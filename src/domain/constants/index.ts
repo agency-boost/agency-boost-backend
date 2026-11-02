@@ -10,6 +10,8 @@
  * provisioning. Runtime code reads the tenant's own value; these are the seed.
  */
 
+import type { LeaderTier } from './leader-tier';
+
 export { RATIO_BENCHMARKS } from './benchmarks';
 export {
   RATIO_DISPLAY_UNITS,
@@ -25,10 +27,28 @@ export const GOAL_DEFAULTS = {
   ANNUAL_SAVINGS_TARGET_MINOR: 50_000_000_00,
   COMMISSION_RATE_PCT: 10,
   CASE_SIZE_MINOR: 18_000_000_00,
+  /**
+   * The two conversion percentages, **now the fallback** (ADR-0160 §3): a new plan opens on the office's
+   * own benchmarks (`GOAL_DEFAULT_RATIOS`), and these only where the office has no usable one.
+   */
   LEADS_TO_APPOINTMENT_PCT: 30,
   CLOSING_RATE_PCT: 30,
   /** Months-left is clamped to this floor so the cascade never divides by ~0. Overall.html:5752. */
   MONTHS_LEFT_MIN: 0.1,
+} as const;
+
+/**
+ * **Which of the office's ratios each of the goal's two percentages defaults from** (ADR-0160 §3), by
+ * ratio code (invariant §4). The client relates *Closing rate* to *Selling success rate* and *Appointment
+ * to Sales meeting* to *Set appointment to meeting*; with the seeded benchmarks those are 30% and 50%.
+ *
+ * A **benchmark**, not the agent's measured history, so ADR-0048's rejection of "default from measured"
+ * stands; a saved goal keeps its own percentages. An office without the ratio — or whose benchmark is no
+ * percentage a plan can use — falls back to `GOAL_DEFAULTS`.
+ */
+export const GOAL_DEFAULT_RATIOS = {
+  closingRatePct: 'SELLING_SUCCESS_RATE',
+  leadsToApptPct: 'MEETING_PER_APPROACH',
 } as const;
 
 /**
@@ -42,12 +62,23 @@ export const GOAL_DEFAULTS = {
  *
  * Here rather than in the goals module because two things will read them: the cascade, and whatever
  * measures an agent against it (Phase 10). One source, per invariant §7.
+ *
+ * **The default binding's codes, and no longer what anything counts** (ADR-0163, P18.9-T2). Each office binds
+ * its own codes to the three roles (`activityBindings`), and every count reads them through
+ * `ActivityBindingService.resolveCascadeBinding`. These are what `defaultBinding()` names: what a template
+ * without a binding gives its offices, and what migration `0034` wrote into every office and template.
  */
 export const CASCADE_ACTIVITY_CODES = {
   leadsCode: 'LEADS_CONTACTED',
   appointmentsCode: 'SELL_PRESENTATION',
   closingsCode: 'SELL_SUBMISSION',
 } as const;
+
+/**
+ * **The most activity type codes one cascade stage may bind** (ADR-0163 §1): an activity replaced, and replaced
+ * again, with room to spare. A binding naming more is refused by `bindingProblems`.
+ */
+export const BINDING_CODES_MAX = 10;
 
 /**
  * Time conversion. These are *projection* constants for the goal cascade — they never
@@ -219,6 +250,12 @@ export const COACHING = {
    * (`KPM_Owner.html:1014`, `:1018`). **Fixed**: the window is part of the label, always.
    */
   COVERAGE_WINDOWS: [PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS] as readonly number[],
+  /**
+   * `COACHING_ACTION_DEFAULT_DUE_DAYS` (§B.8; UI V1, 2026-10-30, UI-060 — the owner's *"every action always has a
+   * date"*): an action item carried forward at *Start*, or added with *+*, is dated this many days after the office's
+   * today — the same weekday next week — and the leader may change it. **Fixed**.
+   */
+  ACTION_DEFAULT_DUE_DAYS: 7,
 } as const;
 
 /**
@@ -241,12 +278,15 @@ export const DEFAULT_TENANT_TIMEZONE = 'Asia/Jakarta';
  * enum one-to-one and lets the enum keep working while the reference becomes the truth.
  *
  * Super Admin edits it afterwards at `/admin/org-levels`. Junior first.
+ *
+ * **Each rung carries its leader tier** (ADR-0156): AB is the *Senior Leader*, AAB the *Associate Leader*,
+ * Agent none — the tiers migration 0030 gives every existing company's rungs of those codes.
  */
 export const DEFAULT_ORG_LADDER = [
-  { code: 'AGENT', label: 'Agent', displayOrder: 1 },
-  { code: 'AAB', label: 'AAB', displayOrder: 2 },
-  { code: 'AB', label: 'AB', displayOrder: 3 },
-] as const;
+  { code: 'AGENT', label: 'Agent', displayOrder: 1, leaderTier: null },
+  { code: 'AAB', label: 'AAB', displayOrder: 2, leaderTier: 'associate' },
+  { code: 'AB', label: 'AB', displayOrder: 3, leaderTier: 'senior' },
+] as const satisfies ReadonlyArray<{ code: string; label: string; displayOrder: number; leaderTier: LeaderTier | null }>;
 
 /** Currency minor units. IDR sen: 100 minor units to the rupiah. */
 export const MINOR_UNITS_PER_MAJOR = 100;
@@ -259,6 +299,8 @@ export {
   SEED_ACTIVITY_CATEGORIES,
   SEED_ACTIVITY_TYPES,
   SEED_LEAD_STATUSES,
+  // P18.95-T9 AC-6 (ADR-0167 §10): the recruitment first status's earlier words, for migration 0038 only.
+  SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167,
   type SeedActivityCategory,
   type SeedActivityType,
   type SeedLeadStatus,
@@ -270,6 +312,7 @@ export {
   TRAINING_STATUSES,
   type TrainingStatus,
   SEED_TRAINING_CATEGORIES,
+  MOTIVATION_CATEGORY,
   SEED_TRAINING_SKILLS,
   SEED_TRAINING_MODULES,
   type SeedTrainingCategory,
@@ -293,6 +336,21 @@ export {
   activationLinkKind,
   activationLinkKinds,
   mayTickByHand,
+  // P18.96-T4 (ADR-0171 §3): the data-backed items, bound by code.
+  ACTIVATION_DATA_LINKS,
+  type ActivationDataLink,
+  type ActivationNamedLink,
+  ACTIVATION_DATA_LINK_KINDS,
+  type ActivationDataLinkKind,
+  ACTIVATION_CODE_BOUND_LINKS,
+  ACTIVATION_INDEPENDENT_CLOSINGS,
+  ACTIVATION_WEEKLY_CHECK_INS,
+  FIRST_SALE_STAGE_CODE,
+  type ActivationRecordForm,
+  isActivationDataLink,
+  effectiveAutoLink,
+  recordFormOf,
+  dataItemHandWrite,
 } from './activation-checklist';
 
 export {
@@ -308,6 +366,8 @@ export {
   PRODUCT_BUDGET_BANDS,
   PRODUCT_AGE_BAND_LABELS,
   PRODUCT_BUDGET_BAND_LABELS,
+  // P18.95-T6 (UI-030): the band the brief asks as its own option, not a monthly one.
+  PRODUCT_LUMP_SUM_BUDGET_BAND,
   SEED_PRODUCTS,
   type SeedProduct,
   type SeedAttackPlan,
@@ -336,8 +396,10 @@ export {
   PRODUCT_RUN_OFF_NOTE,
 } from './attack-plan';
 
-export { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
+export { ASSET_LIMITS, AVATAR, DOCUMENT_MIME_TYPES } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
+// ADR-0184: a workbook's bounds, and the roster file's (§B.31).
+export { ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './spreadsheet';
 
 // Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
 export {
@@ -414,11 +476,13 @@ export {
   type KpmAnalyticsPeriod,
 } from './reporting';
 
-// Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type.
+// Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type; since
+// P18.97-T1, the places a Monthly Target's rate is typed and kept to.
 export {
   LEADER_MEETING_SHARE_DAYS,
   LEADER_MEETING_SHARE_TOKEN_BYTES,
   LEADER_MEETING_LIMITS,
+  LEADER_MEETING_TARGET_RATE_DECIMALS,
 } from './leader-forum';
 
 export {
@@ -449,14 +513,44 @@ export {
   type BillingTier,
 } from './billing';
 
-/** An office's subscription bounds and the leader limit's rungs (ADR-0112, ADR-0113; P13.2-T3, T4). */
-export { SUBSCRIPTION, LEADER_RUNG_CODES } from './subscription';
+/** An office's subscription bounds (ADR-0112; P13.2-T3). */
+export { SUBSCRIPTION } from './subscription';
+
+/** A rung's leader tier, the class it gives its members, and the classes the leader limit counts (ADR-0156). */
+export {
+  LEADER_TIERS,
+  LEADER_CLASSES,
+  LEGACY_TIER_BY_CODE,
+  ROLE_CLASS_BY_TIER,
+  RUNG_SHORT_CODE_MAX_LENGTH,
+  isLeaderClass,
+  roleClassOf,
+  shortOfRung,
+  tierOfRung,
+  type LeaderTier,
+  type RoleClass,
+} from './leader-tier';
+
+/** A person's join date in an office and who it makes them, decided once (ADR-0169; P18.96-T2). */
+export {
+  JOINING,
+  INVITES,
+  // The P18.96 exit review, L2: sign-ups from one address an hour.
+  REGISTRATION,
+  // P18.96-T6 (ADR-0171 §2, ADR-0173): the 90 days a first sale activates in, and the year `/new-hires` lists.
+  ACTIVATION_3M,
+  JOINED_AS,
+  type JoinedAs,
+  joinedAsFor,
+  joinDateViolation,
+} from './joining';
 
 /** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
 export { TEMPLATE } from './templates';
 
-// Phase 17: the candidate brief's vocabulary, the office's four pitch slots and their completion rule, and
-// the playbook a company started from the defaults is given (D-vocabulary, D-slots, OD-88).
+// Phase 17: the candidate brief's vocabulary, the office's pitch slots — four required, and since Phase 18.97
+// two optional (ADR-0177) — their completion rule and what the banner counts, and the playbook a company
+// started from the defaults is given (D-vocabulary, D-slots, OD-88).
 export {
   RECRUITMENT,
   RECRUITMENT_CANDIDATE_TYPES,
@@ -467,6 +561,8 @@ export {
   SEED_RECRUITMENT_PLAYBOOK,
   recruitmentPitchState,
   recruitmentPitchDone,
+  recruitmentPitchSummary,
+  type RecruitmentPitchSummary,
   type RecruitmentTypeCode,
   type RecruitmentMotivationCode,
   type RecruitmentHesitationCode,
@@ -476,3 +572,25 @@ export {
   type RecruitmentPitchSlotCode,
   type RecruitmentPitchState,
 } from './recruitment';
+
+// Phase 18.8: what a person records — the minimum age, gender and work status codes, the agent code's shape (ADR-0158).
+export {
+  PERSONAL_DATA,
+  GENDERS,
+  type Gender,
+  WORK_STATUSES,
+  type WorkStatus,
+  AGENT_CODE_PATTERN,
+} from './personal-data';
+
+// UI V1 (2026-10-30; UI-081, D-22): a person's WhatsApp number, as *Isi nomor WhatsApp* saves it.
+export { PHONE_NATIONAL_DIGITS, PHONE_COUNTRY_PREFIX, normalisePhone } from './phone';
+
+// The product owner, 2026-11-01: a password's bounds, 8 to 200 characters (§B.30).
+export { PASSWORD } from './password';
+
+// Phase 18.98: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
+export {
+  LANGUAGES, type Language, DEFAULT_LANGUAGE, isLanguage, languageOf,
+  SOURCE_LANGUAGE, LANGUAGE_LIVE, unchosenLanguage, LANGUAGE_UNCHOSEN,
+} from './language';

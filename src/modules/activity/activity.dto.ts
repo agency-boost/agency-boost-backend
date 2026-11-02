@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsObject, IsOptional, IsString, MaxLength, Matches } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { ACTIVITY_REFUSALS } from './activity.messages';
 
 /**
  * Every property carries a real `class-validator` decorator, not just `@ApiProperty`.
@@ -10,9 +12,9 @@ import { IsIn, IsObject, IsOptional, IsString, MaxLength, Matches } from 'class-
  * routes could not succeed at all. Found at the Phase 5 exit review; not repeated here.
  */
 
-/** `YYYY-MM-DD`, and the message says so rather than failing a regex silently. */
+/** `YYYY-MM-DD`, and the message says so rather than failing a regex silently — in both languages (P18.98-T5 AC-3). */
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_MESSAGE = 'A day is written YYYY-MM-DD, in this office’s timezone.';
+const DATE_MESSAGE = field(ACTIVITY_REFUSALS.VALIDATION_FAILED.dayShape);
 
 export class ReadActivityDayQueryDto {
   @ApiPropertyOptional({ example: '2026-03-11', description: 'Defaults to today in the office.' })

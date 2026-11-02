@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_EVENT_TYPES } from '@/domain/constants';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { AssetRepository } from '@/modules/assets/asset.repository';
@@ -15,7 +17,8 @@ const ALLIANZ = '66f0000000000000000000c2';
 const KPM = '66f0000000000000000000a1';
 const OTHER_KPM = '66f0000000000000000000a2';
 const NEW_KPM = '66f0000000000000000000a9';
-const sa = RequestContext.platform('root');
+/** The Super Admin, reading the API's English — the reasons asserted below — as nobody's choice is Indonesian (P18.98-T4). */
+const sa = RequestContext.platform('root').withReader(SOURCE_READER);
 const col = (name: string) => mongoose.connection.db!.collection(name);
 
 const member = (kpmId: string, over: Record<string, unknown> = {}) => new RequestContext('u-owner', 'none', {
@@ -296,6 +299,8 @@ describe('template copies (P13.2-T7)', () => {
         'kpms', 'companies', 'companyOrgLevels', 'templates', 'companyTemplates', 'auditLog', 'assets',
         'configSnapshots', 'activationTemplates', 'trainingCategories', 'trainingSkills', 'trainingModules',
         'eventTypes', 'capabilityCatalogs',
+        // P18.9-T2 (ADR-0163): the office's live activity binding, configuration the Super Admin keeps.
+        'activityBindings',
       ]);
       expect(touched.has('configSnapshots')).toBe(true);
       expect([...touched].filter((name) => !configuration.has(name))).toEqual([]);
@@ -410,6 +415,14 @@ describe('template copies (P13.2-T7)', () => {
           kind: 'activation_checklist', code: item,
           reason: `Checklist item ${item} is kept as a manual item: the training module PROSPECT_LIST it linked to is not offered in this office.`,
         }]);
+        // P18.98-T5 AC-4: written for the person who saved — an Indonesian one reads why in Indonesian.
+        const inIndonesian = await wired.templateCopies.saveOffice(
+          sa.withReader(readerIn('id')), KPM, { name: 'Checklist (ID)', companyId: PRUDENTIAL },
+        );
+        expect(inIndonesian.dropped.map((d) => d.reason)).toEqual([
+          `Item checklist ${item} dipertahankan sebagai item manual: modul training PROSPECT_LIST yang ditautkannya `
+            + 'tidak ditawarkan di KPM ini.',
+        ]);
         const checklist = await read(PRUDENTIAL, 'activation_checklist', saved.id) as { aspects: { items: Payload[] }[] };
         expect(checklist.aspects[0].items[0]).toMatchObject({ code: item, autoLink: null });
         await expect(provisionFrom(wired, NEW_KPM, PRUDENTIAL, { kind: 'template', templateId: saved.id })).resolves.toBeDefined();
@@ -423,6 +436,13 @@ describe('template copies (P13.2-T7)', () => {
       const rows = await liveRows(PRUDENTIAL);
       await expect(wired.templateCopies.saveOffice(sa, KPM, { name: 'Broken', companyId: PRUDENTIAL }))
         .rejects.toMatchObject({ status: 400, message: expect.stringContaining('KPM 0417’s published settings would produce a broken office') });
+      // P18.98-T5 AC-3: the same refusal, in Indonesian for an Indonesian reader — the source and every problem.
+      const refused = await wired.templateCopies.saveOffice(sa, KPM, { name: 'Broken', companyId: PRUDENTIAL })
+        .catch((err: unknown) => err);
+      expect(refused).toBeInstanceOf(DomainException);
+      expect((refused as DomainException).messageFor(readerIn('id'))).toMatch(
+        /^Pengaturan KPM 0417 yang diterbitkan akan menghasilkan KPM yang rusak, jadi tidak ada yang dibuat\. Lead statuses: Pipeline \w+ memiliki 2 tahap penutup\./,
+      );
       expect(await liveTemplates(PRUDENTIAL)).toBe(1);
       expect(await liveRows(PRUDENTIAL)).toBe(rows);
     });

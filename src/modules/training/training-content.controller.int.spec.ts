@@ -13,6 +13,7 @@ import {
 import { TrainingController } from './training.controller';
 import { TrainingService } from './training.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -174,8 +175,8 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
       const res = await request(app.getHttpServer()).post(`${url}/uploads`)
         .send({ filename: 'deck.mp4', mimeType: 'video/mp4', bytes: 1024 }).expect(201);
       expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'training', mimeType: 'video/mp4', allowedMimeTypes: undefined });
-      expect(res.body.fields).toMatchObject({ overwrite: 'false' });
-      expect(res.body.fields).not.toHaveProperty('allowed_formats');
+      // P18.7-T2: the form names one fresh key, which the create-only signer cannot overwrite, and the type asked for.
+      expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'video/mp4' });
     });
 
     it('refuses a body carrying a field the DTO never declared', async () => {
@@ -235,5 +236,34 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
 
   it('404s a module code this office does not have', async () => {
     await request(app.getHttpServer()).get(`${url}/modules/NOT_A_MODULE/content`).expect(404);
+  });
+
+  /** **A module's content refused in Bahasa Indonesia** (P18.98-T5 AC-7): the code and the shape as in English. */
+  describe('P18.98-T5 AC-7 a module’s content refused in Indonesian', () => {
+    it('P18.98-T5 AC-7 an insecure link and a file with no label: 400 VALIDATION_FAILED, each item named in Indonesian', async () => {
+      const storageKey = await upload();
+      const res = await request(app.getHttpServer()).put(`${url}/modules/${MODULE}/content`).set(...IN_INDONESIAN)
+        .send({
+          files: [{ label: '', storageKey, mimeType: 'application/pdf', bytes: 1024 }],
+          links: [{ label: 'Talk', url: 'http://learn.example.test/talk' }],
+        })
+        .expect(400);
+      const violations = [
+        'File 1: label harus 1–200 karakter.',
+        'Tautan 1: tautan harus diawali https://. "http://learn.example.test/talk" akan diblokir atau diberi peringatan di ponsel agent.',
+      ];
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations } });
+      // The same body in English, word for word as before.
+      const en = await request(app.getHttpServer()).put(`${url}/modules/${MODULE}/content`)
+        .send({ links: [{ label: 'Talk', url: 'http://learn.example.test/talk' }] }).expect(400);
+      expect(en.body.error.details.violations).toEqual([
+        'Link 1: a link must start with https://. "http://learn.example.test/talk" would be blocked or warned about on an agent’s phone.',
+      ]);
+    });
+
+    it('P18.98-T5 AC-7 a module this office does not have is not found, in Indonesian', async () => {
+      const res = await request(app.getHttpServer()).get(`${url}/modules/NOT_A_MODULE/content`).set(...IN_INDONESIAN).expect(404);
+      expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Modul training tidak ditemukan.' });
+    });
   });
 });

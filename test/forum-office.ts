@@ -5,7 +5,10 @@ import mongoose from 'mongoose';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import type { Clock } from '@/common/clock/clock.port';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
+import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { MonthlyAgentData, MonthlyAgentDataSchema } from '@/modules/production/monthly-agent-data.schema';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import { LeaderMeeting, LeaderMeetingSchema } from '@/modules/leader-meetings/leader-meeting.schema';
@@ -41,6 +44,19 @@ import type { Who } from './coaching-office';
  * | RINA, DEWI, PEER_AB | an Agent, an AAB, an AB, not tagged | 404, the list included; a link opens read-only |
  * | B_AB, B_AGENT | 0555's Owner (`ownerOfB()`) and its Agent | their own office's meetings only |
  */
+/**
+ * **The scorecard, wired the way the app wires it** over `configModule`'s readings — the office's people, its file,
+ * its memberships and its uploads (*AS OF*) — on `wired`'s clock unless another is given (a freeze's morning).
+ */
+export function scorecardServiceOf(wired: ReturnType<typeof configModule>, clock: Clock = wired.clock): LeaderScorecardService {
+  const model = <T>(name: string, schema: unknown) => mongoose.model(name, schema as never) as unknown as T;
+  return new LeaderScorecardService(
+    wired.officePeople, wired.productionReadings,
+    new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema)), wired.memberships, clock,
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema)),
+  );
+}
+
 /** The forum's repositories and services, wired the way the app wires them, over the real scorecard. */
 export interface ForumServices {
   meetings: LeaderMeetingRepository;
@@ -58,14 +74,11 @@ export async function buildForumServices(wired: ReturnType<typeof configModule>)
   const links = new LeaderMeetingShareLinkRepository(model(LeaderMeetingShareLink.name, LeaderMeetingShareLinkSchema));
   await Promise.all([LeaderMeeting.name, LeaderMeetingShareLink.name].map((name) => mongoose.model(name).syncIndexes()));
   const people = new LeaderMeetingPeople(
-    wired.memberships, new MemberNames(wired.memberships, wired.users as never), wired.orgLevels, wired.kpms as never,
+    wired.memberships, new MemberNames(wired.memberships, wired.users as never, wired.avatarLinks), wired.orgLevels, wired.kpms as never,
   );
-  const scorecards = new LeaderScorecardService(
-    wired.officePeople, wired.productionReadings,
-    new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema)), wired.activationRows, wired.clock,
-  );
+  const scorecards = scorecardServiceOf(wired);
   const forum = new LeaderMeetingsService(meetings, people, scorecards, wired.audit, wired.clock);
-  const minutes = new LeaderMeetingMinutes(meetings, people, wired.audit, wired.clock);
+  const minutes = new LeaderMeetingMinutes(meetings, people, wired.audit, wired.clock, scorecards);
   const sharing = new LeaderMeetingSharing(links, meetings, forum, people, wired.audit, wired.clock);
   return { meetings, links, people, scorecards, forum, minutes, sharing };
 }

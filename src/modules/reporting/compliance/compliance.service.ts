@@ -3,6 +3,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
+import { KPM_REPORTING } from '@/domain/constants';
 import { memberAt } from '@/domain/metrics/office-headcount';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { can } from '@/modules/rbac/permissions';
@@ -10,6 +11,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { partitionAgencies } from '../agency-partition';
 import { byName } from '../office-figures';
 import { OfficePeople } from '../office-people';
+import { REPORTING_REFUSALS } from '../reporting.messages';
 import { ActivationComplianceCategory } from './activation.category';
 import { ActivityComplianceCategory } from './activity.category';
 import { CampaignsComplianceCategory, type CampaignsComplianceCatalog } from './campaigns.category';
@@ -34,7 +36,11 @@ export interface ComplianceRow extends CompliancePerson {
   cell: ComplianceCell;
 }
 
-/** A unit card: the AB's own (*(Direct)*) or an AAB's. `done / of` count the rows the item applies to. */
+/**
+ * A unit card: the AB's own (*(Direct)*) or an AAB's. `done / of` count the rows the item applies to. `rung` names
+ * the **class** of the card's head, as `partitionAgencies` placed them (ADR-0156): a *Senior Leader* rung's agency
+ * is an `AB` card whatever the rung is called.
+ */
 export interface ComplianceUnit {
   head: CompliancePerson;
   rung: 'AB' | 'AAB';
@@ -67,6 +73,8 @@ export interface ComplianceView {
   selected: { category: ComplianceCategoryKey; item: string | null };
   tree: ComplianceSection[];
   can: { override: boolean };
+  /** UI V1 (UI-109): where a bar turns red and green, `KPM_REPORTING`'s, so no screen re-declares them. */
+  thresholds: { lowBelowPct: number; highFromPct: number };
 }
 
 /** What the read takes: a category, and — on the three categories that hold several — an item. */
@@ -114,17 +122,18 @@ export class ComplianceService {
   ) {}
 
   async read(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
-    OfficePeople.require(ctx);
+    // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404, before anything is read.
+    OfficePeople.requireAnalyticsReader(ctx);
     const category = query.category ?? 'training';
     const asked = query.item ?? null;
     if (asked !== null && SINGLE_ITEM_CATEGORIES.includes(category)) {
-      refuseWith([`item is not taken by category ${category}: it has one item only.`]);
+      refuseWith([REPORTING_REFUSALS.VALIDATION_FAILED.itemNotTaken({ category })]);
     }
 
     const office = await this.days.office(ctx);
     const { today, timezone } = office;
     const year = today.slice(0, 4);
-    const roster = await this.people.read(ctx, null);
+    const roster = await this.people.read(ctx, null, timezone);
     const endOfToday = this.clock.endOfLocalDay(timezone, today);
     const members = roster.active.filter((p) => memberAt(p, endOfToday));
     const names = roster.names;
@@ -222,6 +231,10 @@ export class ComplianceService {
       selected: { category, item: chosen.item },
       tree,
       can: { override: can(ctx, 'campaign_qualification:override') },
+      thresholds: {
+        lowBelowPct: KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT,
+        highFromPct: KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT,
+      },
     };
 
     // Last, once the answer exists: what the chosen category's cells disclosed (D-audit-tree), in one insert.

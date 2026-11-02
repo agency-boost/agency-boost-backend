@@ -148,8 +148,10 @@ describe('the coaching session over HTTP (P11-T5)', () => {
         status: 'draft', version: 1, date: null, finalizedAt: null, finalizedBy: null, reopenableUntil: null,
         lastWeek: { sessionId: String(lastWeek._id), date: '2026-09-10' },
         lastWeekItems: [{ itemId: 'INDAH-1', text: 'Book two presentations', dueDate: '2026-09-10', lead: null, done: false }],
-        // Carried, with its date cleared: set fresh in this session (`Overall.html:10671-10674`).
-        actionItems: [{ text: 'Book two presentations', dueDate: null }],
+        // UI-060: carried, dated a week from the office's today — every action always has a date, which the leader can
+        // change (the prototype cleared it, `Overall.html:10671-10674`). *+* takes the same `defaultDueDate`.
+        actionItems: [{ text: 'Book two presentations', dueDate: '2026-09-21' }],
+        defaultDueDate: '2026-09-21',
         tips: [], leadActions: [], snapshot: null, earlier: [],
       });
 
@@ -190,7 +192,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
         { itemId: `lead-${undatedLead}`, text: 'Send the brochure', dueDate: '2026-09-12', lead: { leadId: undatedLead, name: 'Pak Surya' }, done: false },
       ]);
       expect(res.body.actionItems.map((i: Doc) => [i.text, i.dueDate])).toEqual([
-        ['Practise the close', null], ['Send the brochure', null],
+        ['Practise the close', '2026-09-21'], ['Send the brochure', '2026-09-21'],
       ]);
       expect(res.body.tips.map((t: Doc) => t.text)).toEqual(['Ask for the referral before you leave.']);
       // *From leads (automatic)* lists the dated lead, live.
@@ -514,14 +516,14 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       const sari = { membershipId: id('SARI'), orgLevelCode: 'AAB', self: false };
       const live = await wired.activityLogs.ratiosOf(office.as('AGUS'), sari);
       expect(live.ratios.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides)
-        .toEqual({ numerator: 'Selling', denominator: 'Recruitment' });
+        .toEqual({ numerator: 'Penjualan', denominator: 'Recruitment' });
 
       const done = await finalized('AGUS', 'SARI');
       const rows = (done.snapshot as { ratios: { rows: Doc[] } }).ratios.rows;
 
       // Each row's sides are the live answer's, the balance's named and every rate's `null`.
       expect(rows.map((r) => [r.code, r.sides])).toEqual(live.ratios.map((r) => [r.code, r.sides]));
-      expect(rows.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides).toEqual({ numerator: 'Selling', denominator: 'Recruitment' });
+      expect(rows.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.sides).toEqual({ numerator: 'Penjualan', denominator: 'Recruitment' });
       expect(rows.filter((r) => r.comparison === 'gte').every((r) => r.sides === null)).toBe(true);
       // Stored as answered, and read back the same.
       const stored = await col('coachingSessions').findOne({ _id: new mongoose.Types.ObjectId(done.sessionId) });
@@ -661,6 +663,44 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect(wired.releasedNotifications.map((r) => r.coalesceKey)).toEqual([`${done.sessionId}:0`, `${done.sessionId}:1`]);
     });
 
+    it('UI-060 Ubah lagi, then finalized again: one coaching — the date kept, one session counted, the last 1:1 not moved', async () => {
+      const done = await finalized('AGUS', 'INDAH', [dated('As agreed')]);
+      const counted = () => col('coachingSessions').countDocuments({
+        coacheeMembershipId: id('INDAH'), status: { $in: ['finalized', 'reopened'] }, date: { $ne: null },
+      });
+      const before = await counted();
+      clock.set(new Date('2026-09-16T03:00:00Z'));
+      as('AGUS');
+      const reopened = (await reopen(done.sessionId, done.version).expect(200)).body;
+      // Reopened, every field is as it was: the same rows, the same date, a draft again to its coach.
+      expect(reopened).toMatchObject({ status: 'reopened', date: ROSTER_TODAY, actionItems: done.actionItems, tips: done.tips });
+      const refinal = (await finalize(done.sessionId, reopened.version).expect(200)).body;
+      expect(refinal).toMatchObject({ status: 'finalized', date: ROSTER_TODAY });
+      // One document, counted once by every coaching reader: Last 1:1 is its date, not the day it was finalized again.
+      expect(await counted()).toBe(before);
+      const last = await wired.coachingReadings.lastOneOnOnes(office.as('AGUS'), [id('INDAH')]);
+      expect(last.get(id('INDAH'))).toMatchObject({ sessionId: done.sessionId, date: ROSTER_TODAY });
+      expect((await history('INDAH').expect(200)).body.sessions.filter((r: Doc) => r.sessionId === done.sessionId))
+        .toEqual([expect.objectContaining({ date: ROSTER_TODAY })]);
+    });
+
+    it('UI-060 a new row saved with no date is dated a week ahead; one cleared by hand stays empty, and finalize names how many', async () => {
+      const { sessionId, version } = (await start('AGUS', 'INDAH').expect(201)).body;
+      const saved = (await save(sessionId, {
+        version, lastWeekItems: [],
+        actionItems: [{ text: 'Added with +' }, { text: 'Cleared by hand', dueDate: null }, { text: 'Third', dueDate: null }],
+        tips: [],
+      }).expect(200)).body;
+      expect(saved.actionItems.map((i: Doc) => [i.text, i.dueDate])).toEqual([
+        ['Added with +', '2026-09-21'], ['Cleared by hand', null], ['Third', null],
+      ]);
+      const refused = await finalize(sessionId, saved.version).expect(422);
+      expect(refused.body.error).toMatchObject({
+        code: 'COACHING_SESSION_INCOMPLETE',
+        details: { rule: 'UNDATED_ACTION_ITEM', count: 2, itemIds: [saved.actionItems[1].itemId, saved.actionItems[2].itemId] },
+      });
+    });
+
     it('P11-T5 AC-6 a session under correction is the next draft’s last week as its latest finalized version, and holds up no Start', async () => {
       const done = await finalized('AGUS', 'INDAH', [dated('As agreed')]);
       as('AGUS');
@@ -682,6 +722,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       const res = await reopen(closed.sessionId, closed.version).expect(409);
       expect(res.body.error).toMatchObject({
         code: 'COACHING_REOPEN_WINDOW_CLOSED',
+        message: 'This session could be reopened until 21 Sep 2026, 7 days after it was held.',
         details: { date: ROSTER_TODAY, reopenableUntil: '2026-09-21', windowDays: 7 },
       });
       // *Edit again* says until when, past the window too.
@@ -755,6 +796,58 @@ describe('the coaching session over HTTP (P11-T5)', () => {
   });
 
   // ------------------------------------------------------------------ who reads a session
+
+  /*
+   * **The session in Indonesian** (P18.98-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
+   * `Accept-Language`, its code and details the same in both; *From leads (automatic)*'s *Follow up with {name}* is
+   * written for the reader while the session is open, and stored at finalize in the language of the leader finalizing.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    it('P18.98-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
+      const started = (await start('AGUS', 'LUKAS').expect(201)).body;
+      const res = await finalize(started.sessionId, started.version).set('Accept-Language', 'id').expect(422);
+      expect(res.body.error).toMatchObject({
+        code: 'COACHING_SESSION_INCOMPLETE',
+        message: 'Tambahkan paling tidak satu action item sebelum memfinalkan.',
+        details: { rule: 'NO_ACTION_ITEM' },
+      });
+    });
+
+    it('P18.98-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
+      const promised = await lead('LUKAS', { name: 'Pak Fauzan Akbar', nextActionDate: '2026-09-16' });
+      const started = (await start('AGUS', 'LUKAS').expect(201)).body;
+      const line = (text: string) => [{ leadId: promised, leadName: 'Pak Fauzan Akbar', dueDate: '2026-09-16', text }];
+
+      // Open: written live, for whoever reads it.
+      expect((await read(started.sessionId).set('Accept-Language', 'id').expect(200)).body.leadActions)
+        .toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+      expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up with Pak Fauzan Akbar'));
+
+      // Finalized by a leader reading Indonesian: stored in their words, and shown as stored to every reader.
+      const saved = (await save(started.sessionId, { version: started.version, lastWeekItems: [], actionItems: [dated()], tips: [] })
+        .expect(200)).body;
+      const done = (await finalize(started.sessionId, saved.version).set('Accept-Language', 'id').expect(200)).body;
+      expect(done.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+      expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
+    });
+
+    it('P18.98-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
+      const closed = await finalized('AGUS', 'DIMAS');
+      as('AGUS');
+      clock.set(new Date('2026-09-21T17:00:00Z')); // 00:00 on the 22nd in Jakarta.
+      const res = await reopen(closed.sessionId, closed.version).set('Accept-Language', 'id').expect(409);
+      expect(res.body.error).toMatchObject({
+        code: 'COACHING_REOPEN_WINDOW_CLOSED',
+        message: 'Sesi ini hanya dapat dibuka kembali sampai 21 Sep 2026, 7 hari setelah diadakan.',
+        details: { date: ROSTER_TODAY, reopenableUntil: '2026-09-21', windowDays: 7 },
+      });
+
+      const blank = await reopen(closed.sessionId, closed.version, '   ').set('Accept-Language', 'id').expect(400);
+      expect(blank.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'reason tidak boleh kosong', details: { violations: ['reason tidak boleh kosong'] },
+      });
+    });
+  });
 
   describe('who reads a session', () => {
     it.each([

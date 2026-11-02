@@ -167,9 +167,9 @@ describe('P11-T4 — the coachee’s ratios and week, over HTTP', () => {
       // Rp 85 M this month: 57, 17 and 5 a month are 13, 4 and 1 over 7 / 30.44. Indah contacted two
       // leads a day on the 8th, 9th and 10th.
       expect(res.body.targets).toEqual([
-        { key: 'leads', code: 'LEADS_CONTACTED', logged: 6, target: 13 },
-        { key: 'appointments', code: 'SELL_PRESENTATION', logged: 0, target: 4 },
-        { key: 'closings', code: 'SELL_SUBMISSION', logged: 0, target: 1 },
+        { key: 'leads', code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED'], logged: 6, target: 13 },
+        { key: 'appointments', code: 'SELL_PRESENTATION', codes: ['SELL_PRESENTATION'], logged: 0, target: 4 },
+        { key: 'closings', code: 'SELL_SUBMISSION', codes: ['SELL_SUBMISSION'], logged: 0, target: 1 },
       ]);
     });
 
@@ -178,7 +178,7 @@ describe('P11-T4 — the coachee’s ratios and week, over HTTP', () => {
       const res = await week({ membershipId: office.id.INDAH }).expect(200);
 
       expect(res.body.sections.map((s: { code: string; label: string }) => [s.code, s.label]))
-        .toEqual([['RECRUITMENT', 'Recruitment'], ['DEVELOPMENT', 'Development']]);
+        .toEqual([['RECRUITMENT', 'Recruitment'], ['DEVELOPMENT', 'Pengembangan']]);
       const recruitment = res.body.sections[0];
       expect(recruitment.total).toBe(111);
       expect(recruitment.rows).toEqual(expect.arrayContaining([{ code: 'RECRUIT_FOLLOWUP', label: expect.any(String), count: 111 }]));

@@ -13,6 +13,8 @@ const M = 1_000_000 * 100;
 const ROSTER_KEYS = [
   'today', 'overdueAfterDays', 'directAgents', 'units', 'head', 'members',
   'membershipId', 'name', 'rung', 'code', 'label', 'depth', 'lastOneOnOne', 'days', 'date', 'overdue', 'coach', 'status',
+  // UI V1 (UI-111): each row's profile photo, a signed link or null — a picture, never a figure.
+  'photoUrl',
 ].sort();
 
 /** Every key in an answer, at any depth. */
@@ -298,7 +300,7 @@ describe('the coaching roster (P11-T6)', () => {
       } as never));
       // No ladder to label them, and no account to name them: the code, and an empty name, rather than a guess.
       const unnamed = (id: mongoose.Types.ObjectId) => ({
-        membershipId: String(id), name: '', rung: { code: 'AGENT', label: 'AGENT' }, depth: 1,
+        membershipId: String(id), name: '', photoUrl: null, rung: { code: 'AGENT', label: 'AGENT' }, depth: 1,
         lastOneOnOne: null, status: 'no_goal_set',
       });
       expect(view.directAgents).toEqual([unnamed(first), unnamed(second)]);

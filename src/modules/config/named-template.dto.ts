@@ -4,6 +4,8 @@ import {
   IsBoolean, IsIn, IsMongoId, IsOptional, IsString, MaxLength, MinLength, ValidateBy, ValidateIf,
   isMongoId,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * A template's name: trimmed by the service, unique among the company's active templates. Its bounds are
@@ -28,7 +30,8 @@ function IsTemplateFrom() {
           && typeof (value as { templateId: unknown }).templateId === 'string'
           && isMongoId((value as { templateId: string }).templateId);
       },
-      defaultMessage: () => 'from must be "empty", "defaults", or { templateId } naming one of the company\u2019s templates',
+      // The DTO's own sentence, in both languages (P18.98-T5 AC-3).
+      defaultMessage: () => field(TEMPLATE_REFUSALS.VALIDATION_FAILED.fromShape),
     },
   });
 }
@@ -124,19 +127,41 @@ export class TemplateQueryDto {
 /**
  * **Start from** (ADR-0115 §4): what a new office is built from. Absent on `POST /admin/tenants`, the
  * company's default template.
+ *
+ * **`defaults` is admitted here and refused by the route** (ADR-0168 §2): `AdminController.createTenant`
+ * answers it `400 VALIDATION_FAILED` with `details.field: 'startFrom.kind'` and a sentence saying what to
+ * choose instead, which an `@IsIn` without it could only have called an unknown value. The documented enum is
+ * what the route accepts.
  */
 export class StartFromDto {
   @ApiProperty({
-    enum: ['template', 'defaults', 'empty'],
+    enum: ['template', 'empty'],
     description:
-      '`template`: one of the company’s active templates, named by `templateId`. `defaults`: the '
-      + 'AgencyBoost defaults. `empty`: nothing but the three cascade activity types.',
+      '`template`: one of the company’s active templates, named by `templateId` — or, with '
+      + '`templateLibrary`, one of the Template library’s, *Template · Default template*, which holds the '
+      + 'AgencyBoost defaults. `empty`: nothing but the three cascade activity types. `defaults` is refused '
+      + '400 VALIDATION_FAILED, `details.field: startFrom.kind` (ADR-0168 §2).',
   })
   @IsIn(['template', 'defaults', 'empty'])
   kind!: 'template' | 'defaults' | 'empty';
 
-  @ApiPropertyOptional({ description: 'Required when `kind` is `template`.' })
-  @ValidateIf((o: StartFromDto) => o.kind === 'template')
+  @ApiPropertyOptional({
+    description:
+      'Required when `kind` is `template`, unless `templateLibrary` is true: then it names one of the '
+      + 'Template library’s active templates, and absent its default.',
+  })
+  @ValidateIf((o: StartFromDto) => o.kind === 'template' && (o.templateId !== undefined || o.templateLibrary !== true))
   @IsMongoId()
   templateId?: string;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'With `kind: template`, the template is the Template library’s rather than the company’s — '
+      + '*Template · Default template*. Its settings are copied across companies, and every role they name '
+      + 'must be on the company’s ladder (409 TEMPLATE_RUNG_UNKNOWN).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  templateLibrary?: boolean;
 }

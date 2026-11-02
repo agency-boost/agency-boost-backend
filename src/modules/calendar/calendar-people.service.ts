@@ -11,6 +11,7 @@ import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import { CALENDAR_REFUSALS } from './calendar.messages';
 
 /**
  * Where somebody sits relative to the reader, as the picker groups them (`Calendar_Section.html:469-480`):
@@ -261,5 +262,5 @@ function keyOf(cursor: string): OrderKey {
   } catch {
     // Falls through to the refusal below.
   }
-  return refuseWith(['cursor is not one this list wrote: start again without it.']);
+  return refuseWith([CALENDAR_REFUSALS.VALIDATION_FAILED.cursorNotOurs]);
 }

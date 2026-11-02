@@ -6,7 +6,8 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
-import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
+import { RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_PITCH_SLOTS, SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
+import { SEED_RECRUITMENT_PLAYBOOK_ID } from '@/domain/constants/recruitment-words-id';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -15,6 +16,7 @@ import {
   productionPipe, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { defaultPlaybookBody } from './recruitment-playbook-defaults';
 import {
   RecruitmentController, RecruitmentPitchController, RecruitmentPlaybookController,
@@ -189,6 +191,49 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
     );
   });
 
+  describe('P18.97-T5 — the two optional documents, per role (ADR-0177 §2; the same permissions as the four)', () => {
+    const OPTIONAL = ['company', 'agency'];
+
+    it.each([
+      ['the Owner', OWNER], ['the Admin', ADMIN], ['an elevated support session as the Owner', ELEVATED_OWNER],
+      ['an elevated support session as the Admin', ELEVATED_ADMIN],
+    ])('P18.97-T5 AC-2 positive: %s signs, attaches and replaces Company Profile and Agency Profile', async (_n, who) => {
+      for (const slot of OPTIONAL) {
+        expect([slot, (await upload(slot, who)).version]).toEqual([slot, 1]);
+        expect([slot, (await upload(slot, who)).version]).toEqual([slot, 2]);
+      }
+    });
+
+    it.each(EVERY_MEMBER)('P18.97-T5 AC-2 positive: %s reads both optional slots and opens one that is filled', async (_n, who) => {
+      await upload('company');
+      session.current = who;
+      const res = await http().get('/recruitment/pitch-materials').expect(200);
+      expect(res.body.slots.filter((s: { required: boolean }) => !s.required).map((s: { slot: string; state: string }) => [s.slot, s.state]))
+        .toEqual([['company', 'uploaded'], ['agency', 'missing']]);
+      const link = await http().get('/recruitment/pitch-materials/company/url').expect(200);
+      expect(link.body.url).toContain('/recruitment-pitch/');
+      // An empty optional slot has nothing to open: 404, as an empty required one.
+      expect((await http().get('/recruitment/pitch-materials/agency/url').expect(404)).body.error.code).toBe('NOT_FOUND');
+    });
+
+    it.each([...NOT_ADMINISTRATORS, ['a read-only support session as the Owner', READ_ONLY_OWNER] as [string, RequestContext]])(
+      'P18.97-T5 AC-2 negative: %s is refused an optional slot’s upload and attach, at the guard, with nothing written', async (_n, who) => {
+        const { storageKey } = await upload('company');
+        session.current = who;
+        await http().post(`${PITCH}/uploads`).send({ filename: 'agency.pdf', mimeType: 'application/pdf', bytes: 1 }).expect(403);
+        for (const slot of OPTIONAL) await http().put(`${PITCH}/${slot}`).send({ storageKey }).expect(403);
+        expect(await mongoose.connection.db!.collection('kpmRecruitmentPitchDocuments').find({}).toArray())
+          .toMatchObject([{ slot: 'company', version: 1 }]);
+      },
+    );
+
+    it('P18.97-T5 AC-2 an optional slot takes no tick: 400 VALIDATION_FAILED over HTTP', async () => {
+      const { version } = await upload('agency');
+      const res = await http().put(`${PITCH}/agency/confirmations/income`).send({ ticked: true, version }).expect(400);
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'item', item: 'income' } });
+    });
+  });
+
   describe('the shapes (the Data contract)', () => {
     it('answers the plan as { hasPlaybook, vocabulary, plan }, the plan’s parts as the contract names them', async () => {
       const res = await http().get(PLAN).expect(200);
@@ -198,7 +243,7 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(res.body.plan.brief.motivations.map((c: { code: string }) => c.code)).toEqual(['flexibility', 'leadership']);
       expect(Object.keys(res.body.plan.profile)).toEqual(['code', 'label', 'tagline', 'goodFitFor', 'benefits']);
       expect(res.body.plan.openings[0]).toEqual({
-        motivation: { code: 'flexibility', label: 'Flexibility / time freedom' },
+        motivation: { code: 'flexibility', label: 'Flexibility' },
         text: SEED_RECRUITMENT_PLAYBOOK.profiles.retiree.openings.flexibility,
       });
       expect(Object.keys(res.body.plan.objections[0])).toEqual(['hesitation', 'theySay', 'youSay', 'profileOwn']);
@@ -209,14 +254,23 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(res.body).toMatchObject({ hasPlaybook: true, plan: null });
     });
 
-    it('answers the pitch as { slots, summary }, each slot the contract’s fields', async () => {
+    it('P18.97-T5 AC-2 answers the pitch as { slots, summary }, six slots, each the contract’s fields, the summary over the four', async () => {
       await upload('proof');
+      await upload('company');
       session.current = AGENT;
       const res = await http().get('/recruitment/pitch-materials').expect(200);
       expect(Object.keys(res.body)).toEqual(['slots', 'summary']);
-      expect(res.body.slots.map((s: { slot: string }) => s.slot)).toEqual(['opportunity', 'proof', 'faq', 'howtojoin']);
-      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'state', 'file', 'checklist', 'version']);
+      expect(res.body.slots.map((s: { slot: string; required: boolean }) => [s.slot, s.required])).toEqual([
+        ['opportunity', true], ['proof', true], ['faq', true], ['howtojoin', true], ['company', false], ['agency', false],
+      ]);
+      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'required', 'state', 'file', 'checklist', 'version']);
       expect(res.body.slots[1]).toMatchObject({ state: 'uploaded', file: { name: 'proof.pdf', bytes: 1024, uploadedOn: '2026-10-09' }, version: 1 });
+      expect(res.body.slots[4]).toMatchObject({
+        slot: 'company', title: 'Company Profile', required: false, state: 'uploaded', checklist: [], version: 1,
+        file: { name: 'company.pdf', bytes: 1024, uploadedOn: '2026-10-09' },
+      });
+      expect(res.body.slots[5]).toMatchObject({ slot: 'agency', title: 'Agency Profile', required: false, state: 'missing', file: null, version: 0 });
+      // The optional Company Profile counts in nothing: one of four done, three missing (ADR-0177 §3).
       expect(res.body.summary).toEqual({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
     });
 
@@ -233,7 +287,8 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
       expect(res.body.storageKey).toMatch(new RegExp(`^dev/${FIXTURE_KPM}/recruitment-pitch/`));
       expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'recruitment-pitch', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
-      expect(res.body.fields).toMatchObject({ public_id: res.body.storageKey, overwrite: 'false', allowed_formats: 'pdf' });
+      // P18.7-T2: one fresh key, and the Content-Type pinned to PDF by the V4 POST policy.
+      expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
     });
   });
 
@@ -380,5 +435,107 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       answers.push(JSON.stringify([(await http().get(PLAN)).body, (await http().get('/recruitment/pitch-materials')).body]));
     }
     expect(new Set(answers).size).toBe(1);
+  });
+
+  /**
+   * **Recruitment's own words in the reader's language** (P18.98-T7; ADR-0179 §7): the pitch slots' titles, lines and
+   * checklist, and the brief's chips, as the API serves them — Indonesian to `Accept-Language: id`, the registry's English
+   * to `en`; the company's playbook as typed in both.
+   */
+  describe('P18.98-T7 recruitment’s words in the reader’s language', () => {
+    it('P18.98-T7 the pitch materials: Indonesian to an Indonesian reader, the English as before to an English one', async () => {
+      session.current = AGENT;
+      const id = await http().get('/recruitment/pitch-materials').set(...IN_INDONESIAN).expect(200);
+      expect(id.body.slots.map((s: { slot: string; title: string }) => [s.slot, s.title])).toEqual([
+        // Each title its English name in both languages (UI-107: *English name as in the app*).
+        ['opportunity', 'Opportunity Overview'], ['proof', 'Proof & Credibility'], ['faq', 'FAQ'],
+        ['howtojoin', 'How to Join'], ['company', 'Company Profile'], ['agency', 'Agency Profile'],
+      ]);
+      expect(id.body.slots[0].checklist[0]).toEqual({ code: 'career-path', label: 'Jenjang karier (Agent → AAB → AB)', ticked: false });
+      const en = await http().get('/recruitment/pitch-materials').expect(200);
+      expect(en.body.slots.map((s: { title: string }) => s.title)).toEqual(RECRUITMENT_PITCH_SLOTS.map((s) => s.title));
+      expect(en.body.slots[0].checklist.map((i: { label: string }) => i.label))
+        .toEqual(RECRUITMENT_PITCH_SLOTS[0].checklist.map((i) => i.label));
+    });
+
+    it('P18.98-T7, UI-107 the attack plan’s chips and tags in the reader’s language; the seed playbook in Indonesian too', async () => {
+      session.current = AGENT;
+      const id = await http().get(PLAN).set(...IN_INDONESIAN).expect(200);
+      const en = await http().get(PLAN).expect(200);
+      expect(id.body.vocabulary.types.map((c: { label: string }) => c.label))
+        .toEqual(['Lulusan baru', 'Pindah karier', 'Pemilik usaha', 'Pensiunan', 'Agent (asuransi lain)']);
+      expect(en.body.vocabulary.types.map((c: { label: string }) => c.label))
+        .toEqual(RECRUITMENT_CANDIDATE_TYPES.map((c) => c.label));
+      expect(id.body.plan.brief.type).toEqual({ code: 'retiree', label: 'Pensiunan' });
+      // The company still holds the platform's seed words, so an Indonesian reader reads them in Indonesian (UI-107).
+      expect(id.body.plan.profile).toMatchObject({
+        code: 'retiree', label: SEED_RECRUITMENT_PLAYBOOK_ID.profiles.retiree.label,
+        tagline: SEED_RECRUITMENT_PLAYBOOK_ID.profiles.retiree.tagline,
+      });
+      expect(en.body.plan.profile.tagline).toBe(SEED_RECRUITMENT_PLAYBOOK.profiles.retiree.tagline);
+      expect(id.body.plan.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK_ID.nextAction);
+      expect(en.body.plan.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK.nextAction);
+    });
+
+    it('P18.98-T7 the Super Admin’s playbook read serves the chips in the reader’s language', async () => {
+      session.current = SUPER_ADMIN;
+      const id = await http().get(`/admin/companies/${PRUDENTIAL}/recruitment-playbook`).set(...IN_INDONESIAN).expect(200);
+      expect(id.body.vocabulary.hesitations.map((c: { code: string; label: string }) => [c.code, c.label])[0])
+        .toEqual(['no-experience', 'Belum berpengalaman menjual']);
+    });
+  });
+
+  /**
+   * **Recruitment's refusals in Bahasa Indonesia** (P18.98-T5 AC-7): a brief, the pitch's checklist and the playbook's
+   * save — the codes and the details as in English, a parameter and a field named as the API names them.
+   */
+  describe('P18.98-T5 AC-7 recruitment’s refusals in Indonesian', () => {
+    const plan = (query: string) => http().get(`/recruitment/attack-plan?${query}`).set(...IN_INDONESIAN).expect(400);
+
+    it('P18.98-T5 AC-7 a brief missing a parameter, naming a code twice, an unknown code and an unknown type', async () => {
+      expect((await plan('type=retiree')).body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Brief memerlukan jenis kandidat, motivasi, dan keraguan; motivation dan hesitation belum diisi.',
+        details: { parameters: ['motivation', 'hesitation'] },
+      });
+      expect((await plan('type=retiree&motivation=leadership,leadership&hesitation=time')).body.error.message)
+        .toBe('motivation menyebut satu jawaban dua kali.');
+      expect((await plan('type=retiree&motivation=fame&hesitation=time')).body.error.message)
+        .toBe('motivation berisi kode yang bukan salah satu jawabannya, atau tidak berisi kode sama sekali.');
+      expect((await plan('type=astronaut&motivation=leadership&hesitation=time')).body.error).toMatchObject({
+        message: '"astronaut" bukan jenis kandidat.', details: { parameters: ['type'] },
+      });
+    });
+
+    it('P18.98-T5 AC-7 the pitch: a tick on a slot with no file, and an item a slot does not have', async () => {
+      session.current = OWNER;
+      const empty = await http().put(`${PITCH}/opportunity/confirmations/income`).set(...IN_INDONESIAN)
+        .send({ ticked: true, version: 1 }).expect(400);
+      expect(empty.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        // P18.98-T7: the slot named in Indonesian too.
+        message: 'Opportunity Overview belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.',
+        details: { field: 'slot', slot: 'opportunity' },
+      });
+      const { version } = await upload('agency');
+      const noItem = await http().put(`${PITCH}/agency/confirmations/income`).set(...IN_INDONESIAN)
+        .send({ ticked: true, version }).expect(400);
+      expect(noItem.body.error).toMatchObject({
+        message: 'Agency Profile tidak memiliki item "income" untuk dikonfirmasi.', details: { field: 'item', item: 'income' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 a playbook that is not whole: each field’s sentence in Indonesian, the message naming them all', async () => {
+      session.current = SUPER_ADMIN;
+      const body = defaultPlaybookBody() as unknown as { nextAction: string };
+      body.nextAction = '';
+      const res = await http().put(`/admin/companies/${PRUDENTIAL}/recruitment-playbook`).set(...IN_INDONESIAN)
+        .send({ version: 1, body }).expect(400);
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Playbook ini tidak dapat disimpan: body.nextAction — Tidak boleh kosong.',
+        details: { violations: [{ field: 'body.nextAction', message: 'Tidak boleh kosong.' }] },
+      });
+    });
   });
 });

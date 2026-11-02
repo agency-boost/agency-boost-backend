@@ -1,7 +1,9 @@
 /**
  * **The forum's figures over the months the office's file holds** (Phase 18.1, P18.1-T1 AC-3, AC-4; OD-144):
- * `NEW_ACTIVE_AGENTS_MONTHLY_AVG`, `MAA_MONTHLY_AVG`, `CASE_SUBMISSIONS` and `AVERAGE_CASE_SIZE_REALISED`
- * (`KPM_Owner.html:2467`, `:2470-2472`).
+ * `MAA_MONTHLY_AVG`, `CASE_SUBMISSIONS` and `AVERAGE_CASE_SIZE_REALISED` (`KPM_Owner.html:2470-2472`).
+ * `NEW_ACTIVE_AGENTS_MONTHLY_AVG` (*New AA (avg. monthly)*, `:2467`) was here: retired by ADR-0175 §2 (P18.97-T1 AC-6) —
+ * not on the client's reference slide — as `NEW_AGENT_3M_ACTIVE_PCT` was. Nothing computes it any more; the scorecards
+ * frozen with it keep its figures (ADR-0129 §7), and the file's `NEW_ACTIVE_AGENTS` stays.
  *
  * Each takes **one figure per month of its period, `null` for a month whose file the office does not hold** — a
  * month's file lands after it ends (ADR-0050), and a month not held is not zero. A figure over part of its period
@@ -16,14 +18,6 @@ function held(values: readonly (number | null)[]): number[] {
 function averageOverHeld(values: readonly (number | null)[]): number | null {
   const months = held(values);
   return months.length === 0 ? null : months.reduce((sum, v) => sum + v, 0) / months.length;
-}
-
-/**
- * `NEW_ACTIVE_AGENTS_MONTHLY_AVG` — *New AA (avg. monthly)* (D-cohort): the file's `NEW_ACTIVE_AGENTS` summed over
- * the office for each month held, ÷ the months held. A fraction where it falls between; the screen rounds.
- */
-export function newActiveAgentsMonthlyAvg(perMonth: readonly (number | null)[]): number | null {
-  return averageOverHeld(perMonth);
 }
 
 /**

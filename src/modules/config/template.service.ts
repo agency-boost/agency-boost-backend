@@ -1,31 +1,52 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { joinSentences, prefixed, refiled, render } from '@/common/i18n/sentence';
+import type { FieldSentence } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
+import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
-import { activationLinkKinds, resolveDisplayUnit } from '@/domain/constants';
+import {
+  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
+} from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
 import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office-counter.port';
-import { NamedTemplateService } from './named-template.service';
+import { NamedTemplateService, type NamedTemplateView } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import {
-  RESERVED_ACTIVITY_CODES, isOfficeTemplateKind, platformDefaultPayload,
+  isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes, type OfficeTemplateKind,
 } from './template-defaults';
 import {
   checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
 } from './summary-group';
+import { bindingOfPayload, bindingProblems, defaultBinding } from './activity-binding';
 import { CampaignKindsApplier } from './campaign-kinds.port';
 import { trainingTaxonomyProblems } from '@/modules/training/training-payload';
 import { activationChecklistProblems } from '@/modules/activation/activation-payload';
+import { completesWhenOf } from '@/modules/activation/activation.messages';
 import { capabilityLadderProblems } from '@/modules/capability/capability-payload';
 import { eventTypesProblems } from '@/modules/events/event-types-payload';
 import {
   campaignKindsProblems, type CampaignKindsPayload,
 } from '@/modules/campaigns/campaign-kinds-payload';
+import { TEMPLATE_REFUSALS } from './template.messages';
+
+/** A publish's refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = TEMPLATE_REFUSALS.VALIDATION_FAILED;
+
+/** A payload's problems, refused whole: every sentence, one after another, as `join(' ')` said them. */
+const refuseProblems = (problems: readonly FieldSentence[]): void => {
+  if (problems.length) throw new InvalidRequestException(joinSentences(problems, ' '));
+};
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
@@ -64,6 +85,37 @@ export interface TemplateView {
    * every other kind.
    */
   linkKinds?: ReturnType<typeof activationLinkKinds>;
+}
+
+/**
+ * **The order *Terbitkan semua* publishes in** (ADR-0185 §3): the activity taxonomy before the ratio set, because a
+ * ratio is checked against the template's *published* taxonomy — so a draft type and the ratio built on it go out
+ * together, as a reader who edited both in one sitting expects; the training taxonomy before the checklist that links
+ * its modules. Every one of the seven kinds, once.
+ */
+export const PUBLISH_ORDER = [
+  'activity_taxonomy',
+  'ratio_set',
+  'lead_pipeline',
+  'training_taxonomy',
+  'activation_checklist',
+  'capability_ladder',
+  'event_types',
+] as const satisfies readonly OfficeTemplateKind[];
+
+/** What *Terbitkan semua* did with one kind (ADR-0185 §3). */
+export type PublishAllOutcome =
+  /** Its draft is now this version. */
+  | { kind: OfficeTemplateKind; outcome: 'published'; version: number }
+  /** No draft waited: nothing to publish. */
+  | { kind: OfficeTemplateKind; outcome: 'skipped'; reason: 'no_changes' }
+  /** Its draft was refused, as `…/template/:kind/publish` would refuse it — in the reader's language. Still a draft. */
+  | { kind: OfficeTemplateKind; outcome: 'refused'; error: { code: string; message: string } };
+
+/** *Terbitkan semua*'s answer: the template as it now stands, and what happened to each kind, in publishing order. */
+export interface PublishAllView {
+  template: NamedTemplateView;
+  results: PublishAllOutcome[];
 }
 
 /**
@@ -128,7 +180,9 @@ export class TemplateService {
    *
    * `templateId` names the template; absent, the company's default.
    */
-  async read(companyId: string, kind: TemplateKind, templateId?: string | null): Promise<TemplateView> {
+  async read(
+    companyId: string, kind: TemplateKind, templateId?: string | null, reader: Reader = readerOf(),
+  ): Promise<TemplateView> {
     const company = await this.requireCompany(companyId);
     const at = await this.address(companyId, kind, templateId);
 
@@ -138,8 +192,8 @@ export class TemplateService {
 
     const standing = await this.standing(at, published?.version ?? null);
 
-    if (draft) return this.view(draft, published?.version ?? null, standing);
-    if (published) return this.view(published, published.version, standing);
+    if (draft) return this.view(draft, published?.version ?? null, standing, reader);
+    if (published) return this.view(published, published.version, standing, reader);
 
     return {
       id: '',
@@ -160,7 +214,7 @@ export class TemplateService {
       publishedVersion: null,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
-      ...linkKindsOf(kind),
+      ...linkKindsOf(kind, reader),
     };
   }
 
@@ -218,6 +272,7 @@ export class TemplateService {
       saved!,
       published?.version ?? null,
       await this.standing(at, published?.version ?? null),
+      ctx.reader,
     );
   }
 
@@ -237,10 +292,7 @@ export class TemplateService {
     const draft = await this.templates
       .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
     if (!draft) {
-      throw new BadRequestException(
-        'There is nothing to publish. Change something first — the published version is '
-          + 'immutable, because offices record which one they were built from.',
-      );
+      throw new InvalidRequestException(SAY.nothingToPublish);
     }
     await this.refuseBroken(at, draft.payload);
 
@@ -272,12 +324,49 @@ export class TemplateService {
       after: { companyId, templateId: at.templateId, kind, version: draft.version },
     });
 
-    return this.view(draft, draft.version, await this.standing(at, draft.version));
+    return this.view(draft, draft.version, await this.standing(at, draft.version), ctx.reader);
+  }
+
+  /**
+   * **Terbitkan semua** (ADR-0185 §3): every kind of one template that holds a draft, published in
+   * {@link PUBLISH_ORDER}, each exactly as its own *Terbitkan* would publish it — the same checks, the same audit row.
+   *
+   * **A refusal stops only its own kind.** The others go out, and the answer says which were published, which had
+   * nothing waiting and which were refused, and why, in the reader's language: the reader fixes the one and publishes
+   * it, rather than finding that one empty list held back six good sections. **Reaches nothing that already exists**,
+   * as every publish (copy-on-provision). Refused whole before anything is written: `403` without
+   * `company_template:write`, `404` for a company or a template that is not the company's, `400` for an archived one.
+   */
+  async publishAll(ctx: RequestContext, companyId: string, templateId: string): Promise<PublishAllView> {
+    if (!can(ctx, 'company_template:write')) throw new PermissionDeniedException('company_template:write');
+    await this.requireCompany(companyId);
+    const template = await this.named.findOf(companyId, templateId);
+    if (template.status === 'archived') throw new InvalidRequestException(SAY.editArchived({ name: template.name }));
+    const id = String(template._id);
+
+    const results: PublishAllOutcome[] = [];
+    for (const kind of PUBLISH_ORDER) {
+      const waiting = await this.templates
+        .exists({ companyId, templateId: id, kind, status: 'draft', deletedAt: null }).exec();
+      if (!waiting) {
+        results.push({ kind, outcome: 'skipped', reason: 'no_changes' });
+        continue;
+      }
+      try {
+        const published = await this.publish(ctx, companyId, kind, id);
+        results.push({ kind, outcome: 'published', version: published.version });
+      } catch (err) {
+        // A refusal is the kind's, said; anything else is a fault, and stops the rest.
+        if (!(err instanceof DomainException)) throw err;
+        results.push({ kind, outcome: 'refused', error: { code: err.code, message: err.messageFor(ctx.reader) } });
+      }
+    }
+    return { template: await this.named.viewOf(companyId, template), results };
   }
 
   /** Every version of one kind of one template, newest first. The history panel. */
   async history(
-    companyId: string, kind: TemplateKind, templateId?: string | null,
+    companyId: string, kind: TemplateKind, templateId?: string | null, reader: Reader = readerOf(),
   ): Promise<TemplateView[]> {
     await this.requireCompany(companyId);
     const at = await this.address(companyId, kind, templateId);
@@ -286,7 +375,7 @@ export class TemplateService {
       .sort({ version: -1 })
       .exec();
     const published = rows.find((r) => r.status === 'published');
-    return rows.map((r) => this.view(r, published?.version ?? null, NO_STANDING));
+    return rows.map((r) => this.view(r, published?.version ?? null, NO_STANDING, reader));
   }
 
   // -------------------------------------------------------------- internals
@@ -309,9 +398,7 @@ export class TemplateService {
   ): Promise<KindAddress> {
     const at = await this.address(companyId, kind, templateId);
     if (at.template?.status === 'archived') {
-      throw new BadRequestException(
-        `${at.template.name} is archived, so it is kept as it is. Edit an active template instead.`,
-      );
+      throw new InvalidRequestException(SAY.editArchived({ name: at.template.name }));
     }
     return at;
   }
@@ -372,6 +459,11 @@ export class TemplateService {
     const { kind } = at;
     this.refuseEmpty(kind, payload);
 
+    if (kind === 'activity_taxonomy') {
+      this.refuseBrokenBinding(payload);
+      return;
+    }
+
     /*
      * The training taxonomy (P5-T1): every row by the checker an office's own write meets
      * (ADR-0030), then the references only a whole payload can break. An empty level is fine.
@@ -382,14 +474,12 @@ export class TemplateService {
       * name, so provisioning checks it against the modules it has just copied.
       */
     if (kind === 'activation_checklist') {
-      const problems = activationChecklistProblems(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(activationChecklistProblems(payload));
       return;
     }
 
     if (kind === 'training_taxonomy') {
-      const problems = trainingTaxonomyProblems(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(trainingTaxonomyProblems(payload));
       return;
     }
 
@@ -399,15 +489,14 @@ export class TemplateService {
      * One checker, two callers, on purpose: publishing and provisioning disagreeing about what is
      * valid is how a template passes here and throws at a Super Admin creating a real branch.
      */
-    const checker: Partial<Record<TemplateKind, (p: unknown) => string[]>> = {
+    const checker: Partial<Record<TemplateKind, (p: unknown) => FieldSentence[]>> = {
       capability_ladder: capabilityLadderProblems,
       event_types: eventTypesProblems,
       campaign_kinds: campaignKindsProblems,
     };
     const check = checker[kind];
     if (check) {
-      const problems = check(payload);
-      if (problems.length) throw new BadRequestException(problems.join(' '));
+      refuseProblems(check(payload));
       return;
     }
 
@@ -420,29 +509,30 @@ export class TemplateService {
       }[];
     };
     if (!ratios?.length) {
-      throw new BadRequestException('A ratio set with no ratios gives every new office nothing to measure.');
+      throw new InvalidRequestException(SAY.noRatios);
     }
 
     /*
-     * Against **this template's published** taxonomy, and the three cascade types every office is
-     * given whatever its source (ADR-0115 §2) — because that is what provisioning copies. Checking
-     * the taxonomy *draft* would pass here and still break the office, which is the defect wearing a
-     * different hat. There is no platform fallback any more: a template with no taxonomy published
-     * gives its offices the three and nothing else (ADR-0115 §1).
+     * Against **this template's published** taxonomy, and the bound types every office is given whatever
+     * its source (ADR-0115 §2, ADR-0163 §5; `withCascadeTypes`) — because that is what provisioning
+     * copies. Checking the taxonomy *draft* would pass here and still break the office, which is the
+     * defect wearing a different hat. There is no platform fallback any more: a template with no taxonomy
+     * published gives its offices the default binding's three and nothing else (ADR-0115 §1).
      */
     const taxonomy = await this.newestPublished({ ...at, kind: 'activity_taxonomy' });
-    const source = (taxonomy?.payload ?? {}) as { types?: { code: string }[] };
-    const known = new Set([...(source.types ?? []).map((t) => t.code), ...RESERVED_ACTIVITY_CODES]);
+    const source = (taxonomy?.payload ?? {}) as { categories?: SeedActivityCategory[]; types?: SeedActivityType[] };
+    const given = withCascadeTypes(
+      source.categories ?? [], source.types ?? [], bindingOfPayload(taxonomy?.payload) ?? defaultBinding(),
+    );
+    const known = new Set(given.types.map((t) => t.code));
 
     const missing = [...new Set(
       ratios.flatMap((r) => [...(r.numerator ?? []), ...(r.denominator ?? [])]),
     )].filter((code) => !known.has(code));
 
     if (missing.length) {
-      throw new BadRequestException(
-        `${missing.join(', ')} is named by a ratio and declared by no activity type in this `
-          + `template\u2019s published taxonomy${taxonomy ? ` (version ${taxonomy.version})` : ''}. `
-          + 'Publish the taxonomy first, or point the ratio at a code it has.',
+      throw new InvalidRequestException(
+        SAY.ratioCodesUndeclared({ codes: missing, version: taxonomy ? taxonomy.version : null }),
       );
     }
 
@@ -457,15 +547,32 @@ export class TemplateService {
           ratio.comparison === 'band' ? 'band' : 'gte', ratio.displayUnit,
         );
         if (resolved.refusal !== undefined) {
-          throw new BadRequestException(`${ratio.code}: ${resolved.refusal}`);
+          // The rule's own words (`resolveDisplayUnit`), after the ratio's code, refused as the publish refuses.
+          throw new InvalidRequestException(
+            prefixed(`${ratio.code}: `, refiled(resolved.refusal, ErrorCode.VALIDATION_FAILED)),
+          );
         }
       }
       if (!ratio.denominator?.length) {
-        throw new BadRequestException(
-          `${ratio.code} has nothing in its denominator. That is a division by zero dressed `
-            + 'up as configuration, and it renders as ∞ on every agent\u2019s screen.',
-        );
+        throw new InvalidRequestException(SAY.noDenominator({ code: ratio.code }));
       }
+    }
+  }
+
+  /**
+   * **The template's activity binding** (ADR-0163 §1, §3): which of its types each cascade role counts, refused
+   * `400` by the checker the office's own binding meets (`bindingProblems`). A code must be one of this
+   * template's activity types, or one of the platform's, which an office made from it is given with it
+   * (`withCascadeTypes`) — the taxonomy provisioning would write. A payload carrying none gives its offices the
+   * default binding, and needs no check.
+   */
+  private refuseBrokenBinding(payload: Record<string, unknown>): void {
+    if (payload.bindings === undefined) return;
+    const own = ((payload.types ?? []) as { code: string }[]).map((t) => t.code);
+    const known = new Set([...own, ...SEED_ACTIVITY_TYPES.map((t) => t.code)]);
+    const problems = bindingProblems(payload.bindings, known);
+    if (problems.length) {
+      throw new InvalidRequestException(SAY.inSection({ section: 'activityBinding', inner: joinSentences(problems, ' ') }));
     }
   }
 
@@ -485,10 +592,7 @@ export class TemplateService {
     if (kind === 'activity_taxonomy') {
       const { categories, types } = payload as { categories?: unknown[]; types?: unknown[] };
       if (!categories?.length || !types?.length) {
-        throw new BadRequestException(
-          'A taxonomy with no categories or no types would give every new office an empty '
-            + 'Log Activity screen.',
-        );
+        throw new InvalidRequestException(SAY.taxonomyEmpty);
       }
       // Again at publish: a draft saved before the rule existed is what would reach offices.
       this.checkedTaxonomy(payload);
@@ -498,13 +602,10 @@ export class TemplateService {
       for (const pipeline of ['sales', 'recruitment']) {
         const mine = (statuses ?? []).filter((s) => s.pipeline === pipeline);
         if (mine.length === 0) {
-          throw new BadRequestException(`The ${pipeline} pipeline has no stages.`);
+          throw new InvalidRequestException(SAY.pipelineNoStages({ pipeline }));
         }
         if (mine.filter((s) => s.isTerminal).length !== 1) {
-          throw new BadRequestException(
-            `The ${pipeline} pipeline needs exactly one stage that closes it. It is what `
-              + 'gates marking a lead successful.',
-          );
+          throw new InvalidRequestException(SAY.pipelineOneTerminal({ pipeline }));
         }
       }
     }
@@ -514,6 +615,7 @@ export class TemplateService {
     doc: CompanyTemplateDocument,
     publishedVersion: number | null,
     standing: OfficeStanding,
+    reader: Reader,
   ): TemplateView {
     return {
       id: String(doc._id),
@@ -527,12 +629,23 @@ export class TemplateService {
       publishedVersion,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
-      ...linkKindsOf(doc.kind),
+      ...linkKindsOf(doc.kind, reader),
     };
   }
 }
 
-/** The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. */
-function linkKindsOf(kind: TemplateKind): Pick<TemplateView, 'linkKinds'> {
-  return kind === 'activation_checklist' ? { linkKinds: activationLinkKinds() } : {};
+/**
+ * The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. **What
+ * completes each kind is written for the reader** (P18.98-T7; ADR-0179 §7), the activation module's own sentence
+ * (`completesWhenOf`) — the same words the office's checklist serves. A feature kind's label is a page's name, and
+ * *Training module* the kind's, the same in both (§A.1, §A.2).
+ */
+function linkKindsOf(kind: TemplateKind, reader: Reader): Pick<TemplateView, 'linkKinds'> {
+  if (kind !== 'activation_checklist') return {};
+  const kinds = activationLinkKinds();
+  const written = Object.fromEntries(Object.entries(kinds).map(([key, linkKind]) => [key, {
+    ...linkKind,
+    completesWhen: render(completesWhenOf(key === 'training' ? ACTIVATION_TRAINING_LINK_PREFIX : key), reader),
+  }])) as unknown as typeof kinds;
+  return { linkKinds: written };
 }

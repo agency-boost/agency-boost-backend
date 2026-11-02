@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import type { TemplateKind } from './company-template.schema';
-import { OfficeCounter, OfficeStanding, TemplateScope } from './office-counter.port';
+import { OfficeCounter, OfficeSeeds, OfficeStanding, TemplateScope } from './office-counter.port';
 
 /**
  * How many of a company's offices were built from something older than the current version
@@ -49,6 +49,21 @@ export class KpmOfficeCounter extends OfficeCounter {
       this.kpms.countDocuments({ ...live, [record]: { $exists: false } }).exec(),
     ]);
     return { behind, unrecorded };
+  }
+
+  /** Across offices by design: Super Admin only (`company_template:read`, `NamedTemplateService.offices`), one company, code/branch/seededFrom alone. */
+  async officesOf(companyId: string, scope: TemplateScope): Promise<OfficeSeeds[]> {
+    const rows = await this.kpms
+      .find({ companyId, deletedAt: null, ...this.answeredBy(scope) }, { code: 1, branchName: 1, seededFrom: 1 })
+      .sort({ code: 1 })
+      .lean()
+      .exec();
+    return rows.map((row) => {
+      const r = row as unknown as {
+        _id: unknown; code: string; branchName: string; seededFrom?: OfficeSeeds['seededFrom'] | null;
+      };
+      return { id: String(r._id), code: r.code, branchName: r.branchName, seededFrom: r.seededFrom ?? {} };
+    });
   }
 
   async countsByTemplate(

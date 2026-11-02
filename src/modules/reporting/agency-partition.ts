@@ -1,8 +1,15 @@
+import type { HierarchyRole } from '@/common/context/request-context';
+
 /**
  * **AB agencies** (Phase 18, D-units → option 1): what a row of the unit comparison is, and of *Units furthest
  * behind target*, when an AB sits under an AB — which ADR-0014 makes the normal result of a promotion.
  *
- * - **One agency per member on the `AB` rung**, over their own people: themselves and everybody below them down
+ * **"AB" and "AAB" here are classes, not rung codes** (ADR-0156 §4): a member of class `ab` — on any rung marked
+ * *Senior Leader* — heads an agency, and one of class `aab` — *Associate Leader* — may head a unit, whatever the
+ * company called the rung. By code until P18.8-T1, which left a company whose leaders are `SM` and `UM` with no
+ * agency at all.
+ *
+ * - **One agency per member of the `ab` class**, over their own people: themselves and everybody below them down
  *   to, and not including, the next AB, whose agency is its own. So the agencies **partition** the office's
  *   members, and a total is the sum of its rows. The Owner is an agency like any AB (roles §1.1).
  * - **Inside an agency, one unit per AAB who leads somebody**, over their people within the agency: the AAB and
@@ -20,6 +27,8 @@
 export interface PlacedMembership {
   membershipId: string;
   orgLevelCode: string;
+  /** The class, from the rung's leader tier: what decides who heads an agency or a unit. */
+  role: HierarchyRole;
   leaderId: string | null;
   /** Root first, excluding self: the cache the org module writes with every edge. */
   ancestorIds: readonly string[];
@@ -50,16 +59,20 @@ export interface AgencyPartition {
   unplacedIds: string[];
 }
 
-export const AGENCY_RUNG = 'AB';
-export const UNIT_RUNG = 'AAB';
+/** The class that heads an agency: a rung marked *Senior Leader* (ADR-0156). */
+export const AGENCY_CLASS: HierarchyRole = 'ab';
+/** The class that may head a unit inside one: a rung marked *Associate Leader*. */
+export const UNIT_CLASS: HierarchyRole = 'aab';
+/** The class of everybody else — the *Agents* a tile, a chip and a Direct Unit count. */
+export const AGENT_CLASS: HierarchyRole = 'agent';
 
 export function partitionAgencies(memberships: readonly PlacedMembership[]): AgencyPartition {
   const active = memberships.filter((m) => m.active);
   const activeIds = new Set(active.map((m) => m.membershipId));
   const leads = new Set(active.flatMap((m) => (m.leaderId !== null && activeIds.has(m.leaderId) ? [m.leaderId] : [])));
-  const isHead = new Set(active.filter((m) => m.orgLevelCode === AGENCY_RUNG).map((m) => m.membershipId));
+  const isHead = new Set(active.filter((m) => m.role === AGENCY_CLASS).map((m) => m.membershipId));
   const isUnitHead = new Set(active
-    .filter((m) => m.orgLevelCode === UNIT_RUNG && leads.has(m.membershipId))
+    .filter((m) => m.role === UNIT_CLASS && leads.has(m.membershipId))
     .map((m) => m.membershipId));
 
   const agencies = new Map<string, { direct: string[]; units: Map<string, string[]> }>();

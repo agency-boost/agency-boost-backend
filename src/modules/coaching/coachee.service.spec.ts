@@ -1,6 +1,6 @@
 import { RequestContext } from '@/common/context/request-context';
 import type { CoachResolver } from '@/modules/org/coach-resolver';
-import type { MemberNames, NamedPerson } from '@/modules/org/member-names.service';
+import type { MemberNames, PicturedPerson } from '@/modules/org/member-names.service';
 import type { OrgLevelService } from '@/modules/tenants/org-level.service';
 import type { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { CoacheeService } from './coachee.service';
@@ -21,7 +21,7 @@ const reader = new RequestContext('u-reader', 'none', {
  */
 describe('the person a coaching page opens on, when a fact cannot be named (P11-T7)', () => {
   function service(over: {
-    people?: Map<string, NamedPerson>;
+    people?: Map<string, PicturedPerson>;
     companyId?: string | null;
     ladder?: { code: string; label: string }[];
     orgLevelCode?: string;
@@ -31,8 +31,8 @@ describe('the person a coaching page opens on, when a fact cannot be named (P11-
       coacheesOf: jest.fn().mockResolvedValue([]),
     } as unknown as CoachResolver;
     const names = {
-      people: jest.fn().mockResolvedValue(over.people ?? new Map([
-        [SUBJECT, { name: 'Rina Wijaya', pronoun: 'she' }], [READER, { name: 'Agus Salim', pronoun: 'he' }],
+      pictured: jest.fn().mockResolvedValue(over.people ?? new Map([
+        [SUBJECT, { name: 'Rina Wijaya', pronoun: 'she', photoUrl: null }], [READER, { name: 'Agus Salim', pronoun: 'he', photoUrl: null }],
       ])),
     } as unknown as MemberNames;
     const list = jest.fn().mockResolvedValue(over.ladder ?? [{ code: 'AGENT', label: 'Agent' }]);
@@ -42,20 +42,30 @@ describe('the person a coaching page opens on, when a fact cannot be named (P11-
         today: '2026-10-02', companyId: over.companyId === undefined ? 'c-1' : over.companyId,
       }),
     } as unknown as TenantDay;
-    return { svc: new CoacheeService(coach, names, orgLevels, days), list };
+    return { svc: new CoacheeService(coach, names, orgLevels, days), list, names };
   }
 
   it('P11-T7 AC-1 names the person and their leader from the directory, and the rung from the company’s ladder', async () => {
     const { svc } = service();
     expect(await svc.read(reader, SUBJECT)).toEqual({
-      today: '2026-10-02', membershipId: SUBJECT, name: 'Rina Wijaya', pronoun: 'she', rung: { code: 'AGENT', label: 'Agent' },
+      today: '2026-10-02', membershipId: SUBJECT, name: 'Rina Wijaya', photoUrl: null, pronoun: 'she', rung: { code: 'AGENT', label: 'Agent' },
       leader: { membershipId: READER, name: 'Agus Salim' }, direct: true, downline: { members: 0, leaders: 0 },
     });
   });
 
   it('P11-T7 AC-1 a leader who can no longer be named is null, and a person with no user reads blank and they', async () => {
     const { svc } = service({ people: new Map() });
-    expect(await svc.read(reader, SUBJECT)).toMatchObject({ name: '', pronoun: 'they', leader: null });
+    expect(await svc.read(reader, SUBJECT)).toMatchObject({ name: '', photoUrl: null, pronoun: 'they', leader: null });
+  });
+
+  it('UI-111 carries the coachee’s photo as the link the names signed, and asks for theirs alone', async () => {
+    const { svc, names } = service({ people: new Map([
+      [SUBJECT, { name: 'Rina Wijaya', pronoun: 'she', photoUrl: 'https://cdn.test/user/u-rina/avatar/a.jpg?sig=abc' }],
+      [READER, { name: 'Agus Salim', pronoun: 'he', photoUrl: null }],
+    ]) });
+    expect((await svc.read(reader, SUBJECT)).photoUrl).toBe('https://cdn.test/user/u-rina/avatar/a.jpg?sig=abc');
+    // The leader is named, never pictured: only the coachee's photo is signed.
+    expect(names.pictured).toHaveBeenCalledWith(reader, [SUBJECT, READER], [SUBJECT]);
   });
 
   it('P11-T7 AC-1 a rung the ladder no longer lists is labelled by its code', async () => {

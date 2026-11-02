@@ -7,6 +7,7 @@ import { configModule } from '../../../test/config-module';
 import { declaredPermissions, session } from '../../../test/http-permissions';
 import { buildEventsOffice, eventsApp, type EventKey, type EventsOffice, type EventsWho } from '../../../test/events-office';
 import { ROSTER_NOW } from '../../../test/coaching-office';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { EventGuestController } from './event-guest.controller';
 
 /**
@@ -58,6 +59,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       read: 'event:read_list',
       rsvp: 'event:rsvp',
       cancelRsvp: 'event:cancel_rsvp',
+      withdrawRsvp: 'event:cancel_rsvp',
       claim: 'event_attendance:self_claim',
       submitFeedback: 'event_feedback:submit',
     });
@@ -82,6 +84,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
         as(who);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp`).expect(201);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`).expect(201);
+        await http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`).expect(201);
         await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
         await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 8 }).expect(201);
       },
@@ -94,6 +97,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       for (const call of [
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp`),
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`),
+        () => http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`),
         () => http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`),
         () => http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }),
       ]) expect((await call().expect(403)).body.error.code).toBe('PERM_DENIED');
@@ -108,6 +112,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       for (const call of [
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp`),
         () => http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`),
+        () => http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`),
         () => http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`),
         () => http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }),
       ]) expect((await call().expect(403)).body.error.code).toBe('PERM_DENIED');
@@ -223,7 +228,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       const past = body.events.find((e) => e.code === 'PAST_ALL')!;
       expect(past).toMatchObject({
         title: 'PAST ALL', blurb: 'PAST_ALL blurb', description: 'PAST_ALL description',
-        type: { code: 'PRODUCT_LAUNCH', label: 'Product launch', emoji: '🚀', color: '#F2994A' },
+        type: { code: 'PRODUCT_LAUNCH', label: 'Peluncuran produk', emoji: '🚀', color: '#F2994A' },
         audience: { issuer: 'company', scope: 'all_agents' },
         startsOn: '2026-08-24', startTime: '09:00', location: 'Kantor KPM', locationUrl: null,
         phase: 'past', ended: true, me: { rsvp: null, claimed: false, feedback: null },
@@ -247,12 +252,48 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(1);
     });
 
+    it('UI-108 Tidak ikut from no answer makes the row, cancelled — audited once, from null', async () => {
+      as('RINA');
+      const id = idOf('UPCOMING');
+      expect((await http().post(`/events/${id}/rsvp/cancel`).expect(201)).body.me.rsvp).toBe('cancelled');
+      await http().post(`/events/${id}/rsvp/cancel`).expect(201);
+      const audits = await db().collection('auditLog').find({ action: /^event\.rsvp/ }).sort({ _id: 1 }).toArray();
+      expect(audits.map((a) => a.action)).toEqual(['event.rsvp_cancelled']);
+      expect(audits[0]).toMatchObject({ before: { rsvpStatus: null }, after: { rsvpStatus: 'cancelled' } });
+      expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(1);
+    });
+
+    it('UI-108 the chosen answer tapped again is undone: Ikut and Tidak ikut each withdraw to no answer, audited', async () => {
+      as('RINA');
+      const id = idOf('UPCOMING');
+      await http().post(`/events/${id}/rsvp`).expect(201);
+      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me).toEqual({ rsvp: null, claimed: false, feedback: null });
+      await http().post(`/events/${id}/rsvp/withdraw`).expect(201);
+      await http().post(`/events/${id}/rsvp/cancel`).expect(201);
+      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me.rsvp).toBeNull();
+      const audits = await db().collection('auditLog').find({ action: /^event\.rsvp/ }).sort({ _id: 1 }).toArray();
+      expect(audits.map((a) => a.action)).toEqual(['event.rsvp', 'event.rsvp_withdrawn', 'event.rsvp_cancelled', 'event.rsvp_withdrawn']);
+      expect(audits[1]).toMatchObject({ before: { rsvpStatus: 'going' }, after: { rsvpStatus: null } });
+      expect(audits[3]).toMatchObject({ before: { rsvpStatus: 'cancelled' }, after: { rsvpStatus: null } });
+      // One row throughout, never deleted: an answer withdrawn is a status, not an erasure.
+      const rows = await db().collection('eventRsvps').find({ membershipId: office.id.RINA }).toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ rsvpStatus: null, deletedAt: null });
+    });
+
+    it('UI-108 withdrawing with no answer changes nothing and makes no row', async () => {
+      as('RINA');
+      expect((await http().post(`/events/${idOf('UPCOMING')}/rsvp/withdraw`).expect(201)).body.me.rsvp).toBeNull();
+      expect(await db().collection('eventRsvps').countDocuments({ membershipId: office.id.RINA })).toBe(0);
+      expect(await db().collection('auditLog').countDocuments({ action: 'event.rsvp_withdrawn' })).toBe(0);
+    });
+
     it('P18.5-T5 AC-5 a running event still takes an RSVP; from endsAt both are refused 409, at the exact boundary', async () => {
       as('AGUS');
       await http().post(`/events/${idOf('RUNNING_LEADERS')}/rsvp`).expect(201);
       as('RINA');
-      // ENDS_NOW ended at ROSTER_NOW to the millisecond: closed.
-      for (const path of ['rsvp', 'rsvp/cancel']) {
+      // ENDS_NOW ended at ROSTER_NOW to the millisecond: closed — the card's undo too (UI-108).
+      for (const path of ['rsvp', 'rsvp/cancel', 'rsvp/withdraw']) {
         const res = await http().post(`/events/${idOf('ENDS_NOW')}/${path}`).expect(409);
         expect(res.body.error.code).toBe('EVENT_RSVP_CLOSED');
       }
@@ -726,6 +767,77 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await codesOf('LUKAS')).toContain('PAST_LEADERS');
       const call = await rollCall('PAST_LEADERS');
       expect(rowOf(call, 'LUKAS')).toBeDefined();
+    });
+  });
+
+  /**
+   * **The member's and the roll call's refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): the same code and details as
+   * in English, the words the reader's — a refusal's message and every field sentence in `details.violations`.
+   */
+  describe('P18.98-T5 AC-7 the events’ refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 one’s own row, before the end and a malformed roll call: the codes as in English, the words Indonesian', async () => {
+      as('OWNER');
+      const own = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.OWNER, attended: true }] }).expect(400);
+      expect(own.body.error).toMatchObject({
+        code: 'EVENT_ATTENDANCE_SELF',
+        message: 'Tidak ada yang mengonfirmasi kehadirannya sendiri. Administrator lain yang mengonfirmasi kehadiran Anda.',
+        details: { membershipId: office.id.OWNER },
+      });
+      const early = await http().put(`/kpm/settings/events/${idOf('UPCOMING')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(409);
+      expect(early.body.error).toMatchObject({ code: 'EVENT_NOT_ENDED', message: 'Kehadiran dikonfirmasi setelah event berakhir.' });
+      const malformed = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [
+          { membershipId: office.id.RINA, attended: 'yes' }, { membershipId: office.id.BUDI, attended: true, note: 'x' },
+        ] }).expect(400);
+      const violations = ['entries[0].attended harus true, false, atau null.', 'properti entries[1].note tidak dikenal'];
+      expect(malformed.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations } });
+      // A field the pipe refuses before the service reads the body is Indonesian too (`common/validation`).
+      const extra = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
+        .send({ entries: [{ membershipId: office.id.RINA, attended: true }], extra: 1 }).expect(400);
+      expect(extra.body.error.details.violations).toEqual(['properti extra tidak dikenal']);
+    });
+
+    it('P18.98-T5 AC-7 the answer: not ended, not attended, a score out of range and a second submit, in Indonesian', async () => {
+      as('RINA');
+      const say = async (key: EventKey, body: Record<string, unknown>, status: number) =>
+        (await http().post(`/events/${idOf(key)}/feedback`).set(...IN_INDONESIAN).send(body).expect(status)).body.error;
+      expect(await say('UPCOMING', { score: 9 }, 409)).toMatchObject({ code: 'EVENT_NOT_ENDED', message: 'Event ini belum berakhir.' });
+      expect(await say('PAST_ALL', { score: 9 }, 409)).toMatchObject({
+        code: 'EVENT_NOT_ATTENDED',
+        message: 'Masukan hanya dikumpulkan dari orang yang ikut atau menyatakan hadir di event ini.',
+      });
+      await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
+      expect(await say('PAST_ALL', { score: 11 }, 400)).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'score harus berupa bilangan bulat dari 0 sampai 10.',
+        details: { violations: ['score harus berupa bilangan bulat dari 0 sampai 10.'] },
+      });
+      expect(await say('PAST_ALL', {}, 400)).toMatchObject({ details: { violations: ['score wajib diisi.'] } });
+      await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }).expect(201);
+      expect(await say('PAST_ALL', { score: 9 }, 409)).toMatchObject({
+        code: 'EVENT_FEEDBACK_ALREADY_SUBMITTED', message: 'Anda sudah memberikan masukan untuk event ini.',
+      });
+      // The RSVP once the event has ended, and the same refusal in English, unchanged.
+      const closed = await http().post(`/events/${idOf('PAST_ALL')}/rsvp`).set(...IN_INDONESIAN).expect(409);
+      expect(closed.body.error).toMatchObject({ code: 'EVENT_RSVP_CLOSED', message: 'Event ini sudah berakhir, jadi RSVP-nya ditutup.' });
+      expect((await http().post(`/events/${idOf('PAST_ALL')}/rsvp`).expect(409)).body.error.message)
+        .toBe('This event has ended, so its RSVP is closed.');
+    });
+
+    it('P18.98-T5 AC-7 an answered event moved into the future is refused in Indonesian, its details as in English', async () => {
+      as('RINA');
+      await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
+      as('OWNER');
+      const res = await http().patch(`/kpm/settings/events/${idOf('PAST_ALL')}`).set(...IN_INDONESIAN)
+        .send({ endsAt: '2027-01-01T02:00:00Z' }).expect(409);
+      expect(res.body.error).toMatchObject({
+        code: 'EVENT_HAS_RESPONSES',
+        message: 'Sudah ada yang menanggapi event ini, jadi waktu mulai, audiens, dan waktu selesai di masa depan tidak '
+          + 'dapat diubah. Tambahkan event baru sebagai gantinya.',
+        details: { field: 'dates', changed: ['endsAt'] },
+      });
     });
   });
 });

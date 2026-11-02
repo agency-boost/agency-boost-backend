@@ -6,6 +6,7 @@ import {
   readBrief, recruitmentPlanFor, recruitmentVocabulary, type RecruitmentPlan, type RecruitmentVocabulary,
 } from './recruitment-plan';
 import { RecruitmentPlaybookService } from './recruitment-playbook.service';
+import { playbookFor } from './recruitment-words';
 
 /** `GET /recruitment/attack-plan` (`RecruitmentAttackPlanView`). */
 export interface RecruitmentAttackPlanView {
@@ -17,7 +18,9 @@ export interface RecruitmentAttackPlanView {
 }
 
 /**
- * **The Recruitment Attack Plan's read** (D-plan, D-store; T2 AC-4 to AC-7).
+ * **The Recruitment Attack Plan's read** — the chips' labels written for the request's reader (P18.98-T7), the
+ * company's playbook as typed (D-plan, D-store; T2 AC-4 to AC-7) — save where it still holds the platform's seed words,
+ * which a reader in Indonesian reads in Indonesian (UI V1, UI-107; `playbookFor`).
  *
  * The reader's office's company, from the office's own row (`TenantDay.office`) — never a company the
  * caller names — and that company's playbook through its named company-filtered read: **those two reads and
@@ -43,8 +46,9 @@ export class RecruitmentPlanService {
     const playbook = companyId ? await this.playbooks.ofCompany(companyId) : null;
     return {
       hasPlaybook: playbook !== null,
-      vocabulary: recruitmentVocabulary(),
-      plan: playbook && brief ? recruitmentPlanFor(playbook.body, brief) : null,
+      vocabulary: recruitmentVocabulary(ctx.reader),
+      // The platform's seed words in the reader's language, the company's own as typed (UI V1, UI-107).
+      plan: playbook && brief ? recruitmentPlanFor(playbookFor(playbook.body, ctx.reader), brief, ctx.reader) : null,
     };
   }
 }

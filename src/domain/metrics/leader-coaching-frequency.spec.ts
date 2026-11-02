@@ -26,6 +26,12 @@ describe('LEADER_COACHING_FREQUENCY (§A.3, D-coverage)', () => {
     expect(leaderCoachingFrequency({ ...base, sessions: [s('L', 'a', '2026-10-05', 'reopened')] }).coached).toBe(1);
   });
 
+  it('P18.97-T3 F-254 rounds an exact half up in integers: 23 of a downline of 40 is 58%, which the float read 57', () => {
+    const downline = ['L', ...Array.from({ length: 40 }, (_, i) => `m${i}`)];
+    const sessions = downline.slice(1, 24).map((id) => s('L', id, '2026-10-08'));
+    expect(leaderCoachingFrequency({ ...base, downline, sessions })).toEqual({ teamSize: 40, coached: 23, pct: 58 });
+  });
+
   it('P18-T1 AC-9 a downline of nobody is null, never 0%', () => {
     expect(leaderCoachingFrequency({ ...base, downline: ['L'], sessions: [] })).toEqual({ teamSize: 0, coached: 0, pct: null });
   });

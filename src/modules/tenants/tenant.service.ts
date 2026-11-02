@@ -1,9 +1,13 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
@@ -16,14 +20,17 @@ import { KpmRequest, KpmRequestDocument } from './kpm-request.schema';
 import { OrgLevelService } from './org-level.service';
 import { ProvisioningService, type StartFrom } from '@/modules/config/provisioning.service';
 import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { TemplateCopyService, type LibraryCopy } from '@/modules/config/template-copy.service';
 import { ProductService } from '@/modules/products/product.service';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
 import { DEFAULT_KPM_SETTINGS, Kpm, KpmDocument, type KpmSubscription } from './kpm.schema';
 import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
+import { INSURERS_ONLY, isTemplateLibrary } from './template-library';
 import {
   subscriptionStateOf, validateSubscription, type SubscriptionInput, type SubscriptionState,
 } from './subscription';
+import { TENANTS_MESSAGES, TENANTS_REFUSALS } from './tenants.messages';
 
 export interface CreateKpmInput {
   companyId: string;
@@ -175,17 +182,17 @@ export class TenantService {
     private readonly namedTemplates: NamedTemplateService,
     // Its recruitment playbook (Phase 17, OD-88): the company's, given with the defaults. Takes a companyId.
     private readonly recruitmentPlaybooks: RecruitmentPlaybookService,
+    /*
+     * ADR-0164 §4: a new company's first template copied from the Template library, its files duplicated. The
+     * application always provides it; optional so the specs that build this service by hand need not, and
+     * without it a company is given the AgencyBoost defaults, as where there is no Template library.
+     */
+    @Optional() private readonly templateCopies: TemplateCopyService | null = null,
   ) {}
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
-    if (!can(ctx, permission)) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission },
-      );
-    }
+    // The shared refusal, in both languages: *You do not have permission to perform this action.*
+    if (!can(ctx, permission)) throw new PermissionDeniedException(permission);
   }
 
   /**
@@ -198,7 +205,7 @@ export class TenantService {
    * silently loses the only name on the screen. That differs from `resolveOwner`, which
    * does filter, because that is a write path and this is a display one.
    */
-  private async toViews(kpms: KpmDocument[]): Promise<KpmView[]> {
+  private async toViews(kpms: KpmDocument[], reader: Reader): Promise<KpmView[]> {
     if (kpms.length === 0) return [];
 
     const ownerIds = [...new Set(kpms.map((k) => k.ownerUserId).filter((id): id is string => Boolean(id)))];
@@ -214,15 +221,15 @@ export class TenantService {
       return {
         _id: String(k._id),
         companyId: k.companyId,
-        companyName: byCompany.get(k.companyId)?.name ?? 'Unknown company',
+        companyName: byCompany.get(k.companyId)?.name ?? render(TENANTS_MESSAGES.unknownCompany, reader),
         code: k.code,
         branchName: k.branchName,
         address: k.address ?? null,
         contactPhone: k.contactPhone ?? null,
         ownerUserId: k.ownerUserId ?? null,
         // An owner whose account has gone still gets a row: 'Unknown' says the office is
-        // owned and the account is missing, which is a different problem from unowned.
-        ownerName: k.ownerUserId ? (owner?.fullName ?? 'Unknown') : null,
+        // owned and the account is missing, which is a different problem from unowned. In the reader's language.
+        ownerName: k.ownerUserId ? (owner?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, reader)) : null,
         ownerEmail: k.ownerUserId ? (owner?.email ?? null) : null,
         timezone: k.timezone,
         locale: k.locale,
@@ -237,8 +244,8 @@ export class TenantService {
     });
   }
 
-  private async toView(kpm: KpmDocument): Promise<KpmView> {
-    return (await this.toViews([kpm]))[0];
+  private async toView(kpm: KpmDocument, reader: Reader): Promise<KpmView> {
+    return (await this.toViews([kpm], reader))[0];
   }
 
   /**
@@ -252,7 +259,7 @@ export class TenantService {
    */
   private async toAdminViews(ctx: RequestContext, kpms: KpmDocument[]): Promise<KpmAdminView[]> {
     const [views, leaders] = await Promise.all([
-      this.toViews(kpms),
+      this.toViews(kpms, ctx.reader),
       countLeadersUsedPerOffice(this.memberships, ctx, kpms.map((k) => String(k._id))),
     ]);
     return views.map((view, i) => ({
@@ -290,7 +297,8 @@ export class TenantService {
     const rows = await this.companies
       // **Suspended companies are not on offer.** That is what suspending one means here: no
       // new person and no new office attaches to it. Everybody already inside is untouched.
-      .find({ deletedAt: null, status: 'active' }, { name: 1 })
+      // **Nor is the Template library** (ADR-0164 §3): it holds templates, and nobody works for it.
+      .find({ deletedAt: null, status: 'active', ...INSURERS_ONLY }, { name: 1 })
       .sort({ name: 1 })
       .lean()
       .exec();
@@ -315,6 +323,11 @@ export class TenantService {
    * **The catch is not belt-and-braces.** Two Super Admins creating the same company at
    * once both pass the pre-check; only the index stops the second, and it must arrive as
    * the same 409 the first reader would have got.
+   *
+   * **What it starts from** (ADR-0164 §4): `usesPlatformDefaults` true — the default — copies the
+   * Template library (its ladder, products, carrier rules, playbook and Default template); false is
+   * *Empty*: the default ladder and a first template holding nothing. Where there is no Template
+   * library, true gives the AgencyBoost defaults from the code, as before the library existed.
    */
   async createCompany(
     ctx: RequestContext,
@@ -333,9 +346,20 @@ export class TenantService {
     // Absent means true: every caller that does not care gets what they always got.
     const usesPlatformDefaults = input.usesPlatformDefaults !== false;
 
+    /*
+     * **What it copies, read and checked before the company exists** (ADR-0164 §4): the Template library's
+     * default template, and every training file it names known to have arrived — so a refusal leaves no company
+     * behind. `null` for a company started *Empty*, and where there is no Template library: a database migration
+     * `0037` has not run on, which is given the AgencyBoost defaults from the code, as before.
+     */
+    const library: LibraryCopy | null = usesPlatformDefaults && this.templateCopies
+      ? await this.templateCopies.libraryCopy(ctx)
+      : null;
+
     let company: CompanyDocument;
     try {
-      company = await this.companies.create({ name, slug, usesPlatformDefaults });
+      // Always an insurer: the Template library is made by migration `0037`, and by nothing else.
+      company = await this.companies.create({ name, slug, usesPlatformDefaults, kind: 'insurer' });
     } catch (err) {
       if ((err as { code?: number }).code === 11000) {
         const winner = await this.companies.findOne({ slug, deletedAt: null }).exec();
@@ -344,11 +368,32 @@ export class TenantService {
       throw err;
     }
 
+    const companyId = String(company._id);
+    if (library) {
+      /*
+       * **A copy of the Template library** (ADR-0164 §4): its ladder with the leader tiers, its products, its
+       * carrier rules and its playbook, then its default template as this company's first and default. Copies,
+       * never links (§6): a later change to the Template reaches no company that already exists.
+       */
+      await this.orgLevels.copyLadderFrom(library.companyId, companyId);
+      await this.products.copyFromCompany(library.companyId, companyId);
+      await this.campaigns.copyRulesFromCompany(library.companyId, companyId);
+      await this.namedTemplates.copyCompanyKind(ctx, 'campaign_kinds', library.companyId, companyId);
+      await this.recruitmentPlaybooks.copyFromCompany(library.companyId, companyId);
+      await this.templateCopies!.writeFirstFromLibrary(ctx, company, library);
+      await this.recordCompanyCreated(ctx, company, {
+        usesPlatformDefaults,
+        startedFrom: 'template_library',
+        source: { companyId: library.companyId, templateId: library.templateId, name: library.templateName },
+      });
+      return company;
+    }
+
     // **Every company gets a ladder, at creation.** `memberships.orgLevelId` resolves
     // against it on every join, so a company without one is an office nobody can join —
     // and nothing would say so until somebody tried. ADR-0012 §3 settles that v1 ships
     // one seeded ladder; Super Admin edits it at /admin/org-levels afterwards.
-    await this.orgLevels.seedDefaultLadder(String(company._id));
+    await this.orgLevels.seedDefaultLadder(companyId);
 
     /*
      * **The rest is the platform's offer, and it can be declined.**
@@ -364,11 +409,12 @@ export class TenantService {
      * from it (ADR-0115 §1) — rather than blank on some of them.
      */
     if (usesPlatformDefaults) {
-      await this.products.seedForCompany(String(company._id));
-      await this.campaigns.seedForCompany(String(company._id));
+      // No Template library to copy (ADR-0164 §4): the AgencyBoost defaults, from the code.
+      await this.products.seedForCompany(companyId);
+      await this.campaigns.seedForCompany(companyId);
       // Phase 17 (OD-88, ADR-0125): the recruitment playbook's AgencyBoost words, version 1 — the company's
       // to reword on the Company template's Recruitment tab. A blank company is given none.
-      await this.recruitmentPlaybooks.seedForCompany(String(company._id));
+      await this.recruitmentPlaybooks.seedForCompany(companyId);
     }
 
     /*
@@ -378,6 +424,23 @@ export class TenantService {
      */
     await this.namedTemplates.createFirst(ctx, company);
 
+    await this.recordCompanyCreated(ctx, company, {
+      usesPlatformDefaults, startedFrom: usesPlatformDefaults ? 'defaults' : 'empty',
+    });
+    return company;
+  }
+
+  /** `company.created`, once, whichever source the company was made from. */
+  private async recordCompanyCreated(
+    ctx: RequestContext,
+    company: CompanyDocument,
+    made: {
+      usesPlatformDefaults: boolean;
+      /** The Template library's copy, the AgencyBoost defaults from the code (no library), or nothing. */
+      startedFrom: 'template_library' | 'defaults' | 'empty';
+      source?: { companyId: string; templateId: string; name: string };
+    },
+  ): Promise<void> {
     await this.audit.record(ctx, {
       action: 'company.created',
       targetCollection: 'companies',
@@ -393,11 +456,12 @@ export class TenantService {
         defaultTimezone: company.defaultTimezone,
         // Recorded because it decides what nine screens show for the life of the company,
         // and because "it came up empty" is otherwise unanswerable a month later.
-        usesPlatformDefaults,
+        usesPlatformDefaults: made.usesPlatformDefaults,
+        // What it was copied from (ADR-0164 §4): the Template library's template by id and name as they were.
+        startedFrom: made.startedFrom,
+        ...(made.source ? { source: made.source } : {}),
       },
     });
-
-    return company;
   }
 
   /**
@@ -498,7 +562,7 @@ export class TenantService {
   private slugTaken(slug: string, existingName: string): DomainException {
     return new DomainException(
       ErrorCode.COMPANY_SLUG_TAKEN,
-      `The slug "${slug}" already belongs to ${existingName}. Edit the slug to something unique.`,
+      TENANTS_REFUSALS.COMPANY_SLUG_TAKEN.taken({ slug, existingName }),
       HttpStatus.CONFLICT,
       { slug, existingName },
     );
@@ -509,6 +573,16 @@ export class TenantService {
 
     const company = await this.companies.findOne({ _id: input.companyId, deletedAt: null }).exec();
     if (!company) throw new NotFoundException('Company');
+    // **The Template library holds templates, not offices** (ADR-0164 §3). Named, not a 404: the Super Admin
+    // chose it, and the console lists it.
+    if (isTemplateLibrary(company)) {
+      throw new DomainException(
+        ErrorCode.COMPANY_IS_TEMPLATE_LIBRARY,
+        TENANTS_REFUSALS.COMPANY_IS_TEMPLATE_LIBRARY.holdsNoOffice({ name: company.name }),
+        HttpStatus.CONFLICT,
+        { companyId: input.companyId },
+      );
+    }
 
     const clash = await this.kpms
       .findOne({ companyId: input.companyId, code: input.code, deletedAt: null })
@@ -516,7 +590,7 @@ export class TenantService {
     if (clash) {
       throw new DomainException(
         ErrorCode.TENANT_CODE_TAKEN,
-        `KPM code ${input.code} is already used by ${company.name}.`,
+        TENANTS_REFUSALS.TENANT_CODE_TAKEN.taken({ code: input.code, company: company.name }),
         HttpStatus.CONFLICT,
         { companyId: input.companyId, code: input.code },
       );
@@ -593,7 +667,7 @@ export class TenantService {
       },
     });
 
-    return this.toView(kpm);
+    return this.toView(kpm, ctx.reader);
   }
 
   /**
@@ -696,12 +770,22 @@ export class TenantService {
        * `assignOwner` writes after this.
        */
       if (existing.status !== 'active') {
-        await this.hierarchy.activate(scoped, String(existing._id), { joinedAt: this.clock.now() });
+        /*
+         * An Owner is never a new hire (ADR-0169 §6, ADR-0103): joined today, an existing agent, and given no
+         * activation. One who already had a join date here keeps it — it is set once.
+         */
+        const joining = existing.joinedAs ? {} : await this.hierarchy.joining(scoped, { joinedAs: 'existing_agent' });
+        await this.hierarchy.activate(scoped, String(existing._id), { joinedAt: this.clock.now(), ...joining });
       }
       return;
     }
 
-    await this.hierarchy.create(scoped, { userId, role: 'ab', leaderId: null, status: 'active' });
+    // The ladder's Senior Leader rung: `AB` on the default ladder, whatever a custom one calls it (ADR-0156).
+    const role = await this.hierarchy.entryRungCode(kpmId, 'owner');
+    // An existing agent, joined today (ADR-0169 §6): the office's creation is nobody's hire (ADR-0103).
+    await this.hierarchy.create(scoped, {
+      userId, role, leaderId: null, status: 'active', joining: { joinedAs: 'existing_agent' },
+    });
   }
 
   private async resolveOwner(who: { userId?: string; email?: string }): Promise<UserDocument> {
@@ -709,7 +793,7 @@ export class TenantService {
     if (!who.userId && !email) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Name the new owner by email or by user id.',
+        TENANTS_REFUSALS.VALIDATION_FAILED.nameTheOwner,
         HttpStatus.BAD_REQUEST,
         { fields: ['email', 'userId'] },
       );
@@ -728,7 +812,7 @@ export class TenantService {
     if (user.status === 'deactivated') {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'That account is deactivated and cannot own an office.',
+        TENANTS_REFUSALS.VALIDATION_FAILED.ownerDeactivated,
         HttpStatus.BAD_REQUEST,
         { userId: String(user._id) },
       );
@@ -744,7 +828,7 @@ export class TenantService {
     this.require(ctx, 'kpm:assign_owner');
     throw new DomainException(
       ErrorCode.PERM_LAST_OWNER,
-      'A KPM must always have an Owner. Transfer ownership instead of removing it.',
+      TENANTS_REFUSALS.PERM_LAST_OWNER.alwaysAnOwner,
       HttpStatus.CONFLICT,
       { kpmId },
     );
@@ -852,7 +936,8 @@ export class TenantService {
     this.require(ctx, 'platform_metrics:read');
 
     const [companies, kpms, members, pendingRequests, ladders] = await Promise.all([
-      this.companies.find({ deletedAt: null }).sort({ name: 1 }).exec(),
+      // The insurers: the Template library holds templates, and is no company the platform serves (ADR-0164 §3).
+      this.companies.find({ deletedAt: null, ...INSURERS_ONLY }).sort({ name: 1 }).exec(),
       this.kpms.find({ deletedAt: null }).exec(),
       this.memberships.findAcrossAllTenants(ctx, { status: 'active' }),
       // The **model**, not `KpmRequestService` — that service already depends on this
@@ -862,7 +947,7 @@ export class TenantService {
       // → AB` (`Superadmin.html:311`); until the ladder was data there was nothing behind
       // it, and a literal would have been a sentence no data stood for.
       this.orgLevels.laddersByCompany(
-        (await this.companies.find({ deletedAt: null }).select('_id').exec()).map((c) => String(c._id)),
+        (await this.companies.find({ deletedAt: null, ...INSURERS_ONLY }).select('_id').exec()).map((c) => String(c._id)),
       ),
     ]);
 
@@ -887,7 +972,7 @@ export class TenantService {
         totalMembers: members.length,
         agencyBuilders,
       },
-      attention: this.attentionQueue(kpms, pendingRequests),
+      attention: this.attentionQueue(kpms, pendingRequests, ctx.reader),
       companies: companies.map((c) => {
         const theirs = kpmsByCompany.get(String(c._id)) ?? [];
         return {
@@ -914,22 +999,20 @@ export class TenantService {
    * one kind of row is produced. A queue with one real row is honest; four invented ones
    * would make the screen look finished and tell the reader nothing true.
    */
-  private attentionQueue(kpms: KpmDocument[], pendingRequests: number): AttentionItem[] {
+  private attentionQueue(kpms: KpmDocument[], pendingRequests: number, reader: Reader): AttentionItem[] {
     const items: AttentionItem[] = [];
+    // Written for the Super Admin reading the queue (P18.98-T5 AC-4): every word of a row in their language.
+    const say = TENANTS_MESSAGES;
 
     const unowned = kpms.filter((k) => !k.ownerUserId && k.status !== 'archived');
     if (unowned.length > 0) {
       items.push({
-        tag: 'KPM owner',
+        tag: render(say.unownedTag, reader),
         severity: 'structural',
-        title:
-          unowned.length === 1
-            ? '1 office has no Owner'
-            : `${unowned.length} offices have no Owner`,
-        detail:
-          'Nobody can administer an office until an Owner is assigned, and only the platform can assign one.',
+        title: render(say.unownedTitle({ count: unowned.length }), reader),
+        detail: render(say.unownedDetail, reader),
         href: '/admin/tenants',
-        actionLabel: 'Review',
+        actionLabel: render(say.reviewAction, reader),
       });
     }
 
@@ -940,16 +1023,12 @@ export class TenantService {
     // surface nobody could reach.
     if (pendingRequests > 0) {
       items.push({
-        tag: 'KPM request',
+        tag: render(say.requestTag, reader),
         severity: 'approval',
-        title:
-          pendingRequests === 1
-            ? '1 office is waiting for a decision'
-            : `${pendingRequests} offices are waiting for a decision`,
-        detail:
-          'Somebody has asked for an office and nobody has approved or declined it yet. Until one of those happens they have no way in.',
+        title: render(say.requestTitle({ count: pendingRequests }), reader),
+        detail: render(say.requestDetail, reader),
         href: '/admin/kpm-requests',
-        actionLabel: 'Decide',
+        actionLabel: render(say.decideAction, reader),
       });
     }
 
@@ -1012,14 +1091,14 @@ export class TenantService {
     return rows
       .map((r) => {
         const who = byUser.get(r.userId);
-        const fullName = who?.fullName ?? 'Unknown';
+        const fullName = who?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, ctx.reader);
         return {
           membershipId: String(r._id),
           fullName,
           email: who?.email ?? '',
           initials: initialsOf(fullName),
           kpmId: r.kpmId,
-          kpmLabel: office.get(r.kpmId) ?? 'Unknown office',
+          kpmLabel: office.get(r.kpmId) ?? render(TENANTS_MESSAGES.unknownOffice, ctx.reader),
           isOwner: ownerOf.get(r.kpmId) === r.userId,
           isAdmin: Boolean(r.adminAccess?.isKpmAdmin),
           // An Owner's rights come with the office, not from a grant, so there is no date
@@ -1067,7 +1146,7 @@ export class TenantService {
       // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
       .catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
-    return ctx.isSuperAdmin ? this.toAdminView(ctx, kpm) : this.toView(kpm);
+    return ctx.isSuperAdmin ? this.toAdminView(ctx, kpm) : this.toView(kpm, ctx.reader);
   }
 
   /**
@@ -1113,7 +1192,7 @@ export class TenantService {
     if (input.fiscalYearStartMonth !== undefined) {
       set.fiscalYearStartMonth = input.fiscalYearStartMonth;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(TENANTS_REFUSALS.VALIDATION_FAILED.nothingToChange);
 
     const before = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec()
       .catch(() => null);
@@ -1137,6 +1216,6 @@ export class TenantService {
       after: set,
     });
 
-    return this.toView(kpm);
+    return this.toView(kpm, ctx.reader);
   }
 }

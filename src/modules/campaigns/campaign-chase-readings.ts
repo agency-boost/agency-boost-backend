@@ -26,7 +26,7 @@ export interface ChasedCampaign {
 export interface ChaseReading {
   /** Each member asked about, with their chases of campaigns not ended, in D-lists' order — `[]` for none. */
   byMember: Map<string, ChasedCampaign[]>;
-  /** Whether the office's `MDRT_QUALIFICATION` is running — and the header tooltip composed from it (OD-152). */
+  /** Whether the office's `MDRT_QUALIFICATION` is running — and the header tooltip composed from it (OD-152), for the reader. */
   mdrt: { running: boolean; tooltip: string };
 }
 
@@ -86,7 +86,8 @@ export class CampaignChaseReadings {
       byMember,
       mdrt: {
         running: mdrt !== null,
-        tooltip: mdrtTooltip(mdrt === null ? null : { requirements: mdrt.requirements }),
+        // Written for the reader who asked (P18.98-T5 AC-4): the Unit Dashboard's header answers it as it is.
+        tooltip: mdrtTooltip(mdrt === null ? null : { requirements: mdrt.requirements }, ctx.reader),
       },
     };
   }

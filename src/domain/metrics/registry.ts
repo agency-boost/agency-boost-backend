@@ -1,4 +1,4 @@
-import { ACTIVATION, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
+import { ACTIVATION, ACTIVATION_3M, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
 import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/metrics';
 
 /**
@@ -253,6 +253,12 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   SALES_LEADS_CLOSING_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   RECRUITMENT_NOMINATED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   /*
+   * UI V1 (Phase 18.99 T4; UI-028, O-4): the roster's *Closing* — sales leads whose first move to *Paid and issued*
+   * falls in the period the screen shows: the calendar month by default, `ROLLING_7D` and the year to date as its other
+   * views, as `CASCADE_ACTIVITY_TOUCHES`. Counted by `closingsIn` (`unit-dashboard/unit-figures.ts`).
+   */
+  SALES_LEADS_CLOSED_IN_PERIOD: { period: 'CALENDAR_MONTH', threshold: null },
+  /*
    * `PACING_TO_MAA` counted over a group, so its period is that metric's. No threshold of its own: the
    * gate is `PACING_TO_MAA`'s. Computed in `domain/metrics/unit-rollup.ts`.
    */
@@ -307,15 +313,17 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    * by its start day in the office's calendar (`activation-cohort.ts`).
    */
   ACTIVATION_COHORT: { period: 'CALENDAR_YEAR', threshold: null },
-  NEW_AGENT_3M_ACTIVE_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  // `NEW_AGENT_3M_ACTIVE_PCT` retired (ADR-0171 §2, P18.96-T6): the row reads `ACTIVATION_3M_PCT`, below.
   PRODUCING_AGENTS: { period: 'CALENDAR_YEAR', threshold: null },
   AVERAGE_CASE_SIZE_REALISED: { period: 'CALENDAR_YEAR', threshold: null },
+  // P18.97-T1 AC-5 (ADR-0175 §2): over the same periods as `PRODUCING_AGENTS`, its denominator — *Full Year* and *YTD*.
+  CASES_PER_PRODUCING_AGENT: { period: 'CALENDAR_YEAR', threshold: null },
   /*
-   * **The three drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
-   * *FY* or *YTD* the months held summed or averaged — the same definition over a year, as `SUMMARY_ACTIVITY_TARGET`'s
-   * *Yearly* view is (`held-months.ts`).
+   * **The two drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
+   * *Full Year* or *YTD* the months held summed or averaged — the same definition over a year, as
+   * `SUMMARY_ACTIVITY_TARGET`'s *Yearly* view is (`held-months.ts`).
    */
-  NEW_ACTIVE_AGENTS_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
+  // `NEW_ACTIVE_AGENTS_MONTHLY_AVG` retired (ADR-0175 §2, P18.97-T1 AC-6): no table draws *New AA (avg. monthly)*.
   MAA_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
   CASE_SUBMISSIONS: { period: 'CALENDAR_MONTH', threshold: null },
 
@@ -329,6 +337,20 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   ACTIVATION_COMPLETION_RATE: { period: 'POINT_IN_TIME', threshold: null },
   // A goal saved for the office's calendar year with an annual target above zero (OD-160; `goal-set.ts`).
   GOAL_SET_RATE: { period: 'CALENDAR_YEAR', threshold: null },
+
+  // ---- New hire activation (Phase 18.96, P18.96-T4; ADR-0171 §1) ----
+  // The day of the first paid and issued case, kept on the membership and moved only earlier (`first-sale.ts`).
+  FIRST_SALE_DATE: { period: 'POINT_IN_TIME', threshold: null },
+  // P18.96-T5 (ADR-0172 §2): on the office's day, an existing agent, or a new hire on or after their first sale
+  // (`counts-for-production.ts`) — the people a unit's production and *on pace* read.
+  COUNTS_FOR_PRODUCTION: { period: 'POINT_IN_TIME', threshold: null },
+  /*
+   * P18.96-T6 (ADR-0171 §2; `activation-3m.ts`): **a new hire's result over their first 90 days**, the programme's own
+   * window — its threshold the day it locks on — and **the share activated, by join month**: a month's new hires are
+   * its cohort, and a year's or a unit's figure is the same definition over theirs.
+   */
+  ACTIVATION_3M: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION_3M.DAYS },
+  ACTIVATION_3M_PCT: { period: 'CALENDAR_MONTH', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

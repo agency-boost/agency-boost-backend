@@ -1,13 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsString, MaxLength, Min, MinLength, ValidateBy, ValidateIf,
+  ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsString, Max, MaxLength, Min, MinLength, ValidateBy, ValidateIf,
 } from 'class-validator';
 import { isLocalDate } from '@/common/time/local-day';
-import { LEADER_MEETING_LIMITS } from '@/domain/constants';
+import { field } from '@/common/validation/violations';
+import { LEADER_MEETING_LIMITS, LEADER_MEETING_TARGET_RATE_DECIMALS } from '@/domain/constants';
 import { ACTION_STATUSES, AGENDA_SECTIONS, type ActionStatus, type AgendaSection } from './leader-meeting.schema';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 
-const { titleMax, textMax, picMax, targetMax } = LEADER_MEETING_LIMITS;
+/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them through class-validator. */
+const SAY = LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED;
+
+const { titleMax, textMax, picMax } = LEADER_MEETING_LIMITS;
 
 /** Leading and trailing spaces are not part of a title: `"  "` is an empty title, refused. */
 const Trimmed = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
@@ -24,7 +29,7 @@ function IsOfficeDate() {
     name: 'isOfficeDate',
     validator: {
       validate: (value: unknown) => isLocalDate(value),
-      defaultMessage: () => 'date must be a real day, YYYY-MM-DD',
+      defaultMessage: () => field(SAY.dateShape),
     },
   });
 }
@@ -37,7 +42,7 @@ export class CreateLeaderMeetingDto {
   @ApiProperty({ example: 'Strategic Check-in — #15', minLength: 1, maxLength: titleMax, description: 'Plain text, trimmed.' })
   @Trimmed()
   @IsString()
-  @MinLength(1, { message: 'title must not be empty' })
+  @MinLength(1, { message: field(SAY.titleNotEmpty) })
   @MaxLength(titleMax)
   title!: string;
 
@@ -52,7 +57,7 @@ export class RescheduleLeaderMeetingDto {
   @Sent()
   @Trimmed()
   @IsString()
-  @MinLength(1, { message: 'title must not be empty' })
+  @MinLength(1, { message: field(SAY.titleNotEmpty) })
   @MaxLength(titleMax)
   title?: string;
 
@@ -100,7 +105,7 @@ export class SaveAgendaItemDto {
   @MaxLength(picMax)
   pic?: string;
 
-  @ApiPropertyOptional({ description: 'The box, on *During* only.' })
+  @ApiPropertyOptional({ description: 'The item’s box, in any section (UI V1, UI-110).' })
   @Sent()
   @IsBoolean()
   done?: boolean;
@@ -163,12 +168,27 @@ export class ReorderActionItemsDto {
   itemIds!: string[];
 }
 
-/** **One *Monthly Target* cell**: short text, with the cell's `version` — 0 for a cell never typed. */
+/**
+ * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4): a number from 0 in the row's unit — IDR minor units for
+ * `ape`, which the service holds to whole sen, a count to two places for the others (`LEADER_MEETING_TARGET_RATE_DECIMALS`,
+ * which bounds every row's rate here) — or `null` to clear it, with the
+ * cell's `version`, 0 for a cell never typed. **Anything that is not a number is refused**, a text included: the
+ * free-text target is gone (the pipe converts nothing, `VALIDATION_PIPE_OPTIONS`).
+ */
 export class SaveMonthlyTargetDto {
-  @ApiProperty({ example: '8 (1 @ unit)', maxLength: targetMax, description: 'Plain text; *TBD* is a value, empty clears it.' })
-  @IsString()
-  @MaxLength(targetMax)
-  value!: string;
+  @ApiProperty({
+    type: Number, nullable: true, minimum: 0, example: 1,
+    description: 'The rate per unit, in the row’s unit: IDR minor units for `ape` (whole sen), a count to two places for '
+      + 'the others. `null` clears the target. Not a number: `400 VALIDATION_FAILED`.',
+  })
+  @ValidateIf((_: unknown, value: unknown) => value !== null)
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false, maxDecimalPlaces: LEADER_MEETING_TARGET_RATE_DECIMALS },
+    { message: field(SAY.rateNumber) },
+  )
+  @Min(0)
+  @Max(Number.MAX_SAFE_INTEGER)
+  rate!: number | null;
 
   @ApiProperty({ example: 0, description: 'The cell’s `version` you read: 0 for one never typed.' })
   @IsInt()

@@ -1,6 +1,16 @@
 import {
-  filesOfTraining, rungCodesOf, templateKindsFromOffice, withCopiedFiles, type OfficeSettings,
+  filesOfTraining, rungCodesOf, templateKindsFromOffice as kindsWithSentences, withCopiedFiles, type OfficeSettings,
 } from './office-template';
+import { english, indonesian } from '../../../test/i18n';
+
+/**
+ * The function, each dropped setting's reason read as the API's English writes it: a reason is a sentence in both
+ * languages, written for the person who saved where the answer is made (P18.98-T5 AC-4).
+ */
+const templateKindsFromOffice = (settings: OfficeSettings) => {
+  const made = kindsWithSentences(settings);
+  return { ...made, dropped: made.dropped.map((d) => ({ ...d, reason: english(d.reason) })) };
+};
 
 /**
  * **What crosses when an office's settings become a template** (P13.2-T7 AC-2, ADR-0115 §5): the pure
@@ -254,6 +264,20 @@ describe('what archiving left behind is dropped, and listed (exit review, findin
       kind: 'ratio_set', code: 'CLOSING',
       reason: 'Ratio CLOSING no longer counts OLD_VISIT, which is not an active activity type in this office.',
     }]);
+  });
+
+  it('P18.98-T5 AC-4 says why in Indonesian too, the codes as they are', () => {
+    const { dropped } = kindsWithSentences(withSnapshot({
+      ratios: [
+        ratio('CLOSING', ['SELL_SUBMISSION', 'OLD_VISIT'], ['SELL_PRESENTATION']),
+        ratio('VISITS', ['OLD_VISIT', 'OLD_CALL'], ['SELL_PRESENTATION']),
+      ],
+    }));
+    expect(dropped.map((d) => indonesian(d.reason))).toEqual([
+      'Ratio CLOSING tidak lagi menghitung OLD_VISIT, yang bukan jenis aktivitas aktif di KPM ini.',
+      'Ratio VISITS tidak disertakan: pembilangnya hanya menghitung OLD_VISIT, OLD_CALL, yang bukan jenis aktivitas '
+        + 'aktif di KPM ini.',
+    ]);
   });
 
   it('leaves a ratio out when a side is left counting nothing, and the kind out when no ratio is left', () => {

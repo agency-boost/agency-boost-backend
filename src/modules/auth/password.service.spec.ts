@@ -1,3 +1,5 @@
+import { english, englishAll, indonesianAll } from '../../../test/i18n';
+import { PASSWORD } from '@/domain/constants';
 import { PasswordService } from './password.service';
 
 /**
@@ -60,27 +62,38 @@ describe('PasswordService', () => {
 
   describe('validation', () => {
     it('accepts a password that is only long', () => {
-      // Length beats symbols, and composition rules reliably produce worse passwords.
+      // No composition rule: they reliably produce worse passwords than length does.
       expect(passwords.validate('correct horse battery staple')).toEqual([]);
     });
 
     it('names every problem at once, rather than one round trip each', () => {
       const problems = passwords.validate(' short ');
       expect(problems).toHaveLength(2);
-      expect(problems[0]).toMatch(/at least 10 characters/);
-      expect(problems[1]).toMatch(/begin or end with a space/);
+      expect(english(problems[0])).toMatch(/at least 8 characters/);
+      expect(english(problems[1])).toMatch(/begin or end with a space/);
+    });
+
+    it('P18.98-T5 AC-3 names each problem in Indonesian too', () => {
+      expect(indonesianAll(passwords.validate(' short '))).toEqual([
+        'Kata sandi minimal 8 karakter.',
+        'Kata sandi tidak boleh diawali atau diakhiri spasi.',
+      ]);
+      expect(indonesianAll(passwords.validate('x'.repeat(201)))).toEqual(['Kata sandi paling banyak 200 karakter.']);
     });
 
     it('refuses one under the floor, and accepts one exactly on it', () => {
-      expect(passwords.validate('123456789')).toHaveLength(1);
-      expect(passwords.validate('1234567890')).toEqual([]);
+      // The floor is `PASSWORD.MIN_LENGTH`, 8 since the product owner's 2026-11-01 (metrics §B.30).
+      expect(PASSWORD.MIN_LENGTH).toBe(8);
+      expect(passwords.validate('1234567')).toHaveLength(1);
+      expect(passwords.validate('12345678')).toEqual([]);
     });
 
     it('refuses one over the ceiling, and accepts one exactly on it', () => {
       // The ceiling is about the hash function's cost, not about the password: an
       // unbounded input is a way to make every login expensive.
+      expect(PASSWORD.MAX_LENGTH).toBe(200);
       expect(passwords.validate('x'.repeat(200))).toEqual([]);
-      expect(passwords.validate('x'.repeat(201)))
+      expect(englishAll(passwords.validate('x'.repeat(201))))
         .toEqual(['Password must be 200 characters or fewer.']);
     });
 

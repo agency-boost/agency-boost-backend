@@ -1,17 +1,26 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { Clock } from '@/common/clock/clock.port';
+import { RequestContext } from '@/common/context/request-context';
+import { localDayOf } from '@/common/time/local-day';
+import { DEFAULT_TENANT_TIMEZONE, type Gender, type WorkStatus } from '@/domain/constants';
+import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Reader } from '@/common/i18n/reader';
+import { joinSentences } from '@/common/i18n/sentence';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { INSURERS_ONLY } from '@/modules/tenants/template-library';
+import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenDocument } from './auth-token.schema';
 import { PasswordService } from './password.service';
 import { TokenSigner } from './token-signer';
+import { AUTH_REFUSALS } from './auth.messages';
 
 export interface TokenPair {
   accessToken: string;
@@ -36,10 +45,37 @@ export interface SessionView {
   current: boolean;
 }
 
+/** What registration takes (`RegisterDto`), the insurer and the code already settled. */
+export interface RegistrationInput {
+  email: string;
+  password: string;
+  fullName: string;
+  companyId: string;
+  agentCode: string;
+  dateOfBirth: string;
+  companyJoinMonth: string;
+  workStatus: WorkStatus;
+  gender: Gender;
+}
+
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_DAYS = 30;
 const VERIFICATION_TTL_HOURS = 24;
 const RESET_TTL_MINUTES = 30;
+
+/**
+ * **An email address as the account stores it** — lower-cased and trimmed, as registration has always written it and
+ * `users.email` holds it (`lowercase`, `trim`). One function, so the email change (UI-111, ADR-0181) compares and
+ * stores the new address exactly as registration would have.
+ */
+export function normalisedEmail(raw: string): string {
+  return raw.toLowerCase().trim();
+}
+
+/** What `POST /auth/verify-email-change` answers: the address the account now signs in with. */
+export interface EmailChanged {
+  email: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -53,40 +89,56 @@ export class AuthService {
     private readonly signer: TokenSigner,
     private readonly clock: Clock,
     private readonly notifications: NotificationService,
+    /*
+     * The email change's audit row (UI-111, ADR-0181). Optional and last, so a harness that builds this service for
+     * something else needs no audit log; the application module always provides one.
+     */
+    @Optional() @Inject(AuditService) private readonly audit: AuditService | null = null,
   ) {}
 
   // ---------------------------------------------------------------- registration
 
-  async register(input: {
-    email: string;
-    password: string;
-    fullName: string;
-    companyId: string;
-    agentCode: string;
-  }): Promise<UserDocument> {
+  /**
+   * `reader` is the request's (P18.98-T5 AC-5): the verification email is written in it for a person who has saved no
+   * language — a new account never has.
+   */
+  async register(input: RegistrationInput, reader?: Reader): Promise<UserDocument> {
+    return (await this.registerAccount(input, reader)).user;
+  }
+
+  /**
+   * **`register`, saying whether it made the account** (P18.96-T3 AC-4). Registration on an invite's link joins the
+   * office only for an account made here and now: an address that already exists answers the same shape as ever —
+   * confirming it would be the enumeration oracle `register` refuses to be — and must not join anybody to anything.
+   */
+  async registerAccount(input: RegistrationInput, reader?: Reader): Promise<{ user: UserDocument; created: boolean }> {
     const problems = this.passwords.validate(input.password);
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
     }
 
-    const email = input.email.toLowerCase().trim();
+    // Before anything is looked up, so the answer is the same whether or not the address exists.
+    this.refusePersonalData(input);
+
+    const email = normalisedEmail(input.email);
     const existing = await this.users.findOne({ email }).exec();
     if (existing) {
       // Do not confirm that the address is taken: that is an enumeration oracle. The
       // caller gets the same shape as a success, and the real account owner gets an
       // email telling them someone tried.
       this.logger.warn({ email }, 'registration attempted for an existing address');
-      return existing;
+      return { user: existing, created: false };
     }
 
-    // The insurer has to exist before we can hold somebody's code against it.
+    // The insurer has to exist before we can hold somebody's code against it. **The Template library is not
+    // one** (ADR-0164 §3): nobody works for it, so it is "not here" to somebody registering, as it is not listed.
     const company = await this.companies
-      .findOne({ _id: input.companyId, deletedAt: null })
+      .findOne({ _id: input.companyId, deletedAt: null, ...INSURERS_ONLY })
       .exec()
       // A malformed id is "not here", not a 500 — this arrives from a public form.
       .catch(() => null);
@@ -110,8 +162,7 @@ export class AuthService {
     if (clash) {
       throw new DomainException(
         ErrorCode.AGENT_CODE_TAKEN,
-        `Agent code ${agentCode} is already registered at ${company.name}. ` +
-          'Check the code on your contract, or ask your office to sort it out.',
+        AUTH_REFUSALS.AGENT_CODE_TAKEN.registered({ agentCode, company: company.name }),
         HttpStatus.CONFLICT,
         { field: 'agentCode', agentCode },
       );
@@ -123,12 +174,39 @@ export class AuthService {
       fullName: input.fullName.trim(),
       companyId: input.companyId,
       agentCode,
+      // ADR-0158: theirs, on the account. How they work waits here for the office that takes them on.
+      dateOfBirth: input.dateOfBirth,
+      companyJoinMonth: input.companyJoinMonth,
+      gender: input.gender,
+      registeredWorkStatus: input.workStatus,
       status: 'invited',
       platformRole: 'none',
     });
 
-    await this.issueVerification(user);
-    return user;
+    await this.issueVerification(user, reader);
+    return { user, created: true };
+  }
+
+  /**
+   * **A birth date in the past and at least 18 years ago, a join month not in the future** (ADR-0158 §2,
+   * P18.8-T4 AC-4), each refused `400 VALIDATION_FAILED` with the field named — registration's, and
+   * `PATCH /auth/me`'s for whichever of the two it carries.
+   *
+   * Measured against **today in `Asia/Jakarta`**, the one office timezone v1 has (ADR-0016): a person
+   * registering belongs to no office yet, so there is no `kpms.timezone` to read, and the clock is the
+   * injected one, never the server's (invariant §9).
+   */
+  refusePersonalData(input: { dateOfBirth?: string; companyJoinMonth?: string }): void {
+    const today = localDayOf(this.clock.now(), DEFAULT_TENANT_TIMEZONE);
+    const checks = [
+      ['dateOfBirth', input.dateOfBirth === undefined ? null : birthDateProblem(input.dateOfBirth, today)],
+      ['companyJoinMonth', input.companyJoinMonth === undefined ? null : joinMonthProblem(input.companyJoinMonth, today)],
+    ] as const;
+    for (const [field, problem] of checks) {
+      if (problem) {
+        throw new DomainException(ErrorCode.VALIDATION_FAILED, problem, HttpStatus.BAD_REQUEST, { field });
+      }
+    }
   }
 
   // ------------------------------------------------------------------------ login
@@ -147,21 +225,21 @@ export class AuthService {
     if (!user || !ok) {
       throw new DomainException(
         ErrorCode.AUTH_INVALID_CREDENTIALS,
-        'That email or password is not correct.',
+        AUTH_REFUSALS.AUTH_INVALID_CREDENTIALS.wrongCredentials,
         HttpStatus.UNAUTHORIZED,
       );
     }
     if (user.status === 'deactivated') {
       throw new DomainException(
         ErrorCode.AUTH_ACCOUNT_DEACTIVATED,
-        'This account has been deactivated. Contact your KPM Owner.',
+        AUTH_REFUSALS.AUTH_ACCOUNT_DEACTIVATED.contactOwner,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!user.emailVerifiedAt) {
       throw new DomainException(
         ErrorCode.AUTH_EMAIL_NOT_VERIFIED,
-        'Verify your email address before signing in. Check your inbox.',
+        AUTH_REFUSALS.AUTH_EMAIL_NOT_VERIFIED.verifyFirst,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -181,19 +259,18 @@ export class AuthService {
    * refresh token was stolen: the legitimate client and the attacker both hold a
    * descendant of the same family. We cannot tell which is which, so the whole family
    * is revoked and both must sign in again.
+   *
+   * **Every refusal here is one answer, `401 AUTH_SESSION_ENDED`** (ADR-0168 §1): a token was presented, so this
+   * browser had a session, and it has ended — whether the token is unknown or malformed, spent, revoked or
+   * expired. Which of those it was stays here, in the log and the family's `revokedReason`; the answer says only
+   * *ended*. A refresh with no token at all never reaches this (`AuthController.refreshTokenFrom`).
    */
   async refresh(rawToken: string, meta: Meta = {}): Promise<TokenPair> {
     const record = await this.tokens
       .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
       .exec();
 
-    if (!record) {
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_INVALID,
-        'Your session is no longer valid. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
+    if (!record) throw sessionEnded();
 
     if (record.usedAt || record.revokedAt) {
       await this.revokeFamily(record.familyId, 'refresh token reuse detected');
@@ -201,20 +278,10 @@ export class AuthService {
         { userId: record.userId, familyId: record.familyId },
         'refresh token reuse — family revoked',
       );
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_INVALID,
-        'Your session is no longer valid. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
+      throw sessionEnded();
     }
 
-    if (record.expiresAt.getTime() <= this.clock.now().getTime()) {
-      throw new DomainException(
-        ErrorCode.AUTH_TOKEN_EXPIRED,
-        'Your session has expired. Sign in again.',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
+    if (record.expiresAt.getTime() <= this.clock.now().getTime()) throw sessionEnded();
 
     record.usedAt = this.clock.now();
     await record.save();
@@ -322,21 +389,21 @@ export class AuthService {
    * is an account-enumeration oracle, the same reason `forgot-password` answers `202`
    * either way.
    */
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(email: string, reader?: Reader): Promise<void> {
     const user = await this.users
       .findOne({ email: email.toLowerCase().trim(), deletedAt: null })
       .exec();
     if (!user || user.emailVerifiedAt) return;
 
-    const raw = await this.issueVerification(user);
-    await this.notifications.send({
-      userId: String(user._id),
-      templateId: NotificationTemplate.EMAIL_VERIFICATION,
-      payload: { token: raw, fullName: user.fullName },
-    });
+    // `issueVerification` sends it. It was sent a second time here, so every resend delivered two (P18.98-T5).
+    await this.issueVerification(user, reader);
   }
 
-  async issueVerification(user: UserDocument): Promise<string> {
+  /**
+   * A fresh verification link, emailed. **In the language of the request that asked for it** where the person has
+   * saved none (P18.98-T5 AC-5): `reader` is that request's, and their saved `users.locale` wins over it.
+   */
+  async issueVerification(user: UserDocument, reader?: Reader): Promise<string> {
     const raw = this.passwords.generateToken();
     await this.tokens.create({
       userId: String(user._id),
@@ -349,6 +416,7 @@ export class AuthService {
       userId: String(user._id),
       templateId: NotificationTemplate.EMAIL_VERIFICATION,
       payload: { token: raw, fullName: user.fullName },
+      reader,
     });
     return raw;
   }
@@ -369,7 +437,7 @@ export class AuthService {
    * Always resolves, whether or not the address exists. Anything else tells an
    * attacker which addresses have accounts.
    */
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, reader?: Reader): Promise<void> {
     const user = await this.users
       .findOne({ email: email.toLowerCase().trim(), deletedAt: null })
       .exec();
@@ -383,10 +451,12 @@ export class AuthService {
       expiresAt: new Date(this.clock.now().getTime() + RESET_TTL_MINUTES * 60_000),
     });
 
+    // In the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
     await this.notifications.send({
       userId: String(user._id),
       templateId: NotificationTemplate.PASSWORD_RESET,
       payload: { token: raw, fullName: user.fullName },
+      reader,
     });
   }
 
@@ -395,7 +465,7 @@ export class AuthService {
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
@@ -419,8 +489,9 @@ export class AuthService {
       .exec();
 
     // A reset is what you do when you believe the password was compromised, so every
-    // existing session dies with it.
+    // existing session dies with it — and any email change asked for with it (ADR-0181 §4).
     await this.logoutAll(record.userId, 'password reset');
+    await this.cancelEmailChange(record.userId, 'password reset');
   }
 
   async changePassword(userId: string, current: string, next: string): Promise<void> {
@@ -428,7 +499,7 @@ export class AuthService {
     if (!user || !(await this.passwords.verify(user.passwordHash, current))) {
       throw new DomainException(
         ErrorCode.AUTH_INVALID_CREDENTIALS,
-        'Your current password is not correct.',
+        AUTH_REFUSALS.AUTH_INVALID_CREDENTIALS.wrongCurrentPassword,
         HttpStatus.UNAUTHORIZED,
       );
     }
@@ -437,7 +508,7 @@ export class AuthService {
     if (problems.length) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        problems.join(' '),
+        joinSentences(problems),
         HttpStatus.BAD_REQUEST,
         { field: 'password', problems },
       );
@@ -448,7 +519,7 @@ export class AuthService {
       // let them through on the credential the admin still has a copy of.
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Choose a different password from the one you are using now.',
+        AUTH_REFUSALS.VALIDATION_FAILED.samePassword,
         HttpStatus.BAD_REQUEST,
         { field: 'password' },
       );
@@ -459,6 +530,148 @@ export class AuthService {
     user.mustChangePassword = false;
     await user.save();
     await this.logoutAll(userId, 'password changed');
+    // What the old address's notice tells somebody to do when the change was not theirs (ADR-0181 §4).
+    await this.cancelEmailChange(userId, 'password changed');
+  }
+
+  // ---------------------------------------------------------------- email change
+
+  /**
+   * **Ask to move the account to another address** (UI V1, UI-111; ADR-0181): `POST /auth/me/email`.
+   *
+   * The password is checked again — a signed-in browser left open is not enough to take the account's login — and
+   * refused as `change-password` refuses it. The address is normalised as registration does; the one the account has
+   * is `400`, one another account has (a soft-deleted one too: `users.email` is unique over every row) is
+   * `409 AUTH_EMAIL_TAKEN`. **Nothing on the account changes here.** The pending change is one `email_change` row in
+   * `authTokens` — the new address, the token's hash, its expiry (`VERIFICATION_TTL_HOURS`, the verification link's
+   * lifetime) — and a newer request revokes the one before it. The link goes to the new address; a notice with no
+   * link goes to the one the account has now.
+   */
+  async requestEmailChange(userId: string, newEmailRaw: string, currentPassword: string, reader?: Reader): Promise<void> {
+    const user = await this.users.findOne({ _id: userId, deletedAt: null }).select('+passwordHash').exec();
+    if (!user || !(await this.passwords.verify(user.passwordHash, currentPassword))) {
+      throw new DomainException(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+        AUTH_REFUSALS.AUTH_INVALID_CREDENTIALS.wrongCurrentPassword,
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    const newEmail = normalisedEmail(newEmailRaw);
+    if (newEmail === user.email) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        AUTH_REFUSALS.VALIDATION_FAILED.sameEmail,
+        HttpStatus.BAD_REQUEST,
+        { field: 'newEmail' },
+      );
+    }
+    if (await this.addressTaken(newEmail, userId)) {
+      throw new DomainException(
+        ErrorCode.AUTH_EMAIL_TAKEN,
+        AUTH_REFUSALS.AUTH_EMAIL_TAKEN.belongsToAnother,
+        HttpStatus.CONFLICT,
+        { field: 'newEmail' },
+      );
+    }
+
+    // One pending change per person: the one before this stops working.
+    await this.cancelEmailChange(userId, 'replaced by a newer email change');
+    const raw = this.passwords.generateToken();
+    await this.tokens.create({
+      userId,
+      kind: 'email_change',
+      tokenHash: this.passwords.hashToken(raw),
+      newEmail,
+      expiresAt: new Date(this.clock.now().getTime() + VERIFICATION_TTL_HOURS * 3_600_000),
+    });
+
+    // The link, to the address being proved; the notice, to the address the account has now — no link in it.
+    await this.notifications.send({
+      userId,
+      templateId: NotificationTemplate.EMAIL_CHANGE_VERIFICATION,
+      payload: { token: raw, fullName: user.fullName },
+      toAddress: newEmail,
+      reader,
+    });
+    await this.notifications.send({
+      userId,
+      templateId: NotificationTemplate.EMAIL_CHANGE_REQUESTED,
+      payload: { fullName: user.fullName, newEmail },
+      reader,
+    });
+
+    // The request is recorded as well as the change (the Phase 18.99 exit review, L10): an account asked to move to an
+    // address it never reached is a trail somebody may need — a stolen password trying to take the account away. As
+    // `user.email_changed`: the platform's scope, written as the person, with the address as it is and as asked.
+    await this.audit?.record(new RequestContext(userId, user.platformRole, null), {
+      action: 'user.email_change_requested',
+      targetCollection: 'users',
+      targetId: userId,
+      before: { email: user.email },
+      after: { email: newEmail },
+    });
+  }
+
+  /**
+   * **Open the link: the account moves to the new address** (UI-111, ADR-0181): `POST /auth/verify-email-change`.
+   *
+   * The token is single-use and expires as a verification link does; unknown, spent, replaced or expired is
+   * `400 AUTH_TOKEN_INVALID`, as `verify-email` answers. It is spent before the address is checked, so a link whose
+   * address was taken since it was sent is `409 AUTH_EMAIL_TAKEN` once and invalid after. The swap marks the address
+   * verified — the link proved the mailbox — and is audited `user.email_changed` with before and after. **Sessions
+   * stay signed in**: the person proved both the password and the new mailbox.
+   */
+  async confirmEmailChange(rawToken: string): Promise<EmailChanged> {
+    const record = await this.consumeSingleUse(rawToken, 'email_change');
+    const user = await this.users.findOne({ _id: record.userId, deletedAt: null }).exec();
+    const newEmail = record.newEmail;
+    if (!user || !newEmail) throw linkInvalid();
+
+    const taken = () => new DomainException(
+      ErrorCode.AUTH_EMAIL_TAKEN,
+      AUTH_REFUSALS.AUTH_EMAIL_TAKEN.takenSinceRequest,
+      HttpStatus.CONFLICT,
+      { field: 'newEmail' },
+    );
+    if (await this.addressTaken(newEmail, record.userId)) throw taken();
+
+    const before = user.email;
+    try {
+      await this.users
+        .updateOne({ _id: record.userId }, { $set: { email: newEmail, emailVerifiedAt: this.clock.now() } })
+        .exec();
+    } catch (err) {
+      // Taken in the moment between the check and the write: the unique index is the last word.
+      if ((err as { code?: number } | null)?.code === 11000) throw taken();
+      throw err;
+    }
+
+    // The account is global (invariant 2), so the row is the platform's scope, `kpmId: null`, written as the person:
+    // they proved the password and the mailbox. Account changes carry the address, as `kpm.owner_assigned` does.
+    await this.audit?.record(new RequestContext(record.userId, user.platformRole, null), {
+      action: 'user.email_changed',
+      targetCollection: 'users',
+      targetId: record.userId,
+      before: { email: before },
+      after: { email: newEmail },
+    });
+    return { email: newEmail };
+  }
+
+  /** Whether an address is another account's — any row, a soft-deleted one too: `users.email` is unique over all. */
+  private async addressTaken(email: string, userId: string): Promise<boolean> {
+    return (await this.users.exists({ email, _id: { $ne: userId } }).exec()) !== null;
+  }
+
+  /** The person's pending email change, if any, stops working. */
+  private async cancelEmailChange(userId: string, reason: string): Promise<void> {
+    await this.tokens
+      .updateMany(
+        { userId, kind: 'email_change', usedAt: null, revokedAt: null },
+        { $set: { revokedAt: this.clock.now(), revokedReason: reason } },
+      )
+      .exec();
   }
 
   // ------------------------------------------------------------------- internals
@@ -495,17 +708,20 @@ export class AuthService {
 
   private async consumeSingleUse(
     rawToken: string,
-    kind: 'email_verification' | 'password_reset',
+    kind: 'email_verification' | 'password_reset' | 'email_change',
   ): Promise<AuthTokenDocument> {
     const record = await this.tokens
       .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind })
       .exec();
 
-    const invalid = new DomainException(
-      kind === 'password_reset' ? ErrorCode.AUTH_RESET_TOKEN_INVALID : ErrorCode.AUTH_TOKEN_INVALID,
-      'That link is no longer valid. Request a new one.',
-      HttpStatus.BAD_REQUEST,
-    );
+    // The email change's link is refused as the verification link is (ADR-0181): the same code and sentence.
+    const invalid = kind === 'password_reset'
+      ? new DomainException(
+        ErrorCode.AUTH_RESET_TOKEN_INVALID,
+        AUTH_REFUSALS.AUTH_RESET_TOKEN_INVALID.linkInvalid,
+        HttpStatus.BAD_REQUEST,
+      )
+      : linkInvalid();
 
     if (!record || record.usedAt || record.revokedAt) throw invalid;
     if (record.expiresAt.getTime() <= this.clock.now().getTime()) throw invalid;
@@ -514,4 +730,25 @@ export class AuthService {
     await record.save();
     return record;
   }
+}
+
+/** A verification link — the address's, or an email change's — that does not work: `verify-email`'s answer. */
+function linkInvalid(): DomainException {
+  return new DomainException(
+    ErrorCode.AUTH_TOKEN_INVALID,
+    AUTH_REFUSALS.AUTH_TOKEN_INVALID.linkInvalid,
+    HttpStatus.BAD_REQUEST,
+  );
+}
+
+/**
+ * A presented refresh token that no longer works, whatever the reason (ADR-0168 §1): one code and one sentence, so
+ * the answer discloses that the session ended and not whether it expired, was revoked or was reused.
+ */
+function sessionEnded(): DomainException {
+  return new DomainException(
+    ErrorCode.AUTH_SESSION_ENDED,
+    AUTH_REFUSALS.AUTH_SESSION_ENDED.ended,
+    HttpStatus.UNAUTHORIZED,
+  );
 }

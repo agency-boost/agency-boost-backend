@@ -6,6 +6,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
 import { OnboardingService } from './onboarding.service';
 import {
   ApproveRequestDto,
@@ -16,6 +17,7 @@ import {
   RedeemInviteDto,
   RegisterKpmDto,
   RequestLeaderDto,
+  TagUntaggedDto,
   UntaggedSearchDto,
 } from './org.dto';
 import { LeaderCodeService } from './leader-code.service';
@@ -59,7 +61,7 @@ export class OnboardingController {
     if (retryAfter !== null) {
       throw new DomainException(
         ErrorCode.AUTH_RATE_LIMITED,
-        `Too many code attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+        ONBOARDING_REFUSALS.AUTH_RATE_LIMITED.tooManyCodes({ minutes: Math.ceil(retryAfter / 60) }),
         HttpStatus.TOO_MANY_REQUESTS,
         { retryAfterSeconds: retryAfter },
       );
@@ -97,8 +99,8 @@ export class OnboardingController {
       'that otherwise nobody could join. Projection-limited to code, branch name, ' +
       'company and city: no member counts, no production, no owner name.',
   })
-  async kpms(@Query() query: KpmSearchDto) {
-    return this.onboarding.searchKpms(query.q);
+  async kpms(@Ctx() ctx: RequestContext, @Query() query: KpmSearchDto) {
+    return this.onboarding.searchKpms(query.q, ctx.reader);
   }
 
   @Post('kpm')
@@ -199,7 +201,7 @@ export class OnboardingController {
   })
   async previewInvite(@Ctx() ctx: RequestContext, @Query() query: InviteCodeQueryDto) {
     this.limitCodeAttempts(ctx);
-    return this.leaderCodes.preview(query.code);
+    return this.leaderCodes.preview(query.code, ctx.reader);
   }
 
   // ---- The leader's side: deciding, and pulling somebody in. ----
@@ -214,6 +216,18 @@ export class OnboardingController {
   })
   async inbox(@Ctx() ctx: RequestContext) {
     return this.approvals.inbox(ctx);
+  }
+
+  @Get('requests/count')
+  @RequirePermission('leader_request:read_inbox')
+  @ApiOperation({
+    summary: 'How many requests are waiting on you',
+    description:
+      'UI V1 (UI-085): the count on the Pending Requests tab, shown on every User Management screen. The same requests ' +
+      '`GET /join/requests` lists, counted without reading their names.',
+  })
+  async waitingCount(@Ctx() ctx: RequestContext) {
+    return this.approvals.waitingCount(ctx);
   }
 
   @Get('requests/routing')
@@ -235,14 +249,16 @@ export class OnboardingController {
     summary: 'Approve a request',
     description:
       'Returns the inbox as it now stands. Deciding one that was already decided is a ' +
-      '409 naming which way it went — two leaders can have this open at once.',
+      '409 naming which way it went — two leaders can have this open at once. `joinDate` ' +
+      'is the day they joined (today when omitted); a date after today or before 1980 is ' +
+      'refused 400 `VALIDATION_FAILED` before anything is written.',
   })
   async approve(
     @Ctx() ctx: RequestContext,
     @Param('requestId') requestId: string,
     @Body() dto: ApproveRequestDto,
   ) {
-    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId);
+    return this.approvals.approve(ctx, requestId, dto.routeToMembershipId, dto.joinDate);
   }
 
   @Post('requests/:requestId/decline')
@@ -282,10 +298,15 @@ export class OnboardingController {
     description:
       'No approval from them — the office already admitted them, and being placed under ' +
       'a leader is not a change they have standing to refuse. Somebody who already ' +
-      'reports to another leader is refused: moving them is a different operation.',
+      'reports to another leader is refused: moving them is a different operation. ' +
+      '`joinDate` as approving a request takes it.',
   })
-  async tag(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
-    return this.approvals.tag(ctx, membershipId);
+  async tag(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: TagUntaggedDto,
+  ) {
+    return this.approvals.tag(ctx, membershipId, dto.joinDate);
   }
 
   @Post('redeem')

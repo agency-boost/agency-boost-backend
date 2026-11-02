@@ -5,6 +5,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
+import { isLeaderClass, shortOfRung } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -13,7 +15,11 @@ import { initialsOf } from './directory.service';
 import { HierarchyService } from './hierarchy.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
-import { HierarchyRole } from './membership.schema';
+import { HierarchyRole, MembershipDocument } from './membership.schema';
+import type { ApprovedPastLimit } from './leader-limit';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ORG_REFUSALS;
 
 export interface TeamMember {
   membershipId: string;
@@ -21,6 +27,8 @@ export interface TeamMember {
   initials: string;
   agentCode: string;
   role: HierarchyRole;
+  /** The rung they stand on, by its ladder code; `role` is the class it gives (ADR-0156). */
+  orgLevelCode: string;
   directCount: number;
   /**
    * Whether this viewer may change *this* person's role. Sent rather than inferred,
@@ -69,7 +77,7 @@ export class RoleChangeService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -108,9 +116,10 @@ export class RoleChangeService {
 
     const users = await this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec();
     const byUser = new Map(users.map((u) => [String(u._id), u]));
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows.map((r) => {
-      const fullName = byUser.get(r.userId)?.fullName ?? 'Unknown';
+      const fullName = byUser.get(r.userId)?.fullName ?? unknown;
       const rules = this.permitted(ctx, r);
       return {
         membershipId: String(r._id),
@@ -118,6 +127,7 @@ export class RoleChangeService {
         initials: initialsOf(fullName),
         agentCode: r.agentCode,
         role: r.role,
+        orgLevelCode: r.orgLevelCode,
         directCount: r.directCounts?.total ?? 0,
         // An AB report never gets the control, even for a leader who manages the rest —
         // AC-1. The prototype does the same, and it is the honest place to draw the line.
@@ -129,14 +139,76 @@ export class RoleChangeService {
   async change(
     ctx: RequestContext,
     membershipId: string,
-    toRole: HierarchyRole,
+    toRole: string,
     reason?: string,
   ): Promise<TeamMember[]> {
     const me = this.requireMember(ctx);
+    const checked = await this.checked(ctx, membershipId, toRole);
+    if (checked) await this.apply(ctx, checked.target, toRole, reason, me);
+    return this.team(ctx);
+  }
 
+  /**
+   * **May this reader ask AgencyBoost to approve this change past the limit?** (ADR-0157 §1). Only if they could
+   * make it themselves — every refusal `change` would meet is met here, in the same words — and only if it is a
+   * change the limit stops: from a rung that leads nobody onto one that leads. Anything else needs nobody's
+   * approval, and is refused as such, so no request is ever made for a write that would simply be served.
+   */
+  async assertMayAsk(
+    ctx: RequestContext,
+    membershipId: string,
+    toRole: string,
+  ): Promise<{ target: MembershipDocument; toCode: string }> {
+    this.requireMember(ctx);
+    const checked = await this.checked(ctx, membershipId, toRole);
+    if (!checked || isLeaderClass(checked.target.role) || !isLeaderClass(checked.toClass)) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        SAY.VALIDATION_FAILED.changeDirectly,
+        HttpStatus.BAD_REQUEST,
+        { membershipId, toRole },
+      );
+    }
+    return { target: checked.target, toCode: checked.levelCode };
+  }
+
+  /**
+   * **AgencyBoost approved it: the change the office asked for, made past the limit** (ADR-0157 §3).
+   *
+   * `ctx` is the Super Admin acting in the request's office. The write is the one `change` makes — the rung, the
+   * history row with the asker as its actor and their reason, the counts, the member's notice, the audit row —
+   * through `setLevel` with `pastLimit`, which re-checks the request still applies with the office's leader lease
+   * held. The asker's own permission was settled when they asked (`assertMayAsk`).
+   */
+  async carryOutApproved(
+    ctx: RequestContext,
+    request: { requestId: string; subjectMembershipId: string; toOrgLevelCode: string; reason: string | null; requestedByMembershipId: string },
+    stillApplies: (target: MembershipDocument | null) => Promise<void>,
+  ): Promise<void> {
+    const target = await this.members.findById(ctx, request.subjectMembershipId);
+    await stillApplies(target);
+    await this.apply(ctx, target as MembershipDocument, request.toOrgLevelCode, request.reason ?? undefined, request.requestedByMembershipId, {
+      approvedRequestId: request.requestId,
+      stillApplies: async () => stillApplies(await this.members.findById(ctx, request.subjectMembershipId)),
+    });
+  }
+
+  /**
+   * Every refusal a role change can meet, before anything is written: the member, the rung, the Owner, who may
+   * change whom, and a leader who still leads. `null` when the member already stands on that rung — nothing to do.
+   */
+  private async checked(
+    ctx: RequestContext,
+    membershipId: string,
+    toRole: string,
+  ): Promise<{ target: MembershipDocument; toClass: HierarchyRole; levelCode: string } | null> {
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
-    if (target.role === toRole) return this.team(ctx);
+    // `toRole` names the rung — `ab` is the `AB` rung, and a company's own rung (`SM`) is named the same way
+    // (OD-50, the custom-rung placement gap); what the rules below weigh is the **class** that rung gives
+    // (ADR-0156 §2), so a rung marked otherwise than its code suggests is judged by what it makes somebody.
+    const { level, role: toClass } = await this.hierarchy.rungFor(ctx, toRole);
+    if (target.role === toClass && target.orgLevelCode === level.code) return null;
 
     // The same reasoning as removal: an Owner demoted out of AB keeps owning the office
     // while losing the rung that goes with it, and only the platform can reassign an
@@ -144,20 +216,20 @@ export class RoleChangeService {
     if (await this.hierarchy.ownsTheOffice(ctx, target)) {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
-        'They own this office. Transfer it first — only the platform can do that.',
+        SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.owner,
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
       );
     }
 
     const rules = this.permitted(ctx, target);
-    const involvesAb = target.role === 'ab' || toRole === 'ab';
+    const involvesAb = target.role === 'ab' || toClass === 'ab';
     if (involvesAb ? !rules.anythingWithAb : !rules.agentAndAab) {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
         involvesAb
-          ? 'Only the office’s Owner or an Admin can make somebody an Agency Builder, or stop them being one.'
-          : 'Only somebody’s direct leader can change their role.',
+          ? SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.officeOnly({ rung: await this.seniorRungName(ctx, target, toClass, level) })
+          : SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.directLeaderOnly,
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
       );
@@ -166,22 +238,57 @@ export class RoleChangeService {
     // AC-3. Demoting somebody who still leads people would leave those people reporting
     // to somebody who, by the role they now hold, cannot lead them. Refused with the
     // count, so the caller knows what has to happen first rather than being told "no".
-    const demoting = target.role !== 'agent' && toRole === 'agent';
+    const demoting = target.role !== 'agent' && toClass === 'agent';
     const directCount = target.directCounts?.total ?? 0;
     if (demoting && directCount > 0) {
       throw new DomainException(
         ErrorCode.ORG_HAS_DIRECT_REPORTS,
-        `${directCount} ${directCount === 1 ? 'person reports' : 'people report'} to them. Move them to another leader first.`,
+        SAY.ORG_HAS_DIRECT_REPORTS.moveFirst({ count: directCount }),
         HttpStatus.CONFLICT,
         { membershipId, directCount },
       );
     }
+    return { target, toClass, levelCode: level.code };
+  }
 
+  /**
+   * **The senior rung a refused change involves, by the name a role is called** (ADR-0167 §10, OD-205; P18.95-T9
+   * AC-1): the rung asked for when the change is onto it, the one they stand on when it is off it — `shortOfRung`,
+   * so the default ladder says *AB* and a company's own rung its own name. Read only to word the refusal; a rung
+   * since taken off the ladder is named by its code.
+   */
+  private async seniorRungName(
+    ctx: RequestContext,
+    target: MembershipDocument,
+    toClass: HierarchyRole,
+    level: { code: string; label: string },
+  ): Promise<string> {
+    if (toClass === 'ab') return shortOfRung(level);
+    const held = await this.hierarchy.rungFor(ctx, target.orgLevelCode).then(
+      ({ level: rung }) => rung,
+      (err: unknown) => {
+        if (err instanceof DomainException && err.code === ErrorCode.ORG_LEVEL_NOT_ON_LADDER) return null;
+        throw err;
+      },
+    );
+    return shortOfRung(held ?? { code: target.orgLevelCode, label: target.orgLevelCode });
+  }
+
+  /** The write, once every refusal has been met: the rung, the edge, the counts, the notice and the audit row. */
+  private async apply(
+    ctx: RequestContext,
+    target: MembershipDocument,
+    toRole: string,
+    reason: string | undefined,
+    actorMembershipId: string,
+    pastLimit?: ApprovedPastLimit,
+  ): Promise<void> {
+    const membershipId = String(target._id);
     const fromRole = target.role;
     const fromOrgLevelId = target.orgLevelId;
     // Through the hierarchy service, which writes the reference and the enum together.
     // A `$set: { role }` here would leave `orgLevelId` on the rung they left.
-    const moved = await this.hierarchy.setLevel(ctx, membershipId, toRole);
+    const moved = await this.hierarchy.setLevel(ctx, membershipId, toRole, pastLimit);
 
     // Append-only: the open edge is closed, and a new one opened. The Role change log
     // reads exactly these rows, and nothing else could reconstruct them.
@@ -194,13 +301,15 @@ export class RoleChangeService {
       membershipId,
       eventType: 'role_changed',
       fromRole,
-      toRole,
+      // The class written, which is the rung's tier's (ADR-0156) — the one the log and the badge read.
+      toRole: moved.role,
       // The rungs those names referred to at the time. A company that later renames a
       // level leaves this row still legible.
       fromOrgLevelId,
       toOrgLevelId: moved.orgLevelId,
       toLeaderId: target.leaderId,
-      actorMembershipId: me,
+      // Whoever made the change — or, approved past the limit, whoever asked for it (ADR-0157 §3).
+      actorMembershipId,
       reason: reason?.trim() || null,
     });
 
@@ -212,7 +321,7 @@ export class RoleChangeService {
       userId: target.userId,
       kpmId: ctx.kpmId,
       templateId: NotificationTemplate.ROLE_CHANGED,
-      payload: { fromRole, toRole, reason: reason?.trim() ?? null },
+      payload: { fromRole, toRole: moved.role, reason: reason?.trim() ?? null },
     });
 
     await this.audit.record(ctx, {
@@ -221,10 +330,12 @@ export class RoleChangeService {
       targetId: membershipId,
       targetMembershipId: membershipId,
       before: { role: fromRole },
-      after: { role: toRole, reason: reason?.trim() ?? null },
+      after: {
+        role: moved.role,
+        reason: reason?.trim() ?? null,
+        ...(pastLimit ? { leaderLimitRequestId: pastLimit.approvedRequestId } : {}),
+      },
     });
-
-    return this.team(ctx);
   }
 
   /**
@@ -262,7 +373,7 @@ export class RoleChangeService {
       const membership = byMembership.get(r.membershipId);
       return {
         membershipId: r.membershipId,
-        fullName: named(r.membershipId) ?? 'Unknown',
+        fullName: named(r.membershipId) ?? render(ORG_MESSAGES.unknownName, ctx.reader),
         agentCode: membership?.agentCode ?? '',
         fromRole: r.fromRole,
         toRole: r.toRole,

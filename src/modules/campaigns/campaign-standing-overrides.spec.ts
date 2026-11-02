@@ -5,7 +5,7 @@ import { configModule } from '../../../test/config-module';
 import { buildCoachingOffice, KPM_A, KPM_B, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
 import { fromFrozen } from './campaign-evaluation';
 import type { CampaignStanding } from './campaign-standing.schema';
-import { checkStandingOverride, checkStandingOverrideClear, OVERRIDE_REASON } from './campaign-standing-overrides';
+import { checkStandingOverride, checkStandingOverrideClear, FREEZE_WAIT, OVERRIDE_REASON } from './campaign-standing-overrides';
 
 const wib = (local: string) => new Date(`${local}+07:00`).toISOString();
 const APE = { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1 };
@@ -219,6 +219,33 @@ describe('overriding a final standing (P18.6-T2 AC-5)', () => {
       expect(await audits('campaign_standing.finalised')).toHaveLength(1);
     });
 
+    it('P18.6-T2 AC-5 a chaser whose window another request is still freezing is waited for, not called missing', async () => {
+      // As the loser of `markFrozen` reads: the window final, and the winner's insert not landed yet.
+      const spy = jest.spyOn(wired.campaignStandings, 'findOne').mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      try {
+        const result = await overrides().override(owner(), 'AUGUST_PUSH', office.id.BUDI, { status: 'qualified', reason: REASON });
+        expect(result.status).toBe('qualified');
+        expect(spy).toHaveBeenCalledTimes(3);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await audits('campaign_standing.overridden')).toHaveLength(1);
+    });
+
+    it('P18.6-T2 AC-5 a chaser whose row never arrives is 404 after the wait, nothing written', async () => {
+      await overrides().override(owner(), 'AUGUST_PUSH', office.id.RINA, { status: 'not_met', reason: REASON });
+      const spy = jest.spyOn(wired.campaignStandings, 'findOne').mockResolvedValue(null);
+      try {
+        await expect(overrides().override(owner(), 'AUGUST_PUSH', office.id.BUDI, { status: 'qualified', reason: REASON }))
+          .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'Standing not found.' });
+        expect(spy).toHaveBeenCalledTimes(FREEZE_WAIT.reads);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await audits('campaign_standing.overridden')).toHaveLength(1);
+      expect(FREEZE_WAIT.ms * FREEZE_WAIT.reads).toBe(2_000);
+    });
+
     it('P18.6-T2 AC-5 a write that loses the race twice is a version conflict, nothing audited', async () => {
       await overrides().override(owner(), 'AUGUST_PUSH', office.id.BUDI, { status: 'qualified', reason: REASON });
       const spy = jest.spyOn(wired.campaignStandings, 'setOverride').mockResolvedValue(false);
@@ -331,8 +358,15 @@ describe('overriding a final standing (P18.6-T2 AC-5)', () => {
     });
 
     it('P18.6-T2 AC-5 404 for a member who was not chasing it when it ended: no stored standing (ADR-0143)', async () => {
-      await expect(overrides().override(owner(), 'AUGUST_PUSH', office.id.INDAH, { status: 'qualified', reason: 'x' }))
-        .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'Standing not found.' });
+      const spy = jest.spyOn(wired.campaignStandings, 'findOne');
+      try {
+        await expect(overrides().override(owner(), 'AUGUST_PUSH', office.id.INDAH, { status: 'qualified', reason: 'x' }))
+          .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'Standing not found.' });
+        // Nobody else's freeze can bring them a row, so nothing is waited for.
+        expect(spy).toHaveBeenCalledTimes(1);
+      } finally {
+        spy.mockRestore();
+      }
       expect(await standing('AUGUST_PUSH', 'INDAH')).toBeNull();
     });
 

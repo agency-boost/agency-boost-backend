@@ -53,6 +53,7 @@ describe('AuthService', () => {
   function reg(
     over: Partial<{
       email: string; password: string; fullName: string; agentCode: string; companyId: string;
+      dateOfBirth: string; companyJoinMonth: string;
     }> = {},
   ) {
     codeSeq += 1;
@@ -61,7 +62,12 @@ describe('AuthService', () => {
       password: PASSWORD,
       fullName: 'Rina Wijaya',
       companyId,
-      agentCode: `PRU-${1000 + codeSeq}`,
+      agentCode: String(1000 + codeSeq),
+      // What a person records (ADR-0158), required at registration since P18.8-T4.
+      dateOfBirth: '1990-03-15',
+      companyJoinMonth: '2021-07',
+      workStatus: 'part_time' as const,
+      gender: 'female' as const,
       ...over,
     };
   }
@@ -96,15 +102,50 @@ describe('AuthService', () => {
      * both — and it is the one place the pair can be checked before anything depends
      * on it.
      */
-    it('AC-1: stores the insurer and the code, upper-cased and trimmed', async () => {
-      await service.register(reg({ email: 'code@kpm.test', agentCode: '  pru-88213 ' }));
+    it('AC-1: stores the insurer and the code, trimmed', async () => {
+      await service.register(reg({ email: 'code@kpm.test', agentCode: '  88213 ' }));
       const user = await mongoose.model(User.name).findOne({ email: 'code@kpm.test' });
       expect(user?.get('companyId')).toBe(companyId);
-      expect(user?.get('agentCode')).toBe('PRU-88213');
+      expect(user?.get('agentCode')).toBe('88213');
+    });
+
+    /*
+     * P18.8-T4 (ADR-0158). The four a person records arrive with the registration; work status waits on
+     * the account for the membership an office later gives them, which is where it lives.
+     */
+    it('P18.8-T4 AC-3: stores the birth date, join month and gender, and keeps the work status for the membership', async () => {
+      await service.register(reg({ email: 'four@kpm.test' }));
+      const user = await mongoose.model(User.name).findOne({ email: 'four@kpm.test' }).lean();
+      expect(user).toMatchObject({
+        dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', gender: 'female', registeredWorkStatus: 'part_time',
+      });
+    });
+
+    it('P18.8-T4 AC-4: refuses a birth date under 18 years ago, or not in the past, naming the field', async () => {
+      // NOW is 09:00 on 5 September 2026 in Jakarta.
+      await expect(service.register(reg({ email: 'young@kpm.test', dateOfBirth: '2008-09-06' })))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'dateOfBirth' } });
+      await expect(service.register(reg({ email: 'future@kpm.test', dateOfBirth: '2026-09-06' })))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'dateOfBirth' } });
+      await expect(service.register(reg({ email: 'adult@kpm.test', dateOfBirth: '2008-09-05' }))).resolves.toBeDefined();
+      expect(await mongoose.model(User.name).countDocuments({})).toBe(1);
+    });
+
+    it('P18.8-T4 AC-4: refuses a join month in the future, naming the field', async () => {
+      const refusal = await service.register(reg({ email: 'later@kpm.test', companyJoinMonth: '2026-10' })).catch((e) => e);
+      expect(refusal).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'companyJoinMonth' } });
+      expect(refusal.getResponse().message).toBe('The company join month cannot be in the future.');
+      await expect(service.register(reg({ email: 'now@kpm.test', companyJoinMonth: '2026-09' }))).resolves.toBeDefined();
+    });
+
+    it('P18.8-T4 AC-4: measures the age in the office calendar, not the server\'s', async () => {
+      // 20:00 UTC on 5 September is already the 6th in Jakarta: born on 6 September 2008, they are 18.
+      clock.set(new Date('2026-09-05T20:00:00Z'));
+      await expect(service.register(reg({ email: 'birthday@kpm.test', dateOfBirth: '2008-09-06' }))).resolves.toBeDefined();
     });
 
     it('AC-1: refuses a code already registered at that insurer, and says so', async () => {
-      await service.register(reg({ email: 'first@kpm.test', agentCode: 'PRU-500' }));
+      await service.register(reg({ email: 'first@kpm.test', agentCode: '500' }));
       /*
        * **Said out loud, where a taken address is not.** Confirming an email is an
        * enumeration oracle and the real owner is emailed instead. A person holding a card
@@ -112,7 +153,7 @@ describe('AuthService', () => {
        * them off waiting for a verification email that is never coming.
        */
       await expect(
-        service.register(reg({ email: 'second@kpm.test', agentCode: 'pru-500' })),
+        service.register(reg({ email: 'second@kpm.test', agentCode: ' 500 ' })),
       ).rejects.toMatchObject({ code: 'AGENT_CODE_TAKEN' });
       expect(await mongoose.model(User.name).countDocuments({})).toBe(1);
     });
@@ -121,9 +162,9 @@ describe('AuthService', () => {
       const other = await mongoose
         .model(Company.name)
         .create({ name: 'Allianz', slug: `allianz-${Math.random()}` });
-      await service.register(reg({ email: 'a@kpm.test', agentCode: 'X-1' }));
+      await service.register(reg({ email: 'a@kpm.test', agentCode: '701' }));
       await expect(
-        service.register(reg({ email: 'b@kpm.test', agentCode: 'X-1', companyId: String(other._id) })),
+        service.register(reg({ email: 'b@kpm.test', agentCode: '701', companyId: String(other._id) })),
       ).resolves.toBeDefined();
       expect(await mongoose.model(User.name).countDocuments({})).toBe(2);
     });
@@ -209,13 +250,13 @@ describe('AuthService', () => {
 
       // The attacker replays the token the legitimate client already spent.
       await expect(service.refresh(first.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
 
       // And the legitimate client's current token dies too — we cannot tell which
       // party is which, so both must sign in again.
       await expect(service.refresh(second.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
@@ -236,13 +277,13 @@ describe('AuthService', () => {
       const pair = await service.login(email, PASSWORD);
       clock.set(new Date(NOW.getTime() + 31 * 86_400_000));
       await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_EXPIRED',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
     it('rejects an unknown token', async () => {
       await expect(service.refresh('never-issued')).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
   });
@@ -253,7 +294,7 @@ describe('AuthService', () => {
       const pair = await service.login(email, PASSWORD);
       await service.logout(pair.refreshToken);
       await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({
-        code: 'AUTH_TOKEN_INVALID',
+        code: 'AUTH_SESSION_ENDED',
       });
     });
 
@@ -266,7 +307,36 @@ describe('AuthService', () => {
       await service.logoutAll(String(user!._id));
 
       for (const pair of [a, b]) {
-        await expect(service.refresh(pair.refreshToken)).rejects.toBeDefined();
+        await expect(service.refresh(pair.refreshToken)).rejects.toMatchObject({ code: 'AUTH_SESSION_ENDED' });
+      }
+    });
+
+    /*
+     * ADR-0168 §1: **a presented token that no longer works is one answer**, `401 AUTH_SESSION_ENDED`, whichever
+     * reason it is — so the browser can say the session ended, and nobody can learn from the answer whether a
+     * token was revoked, reused or simply old.
+     */
+    it('ADR-0168 §1 answers every presented-but-dead token alike: unknown, malformed, spent, signed out everywhere, expired', async () => {
+      const email = await verifiedUser();
+      const user = await mongoose.model(User.name).findOne({ email });
+      const spent = await service.login(email, PASSWORD);
+      await service.refresh(spent.refreshToken);
+      const everywhere = await service.login(email, PASSWORD);
+      await service.logoutAll(String(user!._id));
+      const old = await service.login(email, PASSWORD);
+
+      const refusals = [];
+      for (const token of ['never-issued', '%%%not-a-token%%%', spent.refreshToken, everywhere.refreshToken]) {
+        refusals.push(await service.refresh(token).catch((e) => e));
+      }
+      clock.set(new Date(NOW.getTime() + 31 * 86_400_000));
+      refusals.push(await service.refresh(old.refreshToken).catch((e) => e));
+
+      for (const refused of refusals) {
+        expect(refused).toMatchObject({ code: 'AUTH_SESSION_ENDED' });
+        expect(refused.getStatus()).toBe(401);
+        expect(refused.message).toBe('Your session ended. Sign in again.');
+        expect(refused.details).toBeUndefined();
       }
     });
 
@@ -451,7 +521,7 @@ describe('AuthService', () => {
       await expect(service.resetPassword(token, ' short ')).rejects.toMatchObject({
         code: 'VALIDATION_FAILED',
       });
-      await expect(service.resetPassword(token, ' short ')).rejects.toThrow(/at least 10/);
+      await expect(service.resetPassword(token, ' short ')).rejects.toThrow(/at least 8/);
     });
 
     it('refuses a change to a password the rules reject', async () => {

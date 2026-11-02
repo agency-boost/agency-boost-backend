@@ -1,21 +1,23 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
-  CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, SetLeadOutcomeDto, SetLeadStatusDto, UpdateLeadDto,
+  CreateLeadDto, CreateLeadQueryDto, ListLeadsQueryDto, ReorderLeadsDto, SetLeadOutcomeDto, SetLeadStatusDto,
+  SetNextActionDoneDto, UpdateLeadDto,
 } from './lead.dto';
-import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
+import { DeletedLeadDto, LeadDetailResponseDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from './lead.response.dto';
 import { LeadService } from './lead.service';
 
 /**
  * One person an agent is working (P7-T2, P7-T3).
  *
- * **Seven routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
+ * **Eight routes, one screen.** Everything here is called by `/leads`; nothing is an endpoint
  * waiting for a consumer, which is the rule `check-api-consumers.py` enforces and the reason
- * P7-T1 shipped with none at all. The eighth, `GET /leads/summary`, lost its only caller when
- * `/leads` went back to the prototype and was retired with it (P10.1-T4).
+ * P7-T1 shipped with none at all. `GET /leads/summary` lost its only caller when `/leads` went back to
+ * the prototype and was retired with it (P10.1-T4); `PATCH /leads/order`, the screen's drag handles,
+ * arrived with P18.8-T7.
  *
  * **Moving and closing are separate routes on separate permissions**, because they are separate
  * acts: a status says where somebody is, an outcome says the work stopped and how it ended. The
@@ -76,9 +78,10 @@ export class LeadController {
     summary: 'One lead',
     description:
       '**404, not 403**, for another office’s. A lead you do not own — one of somebody you coach — '
-      + 'writes one entry to the audit log; your own writes none.',
+      + 'writes one entry to the audit log; your own writes none. **With its `history`** (UI V1, UI-105): every '
+      + 'move along its ladder, oldest first, for the lead sheet’s *Riwayat* — on this read only, never the list.',
   })
-  @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 200, type: LeadDetailResponseDto })
   async read(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.leads.read(ctx, id);
   }
@@ -101,6 +104,27 @@ export class LeadController {
     @Ctx() ctx: RequestContext, @Body() body: CreateLeadDto, @Query() query: CreateLeadQueryDto,
   ) {
     return this.leads.create(ctx, body, query.owner);
+  }
+
+  /**
+   * **Declared above `PATCH :id`**, or Nest reads *order* as a lead's id and answers a patch to a lead
+   * that does not exist (the note on `GET :id` above).
+   */
+  @Patch('order')
+  @RequirePermission('lead:update')
+  @ApiOperation({
+    summary: 'Put your leads in your order',
+    description:
+      'Every one of your **open** leads, once each, top first: `GET /leads` without `sort` then answers '
+      + 'in this order, and a lead you add goes to the top (ADR-0161 §1). Your own, whatever your grant '
+      + 'reaches: a leader orders their own leads, not their agents’. A closed or deleted lead, somebody '
+      + 'else’s, another office’s, a repeat or one left out is `VALIDATION_FAILED` (400), and nothing is '
+      + 'written. A place is not a change to the lead: no `version` moves and no editor is named. One '
+      + '`lead.reordered` entry, with how many.',
+  })
+  @ApiResponse({ status: 200, type: LeadOrderDto })
+  async reorder(@Ctx() ctx: RequestContext, @Body() body: ReorderLeadsDto) {
+    return this.leads.reorder(ctx, body.ids);
   }
 
   @Patch(':id')
@@ -154,6 +178,23 @@ export class LeadController {
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadOutcomeDto,
   ) {
     return this.leads.setOutcome(ctx, id, body.outcome, body.version);
+  }
+
+  @Put(':id/next-action/done')
+  @RequirePermission('lead:update')
+  @ApiOperation({
+    summary: 'Tick your lead’s next action done, or take the tick back',
+    description:
+      'From your Calendar’s *Tugas* (UI V1, UI-104). `done: true` clears the next action’s date and note — the lead '
+      + 'then asks for a new one — and keeps them so `done: false` can put them back. **Your own lead only**: a lead '
+      + 'of somebody you coach is `404`, as one out of reach is. Always pinned to `version`. A lead with nothing to '
+      + 'tick, or nothing to put back, is answered as it is.',
+  })
+  @ApiResponse({ status: 200, type: LeadResponseDto })
+  @ApiResponse({ status: 404, description: '`NOT_FOUND` — not a lead of yours: somebody else’s, another office’s, or nobody’s.', type: ApiErrorEnvelope })
+  @ApiResponse({ status: 409, description: STALE, type: ApiErrorEnvelope })
+  async setNextActionDone(@Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetNextActionDoneDto) {
+    return this.leads.setNextActionDone(ctx, id, body.done, body.version);
   }
 
   @Delete(':id')

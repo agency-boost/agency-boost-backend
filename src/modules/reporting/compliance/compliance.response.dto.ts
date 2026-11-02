@@ -182,6 +182,13 @@ class ComplianceCanDto {
   override!: boolean;
 }
 
+class ComplianceThresholdsDto {
+  @ApiProperty({ example: 50, description: 'UI V1 (UI-109): a bar below this share done is red (`KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT`).' })
+  lowBelowPct!: number;
+  @ApiProperty({ example: 80, description: 'From this share done it is green (`KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT`).' })
+  highFromPct!: number;
+}
+
 export class ComplianceViewDto implements ComplianceView {
   @ApiProperty({ example: '2026-10-10', description: 'The office’s day.' }) today!: string;
   @ApiProperty({ description: 'The members listed: the office’s active members, each in an AB agency.' }) people!: number;
@@ -193,4 +200,5 @@ export class ComplianceViewDto implements ComplianceView {
   @ApiProperty({ type: [ComplianceSectionDto], description: 'One per AB agency, A to Z by the AB’s name.' })
   tree!: ComplianceSectionDto[];
   @ApiProperty({ type: ComplianceCanDto }) can!: ComplianceCanDto;
+  @ApiProperty({ type: ComplianceThresholdsDto }) thresholds!: ComplianceThresholdsDto;
 }

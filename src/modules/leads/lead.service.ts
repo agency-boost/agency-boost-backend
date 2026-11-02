@@ -15,10 +15,17 @@ import type { LeadStatusView } from '@/modules/config/lead-status.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
+import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
+import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
+import { isLocalDate, type LocalDate } from '@/common/time/local-day';
+import type { FieldSentence } from '@/common/validation/fields';
 import { leadFlags, type LeadFlag } from './lead-attention';
+import { LEAD_REFUSALS } from './leads.messages';
 import { checkLead, type CheckedLead } from './lead-input';
-import { isInMemorySort, ladderRanks, leadOrder, type LeadSortKey } from './lead-order';
-import { recruitmentPipelineFacets } from './lead-readings';
+import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
+import {
+  byClosedAt, CLOSING_FIELDS, CLOSING_FILTER, closingOf, recruitmentPipelineFacets, type LeadClosing,
+} from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
 
@@ -133,6 +140,23 @@ export interface LeadView {
 }
 
 /**
+ * **One move along the lead's ladder, as its sheet's *Riwayat* reads it** (UI V1, UI-105; D-19): when, and from which
+ * stage to which, by code — the screen names the stage in the office's own words. The stored `transitions`, which are
+ * append-only and written from a lead's first move (invariant §5's spirit), oldest first. Who moved it stays in the
+ * record and out of the answer: the sheet does not say it.
+ */
+export interface LeadMoveView {
+  at: string;
+  fromStatusCode: string | null;
+  toStatusCode: string;
+}
+
+/** One lead read by its id (`GET /leads/:id`): the list's shape, and its moves (UI-105). The list never carries them. */
+export interface LeadDetailView extends LeadView {
+  history: LeadMoveView[];
+}
+
+/**
  * The lead record (P7-T1).
  *
  * **Whose lead a write is.** Without `owner`, a create is the caller's own lead, as an activity day is
@@ -167,6 +191,11 @@ export class LeadService {
      * the activation module answers, so leads does not depend on it; optional, failing open.
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
+    /*
+     * P18.96-T4 AC-1: a sales lead reaching *Paid and issued*, or a closing logged from the checklist, may be the
+     * owner's first sale. A port the activation module answers; optional, failing open.
+     */
+    @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
   ) {}
 
   /**
@@ -222,10 +251,9 @@ export class LeadService {
     if (writing && pinned === undefined && lead.ownerMembershipId !== ctx.membershipId) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Send the version you read this lead at. A change to somebody else’s lead has to say which '
-        + 'version it was written against.',
+        LEAD_REFUSALS.VALIDATION_FAILED.pinVersion,
         HttpStatus.BAD_REQUEST,
-        { violations: ['version is required when the lead is not yours'] },
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.versionRequired] },
       );
     }
     /*
@@ -305,6 +333,8 @@ export class LeadService {
     const now = this.clock.now();
     const created = await this.leads.create(ctx, {
       ownerMembershipId,
+      // The top of the owner's list (ADR-0161 §1), a coachee's included when a leader adds it.
+      position: await this.firstPlace(ctx, ownerMembershipId),
       name: input.name!,
       type: input.type ?? null,
       // **No `lawfulBasis` and no `consentAt`** (ADR-0108 §1): the schema's nulls, never a ground
@@ -341,6 +371,100 @@ export class LeadService {
     return this.view(
       created, day, ownerMembershipId === membershipId ? new Map() : await this.attribution(ctx, [created]),
     );
+  }
+
+  /**
+   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3; ADR-0171 §3): *Which case? → Log a new closing*,
+   * a name and the day it was paid and issued. The owner's own, or — with `owner` — a coachee's, resolved on
+   * `lead:create` exactly as `create`'s is (`coachedOwner`: `COACH` and nothing wider, anybody else a 404).
+   *
+   * **A minimal sales lead, closed**: on the office's published *Paid and issued* stage — one move, from no stage,
+   * dated the day given (noon in the office's zone, never after now) — and won on it, so it is a closed case in the
+   * owner's *Closed* card and in no open count. `loggedFrom: 'activation_checklist'` says it was not walked up the
+   * ladder: it is the *manual* first sale, and not the data that confirms one (`firstSaleOf`). The day is an office
+   * date, not after the office's today; the caller holds it to the join date. An office whose published sales ladder
+   * has no *Paid and issued* stage refuses it, 404 `NOT_FOUND` on the status, as a move to it would be.
+   *
+   * The ordinary audit entry, `lead.created`, carrying the origin, the stage and the outcome; the activation signals
+   * every lead write sends (`feature:leads`), and the sale (`SalesEvents`).
+   */
+  async logClosing(
+    ctx: RequestContext, input: { name: string; date: string }, owner?: string,
+  ): Promise<{ id: string; name: string; date: LocalDate }> {
+    const membershipId = this.me(ctx);
+    const checked = checkLead({ name: input.name, type: 'sales' });
+    const ownerMembershipId = owner === undefined ? membershipId : await this.coachedOwner(ctx, owner);
+    const day = await this.days.for(ctx);
+    if (!isLocalDate(input.date) || input.date > day.today) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        LEAD_REFUSALS.VALIDATION_FAILED.paidAndIssuedDate,
+        HttpStatus.BAD_REQUEST,
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.dateNotAfterToday] },
+      );
+    }
+    const status = await this.publishedStage(ctx, FIRST_SALE_STAGE_CODE);
+    if (!status || status.pipeline !== 'sales' || status.status === 'archived') {
+      throw new NotFoundException('Lead status', { code: FIRST_SALE_STAGE_CODE });
+    }
+
+    const now = this.clock.now();
+    const noon = new Date(this.clock.startOfLocalDay(day.timezone, input.date).getTime() + 12 * 3_600_000);
+    const at = noon < now ? noon : now;
+    const created = await this.leads.create(ctx, {
+      ownerMembershipId,
+      position: await this.firstPlace(ctx, ownerMembershipId),
+      name: checked.name!,
+      type: 'sales',
+      contact: { phone: null, email: null },
+      remarks: null,
+      nextActionDate: null,
+      nextActionNote: null,
+      source: null,
+      commitments: [],
+      statusCode: FIRST_SALE_STAGE_CODE,
+      statusId: status.id,
+      outcome: 'won',
+      outcomeAt: at,
+      dateRegistered: now,
+      loggedFrom: 'activation_checklist',
+      version: 1,
+      transitions: [{ fromStatusCode: null, toStatusCode: FIRST_SALE_STAGE_CODE, at, byMembershipId: membershipId }],
+      createdBy: membershipId,
+      updatedBy: membershipId,
+    } as Partial<LeadDocument>);
+    const id = String(created._id);
+
+    await this.record(ctx, 'lead.created', id, {
+      type: 'sales',
+      hasContact: false,
+      loggedFrom: 'activation_checklist',
+      statusCode: FIRST_SALE_STAGE_CODE,
+      outcome: 'won',
+      ...(ownerMembershipId !== membershipId ? { ownerMembershipId } : {}),
+    });
+    await signalActivation(this.activation, ctx, ownerMembershipId, 'feature:leads');
+    await signalSales(this.sales, ctx, [ownerMembershipId]);
+    return { id, name: created.name, date: input.date };
+  }
+
+  /**
+   * **A member's closings, newest first** (P18.96-T4 AC-3): their sales leads that reached *Paid and issued*, with the
+   * office day each first did — what the checklist's *Which case?* offers to name. The caller's own, or — with
+   * `owner` — a member whose leads the caller reads (`lead:read`, `COACH`; anybody else a 404), recorded as any read
+   * of somebody else's leads is (§3.5). Ids, names and days; nothing else of a lead leaves here.
+   */
+  async closingsOf(ctx: RequestContext, owner?: string): Promise<(LeadClosing & { date: LocalDate })[]> {
+    const subject = await this.coach.subject(ctx, owner, 'lead:read', 'Membership');
+    const day = await this.days.for(ctx);
+    const rows = await this.leads.find(
+      ctx, { ownerMembershipId: subject.membershipId, ...CLOSING_FILTER }, { projection: { ...CLOSING_FIELDS } },
+    );
+    const closings = rows.map(closingOf).filter((c): c is LeadClosing => c !== null).sort(byClosedAt).reverse();
+    if (!subject.self) {
+      await this.subjectReads.record(ctx, { membershipId: subject.membershipId }, 'leads', { from: null, to: day.today });
+    }
+    return closings.map((c) => ({ ...c, date: this.clock.localDateFor(day.timezone, c.at) }));
   }
 
   async update(ctx: RequestContext, id: string, body: unknown): Promise<LeadView> {
@@ -394,6 +518,9 @@ export class LeadService {
      * correcting today's promise, not erasing a past one. Nothing before this month can be
      * reached from here at all.
      */
+    // A next action written over one ticked done replaces it: *Urungkan* has nothing left to put back (UI-104).
+    if (input.nextActionDate !== undefined || input.nextActionNote !== undefined) $set.nextActionDone = null;
+
     const commit = dropCommitment ? false : input.thisMonth;
     const alreadyCommitted = (lead.commitments ?? []).some((c) => c.month === day.month);
     const write: Record<string, unknown> = { $set, $inc: { version: 1 } };
@@ -429,7 +556,7 @@ export class LeadService {
     if (lead.outcome) {
       throw new DomainException(
         ErrorCode.LEAD_ALREADY_CLOSED,
-        'This lead is closed. Reopen it before moving it again.',
+        LEAD_REFUSALS.LEAD_ALREADY_CLOSED.reopenToMove,
         HttpStatus.CONFLICT,
         { outcome: lead.outcome },
       );
@@ -439,9 +566,9 @@ export class LeadService {
       // a stage means nothing until we know which of the two vocabularies it belongs to.
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Choose whether this is a sales or a recruitment lead before setting a stage.',
+        LEAD_REFUSALS.VALIDATION_FAILED.typeFirst,
         HttpStatus.BAD_REQUEST,
-        { violations: ['type is required before a stage'] },
+        { violations: [LEAD_REFUSALS.VALIDATION_FAILED.typeRequired] },
       );
     }
 
@@ -461,7 +588,9 @@ export class LeadService {
     if (status.pipeline !== lead.type) {
       throw new DomainException(
         ErrorCode.LEAD_STATUS_WRONG_PIPELINE,
-        `${wanted} belongs to the ${status.pipeline} ladder; this is a ${lead.type} lead.`,
+        LEAD_REFUSALS.LEAD_STATUS_WRONG_PIPELINE.otherLadder({
+          code: wanted, pipeline: status.pipeline, type: lead.type,
+        }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { code: wanted, pipeline: status.pipeline, leadType: lead.type },
       );
@@ -485,6 +614,8 @@ export class LeadService {
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
     });
+    // P18.96-T4 AC-1: a sales lead at *Paid and issued* may be its owner's first sale, and a closing (ADR-0171 §1).
+    if (wanted === FIRST_SALE_STAGE_CODE && lead.type === 'sales') await signalSales(this.sales, ctx, [lead.ownerMembershipId]);
     return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
   }
 
@@ -507,7 +638,7 @@ export class LeadService {
     if (outcome && lead.outcome) {
       throw new DomainException(
         ErrorCode.LEAD_ALREADY_CLOSED,
-        `This lead is already ${lead.outcome}. Reopen it before closing it again.`,
+        LEAD_REFUSALS.LEAD_ALREADY_CLOSED.reopenToClose({ outcome: lead.outcome }),
         HttpStatus.CONFLICT,
         { outcome: lead.outcome },
       );
@@ -519,7 +650,7 @@ export class LeadService {
       if (!status?.isTerminal) {
         throw new DomainException(
           ErrorCode.LEAD_STATUS_NOT_FINAL,
-          'A lead is won at the stage that closes its pipeline. Move it there first.',
+          LEAD_REFUSALS.LEAD_STATUS_NOT_FINAL.moveFirst,
           HttpStatus.UNPROCESSABLE_ENTITY,
           { statusCode: lead.statusCode ?? null },
         );
@@ -567,10 +698,55 @@ export class LeadService {
   private retired(code: string): DomainException {
     return new DomainException(
       ErrorCode.CONFIG_ARCHIVED,
-      `${code} has been retired. Leads already on it keep it; new ones cannot be moved to it.`,
+      LEAD_REFUSALS.CONFIG_ARCHIVED.retiredStage({ code }),
       HttpStatus.UNPROCESSABLE_ENTITY,
       { code },
     );
+  }
+
+  /**
+   * **`PUT /leads/:id/next-action/done` — *Selesai*, or *Urungkan*, from the owner's Calendar** (UI V1, 2026-10-30,
+   * UI-104 point 4; ADR-0180 §11; `functional/leads.md`, *UI V1*).
+   *
+   * - **Ticked** (`done: true`): the next action's date and note move into `nextActionDone`, with when and by whom, and
+   *   the lead's own are cleared — so the lead asks for a new one everywhere (*Isi tindakan*, UI-062), and it leaves
+   *   the owner's Calendar and Home's count.
+   * - **Taken back** (`done: false`): what was ticked is put back and the marker cleared.
+   * - **The owner's alone**, whatever `lead:update` reaches: a leader's Calendar shows a downline's tasks with no
+   *   checkbox, and a leader naming one here is `404`, as a lead out of reach is — scope first, then whose it is, then
+   *   the version, so a refusal confirms nothing.
+   * - **Always pinned** (`VERSION_CONFLICT`): a tick clears what may have just been rewritten in a 1-on-1.
+   * - Nothing to tick, or nothing to put back — the lead holds no next action, or holds a new one — answers the lead
+   *   as it is and writes nothing.
+   */
+  async setNextActionDone(ctx: RequestContext, id: string, done: boolean, version: number): Promise<LeadView> {
+    const membershipId = this.me(ctx);
+    const lead = await this.reachable(ctx, id, 'lead:update');
+    if (lead.ownerMembershipId !== membershipId) throw new NotFoundException('Lead');
+    if (version !== lead.version) throw new VersionConflictException(version, lead.version);
+    const day = await this.days.for(ctx);
+    const holds = Boolean(lead.nextActionDate || lead.nextActionNote?.trim());
+    const kept = lead.nextActionDone ?? null;
+    if (done ? !holds : !kept || holds) return this.view(lead, day, await this.attribution(ctx, [lead]));
+
+    const write = done
+      ? {
+        $set: {
+          nextActionDone: {
+            date: lead.nextActionDate, note: lead.nextActionNote, at: this.clock.now(), byMembershipId: membershipId,
+          },
+          nextActionDate: null,
+          nextActionNote: null,
+        },
+        $inc: { version: 1 },
+      }
+      : {
+        $set: { nextActionDate: kept!.date, nextActionNote: kept!.note, nextActionDone: null },
+        $inc: { version: 1 },
+      };
+    const updated = await this.writeAt(ctx, lead, write);
+    await this.record(ctx, done ? 'lead.next_action_done' : 'lead.next_action_undone', id, {});
+    return this.view(updated, day, await this.attribution(ctx, [updated]));
   }
 
   /**
@@ -591,6 +767,63 @@ export class LeadService {
   }
 
   /**
+   * **The caller's open leads, in the order they dragged them into** (P18.8-T7, ADR-0161 §1).
+   *
+   * **Every one of them, once each, and nothing else** — the contract every reorder in this product
+   * has (`ActivityService.reorderTypes`, `LeadStatusService.reorder`): a single *move this one to place 4*
+   * would leave the server to infer what happened to the rest, and two tabs dragging at once would
+   * interleave into an order neither asked for. An id that is not one of the caller's open, live leads —
+   * a closed one, a deleted one, a colleague's, a downline's, another office's, or one that never
+   * existed — and a lead left out are each `400 VALIDATION_FAILED`, and nothing is written. The answer is
+   * the same for all of them, so it confirms nothing about an id that is not the caller's.
+   *
+   * **The caller's own, whatever their grant reaches.** `lead:update` lets a leader write a downline's
+   * lead (ADR-0044); the order of a list is its owner's, and a leader dragging on their own `/leads` is
+   * ordering their own leads among their agents'. A coaching session's card has no handles at all.
+   *
+   * One `bulkWrite` (`LeadRepository.reposition`), and one `lead.reordered` entry carrying how many — no
+   * names, as no lead entry carries one.
+   */
+  async reorder(ctx: RequestContext, ids: readonly string[]): Promise<{ ids: string[] }> {
+    const membershipId = this.me(ctx);
+    const open = await this.leads.find(
+      ctx, { ownerMembershipId: membershipId, outcome: null }, { projection: { _id: 1 } },
+    );
+    const mine = new Set(open.map((lead) => String(lead._id)));
+    const sent = new Set(ids);
+
+    // Field sentences, each in both languages, written for the reader in `details.violations` (P18.98-T5 AC-3).
+    const SAY = LEAD_REFUSALS.VALIDATION_FAILED;
+    const violations: FieldSentence[] = [];
+    const strangers = ids.filter((id) => !mine.has(id)).length;
+    if (strangers > 0) violations.push(SAY.reorderStrangers({ count: strangers }));
+    if (sent.size !== ids.length) violations.push(SAY.reorderRepeat);
+    const missing = [...mine].filter((id) => !sent.has(id)).length;
+    if (missing > 0) violations.push(SAY.reorderMissing({ count: missing }));
+    if (violations.length > 0) {
+      throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.reorderEveryLead, HttpStatus.BAD_REQUEST, { violations });
+    }
+
+    await this.leads.reposition(ctx, membershipId, ids);
+    await this.record(ctx, 'lead.reordered', membershipId, { count: ids.length });
+    return { ids: [...ids] };
+  }
+
+  /**
+   * **The place a new lead takes: one before the owner's first** (ADR-0161 §1), so it is the top of their
+   * list. `0` for an owner with no placed lead yet. A lead nothing has placed holds `null` and sorts
+   * before it — there is none once migration 0031 has run.
+   */
+  private async firstPlace(ctx: RequestContext, ownerMembershipId: string): Promise<number> {
+    const [first] = await this.leads.find(
+      ctx,
+      { ownerMembershipId, position: { $ne: null } },
+      { sort: { position: 1 }, limit: 1, projection: { position: 1 } },
+    );
+    return typeof first?.position === 'number' ? first.position - 1 : 0;
+  }
+
+  /**
    * One lead of this office. 404 for another office's, never 403.
    *
    * **A lead the caller does not own is another member's data**, read through the leader's reach, so the
@@ -598,7 +831,7 @@ export class LeadService {
    * subject, from no date to the office's today — what `GET /leads?owner=` writes for the same rows. Once,
    * after the answer exists; the owner's own read writes none (`SubjectReadAudit`).
    */
-  async read(ctx: RequestContext, id: string): Promise<LeadView> {
+  async read(ctx: RequestContext, id: string): Promise<LeadDetailView> {
     // Before the repository, so a caller with no office is refused by name rather than by a
     // `MissingTenantContextError` surfacing as 500 — which is what a Super Admin's `all` grant
     // would otherwise produce here (ADR-0044).
@@ -608,15 +841,26 @@ export class LeadService {
     await this.subjectReads.record(
       ctx, { membershipId: String(lead.ownerMembershipId) }, 'leads', { from: null, to: day.today },
     );
-    return view;
+    /*
+     * **Its moves, for the lead sheet's *Riwayat*** (UI V1, UI-105): on this read alone, never on the list, which would
+     * carry every lead's whole history to draw a card that shows none of it.
+     */
+    const history = (lead.transitions ?? []).map((move) => ({
+      at: new Date(move.at).toISOString(),
+      fromStatusCode: move.fromStatusCode ?? null,
+      toStatusCode: move.toStatusCode,
+    }));
+    return { ...view, history };
   }
 
   /**
    * The caller's own live leads (P7-T2).
    *
-   * **`/leads` sends no search and no filter since P10.1-T4**, because the prototype's table has
-   * neither. The parameters stay for coaching's *Leads* card, which has the prototype's own search
-   * box and type filter (`Overall.html:4258-4266`, ADR-0063).
+   * **`search`, `type` and `statusCode` narrow, and never widen.** Coaching's *Leads* card has sent the
+   * first two since P11-T8 (the prototype's own search box and type filter, `Overall.html:4258-4266`), and
+   * `/leads` sends all three since P18.95-T4 (ADR-0167 §4, the client's UI review of 2026-10-26: UI-016). They
+   * sit beside the owner filter below, never in place of it, so a search reaches only what the caller's
+   * grant already reaches, in their own office (`lead-filters.int.spec.ts`).
    *
    * **Sorting is single-key.** The prototype's own footnote promises *"Sales leads first, then
    * Recruitment"* and its code does no such thing; the code wins and the footnote is not
@@ -658,8 +902,11 @@ export class LeadService {
     const inMemory = isInMemorySort(query.sort) ? query.sort : null;
     const dir = query.dir === 'asc' ? 1 : -1;
     const found = await this.leads.find(ctx, filter, inMemory ? {} : {
-      // MongoDB promises no order among equal keys, and `/leads` reads 200 at a time.
-      sort: { [query.sort ?? 'dateRegistered']: dir, _id: dir },
+      /*
+       * MongoDB promises no order among equal keys, and `/leads` reads 200 at a time. **No `sort` is the
+       * owner's own order** (P18.8-T7 AC-3), `SAVED_ORDER`; a key asked for orders as it always did.
+       */
+      sort: query.sort ? { [query.sort]: dir, _id: dir } : SAVED_ORDER,
     });
     /*
      * **Over the whole filtered set, before the page is cut**, so page 2 of a status sort carries on

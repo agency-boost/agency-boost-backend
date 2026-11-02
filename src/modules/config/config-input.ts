@@ -1,5 +1,6 @@
 import { CODE_MESSAGE, CODE_PATTERN, Fields, checkNoFields } from '@/common/validation/fields';
 import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
+import { CONFIG_REFUSALS } from './config.messages';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
 
@@ -50,9 +51,11 @@ export const CONFIG_BOUNDS = {
 /** The fields a section's summary tile is set by (ADR-0064). */
 const SUMMARY_GROUP_FIELDS = ['summaryGroupCode', 'summaryGroupLabel'] as const;
 
-/** Said once, because a create, an update and a template row all refuse it the same way. */
-export const SUMMARY_GROUP_PAIR_MESSAGE =
-  'summaryGroupCode and summaryGroupLabel are set together, or cleared together with null.';
+/**
+ * Said once, because a create, an update and a template row all refuse it the same way — in both languages
+ * (P18.98-T5 AC-3).
+ */
+export const SUMMARY_GROUP_PAIR_SENTENCE = CONFIG_REFUSALS.VALIDATION_FAILED.summaryGroupPair;
 
 /**
  * A section's summary tile: both fields, or neither (ADR-0064).
@@ -76,7 +79,7 @@ function summaryGroup(
   const summaryGroupLabel = labelNull
     ? null
     : f.text('summaryGroupLabel', CONFIG_BOUNDS.summaryGroupLabel, false);
-  if (codeSent !== labelSent || codeNull !== labelNull) f.violations.push(SUMMARY_GROUP_PAIR_MESSAGE);
+  if (codeSent !== labelSent || codeNull !== labelNull) f.violations.push(SUMMARY_GROUP_PAIR_SENTENCE);
   return { summaryGroupCode, summaryGroupLabel };
 }
 
@@ -176,8 +179,8 @@ export interface RatioCreateInput {
  * or `NaN` on every agent's screen — so the refusal says what a ratio needs, not a count.
  */
 const side = (name: 'numerator' | 'denominator') => (count: number) => (count === 0
-  ? `A ratio needs at least one activity type in its ${name}.`
-  : `A ratio counts at most ${CONFIG_BOUNDS.formulaTerms.max} activity types in its ${name}.`);
+  ? CONFIG_REFUSALS.VALIDATION_FAILED.ratioSideEmpty({ side: name })
+  : CONFIG_REFUSALS.VALIDATION_FAILED.ratioSideTooMany({ side: name, max: CONFIG_BOUNDS.formulaTerms.max }));
 
 const RATIO_FIELDS = [
   'label', 'numerator', 'denominator', 'benchmark', 'comparison', 'displayUnit',

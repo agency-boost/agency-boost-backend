@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { field } from '@/common/validation/violations';
 import { KPM_REPORTING, type KpmAnalyticsPeriod } from '@/domain/constants';
+import { REPORTING_REFUSALS } from './reporting.messages';
 
 /**
  * **Empty on purpose**: the Overview is the reader's office, with nothing to filter, page or name. A class with no
@@ -15,7 +17,7 @@ export class NotLoggedQueryDto {}
 export class SetRecruitTargetDto {
   @ApiProperty({ example: '2026-10', description: 'The agency’s current month, `YYYY-MM`. No other month is accepted.' })
   @IsString()
-  @Matches(/^\d{4}-\d{2}$/, { message: 'month must be YYYY-MM' })
+  @Matches(/^\d{4}-\d{2}$/, { message: field(REPORTING_REFUSALS.VALIDATION_FAILED.monthShape) })
   month!: string;
 
   @ApiProperty({ minimum: 0, example: 15, description: 'Recruits to close in the month: a whole number from 0.' })

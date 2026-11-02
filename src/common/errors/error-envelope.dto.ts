@@ -18,7 +18,9 @@ export class ApiErrorBody {
 
   @ApiProperty({
     example: 'You do not have permission to do that.',
-    description: 'Written for a person. Wording may change; the code will not.',
+    description: 'Written for a person, in the request\'s language: `Accept-Language` (`id` or `en`), else the '
+      + 'signed-in person\'s saved language, else Bahasa Indonesia, the default since 2026-10-29. Wording may change; '
+      + 'the code will not.',
   })
   message!: string;
 

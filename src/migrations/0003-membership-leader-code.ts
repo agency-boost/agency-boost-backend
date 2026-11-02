@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { emptyIfMissing } from './missing-collection';
 import { generateLeaderCode } from '@/modules/org/leader-code';
 
 /**
@@ -43,7 +44,8 @@ export async function up(
   for (const membership of memberships) {
     // The oldest live invite they issued: if they made several, the one most likely to be
     // out in the world is the first they shared.
-    const invite = await db
+    // No `inviteCodes` collection is no invite; any other failure stops the migration (P18.7-T1).
+    const invite = await emptyIfMissing(db
       .collection('inviteCodes')
       .find({
         issuedByMembershipId: String(membership._id),
@@ -52,8 +54,7 @@ export async function up(
       })
       .sort({ createdAt: 1 })
       .limit(1)
-      .toArray()
-      .catch(() => []);
+      .toArray());
 
     let code = invite[0]?.code ? String(invite[0].code).toUpperCase() : null;
     if (code && taken.has(code)) code = null; // Somebody else already has it; generate.

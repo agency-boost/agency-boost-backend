@@ -21,6 +21,11 @@ describe('calendar limits (functional/calendar.md, Its fields)', () => {
     expect(CALENDAR.PEOPLE_QUERY_MAX).toBe(100);
   });
 
+  it('UI-104 pins the Agenda at 7 days from the day asked for, and the 3 Hari view at 3', () => {
+    expect(CALENDAR.AGENDA_DAYS).toBe(7);
+    expect(CALENDAR.THREE_DAYS).toBe(3);
+  });
+
   it('pins an id a request names at 64 characters, as every subject parameter is', () => {
     expect(CALENDAR.ID_MAX).toBe(64);
   });

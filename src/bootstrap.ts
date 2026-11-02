@@ -6,6 +6,8 @@ import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common
 import { SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 
+import { validationRefusal } from './common/validation/violations';
+import { corsOriginsOf } from './config/cors-origins';
 import { buildOpenApiDocument } from './openapi';
 
 /**
@@ -31,6 +33,12 @@ export const VALIDATION_PIPE_OPTIONS = {
   // @Type(() => Number). That is more typing and it is the right trade: this
   // product's premise is that a silently wrong number is worse than a crash.
   transformOptions: { enableImplicitConversion: false },
+  /*
+   * **The refusal in the reader's language** (P18.98-T5 AC-3): `400 VALIDATION_FAILED` with `details.violations`, as
+   * Nest's own factory answers — the same English, so every assertion on it stands — each violation a sentence the
+   * error filter writes for the request's reader (`common/validation/violations.ts`).
+   */
+  exceptionFactory: validationRefusal,
 } as const;
 
 /**
@@ -45,8 +53,29 @@ export const VALIDATION_PIPE_OPTIONS = {
  * `.claude/rules/backend-then-frontend.md` describes — two halves implementing a contract
  * the other does not — and it would show up only in the environment nobody was testing.
  */
+
+/**
+ * **How long a browser may reuse a preflight's answer** (P18.95-T5's finding, UI-030). Without
+ * `Access-Control-Max-Age` Chrome keeps one for five seconds, so a screen's reads paid an `OPTIONS`
+ * round trip again every few seconds — one more on each of the three serial requests a hard load makes
+ * (refresh, `/auth/me`, then the reads). Ten minutes; Chrome caps it at two hours. A change to
+ * `CORS_ORIGINS` reaches a browser that cached a preflight within that time.
+ */
+export const CORS_PREFLIGHT_MAX_AGE_SECONDS = 600;
+
 export function configureApp(app: INestApplication): void {
   const config = app.get(ConfigService);
+
+  /*
+   * **Who the client is, behind the proxy** (P18.7-T1, ADR-0152). `TRUST_PROXY` is validated to
+   * `false` or a hop count; anything else reaching here is a misconfiguration, and it trusts nothing
+   * rather than everything. `req.ip` is what the login limiter keys on and what a session row
+   * records, so believing a forged `X-Forwarded-For` would let a client choose its own bucket.
+   */
+  const trustProxy = config.get<false | number>('TRUST_PROXY');
+  // The instance is the Express app Nest built; the adapter's type does not carry it (as in `serverless.ts`).
+  const express = app.getHttpAdapter().getInstance() as { set(setting: string, value: unknown): unknown };
+  express.set('trust proxy', typeof trustProxy === 'number' && trustProxy > 0 ? trustProxy : false);
 
   // The request id is generated and echoed by the pino http logger (LoggingModule),
   // which also puts it on every log line. The error filter reads the same value.
@@ -64,10 +93,12 @@ export function configureApp(app: INestApplication): void {
 
   app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
-  const origins = config.get<string>('CORS_ORIGINS', '');
+  // Read by `corsOriginsOf`, as the refresh-origin check on `/auth/refresh` reads it (P18.7-T1).
+  const origins = corsOriginsOf(config.get<string>('CORS_ORIGINS', ''));
   app.enableCors({
-    origin: origins ? origins.split(',').map((o) => o.trim()) : false,
+    origin: origins.length > 0 ? origins : false,
     credentials: true,
+    maxAge: CORS_PREFLIGHT_MAX_AGE_SECONDS,
   });
 
   if (config.get('NODE_ENV') !== 'production') {

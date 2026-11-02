@@ -27,6 +27,7 @@ import { MembershipHistory, MembershipHistorySchema } from './membership-history
 import { MembershipRepository } from './membership.repository';
 import { Membership, MembershipSchema } from './membership.schema';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
+import { LeaderLimitRequestService } from './leader-limit-request.service';
 import { OrgController } from './org.controller';
 import { MembershipHistoryRepository } from './org.repositories';
 import { OrgTreeService } from './org-tree.service';
@@ -92,8 +93,10 @@ describe('GET /members/tree over HTTP', () => {
         { provide: OrgTreeService, useValue: new OrgTreeService(members, users as never) },
         // The other five back routes this spec never calls; a bare object keeps Nest from
         // building their dependency graphs.
-        ...[DirectoryService, RoleChangeService, RemovalService, GroupService, AdminDelegationService, DirectoryColumns]
-          .map((provide) => ({ provide, useValue: {} })),
+        ...[
+          DirectoryService, RoleChangeService, RemovalService, GroupService, AdminDelegationService, DirectoryColumns,
+          LeaderLimitRequestService,
+        ].map((provide) => ({ provide, useValue: {} })),
       ],
     }).compile();
 

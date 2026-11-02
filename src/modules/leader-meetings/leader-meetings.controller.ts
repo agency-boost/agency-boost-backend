@@ -212,7 +212,7 @@ export class LeaderMeetingsController {
   @ApiResponse({ status: 200, type: AgendaItemSavedDto })
   @ApiResponse(refusal(
     400,
-    '`VALIDATION_FAILED` — not exactly one field, a field too long or unknown, or `done` on an item outside *During*.',
+    '`VALIDATION_FAILED` — not exactly one field, or a field too long or unknown. `done` is any section’s since UI V1 (UI-110).',
   ))
   @ApiResponse(ITEM_CONFLICT)
   @ApiResponse(NOT_FOUND)
@@ -293,12 +293,18 @@ export class LeaderMeetingsController {
   @ApiOperation({
     summary: 'Save a Monthly Target cell',
     description:
-      'The leaders’ own target for one of the six rows the scorecard leaves open — `ape`, `manpower`, `flc`, `new_aa`, '
-      + '`avg_monthly_aa`, `case_submission` — with the cell’s version, 0 for one never typed. Never kept with the '
-      + 'scorecard: it stays editable. Audited with before and after.',
+      'The leaders’ own target for one of the five rows that take one — `ape`, `manpower`, `flc`, `avg_monthly_aa`, '
+      + '`case_submission` — **typed as a rate per unit**, in the row’s unit, or `null` to clear it, with the cell’s '
+      + 'version, 0 for one never typed. Answered as the table draws it: the rate and its value, the rate times the '
+      + 'meeting’s *# of units* — the ones it was kept with, once it is over. Never kept with the scorecard: it stays '
+      + 'editable. Audited with before and after.',
   })
   @ApiResponse({ status: 200, type: MonthlyTargetSavedDto })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a row the scorecard blocks or does not have, or a value too long.'))
+  @ApiResponse(refusal(
+    400,
+    '`VALIDATION_FAILED` — a row that takes no target or does not exist, a rate that is not a number from 0 (a text '
+    + 'included), more than two places, or `ape`’s not in whole minor units.',
+  ))
   @ApiResponse(ITEM_CONFLICT)
   @ApiResponse(NOT_FOUND)
   @ApiResponse(REFUSED)

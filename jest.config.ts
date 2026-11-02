@@ -7,6 +7,15 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testRegex: '\\.spec\\.ts$',
+  // P18.7-T2: `*.live.spec.ts` reaches a real bucket and runs only under `pnpm test:storage-live`, which
+  // replaces this list. Every other script — the full run, coverage, integration, tenancy — leaves it out.
+  //
+  // `*.performance.spec.ts` runs only under `pnpm test:performance`, one suite at a time, which replaces this
+  // list too. A p95 taken beside three other workers measures the other workers, and one taken under coverage
+  // measures the instrumentation. The forum's meeting read, ≈ 710 ms alone on a laptop, took 10.5 s in the CI
+  // runner's unit run and 48 s under its coverage run, and starved the tenancy suites into hook timeouts
+  // beside it (the first run on GitHub, 2026-10-23).
+  testPathIgnorePatterns: ['/node_modules/', '\\.live\\.spec\\.ts$', '\\.performance\\.spec\\.ts$'],
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
   collectCoverageFrom: [
@@ -46,6 +55,14 @@ const config: Config = {
     // read whose data, so it is permissions code held to the permissions floor, although it lives in
     // `modules/org` beside the tree — whose own floor is lower, and says why.
     './src/modules/org/coach-resolver.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // P18.97-T8 L2 (the Phase 18.97 exit permission review): which memberships a reader may see — the roster, one
+    // member's read, their reports, the *Rejoined* mark, the tree and a removal's destination all narrow through it —
+    // and who administers the office, the Owner's grant and revoke. Permissions code, held where the resolver is
+    // although `modules/org` around them is not. `reader-visibility.ts` was `visibleTo` and its compositions inside
+    // `directory.service.ts`, whose own floor is the module's; `admin-delegation.service.ts` stood at 77% branch,
+    // its gaps an admin nobody granted (now tested) and two arms no input reaches (removed).
+    './src/modules/org/reader-visibility.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/org/admin-delegation.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // P11-T3: the §3.5 seam every coach read of a coachee's data calls — who read whose data, and
     // the self-read it skips. It decides what the record of disclosures holds, so it is held where
     // the resolver is, although `modules/audit` around it runs under the global floor.
@@ -60,6 +77,9 @@ const config: Config = {
      * wrong date.
      */
     './src/common/time/': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // **`common/format` is how every sentence the API composes writes a date, a sum or a percentage** (ADR-0167 §1),
+    // and it places an instant on the tenant's clock as `common/time` does: pinned with it, for the same reason.
+    './src/common/format/': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Business rules and constants: a silently wrong number is worse than a crash.
     //
     // `./src/domain/` alone used to stand for "business-rule modules", and it is sixteen
@@ -141,6 +161,9 @@ const config: Config = {
     './src/modules/events/': { lines: 95, branches: 95, functions: 95, statements: 95 },
     './src/modules/events/event-audience.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-guest.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // Phase 18.99 (the exit review, T1): the coachee's tick from Calendar — who may write it, a tick that changes nothing,
+    // and the session gone between the read and the write — pinned whole by its own spec.
+    './src/modules/coaching/coaching-action-done.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-roll-call.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/products/': { lines: 95, branches: 84, functions: 95, statements: 95 },
@@ -249,6 +272,28 @@ const config: Config = {
     // Phase 18.1: who reads the forum and who edits it — the tag is the list, and a field member not tagged meets 404.
     // It decides access, so it is held where the permissions are.
     './src/modules/leader-meetings/leader-meeting-people.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18.7 (P18.7-T2, ADR-0153): storage. The adapter decides what an upload may be and what a file is
+     * confirmed as, and the sniff is the one check standing where Cloudinary read the bytes itself (ADR-0040), so
+     * both are held whole; so is the choice between the bucket and the storage that refuses. All four measured
+     * 100 on every figure the day they landed.
+     */
+    './src/modules/assets/gcs.adapter.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/content-sniff.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/unconfigured-storage.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/assets/storage.provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18.99 T18 (ADR-0182): which provider sends the mail, and with what. Boot validation, the adapter and the
+     * test command all decide from it, so a branch wrong here is mail that silently stops, or a password sent before
+     * TLS; held whole, as the storage choice is. It measured 100 on every figure the day it landed.
+     */
+    './src/modules/notifications/mail-provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * ADR-0184: the workbook reader and writer, the ZIP guard in front of them, and the upload interceptor both imports
+     * receive a file through. A branch wrong in the guard is a zip bomb unpacked; held whole, as the asset sniff is. It
+     * measured 100 on every figure the day it landed.
+     */
+    './src/common/spreadsheet/': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

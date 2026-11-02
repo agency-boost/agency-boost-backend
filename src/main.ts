@@ -25,6 +25,16 @@ async function bootstrap(): Promise<void> {
 
   configureApp(app);
 
+  /*
+   * **A deploy stops this process with SIGTERM, and it finishes its work first** (P18.7-T1,
+   * ADR-0152). Without the hooks Node exits on the signal at once: the email a save had just
+   * dispatched was cut off mid-send, and its row stayed `pending` for good. With them `app.close()`
+   * runs: `GracefulShutdown` stops listening and lets the open requests finish, then waits a bounded
+   * time for the sends they started, and the database closes after it. Here and not in
+   * `configureApp`: the serverless entry has no process of its own to stop.
+   */
+  app.enableShutdownHooks();
+
   const port = config.get<number>('PORT', 3001);
   await app.listen(port);
   logger.log(`AgencyBoost API listening on :${port}`);

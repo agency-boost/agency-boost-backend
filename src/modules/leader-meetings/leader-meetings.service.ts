@@ -9,6 +9,7 @@ import { refuseWith } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { startingAgenda } from './leader-meeting-agenda';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 import { LeaderMeetingPeople, meetingNotFound, type ForumOffice } from './leader-meeting-people';
 import { LeaderMeetingRepository } from './leader-meeting.repository';
 import type { FrozenEditor, LeaderMeetingDocument } from './leader-meeting.schema';
@@ -16,8 +17,8 @@ import {
   actionItemsInOrder, agendaOf, FORUM_LIMITS, meetingState, openItemsOf, scorecardOf,
   type MeetingCard, type MeetingEditors, type MeetingListView, type MeetingView,
 } from './leader-meeting.view';
+import { frozenRecord, liveRecord, type ScorecardRecord } from './scorecard/scorecard-record';
 import { LeaderScorecardService } from './scorecard/scorecard.service';
-import type { ComputedScorecard } from './scorecard/scorecard.types';
 
 /** The audit trail's name for the collection (`targetCollection`). */
 export const MEETINGS = 'leaderMeetings';
@@ -91,7 +92,8 @@ export class LeaderMeetingsService {
       try {
         created = await this.meetings.create(ctx, {
           number, title: input.title, date: input.date,
-          agenda: startingAgenda(input.date, previous?.agenda ?? null, newItemId),
+          // The first agenda in the maker's language, stored as text (P18.98-T5 AC-6); a copied one as stored.
+          agenda: startingAgenda(input.date, previous?.agenda ?? null, newItemId, ctx.reader),
           actionItems: [], monthlyTargets: {}, writtenAt: null,
           frozenScorecard: null, frozenAt: null, frozenCoeditors: null, version: 1,
         } as never);
@@ -102,7 +104,7 @@ export class LeaderMeetingsService {
         if (attempt >= NUMBER_ATTEMPTS) {
           throw new DomainException(
             ErrorCode.VERSION_CONFLICT,
-            'Another meeting was made at the same moment. Try again.',
+            LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.madeAtSameMoment,
             HttpStatus.CONFLICT,
             { number },
           );
@@ -128,11 +130,13 @@ export class LeaderMeetingsService {
     const office = await this.people.office(ctx);
     const meeting = await this.meetings.findById(ctx, meetingId);
     if (!meeting) throw meetingNotFound();
-    if (input.title === undefined && input.date === undefined) refuseWith(['Send a title, a date, or both.']);
+    if (input.title === undefined && input.date === undefined) {
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.titleOrDate]);
+    }
     if (meetingState(meeting.date, this.today(office)) === 'completed') {
       throw new DomainException(
         ErrorCode.LEADER_MEETING_COMPLETED,
-        'This meeting has already taken place, so its date stays.',
+        LEADER_MEETINGS_REFUSALS.LEADER_MEETING_COMPLETED.dateStays,
         HttpStatus.CONFLICT,
         { date: meeting.date },
       );
@@ -167,7 +171,7 @@ export class LeaderMeetingsService {
       if (now.writtenAt) {
         throw new DomainException(
           ErrorCode.LEADER_MEETING_HAS_MINUTES,
-          'Something has been written in this meeting, so it can’t be deleted.',
+          LEADER_MEETINGS_REFUSALS.LEADER_MEETING_HAS_MINUTES.writtenIn,
           HttpStatus.CONFLICT,
         );
       }
@@ -230,10 +234,10 @@ export class LeaderMeetingsService {
   private async recordOf(
     ctx: RequestContext, office: ForumOffice, meeting: LeaderMeetingDocument, state: 'upcoming' | 'completed',
     live: FrozenEditor[],
-  ): Promise<{ meeting: LeaderMeetingDocument; scorecard: ComputedScorecard; editors: FrozenEditor[]; frozenAt: Date | null }> {
+  ): Promise<{ meeting: LeaderMeetingDocument; scorecard: ScorecardRecord; editors: FrozenEditor[]; frozenAt: Date | null }> {
     if (meeting.frozenAt) return this.frozen(meeting);
     const scorecard = await this.scorecards.compute({ kpmId: ctx.kpmId!, timezone: office.timezone, meetingDate: meeting.date });
-    if (state === 'upcoming' || ctx.impersonationReadOnly) return { meeting, scorecard, editors: live, frozenAt: null };
+    if (state === 'upcoming' || ctx.impersonationReadOnly) return { meeting, scorecard: liveRecord(scorecard), editors: live, frozenAt: null };
     const frozenAt = this.clock.now();
     const written = await this.meetings.freeze(ctx, String(meeting._id), {
       frozenScorecard: scorecard as unknown as Record<string, unknown>, frozenAt, frozenCoeditors: live,
@@ -252,12 +256,14 @@ export class LeaderMeetingsService {
 
   /**
    * A frozen meeting's record. `frozenScorecard`, `frozenAt` and `frozenCoeditors` are written in one update
-   * (`LeaderMeetingRepository.freeze`), so a meeting with the one has the others.
+   * (`LeaderMeetingRepository.freeze`), so a meeting with the one has the others. **The scorecard is read tolerantly**
+   * (ADR-0175 §8, P18.97-T1 AC-19): one frozen before the reference slide's table reads *—* where it lacks a column, a
+   * row or *AS OF*, keeps the *# of units* it froze with, and is never recomputed (`frozenRecord`).
    */
   private frozen(meeting: LeaderMeetingDocument) {
     return {
       meeting,
-      scorecard: meeting.frozenScorecard as unknown as ComputedScorecard,
+      scorecard: frozenRecord(meeting.frozenScorecard, meeting.date),
       editors: meeting.frozenCoeditors!,
       frozenAt: meeting.frozenAt,
     };

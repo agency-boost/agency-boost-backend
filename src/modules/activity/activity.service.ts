@@ -1,4 +1,4 @@
-import { BadRequestException, HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -9,27 +9,32 @@ import { RequestContext } from '@/common/context/request-context';
  * is not a 400 becomes `INTERNAL_ERROR`. So a plain `NotFoundException` from `@nestjs/common`
  * answered 404 with `code: "INTERNAL_ERROR"` — the tenant boundary, the most important refusal in
  * this module, reporting itself as a server fault. Found at the Phase 6 exit review.
+ *
+ * Since 2026-10-24 the filter gives Nest's 400, 401, 403 and 404 their catalog codes too
+ * (`FRAMEWORK_CODES`), so the router's own 404 is `NOT_FOUND`. A domain refusal still throws the
+ * project's exception: only it carries a specific code, a message and `details`.
  */
 import {
-  DomainException, NoMembershipException, NotFoundException,
+  DomainException, InvalidRequestException, NoMembershipException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import {
   calendarMonth, isFutureDay, isLocalDate, isWithinCorrectionWindow, localDayOf, rollingWindow,
   type LocalDate,
 } from '@/common/time/local-day';
 import {
-  ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD, SEED_RATIO_PURPOSES,
+  ACTIVITY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PERIOD,
 } from '@/domain/constants';
-import type { RatioDisplayUnit } from '@/domain/constants/ratio-display';
 import { subPeriodActivityTarget, type CascadeTargets } from '@/domain/metrics/sub-period-activity-target';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import {
   ActivityCategoryRepository, ActivityTypeRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
-import { diverges } from '@/modules/config/ratio.service';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import { boundCodes, countOf, defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
 import { GoalService } from '@/modules/goals/goal.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { ProductionReadings } from '@/modules/production/production-readings';
@@ -44,7 +49,9 @@ import type { ActivityLogDocument } from './activity-log.schema';
 import {
   bucketIndex, bucketsFor, dashboardRange, type DashboardBucket, type DashboardRange,
 } from './activity-dashboard';
-import { appliesTo, computeRatio, type RatioStatus } from './activity-ratios';
+import { ActivityRatioReadings, type ActivityRatioView } from './activity-ratio-readings';
+import { appliesTo } from './activity-ratios';
+import { ACTIVITY_MESSAGES, ACTIVITY_REFUSALS } from './activity.messages';
 
 /** One activity type's count on one day, as the wire carries it. */
 export interface ActivityCountView {
@@ -68,14 +75,17 @@ export interface ActivityDayView {
 }
 
 /**
- * One of the goal's three cascade codes over the window, against its target (P11-T4): the coaching
- * session's Activity card, *{logged} / {target}*, labelled *pro-rated*.
+ * One of the three cascade roles over the window, against its target (P11-T4): the coaching session's
+ * Activity card, *{logged} / {target}*, labelled *pro-rated*. The role's codes are the office's binding
+ * (ADR-0163), summed.
  */
 export interface ActivityWindowTargetView {
   key: ActivityTargetKey;
-  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  /** The first code the office binds to this role — never an item number (invariant §4). */
   code: string;
-  /** Every stored entry against the code in the window, archived types included. */
+  /** Every code the office binds to this role; `logged` is their sum. */
+  codes: string[];
+  /** Every stored entry against the role's codes in the window, archived types included. */
   logged: number;
   /**
    * `SUB_PERIOD_ACTIVITY_TARGET` for `ROLLING_7D`: this month's `SUMMARY_ACTIVITY_TARGET` pro-rated.
@@ -146,44 +156,8 @@ export interface ActivityDashboardView {
   correctedDays: number;
 }
 
-/** One activity code in a ratio's formula, as the office names and numbers it. */
-export interface RatioTermView {
-  code: string;
-  label: string;
-  /** The number the log screen shows — display order, never an identity (invariant §4). 0 when unknown. */
-  displayOrder: number;
-}
-
-/** One of the office's ratios, computed over the member's last 30 days (P10-T2). */
-export interface ActivityRatioView {
-  code: string;
-  label: string;
-  comparison: 'gte' | 'band';
-  displayUnit: RatioDisplayUnit;
-  /** The office's own benchmark — a proportion for a rate, points either side for the balance. */
-  benchmark: number;
-  /**
-   * The section the ratio measures, read from its denominator — *Selling* for a selling success rate —
-   * or *Balance* for the two-sided one. `null` when the denominator spans sections.
-   */
-  tag: { code: string | null; label: string } | null;
-  numerator: RatioTermView[];
-  denominator: RatioTermView[];
-  /**
-   * The balance's two ends, named by the section each side counts — *Selling* and *Recruitment* on the
-   * seed — so an office that rebuilds it is not told it leans toward selling. `null` for a rate, and a
-   * side is `null` when its codes span sections.
-   */
-  sides: { numerator: string | null; denominator: string | null } | null;
-  /** The platform's sentence for what it measures; `null` for an office's own formula, or one it changed. */
-  purpose: string | null;
-  divergesFromStandard: boolean;
-  value: number | null;
-  share: number | null;
-  numeratorCount: number;
-  denominatorCount: number;
-  status: RatioStatus;
-}
+/** A ratio's term and a computed ratio: the shapes `ActivityRatioReadings` builds (one place since UI V1, Phase 18.99 T4). */
+export type { ActivityRatioView, RatioTermView } from './activity-ratio-readings';
 
 export interface ActivityRatiosView {
   membershipId: string;
@@ -273,6 +247,12 @@ export class ActivityService {
      * the save read the draft again (`app.module.int.spec.ts` pins it).
      */
     @Optional() @Inject(TenantConfigService) private readonly published: TenantConfigService | null = null,
+    /*
+     * ADR-0163 §4: which activity types each cascade role counts — the office's binding, through the one resolver.
+     * The application always provides it; optional, with the token named for the reason above, and without it the
+     * default binding.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -371,9 +351,10 @@ export class ActivityService {
     }
 
     const week = weekly ? subPeriodActivityTarget(plan.monthly) : null;
-    const { leadsCode, appointmentsCode, closingsCode } = plan.mapping;
-    const target = (key: ActivityTargetKey, code: string, of: number | undefined): ActivityWindowTargetView => ({
-      key, code, logged: totals.get(code) ?? 0, target: of ?? null,
+    // The office's binding (ADR-0163 §4): a role bound to `[A, B]` counts both.
+    const { binding } = plan;
+    const target = (key: ActivityTargetKey, codes: string[], of: number | undefined): ActivityWindowTargetView => ({
+      key, code: codes[0] ?? '', codes: [...codes], logged: countOf(totals, codes), target: of ?? null,
     });
 
     return {
@@ -386,11 +367,11 @@ export class ActivityService {
       daysLogged: rows.length,
       totalCount,
       targets: [
-        target('leads', leadsCode, week?.leads),
-        target('appointments', appointmentsCode, week?.appointments),
-        target('closings', closingsCode, week?.policies),
+        target('leads', binding.leads, week?.leads),
+        target('appointments', binding.appointments, week?.appointments),
+        target('closings', binding.closings, week?.policies),
       ],
-      sections: sectionChips(shown, totals, [leadsCode, appointmentsCode, closingsCode]),
+      sections: sectionChips(shown, totals, boundCodes(binding)),
     };
   }
 
@@ -489,7 +470,9 @@ export class ActivityService {
     if (stray.length > 0) {
       const counts = stray.map((code) => byCode.get(code)!);
       sections.push({
-        code: '', label: 'Other', standing: 'archived', total: total(sum(counts)), counts: sum(counts),
+        // The section's name is the API's own, written for the reader; each row's is its code (P18.98-T5 AC-4).
+        code: '', label: render(ACTIVITY_MESSAGES.otherSection, ctx.reader), standing: 'archived',
+        total: total(sum(counts)), counts: sum(counts),
         types: stray.map((code, i) => ({
           code, label: code, description: null, displayOrder: 0, standing: 'archived',
           total: total(counts[i]), counts: counts[i],
@@ -549,66 +532,26 @@ export class ActivityService {
   async ratiosOf(
     ctx: RequestContext, subject: { membershipId: string; orgLevelCode: string },
   ): Promise<ActivityRatiosView> {
+    const { ratios, ...window } = await this.ratiosOfSets(ctx, { one: [subject.membershipId] }, subject.orgLevelCode);
+    return { membershipId: subject.membershipId, ...window, ratios: ratios.one };
+  }
+
+  /**
+   * **The same ratios over several sets of members' summed counts at once** (UI V1, Phase 18.99 T4; UI-001: the Unit
+   * Dashboard's *Ratio · 30 hari terakhir*, its *Unit* and its *Group*). `ratiosOf` is the one-member set of this, so a
+   * set's figures are the Ratio page's by construction: the same window, the same definitions and the same formula over
+   * the members' counts added up — each member counted once in a set, however many sets hold them. **No subject is
+   * resolved and no audit entry written here**: the caller has resolved who it may read and writes its own entries.
+   * One read of the logs for every set together, whatever their number.
+   */
+  async ratiosOfSets<K extends string>(
+    ctx: RequestContext, sets: Readonly<Record<K, readonly string[]>>, orgLevelCode: string,
+  ): Promise<Omit<ActivityRatiosView, 'membershipId' | 'ratios'> & { ratios: Record<K, ActivityRatioView[]> }> {
     const office = await this.office(ctx);
     const today = localDayOf(this.clock.now(), office.timezone);
     const window = rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
-
-    const [rows, definitions, categories, types] = await Promise.all([
-      this.logs.find(ctx, { membershipId: subject.membershipId, localDate: { $gte: window.from, $lte: window.to } }),
-      this.ratioDefinitions.find(ctx, { status: 'active' }, { sort: { displayOrder: 1 } }),
-      this.categories.find(ctx, {}),
-      this.types.find(ctx, {}),
-    ]);
-
-    const sums = new Map<string, number>();
-    for (const row of rows) {
-      for (const entry of row.entries) {
-        sums.set(entry.activityTypeCode, (sums.get(entry.activityTypeCode) ?? 0) + entry.count);
-      }
-    }
-    const typeOf = new Map(types.map((t) => [t.code, t]));
-    const sectionOf = new Map(categories.map((c) => [c.code, c]));
-    const term = (code: string): RatioTermView => {
-      const type = typeOf.get(code);
-      return { code, label: type?.label ?? code, displayOrder: type?.displayOrder ?? 0 };
-    };
-    /** The one section a list of codes belongs to, or undefined when they span more than one. */
-    const sectionFor = (codes: readonly string[]) => {
-      const sections = [...new Set(codes.map((code) => typeOf.get(code)?.categoryCode))];
-      return sections.length === 1 && sections[0] ? sectionOf.get(sections[0]) : undefined;
-    };
-    const tagFor = (comparison: string, denominator: readonly string[]) => {
-      if (comparison === 'band') return { code: null, label: 'Balance' };
-      const section = sectionFor(denominator);
-      return section ? { code: section.code, label: section.label } : null;
-    };
-
-    return {
-      membershipId: subject.membershipId,
-      ...window,
-      days: PERIOD.ROLLING_30D_DAYS,
-      ratios: definitions
-        .filter((d) => appliesTo(d.appliesToOrgLevelCodes, subject.orgLevelCode))
-        .map((d): ActivityRatioView => {
-          const diverged = diverges(d);
-          return {
-            code: d.code,
-            label: d.label,
-            comparison: d.comparison,
-            displayUnit: d.displayUnit,
-            benchmark: d.benchmark,
-            tag: tagFor(d.comparison, d.denominator),
-            sides: d.comparison === 'band'
-              ? { numerator: sectionFor(d.numerator)?.label ?? null, denominator: sectionFor(d.denominator)?.label ?? null }
-              : null,
-            numerator: d.numerator.map(term),
-            denominator: d.denominator.map(term),
-            purpose: d.origin === 'platform' && !diverged ? SEED_RATIO_PURPOSES[d.code] ?? null : null,
-            divergesFromStandard: diverged,
-            ...computeRatio(d, sums),
-          };
-        }),
-    };
+    const readings = new ActivityRatioReadings(this.logs, this.ratioDefinitions, this.categories, this.types);
+    return { ...window, days: PERIOD.ROLLING_30D_DAYS, ratios: await readings.ratiosOfSets(ctx, sets, orgLevelCode, window) };
   }
 
   /**
@@ -690,7 +633,7 @@ export class ActivityService {
     if (isFutureDay(date, today)) {
       throw new DomainException(
         ErrorCode.ACTIVITY_FUTURE_DATE,
-        `${date} has not happened yet in this office. A day is logged after it, not before.`,
+        ACTIVITY_REFUSALS.ACTIVITY_FUTURE_DATE.notYet({ date }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, today },
       );
@@ -702,8 +645,7 @@ export class ActivityService {
       // step, and the screen switches to the correction form rather than showing a message.
       throw new DomainException(
         ErrorCode.ACTIVITY_DATE_OUT_OF_WINDOW,
-        `${date} is closed for editing. Correct it instead, with a reason — the correction stays `
-        + 'beside the numbers anybody has already read.',
+        ACTIVITY_REFUSALS.ACTIVITY_DATE_OUT_OF_WINDOW.closed({ date }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { date, graceDays: grace },
       );
@@ -764,25 +706,21 @@ export class ActivityService {
     const reason = (input.reason ?? '').trim();
 
     if (!reason) {
-      throw new BadRequestException(
-        'Say why the day is being corrected. A correction nobody can explain is a number that '
-        + 'changed for no reason anybody can find.',
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.correctionReason);
     }
 
     const existing = await this.logs.findOne(ctx, { membershipId: me, localDate: date });
     if (!existing) {
-      throw new NotFoundException(
-        `There is no entry for ${date} to correct. Log the day instead.`,
+      throw new DomainException(
+        ErrorCode.NOT_FOUND,
+        ACTIVITY_REFUSALS.NOT_FOUND.noEntryToCorrect({ date }),
+        HttpStatus.NOT_FOUND,
       );
     }
 
     const grace = office.settings.activityBackdateGraceDays;
     if (isWithinCorrectionWindow(date, today, grace)) {
-      throw new BadRequestException(
-        `${date} is still open — save it normally. A correction is for a day somebody has `
-        + 'already read.',
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.stillOpen({ date }));
     }
 
     const mine = ctx.membership?.orgLevelCode ?? '';
@@ -847,30 +785,28 @@ export class ActivityService {
   }
 
   /**
-   * The goal's cascade codes, and — for a 7-day read — this month's `SUMMARY_ACTIVITY_TARGET`, read and
-   * computed exactly as `GET /summary` computes its *Monthly* targets (`summaryPlan`): the plan through
+   * The office's cascade binding (ADR-0163 §4), and — for a 7-day read — this month's `SUMMARY_ACTIVITY_TARGET`,
+   * read and computed exactly as `GET /summary` computes its *Monthly* targets (`summaryPlan`): the plan through
    * `GoalService.planOf`, the year to date through last month and this month's own APE. Another window
    * needs only the codes, so it reads no production.
    */
   private async monthPlan(
     ctx: RequestContext, membershipId: string, today: LocalDate, weekly: boolean,
-  ): Promise<{
-    mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string };
-    monthly: CascadeTargets | null;
-  }> {
+  ): Promise<{ binding: CascadeBinding; monthly: CascadeTargets | null }> {
     const year = today.slice(0, 4);
     const month = today.slice(0, 7);
     const monthNumber = Number(today.slice(5, 7));
     const previous = monthNumber === 1 ? null : `${year}-${String(monthNumber - 1).padStart(2, '0')}`;
-    const [goal, through, thisMonth] = await Promise.all([
+    const [goal, through, thisMonth, binding] = await Promise.all([
       this.goals.planOf(ctx, year, membershipId),
       weekly && previous ? this.production.apeYearToDateThrough(ctx, membershipId, previous) : null,
       weekly ? this.production.apeForMonth(ctx, membershipId, month) : null,
+      this.bindings ? this.bindings.resolveCascadeBinding(ctx) : defaultBinding(),
     ]);
     const plan = weekly
       ? summaryPlan({ goal, month, throughLastMonthMinor: through?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null })
       : null;
-    return { mapping: goal.cascadeMapping, monthly: plan?.monthlyCounts ?? null };
+    return { binding, monthly: plan?.monthlyCounts ?? null };
   }
 
   private requireMembership(ctx: RequestContext): string {
@@ -883,7 +819,7 @@ export class ActivityService {
 
   private requireDay(value: string): LocalDate {
     if (!isLocalDate(value)) {
-      throw new BadRequestException(`${value} is not a date. Days are written YYYY-MM-DD.`);
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.notADay({ value }));
     }
     return value;
   }
@@ -984,9 +920,7 @@ export class ActivityService {
     const sent = Object.keys(counts ?? {}).map((code) => code.trim().toUpperCase());
     const unknown = sent.filter((code) => !codes.has(code));
     if (unknown.length > 0) {
-      throw new BadRequestException(
-        `This office has no activity type with the code ${unknown.join(', ')} in the list it has published.`,
-      );
+      throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.unknownCodes({ codes: unknown }));
     }
 
     // A code that exists but belongs to a section this rung is not shown. Its own code, because
@@ -996,7 +930,7 @@ export class ActivityService {
     if (hidden.length > 0) {
       throw new DomainException(
         ErrorCode.ACTIVITY_TYPE_NOT_APPLICABLE,
-        `${hidden.join(', ')} counts activity in a section your office does not show your rung.`,
+        ACTIVITY_REFUSALS.ACTIVITY_TYPE_NOT_APPLICABLE.hiddenSection({ codes: hidden }),
         HttpStatus.UNPROCESSABLE_ENTITY,
         { codes: hidden },
       );
@@ -1023,7 +957,7 @@ export class ActivityService {
       const from = this.requireDay(input.from ?? today);
       const to = this.requireDay(input.to ?? today);
       if (from > to) {
-        throw new BadRequestException('The range starts after it ends.');
+        throw new InvalidRequestException(ACTIVITY_REFUSALS.VALIDATION_FAILED.rangeBackwards);
       }
       return { from, to };
     }
@@ -1032,8 +966,8 @@ export class ActivityService {
       case 'ROLLING_30D': return rollingWindow(today, PERIOD.ROLLING_30D_DAYS);
       case 'ROLLING_7D': return rollingWindow(today, PERIOD.ROLLING_7D_DAYS);
       default:
-        throw new BadRequestException(
-          `${input.period} is not a period. One of: ROLLING_7D, ROLLING_30D, CALENDAR_MONTH.`,
+        throw new InvalidRequestException(
+          ACTIVITY_REFUSALS.VALIDATION_FAILED.notAPeriod({ period: String(input.period) }),
         );
     }
   }

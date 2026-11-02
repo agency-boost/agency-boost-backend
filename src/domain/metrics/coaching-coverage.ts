@@ -1,13 +1,15 @@
 import { COACHING } from '@/domain/constants';
 import { coachedWithin, daysSinceLastCoaching } from './coaching-recency';
+import { rateOver } from './rate';
 
 /**
  * `COACHING_COVERAGE` (`metrics-and-definitions.md` §A.3, P11-T10 AC-5): the share of the members in a
  * scope who were coached inside the window.
  *
  * **The formula is the definition**: `count(members where COACHED_nD) / count(members in scope)`, rounded
- * to a whole percent, read once for each window of `COACHING_COVERAGE_WINDOWS` (§B.4) — `COACHED_7D`, the
- * primary, then `COACHED_30D`. `COACHED_nD` is `coaching-recency.ts`'s, over `DAYS_SINCE_LAST_COACHING`,
+ * to a whole percent half up **in integers** (`rateOver`; P18.97-T3, parity F-254 — 23 of 40 is 58%, which
+ * `Math.round(23 / 40 * 100)` read 57), read once for each window of `COACHING_COVERAGE_WINDOWS` (§B.4) —
+ * `COACHED_7D`, the primary, then `COACHED_30D`. `COACHED_nD` is `coaching-recency.ts`'s, over `DAYS_SINCE_LAST_COACHING`,
  * so every rule that metric carries holds here without being restated:
  *
  * - **only a session finalized at least once counts** — `finalized`, or `reopened` while a correction is
@@ -43,7 +45,7 @@ export interface CoachingCoverage {
   coached: number;
   /** Members of the scope, less its leader. */
   members: number;
-  /** `coached / members`, a whole percent, rounded half up as the prototype rounds; `null` for nobody. */
+  /** `coached / members`, a whole percent, rounded half up in integers (`rateOver`); `null` for nobody. */
   pct: number | null;
 }
 
@@ -83,7 +85,7 @@ export function coachingCoverage(input: {
       windowDays,
       coached,
       members: members.length,
-      pct: members.length === 0 ? null : Math.round((coached / members.length) * 100),
+      pct: rateOver(coached, members.length).pct,
     };
   });
 }

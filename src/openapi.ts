@@ -28,7 +28,11 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
           '— and every `code` has a row in `docs/02-specs/api/error-catalog.md`. **Branch on the ' +
           'code, never on the message.**\n\n' +
           'A resource in another tenant answers `404`, not `403`: a `403` would confirm the id ' +
-          'exists.',
+          'exists.\n\n' +
+          '**Every sentence is in the request\'s language** — a refusal\'s `message`, its `details.violations`, a ' +
+          'notice: `Accept-Language` (`id` or `en`, exactly), else the signed-in person\'s saved language, else ' +
+          'Bahasa Indonesia, the default since 2026-10-29 (`docs/02-specs/api/conventions.md`). `code` and every other ' +
+          'detail are the same in both.',
       )
       .setVersion('1.0')
       .addBearerAuth()
@@ -91,6 +95,8 @@ function describeFailuresAndPermissions(
             'application/json': {
               schema: shape.isArray ? { type: 'array', items: ref } : ref,
             },
+            // A template asked for as a file is answered as that file (ADR-0184).
+            ...Object.fromEntries((shape.files ?? []).map((type) => [type, { schema: { type: 'string', format: 'binary' } }])),
           },
         };
       }

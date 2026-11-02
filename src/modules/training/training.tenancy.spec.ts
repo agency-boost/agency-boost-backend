@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { SEED_TRAINING_MODULES } from '@/domain/constants';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
+import { SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES } from '@/domain/constants';
 import type { ConfigChangeDto } from '@/modules/config/changes.dto';
 import { TrainingService } from './training.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -52,7 +54,7 @@ describe('the office training taxonomy (P5-T1)', () => {
     it('seeds the Owner prototype’s taxonomy when the company has published none', async () => {
       const tree = await training.list(ctx(KPM_A));
       expect(tree.map((c) => c.code)).toEqual([
-        'SALES', 'PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'SOFT_SKILLS', 'COMPANY_AND_KPM',
+        'SALES', 'PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM',
       ]);
       const sales = tree[0];
       expect(sales.skills.map((s) => s.code)).toEqual([
@@ -140,7 +142,8 @@ describe('the office training taxonomy (P5-T1)', () => {
   describe('creating and editing (AC-2, AC-9)', () => {
     it('appends a category, a skill within its category, and a module within its skill', async () => {
       const category = await training.createCategory(ctx(KPM_A), { code: 'onboarding', label: 'Onboarding' });
-      expect(category).toMatchObject({ code: 'ONBOARDING', displayOrder: 7, version: 1, description: null });
+      // After the seed's seven (UI V1: Motivation the seventh, P18.99-T10).
+      expect(category).toMatchObject({ code: 'ONBOARDING', displayOrder: SEED_TRAINING_CATEGORIES.length + 1, version: 1, description: null });
 
       const skill = await training.createSkill(ctx(KPM_A), { code: 'FIRST_WEEK', categoryCode: 'onboarding', label: 'First week' });
       expect(skill).toMatchObject({ categoryCode: 'ONBOARDING', displayOrder: 1 });
@@ -292,6 +295,36 @@ describe('the office training taxonomy (P5-T1)', () => {
         .rejects.toThrow('CLOSING_TECHNIQUES teaches CLOSING, which is archived');
       await expect(training.createSkill(ctx(KPM_A), { code: 'UNDER_ARCHIVED', categoryCode: 'SALES', label: 'x' }))
         .rejects.toThrow('No active training category called SALES');
+    });
+
+    it('P18.98-T5 AC-3 refuses in Bahasa Indonesia: a code taken, a parent not active, nothing to change, an archived parent', async () => {
+      const said = async (attempt: Promise<unknown>) => {
+        const err = await attempt.then(() => null, (e: unknown) => e as DomainException);
+        return [err!.code, err!.messageFor(readerIn('id'))];
+      };
+      expect(await said(training.createCategory(ctx(KPM_A), { code: 'SALES', label: 'Again' }))).toEqual([
+        'VALIDATION_FAILED', 'KPM ini sudah memiliki kategori training dengan kode SALES. Kode tidak pernah dipakai ulang.',
+      ]);
+      expect(await said(training.createModule(ctx(KPM_A), { code: 'PROSPECT_LIST', skillCode: 'CLOSING', title: 'Again' })))
+        .toEqual(['VALIDATION_FAILED', 'KPM ini sudah memiliki modul training dengan kode PROSPECT_LIST. Kode tidak pernah dipakai ulang.']);
+      expect(await said(training.createSkill(ctx(KPM_A), { code: 'NEW_SKILL', categoryCode: 'NOPE', label: 'x' })))
+        .toEqual(['VALIDATION_FAILED', 'Tidak ada kategori training aktif dengan kode NOPE di KPM ini.']);
+      expect(await said(training.createModule(ctx(KPM_A), { code: 'NEW_MODULE', skillCode: 'NOPE', title: 'x' })))
+        .toEqual(['VALIDATION_FAILED', 'Tidak ada skill training aktif dengan kode NOPE di KPM ini.']);
+      const category = await categoryNamed('SALES');
+      expect(await said(training.updateCategory(ctx(KPM_A), category.id, {}))).toEqual(['VALIDATION_FAILED', 'Tidak ada yang diubah.']);
+
+      await training.archiveCategory(ctx(KPM_A), category.id);
+      expect(await said(training.restoreSkill(ctx(KPM_A), (await skillNamed('CLOSING')).id))).toEqual([
+        'VALIDATION_FAILED',
+        'CLOSING ada di SALES, yang diarsipkan. Pulihkan kategorinya dulu — skill di kategori yang diarsipkan tidak tampil di layar '
+          + 'mana pun.',
+      ]);
+      expect(await said(training.restoreModule(ctx(KPM_A), (await moduleNamed('CLOSING_TECHNIQUES')).id))).toEqual([
+        'VALIDATION_FAILED',
+        'CLOSING_TECHNIQUES mengajarkan CLOSING, yang diarsipkan. Pulihkan skill-nya dulu — modul di bawah skill yang diarsipkan tidak '
+          + 'tampil di layar mana pun.',
+      ]);
     });
 
     it('archives a module on its own', async () => {

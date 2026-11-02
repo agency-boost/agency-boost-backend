@@ -5,6 +5,7 @@ import {
   defaultEventTypes, eventTypeSeedDocuments, eventTypesProblems,
 } from '@/modules/events/event-types-payload';
 import { platformDefaultPayload, withPlatformLadder } from './template-defaults';
+import { englishAll } from '../../../test/i18n';
 
 /**
  * What the two template kinds P5-T9 added refuse, one rule at a time (AC-4).
@@ -15,58 +16,58 @@ import { platformDefaultPayload, withPlatformLadder } from './template-defaults'
  */
 describe('the event types payload (P5-T9)', () => {
   it('passes the platform defaults, which is what a template starts from', () => {
-    expect(eventTypesProblems(defaultEventTypes())).toEqual([]);
+    expect(englishAll(eventTypesProblems(defaultEventTypes()))).toEqual([]);
     expect(defaultEventTypes().types).toHaveLength(5);
   });
 
   it('refuses a payload that is not a list at all, and stops there', () => {
     // Stops, rather than reporting five more problems about a thing that is not a list.
-    expect(eventTypesProblems({})).toEqual(['types must be a list.']);
-    expect(eventTypesProblems(null)).toEqual(['types must be a list.']);
-    expect(eventTypesProblems({ types: 'TRAINING' })).toEqual(['types must be a list.']);
+    expect(englishAll(eventTypesProblems({}))).toEqual(['types must be a list.']);
+    expect(englishAll(eventTypesProblems(null))).toEqual(['types must be a list.']);
+    expect(englishAll(eventTypesProblems({ types: 'TRAINING' }))).toEqual(['types must be a list.']);
   });
 
   it('refuses an empty list: an office with no type cannot file an event', () => {
-    expect(eventTypesProblems({ types: [] }))
+    expect(englishAll(eventTypesProblems({ types: [] })))
       .toEqual([expect.stringContaining('nothing to file an event under')]);
   });
 
   it('refuses a row with no code, because an event stores the code', () => {
-    expect(eventTypesProblems({ types: [{ label: 'Training' }] }))
+    expect(englishAll(eventTypesProblems({ types: [{ label: 'Training' }] })))
       .toEqual([expect.stringContaining('Event type 1 has no code')]);
   });
 
   it('refuses a code used twice, which would be one type wearing two labels', () => {
-    const problems = eventTypesProblems({
+    const problems = englishAll(eventTypesProblems({
       types: [{ code: 'TRAINING', label: 'Training' }, { code: 'training', label: 'Latihan' }],
-    });
+    }));
     // Case-insensitively: codes are upper-cased on the way in, so these are one code.
     expect(problems).toEqual([expect.stringContaining('TRAINING is used twice')]);
   });
 
   it('refuses a code nothing could store', () => {
-    expect(eventTypesProblems({ types: [{ code: '1ST-EVENT', label: 'First' }] }))
+    expect(englishAll(eventTypesProblems({ types: [{ code: '1ST-EVENT', label: 'First' }] })))
       .toEqual([expect.stringContaining('is not a usable code')]);
   });
 
   it('refuses a row with no label, which would render as a blank line', () => {
-    expect(eventTypesProblems({ types: [{ code: 'TRAINING', label: '   ' }] }))
+    expect(englishAll(eventTypesProblems({ types: [{ code: 'TRAINING', label: '   ' }] })))
       .toEqual([expect.stringContaining('has no label')]);
   });
 
   it('refuses a colour nothing can parse, and accepts one that can', () => {
-    expect(eventTypesProblems({ types: [{ code: 'A', label: 'A', color: 'blue' }] }))
+    expect(englishAll(eventTypesProblems({ types: [{ code: 'A', label: 'A', color: 'blue' }] })))
       .toEqual([expect.stringContaining('is not a colour')]);
-    expect(eventTypesProblems({ types: [{ code: 'A', label: 'A', color: '#2D9CDB' }] })).toEqual([]);
+    expect(englishAll(eventTypesProblems({ types: [{ code: 'A', label: 'A', color: '#2D9CDB' }] }))).toEqual([]);
     // Absent is fine: a type without a colour simply has no swatch.
-    expect(eventTypesProblems({ types: [{ code: 'A', label: 'A' }] })).toEqual([]);
+    expect(englishAll(eventTypesProblems({ types: [{ code: 'A', label: 'A' }] }))).toEqual([]);
   });
 
   it('collects every problem rather than stopping at the first', () => {
     // A payload half-fixed twice is worse than one refused once with the whole list.
-    expect(eventTypesProblems({
+    expect(englishAll(eventTypesProblems({
       types: [{ code: '', label: '' }, { code: 'A', label: 'A', color: 'nope' }],
-    })).toHaveLength(3);
+    }))).toHaveLength(3);
   });
 
   it('numbers and normalises the rows an office starts with', () => {
@@ -102,24 +103,24 @@ describe('the campaign kinds payload (P5-T9)', () => {
   });
 
   it('passes the platform tiers and MOC, which is what a template starts from', () => {
-    expect(campaignKindsProblems(defaultCampaignKinds())).toEqual([]);
+    expect(englishAll(campaignKindsProblems(defaultCampaignKinds()))).toEqual([]);
     // Three tiers and two MOC rules, from one list keyed by `kind`.
     expect(defaultCampaignKinds().rules).toHaveLength(5);
   });
 
   it('refuses a payload that is not a list at all, and stops there', () => {
-    expect(campaignKindsProblems({})).toEqual(['rules must be a list.']);
+    expect(englishAll(campaignKindsProblems({}))).toEqual(['rules must be a list.']);
   });
 
   it('refuses an empty list: nothing to qualify for', () => {
-    expect(campaignKindsProblems({ rules: [] }))
+    expect(englishAll(campaignKindsProblems({ rules: [] })))
       .toEqual([expect.stringContaining('nothing to qualify for')]);
   });
 
   it('refuses a kind that is not one of the three', () => {
-    expect(campaignKindsProblems({ rules: [rule({ kind: 'bonus_scheme' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ kind: 'bonus_scheme' })] })))
       .toEqual([expect.stringContaining('is not a rule kind')]);
-    expect(campaignKindsProblems({ rules: [rule({ kind: undefined })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ kind: undefined })] })))
       .toEqual([expect.stringContaining('(none) is not a rule kind')]);
   });
 
@@ -127,50 +128,50 @@ describe('the campaign kinds payload (P5-T9)', () => {
     const asked = rule({
       criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'leaders_used', comparator: 'lte', value: 10 }] }],
     });
-    expect(campaignKindsProblems({ rules: [asked] }))
+    expect(englishAll(campaignKindsProblems({ rules: [asked] })))
       .toEqual([expect.stringContaining('Leaders used counts the office, not anybody’s work')]);
   });
 
   it('refuses a missing code and a missing name', () => {
-    expect(campaignKindsProblems({ rules: [rule({ code: '' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ code: '' })] })))
       .toEqual([expect.stringContaining('has no code')]);
-    expect(campaignKindsProblems({ rules: [rule({ name: '  ' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ name: '  ' })] })))
       .toEqual([expect.stringContaining('has no name')]);
   });
 
   it('scopes a duplicate code to its kind, so two kinds may share a name', () => {
-    expect(campaignKindsProblems({ rules: [rule(), rule({ rank: 2 })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule(), rule({ rank: 2 })] })))
       .toEqual([expect.stringContaining('STAR_CLUB is used twice in production_club')]);
     // The same code under a different kind is fine: a code is unique within its own list.
-    expect(campaignKindsProblems({ rules: [rule(), rule({ kind: 'moc' })] })).toEqual([]);
+    expect(englishAll(campaignKindsProblems({ rules: [rule(), rule({ kind: 'moc' })] }))).toEqual([]);
   });
 
   it('refuses a rank that is not a rank, and two rules sharing one', () => {
-    expect(campaignKindsProblems({ rules: [rule({ rank: 0 })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ rank: 0 })] })))
       .toEqual([expect.stringContaining('needs a rank of 1 or more')]);
-    expect(campaignKindsProblems({ rules: [rule({ rank: 1.5 })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ rank: 1.5 })] })))
       .toEqual([expect.stringContaining('needs a rank of 1 or more')]);
     // Two tiers at one rank make "the highest reached" a question with no answer.
-    expect(campaignKindsProblems({ rules: [rule(), rule({ code: 'ELITE' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule(), rule({ code: 'ELITE' })] })))
       .toEqual([expect.stringContaining('share rank 1')]);
   });
 
   it('refuses a rule everybody qualifies for on the day it publishes', () => {
-    expect(campaignKindsProblems({ rules: [rule({ criteriaGroups: [] })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ criteriaGroups: [] })] })))
       .toEqual([expect.stringContaining('asks for nothing')]);
-    expect(campaignKindsProblems({
+    expect(englishAll(campaignKindsProblems({
       rules: [rule({ criteriaGroups: [{ mode: 'all', criteria: [] }] })],
-    })).toEqual([expect.stringContaining('group 1 asks for nothing')]);
+    }))).toEqual([expect.stringContaining('group 1 asks for nothing')]);
   });
 
   it('refuses a mode and a groupMode that are not one', () => {
-    expect(campaignKindsProblems({ rules: [rule({ groupMode: 'either' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ groupMode: 'either' })] })))
       .toEqual([expect.stringContaining('groupMode must be all or any')]);
-    expect(campaignKindsProblems({
+    expect(englishAll(campaignKindsProblems({
       rules: [rule({ criteriaGroups: [{ mode: 'some', criteria: [{ metricKey: 'A', comparator: 'gte', value: 1 }] }] })],
-    })).toEqual([expect.stringContaining('mode must be all or any')]);
+    }))).toEqual([expect.stringContaining('mode must be all or any')]);
     // Omitted `groupMode` is fine — the seed resolves one.
-    expect(campaignKindsProblems({ rules: [rule({ groupMode: undefined })] })).toEqual([]);
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ groupMode: undefined })] }))).toEqual([]);
   });
 
   it('refuses a criterion with no metric, no comparator or no number', () => {
@@ -180,16 +181,16 @@ describe('the campaign kinds payload (P5-T9)', () => {
         criteria: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1, ...over }],
       }],
     });
-    expect(campaignKindsProblems({ rules: [rule(criteria({ metricKey: '' }))] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule(criteria({ metricKey: '' }))] })))
       .toEqual([expect.stringContaining('names no metric')]);
-    expect(campaignKindsProblems({ rules: [rule(criteria({ comparator: 'about' }))] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule(criteria({ comparator: 'about' }))] })))
       .toEqual([expect.stringContaining('is not a comparator')]);
-    expect(campaignKindsProblems({ rules: [rule(criteria({ value: 'a lot' }))] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule(criteria({ value: 'a lot' }))] })))
       .toEqual([expect.stringContaining('no number to compare against')]);
   });
 
   it('refuses a criteriaGroups that is not a list, saying what it is missing', () => {
-    expect(campaignKindsProblems({ rules: [rule({ criteriaGroups: 'all of them' })] }))
+    expect(englishAll(campaignKindsProblems({ rules: [rule({ criteriaGroups: 'all of them' })] })))
       .toEqual([expect.stringContaining('asks for nothing')]);
   });
 

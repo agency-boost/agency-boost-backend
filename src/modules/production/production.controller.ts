@@ -1,8 +1,8 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UploadedFile, UseInterceptors,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags,
+  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
 import {
   IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateIf,
@@ -12,14 +12,32 @@ import { CADENCES, type Cadence } from './production-preview';
 import { ProductionCorrections } from './production-correction.service';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { XLSX_MIME_TYPE } from '@/domain/constants';
+import { field } from '@/common/validation/violations';
+import { PRODUCTION_REFUSALS } from './production.messages';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
   UploadPreviewDto,
 } from './production.response.dto';
 import { ProductionImportService } from './production-import.service';
 import { ProductionMonths } from './production-months.service';
-import { ProductionUploadInterceptor, type UploadedCsv } from './production-upload.interceptor';
+import { ProductionUploadInterceptor, type FileUpload } from './production-upload.interceptor';
 import { ProductionService, requireMonth, requireOffice } from './production.service';
+
+/**
+ * **`GET /kpm/data-upload/template`'s query** (S4 of the T17–T20 permission review): `month`, checked as a month by the
+ * service, and `format`, `xlsx` or absent for the JSON. Each a string or nothing, so an operator object is a 400, and
+ * any other query field is refused by name.
+ */
+class TemplateFileQueryDto {
+  @IsOptional()
+  @IsString()
+  month?: string;
+
+  @IsOptional()
+  @IsIn(['xlsx'], { message: field(PRODUCTION_REFUSALS.VALIDATION_FAILED.unknownFormat) })
+  format?: 'xlsx';
+}
 
 /** The multipart form's text field. The file is `file`, read by the interceptor. */
 class PreviewUploadDto {
@@ -113,10 +131,22 @@ export class ProductionController {
       + 'stored. **The header is the version**: there is no version line, and an importer '
       + 'identifies a file by its header cells.',
   })
-  @ApiQuery({ name: 'month', example: '2026-09', description: '`YYYY-MM`, the office’s calendar month. Names the file; the rows are the same for every month.' })
+  @ApiQuery({ name: 'month', type: String, example: '2026-09', description: '`YYYY-MM`, the office’s calendar month. Names the file; the rows are the same for every month.' })
+  @ApiQuery({
+    name: 'format', required: false, enum: ['xlsx'],
+    description: 'Absent: the JSON below, whose `file` is the CSV. `xlsx`: the same header and rows as an Excel workbook '
+      + '(ADR-0184) — its *Data* sheet, with the guide on a sheet of its own in the reader’s language — answered as the '
+      + 'file itself, `attachment; filename="KPM0417-agent-data-Sep-2026.xlsx"`. Anything else is `400 VALIDATION_FAILED`.',
+  })
+  @ApiProduces('application/json', XLSX_MIME_TYPE)
   @ApiResponse({ status: 200, type: TemplateFileDto })
-  async template(@Ctx() ctx: RequestContext, @Query('month') month: string) {
-    return this.production.template(ctx, month ?? '');
+  async template(@Ctx() ctx: RequestContext, @Query() query: TemplateFileQueryDto) {
+    const month = query.month ?? '';
+    if (query.format === 'xlsx') {
+      const { filename, bytes } = await this.production.workbook(ctx, month);
+      return new StreamableFile(bytes, { type: XLSX_MIME_TYPE, disposition: `attachment; filename="${filename}"` });
+    }
+    return this.production.template(ctx, month);
   }
 
   @Post('preview')
@@ -130,16 +160,18 @@ export class ProductionController {
       required: ['month', 'file'],
       properties: {
         month: { type: 'string', example: '2026-09', description: '`YYYY-MM`, the month the figures are for.' },
-        file: { type: 'string', format: 'binary', description: 'The filled template, as it was saved. At most 1 MiB.' },
+        file: { type: 'string', format: 'binary', description: 'The filled template, as it was saved — an Excel workbook (.xlsx) or a CSV. At most 1 MiB.' },
       },
     },
   })
   @ApiOperation({
     summary: 'What a filled file would change, before anything does',
     description:
-      'Reads the file as bytes — UTF-8, or Windows-1252 when it is not valid UTF-8 — with a comma, '
-      + 'semicolon or tab delimiter, and checks its header cell by cell against every template ever '
-      + 'issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is '
+      'Reads the file as bytes. **An Excel workbook** (ADR-0184) is opened only after its parts, as its own directory '
+      + 'declares them, are checked to unpack to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413, '
+      + 'otherwise), and its *Data* sheet is read, at most 10,000 rows (`format: \'xlsx\'`). **A CSV** is read as UTF-8, '
+      + 'or Windows-1252 when it is not valid UTF-8, with a comma, semicolon or tab delimiter. Either way the header is '
+      + 'checked cell by cell against every template ever issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is '
       + 'stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready '
       + 'row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, '
       + 'with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). '
@@ -150,7 +182,7 @@ export class ProductionController {
   async preview(
     @Ctx() ctx: RequestContext,
     @Body() body: PreviewUploadDto,
-    @UploadedFile() file?: UploadedCsv,
+    @UploadedFile() file?: FileUpload,
   ) {
     return this.production.preview(ctx, body.month, file);
   }
@@ -186,7 +218,7 @@ export class ProductionController {
   async commit(
     @Ctx() ctx: RequestContext,
     @Body() body: CommitUploadDto,
-    @UploadedFile() file?: UploadedCsv,
+    @UploadedFile() file?: FileUpload,
   ) {
     return this.imports.commit(ctx, body.month, body.revision, file, body.replace);
   }

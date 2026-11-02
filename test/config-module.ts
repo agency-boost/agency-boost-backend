@@ -18,9 +18,11 @@ import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
 import {
-  ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
+  ActivityBindingRepository, ActivityCategoryRepository, ActivityTypeRepository, ConfigSnapshotRepository,
   LeadStatusRepository, RatioDefinitionRepository,
 } from '@/modules/config/activity.repository';
+import { ActivityBinding, ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { ActivityConfigService } from '@/modules/config/activity.service';
 import { LeadStatusService } from '@/modules/config/lead-status.service';
 import { RatioService } from '@/modules/config/ratio.service';
@@ -52,6 +54,9 @@ import {
 } from '@/modules/activation/activation-template.schema';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { ActivationService } from '@/modules/activation/activation.service';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
+import { FirstSaleService } from '@/modules/activation/first-sale.service';
+import { Activation3MService } from '@/modules/activation/activation-3m.service';
 import { ProductSchema } from '@/modules/products/product.schema';
 import { KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
@@ -116,6 +121,9 @@ import { ProductionMonth, ProductionMonthSchema } from '@/modules/production/pro
 import { ProductionMonthRepository } from '@/modules/production/production-month.repository';
 import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
+import { UnitActivitiesService } from '@/modules/unit-dashboard/unit-activities.service';
+import { CoachingActionDone } from '@/modules/coaching/coaching-action-done.service';
+import { ActivityRatioReadings } from '@/modules/activity/activity-ratio-readings';
 import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
 import { DataUploadRowRepository } from '@/modules/production/data-upload-row.repository';
 import { ProductionMonths } from '@/modules/production/production-months.service';
@@ -126,6 +134,7 @@ import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
+import { AvatarLinks } from '@/modules/users/avatar.service';
 import { UserSchema } from '@/modules/users/user.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -149,6 +158,7 @@ import { LeaderNoteService } from '@/modules/coaching/leader-note.service';
 import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 import { CalendarEventRepository } from '@/modules/calendar/calendar-event.repository';
 import { CalendarNotices } from '@/modules/calendar/calendar-notices';
+import { CalendarAutoItems } from '@/modules/calendar/calendar-auto-items';
 import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
 import { CalendarLeave } from '@/modules/calendar/calendar-leave';
@@ -214,6 +224,8 @@ export function configModule(
 
   const clock: Clock = new FixedClock(now);
   const storage = new StubStorage();
+  // UI V1 (UI-111): profile photos signed into links, for the reads that draw a row's avatar.
+  const avatarLinks = new AvatarLinks(storage, clock);
   const audit = new AuditService(model('AuditLogModel', AuditLogSchema) as never);
   // P11-T3: the §3.5 read audit, one seam for every subject read.
   const subjectReads = new SubjectReadAudit(audit);
@@ -222,6 +234,15 @@ export function configModule(
     new LeadStatusRepository(leadStatuses as never), audit, clock,
   );
   const kpms = model('KpmModelForConfig', KpmSchema);
+  /*
+   * P18.9-T2 (ADR-0163): an office's activity binding, and `resolveCascadeBinding`, the one reader every cascade
+   * count goes through — the summary, coaching, the Unit Dashboard, pace status, the goals and the campaigns below.
+   */
+  const activityBindingRows = model(ActivityBinding.name, ActivityBindingSchema);
+  const activityBindingRepository = new ActivityBindingRepository(activityBindingRows as never);
+  const activityBindings = new ActivityBindingService(
+    activityBindingRepository, new ActivityTypeRepository(types as never), kpms as never, audit,
+  );
   // Shared, because the lead service resolves a leader's downline from the same rows the org
   // module reads — two handles on one collection is two caches and one of them stale.
   const memberships = new MembershipRepository(model(Membership.name, MembershipSchema) as never);
@@ -248,6 +269,8 @@ export function configModule(
     orgLevels,
     audit,
     clock,
+    // P18.9-T2: a bound type is not archived (ADR-0163 §5).
+    activityBindings,
   );
   const ratios = new RatioService(
     new RatioDefinitionRepository(ratioDefinitions as never), activity, orgLevels, audit, clock,
@@ -385,6 +408,9 @@ export function configModule(
     clock,
     // P18.5-T3: a training-linked item completes from the hire's progress.
     trainingReadings,
+    // P18.96-T4: the data-backed items read the production file and the coaching sessions.
+    productionReadings,
+    new CoachingReadings(new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema) as never), clock),
   );
   const activationProgress = new ActivationProgressService(
     activationRows, activation, activationEngine, memberships,
@@ -398,9 +424,22 @@ export function configModule(
     trainingProgressRows, trainingReadings, offeredTraining, training, coach, subjectReads,
     new TenantDay(kpms as never, clock), audit, clock, activationProgress,
   );
-  const newHires = new NewHiresService(
-    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
-    new TenantDay(kpms as never, clock), subjectReads, audit, clock,
+  /*
+   * P18.96-T4: each person's first sale, answered to the leads' and the production file's writes — the real one, so a
+   * spec that moves a lead to *Paid and issued* watches the membership and the checklist move, as the app does.
+   */
+  // P18.96-T6: each new hire's 3M activation, kept once decided — before a first sale, a join date or leaving moves it.
+  // *Mark left* removes the new hire through the removal's own path (no departure hook here: no calendar in these specs).
+  // UI-025: *Mark left* is retired, so the 3M service no longer removes anybody (ADR-0180 §6).
+  const activation3M = new Activation3MService(memberships, new TenantDay(kpms as never, clock), clock);
+  const firstSale = new FirstSaleService(
+    memberships,
+    new LeadReadings(new LeadRepository(model(Lead.name, LeadSchema) as never), new LeadStatusRepository(leadStatuses as never), clock),
+    productionReadings,
+    new TenantDay(kpms as never, clock),
+    clock,
+    activationProgress,
+    activation3M,
   );
 
   const goals = new GoalService(
@@ -420,6 +459,10 @@ export function configModule(
     ),
     // P13-T3: a goal saved on a hire's membership completes their `feature:goals` item.
     activationProgress,
+    // P18.8-T10: a new plan's two percentages open on the office's benchmarks (ADR-0160 §3).
+    new RatioDefinitionRepository(ratioDefinitions as never),
+    // P18.9-T2: the measured rates and `cascadeBinding` read the office's binding.
+    activityBindings,
   );
   // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
   // P11-T4, whose plan the 7-day targets read.
@@ -439,6 +482,10 @@ export function configModule(
     activityReadings,
     // P13-T3: a day saved or corrected may make a hire's fourth week of activity.
     activationProgress,
+    // The published copy is handed over below, once `config` exists.
+    undefined,
+    // P18.9-T2: the 7-day targets count the office's binding.
+    activityBindings,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
   const summary = new SummaryService(
@@ -457,6 +504,10 @@ export function configModule(
     subjectReads,
     // Phase 15: who corrected a figure, by name.
     new MemberNames(memberships, users as never),
+    // P18.9-T2: the targets, the pace and the tiles count the office's binding.
+    activityBindings,
+    // UI V1 (UI-054): the day the page's APE is valid for, from the office's production imports.
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
   );
   // P11-T5: the coaching sessions, and the coaching metrics read over them.
   const coachingSessions = new CoachingSessionRepository(
@@ -465,19 +516,19 @@ export function configModule(
   const coachingReadings = new CoachingReadings(coachingSessions, clock);
   // P11-T6: `GOAL_PACE_STATUS` over `PACING_TO_MAA`, and the roster that serves them.
   const paceStatus = new PaceStatusReadings(
-    new GoalRepository(model(Goal.name, GoalSchema) as never), productionReadings, activityReadings,
+    new GoalRepository(model(Goal.name, GoalSchema) as never), productionReadings, activityReadings, activityBindings,
   );
   const coachingRoster = new CoachingRosterService(
     coach,
     coachingReadings,
     paceStatus,
-    new MemberNames(memberships, users as never),
+    new MemberNames(memberships, users as never, avatarLinks),
     orgLevels,
     new TenantDay(kpms as never, clock),
   );
   // P11-T7: the person a coaching page opens on.
   const coachee = new CoacheeService(
-    coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
+    coach, new MemberNames(memberships, users as never, avatarLinks), orgLevels, new TenantDay(kpms as never, clock),
   );
   // P11-T5: the session lifecycle, and the snapshot finalize takes through the live cards' own internals.
   const coachingSnapshots = new CoachingSnapshotBuilder(
@@ -494,6 +545,8 @@ export function configModule(
     subjectReads,
     notifier,
     clock,
+    // P18.96-T4: a 1:1 finalized or logged with a new hire counts toward their *Weekly 1-on-1 check-in*.
+    activationProgress,
   );
   // P11-T10: a finalized session's print, and the reader's own coaching.
   const coachingRecord = new CoachingRecordService(
@@ -518,9 +571,11 @@ export function configModule(
     productionNames,
     audit,
     clock,
+    // P18.96-T4: a policy in the file may be a member's first sale.
+    firstSale,
   );
   // P9-T5: one figure by hand.
-  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock);
+  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock, firstSale);
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -554,6 +609,8 @@ export function configModule(
     activation,
     events,
     capability,
+    // P18.9-T2: the binding rendered into each snapshot, as its record.
+    activityBindings,
   );
   /*
    * P13.1-T2: the activity log reads and saves in the office's published vocabulary, as Nest wires it
@@ -579,6 +636,17 @@ export function configModule(
     subjectReads,
     // P13-T3: a lead in a hire's pipeline completes their `feature:leads` item.
     activationProgress,
+    // P18.96-T4: a sales lead at *Paid and issued* may be its owner's first sale.
+    firstSale,
+  );
+  // P18.96-T4: a data-backed item's hand tick, with its record — through the leads and the coaching sessions.
+  const activationRecords = new ActivationItemRecords(
+    activationProgress, leadRecords, coachingSession, new TenantDay(kpms as never, clock),
+  );
+  const newHires = new NewHiresService(
+    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
+    new TenantDay(kpms as never, clock), subjectReads, audit, clock, memberships, activationRecords, activation3M,
+    users as never,
   );
   const provisioning = new ProvisioningService(
     categories as never,
@@ -597,6 +665,11 @@ export function configModule(
     clock,
     config,
     namedTemplateRows as never,
+    // P18.9-T2: the office's binding, copied from the source's taxonomy.
+    activityBindingRows as never,
+    // P18.9-T3: the Template library an office may start from, and the ladder its rungs are checked against.
+    model('CompanyModelForConfig', CompanySchema) as never,
+    orgLevels,
   );
 
   // `orgLevels` and `kpms` are exposed since P4-T15: a ratio's applicability validates
@@ -636,6 +709,8 @@ export function configModule(
     new ActivationTemplateRepository(activationTemplates as never),
     new TrainingModuleRepository(trainingModules as never),
     new AssetRepository(assetRows as never),
+    // P18.9-T2: the office's live binding, which *Save as template* carries.
+    activityBindingRepository,
   );
   const templateCopies = new TemplateCopyService(
     namedTemplates, officeSettings, assets, orgLevels, provisioning, kpms as never, audit,
@@ -657,9 +732,14 @@ export function configModule(
    */
   const calendarEntries = new CalendarEventRepository(model(CalendarEvent.name, CalendarEventSchema) as never);
   const calendarNotices = new CalendarNotices(notifier, memberships);
+  // UI V1 (UI-104): what other features put on the calendar, read from their sources — leads, sessions, RSVPs.
+  const calendarAutoItems = new CalendarAutoItems(
+    new LeadRepository(model(Lead.name, LeadSchema) as never), coachingSessions, eventRsvps, eventRows, eventTypeRows,
+    memberships, new MemberNames(memberships, users as never), users as never,
+  );
   const calendar = new CalendarService(
     calendarEntries, memberships, coach, new MemberNames(memberships, users as never), orgLevels,
-    new TenantDay(kpms as never, clock), calendarNotices, subjectReads, audit, clock,
+    new TenantDay(kpms as never, clock), calendarNotices, subjectReads, audit, clock, calendarAutoItems,
   );
   const calendarPeople = new CalendarPeopleService(
     memberships, coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
@@ -682,6 +762,8 @@ export function configModule(
   const campaignEvaluation = new CampaignEvaluation(
     productionReadings, productionMonths, activityReadings, new RatioDefinitionRepository(ratioDefinitions as never),
     memberships, campaignChases, campaignStandings, campaignRows, new TenantDay(kpms as never, clock), clock, audit,
+    // P18.9-T2: the cascade touches count the office's binding.
+    activityBindings,
   );
   const campaignAgent = new CampaignAgentService(
     campaignRows, campaignChases, campaignChaseReadings, campaignEvaluation, coach, memberships, audit,
@@ -697,7 +779,7 @@ export function configModule(
   );
 
   const unitDashboard = new UnitDashboardService(
-    coach, new MemberNames(memberships, users as never), orgLevels, new TenantDay(kpms as never, clock),
+    coach, new MemberNames(memberships, users as never, avatarLinks), orgLevels, new TenantDay(kpms as never, clock),
     coachingReadings, paceStatus, goals, productionReadings, productionMonths, productionCorrections, activityReadings,
     new LeadReadings(
       new LeadRepository(model(Lead.name, LeadSchema) as never),
@@ -706,6 +788,23 @@ export function configModule(
     ),
     subjectReads,
     campaignChaseReadings,
+    // P18.96-T5: the head's own membership, for whether they count for production yet.
+    memberships,
+    // UI V1 (Phase 18.99 T4, UI-028): the office's imports, for *Last updated*.
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
+    // P18.9-T2: the activity cells count the office's binding.
+    activityBindings,
+  );
+  // UI V1 (Phase 18.99 T4, UI-001): the Activities tab — the dashboard's reach, the counts and the Ratio page's ratios.
+  const unitActivities = new UnitActivitiesService(
+    unitDashboard, new TenantDay(kpms as never, clock), activityReadings,
+    new ActivityRatioReadings(
+      new ActivityLogRepository(model(ActivityLog.name, ActivityLogSchema) as never),
+      new RatioDefinitionRepository(ratioDefinitions as never),
+      new ActivityCategoryRepository(categories as never), new ActivityTypeRepository(types as never),
+    ),
+    new ActivityCategoryRepository(categories as never), new ActivityTypeRepository(types as never), subjectReads,
+    new MemberNames(memberships, users as never, avatarLinks),
   );
 
   /*
@@ -738,7 +837,7 @@ export function configModule(
   const recruitTargets = new KpmRecruitTargetRepository(model(KpmRecruitTarget.name, KpmRecruitTargetSchema) as never);
   const officePeople = new OfficePeople(
     memberships, new MemberNames(memberships, users as never), kpms as never,
-    model('CompanyModelForConfig', CompanySchema) as never, orgLevels,
+    model('CompanyModelForConfig', CompanySchema) as never, orgLevels, clock,
   );
   const carrierRules = new CarrierRules(model(QualificationRule.name, QualificationRuleSchema) as never, kpms as never);
   const kpmOverview = new KpmOverviewService(
@@ -756,28 +855,32 @@ export function configModule(
     activityReadings, coachingReadings, new TenantDay(kpms as never, clock), clock, subjectReads,
   );
 
+  // UI V1 (UI-104 point 4): a coachee ticks an action item from their Calendar's *Tugas*.
+  const coachingActionDone = new CoachingActionDone(coachingSessions, audit, clock);
+
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
     namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
-    products, assets, storage, kpmProducts, events, campaigns, capability, activityLogs,
+    products, assets, storage, avatarLinks, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
     goals, production, productionMonths, productionImport, productionCorrections, productionReadings, summary,
     sentNotifications, coach, subjectReads,
     coachingSessions, coachingReadings, paceStatus, coachingRoster, activityReadings, coachee,
     coachingSnapshots, coachingSession, releasedNotifications,
     coachingProfiles, coachingProfile, leaderNoteRows, leaderNotes,
-    coachingRecord,
+    coachingRecord, coachingActionDone,
     calendarEntries, calendarNotices, calendar, calendarPeople, calendarLeave,
-    activationRows, activationEngine, activationProgress, newHires,
+    activationRows, activationEngine, activationProgress, newHires, firstSale, activationRecords, activation3M,
     trainingProgressRows, offeredTraining, trainingReadings, trainingProgress,
-    unitDashboard,
+    unitDashboard, unitActivities,
     campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
     campaignStandingsReader, campaignDeparture, campaignStandingOverrides,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
     leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
     directoryColumns, memberships, users,
     eventRsvps, eventFeedback, eventAudiences, eventReadings, eventGuests, eventRollCalls,
+    activityBindings, activityBindingRows,
   };
 }
 

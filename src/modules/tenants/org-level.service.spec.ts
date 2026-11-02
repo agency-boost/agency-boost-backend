@@ -218,4 +218,34 @@ describe('OrgLevelService', () => {
       expect((await service.laddersByCompany([])).size).toBe(0);
     });
   });
+
+  /** P18.8-T1, ADR-0156: the tier on each rung, and the class it gives. Over HTTP: `org-level.int.spec.ts`. */
+  describe('P18.8-T1 the leader tier', () => {
+    it('AC-1 seeds the default ladder with its tiers: AB senior, AAB associate, Agent none', async () => {
+      await service.seedDefaultLadder(companyId);
+      const ladder = await service.list(sa(), companyId);
+      expect(ladder.map((l) => [l.code, l.leaderTier])).toEqual([['AGENT', null], ['AAB', 'associate'], ['AB', 'senior']]);
+    });
+
+    it('AC-3 gives each active rung its tier’s class, by code — a custom rung’s included, an archived one not', async () => {
+      await service.create(sa(), { ...rung('AGENT', 'Agent', 1) });
+      await service.create(sa(), { ...rung('UM', 'Unit Manager', 2), leaderTier: 'associate' });
+      await service.create(sa(), { ...rung('SM', 'Senior Manager', 3), leaderTier: 'senior' });
+      const [, , , gone] = await service.create(sa(), { ...rung('OLD', 'Old', 4), leaderTier: 'senior' });
+      await service.update(sa(), gone.orgLevelId, { status: 'archived' });
+
+      expect(Object.fromEntries(await service.classesByCode(companyId))).toEqual({ AGENT: 'agent', UM: 'aab', SM: 'ab' });
+    });
+
+    it('AC-2 refuses a tier change as a server fault when it cannot count who holds the rung — nothing written', async () => {
+      // This spec builds the service without the membership repository, as fifteen others do for the reads.
+      const [level] = await service.create(sa(), rung('SM', 'Senior Manager', 1));
+      await expect(service.update(sa(), level.orgLevelId, { leaderTier: 'senior' })).rejects.toMatchObject({
+        code: 'INTERNAL_ERROR',
+      });
+      expect((await service.list(sa(), companyId))[0].leaderTier).toBeNull();
+      // A change that is no change asks nobody.
+      await expect(service.update(sa(), level.orgLevelId, { leaderTier: null, label: 'SM' })).resolves.toHaveLength(1);
+    });
+  });
 });

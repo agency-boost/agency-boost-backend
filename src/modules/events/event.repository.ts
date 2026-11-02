@@ -39,7 +39,17 @@ export class EventRsvpRepository extends TenantScopedRepository<EventRsvpDocumen
    * 2. No match, and no `upsert`, or a row that is there in another state: nothing to do.
    * 3. No row at all: create it. Two first writes at once both reach this; the partial unique index on
    *    `(kpmId, eventId, membershipId)` refuses the second (`E11000`), which is the same answer, `null`.
+   *
+   * Without `upsert` only step 1 writes, so a write that happened always has the row as it was.
    */
+  async writeWhen(
+    ctx: RequestContext, eventId: string, membershipId: string,
+    condition: FilterQuery<EventRsvpDocument>, set: Record<string, unknown>, upsert: false,
+  ): Promise<{ id: string; before: EventRsvpDocument } | null>;
+  async writeWhen(
+    ctx: RequestContext, eventId: string, membershipId: string,
+    condition: FilterQuery<EventRsvpDocument>, set: Record<string, unknown>, upsert: boolean,
+  ): Promise<{ id: string; before: EventRsvpDocument | null } | null>;
   async writeWhen(
     ctx: RequestContext,
     eventId: string,

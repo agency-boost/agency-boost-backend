@@ -32,7 +32,7 @@ export class LeaderMeetingAgendaItem {
   @Prop({ type: String, default: '' })
   pic!: string;
 
-  /** Meaningful on *During* only, where the prototype draws the boxes (`:2817`). */
+  /** Ticked in any section since UI V1 (UI-110); *During*'s alone before, where the prototype draws the boxes (`:2817`). */
   @Prop({ type: Boolean, default: false })
   done!: boolean;
 
@@ -96,8 +96,23 @@ export class LeaderMeetingActionItem {
 
 export const LeaderMeetingActionItemSchema = SchemaFactory.createForClass(LeaderMeetingActionItem);
 
-/** A *Monthly Target* cell (`:2462-2471`): short text, *TBD* a value, versioned on its own. */
+/**
+ * **A *Monthly Target* cell, typed as a rate per unit** (ADR-0175 §4, P18.97-T1 AC-10; UI-008), versioned on its own:
+ * `rate` in the row's unit — IDR minor units per unit for *APE*, a count per unit for the others — or `null` for none;
+ * `typed`, a target typed as text before rates that migration `0043` could not read as one, shown as typed until an
+ * editor enters a rate (AC-11), `null` otherwise. The target drawn is `rate × # of units`, the meeting's own.
+ */
 export interface MonthlyTargetCell {
+  rate: number | null;
+  typed: string | null;
+  version: number;
+}
+
+/**
+ * **A cell typed as free text before rates** (ADR-0129 §5, reversed by ADR-0175 §4): what migration `0043` reads and
+ * rewrites, and what a *New AA* target keeps — it is never migrated, and no table draws it (AC-6, AC-11).
+ */
+export interface TextTargetCell {
   value: string;
   version: number;
 }
@@ -150,11 +165,12 @@ export class LeaderMeeting {
   actionItems!: LeaderMeetingActionItem[];
 
   /**
-   * The *Monthly Target* cells typed, keyed by the scorecard's row (the six the prototype leaves unblocked). A row
-   * never typed is absent, and served `{ value: '', version: 0 }`. Never frozen: it is typed, and stays editable.
+   * The *Monthly Target* cells typed, keyed by the scorecard's row — the five taking a rate (`TARGET_ROW_KEYS`), and a
+   * *New AA* cell typed before it left the table, kept as it was (P18.97-T1 AC-6). A row never typed is absent, and
+   * served with no rate at version 0. Never frozen: it is typed, and stays editable.
    */
   @Prop({ type: Object, default: () => ({}) })
-  monthlyTargets!: Partial<Record<string, MonthlyTargetCell>>;
+  monthlyTargets!: Partial<Record<string, MonthlyTargetCell | TextTargetCell>>;
 
   /**
    * The first write in the agenda, the tracker or a target after the meeting was made — **what "nobody has
@@ -163,7 +179,11 @@ export class LeaderMeeting {
   @Prop({ type: Date, default: null })
   writtenAt!: Date | null;
 
-  /** The scorecard as computed at the freeze (ADR-0129 §7), without the typed targets; `null` while live. */
+  /**
+   * The scorecard as computed at the freeze (ADR-0129 §7), without the typed targets — its *AS OF* with it
+   * (`frozenScorecard.asOf`, P18.97-T1 AC-13); `null` while live. **Read tolerantly** (`scorecard-record.ts`): one frozen
+   * before 2026-10-28 has five columns, *New AA* and no *AS OF*, and is never recomputed (AC-19).
+   */
   @Prop({ type: Object, default: null })
   frozenScorecard!: Record<string, unknown> | null;
 

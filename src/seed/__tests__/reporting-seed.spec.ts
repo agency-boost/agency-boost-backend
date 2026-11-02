@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { up as mocPersistency } from '@/migrations/0026-moc-persistency';
 import { DirectoryService } from '@/modules/org/directory.service';
 import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
@@ -23,7 +24,7 @@ async function as(code: string, email: string, flags: { owner?: boolean; admin?:
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: flags.owner ?? false, isKpmAdmin: flags.admin ?? false, directCount: 0,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /**
@@ -66,19 +67,23 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(agency('Yosef Tambunan').manpower).toEqual({ aab: 1, agents: 8, total: 10 });
   });
 
-  it('P18-T1 AC-13 the leaderboard ranks the four ABs who lead somebody; Satria’s people were coached by nobody this week', () => {
-    expect(overview.coaching.leaderboard.map((l) => l.name).sort())
+  it('P18-T1 AC-13, P18.97-T3 AC-5 the leaderboard ranks every AB: the four who lead somebody, then Maya Halim, No team', () => {
+    expect(overview.coaching.leaderboard.slice(0, 4).map((l) => l.name).sort())
       .toEqual(['Agus Prasetyo', 'Satria Nugraha', 'Wilson Tanoto', 'Yosef Tambunan']);
+    // UI-017: Maya Halim, the Admin on the AB rung, leads nobody — listed last, no rate; *Showing 4 of 5 ABs*.
+    expect(overview.coaching.leaderboard).toHaveLength(5);
+    expect(overview.coaching.leaderboard[4]).toMatchObject({ name: 'Maya Halim', leads: false, teamSize: 0, coached: 0, pct: null });
     expect(overview.coaching.leaderboard.find((l) => l.name === 'Satria Nugraha')).toMatchObject({ teamSize: 3, coached: 0, pct: 0 });
     expect(overview.coaching.leaderboard.find((l) => l.name === 'Yosef Tambunan')!.coached).toBe(3);
   });
 
-  it('P18-T1 AC-13 who hasn’t logged: the two who never have, then the longest silent — the Admin, 13 days ago', async () => {
+  it('P18-T1 AC-13 who hasn’t logged: the ones who never have first — Agus, Lukman, Raka — then the longest silent', async () => {
     const list = await wired.kpmOverview.notLogged(await as('0417', 'owner@kpm0417.test', { owner: true }));
+    // P18.96-T6 adds two new hires who have logged nothing (`activation-3m-fixture.ts`): Lukman, and Tari after him.
     expect(list.members.map((m) => [m.name, m.daysSince])).toEqual([
-      ['Agus Prasetyo', null], ['Raka Aditama', null], ['Maya Halim', 13],
+      ['Agus Prasetyo', null], ['Lukman Hakim', null], ['Raka Aditama', null],
     ]);
-    expect(list.total).toBeGreaterThan(3);
+    expect(list.total).toBeGreaterThan(4);
   });
 
   it('P18-T1 AC-13 the Owner and Maya logged weeks ago and not since; Gilang left Yosef’s agency last month', async () => {
@@ -87,7 +92,7 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     const people = (await wired.directoryColumns.decorate(owner, await directory.list(owner, { limit: 200 }))).members;
     expect(people.find((m) => m.fullName === 'Maya Halim')).toMatchObject({ lastActivityDays: 13 });
     expect(people.find((m) => m.fullName === 'Wilson Tanoto')).toMatchObject({ lastActivityDays: 11 });
-    const gilang = (await col('memberships').findOne({ agentCode: 'PRU-87015' }))!;
+    const gilang = (await col('memberships').findOne({ agentCode: '87015' }))!;
     expect(gilang).toMatchObject({ status: 'removed' });
     expect((gilang.removedAt as Date).toISOString().slice(0, 7)).toBe('2026-09');
     // On every file this year to July; the Overview's year to date holds it, the analytics' total says how much (OD-74).
@@ -123,8 +128,8 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(yosef.aabUnits[0].moc).toMatchObject({ status: 'unknown', missing: 'Not uploaded yet: Rolling Persistency — DU.' });
     expect(yosef.aabUnits[0].moc!.criteria.find((c) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 2, met: true });
     expect(analytics.mocRulesText).toBe(
-      'AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+      'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     );
     const satria = agency('Satria Nugraha');
     expect(satria.moc!.status).toBe('not_met');

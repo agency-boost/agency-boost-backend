@@ -5,7 +5,15 @@ import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import type { UnitDashboardView, UnitGroup, UnitRow } from '@/modules/unit-dashboard/unit-dashboard.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { COACHING_LEADS } from '../coaching-cast';
 import { ROSTER_PLAN } from '../coaching-fixture';
+
+/*
+ * The words the seed typed, in Bahasa Indonesia since P18.98-T7 (OD-238): Indah's lead's next step from the cast, Rina's
+ * Pak Hendro's from `demo.ts`, and the coaching items from `coaching-fixture.ts`.
+ */
+const INDAH_NEXT = COACHING_LEADS.find((lead) => lead.name === 'Ibu Melati Kusumawardani')!.nextActionNote!;
+const HENDRO_NEXT = 'Follow up soal ilustrasinya.';
 import { seedDemo } from '../demo';
 import {
   UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH, UNIT_DASHBOARD_INDAH_LEAD, unitDashboardLeadId,
@@ -59,11 +67,37 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
 
   const row = (name: string, v = view) => everyRow(v).find((r) => first(r.name) === name)!;
 
+  it('P18.8-T11 0417 has been open since January last year, so the Summary offers every month since, read whole', async () => {
+    const august = await wired.summary.read(agus, undefined, { month: '2026-08' });
+    expect(august).toMatchObject({
+      month: '2026-08', pace: null,
+      period: { firstMonth: '2025-01', thisMonth: MONTH, currentMonth: false, currentYear: true },
+      activity: { monthly: { from: '2026-08-01', to: '2026-08-31' } },
+    });
+    expect((await wired.summary.read(agus, undefined, { year: '2025' })).month).toBe('2025-12');
+    await expect(wired.summary.read(agus, undefined, { month: '2024-12' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('P18.8-T14 AC-1 the raised benchmarks still leave a strength to see: Sari’s, and Rina’s cut by the four-card limit', async () => {
+    const sari = await as('sari@kpm0417.test');
+    const sariCards = (await wired.summary.read(sari, undefined, {})).insights;
+    expect(sariCards.map((i) => i.rule)).toEqual(['RATIO_BELOW', 'RATIO_STRENGTH']);
+    expect(sariCards[1]).toMatchObject({ facts: { code: 'LEADS_PER_ACTIVITY', benchmark: 1 } });
+
+    // Rina: behind pace, two leads, and the ratio she is below on — four, so her strength is not shown (ADR-0060).
+    const rina = await as('rina@kpm0417.test');
+    expect((await wired.summary.read(rina, undefined, {})).insights.map((i) => i.rule))
+      .toEqual(['BEHIND_PACE', 'LEAD_OVERDUE', 'LEAD_NEGLECTED', 'RATIO_BELOW']);
+    const ratios = await wired.activityLogs.ratiosOf(rina, { membershipId: rina.membershipId!, orgLevelCode: 'AGENT' });
+    expect(ratios.ratios.find((r) => r.code === 'LEADS_PER_ACTIVITY')).toMatchObject({ benchmark: 1, status: 'success' });
+  });
+
   it('P15-T1 AC-12 Agus reads the roster the phase file draws: Your Unit · 4, then Arief’s, Dewi’s and Sari’s units', () => {
-    expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dimas', 'Indah', 'Siti']);
+    // P18.96-T6 adds Lukman, Agus's own new hire (`activation-3m-fixture.ts`); Tari, Arief's, was marked left — removed.
+    expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dimas', 'Indah', 'Lukman', 'Siti']);
     expect(view.units.map((u) => [first(u.head.name), ...rowsOf(u).slice(1).map((r) => first(r.name))]))
       .toEqual([['Arief', 'Novi', 'Wahyu'], ['Dewi'], ['Sari', 'Budi', 'Rina', 'Yanti']]);
-    expect(view.tiles.team).toEqual({ total: 12, direct: 4, units: 3, underUnits: 5 });
+    expect(view.tiles.team).toMatchObject({ total: 13, direct: 5, units: 3, underUnits: 5 });
   });
 
   it('P15-T1 AC-12 every status shows, as the coaching fixture plans it', async () => {
@@ -73,7 +107,8 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
       const key = first(r.name).toLowerCase() as keyof typeof ROSTER_PLAN;
       expect({ who: key, status: r.status, last: r.lastOneOnOne })
         .toEqual({ who: key, status: coached.find((c) => c.membershipId === r.membershipId)!.status, last: coached.find((c) => c.membershipId === r.membershipId)!.lastOneOnOne });
-      if (!ROSTER_PLAN[key].monthDependent) expect({ who: key, status: r.status }).toEqual({ who: key, status: ROSTER_PLAN[key].status });
+      // P18.96-T6's two new hires are not the coaching fixture's: their status is read, not planned.
+      if (key in ROSTER_PLAN && !ROSTER_PLAN[key].monthDependent) expect({ who: key, status: r.status }).toEqual({ who: key, status: ROSTER_PLAN[key].status });
     }
     expect(new Set(everyRow(view).map((r) => r.status))).toEqual(new Set(['on_track', 'watch_closely', 'needs_attention', 'no_goal_set']));
   });
@@ -83,7 +118,56 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
       expect({ who, month: row(who).production.monthly.valueMinor, goal: row(who).goal.actualMinor }).toEqual({ who, month: null, goal: null });
     }
     const sari = view.units[2];
-    expect(sari.total.goal.missing).toBe(2);
+    // *Changed 2026-10-27 (P18.96-T5, ADR-0172 §2):* 2 until then. Budi is missing; Yanti, a new hire with no first sale
+    // yet, is left out as one — counted in `newHires`, never as a figure not uploaded.
+    expect(sari.total.goal.missing).toBe(1);
+    expect(sari.total.newHires).toBe(1);
+  });
+
+  /**
+   * **P18.96-T5 — who counts where, on the seed** (ADR-0172; `functional/unit-dashboard.md`, *Seed*). Yanti rejoined 28
+   * days ago and has sold nothing: last month's file lists her with no policy and this month's leaves her out, so her
+   * live membership has no first sale. Rina and Budi are new hires whose first sales (T4's leads) are behind them; Sari
+   * is an existing agent with no first sale, who counts as she always did.
+   */
+  it('P18.96-T5 AC-1 to AC-3 Yanti is in the team and tagged New hire; Rina and Budi are in from their first sales; Sari counts', async () => {
+    const membership = async (email: string) => {
+      const account = await col('users').findOne({ email });
+      return (await col('memberships').findOne({ userId: String(account!._id), status: 'active' }))!;
+    };
+    const yanti = await membership('removed@kpm0417.test');
+    expect([yanti.joinedAs, yanti.firstSaleDate ?? null]).toEqual(['new_hire', null]);
+    expect(row('Yanti')).toMatchObject({ membershipId: String(yanti._id), newHireBeforeFirstSale: true });
+    const today = clock.localDateFor('Asia/Jakarta');
+    for (const [who, email] of [['Rina', 'rina@kpm0417.test'], ['Budi', 'budi@kpm0417.test']] as const) {
+      const m = await membership(email);
+      expect({ who, joinedAs: m.joinedAs, sold: m.firstSaleDate <= today, tag: row(who).newHireBeforeFirstSale })
+        .toEqual({ who, joinedAs: 'new_hire', sold: true, tag: false });
+    }
+    const sari = await membership('sari@kpm0417.test');
+    expect([sari.joinedAs, sari.firstSaleDate ?? null, row('Sari').newHireBeforeFirstSale]).toEqual(['existing_agent', null, false]);
+    // AC-1: every one of them is in the team; the tile counts the new hires it leaves out.
+    expect(view.tiles.team.total).toBe(everyRow(view).length);
+    expect(view.tiles.team.newHires).toBe(everyRow(view).filter((r) => r.newHireBeforeFirstSale).length);
+    expect(view.tiles.team.newHires).toBeGreaterThanOrEqual(1);
+  });
+
+  it('UI-013 Yanti, on pace, is in Active Agent’s of — manpower — and never its count, nor the target', () => {
+    expect(row('Yanti').pacingToMaa).toBe(true);
+    const sari = view.units[2];
+    const selling = rowsOf(sari).filter((r) => !r.newHireBeforeFirstSale);
+    expect(selling.map((r) => first(r.name))).toEqual(['Sari', 'Budi', 'Rina']);
+    expect(sari.total.potentialActive).toEqual({ count: selling.filter((r) => r.pacingToMaa === true).length, of: 4 });
+    const all = everyRow(view).filter((r) => !r.newHireBeforeFirstSale);
+    expect(view.tiles.potentialActive).toMatchObject({ count: all.filter((r) => r.pacingToMaa === true).length, of: everyRow(view).length });
+    // The same number as *Your team*, and the Unit / AAB split adds up to it.
+    expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
+    const { unit, aab } = view.tiles.potentialActive;
+    expect([unit.of, aab.of]).toEqual([view.yourUnit.rows.length, view.tiles.team.total - view.yourUnit.rows.length]);
+    expect(unit.count + aab.count).toBe(view.tiles.potentialActive.count);
+    // Her target is out of the group's production: the paired target is the selling rows' with production held.
+    const held = all.filter((r) => r.goal.actualMinor !== null);
+    expect(view.tiles.directGroupProduction.targetMinor).toBe(held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0));
   });
 
   it('P15-T3 AC-5 Sari’s correction of Budi’s year to date, through Update production’s own function, under her name', async () => {
@@ -124,11 +208,11 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
 
   it('P15-T2 AC-5 OD-140, typed or from a lead: each row’s next item from the latest 1:1, overdue in office days', () => {
     // Sari's last 1:1 with Agus, twelve days ago: a typed item carried from the one before, due nine days ago.
-    expect(row('Sari').followUp).toEqual({ text: 'Go through Budi\'s lapsed prospects with him', dueDate: '2026-09-29', overdueDays: 9 });
+    expect(row('Sari').followUp).toEqual({ text: 'Tinjau bersama Budi prospeknya yang terbengkalai', dueDate: '2026-09-29', overdueDays: 9 });
     // Indah's, four days ago: a lead action it froze, due two days ago — before any typed item.
-    expect(row('Indah').followUp).toEqual({ text: 'Collect the signed SPAJ.', dueDate: '2026-10-06', overdueDays: 2 });
+    expect(row('Indah').followUp).toEqual({ text: INDAH_NEXT, dueDate: '2026-10-06', overdueDays: 2 });
     // Rina's, today: the lead actions it froze as they stood — Pak Hendro's next action, six days late.
-    expect(row('Rina').followUp).toEqual({ text: 'Chase the illustration.', dueDate: '2026-10-02', overdueDays: 6 });
+    expect(row('Rina').followUp).toEqual({ text: HENDRO_NEXT, dueDate: '2026-10-02', overdueDays: 6 });
     // Nobody without a finalized session has one; a draft (Agus's with Indah today) is no session.
     for (const who of ['Agus', 'Dimas', 'Siti', 'Arief', 'Budi', 'Yanti']) expect({ who, f: row(who).followUp }).toEqual({ who, f: null });
   });
@@ -137,11 +221,11 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     const admin = await as('admin@kpm0417.test', { admin: true });
     const theirs = await wired.unitDashboard.read(admin, { for: agus.membershipId! });
     const text = JSON.stringify(theirs);
-    for (const words of ['Collect the signed SPAJ.', 'Chase the illustration.']) expect([words, text.includes(words)]).toEqual([words, false]);
+    for (const words of [INDAH_NEXT, HENDRO_NEXT]) expect([words, text.includes(words)]).toEqual([words, false]);
     // Sari's is typed, and the same; Indah's and Rina's fall back to a typed item of their own sessions.
     expect(row('Sari', theirs).followUp).toEqual(row('Sari').followUp);
-    expect(row('Indah', theirs).followUp).toEqual({ text: 'Ask Ibu Melati for two referrals at the policy handover', dueDate: '2026-10-07', overdueDays: 1 });
-    expect(row('Rina', theirs).followUp).toEqual({ text: 'Close Pak Hendro\'s illustration, or mark the lead lost', dueDate: '2026-10-10', overdueDays: null });
+    expect(row('Indah', theirs).followUp).toEqual({ text: 'Minta dua referral ke Ibu Melati saat serah terima polis', dueDate: '2026-10-07', overdueDays: 1 });
+    expect(row('Rina', theirs).followUp).toEqual({ text: 'Closing ilustrasi Pak Hendro, atau tandai lead-nya gagal', dueDate: '2026-10-10', overdueDays: null });
     expect(everyRow(theirs).every((r) => !r.coached)).toBe(true);
   });
 
@@ -149,15 +233,22 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     for (const period of ['7d', 'month', 'year'] as const) {
       const v = await wired.unitDashboard.read(agus, { period });
       const groups = (g: UnitGroup): UnitGroup[] => [g, ...g.units.flatMap(groups)];
-      for (const [rows, total] of [
+      for (const [everybody, total] of [
         [v.yourUnit.rows, v.yourUnit.total], ...v.units.flatMap(groups).map((g) => [rowsOf(g), g.total] as const),
       ] as const) {
+        // The goal and *on pace* over the people who count for production (ADR-0172 §2); the leads over everybody.
+        const rows = everybody.filter((r) => !r.newHireBeforeFirstSale);
+        expect(total.newHires).toBe(everybody.length - rows.length);
+        expect(total.leadsCounts.salesOpen).toBe(everybody.reduce((s, r) => s + r.leadsCounts.salesOpen, 0));
         const actuals = rows.map((r) => r.goal.actualMinor).filter((a): a is number => a !== null);
-        const targets = rows.map((r) => r.goal.targetMinor).filter((a): a is number => a !== null);
+        // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when none is.
+        const counted = actuals.length ? rows.filter((r) => r.goal.actualMinor !== null) : rows;
+        const targets = counted.map((r) => r.goal.targetMinor).filter((a): a is number => a !== null);
         expect(total.goal.actualMinor).toBe(actuals.length ? actuals.reduce((a, b) => a + b, 0) : null);
         expect(total.goal.targetMinor).toBe(targets.length ? targets.reduce((a, b) => a + b, 0) : null);
-        expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
-        expect(total.leadsCounts.salesOpen).toBe(rows.reduce((s, r) => s + r.leadsCounts.salesOpen, 0));
+        expect(total.goal.missing).toBe(rows.length - actuals.length);
+        // UI-013: out of everybody — manpower.
+        expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: everybody.length });
       }
     }
   });

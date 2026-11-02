@@ -22,10 +22,11 @@ import { LeadReadings } from '@/modules/leads/lead-readings';
 import { ProductionReadings, type MonthLedger } from '@/modules/production/production-readings';
 import { goalFigures } from '@/modules/summary/summary-figures';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
-import { AGENCY_RUNG, partitionAgencies } from './agency-partition';
+import { AGENCY_CLASS, partitionAgencies } from './agency-partition';
 import { KpmRecruitTargetRepository } from './kpm-recruit-target.repository';
 import { byName, moneyOf, shiftMonth, type Money, type Person } from './office-figures';
 import { OfficePeople, rungsFor, type OfficeHeader, type OfficePerson } from './office-people';
+import { REPORTING_REFUSALS } from './reporting.messages';
 
 export interface RungCount {
   code: string;
@@ -37,6 +38,11 @@ export interface OverviewLeader extends Person {
   teamSize: number;
   coached: number;
   pct: number | null;
+  /**
+   * Has an active direct report (ADR-0087). `false` is an AB who leads nobody (P18.97-T3 AC-5, UI-017): listed last, its
+   * team 0 and its rate `null` — *No team* where the rate would be.
+   */
+  leads: boolean;
 }
 
 export interface OverviewUnit extends Person, Money {}
@@ -100,7 +106,8 @@ export interface RecruitTargetView {
  * - **engagement**: `ACTIVITY_LOGGED_THIS_MONTH` (OD-142) with last month to the same day beside it, and
  *   `ACTIVITY_COMPLIANCE_RATE` over `ROLLING_7D`, from `ActivityReadings`;
  * - **coaching**: `COACHING_COVERAGE` from coaching's own `coachingCoverage` over the office — the head of
- *   nothing, so nobody is left out — and `LEADER_COACHING_FREQUENCY` per AB who leads somebody, lowest first;
+ *   nothing, so nobody is left out — and `LEADER_COACHING_FREQUENCY` for **every** AB, lowest first, one who leads
+ *   nobody last (P18.97-T3 AC-5);
  * - **recruitment**: `LeadService.summary`'s two counts from the same facets (`LeadReadings.recruitmentPipeline`),
  *   `RECRUITMENT_CLOSED_LAST_MONTH`, and the office's target for the month, carried forward;
  * - **production**: the office's year to date from its file (`ProductionReadings`) against the sum of its
@@ -144,7 +151,8 @@ export class KpmOverviewService {
     const engagementFrom = [lastMonthWindow.from, week.from].sort()[0];
     // Leavers since the earlier of January and last month's first day: this year's production, and last month's headcount.
     const since = [`${year}-01`, lastMonth].sort()[0];
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${since}-01`));
+    // Each member counted from their join date, in the office's zone (ADR-0172 §1).
+    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${since}-01`), timezone);
     const members = roster.everyone.filter((p) => memberAt(p, endOfToday));
     const memberIds = members.map((p) => p.membershipId);
     const membersThen = roster.everyone.filter((p) => memberAt(p, this.clock.endOfLocalDay(timezone, lastMonthWindow.to)));
@@ -245,7 +253,8 @@ export class KpmOverviewService {
     };
 
     // Last, once the answer exists: one entry per leader on the leaderboard, whose own coaching it carries (D-audit).
-    await this.subjectReads.recordMany(ctx, leaderboard, 'kpm_overview', week);
+    // An AB who leads nobody carries no coaching of theirs — *No team* is the tree's shape — so writes none.
+    await this.subjectReads.recordMany(ctx, leaderboard.filter((row) => row.leads), 'kpm_overview', week);
     return view;
   }
 
@@ -259,7 +268,7 @@ export class KpmOverviewService {
   async notLogged(ctx: RequestContext): Promise<NotLoggedView> {
     OfficePeople.require(ctx);
     const office = await this.days.office(ctx);
-    const roster = await this.people.read(ctx, null);
+    const roster = await this.people.read(ctx, null, office.timezone);
     const ids = roster.active.map((p) => p.membershipId);
     const [ladder, latest] = await Promise.all([
       this.people.ladder(ctx, office.companyId),
@@ -303,7 +312,7 @@ export class KpmOverviewService {
     if (body.month !== office.month) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        `A recruitment target is set for ${office.month}, the agency's current month.`,
+        REPORTING_REFUSALS.VALIDATION_FAILED.recruitTargetMonth({ month: office.month }),
         HttpStatus.BAD_REQUEST,
         { field: 'month', month: office.month },
       );
@@ -322,8 +331,11 @@ export class KpmOverviewService {
   }
 
   /**
-   * *AB coaching frequency* (D-coverage): `LEADER_COACHING_FREQUENCY` over `ROLLING_7D` for every member on the
-   * `AB` rung who leads somebody, over their whole downline now — lowest first, A to Z within a share.
+   * *AB coaching frequency* (D-coverage): `LEADER_COACHING_FREQUENCY` over `ROLLING_7D` for **every member of the `ab`
+   * class** (a *Senior Leader* rung, ADR-0156), over their whole downline now — lowest first, A to Z within a share.
+   * *Amended 2026-10-28 (P18.97-T3 AC-5; ADR-0176 §2, UI-017):* an AB who leads nobody is listed too, **last**, A to Z
+   * among themselves — `leads: false`, a team of 0 and no rate, *No team* on the card — where the board left them out,
+   * so *"Showing 4 of {n} ABs"* counted four of 0417's five. Who leads is ADR-0087's: an active direct report.
    */
   private leaderboard(
     members: readonly OfficePerson[],
@@ -332,22 +344,29 @@ export class KpmOverviewService {
     today: LocalDate,
     daysBetween: (from: string, to: string) => number,
   ): OverviewLeader[] {
-    const leaders = members.filter((p) => p.orgLevelCode === AGENCY_RUNG
-      && members.some((q) => q.leaderId === p.membershipId));
-    return leaders
-      .map((leader) => ({
-        membershipId: leader.membershipId,
-        name: names.get(leader.membershipId) ?? '',
-        ...leaderCoachingFrequency({
-          leaderMembershipId: leader.membershipId,
-          downline: members.filter((q) => q.ancestorIds.includes(leader.membershipId)).map((q) => q.membershipId),
-          sessions,
-          windowDays: PERIOD.ROLLING_7D_DAYS,
-          today,
-          daysBetween,
-        }),
-      }))
-      .sort((a, b) => (a.pct as number) - (b.pct as number) || a.name.localeCompare(b.name) || a.membershipId.localeCompare(b.membershipId));
+    const leaders = new Set(members.flatMap((q) => (q.leaderId === null ? [] : [q.leaderId])));
+    return members
+      .filter((p) => p.role === AGENCY_CLASS)
+      .map((ab): OverviewLeader => {
+        const person = { membershipId: ab.membershipId, name: names.get(ab.membershipId) ?? '' };
+        // Nobody to coach: no rate to draw, never 0% (roles §6.11).
+        if (!leaders.has(ab.membershipId)) return { ...person, teamSize: 0, coached: 0, pct: null, leads: false };
+        return {
+          ...person,
+          ...leaderCoachingFrequency({
+            leaderMembershipId: ab.membershipId,
+            downline: members.filter((q) => q.ancestorIds.includes(ab.membershipId)).map((q) => q.membershipId),
+            sessions,
+            windowDays: PERIOD.ROLLING_7D_DAYS,
+            today,
+            daysBetween,
+          }),
+          leads: true,
+        };
+      })
+      .sort((a, b) => Number(b.leads) - Number(a.leads)
+        || (a.leads ? (a.pct as number) - (b.pct as number) : 0)
+        || a.name.localeCompare(b.name) || a.membershipId.localeCompare(b.membershipId));
   }
 
   /** *Units furthest behind target* (D-units): every agency, lowest attainment first, a row with none last. */

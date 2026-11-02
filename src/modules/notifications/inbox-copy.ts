@@ -1,3 +1,7 @@
+import { formatDateTime } from '@/common/format/format';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
+import { NOTICE_MESSAGES } from './notification.messages';
 import { NotificationTemplate, NotificationTemplateId, TEMPLATE_CHANNELS } from './notification.types';
 
 /** The templates that belong in an inbox: the ones with an `in_app` channel. */
@@ -10,6 +14,33 @@ function name(payload: Record<string, unknown>, key: string, fallback: string): 
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+/** The first of these keys the payload holds a name under, or the fallback: one notice, written by two senders. */
+function nameOf(payload: Record<string, unknown>, keys: readonly string[], fallback: string): string {
+  for (const key of keys) {
+    const value = name(payload, key, '');
+    if (value) return value;
+  }
+  return fallback;
+}
+
+/**
+ * **Who asked to join** (P18.96-T1 AC-3). `requestLeader` writes the asker's name as `askerName`; the demo seed and
+ * every notice stored before this read wrote `fullName`. The template read only `fullName`, so every real request
+ * said *"Somebody asked to join your unit"*. Either is the asker's name; `askerName` first, as the sender writes it.
+ */
+const ASKER_KEYS = ['askerName', 'fullName'] as const;
+
+/** **Who walked in with the leader's code** (`LeaderCodeService.redeem`), the one `MEMBER_TAGGED_BY_LEADER` sent to a leader. */
+const JOINER_KEYS = ['joinerName', 'fullName'] as const;
+
+const SAY = NOTICE_MESSAGES;
+
+/** What a notification says: its title and its detail, each written for the reader. */
+export interface NoticeWords {
+  title: string;
+  detail: string | null;
+}
+
 /**
  * What a notification says, in words.
  *
@@ -19,9 +50,10 @@ function name(payload: Record<string, unknown>, key: string, fallback: string): 
  * anything the product depends on"* — so what a row says is product copy, not a
  * rendering detail a client may improvise. One source, quoted by the manual books.
  *
- * Separate from `TemplateRenderer`, which composes **email** and is still the console
- * placeholder until the email adapter lands. The two will share templates then; today
- * they say different things because only one of them has anything to say.
+ * **In the reader's language, when it is read** (P18.98-T5 AC-4; ADR-0179 §7): the inbox composes each row for the
+ * request's reader, so a notice stored before the phase reads in the new language too, and the email renders the same
+ * words for its recipient (`email-renderer.ts`). A name and a reason in the payload are shown as typed; a figure — an
+ * event's time — is written in the reader's figures' language. The words are `NOTICE_MESSAGES`'.
  *
  * A template with no entry falls back to something true rather than throwing: an inbox
  * that breaks on an unrecognised row is worse than one that says *"Something happened"*.
@@ -29,39 +61,77 @@ function name(payload: Record<string, unknown>, key: string, fallback: string): 
 export function describeNotification(
   templateId: string,
   payload: Record<string, unknown>,
-): { title: string; detail: string | null } {
+  reader: Reader = readerOf(),
+): NoticeWords {
+  const say = (sentence: Sentence) => render(sentence, reader);
+  /** A typed reason, as typed, or our sentence for a payload that holds none. */
+  const reasonOr = (fallback: Sentence) => name(payload, 'reason', say(fallback));
   switch (templateId) {
     case NotificationTemplate.JOIN_REQUEST_RECEIVED:
       return {
-        title: `${name(payload, 'fullName', 'Somebody')} asked to join your unit`,
-        detail: 'Approve or decline it on Pending requests.',
+        title: say(SAY.joinRequestReceived({ asker: nameOf(payload, ASKER_KEYS, say(SAY.somebody)) })),
+        // The tab's own name: the row opens it (`inboxAddress`).
+        detail: say(SAY.joinRequestReceivedDetail),
       };
     case NotificationTemplate.JOIN_REQUEST_APPROVED:
-      return { title: 'You are in', detail: 'Your request was approved. You now have a leader.' };
+      return { title: say(SAY.joinRequestApproved), detail: say(SAY.joinRequestApprovedDetail) };
     case NotificationTemplate.JOIN_REQUEST_DECLINED:
-      return {
-        title: 'Your request was declined',
-        detail: name(payload, 'reason', 'You can search for another leader and ask again.'),
-      };
+      return { title: say(SAY.joinRequestDeclined), detail: reasonOr(SAY.joinRequestDeclinedDetail) };
     case NotificationTemplate.MEMBER_TAGGED_BY_LEADER:
+      /*
+       * **One template, two readers** (P18.96-T1 AC-3). A tag (`ApprovalsService.tag`, or AgencyBoost approving one
+       * past the leader limit) tells the member, `via: 'tagged'`; a leader code redeemed (`LeaderCodeService.redeem`)
+       * tells the **leader** whose code it was, `via: 'leader-code'`. The member's sentence reached the leader, who
+       * read *"A leader added you to their unit"* about somebody joining theirs.
+       */
+      if (payload.via === 'leader-code') {
+        return {
+          title: say(SAY.joinedWithLeaderCode({ joiner: nameOf(payload, JOINER_KEYS, say(SAY.somebody)) })),
+          detail: say(SAY.joinedWithLeaderCodeDetail),
+        };
+      }
+      return { title: say(SAY.taggedByLeader), detail: say(SAY.taggedByLeaderDetail) };
+    /*
+     * P18.96-T3 (ADR-0170 §2, §4): an invite accepted, a transfer asked for, and its decision — which reads by who it
+     * is addressed to (`audience`): whoever asked, the member who moved, or the leader they left.
+     */
+    case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
       return {
-        title: 'A leader added you to their unit',
-        detail: 'You did not have to ask — they picked you up from the unassigned list.',
+        title: say(SAY.inviteAccepted({ joiner: nameOf(payload, JOINER_KEYS, say(SAY.somebody)) })),
+        detail: say(SAY.inviteAcceptedDetail),
       };
+    case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
+      return {
+        title: say(SAY.transferRequested({
+          requester: name(payload, 'requesterName', say(SAY.aLeader)),
+          member: name(payload, 'memberName', say(SAY.aMember)),
+        })),
+        detail: say(SAY.transferRequestedDetail),
+      };
+    case NotificationTemplate.TRANSFER_REQUEST_DECIDED:
+      return transferDecided(payload, say);
     case NotificationTemplate.MEMBER_REMOVED:
-      return {
-        title: 'You were removed from your unit',
-        detail: name(payload, 'reason', 'Search for a leader and ask to join again if you want to come back.'),
-      };
+      return { title: say(SAY.memberRemoved), detail: reasonOr(SAY.memberRemovedDetail) };
     case NotificationTemplate.ROLE_CHANGED:
-      return {
-        title: 'Your role changed',
-        detail: name(payload, 'reason', 'Your leader changed what you are. You still report to them.'),
-      };
+      return { title: say(SAY.roleChanged), detail: reasonOr(SAY.roleChangedDetail) };
     case NotificationTemplate.ADMIN_ACCESS_CHANGED:
       return payload.granted === true
-        ? { title: 'You can now administer this office', detail: 'The Owner gave you KPM Admin access.' }
-        : { title: 'Your admin access was removed', detail: 'You are still in the office; you just cannot administer it.' };
+        ? { title: say(SAY.adminGranted), detail: say(SAY.adminGrantedDetail) }
+        : { title: say(SAY.adminRevoked), detail: say(SAY.adminRevokedDetail) };
+    /*
+     * ADR-0157 §3: AgencyBoost's answer to a leader past the office's limit, to whoever asked. Approved, the change
+     * is already made; declined, nothing about the member changed, and the reason is the Super Admin's.
+     */
+    case NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED:
+      return {
+        title: say(SAY.leaderLimitApproved({ subject: name(payload, 'subjectName', say(SAY.aNewLeader)) })),
+        detail: say(SAY.leaderLimitApprovedDetail),
+      };
+    case NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED:
+      return {
+        title: say(SAY.leaderLimitDeclined({ subject: name(payload, 'subjectName', say(SAY.aNewLeader)) })),
+        detail: reasonOr(SAY.leaderLimitDeclinedDetail),
+      };
     case NotificationTemplate.GOAL_SET_BY_LEADER:
       /*
        * **Not *"accept it"*.** There is nothing to accept: a leader's write is the agent's goal
@@ -69,50 +139,98 @@ export function describeNotification(
        * was written from a recommendation nothing had ratified.
        */
       return {
-        title: `${name(payload, 'byName', 'Your leader')} set your goal`,
-        detail: 'Open Goal settings to see it — you can change it, it is your plan.',
+        title: say(SAY.goalSet({ by: name(payload, 'byName', say(SAY.yourLeader)) })),
+        detail: say(SAY.goalSetDetail),
       };
     case NotificationTemplate.COACHING_SESSION_FINALIZED:
-      return { title: 'A coaching session was finalized', detail: 'What was agreed is now on the record.' };
+      return { title: say(SAY.coachingFinalized), detail: say(SAY.coachingFinalizedDetail) };
     /*
      * The calendar's (ADR-0095, in ADR-0096's words): general, because the payload carries ids and a date
      * and nothing anybody typed — the entry says the rest.
      */
     case NotificationTemplate.CALENDAR_INVITATION:
-      return { title: 'You have a new invitation', detail: 'Open it on your calendar to accept or decline.' };
+      return { title: say(SAY.calendarInvitation), detail: say(SAY.calendarInvitationDetail) };
     case NotificationTemplate.CALENDAR_BLOCK_PLACED:
-      return { title: 'Time was blocked on your calendar', detail: 'A leader above you placed it. Open it to see when.' };
+      return { title: say(SAY.calendarBlockPlaced), detail: say(SAY.calendarBlockPlacedDetail) };
     case NotificationTemplate.CALENDAR_ENTRY_CHANGED:
       return payload.change === 'cancelled'
-        ? { title: 'An entry on your calendar was cancelled', detail: 'It is no longer on your calendar.' }
-        : { title: 'An entry on your calendar has moved', detail: 'Open it to see the new time.' };
+        ? { title: say(SAY.calendarCancelled), detail: say(SAY.calendarCancelledDetail) }
+        : { title: say(SAY.calendarMoved), detail: say(SAY.calendarMovedDetail) };
     case NotificationTemplate.IMPERSONATION_STARTED:
+      /*
+       * **A setup session says so, and what it may change** (ADR-0162 §3): it writes in the person's name, which
+       * a support session does not, so the notice that said *"They can only look"* would be untrue of it.
+       */
+      if (payload.purpose === 'setup') {
+        return payload.isSubject === true
+          ? {
+            title: say(SAY.setupAsYou),
+            detail: `${reasonOr(SAY.setupStartedDefault)} ${say(SAY.setupScope)}`,
+          }
+          : {
+            title: say(SAY.setupInYourOffice),
+            detail: `${reasonOr(SAY.setupHelpingDefault)} ${say(SAY.setupScope)}`,
+          };
+      }
       return payload.isSubject === true
         ? {
-          title: 'Somebody from AgencyBoost is looking at your screens',
-          detail: `${name(payload, 'reason', 'A support session has started.')} `
-            + 'They can only look, unless a second person approves otherwise.',
+          title: say(SAY.supportLooking),
+          detail: `${reasonOr(SAY.supportStartedDefault)} ${say(SAY.supportLookOnly)}`,
         }
-        : {
-          title: 'A support session started in your office',
-          detail: name(payload, 'reason', 'Somebody from AgencyBoost is helping a member.'),
-        };
+        : { title: say(SAY.supportInYourOffice), detail: reasonOr(SAY.supportHelpingDefault) };
     case NotificationTemplate.IMPERSONATION_ELEVATED:
-      return {
-        title: 'That support session can now make changes',
-        detail: name(payload, 'reason', 'A second person from AgencyBoost approved it.'),
-      };
+      return { title: say(SAY.supportElevated), detail: reasonOr(SAY.supportElevatedDefault) };
     case NotificationTemplate.EVENT_REMINDER:
       return {
-        title: `${name(payload, 'title', 'An event')} is coming up`,
-        detail: 'Check the time and where it is.',
+        title: say(SAY.eventComingUp({ title: name(payload, 'title', say(SAY.anEvent)) })),
+        detail: whenAndWhere(payload, reader) ?? say(SAY.eventComingUpDefault),
       };
     default:
       // Includes the email-only templates, which the inbox filters out before this is
       // reached — so this is genuinely for a template nobody has written copy for yet.
-      return { title: 'Something happened', detail: null };
+      return { title: say(SAY.somethingHappened), detail: null };
   }
 }
+
+/** **A transfer request's decision** (ADR-0170 §4), in the words of whoever it is addressed to. */
+function transferDecided(payload: Record<string, unknown>, say: (sentence: Sentence) => string): NoticeWords {
+  const member = name(payload, 'memberName', say(SAY.aMember));
+  const to = name(payload, 'toLeaderName', say(SAY.anotherLeader));
+  if (payload.audience === 'member') {
+    return { title: say(SAY.transferMovedYou({ to })), detail: say(SAY.transferMovedYouDetail) };
+  }
+  if (payload.audience === 'from_leader') {
+    return { title: say(SAY.transferLeftYourUnit({ member, to })), detail: say(SAY.transferLeftYourUnitDetail) };
+  }
+  return payload.decision === 'approved'
+    ? { title: say(SAY.transferApproved({ member })), detail: say(SAY.transferApprovedDetail) }
+    : { title: say(SAY.transferDeclined({ member })), detail: name(payload, 'reason', say(SAY.transferDeclinedDetail)) };
+}
+
+/**
+ * **An event's time and place**, the reminder's detail (P18.95-T7 AC-4; the client's UI review of 2026-10-26, UI-030):
+ * *9 Nov 2026, 09.00 · Kantor KPM* — its start on the office's clock, through the shared formatter (ADR-0167 §1), in the
+ * reader's figures' language (*9 Nov 2026, 09:00* in English, P18.98-T5), and where it is as the office wrote it. It
+ * said *"Check the time and where it is."*, which sent the reader looking for both. Either half alone when the payload
+ * holds one; `null` when it holds neither — a reminder written before the payload carried them — and the old sentence
+ * is still true of it.
+ *
+ * The instant is read in the **office's** zone, which the payload names (invariant §9): never the server's.
+ */
+function whenAndWhere(payload: Record<string, unknown>, reader: Reader): string | null {
+  const when = typeof payload.startsAt === 'string' && typeof payload.timezone === 'string'
+    ? formatDateTime(payload.startsAt, payload.timezone, reader.figures)
+    : '';
+  const where = name(payload, 'location', '').trim();
+  const parts = [when, where].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/**
+ * The leader's request inbox: **`/new-hires`'s *Review requests***, opened by `?review=requests` (P18.96-T3 AC-5,
+ * ADR-0170 §5). It was the *Pending Requests* tab of User management, which lists the same requests and stays.
+ */
+export const JOIN_REQUEST_INBOX = '/new-hires?review=requests';
 
 /** An id as a notice carries one: a MongoDB ObjectId, 24 hex characters. */
 const OBJECT_ID = /^[0-9a-f]{24}$/i;
@@ -133,6 +251,12 @@ const wellFormed = (value: unknown, shape: RegExp): value is string => typeof va
  *   week, `/calendar?entry={entryId}&date={date}`; a cancellation opens the week it was in,
  *   `/calendar?date={date}`, since the entry no longer reads. A payload without a well-formed id or date
  *   opens `/calendar`.
+ * - **A join request** (P18.96-T1 AC-3) opens the leader's request inbox, `/new-hires?review=requests` since P18.96-T3
+ *   (*Review requests* on *New hires*; `/user-management/pending` until then), where it is
+ *   approved or declined. It goes only to an AB or an AAB, who reach that route. The payload names nobody's row,
+ *   so the address names none either.
+ * - **A transfer request** (P18.96-T3, ADR-0170 §4) opens the office's *All Members* on its *Pending* tab,
+ *   `/people/members?tab=pending`, where the Owner and the Admins decide it; **an accepted invite** opens `/new-hires`.
  * - **Every other item is `null`**.
  */
 export function inboxAddress(templateId: string, payload: Record<string, unknown>): string | null {
@@ -147,6 +271,13 @@ export function inboxAddress(templateId: string, payload: Record<string, unknown
     case NotificationTemplate.CALENDAR_INVITATION:
     case NotificationTemplate.CALENDAR_BLOCK_PLACED:
       return calendarEntryAddress(payload);
+    case NotificationTemplate.JOIN_REQUEST_RECEIVED:
+      return JOIN_REQUEST_INBOX;
+    // P18.96-T3: a transfer waits on the office's Pending tab; an accepted invite is in the leader's unit.
+    case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
+      return '/people/members?tab=pending';
+    case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
+      return '/new-hires';
     default:
       return null;
   }

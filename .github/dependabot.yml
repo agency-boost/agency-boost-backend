@@ -1,0 +1,17 @@
+# Every action in .github/workflows is pinned by commit (P18.7 review, M5): a tag can be moved, and
+# whoever moves it would run code with this repository's deploy identity. Pins do not update
+# themselves, so Dependabot proposes the new commit and version comment weekly, as a PR that goes
+# through review and CI like any other.
+#
+# The Dockerfile's base and deploy/compose.yml's images are pinned by digest too, but are moved by
+# hand (the commands are in the Dockerfile and the runbook): Mongo in particular never moves without
+# a person deciding to.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

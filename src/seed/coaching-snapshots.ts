@@ -82,12 +82,15 @@ export async function backfillCoachingSnapshots(kpmId: string): Promise<number> 
   const sessions = new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema));
   // Nothing here saves a goal, so nothing would announce one; inert all the same.
   const inert = { send: async () => undefined, sendCoalesced: async () => undefined } as unknown as NotificationService;
+  const ratioDefinitions = new RatioDefinitionRepository(model(RatioDefinition.name, RatioDefinitionSchema));
   const goals = new GoalService(
     goalRows, audit, clock, days, memberships, new MemberNames(memberships, model(User.name, UserSchema)), inert,
     production, readings, coach, new CoachingSessionGate(sessions, coach),
+    // A plan nobody saved opens on the office's benchmarks (ADR-0160 §3), as the API's does.
+    null, ratioDefinitions,
   );
   const activity = new ActivityService(
-    logs, types, categories, coach, kpms, clock, audit, new RatioDefinitionRepository(model(RatioDefinition.name, RatioDefinitionSchema)),
+    logs, types, categories, coach, kpms, clock, audit, ratioDefinitions,
     subjectReads, goals, production, readings,
   );
   const summary = new SummaryService(

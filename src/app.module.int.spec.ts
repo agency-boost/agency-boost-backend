@@ -3,6 +3,8 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
+// Above AppModule: its import validates the configuration (test/boot-env.ts says why).
+import '../test/boot-env';
 import { AppModule } from './app.module';
 import { startMongo, stopMongo } from '../test/mongo';
 import { listenOnLoopback } from '../test/listen';
@@ -12,7 +14,9 @@ import { ActivationProgressService } from './modules/activation/activation-progr
 import { TrainingProgressService } from '@/modules/training/training-progress.service';
 import { ActivityService } from './modules/activity/activity.service';
 import { TenantConfigService } from './modules/config/tenant-config.service';
+import { RatioDefinitionRepository } from './modules/config/activity.repository';
 import { AuthController } from './modules/auth/auth.controller';
+import { ProfileLineReader } from './modules/org/profile-line';
 import { CalendarLeave } from './modules/calendar/calendar-leave';
 import { GoalService } from './modules/goals/goal.service';
 import { LeadService } from './modules/leads/lead.service';
@@ -22,6 +26,7 @@ import { LeaderCodeService } from './modules/org/leader-code.service';
 import { MemberDeparture, MemberDepartures } from './modules/org/member-departure.port';
 import { CampaignChaseDeparture } from './modules/campaigns/campaign-departure';
 import { RemovalService } from './modules/org/removal.service';
+import { InvitesService } from './modules/org/invites.service';
 
 /**
  * Boots the real AppModule.
@@ -34,23 +39,10 @@ describe('AppModule boots', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const uri = await startMongo();
+    // The configuration was fixed when AppModule was imported (test/boot-env.ts); this only makes sure the
+    // run's server is up, and hands the connection back to the module.
+    await startMongo();
     await mongoose.disconnect();
-
-    Object.assign(process.env, {
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'silent',
-      MONGODB_URI: uri,
-      MONGODB_DB_NAME: 'agencyboost_boot',
-      JWT_ACCESS_SECRET: 'a'.repeat(40),
-      JWT_REFRESH_SECRET: 'b'.repeat(40),
-      CLOUDINARY_CLOUD_NAME: 'demo',
-      CLOUDINARY_API_KEY: 'key',
-      CLOUDINARY_API_SECRET: 'secret',
-      SMTP_HOST: 'smtp.test',
-      MAIL_FROM: 'AgencyBoost <no-reply@test>',
-      APP_BASE_URL: 'http://localhost:3000',
-    });
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
@@ -87,6 +79,8 @@ describe('AppModule boots', () => {
     expect(port(ApprovalsService, 'activations')).toBe(activation);
     expect(port(LeaderCodeService, 'activations')).toBe(activation);
     expect(port(AuthController, 'activationNav')).toBe(activation);
+    // P18.8-T6 AC-1: the profile line's groups and office, read with the session.
+    expect(port(AuthController, 'profileLine')).toBe(app.get(ProfileLineReader, { strict: false }));
     // P18.5-T7 AC-5: leaving answers the calendar and the campaigns' chases, both behind the one port.
     const departures = port(RemovalService, 'departures') as { each: unknown[] };
     expect(departures).toBe(app.get(MemberDeparture as never, { strict: false }));
@@ -94,6 +88,27 @@ describe('AppModule boots', () => {
     expect(departures.each[1] === app.get(CampaignChaseDeparture, { strict: false })).toBe(true);
     // P18.5-T3 AC-2: a module marked done reaches the hire's activation through the same port.
     expect(port(TrainingProgressService, 'activation')).toBe(activation);
+    // P18.96-T3 AC-4: registration on an invite's link reaches the invites, by token.
+    expect(port(AuthController, 'invites') === app.get(InvitesService, { strict: false })).toBe(true);
+    expect(port(InvitesService, 'activations')).toBe(activation);
+  });
+
+  /*
+   * **P18.96-T3: `/new-hires/invites` and `/new-hires/transfers` are their own routes, not a hire's id.** Express takes
+   * the first route that matches in the order they were registered, and `NewHiresController` declares
+   * `GET /new-hires/:membershipId`: registered before *+ Add agent*'s controller, it would read `invites` as a
+   * membership and answer 404. Both are guarded, so a request cannot tell them apart; the router's own order can.
+   */
+  it('P18.96-T3 registers GET /new-hires/invites and /new-hires/transfers before GET /new-hires/:membershipId', () => {
+    const stack = (app.getHttpAdapter().getInstance() as { _router: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] } })
+      ._router.stack;
+    const at = (path: string) => stack.findIndex((layer) => layer.route?.path === path && layer.route.methods.get);
+    const hire = at('/api/v1/new-hires/:membershipId');
+    expect(hire).toBeGreaterThan(-1);
+    expect(at('/api/v1/new-hires/invites')).toBeGreaterThan(-1);
+    expect(at('/api/v1/new-hires/invites')).toBeLessThan(hire);
+    expect(at('/api/v1/new-hires/transfers')).toBeLessThan(hire);
+    expect(at('/api/v1/new-hires/transfers')).toBeGreaterThan(-1);
   });
 
   /*
@@ -105,6 +120,16 @@ describe('AppModule boots', () => {
     const service = app.get(ActivityService, { strict: false }) as unknown as Record<string, unknown>;
     // Compared, not matched: a failing `toBe` on a service prints its whole graph, configuration included.
     expect(service.published === app.get(TenantConfigService, { strict: false })).toBe(true);
+  });
+
+  /*
+   * P18.8-T10 AC-1: a plan nobody saved opens on the office's benchmarks, read through an optional dependency
+   * so a hand-built instance need not provide it. Optional means a graph that failed to would quietly open
+   * every plan on `GOAL_DEFAULTS` again, so the real graph is asserted.
+   */
+  it('P18.8-T10 AC-1 hands GoalService the office’s ratio definitions, in the real graph', () => {
+    const service = app.get(GoalService, { strict: false }) as unknown as Record<string, unknown>;
+    expect(service.ratios === app.get(RatioDefinitionRepository, { strict: false })).toBe(true);
   });
 
   /*
@@ -145,6 +170,13 @@ describe('AppModule boots', () => {
       .post('/api/v1/auth/forgot-password')
       .send({ email: 'nobody@kpm.test' })
       .expect(202);
+  });
+
+  it('answers a path no route serves 404 NOT_FOUND, through the real router — never INTERNAL_ERROR', async () => {
+    for (const path of ['/api/v1/no-such-route', '/api/no-such-route', '/']) {
+      const res = await request(app.getHttpServer()).get(path).expect(404);
+      expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: `Cannot GET ${path}` });
+    }
   });
 
   it('enforces permissions on the admin surface', async () => {

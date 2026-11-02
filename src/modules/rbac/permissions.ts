@@ -1,4 +1,4 @@
-import { RequestContext } from '@/common/context/request-context';
+import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
 
 /**
  * The permission matrix as executable policy.
@@ -23,18 +23,16 @@ export type Grantee =
   | { kind: 'platform'; role: 'super_admin' }
   | { kind: 'tenant'; role: 'kpm_owner' | 'kpm_admin' }
   /**
-   * A rung of the **company's ladder**, by code (P4-T9, ADR-0012).
+   * A **class** of the hierarchy (ADR-0156 §3): `ab`, `aab` or `agent` — the `role` a membership is given from
+   * its rung's leader tier (*Senior Leader*, *Associate Leader*, none) wherever it is placed on a rung.
    *
-   * `role: HierarchyRole` until P4-T9 — three fixed names, compared against an enum.
-   * That cannot describe a ladder a second insurer has not published yet: a company
-   * adding a rung between AAB and AB would have members standing on something no grant
-   * mentions, and every hierarchy permission would silently deny them.
-   *
-   * v1 seeds one ladder whose codes are the upper-cased enum values, so the two are
-   * one-to-one and no permission outcome changes — which `ladder-migration.spec.ts`
-   * asserts rather than assumes.
+   * By rung code from P4-T9 until P18.8-T1, and that was the defect ADR-0156 names: a member on a rung the Super
+   * Admin added — `SM`, say — stood on something no grant mentioned, and held none of AB's, AAB's or AGENT's
+   * rights. A custom rung worked for nothing. By class, a rung marked *Senior Leader* holds exactly AB's grants
+   * whatever it is called, and the matrix is unchanged for the default ladder, whose codes are the classes
+   * upper-cased (`permissions.spec.ts`, *the leader tier*).
    */
-  | { kind: 'hierarchy'; orgLevelCode: string }
+  | { kind: 'hierarchy'; roleClass: HierarchyRole }
   /**
    * Anyone signed in, membership or not. Exactly one permission uses it, and the
    * documentation says why: the office directory is `all` for every authenticated user
@@ -45,9 +43,9 @@ export type Grantee =
 export const SUPER_ADMIN: Grantee = { kind: 'platform', role: 'super_admin' };
 export const KPM_OWNER: Grantee = { kind: 'tenant', role: 'kpm_owner' };
 export const KPM_ADMIN: Grantee = { kind: 'tenant', role: 'kpm_admin' };
-export const AB: Grantee = { kind: 'hierarchy', orgLevelCode: 'AB' };
-export const AAB: Grantee = { kind: 'hierarchy', orgLevelCode: 'AAB' };
-export const AGENT: Grantee = { kind: 'hierarchy', orgLevelCode: 'AGENT' };
+export const AB: Grantee = { kind: 'hierarchy', roleClass: 'ab' };
+export const AAB: Grantee = { kind: 'hierarchy', roleClass: 'aab' };
+export const AGENT: Grantee = { kind: 'hierarchy', roleClass: 'agent' };
 export const AUTHENTICATED: Grantee = { kind: 'authenticated' };
 
 export interface Grant {
@@ -177,6 +175,20 @@ export const PERMISSIONS = {
    */
   'company_template:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'company_template:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * **An office's activity binding** (ADR-0163 §3, P18.9-T2): which activity types each cascade role counts —
+   * *Set appointment*, *Sales meeting*, *Submission polis*. The Super Admin keeps it, per office, at
+   * `GET`/`PUT /admin/tenants/:kpmId/activity-binding`, through a named cross-tenant method; the Owner and the
+   * Admin read their own office's on their activity types screen (`GET /kpm/settings/activity-binding`), and the
+   * admin route answers them their own office and 404 for any other. Nobody else reads it: an agent's screens
+   * read the counts it produces, never the binding. A template's binding is `company_template:write`.
+   */
+  'activity_binding:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  'activity_binding:write': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
    * The company's product catalog (ADR-0033, P5-T4).
    *
@@ -785,6 +797,11 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-downline' },
     { grantee: AGENT, scope: 'own-downline' },
   ],
+  /*
+   * *`new_hire:mark_left`* — *Mark left*, `POST /new-hires/:membershipId/left` (P18.96-T6 AC-4) — **retired 2026-10-30**
+   * (UI V1, UI-025; ADR-0180 §6): there is no *Keluar* in the interface, so the route lost its only caller and went with
+   * its grant. `leftAt` stays in the data and decides nothing; somebody who leaves is removed (`member:remove_from_team`).
+   */
 
   /*
    * ---- Training progress (P18.5-T1, T4; roles §3.7; `functional/training.md`, *The permissions*). ----
@@ -888,7 +905,8 @@ export const PERMISSIONS = {
    *
    * **The office's console, the Owner's and the Admin's alike** (ADR-0028): the KPM Overview, its not-logged
    * list and the recruitment target's write, and KPM analytics — every figure over the office, `own-kpm`. No
-   * field role holds any of them: a leader's own reporting is the Unit Dashboard. The Super Admin's `all` on the
+   * field role holds the Overview: a leader's own reporting is the Unit Dashboard. KPM analytics is a Core
+   * Leader's as well (below). The Super Admin's `all` on the
    * two reads is not access on its own: both resolve the office from the caller's membership, so one reads an
    * office only inside a support session, as its member, and is answered `TENANT_NO_MEMBERSHIP` outside one.
    * **The target is a write by its verb**: a read-only session reads the Overview and is refused it; an elevated
@@ -903,10 +921,19 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  /*
+   * **And a Core Leader's** (ADR-0159 §2, P18.8-T5 AC-4): AB and AAB hold it at `own-kpm`, which lets the request
+   * through the guard, and **the reporting services answer `404 NOT_FOUND` to a leader who is not a Core Leader** —
+   * tagged, on a leader rung, read on every request (`OfficePeople.requireAnalyticsReader`) — the forum's rule. A
+   * Core Leader reads the whole office, read-only: no write in this module is granted to a field role. No Agent
+   * holds it, since no Agent can be one.
+   */
   'kpm_analytics:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-kpm' },
+    { grantee: AAB, scope: 'own-kpm' },
   ],
   /*
    * *Cross-platform analytics* (P18-T8; OD-148 → option 1, D-admin): adoption across offices, inside ADR-0011's
@@ -983,6 +1010,19 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+  ],
+  /*
+   * **A leader saves the WhatsApp number of somebody they coach** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22:
+   * *a leader may set it for their agents*) — `PUT /members/:membershipId/phone`, the *Isi nomor WhatsApp* sheet on a
+   * person's row. The `COACH` reach, as `coaching_profile:update`: an AB their downline, an AAB their own unit's subtree
+   * (`own-downline` is the right token for an AAB too, roles §1 rule 2). **Nobody else**: the Owner and an Admin keep
+   * the office's people at arm's length from their accounts, an Agent sets only their own (`PATCH /auth/me`, which
+   * needs no grant), and a Super Admin is in no office. A personal datum, so refused in every support session
+   * (`@RefuseInSupportSession`).
+   */
+  'member:update_phone': [
+    { grantee: AB, scope: 'own-downline' },
+    { grantee: AAB, scope: 'own-downline' },
   ],
   // Tags, and only the office's admins set them. A group is not hierarchy and not
   // access, so no leader grant: it is the office's own way of organising, not a unit's.
@@ -1085,6 +1125,31 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  /*
+   * **+ Add agent** (ADR-0170 §1, P18.96-T3 AC-1): the one form — `POST /new-hires/agents` — and the invites it makes,
+   * listed, resent and cancelled, and the transfer requests it asked for. An AB and an AAB for **their own unit**:
+   * the person joins under them, and nobody else's unit is theirs to add to, nor anybody else's invite theirs to read.
+   * The Owner and an Admin for the office: any active member's unit, named in the body. **Not the Agent's**, whose
+   * code still lets anybody walk in. **Not the Super Admin's**, and not a setup session's (`SETUP_SESSION_WRITE_SCOPE`
+   * names the office's settings, its import and its production file, never a person): a support session reaches the
+   * office as its member, and a write by its verb is refused to a read-only one. Revived in P18.96-T3 after its
+   * retirement in P3.6-T1, for a different thing — an invite to one named person, not a reusable code.
+   */
+  'member:invite': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  /*
+   * **Deciding a transfer request** (ADR-0170 §4, P18.96-T3 AC-3): the office's queue, and approving — which moves the
+   * member through `HierarchyService.reparent`, with history — or declining. The Owner's and an Admin's alone: no
+   * leader moves a member directly, so the leader who asked never decides their own request.
+   */
+  'member:transfer_approve': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   // The Owner and an Admin decide anywhere in the office — a request whose leader never
   // looks is the failure the queue exists to prevent. This matched the matrix nowhere
   // until 2026-09-06: the code had only the two leader grants, and office-wide approval
@@ -1097,6 +1162,34 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
   ],
+  /*
+   * **A leader past the office's limit waits for AgencyBoost** (ADR-0157). Asking — and cancelling an ask — is
+   * held by whoever may make the write the limit refused: the Owner and an Admin office-wide, an AB and an AAB
+   * over the people they act on, as `member:change_role` and `leader_request:approve` reach. The service asks
+   * the same question the write would — may *this* reader change *this* member's rung, or let them in — so the
+   * grant says who may ask at all, and never widens the act. A write by its verb: a read-only support session is
+   * refused it, an elevated one asks in the member's name with both actors audited.
+   */
+  'leader_limit_request:create': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  /*
+   * The office's requests: the Owner and an Admin read every one, an AB or AAB those they asked. The Super Admin
+   * reads the platform's queue (`GET /admin/leader-limit-requests`), through the repository's named unscoped
+   * methods. A read by its verb, so a read-only support session keeps it.
+   */
+  'leader_limit_request:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  /* Approving carries the act out past the limit; declining changes nothing. AgencyBoost's alone (ADR-0157 §3). */
+  'leader_limit_request:decide': [{ grantee: SUPER_ADMIN, scope: 'all' }],
 
   // ---- Joining an office. ----
   //
@@ -1480,9 +1573,34 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
    * elevated one would enrol the member in their name. The operator reproduces a failing chase on a test office.
    */
   'campaign:chase',
+  /*
+   * ADR-0162 §4: **the day's log is the member's own word**, and §3.5 above says no proxy writes it — *"not an
+   * elevated impersonation session"*. The grant list said so and this list did not, so an elevated session held it
+   * through the member's `own` grant. A read-only one, and a setup one, refuse it by its verb already.
+   */
+  'activity_log:create',
+  /*
+   * And **its correction** (the permission review of Phases 18.8 and 18.9, 2026-10-26): rewriting a frozen day is the
+   * same word, the member's, and it moves the compliance tree and a campaign's evidence just as a first save does.
+   */
+  'activity_log:update',
 ];
 
 const BLOCKED = new Set<string>(BLOCKED_WHILE_IMPERSONATING);
+
+/**
+ * **What a setup session may write, and nothing else** (ADR-0162 §2): the office's settings, its people
+ * import and its production file — the setup screens' own permissions. Stored on the session row as
+ * `writeScope` when one starts, so a session already running keeps the scope it was started with.
+ *
+ * `data_upload:*` is the whole of the data upload's grants, its reads included (they are reads anyway).
+ * Nothing on `BLOCKED_WHILE_IMPERSONATING` is in it, and a test keeps it that way.
+ */
+export const SETUP_SESSION_WRITE_SCOPE: readonly Permission[] = Object.freeze([
+  'tenant_config:write',
+  'kpm:import_roster',
+  ...(Object.keys(PERMISSIONS) as Permission[]).filter((p) => p.startsWith('data_upload:')),
+]);
 
 /** Is this one of the powers a support session may never use? */
 export function isBlockedWhileImpersonating(permission: Permission): boolean {
@@ -1507,7 +1625,13 @@ export function can(ctx: RequestContext, permission: Permission): boolean {
    * verb. Every permission in the registry is `resource:action`, and the read-shaped
    * actions are a short closed list.
    */
-  if (ctx.impersonationReadOnly && !isReadLike(permission)) return false;
+  /*
+   * **A setup session is a read-only one with a scope** (ADR-0162 §2): a write whose permission the session row
+   * names goes on to the ordinary question below — the scope lets a write through, it grants nothing the member
+   * does not hold. Every other write is refused exactly as above.
+   */
+  if (ctx.impersonationReadOnly && !isReadLike(permission)
+    && !ctx.impersonationWriteScope.includes(permission)) return false;
 
   return scopeFor(ctx, permission) !== null;
 }
@@ -1552,9 +1676,9 @@ function holds(ctx: RequestContext, grant: Grant): boolean {
         status !== undefined &&
         status !== 'removed' &&
         (allowed as readonly string[]).includes(status) &&
-        // By ladder code, not by enum (P4-T9). Both sides are the company's own
-        // vocabulary; neither is a list this file enumerated in advance.
-        ctx.membership!.orgLevelCode === grantee.orgLevelCode
+        // By class, not by rung code (ADR-0156 §3): the class is derived from the rung's
+        // leader tier, so a rung a company named itself holds its tier's rights.
+        ctx.membership!.hierarchyRole === grantee.roleClass
       );
     }
   }

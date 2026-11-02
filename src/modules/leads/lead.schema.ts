@@ -10,6 +10,10 @@ export type LeadType = (typeof LEAD_TYPES)[number];
 export const LEAD_OUTCOMES = ['won', 'lost'] as const;
 export type LeadOutcome = (typeof LEAD_OUTCOMES)[number];
 
+/** Where a lead was written other than the Leads screen: a closing logged from the checklist (P18.96-T4). */
+export const LEAD_ORIGINS = ['activation_checklist'] as const;
+export type LeadOrigin = (typeof LEAD_ORIGINS)[number];
+
 /**
  * Why this person's details may be held (UU 27/2022) — **as recorded until 2026-10-07.**
  *
@@ -70,6 +74,28 @@ export class LeadCommitment {
   byMembershipId!: string;
 }
 export const LeadCommitmentSchema = SchemaFactory.createForClass(LeadCommitment);
+
+/**
+ * **A next action its owner ticked done** (UI V1, 2026-10-30, UI-104 point 4; ADR-0180 §11): the date and the note it
+ * had, when, and by whom. Ticking clears the lead's own `nextActionDate` and `nextActionNote`, so every screen then asks
+ * for a new one (*Isi tindakan*, UI-062); *Urungkan* puts these back and clears the marker. The latest tick's only.
+ */
+@Schema({ _id: false })
+export class LeadNextActionDone {
+  @Prop({ type: String, default: null })
+  date!: string | null;
+
+  @Prop({ type: String, default: null })
+  note!: string | null;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** The lead's owner: nobody else ticks it. */
+  @Prop({ type: String, required: true })
+  byMembershipId!: string;
+}
+export const LeadNextActionDoneSchema = SchemaFactory.createForClass(LeadNextActionDone);
 
 /** Whatever contact detail the agent has. Both optional, and since 2026-10-07 nothing asked beside them. */
 @Schema({ _id: false })
@@ -176,6 +202,13 @@ export class Lead {
   nextActionNote!: string | null;
 
   /**
+   * **The next action last ticked done** from the owner's Calendar (UI-104 point 4), `null` when none is — or once a
+   * new one is written over it, or the tick is taken back. What *Urungkan* restores; never read as the next action.
+   */
+  @Prop({ type: LeadNextActionDoneSchema, default: null })
+  nextActionDone!: LeadNextActionDone | null;
+
+  /**
    * **One vocabulary.** The agent screen writes `success`/`fail` and the coaching screen writes
    * `won`/`lost` for the same field; `won`/`lost` wins because it is what the Owner's settings
    * screen and every downstream metric already say.
@@ -191,6 +224,21 @@ export class Lead {
 
   @Prop({ type: String, default: null, trim: true })
   source!: string | null;
+
+  /**
+   * **Where the lead sits in its owner's list**, smallest first (P18.8-T7, ADR-0161 §1).
+   *
+   * The owner's, and nobody else's: `GET /leads` without `sort` reads it, and `PATCH /leads/order` is
+   * the only route that writes it, with the caller's own open leads in the order they dragged them. A new
+   * lead takes one less than the owner's first, so it goes to the top. Migration 0031 filled it from the
+   * date registered, newest first, so nobody's list moved on the day it arrived.
+   *
+   * **Presentation, so no write here bumps `version` or names an editor.** A leader's pinned edit in a
+   * 1-on-1 does not conflict with the agent tidying their list, and the ✎ still names the leader. `null`
+   * is a lead nothing has placed yet — a row written before 0031 ran — and sorts first, as a new one does.
+   */
+  @Prop({ type: Number, default: null })
+  position!: number | null;
 
   /**
    * The domain's version, bumped on every write and pinned by the next one (P7-T7).
@@ -209,6 +257,16 @@ export class Lead {
   @Prop({ type: [LeadTransitionSchema], default: [] })
   transitions!: LeadTransition[];
 
+  /**
+   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3, ADR-0171 §3): `activation_checklist` for a sales
+   * lead its owner or a leader created from *Which case? → Log a new closing*, straight at *Paid and issued* on the
+   * day they gave, rather than walked up the ladder. It is the ADR's *manual tick that names a closing*: it counts as
+   * a first sale marked `manual`, and **not as the data that confirms one** (`firstSaleOf`'s `dataOnly`). `null` for
+   * every other lead.
+   */
+  @Prop({ type: String, enum: [...LEAD_ORIGINS, null], default: null })
+  loggedFrom!: LeadOrigin | null;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 
@@ -226,7 +284,8 @@ export const LeadSchema = SchemaFactory.createForClass(Lead);
  * Every index leads with `kpmId` (invariant §1).
  *
  * The agent's own screen is the read this collection exists for: one member's live leads, newest
- * first, which is the prototype's default sort.
+ * first, which is the prototype's default sort — and since P18.8-T7 the `dateRegistered` sort and the
+ * closed cards, the default being the owner's own order (the last index below).
  */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, deletedAt: 1, dateRegistered: -1 });
 
@@ -235,3 +294,9 @@ LeadSchema.index({ kpmId: 1, type: 1, outcome: 1, statusCode: 1, deletedAt: 1 })
 
 /** Triage: what is overdue, across the office or one member's list. */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, nextActionDate: 1, deletedAt: 1 });
+
+/**
+ * The owner's own order (P18.8-T7): `GET /leads` without `sort`, and the first place a new lead takes,
+ * which is one less than the owner's smallest.
+ */
+LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, position: 1 });

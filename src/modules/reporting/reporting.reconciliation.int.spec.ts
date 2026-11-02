@@ -9,6 +9,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { coachingCoverage } from '@/domain/metrics/coaching-coverage';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
+import { rollUpGoal, rollUpGoalPaired, type GoalFigure } from '@/domain/metrics/unit-rollup';
 import { CoachingController } from '@/modules/coaching/coaching.controller';
 import { CoachingRosterService } from '@/modules/coaching/coaching-roster.service';
 import { CoacheeService } from '@/modules/coaching/coachee.service';
@@ -20,6 +21,7 @@ import { RemovalService } from '@/modules/org/removal.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { GroupService } from '@/modules/org/group.service';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { ProductionController } from '@/modules/production/production.controller';
 import { ProductionService } from '@/modules/production/production.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
@@ -101,7 +103,8 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
         { provide: CoachingRosterService, useValue: wired.coachingRoster },
         { provide: CoacheeService, useValue: wired.coachee },
         { provide: CoachingSessionService, useValue: wired.coachingSession },
-        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService]
+        // Routes this spec never calls; a bare object keeps Nest from building their graphs.
+        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService, LeaderLimitRequestService]
           .map((provide) => ({ provide, useValue: {} })),
       ],
     }).compile();
@@ -235,13 +238,24 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     for (const key of ['apeAnnual', 'coached7d', 'manpower'] as const) {
       expect([at(`${key} ignores the period`), then.total[key]]).toEqual([at(`${key} ignores the period`), now.total[key]]);
     }
-    // The Owner is the root AB: their Unit Dashboard is the office.
+    // The Owner is the root AB: their Unit Dashboard's rows are the office.
     const tile = unitMonth.tiles.directGroupProduction;
-    expect([at('the month = the Unit Dashboard'), now.total.apeMonth.achievedMinor, now.total.apeMonth.targetMinor])
-      .toEqual([at('the month = the Unit Dashboard'), tile.actualMinor, tile.targetMinor]);
     const unitRows = [...unitMonth.yourUnit.rows, ...unitMonth.units.flatMap(function rows(g: { head: unknown; members: unknown[]; units: unknown[] }): unknown[] {
       return [g.head, ...g.members, ...(g.units as typeof g[]).flatMap(rows)];
-    })] as { leadsCounts: { salesOpen: number; salesClosing: number; recruitOpen: number; recruitNominated: number } }[];
+    })] as {
+      goal: GoalFigure;
+      leadsCounts: { salesOpen: number; salesClosing: number; recruitOpen: number; recruitNominated: number };
+    }[];
+    /*
+     * The office's month sums its rows by the rollup rule, every target held; the dashboard's tile **pairs** each target
+     * with the production it measures (ADR-0165 §1, P18.8-T15 AC-6). One set of rows, two documented rules.
+     */
+    const office = rollUpGoal(unitRows.map((r) => r.goal));
+    expect([at('the month = the Unit Dashboard’s rows'), now.total.apeMonth.achievedMinor, now.total.apeMonth.targetMinor])
+      .toEqual([at('the month = the Unit Dashboard’s rows'), office.actualMinor, office.targetMinor]);
+    const paired = rollUpGoalPaired(unitRows.map((r) => r.goal));
+    expect([at('the tile pairs'), tile.actualMinor, tile.targetMinor, tile.missing])
+      .toEqual([at('the tile pairs'), paired.actualMinor, paired.targetMinor, paired.missing]);
     const leads = unitRows.reduce((n, r) => ({
       sales: n.sales + r.leadsCounts.salesOpen, salesPotential: n.salesPotential + r.leadsCounts.salesClosing,
       recruit: n.recruit + r.leadsCounts.recruitOpen, recruitPotential: n.recruitPotential + r.leadsCounts.recruitNominated,

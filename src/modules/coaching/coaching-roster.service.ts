@@ -31,6 +31,8 @@ export interface RosterLastOneOnOne {
 
 /** One person on the roster: verdicts and dates, and **no count of any activity** (P11-T6 AC-6). */
 export interface RosterRow extends RosterPerson {
+  /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the row draws initials. */
+  photoUrl: string | null;
   rung: { code: string; label: string };
   /** Edges from the reader: 1 is a direct report. */
   depth: number;
@@ -110,7 +112,9 @@ export class CoachingRosterService {
     ]);
     // The last 1:1's coach may be anybody who coached them: a leader above the reader, or one who left.
     const coachIds = [...recency.values()].flatMap((r) => (r.last ? [r.last.coachMembershipId] : []));
-    const names = await this.names.byMembershipId(ctx, [...ids, ...coachIds]);
+    // The rows' photos signed with their names (UI V1, UI-111); a last 1:1's coach is only named.
+    const people = await this.names.pictured(ctx, [...ids, ...coachIds], ids);
+    const names = new Map([...people].map(([id, p]) => [id, p.name]));
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
 
     const nameOf = (c: Coachee) => names.get(c.membershipId) ?? '';
@@ -125,6 +129,7 @@ export class CoachingRosterService {
       return {
         membershipId: c.membershipId,
         name: nameOf(c),
+        photoUrl: people.get(c.membershipId)?.photoUrl ?? null,
         rung: { code: c.membership.orgLevelCode, label: labels.get(c.membership.orgLevelCode) ?? c.membership.orgLevelCode },
         depth: c.depth,
         lastOneOnOne: last === null ? null : {

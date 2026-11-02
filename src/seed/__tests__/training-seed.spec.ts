@@ -1,12 +1,16 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { SEED_TRAINING_MODULES } from '@/domain/constants';
 import type { TrainingProgressView } from '@/modules/training/training-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { StubStorage } from '../../../test/stub-storage';
 import { seedDemo, type SeedResult } from '../demo';
 import { TRAINING_SEED_LINK } from '../training-fixture';
+
+/** A seeded module's title, as the seed gives it — in Bahasa Indonesia since P18.98-T7 (OD-238). */
+const titleOf = (code: string) => SEED_TRAINING_MODULES.find((m) => m.code === code)!.title;
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -121,7 +125,7 @@ describe('Phase 18.5 the training seed — a run at 10:00 on 10 October 2026 in 
     expect(item('MANDATORY_TRAINING')).toMatchObject({
       done: false,
       link: {
-        kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', live: true,
+        kind: 'training:CLOSING_TECHNIQUES', label: titleOf('CLOSING_TECHNIQUES'), live: true,
         route: '/training/SALES/CLOSING_TECHNIQUES',
       },
     });
@@ -238,7 +242,7 @@ describe('Phase 18.5 the training seed — storage configured', () => {
   it('P18.5-T1 AC-6 Rina opens a module’s PDF through the company’s registry', async () => {
     const rina = await as('0417', 'rina@kpm0417.test');
     const page = await wired.trainingProgress.module(rina, 'PROSPECT_LIST');
-    expect(page.items.map((i) => [i.kind, i.label])).toEqual([['file', 'Building Your Prospect List.pdf']]);
+    expect(page.items.map((i) => [i.kind, i.label])).toEqual([['file', `${titleOf('PROSPECT_LIST')}.pdf`]]);
     const opened = await wired.trainingProgress.open(rina, 'PROSPECT_LIST', page.items[0].id);
     expect(opened.url).toContain('/training/PROSPECT_LIST-demonstration');
   });

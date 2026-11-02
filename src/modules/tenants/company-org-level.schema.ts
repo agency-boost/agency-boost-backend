@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
+import type { LeaderTier } from '@/domain/constants';
 
 export type CompanyOrgLevelDocument = HydratedDocument<CompanyOrgLevel>;
 
@@ -38,6 +39,21 @@ export class CompanyOrgLevel {
   /** Junior first: Agent is 1, AB is last. Reorderable, which is why nothing references it. */
   @Prop({ type: Number, required: true })
   displayOrder!: number;
+
+  /**
+   * **Whether this rung leads, and how** (ADR-0156): `senior` (*Senior Leader*, what AB is), `associate`
+   * (*Associate Leader*, what AAB is) or `null` (*Not a leader*). A member's `role` class is derived from it
+   * wherever they are placed on the rung, and RBAC, *Leaders used* and the agency and unit partitions read the
+   * class — so a company whose leaders are `SM` and `UM` marks them and they lead.
+   *
+   * **No default, on purpose.** A row written before the field existed reads as absent, and `tierOfRung` reads
+   * an absent tier as migration 0030 writes it (`AB` senior, `AAB` associate, others none). A `default: null`
+   * would hydrate that row as *Not a leader* and demote every AB the moment the code ran ahead of the migration.
+   *
+   * **Fixed while anybody holds the rung** (`409 ORG_LEVEL_TIER_IN_USE`): nobody is re-classed silently.
+   */
+  @Prop({ type: String, enum: ['senior', 'associate', null] })
+  leaderTier?: LeaderTier | null;
 
   /**
    * Archived, never deleted (invariant 3). A ladder rung that vanished would orphan every

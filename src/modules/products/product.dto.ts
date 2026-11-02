@@ -8,6 +8,8 @@ import {
   PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_NEEDS,
   PRODUCT_TAGLINE_MAX_LENGTH,
 } from '@/domain/constants';
+import { field } from '@/common/validation/violations';
+import { PRODUCTS_REFUSALS } from './products.messages';
 
 const AGE_BAND_MAX = PRODUCT_AGE_BANDS.length;
 const BUDGET_BAND_MAX = PRODUCT_BUDGET_BANDS.length;
@@ -136,7 +138,8 @@ export class CreateProductDto extends ProductFieldsDto {
   @ApiProperty({ example: 'PRUMAPAN', description: 'Upper case, letters, digits and `_`. Immutable once created.' })
   @IsString() @MaxLength(60)
   @Matches(/^[A-Za-z][A-Za-z0-9_]*$/, {
-    message: 'A product code starts with a letter and holds letters, digits and underscores.',
+    // The DTO's own sentence, in both languages (P18.98-T5 AC-3).
+    message: field(PRODUCTS_REFUSALS.VALIDATION_FAILED.productCodeShape),
   })
   code!: string;
 

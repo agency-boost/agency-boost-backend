@@ -74,4 +74,25 @@ describe('activity readings, for many members at once (P11-T6)', () => {
   it('P11-T6 AC-9 asks nothing for an empty list', async () => {
     expect(await wired.activityReadings.countsOverMany(leader(), [], SEPTEMBER)).toEqual(new Map());
   });
+
+  /*
+   * **`perPersonPerDay`: each person's count on each asked day** (UI V1, Phase 18.99 T9: UI-059's *Hari ini* on the
+   * Group Tree, O-5; the same read Home's team list takes for yesterday and today, UI-101). The day's `totalCount`,
+   * within the office, never a deleted day.
+   */
+  it('UI-059 answers each person’s total for each asked day, within the office, a missing day absent', async () => {
+    const counts = await wired.activityReadings.perPersonPerDay(leader(), [RINA, BUDI, DEWI], ['2026-09-14', '2026-09-11', '2026-09-10']);
+    expect(counts.get(RINA)).toEqual(new Map([['2026-09-14', 7]]));
+    // Budi's 11th was deleted: only the 10th reads.
+    expect(counts.get(BUDI)).toEqual(new Map([['2026-09-10', 1]]));
+    // Nobody logged for Dewi: absent, *not reported*.
+    expect(counts.has(DEWI)).toBe(false);
+  });
+
+  it('UI-059 never reads another office’s row against the same id, and asks nothing for an empty list', async () => {
+    const asB = await wired.activityReadings.perPersonPerDay(leader(KPM_B), [RINA], ['2026-09-05', '2026-09-14']);
+    expect(asB.get(RINA)).toEqual(new Map([['2026-09-05', 100]]));
+    expect(await wired.activityReadings.perPersonPerDay(leader(), [], ['2026-09-14'])).toEqual(new Map());
+    expect(await wired.activityReadings.perPersonPerDay(leader(), [RINA], [])).toEqual(new Map());
+  });
 });

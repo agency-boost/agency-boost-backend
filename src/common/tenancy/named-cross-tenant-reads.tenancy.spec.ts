@@ -33,6 +33,24 @@ const CALLERS: Record<string, Record<string, string>> = {
       'the orphan sweep: storage accounting is a platform job, and a per-office sweep would never see '
       + 'an archived office — nor a company file a failed template copy left behind (P13.2-T7 AC-5)',
   },
+  'tenants/org-level.service.ts': {
+    countHoldingRungAcrossTenants:
+      'a rung\'s leader tier refused while anybody holds it (P18.8-T1, ADR-0156 §5): the rung is the company\'s and '
+      + 'its members are in every office of it, so the Super Admin, in none, counts them — a count, never a row',
+  },
+  'org/leader-limit-request.service.ts': {
+    queueAcrossTenants:
+      'the Super Admin\'s queue of leaders past an office\'s limit (ADR-0157 §3): every office\'s requests, by the '
+      + 'Super Admin who is in none — each read in its own office afterwards for names, never widened',
+    findByIdAcrossTenants:
+      'deciding one leader-limit request (ADR-0157 §3): the route names the request, and the office it names is the '
+      + 'one the approval then acts in, through the scoped repository with that office named',
+  },
+  'org/invites.service.ts': {
+    pendingCodeAcrossTenants:
+      '*+ Add agent* (P18.96-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
+      + 'company — the insurer issued the code and spans offices — answered as a boolean, never a row, an office or a name',
+  },
   'org/leader-limit.ts': {
     countPerOfficeAcrossTenants:
       '*Leaders used* per office on the Super Admin\'s offices list (P13.2-T3, ADR-0113): counts, never '
@@ -52,7 +70,12 @@ const CALLERS: Record<string, Record<string, string>> = {
   'config/office-settings.source.ts': {
     findInOfficeAcrossTenants:
       '*Save as template* (P13.2-T7, ADR-0115 §5): one named office\'s published configuration — and '
-      + 'its own training files, to duplicate — read by the Super Admin, who is in no office',
+      + 'its own training files, to duplicate, and its live activity binding — read by the Super Admin, who is in no office',
+  },
+  'config/activity-binding.service.ts': {
+    findInOfficeAcrossTenants:
+      'an office\'s activity binding, kept by the Super Admin (P18.9-T2, ADR-0163 §3): one named office\'s binding '
+      + 'and its activity types — configuration, never a log — to show and to check a rebind against',
   },
 };
 
@@ -67,6 +90,8 @@ const CALLERS: Record<string, Record<string, string>> = {
  */
 const CONFIGURATION_REPOSITORIES = new Set([
   'ConfigSnapshotRepository',
+  // ADR-0163: the office's activity binding, read live — the Super Admin's, never an Owner's unpublished edit.
+  'ActivityBindingRepository',
   'ActivationTemplateRepository',
   'TrainingModuleRepository',
   'AssetRepository',
@@ -113,6 +138,15 @@ describe('named cross-tenant reads (invariant §1, P13.2-T7 AC-6)', () => {
         expect([file, found.get(file)?.has(method) ?? false]).toEqual([file, true]);
       }
     }
+  });
+
+  it('P18.9-T2 reads an office’s activity binding from configuration alone — nothing outside it is in reach', () => {
+    const source = readFileSync(join(MODULES, 'config/activity-binding.service.ts'), 'utf8');
+    const constructor = source.slice(source.indexOf('constructor('), source.indexOf(') {}', source.indexOf('constructor(')));
+    const injected = [...constructor.matchAll(/private readonly \w+\s*:\s*(\w+)/g)].map((m) => m[1]);
+    // The binding and the types it names, the office record its 404 is answered from, and the audit it writes.
+    expect(injected.sort()).toEqual(['ActivityBindingRepository', 'ActivityTypeRepository', 'AuditService', 'Model']);
+    expect(source).toContain('@InjectModel(Kpm.name)');
   });
 
   it('reads one office’s settings from configuration alone — nothing outside it is in reach', () => {

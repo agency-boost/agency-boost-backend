@@ -12,6 +12,7 @@ import { CampaignEvaluation, evaluationInput, fromFrozen } from './campaign-eval
 import { CampaignStandingRepository } from './campaign-standing.repository';
 import type { CampaignStanding, StandingOverride } from './campaign-standing.schema';
 import { CampaignRepository } from './campaign.repository';
+import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
 
 /** What a stored final standing can read: the two an override sets, and the one nothing could decide. */
 type FrozenStatus = StandingOverride['previousStatus'];
@@ -25,6 +26,16 @@ export type OverrideStatus = (typeof OVERRIDE_STATUSES)[number];
 
 /** A reason, trimmed: required to set and to clear, as long as the house's other reasons (`REASON_MAX`). */
 export const OVERRIDE_REASON = { min: 1, max: 500 } as const;
+
+/**
+ * **How long a write waits for a standing another request is freezing**: a read every `ms`, at most `reads` of
+ * them, two seconds in all. Of two first reads of a window at once, the one that loses `markFrozen` answers *final*
+ * before the winner's insert has landed (`CampaignEvaluation`), so a chaser's row can be a moment away rather than
+ * missing. Only a chaser at the window's end is waited for: anybody else has no row to wait for.
+ */
+export const FREEZE_WAIT = { ms: 25, reads: 80 } as const;
+
+const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
 /** The override as the tree's cell names it: who set what, when and why. */
 export interface StandingOverrideView {
@@ -73,6 +84,8 @@ export function checkStandingOverrideClear(body: unknown): { reason: string } {
  *   member's dialog shows requirement rows only (ADR-0147) and does not change.
  * - **One write per reading**: conditional on the row's `version`; a write that lost a race re-reads and re-checks
  *   once (so a second identical set answers *"already reads"*, as it would in sequence), then `409 VERSION_CONFLICT`.
+ *   A write that froze nothing itself, because another request was freezing the window at the same moment, waits
+ *   for a chaser's row rather than calling it missing (`FREEZE_WAIT`; found by a coverage run, 2026-10-23).
  *   Each write audited once, `campaign_standing.overridden` or `campaign_standing.override_cleared`, with before,
  *   after, the reason and the previous status; both actors in a support session (the audit's own).
  * - **Nobody overrides their own result** (the exit review, round 1; ADR-0138's rule): the caller's own membership is
@@ -117,7 +130,7 @@ export class CampaignStandingOverrides {
     if (membershipId === me) {
       throw new DomainException(
         ErrorCode.CAMPAIGN_OVERRIDE_SELF,
-        'You can’t override your own result.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_OVERRIDE_SELF.ownResult,
         HttpStatus.BAD_REQUEST,
         { membershipId: me },
       );
@@ -129,15 +142,21 @@ export class CampaignStandingOverrides {
     if (!evaluated.final) {
       throw new DomainException(
         ErrorCode.CAMPAIGN_STANDING_NOT_FINAL,
-        'This campaign’s result is not final yet. It can be overridden once the last month it reads has locked.',
+        CAMPAIGNS_REFUSALS.CAMPAIGN_STANDING_NOT_FINAL.notFinal,
         HttpStatus.CONFLICT,
         { code: campaign.code },
       );
     }
     const where = { campaignCode: campaign.code, windowKey: evaluated.window.key, membershipId };
+    // A chaser at the window's end has a stored standing, or is about to (FREEZE_WAIT).
+    const chaser = evaluated.members.get(membershipId)?.chasing === true;
 
     for (let attempt = 0; ; attempt += 1) {
-      const row = await this.standings.findOne(ctx, where);
+      let row = await this.standings.findOne(ctx, where);
+      for (let read = 1; !row && chaser && read < FREEZE_WAIT.reads; read += 1) {
+        await pause(FREEZE_WAIT.ms);
+        row = await this.standings.findOne(ctx, where);
+      }
       // A member who was not chasing at the window's end has no stored standing (ADR-0143 §4): nothing to correct.
       if (!row) throw new NotFoundException('Standing');
       // Hydrated with the schema's default: a row frozen before the field existed reads `null`.
@@ -146,9 +165,9 @@ export class CampaignStandingOverrides {
       if (status !== null && before === status) {
         throw new DomainException(
           ErrorCode.VALIDATION_FAILED,
-          `The result already reads ${status}.`,
+          CAMPAIGNS_REFUSALS.VALIDATION_FAILED.alreadyReads({ status }),
           HttpStatus.BAD_REQUEST,
-          { violations: [`status already reads ${status}.`], status },
+          { violations: [CAMPAIGNS_REFUSALS.VALIDATION_FAILED.statusAlreadyReads({ status })], status },
         );
       }
       if (status === null && current === null) throw new NotFoundException('Override');
@@ -185,7 +204,7 @@ export class CampaignStandingOverrides {
       if (attempt >= 1) {
         throw new DomainException(
           ErrorCode.VERSION_CONFLICT,
-          'This result changed while it was being corrected. Reload and try again.',
+          CAMPAIGNS_REFUSALS.VERSION_CONFLICT.changedWhileCorrected,
           HttpStatus.CONFLICT,
         );
       }

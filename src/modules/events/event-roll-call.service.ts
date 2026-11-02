@@ -5,8 +5,10 @@ import {
   DomainException, NoMembershipException, NotFoundException, PermissionDeniedException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { refuseWith } from '@/common/validation/fields';
+import { refuseWith, type FieldSentence } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import type { EventAttendanceStatus, EventPhase } from '@/domain/constants';
+import { eventAttendanceRateShown } from '@/domain/metrics/event-attendance';
 import type { NpsBucket } from '@/domain/metrics/event-nps';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -17,6 +19,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { EventRsvpRepository } from './event.repository';
 import { NPS_CONSTANTS, type NpsConstants } from './event-guest.service';
 import { EventReadings, type FeedbackAttendance } from './event-readings';
+import { EVENTS_REFUSALS } from './events.messages';
 
 export interface RollCallRow {
   membershipId: string;
@@ -168,7 +171,9 @@ export class EventRollCallService {
         registered: reading.counts.registered,
         notRegistered: reading.counts.not_registered,
       },
-      attendanceRate: reading.rate,
+      // The share as a reader is shown it, whole and rounded once from the counts (ADR-0174 §1, P18.97-T3 AC-2), never
+      // `EVENT_ATTENDANCE_RATE`'s tenth for a screen to round again.
+      attendanceRate: eventAttendanceRateShown(reading.rows.map((r) => r.status), reading.event.ended),
       can: { confirm: can(ctx, 'event_attendance:confirm') && reading.event.ended },
     };
   }
@@ -186,14 +191,14 @@ export class EventRollCallService {
     if (entries.some((entry) => entry.membershipId === me)) {
       throw new DomainException(
         ErrorCode.EVENT_ATTENDANCE_SELF,
-        'Nobody confirms their own attendance. Another administrator confirms yours.',
+        EVENTS_REFUSALS.EVENT_ATTENDANCE_SELF.ownAttendance,
         HttpStatus.BAD_REQUEST,
         { membershipId: me },
       );
     }
     if (!reading.event.ended) {
       throw new DomainException(
-        ErrorCode.EVENT_NOT_ENDED, 'Attendance is confirmed once the event has ended.', HttpStatus.CONFLICT,
+        ErrorCode.EVENT_NOT_ENDED, EVENTS_REFUSALS.EVENT_NOT_ENDED.attendanceAfterEnd, HttpStatus.CONFLICT,
       );
     }
     const byMember = new Map(reading.rows.map((row) => [row.membershipId, row]));
@@ -282,38 +287,40 @@ export class EventRollCallService {
 
 /** The roll-call body: `{ entries: [{ membershipId, attended: true | false | null }] }`, 1 to 500, no repeats. */
 export function checkRollCall(body: unknown): { membershipId: string; attended: boolean | null }[] {
-  const violations: string[] = [];
+  const SAY = EVENTS_REFUSALS.VALIDATION_FAILED;
+  const FIELD = VALIDATION_REFUSALS.VALIDATION_FAILED;
+  const violations: FieldSentence[] = [];
   const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
-  if (!isObject(body)) refuseWith(['The change must be an object of fields.']);
-  for (const key of Object.keys(body)) if (key !== 'entries') violations.push(`property ${key} should not exist`);
+  if (!isObject(body)) refuseWith([FIELD.notAnObject]);
+  for (const key of Object.keys(body)) if (key !== 'entries') violations.push(FIELD.unknownField({ key }));
   const raw = body.entries;
   if (!Array.isArray(raw)) {
-    violations.push('entries must be a list.');
+    violations.push(SAY.entriesNotList);
     refuseWith(violations);
   }
   if (raw.length < 1 || raw.length > ROLL_CALL_MAX_ENTRIES) {
-    violations.push(`entries must hold 1–${ROLL_CALL_MAX_ENTRIES} people.`);
+    violations.push(SAY.entriesCount({ max: ROLL_CALL_MAX_ENTRIES }));
   }
   const seen = new Set<string>();
   const entries: { membershipId: string; attended: boolean | null }[] = [];
   raw.forEach((item, i) => {
     if (!isObject(item)) {
-      violations.push(`entries[${i}] must be an object.`);
+      violations.push(SAY.entryNotObject({ i }));
       return;
     }
     for (const key of Object.keys(item)) {
-      if (key !== 'membershipId' && key !== 'attended') violations.push(`entries[${i}].${key} should not exist`);
+      if (key !== 'membershipId' && key !== 'attended') violations.push(SAY.entryUnknownField({ i, key }));
     }
     const { membershipId, attended } = item;
     if (typeof membershipId !== 'string' || membershipId.trim() === '') {
-      violations.push(`entries[${i}].membershipId is required.`);
+      violations.push(FIELD.required({ field: `entries[${i}].membershipId` }));
       return;
     }
     if (attended !== true && attended !== false && attended !== null) {
-      violations.push(`entries[${i}].attended must be true, false or null.`);
+      violations.push(SAY.entryAttended({ i }));
       return;
     }
-    if (seen.has(membershipId)) violations.push(`entries[${i}] names ${membershipId} twice.`);
+    if (seen.has(membershipId)) violations.push(SAY.entryTwice({ i, membershipId }));
     seen.add(membershipId);
     entries.push({ membershipId, attended });
   });

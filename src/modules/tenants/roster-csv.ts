@@ -1,4 +1,12 @@
 import { randomInt } from 'node:crypto';
+import type { LocalDate } from '@/common/time/local-day';
+import type { FieldSentence } from '@/common/validation/fields';
+import { AGENT_CODE_PATTERN, type Gender, type WorkStatus } from '@/domain/constants';
+import { birthDateProblem, joinMonthProblem } from '@/modules/users/personal-data';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** Each row's issue, in both languages (P18.98-T5 AC-3): written for the reader where the preview answers. */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
 
 /**
  * The roster file, and the password an imported account starts on.
@@ -8,27 +16,53 @@ import { randomInt } from 'node:crypto';
  * reason: the rules about the *file* are not rules about the *office*.
  */
 
-/** The columns, in order. The template download writes exactly this header. */
+/**
+ * The columns, in order. The template download writes exactly this header.
+ *
+ * **Nine since P18.8-T4** (ADR-0158 §2): the four a person records follow the five, in this order, and
+ * every one is required — a row missing any is an issue naming it.
+ */
 export const ROSTER_COLUMNS = [
   'fullName',
   'email',
   'agentCode',
   'role',
   'leaderAgentCode',
+  'dateOfBirth',
+  'companyJoinMonth',
+  'workStatus',
+  'gender',
 ] as const;
+
+/**
+ * The file's words for `memberships.workStatus` and `users.gender`, read in any case.
+ *
+ * Hyphenated in the file because that is how a person writes it in a spreadsheet; underscored in the
+ * database because that is how a code is written (ADR-0158 §1).
+ */
+const WORK_STATUS_WORDS: Record<string, WorkStatus> = { 'full-time': 'full_time', 'part-time': 'part_time' };
+const GENDER_WORDS: Record<string, Gender> = { male: 'male', female: 'female' };
 
 export const ROSTER_TEMPLATE_HEADER = ROSTER_COLUMNS.join(',');
 
 /**
+ * Is this a rung's code in shape — letters, digits and underscores, starting with a letter, as the ladder
+ * writes them (any case)? Whether the company's ladder has it is the import's to check.
+ */
+export function isRungCode(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]{1,31}$/.test(value);
+}
+
+/**
  * A line the importer ignores entirely.
  *
- * This exists so the template can carry **worked examples** without them becoming people.
- * A template with live example rows is a trap: somebody types under them, uploads, and
- * imports Rina Wijaya along with their actual roster — or, if the examples happen to be
- * invalid, gets four issues about rows they did not write and cannot see the point of.
+ * This existed so the CSV template could carry **worked examples** and a column guide without them becoming people
+ * — a template with live example rows is a trap: somebody types under them, uploads, and imports Rina Wijaya along
+ * with their actual roster.
  *
- * Commented out, they can be read, copied over, or left alone, and none of those creates
- * anybody.
+ * **Since ADR-0184 the template carries neither**: the guide and the examples are the Excel template's *Petunjuk*
+ * sheet and the import page's, and the CSV is the header alone. The importer still skips these lines, so a template
+ * downloaded before — seventeen `#` lines, the header, three commented examples — reads as it always did.
  */
 export const COMMENT_PREFIX = '#';
 
@@ -40,41 +74,26 @@ export const COMMENT_PREFIX = '#';
  * a chain of three reads. A blank template answers none of them, and the issue list is a
  * worse place to learn than the example itself.
  *
- * Cells, because two places need them in two shapes — the downloaded template writes them
- * as commented CSV, and the paste box shows them tab-separated, the way a clipboard
- * carries them. Deriving the second from the first would put a CSV splitter in the
- * frontend: a second parser, disagreeing with this one over precisely the row that is
- * here to demonstrate quoting.
+ * Cells, because two places need them — the Excel template's guide sheet lists them under
+ * the header (ADR-0184), and the paste box shows them tab-separated, the way a clipboard
+ * carries them. Splitting a CSV line in the frontend would be a second parser, disagreeing
+ * with this one over precisely the row that is here to demonstrate quoting.
  */
 export const ROSTER_EXAMPLES: readonly (readonly string[])[] = [
-  ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
-  ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
-  ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+  ['Agus Prasetyo', 'agus@example.test', '88001', 'AB', '', '1984-05-12', '2012-03', 'full-time', 'male'],
+  ['Puspita, Sari', 'sari@example.test', '88002', 'AAB', '88001', '1990-11-02', '2016-08', 'full-time', 'female'],
+  ['Rina Wijaya', 'rina@example.test', '88003', 'Agent', '88002', '1998-07-21', '2024-01', 'part-time', 'female'],
 ];
 
-/** Quote a cell only where the delimiter would otherwise tear it in half. */
-const asCsvCell = (cell: string) => (cell.includes(',') ? `"${cell}"` : cell);
-
 /**
- * The template a person downloads: the header, then the three examples, commented out so
- * they cannot import.
+ * **The CSV template a person downloads: the header, and nothing else** (ADR-0184).
+ *
+ * It carried seventeen `#` lines of guidance and three commented examples until 2026-11-01. The product owner asked for
+ * the guideline apart from the fill-in data, so the file is tidy to fill: the guide is the Excel template's *Petunjuk*
+ * sheet (`rosterWorkbook`) and the import page's *Panduan pengisian*, and this is the data. A file of the old shape still
+ * imports (`COMMENT_PREFIX`).
  */
-export const ROSTER_TEMPLATE = [
-  `${COMMENT_PREFIX} AgencyBoost roster template.`,
-  `${COMMENT_PREFIX} Add one row per person below. Lines starting with ${COMMENT_PREFIX} are ignored,`,
-  `${COMMENT_PREFIX} so the examples never import — delete them or leave them, either is fine.`,
-  `${COMMENT_PREFIX}`,
-  `${COMMENT_PREFIX} fullName          the person's name. Quote it if it contains a comma.`,
-  `${COMMENT_PREFIX} email             their address. It must be one nobody has registered yet.`,
-  `${COMMENT_PREFIX}                   You send them their password yourself — nothing is emailed.`,
-  `${COMMENT_PREFIX} agentCode         the producer id their insurer issued. Unique within the insurer.`,
-  `${COMMENT_PREFIX} role              ab, aab or agent. Nothing else.`,
-  `${COMMENT_PREFIX} leaderAgentCode   the agent code of whoever they report to.`,
-  `${COMMENT_PREFIX}                   LEAVE IT EMPTY for somebody who reports to nobody.`,
-  ROSTER_TEMPLATE_HEADER,
-  ...ROSTER_EXAMPLES.map((cells) => `${COMMENT_PREFIX} ${cells.map(asCsvCell).join(',')}`),
-  '',
-].join('\n');
+export const ROSTER_TEMPLATE = `${ROSTER_TEMPLATE_HEADER}\n`;
 
 export interface RosterRow {
   /** 1-based, and counting the header — so it is the line number a spreadsheet shows. */
@@ -85,12 +104,24 @@ export interface RosterRow {
   role: string;
   /** Empty for somebody who reports to nobody: the office root, or a second one. */
   leaderAgentCode: string;
+  /** `YYYY-MM-DD`, checked: a real day, in the past, at least 18 years ago (ADR-0158 §2). */
+  dateOfBirth: string;
+  /** `YYYY-MM`, checked: a real month, not one still to come. */
+  companyJoinMonth: string;
+  /** Read from `full-time` / `part-time`; `null` only on a row that has an issue saying why. */
+  workStatus: WorkStatus | null;
+  /** Read from `male` / `female`; `null` only on a row that has an issue saying why. */
+  gender: Gender | null;
 }
 
 export interface RosterIssue {
   line: number;
   column: string;
-  message: string;
+  /**
+   * What is wrong, in both languages (P18.98-T5 AC-3): the preview writes it for its reader, and the commit's refusal
+   * carries it in `details.issues`, which the error filter writes for its reader.
+   */
+  message: FieldSentence;
 }
 
 /**
@@ -119,8 +150,8 @@ export function generateTemporaryPassword(): string {
     }
     groups.push(group);
   }
-  // 16 characters of alphabet-32 is ~80 bits, and comfortably over the 10-character
-  // minimum `PasswordService` enforces — which matters, because the account has to be
+  // 16 characters of alphabet-32 is ~80 bits, and comfortably over `PASSWORD.MIN_LENGTH`,
+  // the minimum `PasswordService` enforces — which matters, because the account has to be
   // able to sign in with it before it can replace it.
   return groups.join('-');
 }
@@ -189,7 +220,11 @@ function looksLikeHeader(cells: string[]): boolean {
   return cells.some((cell) => names.has(cell.toLowerCase().replace(/^﻿/, '')));
 }
 
-export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIssue[] } {
+/**
+ * `today` is the office's calendar day (from the injected clock, in `kpms.timezone`), which a birth
+ * date and a join month are measured against. The parser reads no clock of its own.
+ */
+export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]; issues: RosterIssue[] } {
   const issues: RosterIssue[] = [];
 
   /*
@@ -197,8 +232,9 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
    *
    * Blank lines and commented ones are dropped, but each surviving line keeps the number
    * it had in the file. Filtering first and numbering afterwards was the first version of
-   * this, and the template ships with eleven comment lines — so every issue would have
-   * been reported eleven lines off, pointing the reader at somebody else's row.
+   * this, and the template shipped with eleven comment lines then (seventeen later, and none
+   * since ADR-0184) — so every issue would have been reported eleven lines off, pointing the
+   * reader at somebody else's row. A workbook's rows arrive numbered as its sheet numbers them.
    */
   const lines = text
     .split(/\r?\n/)
@@ -206,7 +242,7 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
     .filter(({ text }) => text.trim() !== '' && !text.trimStart().startsWith(COMMENT_PREFIX));
 
   if (lines.length === 0) {
-    issues.push({ line: 1, column: 'file', message: 'The file is empty.' });
+    issues.push({ line: 1, column: 'file', message: SAY.fileEmpty });
     return { rows: [], issues };
   }
 
@@ -230,7 +266,7 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
     issues.push({
       line: lines[0].line,
       column: 'file',
-      message: `The header must read exactly: ${ROSTER_TEMPLATE_HEADER}. Download the template.`,
+      message: SAY.headerExactly({ header: ROSTER_TEMPLATE_HEADER }),
     });
     return { rows: [], issues };
   }
@@ -246,45 +282,82 @@ export function parseRoster(text: string): { rows: RosterRow[]; issues: RosterIs
       issues.push({
         line,
         column: 'file',
-        message: `Expected ${ROSTER_COLUMNS.length} columns, found ${cells.length}.`,
+        message: SAY.columnCount({ expected: ROSTER_COLUMNS.length, found: cells.length }),
       });
       continue;
     }
 
-    const [fullName, emailRaw, agentCodeRaw, roleRaw, leaderAgentCodeRaw] = cells;
+    const [
+      fullName, emailRaw, agentCodeRaw, roleRaw, leaderAgentCodeRaw,
+      dateOfBirth, companyJoinMonth, workStatusRaw, genderRaw,
+    ] = cells;
     const email = emailRaw.toLowerCase();
     const agentCode = agentCodeRaw.toUpperCase();
     const role = roleRaw.toLowerCase();
     const leaderAgentCode = leaderAgentCodeRaw.toUpperCase();
 
-    if (!fullName) issues.push({ line, column: 'fullName', message: 'A name is required.' });
+    if (!fullName) issues.push({ line, column: 'fullName', message: SAY.nameRequired });
     // Deliberately loose, and the same shape `@IsEmail` will apply on the way in. The
     // point here is to catch the blank and the obviously-not-an-address, not to relitigate
     // what an address may contain.
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      issues.push({ line, column: 'email', message: `"${emailRaw}" is not an email address.` });
+      issues.push({ line, column: 'email', message: SAY.notAnEmail({ value: emailRaw }) });
     }
     if (!agentCode) {
-      issues.push({ line, column: 'agentCode', message: 'An agent code is required.' });
+      issues.push({ line, column: 'agentCode', message: SAY.agentCodeRequired });
+    } else if (!AGENT_CODE_PATTERN.test(agentCode)) {
+      // ADR-0158 §4: digits only on every new code. One already held elsewhere keeps its letters.
+      issues.push({ line, column: 'agentCode', message: SAY.notAnAgentCode({ value: agentCodeRaw }) });
     }
-    if (!['ab', 'aab', 'agent'].includes(role)) {
+    // The shape of a rung's code. Whether it is a rung **of this company's ladder** the parser cannot know:
+    // the import checks it against the ladder (OD-50), so a rung the company added — `SM` — is placed too.
+    if (!isRungCode(role)) {
+      issues.push({ line, column: 'role', message: SAY.notARung({ value: roleRaw }) });
+    }
+
+    // The four a person records (ADR-0158 §2), each required, each named when it is wrong.
+    if (!dateOfBirth) {
+      issues.push({ line, column: 'dateOfBirth', message: SAY.birthDateRequired });
+    } else {
+      const problem = birthDateProblem(dateOfBirth, today);
+      if (problem) issues.push({ line, column: 'dateOfBirth', message: problem });
+    }
+    if (!companyJoinMonth) {
+      issues.push({ line, column: 'companyJoinMonth', message: SAY.joinMonthRequired });
+    } else {
+      const problem = joinMonthProblem(companyJoinMonth, today);
+      if (problem) issues.push({ line, column: 'companyJoinMonth', message: problem });
+    }
+    const workStatus = WORK_STATUS_WORDS[workStatusRaw.toLowerCase()] ?? null;
+    if (!workStatus) {
       issues.push({
-        line, column: 'role', message: `"${roleRaw}" is not a rung. Use ab, aab or agent.`,
+        line, column: 'workStatus',
+        message: workStatusRaw ? SAY.notAWorkStatus({ value: workStatusRaw }) : SAY.workStatusRequired,
+      });
+    }
+    const gender = GENDER_WORDS[genderRaw.toLowerCase()] ?? null;
+    if (!gender) {
+      issues.push({
+        line, column: 'gender',
+        message: genderRaw ? SAY.notAGender({ value: genderRaw }) : SAY.genderRequired,
       });
     }
 
     // Within the file. Against the office is the service's to check.
     const emailFirst = seenEmail.get(email);
     if (email && emailFirst) {
-      issues.push({ line, column: 'email', message: `Already on line ${emailFirst}.` });
+      issues.push({ line, column: 'email', message: SAY.alreadyOnLine({ line: emailFirst }) });
     } else if (email) seenEmail.set(email, line);
 
     const codeFirst = seenCode.get(agentCode);
     if (agentCode && codeFirst) {
-      issues.push({ line, column: 'agentCode', message: `Already on line ${codeFirst}.` });
+      issues.push({ line, column: 'agentCode', message: SAY.alreadyOnLine({ line: codeFirst }) });
     } else if (agentCode) seenCode.set(agentCode, line);
 
-    rows.push({ line, fullName, email, agentCode, role, leaderAgentCode });
+    rows.push({
+      line, fullName, email, agentCode, role, leaderAgentCode,
+      dateOfBirth, companyJoinMonth, workStatus, gender,
+    });
   }
 
   return { rows, issues };

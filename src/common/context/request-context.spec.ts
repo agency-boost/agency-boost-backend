@@ -1,4 +1,4 @@
-import { RequestContext } from './request-context';
+import { isEffectiveCoreLeader, RequestContext, type HierarchyRole } from './request-context';
 
 /**
  * The factories that mint a context inside a service, rather than from a request.
@@ -135,5 +135,71 @@ describe('request context factories', () => {
       expect(scoped.kpmId).toBe(OFFICE);
       expect(scoped.membershipId).toBeNull();
     });
+  });
+});
+
+/**
+ * **The effective Core Leader** (ADR-0159 §1, §4; P18.8-T5 AC-1): the tag on a leader class — one rule, read by the
+ * context, the directory, the forum and KPM analytics alike.
+ */
+describe('the Core Leader', () => {
+  const member = (role: HierarchyRole, isCoreLeader?: boolean) => new RequestContext('u', 'none', {
+    membershipId: 'm', kpmId: 'k', orgLevelCode: role.toUpperCase(), hierarchyRole: role, status: 'active',
+    isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...(isCoreLeader === undefined ? {} : { isCoreLeader }),
+  });
+
+  it.each([
+    ['ab', true, true], ['aab', true, true], ['agent', true, false],
+    ['ab', false, false], ['aab', undefined, false],
+  ] as const)('a %s tagged %s is one: %s', (role, tagged, expected) => {
+    expect(member(role, tagged).isCoreLeader).toBe(expected);
+    expect(isEffectiveCoreLeader({ role, isCoreLeader: tagged })).toBe(expected);
+  });
+
+  it('nobody outside an office is one, and nothing without a row is', () => {
+    expect(new RequestContext('u', 'none', null).isCoreLeader).toBe(false);
+    expect(RequestContext.platform('root').isCoreLeader).toBe(false);
+    expect(isEffectiveCoreLeader(null)).toBe(false);
+    expect(isEffectiveCoreLeader({ isCoreLeader: true, role: null })).toBe(false);
+  });
+});
+
+/**
+ * **P18.98-T5 AC-1 — the reader is on the context** (ADR-0179 §7): resolved once by `AuthGuard`, what every service
+ * writes a sentence for. A context built for a job, or by hand, reads as a reader who has chosen nothing.
+ */
+describe('P18.98-T5 the context’s reader', () => {
+  const member = {
+    membershipId: 'm1', kpmId: 'k1', orgLevelCode: 'AB', hierarchyRole: 'ab' as const, status: 'active' as const,
+    isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+  };
+
+  it('AC-1 reads as nobody’s choice when nothing resolved one: Bahasa Indonesia, words and figures, as it is live', () => {
+    expect(new RequestContext('u1', 'none', member).reader).toEqual({ language: 'id', figures: 'id' });
+    expect(RequestContext.forJob('k1', 'nightly').reader).toEqual({ language: 'id', figures: 'id' });
+  });
+
+  it('AC-1 carries the reader it was given', () => {
+    const ctx = new RequestContext('u1', 'none', member, null, null, false, false, [], { language: 'id', figures: 'id' });
+    expect(ctx.reader).toEqual({ language: 'id', figures: 'id' });
+  });
+
+  it('AC-1 answers the same context for another reader, every other fact kept', () => {
+    const session = new RequestContext('u1', 'none', member, 'root', null, true, true, ['tenant_config:write']);
+    const indonesian = session.withReader({ language: 'id', figures: 'id' });
+    expect(indonesian).not.toBe(session);
+    expect(indonesian.reader).toEqual({ language: 'id', figures: 'id' });
+    expect(indonesian).toMatchObject({
+      userId: 'u1', impersonatorUserId: 'root', mustChangePassword: true, impersonationReadOnly: true,
+      impersonationWriteScope: ['tenant_config:write'], membership: member,
+    });
+    expect(Object.isFrozen(indonesian)).toBe(true);
+    // The office a Super Admin acts inside travels too.
+    expect(RequestContext.superAdminInTenant('root', 'k9').withReader({ language: 'id', figures: 'id' }).kpmId).toBe('k9');
+  });
+
+  it('AC-1 keeps the reader of the request somebody joins an office from', () => {
+    const asked = new RequestContext('u1', 'none', null, null, null, false, false, [], { language: 'id', figures: 'id' });
+    expect(RequestContext.joiningTenant(asked, 'k1').reader).toEqual({ language: 'id', figures: 'id' });
   });
 });

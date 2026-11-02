@@ -1,0 +1,116 @@
+name: seed staging
+
+# Empties staging's demo data and seeds it again (P18.7-T4, ADR-0152). By hand only, from development,
+# with the words typed out. Production is never seeded (D11): this workflow has no production path, the
+# VM's sudoers rule allows bin/seed.sh on staging alone, and seed.sh and src/seed/demo.ts each refuse
+# production again.
+#
+# The seed runs from TypeScript source with dev dependencies, so it ships as its own image: the
+# Dockerfile's `tools` stage, built in this run from this commit and pushed to staging's own repository,
+# agencyboost-staging, under a tag no other build has (tags there are immutable).
+#
+# Staging and production share one VM and one MongoDB (ADR-0155). The seed runs there as staging's
+# database user, whose only role is readWrite on agencyboost_staging, and seed.sh checks that with
+# Mongo before every run: its --reset cannot reach production's database.
+#
+# Two identities, in order. gh-builder, as a bare access token with no file in the workspace, pushes
+# the image. Only after the build does gh-deployer sign in, with a credentials file, to reach the VM.
+# Nothing a credentials file holds can then be in the build context (P18.7 review, H1).
+#
+# Every action is pinned by commit, with its version beside it; .github/dependabot.yml proposes updates.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "This erases every demo account and record on staging and seeds them again. Type: reset staging"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    environment: staging
+    # A group of its own. Sharing deploy-staging would let a pending seed cancel a pending deploy, or the
+    # other way round: GitHub keeps one pending run per group. The VM's lock is what keeps a seed and a
+    # deploy apart.
+    concurrency:
+      group: seed-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCE_INSTANCE: ${{ vars.GCE_INSTANCE }}
+      GCE_ZONE: ${{ vars.GCE_ZONE }}
+      BUILD_SA: ${{ vars.GCP_BUILD_SA }}
+      DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
+    steps:
+      - name: Confirmed, from development, and configured
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "reset staging" ]; then
+            echo "::error::Nothing was done. To reset staging, type exactly: reset staging"
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != refs/heads/development ]; then
+            echo "::error::Run this from development, the branch staging runs, not $GITHUB_REF."
+            exit 1
+          fi
+          for name in GCP_PROJECT_ID GCE_INSTANCE GCE_ZONE BUILD_SA DEPLOY_SA; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::Variable $name is missing from the staging environment."
+              exit 1
+            fi
+          done
+          echo "IMAGE=asia-southeast2-docker.pkg.dev/$GCP_PROJECT_ID/agencyboost-staging/tools" >> "$GITHUB_ENV"
+          echo "TAG=$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - id: builder
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SA }}
+          token_format: access_token
+          create_credentials_file: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: asia-southeast2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.builder.outputs.access_token }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build and push the tools image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: tools
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          cache-from: |
+            type=gha,scope=api-tools
+            type=gha,scope=api-runtime
+          cache-to: type=gha,scope=api-tools,mode=max
+      # After the build, never before it: this writes a credentials file into the workspace.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Seed staging
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "::error::No tools image digest came out of the build."; exit 1 ;;
+          esac
+          gcloud compute ssh "$GCE_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCE_ZONE" \
+            --tunnel-through-iap --ssh-key-expire-after=30m --quiet \
+            --command="sudo /opt/agencyboost/bin/seed.sh staging '$IMAGE@$DIGEST'"

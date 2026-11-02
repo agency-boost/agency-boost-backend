@@ -23,6 +23,7 @@ import { TenantService } from '@/modules/tenants/tenant.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-17T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -299,7 +300,7 @@ describe('the configuration controllers', () => {
       const saved = await request(app.getHttpServer())
         .put('/kpm/settings/activation-checklist').send(next).expect(200);
       expect(saved.body.draft).toMatchObject({ version: 2, status: 'draft' });
-      expect(saved.body.published.aspects[0].label).toBe('1. Introduction');
+      expect(saved.body.published.aspects[0].label).toBe('1. Pengenalan');
 
       const published = await request(app.getHttpServer())
         .post('/kpm/settings/activation-checklist/publish').expect(201);
@@ -411,6 +412,42 @@ describe('the configuration controllers', () => {
         .post('/kpm/settings/changes')
         .send({ ops: 'everything' })
         .expect(400);
+    });
+
+    it('P18.98-T5 AC-7 names the op that failed, its field sentences and a missing row in Indonesian for an Indonesian reader', async () => {
+      const ops = [
+        { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
+        { op: 'category.create', body: { code: 'x', label: '' } },
+      ];
+      const res = await request(app.getHttpServer())
+        .post('/kpm/settings/changes').set(...IN_INDONESIAN).send({ ops }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.message).toBe(
+        'Perubahan 2 (category.create): code: Kode terdiri dari 3–40 karakter A–Z, 0–9 dan garis bawah, diawali huruf.; '
+          + 'label harus 1–80 karakter.',
+      );
+      expect(res.body.error.details.violations).toEqual([
+        'code: Kode terdiri dari 3–40 karakter A–Z, 0–9 dan garis bawah, diawali huruf.',
+        'label harus 1–80 karakter.',
+      ]);
+
+      // The same refusal in English for an English reader — the words the batch has always written.
+      const english = await request(app.getHttpServer()).post('/kpm/settings/changes').send({ ops }).expect(400);
+      expect(english.body.error.message).toBe(
+        'Change 2 (category.create): code: A code is 3–40 characters of A–Z, 0–9 and underscore, starting with a '
+          + 'letter.; label must be 1–80 characters.',
+      );
+
+      const missing = await request(app.getHttpServer())
+        .post('/kpm/settings/changes').set(...IN_INDONESIAN)
+        .send({ ops: [{ op: 'ratio.update', id: '66f0000000000000000000ff', expectedVersion: 1, body: { benchmark: 0.2 } }] })
+        .expect(404);
+      expect(missing.body.error).toMatchObject({
+        code: 'NOT_FOUND', message: 'Perubahan 1 (ratio.update): Baris itu tidak ditemukan.',
+      });
+      // Nothing of the first batch was written: its second op was refused before any was.
+      const after = await wired.activity.list(OWNER, true);
+      expect(after.some((c) => c.code === 'REFERRALS')).toBe(false);
     });
   });
 
@@ -617,10 +654,10 @@ describe('the configuration controllers', () => {
       const selling = await section('SELLING');
       const res = await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(200);
       expect(res.body).toMatchObject({
-        summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development', version: selling.version + 1,
+        summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan', version: selling.version + 1,
       });
     });
 
@@ -632,7 +669,7 @@ describe('the configuration controllers', () => {
         .expect(422);
       expect(res.body.error).toMatchObject({
         code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
-        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Pengembangan'] },
       });
 
       const batch = await request(app.getHttpServer())
@@ -646,7 +683,7 @@ describe('the configuration controllers', () => {
         .expect(422);
       expect(batch.body.error).toMatchObject({
         code: 'CONFIG_SUMMARY_GROUP_LABEL_MISMATCH',
-        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Development'] },
+        details: { summaryGroupCode: 'DEVELOPMENT', labels: ['Growth', 'Pengembangan'] },
       });
     });
 
@@ -675,8 +712,8 @@ describe('the configuration controllers', () => {
         LEADS_GENERATION: [null, null],
         SELLING: [null, null],
         RECRUITMENT: [null, null],
-        PERSONAL_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
-        TEAM_DEVELOPMENT: ['DEVELOPMENT', 'Development'],
+        PERSONAL_DEVELOPMENT: ['DEVELOPMENT', 'Pengembangan'],
+        TEAM_DEVELOPMENT: ['DEVELOPMENT', 'Pengembangan'],
         REFERRALS: [null, null],
       });
     });
@@ -686,13 +723,13 @@ describe('the configuration controllers', () => {
       current = AGENT;
       await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(403);
 
       current = ADMIN;
       await request(app.getHttpServer())
         .patch(`/kpm/settings/activity-categories/${selling.id}`)
-        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development' })
+        .send({ summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan' })
         .expect(200);
     });
   });

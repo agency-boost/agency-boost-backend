@@ -6,6 +6,7 @@ import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { NamedTemplateService } from './named-template.service';
 import { TemplateCopyService } from './template-copy.service';
+import { TemplateService } from './template.service';
 import { CreateTemplateDto, ImportTemplateDto, UpdateTemplateDto } from './named-template.dto';
 
 /**
@@ -14,7 +15,9 @@ import { CreateTemplateDto, ImportTemplateDto, UpdateTemplateDto } from './named
  *
  * The Super Admin's alone: `company_template:read` and `company_template:write`, which no tenant role
  * holds and a support session — acting as the member it impersonates — does not either. Each kind of a
- * template is still read, drafted and published at `…/template/:kind` with `?templateId=`.
+ * template is still read, drafted and published at `…/template/:kind` with `?templateId=`; since ADR-0185,
+ * every kind with a draft is published at once (`POST …/:templateId/publish`), and the offices the template
+ * answers for are listed with what each is behind on (`GET …/:templateId/offices`).
  */
 @ApiTags('admin (Super Admin)')
 @ApiBearerAuth()
@@ -24,6 +27,8 @@ export class NamedTemplateController {
     private readonly templates: NamedTemplateService,
     /** The copies across an owner boundary (P13.2-T7): *Import from another company*. */
     private readonly copies: TemplateCopyService,
+    /** A template's kinds, published together (ADR-0185 §3): *Terbitkan semua*. */
+    private readonly kinds: TemplateService,
   ) {}
 
   @Get()
@@ -33,9 +38,11 @@ export class NamedTemplateController {
     description:
       'Every named template of the company, the default first: its name, whether it is the default, '
       + 'active or archived, where it came from, the newest published version of each of its seven '
-      + 'kinds (null where none is, which an office made from it gets empty), and how many live '
-      + 'offices it answers for. Archived templates are listed — offices record that they started '
-      + 'from one — and are not offered as *Start from*. 404 for a company that does not exist.',
+      + 'kinds (null where none is, which an office made from it gets empty), `sections` — each kind\u2019s '
+      + 'newest published version and whether a draft waits (ADR-0185 §3), for the template\u2019s card and '
+      + 'its checklist — and how many live offices it answers for. Archived templates are listed — offices '
+      + 'record that they started from one — and are not offered as *Start from*. 404 for a company that '
+      + 'does not exist.',
   })
   async list(@Param('companyId') companyId: string) {
     return this.templates.list(companyId);
@@ -105,6 +112,50 @@ export class NamedTemplateController {
     @Body() dto: UpdateTemplateDto,
   ) {
     return this.templates.update(ctx, companyId, templateId, dto);
+  }
+
+  @Post(':templateId/publish')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Publish every section of a template that has changes',
+    description:
+      '*Terbitkan semua* (ADR-0185 §3): every kind of the template holding a draft is published, in the '
+      + 'order `activity_taxonomy`, `ratio_set`, `lead_pipeline`, `training_taxonomy`, '
+      + '`activation_checklist`, `capability_ladder`, `event_types` — each exactly as '
+      + '`POST …/template/:kind/publish` would, the same checks and the same audit row. A refusal stops only '
+      + 'its own kind: `results` says, per kind, `published` (with the new `version`), `skipped` '
+      + '(`reason: no_changes`, nothing waited) or `refused` (`error.code` and `error.message`, in the '
+      + 'reader\u2019s language; still a draft). `template` is the template as it now stands. **Reaches no '
+      + 'office that already exists.** 400 for an archived template; 404 for a template that is not the '
+      + 'company\u2019s.',
+  })
+  async publishAll(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+  ) {
+    return this.kinds.publishAll(ctx, companyId, templateId);
+  }
+
+  @Get(':templateId/offices')
+  @RequirePermission('company_template:read')
+  @ApiOperation({
+    summary: 'The offices a template answers for, and what each is behind on',
+    description:
+      'Every live office started from the template — and, for the template each company was given when '
+      + 'templates were named, the offices created before then — by code, with `behind`, the kinds the '
+      + 'template has since published a newer version of than the office was built from, and `unrecorded`, '
+      + 'the kinds the office has no record of (ADR-0185 §4). What the checklist\u2019s *N KPM memakai versi '
+      + 'lama* lists. Information only: nothing reaches an office (ADR-0115 §6). 404 for a template that is '
+      + 'not the company\u2019s.',
+  })
+  async offices(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+  ) {
+    return this.templates.offices(ctx, companyId, templateId);
   }
 
   @Post(':templateId/archive')

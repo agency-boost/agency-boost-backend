@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { RequestContext } from '@/common/context/request-context';
+import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
-import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import { DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
@@ -16,7 +16,10 @@ export interface ForumReader {
   membershipId: string;
   /** The Owner or an Admin: an editor of every meeting, whatever their tag (ADR-0028). */
   office: boolean;
-  /** Tagged *Core Leader* **at this request** (roles §1.4) — read from the membership, never the token. */
+  /**
+   * A *Core Leader* **at this request** (roles §1.4, ADR-0159 §1) — tagged, on a leader rung — read from the
+   * membership, never the token. A tagged member off a leader rung is not one.
+   */
   tagged: boolean;
 }
 
@@ -42,8 +45,8 @@ export function meetingNotFound(): NotFoundException {
  * **Who reads the forum, and who may edit it** (D-coeditors, roles §1.4, §3.14).
  *
  * **The tag is the list.** The editors are the Owner, then the Admins (`adminAccess.isKpmAdmin`), then every other
- * active member tagged *Core Leader* — each person once — read from the memberships on every request, so tagging or
- * untagging somebody changes who may edit every meeting at once. Every read here is a fixed number of queries,
+ * active member who is a *Core Leader* — tagged, on a leader rung (ADR-0159 §1) — each person once, read from the
+ * memberships on every request, so tagging or untagging somebody changes who may edit every meeting at once. Every read here is a fixed number of queries,
  * whatever the office's size: the reader's row, the office's row, the editors in one read, their names in two
  * (`MemberNames`) and the company's ladder in one.
  */
@@ -67,7 +70,7 @@ export class LeaderMeetingPeople {
     return {
       membershipId: ctx.membership.membershipId,
       office: ctx.membership.isKpmOwner || ctx.membership.isKpmAdmin,
-      tagged: row?.isCoreLeader === true,
+      tagged: isEffectiveCoreLeader(row),
     };
   }
 
@@ -95,7 +98,8 @@ export class LeaderMeetingPeople {
 
   /**
    * **The editors now** (D-coeditors), as the freeze writes them: the Owner — the active membership of the office's
-   * owning account — then the Admins, then every other member tagged, each once, by membership id and rung.
+   * owning account — then the Admins, then every other Core Leader (tagged, on a leader rung), each once, by
+   * membership id and rung.
    */
   async liveEditors(ctx: RequestContext, office: ForumOffice): Promise<FrozenEditor[]> {
     const rows = await this.memberships.find(
@@ -105,26 +109,28 @@ export class LeaderMeetingPeople {
         $or: [
           ...(office.ownerUserId ? [{ userId: office.ownerUserId }] : []),
           { 'adminAccess.isKpmAdmin': true },
-          { isCoreLeader: true },
+          // ADR-0159 §1: a Core Leader is tagged **and** a leader by rung; a tagged Agent is nobody's editor.
+          { isCoreLeader: true, role: { $in: [...LEADER_CLASSES] } },
         ],
       },
-      { projection: { userId: 1, orgLevelCode: 1, isCoreLeader: 1, adminAccess: 1 } },
+      { projection: { userId: 1, orgLevelCode: 1, role: 1, isCoreLeader: 1, adminAccess: 1 } },
     );
     const owner = office.ownerUserId ? rows.find((row) => row.userId === office.ownerUserId) ?? null : null;
     const editor = (row: (typeof rows)[number], as: EditorStanding): FrozenEditor => ({
-      membershipId: String(row._id), as, rungCode: row.orgLevelCode, tagged: row.isCoreLeader === true,
+      membershipId: String(row._id), as, rungCode: row.orgLevelCode, tagged: isEffectiveCoreLeader(row),
     });
     const others = rows.filter((row) => row !== owner);
     return [
       ...(owner ? [editor(owner, 'owner')] : []),
       ...others.filter((row) => row.adminAccess?.isKpmAdmin === true).map((row) => editor(row, 'admin')),
-      ...others.filter((row) => row.adminAccess?.isKpmAdmin !== true && row.isCoreLeader === true)
+      ...others.filter((row) => row.adminAccess?.isKpmAdmin !== true && isEffectiveCoreLeader(row))
         .map((row) => editor(row, 'core_leader')),
     ];
   }
 
   /**
-   * **Names and rungs for every list of editors a read serves, in one pass**: the names in two queries, the
+   * **Names, photos and rungs for every list of editors a read serves, in one pass**: the names in two queries — each
+   * photo's key read beside the name and signed in one batch (UI-111) — the
    * company's ladder in one, however many meetings and people. Each list is then described by the function this
    * answers — the Owner first, the Admins and the Core Leaders each by name — and `coreLeaderCount` counts every
    * editor tagged but the Owner. An editor whose membership is gone from the office is left out.
@@ -136,12 +142,15 @@ export class LeaderMeetingPeople {
     nameOf: (membershipId: string) => string | null;
   }> {
     const ids = [...new Set(lists.flatMap((list) => list.map((e) => e.membershipId)))];
-    const names = await this.names.byMembershipId(ctx, ids);
+    // Every editor of every list is drawn with an avatar, so each one's photo is signed with the name (UI V1, UI-111).
+    const people = await this.names.pictured(ctx, ids);
+    const names = new Map([...people].map(([id, p]) => [id, p.name]));
     const ladder = office.companyId ? await this.orgLevels.list(ctx, office.companyId) : [];
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
     const person = (e: FrozenEditor): ForumPerson => ({
       membershipId: e.membershipId,
       name: names.get(e.membershipId)!,
+      photoUrl: people.get(e.membershipId)?.photoUrl ?? null,
       rung: { code: e.rungCode, label: labels.get(e.rungCode) ?? e.rungCode },
       isReader: e.membershipId === ctx.membershipId,
       tagged: e.tagged,

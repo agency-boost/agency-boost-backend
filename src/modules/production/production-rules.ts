@@ -1,4 +1,8 @@
+import type { Sentence } from '@/common/i18n/sentence';
 import { MONEY_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS.UPLOAD_VALUE_OUT_OF_RANGE;
 
 /**
  * What a production figure may be — **one definition, used by the import and by correction alike**
@@ -21,19 +25,21 @@ export const ADDITIVE_METRICS: readonly ProductionMetric[] = ['ape', 'recruitmen
 
 export const isMoney = (m: ProductionMetric) => (MONEY_METRICS as readonly string[]).includes(m);
 
-/** Why this figure cannot be stored, as the end of a sentence — or `null` when it can. */
-export function refusalFor(metric: ProductionMetric, stored: number): string | null {
-  if (!Number.isFinite(stored)) return 'is not a number.';
-  if (stored < 0) return 'is negative.';
-  if (metric === 'persistency') return stored > 100 ? 'is above 100 — persistency is a percentage.' : null;
+/**
+ * Why this figure cannot be stored, as the end of a sentence in both languages (P18.98-T5) — or `null` when it can.
+ * The import says it after the cell (`Rolling Persistency (%) — This Month: “140” …`), a correction after the figure's
+ * name (*APE this month …*).
+ */
+export function refusalFor(metric: ProductionMetric, stored: number): Sentence<'UPLOAD_VALUE_OUT_OF_RANGE'> | null {
+  if (!Number.isFinite(stored)) return SAY.notANumber;
+  if (stored < 0) return SAY.negative;
+  if (metric === 'persistency') return stored > 100 ? SAY.persistencyAbove100 : null;
   if (isMoney(metric)) {
-    if (!Number.isSafeInteger(stored)) {
-      return Number.isInteger(stored) ? 'is larger than any figure this product can hold.' : 'is a fraction of a sen.';
-    }
+    if (!Number.isSafeInteger(stored)) return Number.isInteger(stored) ? SAY.tooLarge : SAY.fractionOfSen;
     return null;
   }
   if (COUNT_METRICS.includes(metric) && !Number.isInteger(stored)) {
-    return `is not a whole number — it counts ${metric === 'policyCount' ? 'policies' : 'people'}.`;
+    return SAY.notWhole({ counts: metric === 'policyCount' ? 'policies' : 'people' });
   }
   return null;
 }

@@ -320,17 +320,21 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
       // 75 this month: ceil(75 / 18) = 5 closings, ceil(5 / 0.3) = 17 appointments, ceil(17 / 0.3) = 57 leads.
       expect(view.activity.monthly).toMatchObject({ from: '2026-09-01', to: '2026-09-14' });
-      expect(month.leads).toEqual({ key: 'leads', code: 'LEADS_CONTACTED', logged: 20, target: 57, attainmentPct: 35, targetMet: false });
+      expect(month.leads).toEqual({ key: 'leads', code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED'], logged: 20, target: 57, attainmentPct: 35, targetMet: false });
       expect(month.appointments).toMatchObject({ code: 'SELL_PRESENTATION', logged: 6, target: 17, attainmentPct: 35 });
       expect(month.closings).toMatchObject({ code: 'SELL_SUBMISSION', logged: 2, target: 5, attainmentPct: 40 });
       // The closings chip and the pace sentence name one number.
       expect(view.pace?.closingTarget).toBe(month.closings.target);
 
-      // The year: 500 through the cascade once — ceil(500 / 18) = 28, ceil(28 / 0.3) = 94, ceil(94 / 0.3) = 314.
+      // UI-052: the year is what it still needs — 500 less the 200 done, through the cascade once: ceil(300 / 18) = 17,
+      // ceil(17 / 0.3) = 57, ceil(57 / 0.3) = 190. Its Submission polis target is *Polis yang dibutuhkan* itself.
       expect(view.activity.yearly).toMatchObject({ from: '2026-01-01', to: '2026-09-14' });
-      expect(year.closings).toMatchObject({ logged: 11, target: 28, attainmentPct: 39 });
-      expect(year.appointments).toMatchObject({ logged: 36, target: 94 });
-      expect(year.leads).toMatchObject({ logged: 120, target: 314, attainmentPct: 38 });
+      expect(year.closings).toMatchObject({ logged: 11, target: 17, attainmentPct: 65 });
+      expect(year.closings.target).toBe(view.yearly.policiesNeeded);
+      expect(year.appointments).toMatchObject({ logged: 36, target: 57 });
+      expect(year.leads).toMatchObject({ logged: 120, target: 190, attainmentPct: 63 });
+      // UI-052: every count of policies on the page is the activity log's Submission polis, and the answer says so.
+      expect(view.policies).toEqual({ source: 'activity_log', codes: ['SELL_SUBMISSION'] });
     });
 
     it('AC-1: holds this month’s chip targets when this month’s own APE arrives (ADR-0056)', async () => {
@@ -379,7 +383,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(chips((await wired.summary.read(agent())).activity.monthly).appointments.logged).toBe(4);
     });
 
-    it('AC-2, P10.1-T6 AC-5: one chip per other summary tile — the seed’s two — with its total, its rows, and the total across every category', async () => {
+    it('UI-052 one chip per other summary tile — the seed’s two — with its total and rows, and a total that is their sum', async () => {
       await day('2026-09-03', { RECRUIT_PRESENTATION: 3, RECRUIT_FOLLOWUP: 2, DEV_TRAINING_ATTEND: 1, SELL_SUBMISSION: 1 });
       await day('2026-09-10', { RECRUIT_AGENT_CODE: 1, DEV_TEAM_ACTIVITY: 4, LEADS_NEW_PROSPECT: 6 });
 
@@ -389,7 +393,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       // Leads Generation and Selling hold the cascade's codes, so the three target chips stand for them.
       // Personal and Team Development share the tile DEVELOPMENT (ADR-0064): the prototype's two chips.
       expect(sections.map((s) => [s.code, s.label, s.total])).toEqual([
-        ['RECRUITMENT', 'Recruitment', 6], ['DEVELOPMENT', 'Development', 5],
+        ['RECRUITMENT', 'Recruitment', 6], ['DEVELOPMENT', 'Pengembangan', 5],
       ]);
       expect(sections[0].rows.map((r) => [r.code, r.count])).toEqual([
         ['RECRUIT_PRESENTATION', 3], ['RECRUIT_FOLLOWUP', 2], ['RECRUIT_AGENT_CODE', 1],
@@ -398,7 +402,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
         ['DEV_TRAINING_ATTEND', 1], ['DEV_COACHING_RECEIVED', 0], ['DEV_TEAM_ACTIVITY', 4],
       ]);
       expect(view.activity.yearly.sections.map((s) => s.code)).toEqual(['RECRUITMENT', 'DEVELOPMENT']);
-      expect(view.activity.monthly.total).toBe(18);
+      // UI-052: the total is the breakdown's sum — Recruitment 6, Development 5 and Submission polis 1. The six new
+      // prospects are in no chip the page shows, so in no total either: *n aktivitas* equals the rows beneath it.
+      const shown = view.activity.monthly.targets.reduce((n, t) => n + t.logged, 0) + sections.reduce((n, c) => n + c.total, 0);
+      expect(view.activity.monthly.total).toBe(12);
+      expect(view.activity.monthly.total).toBe(shown);
     });
 
     it('P10.1-T6 AC-5: a tile counts only the sections this rung is shown, and a section left ungrouped is a chip of its own', async () => {
@@ -408,7 +416,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       await day('2026-09-03', { DEV_TRAINING_ATTEND: 2, DEV_TEAM_ACTIVITY: 4 });
 
       const asAgent = (await wired.summary.read(agent())).activity.monthly.sections;
-      expect(asAgent.find((s) => s.code === 'DEVELOPMENT')).toMatchObject({ label: 'Development', total: 2 });
+      expect(asAgent.find((s) => s.code === 'DEVELOPMENT')).toMatchObject({ label: 'Pengembangan', total: 2 });
 
       await mongoose.connection.db!.collection('activityCategories').updateMany(
         { code: { $in: ['PERSONAL_DEVELOPMENT', 'TEAM_DEVELOPMENT'] } },
@@ -416,7 +424,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       );
       const ungrouped = (await wired.summary.read(agent())).activity.monthly.sections;
       expect(ungrouped.map((s) => [s.code, s.label, s.total])).toEqual([
-        ['RECRUITMENT', 'Recruitment', 0], ['PERSONAL_DEVELOPMENT', 'Personal Development', 2], ['TEAM_DEVELOPMENT', 'Team Development', 4],
+        ['RECRUITMENT', 'Recruitment', 0], ['PERSONAL_DEVELOPMENT', 'Pengembangan diri', 2], ['TEAM_DEVELOPMENT', 'Pengembangan tim', 4],
       ]);
     });
 
@@ -430,8 +438,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       const asLeader = await wired.summary.read(agent({ orgLevelCode: 'AB', hierarchyRole: 'ab' }));
 
       expect(asAgent.activity.monthly.sections.map((s) => s.code)).toEqual(['DEVELOPMENT']);
-      // The total is every category's, so a history the reader is not shown still adds up.
-      expect(asAgent.activity.monthly.total).toBe(3);
+      // UI-052: the total is what the reader is shown — the hidden section's three are in no chip, so in no total.
+      expect(asAgent.activity.monthly.total).toBe(0);
       expect(asLeader.activity.monthly.sections.map((s) => s.code)).toContain('RECRUITMENT');
     });
 
@@ -519,6 +527,53 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(asLeader.leads).toMatchObject({ total: 1, rows: [{ name: 'Mine' }] });
     });
 
+    /*
+     * P18.8-T15 AC-4 (the client's UI review, UI-002): an AB with 71 open on Leads Management read *No active leads
+     * yet* here, since the card is their own. `unitOpen` is what Leads Management lists them besides their own.
+     */
+    describe('P18.8-T15 AC-4 — the open leads a leader reads elsewhere', () => {
+      const DOWNLINE = '66f000000000000000000199';
+      const below = () => mongoose.connection.db!.collection('memberships').insertOne({
+        _id: new mongoose.Types.ObjectId(DOWNLINE), kpmId: KPM, userId: 'u-below', role: 'agent', orgLevelCode: 'AGENT',
+        leaderId: ME, ancestorIds: [ME], depth: 1, status: 'active', deletedAt: null, createdAt: NOW, updatedAt: NOW,
+      } as never);
+      const asAb = () => agent({ orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1 });
+
+      it('P18.8-T15 AC-4 counts the open leads of the people an AB leads, when their own card is empty', async () => {
+        await below();
+        await lead('Theirs, open', { ownerMembershipId: DOWNLINE });
+        await lead('Theirs, open too', { ownerMembershipId: DOWNLINE });
+        await lead('Theirs, won', { ownerMembershipId: DOWNLINE, outcome: 'won' });
+        await lead('Theirs, deleted', { ownerMembershipId: DOWNLINE, deletedAt: NOW });
+
+        const view = await wired.summary.read(asAb());
+
+        expect(view.leads).toEqual({ rows: [], total: 0, unitOpen: 2 });
+      });
+
+      it('P18.8-T15 AC-4 counts none in another office, under the same ids', async () => {
+        await below();
+        await lead('Another office’s', { kpmId: OTHER_KPM, ownerMembershipId: DOWNLINE });
+
+        expect((await wired.summary.read(asAb())).leads.unitOpen).toBe(0);
+      });
+
+      it('P18.8-T15 AC-4 counts nothing while the reader has open leads of their own: the sentence never reads', async () => {
+        await below();
+        await lead('Mine');
+        await lead('Theirs', { ownerMembershipId: DOWNLINE });
+
+        expect((await wired.summary.read(asAb())).leads).toMatchObject({ total: 1, unitOpen: 0 });
+      });
+
+      it('P18.8-T15 AC-4 an Agent who leads somebody reads only their own leads on Leads Management, so 0', async () => {
+        await below();
+        await lead('Theirs', { ownerMembershipId: DOWNLINE });
+
+        expect((await wired.summary.read(agent({ directCount: 1 }))).leads.unitOpen).toBe(0);
+      });
+    });
+
     it('AC-1: each with its flags as the Leads screen derives them — the commitment hiding none (I-103)', async () => {
       await lead('Late and promised', { nextActionDate: '2026-09-10', commitments: [{ month: '2026-09', at: NOW }] });
       await lead('Nothing written', { remarks: null, statusCode: null, type: null });
@@ -584,7 +639,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       await wired.goals.save(agent(), plan());
       await production('2026-08', { apeYtd: cell(200 * M) });
       // One closing in the last 30 days against a target of 5 (ADR-0109). Ten presentations, one submission:
-      // a selling success rate of 0.10 against 0.15, over enough of them to say so.
+      // a selling success rate of 0.10 against 0.30, over enough of them to say so.
       await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 10 });
       await lead('Pak Heri', { nextActionDate: '2026-09-06' });
       await lead('Pak Alvin', { nextActionDate: null, remarks: null });
@@ -595,7 +650,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(view[0]).toMatchObject({ kind: 'action', facts: { closingsLast30Days: 1, closingTarget: 5, weeksLeft: 3, neededPerWeek: 2 } });
       expect(view[1]).toMatchObject({ facts: { name: 'Pak Heri', overdueDays: 8, others: 0 } });
       expect(view[3]).toMatchObject({
-        kind: 'improve', facts: { code: 'SELLING_SUCCESS_RATE', label: 'Selling success rate', value: 0.1, benchmark: 0.15 },
+        kind: 'improve', facts: { code: 'SELLING_SUCCESS_RATE', label: 'Selling success rate', value: 0.1, benchmark: 0.3 },
       });
     });
 
@@ -620,11 +675,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     });
 
     it('AC-1: names a strength only well above its benchmark', async () => {
-      // Leads per activity: 6 new prospects over 10 activities is 0.6 against 0.3 — twice the benchmark.
-      await day('2026-09-10', { LEADS_NEW_PROSPECT: 6, LEADS_GEN_ACTIVITY: 10 });
+      // Leads per activity: 20 new prospects over 10 activities is 2.0 against 1.00 (ADR-0160 §2) — twice the benchmark.
+      await day('2026-09-10', { LEADS_NEW_PROSPECT: 20, LEADS_GEN_ACTIVITY: 10 });
 
       expect(await cards()).toContainEqual(
-        expect.objectContaining({ rule: 'RATIO_STRENGTH', kind: 'improve', facts: expect.objectContaining({ code: 'LEADS_PER_ACTIVITY', value: 0.6 }) }),
+        expect.objectContaining({ rule: 'RATIO_STRENGTH', kind: 'improve', facts: expect.objectContaining({ code: 'LEADS_PER_ACTIVITY', value: 2 }) }),
       );
     });
 
@@ -637,6 +692,168 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(await cards()).toEqual([]);
       // The fixture is real: office B's reader gets office B's cards.
       expect((await cards(agent({ kpmId: OTHER_KPM }))).map((c) => c.rule)).toEqual(['LEAD_OVERDUE', 'RATIO_BELOW']);
+    });
+  });
+
+  describe('P18.8-T11 — an earlier month or year, read whole (ADR-0161 §4)', () => {
+    /** The office opened at 00:00 on 1 June 2025 in Jakarta — still 31 May in UTC. */
+    beforeEach(() => mongoose.connection.db!.collection('kpms').updateOne(
+      { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2025-05-31T17:00:00Z') } },
+    ));
+    const closings = (activity: { targets: { key: string; logged: number }[] }) =>
+      activity.targets.find((t) => t.key === 'closings')!.logged;
+
+    it('P18.8-T11 AC-1, AC-3 a month this year: its own APE against its target as it began, the whole month, no pace', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-07', { apeYtd: cell(170 * M) });
+      await production('2026-08', { apeMonthly: cell(30 * M), apeYtd: cell(200 * M) });
+      await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(230 * M) });
+      await day('2026-08-05', { SELL_SUBMISSION: 2 });
+      await day('2026-08-31', { SELL_SUBMISSION: 1 }); // the month's last day: in a month read whole
+      await day('2026-09-02', { SELL_SUBMISSION: 5 }); // September's: not August's
+
+      const view = await wired.summary.read(agent(), undefined, { month: '2026-08' });
+
+      expect(view).toMatchObject({
+        year: '2026', month: '2026-08', today: '2026-09-14', pace: null,
+        period: { firstMonth: '2025-06', thisMonth: '2026-09', currentMonth: false, currentYear: true },
+      });
+      // (500 − 170 through July) over the five months left including August — fixed as August began.
+      expect(view.monthly).toMatchObject({ targetMinor: 66 * M, actualMinor: 30 * M, source: { provenance: 'imported', month: '2026-08' } });
+      expect(view.activity.monthly).toMatchObject({ from: '2026-08-01', to: '2026-08-31', total: 3 });
+      expect(closings(view.activity.monthly)).toBe(3);
+      // Its year is this one, to today: what *Yearly* shows for 2026.
+      expect(view.yearly).toMatchObject({ targetMinor: 500 * M, actualMinor: 230 * M });
+      expect(view.activity.yearly).toMatchObject({ from: '2026-01-01', to: '2026-09-14', total: 8 });
+      // No pace, so not the pace's card either: the month is over.
+      expect(view.insights.map((i) => i.rule)).not.toContain('BEHIND_PACE');
+    });
+
+    it('P18.8-T11 AC-1, AC-3 a year that has ended: the whole year, its December, its own goal, no pace', async () => {
+      at('2025-06-10T02:00:00Z');
+      await wired.goals.save(agent(), plan({ period: '2025' }));
+      at(NOW.toISOString());
+      await production('2025-11', { apeYtd: cell(400 * M) });
+      await production('2025-12', { apeMonthly: cell(50 * M), apeYtd: cell(450 * M) });
+      await production('2026-01', { apeMonthly: cell(10 * M), apeYtd: cell(10 * M) });
+      await day('2025-12-31', { SELL_SUBMISSION: 2 });
+      await day('2026-01-01', { SELL_SUBMISSION: 9 }); // the next year's first day
+
+      const view = await wired.summary.read(agent(), undefined, { year: '2025' });
+
+      expect(view).toMatchObject({
+        year: '2025', month: '2025-12', pace: null, goal: { set: true },
+        period: { firstMonth: '2025-06', thisMonth: '2026-09', currentMonth: false, currentYear: false },
+      });
+      expect(view.yearly).toMatchObject({ targetMinor: 500 * M, actualMinor: 450 * M, attainmentPct: 90, source: { month: '2025-12' } });
+      expect(view.monthly).toMatchObject({ targetMinor: 100 * M, actualMinor: 50 * M });
+      expect(view.activity.yearly).toMatchObject({ from: '2025-01-01', to: '2025-12-31' });
+      expect(closings(view.activity.yearly)).toBe(2);
+      expect(view.activity.monthly).toMatchObject({ from: '2025-12-01', to: '2025-12-31' });
+    });
+
+    it('P18.8-T11 AC-1 this month asked by name is this month: to today, with its pace', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeYtd: cell(200 * M) });
+
+      const named = await wired.summary.read(agent(), undefined, { month: '2026-09' });
+      const plain = await wired.summary.read(agent());
+
+      expect(named).toEqual(plain);
+      expect(named.period).toEqual({ firstMonth: '2025-06', thisMonth: '2026-09', currentMonth: true, currentYear: true });
+      expect(named.pace).not.toBeNull();
+    });
+
+    it.each([
+      [{ month: '2026-10' }, 'month'],
+      [{ year: '2027' }, 'year'],
+      [{ month: '2025-05' }, 'month'],
+      [{ year: '2024' }, 'year'],
+      [{ month: '2026-08', year: '2026' }, 'year'],
+    ])('P18.8-T11 AC-1 refuses %j 400, naming the field and the range there is', async (asked, field) => {
+      await expect(wired.summary.read(agent(), undefined, asked)).rejects.toMatchObject({
+        status: 400, code: 'VALIDATION_FAILED',
+        details: { field, earliest: field === 'year' ? '2025' : '2025-06', latest: field === 'year' ? '2026' : '2026-09' },
+      });
+    });
+
+    it('P18.8-T11 AC-1 reads nothing of another office’s month — the same member id there included', async () => {
+      await wired.goals.save(agent(), plan());
+      await production('2026-08', { apeMonthly: cell(30 * M), apeYtd: cell(200 * M) });
+      await production('2026-08', { apeMonthly: cell(99 * M), apeYtd: cell(999 * M) }, { kpmId: OTHER_KPM });
+      await day('2026-08-20', { SELL_SUBMISSION: 40 }, { kpmId: OTHER_KPM });
+
+      const view = await wired.summary.read(agent(), undefined, { month: '2026-08' });
+
+      expect(view.monthly.actualMinor).toBe(30 * M);
+      expect(closings(view.activity.monthly)).toBe(0);
+    });
+  });
+
+  describe('UI V1 (UI-054) — the day the page’s APE is valid for, the latest upload', () => {
+    beforeEach(() => mongoose.connection.db!.collection('kpms').updateOne(
+      { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2025-06-01T00:00:00Z') } },
+    ));
+    let revision = 0;
+    /** One import of a month's file, committed at an instant (or not standing at all). */
+    const upload = (month: string, committedAt: string | null, { kpmId = KPM, status = 'committed' } = {}) => {
+      revision += 1;
+      return mongoose.connection.db!.collection('dataUploadBatches').insertOne({
+        kpmId, month, status, filename: `0417-${month}.csv`, fileSha256: `sha-${revision}`, templateVersion: 1,
+        encoding: 'utf-8', delimiter: ',', basedOnRevision: revision - 1, monthRevision: revision, rowCount: 1,
+        writtenRowCount: 1, cellCount: 1, issueCount: 0, startedAt: committedAt ? new Date(committedAt) : new Date(),
+        committedAt: committedAt ? new Date(committedAt) : null, committedBy: 'mem-owner', deletedAt: null,
+      } as never);
+    };
+
+    it('UI-054 the month’s latest file standing, on the office’s day — 20:00 UTC on the 12th is the 13th in Jakarta', async () => {
+      await upload('2026-09', '2026-09-02T03:00:00Z');
+      await upload('2026-09', '2026-09-12T20:00:00Z');
+      await upload('2026-09', '2026-09-14T01:00:00Z', { status: 'reverted' }); // stands for nothing
+      await upload('2026-09', null, { status: 'pending' });
+      await upload('2026-08', '2026-09-13T23:00:00Z'); // August's, uploaded later: the year's, not the month's
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: '2026-09-13', year: '2026-09-14' });
+    });
+
+    it('UI-054 none for the month yet: no date — the year still has last month’s', async () => {
+      await upload('2026-08', '2026-09-03T02:00:00Z');
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: null, year: '2026-09-03' });
+    });
+
+    it('UI-054 a past month and a past year read their own files, never a later month’s', async () => {
+      await upload('2025-12', '2026-01-05T02:00:00Z');
+      await upload('2026-01', '2026-02-04T02:00:00Z');
+      await upload('2026-08', '2026-09-03T02:00:00Z');
+      await upload('2026-09', '2026-09-10T02:00:00Z');
+
+      const august = await wired.summary.read(agent(), undefined, { month: '2026-08' });
+      const lastYear = await wired.summary.read(agent(), undefined, { year: '2025' });
+
+      expect(august.uploadedOn).toEqual({ month: '2026-09-03', year: '2026-09-03' });
+      expect(lastYear.uploadedOn).toEqual({ month: '2026-01-05', year: '2026-01-05' });
+    });
+
+    it('UI-054 reads nothing of another office’s uploads', async () => {
+      await upload('2026-09', '2026-09-13T02:00:00Z', { kpmId: OTHER_KPM });
+
+      const view = await wired.summary.read(agent());
+
+      expect(view.uploadedOn).toEqual({ month: null, year: null });
+    });
+
+    it('UI-054 a leader’s copy of a coachee’s Summary reads the office’s same date', async () => {
+      await upload('2026-09', '2026-09-12T02:00:00Z');
+
+      expect((await wired.summary.read(agent())).uploadedOn.month).toBe('2026-09-12');
+      // The subject's Summary as a leader's read computes it, once `COACH` has resolved them (`of`).
+      const copy = await wired.summary.of(owner(), { membershipId: ME, orgLevelCode: 'AGENT', self: false });
+      expect(copy.uploadedOn.month).toBe('2026-09-12');
     });
   });
 

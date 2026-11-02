@@ -5,7 +5,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import {
   LeaderMeeting, type AgendaSection, type FrozenEditor, type LeaderMeetingActionItem, type LeaderMeetingAgendaItem,
-  type LeaderMeetingDocument,
+  type LeaderMeetingDocument, type MonthlyTargetCell,
 } from './leader-meeting.schema';
 
 type Filter = FilterQuery<LeaderMeetingDocument>;
@@ -161,17 +161,19 @@ export class LeaderMeetingRepository extends TenantScopedRepository<LeaderMeetin
   }
 
   /**
-   * **One *Monthly Target* cell**, only while it is at `version` — 0 for a cell never typed, which this write
-   * creates at 1.
+   * **One *Monthly Target* cell's rate** (ADR-0175 §4), only while the cell is at `version` — 0 for a cell never typed,
+   * which this write creates at 1. The cell is written whole: a rate entered replaces whatever text it was typed as
+   * before rates (`typed`), which the audit row keeps as its `before`.
    */
   async setMonthlyTarget(
-    ctx: RequestContext, id: string, row: string, version: number, value: string,
+    ctx: RequestContext, id: string, row: string, version: number, rate: number | null,
   ): Promise<LeaderMeetingDocument | null> {
     const path = `monthlyTargets.${row}`;
     const at = version === 0 ? { [path]: { $exists: false } } : { [`${path}.version`]: version };
+    const cell: MonthlyTargetCell = { rate, typed: null, version: version + 1 };
     return this.model.findOneAndUpdate(
       this.scope(ctx, 'setMonthlyTarget', { _id: id, ...at } as Filter),
-      { $set: { [path]: { value, version: version + 1 }, updatedBy: ctx.membershipId } },
+      { $set: { [path]: cell, updatedBy: ctx.membershipId } },
       { new: true },
     ).exec();
   }

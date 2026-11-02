@@ -1,5 +1,5 @@
 import {
-  AssetOwner, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject,
 } from '@/modules/assets/storage.port';
 
 /**
@@ -27,9 +27,7 @@ export class StubStorage extends StoragePort {
     owner: AssetOwner; folder: string; filename: string; mimeType: string; allowedMimeTypes?: readonly string[];
   }): Promise<SignedUpload> {
     this.signedWith.push({ folder: params.folder, mimeType: params.mimeType, allowedMimeTypes: params.allowedMimeTypes });
-    const owner = params.owner.kind === 'kpm'
-      ? params.owner.kpmId
-      : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     this.next += 1;
     const storageKey = `dev/${owner}/${params.folder}/${String(this.next).padStart(4, '0')}`;
     // Present from the moment a signature is issued, so the common path in a test is the
@@ -38,17 +36,19 @@ export class StubStorage extends StoragePort {
       storageKey, mimeType: params.mimeType, bytes: 1024,
     });
     return {
-      uploadUrl: 'https://upload.test',
+      uploadUrl: 'https://storage.googleapis.com/stub-bucket/',
       storageKey,
       signature: 'sig',
-      // Shaped as the adapter's: never overwrite, and a narrower list asked of the vendor too.
+      // Shaped as `GcsAdapter`'s V4 POST policy (P18.7-T2): the one key, and the Content-Type pinned to the
+      // type the service checked — which is how a route's narrower list reaches storage.
       fields: {
-        public_id: storageKey,
-        overwrite: 'false',
-        ...(params.allowedMimeTypes
-          ? { allowed_formats: params.allowedMimeTypes.map((m) => m.split('/')[1]).join(',') }
-          : {}),
-        signature: 'sig',
+        'Content-Type': params.mimeType,
+        key: storageKey,
+        'x-goog-date': '20260918T020000Z',
+        'x-goog-credential': 'stub-signer@stub.iam.gserviceaccount.com/20260918/auto/storage/goog4_request',
+        'x-goog-algorithm': 'GOOG4-RSA-SHA256',
+        policy: 'eyJjb25kaXRpb25zIjpbXX0=',
+        'x-goog-signature': 'sig',
       },
       expiresAt: new Date('2026-09-18T02:10:00Z'),
     };
@@ -76,7 +76,7 @@ export class StubStorage extends StoragePort {
     if (!source || this.failing.has(params.storageKey)) {
       throw new Error(`Storage could not copy ${params.storageKey}.`);
     }
-    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     this.next += 1;
     const storageKey = `dev/${owner}/${params.folder}/${String(this.next).padStart(4, '0')}`;
     const copied = { ...source, storageKey };
@@ -95,7 +95,7 @@ export class StubStorage extends StoragePort {
   async putObject(params: {
     owner: AssetOwner; folder: string; name: string; mimeType: string; body: Buffer;
   }): Promise<StoredObject & { sent: boolean }> {
-    const owner = params.owner.kind === 'kpm' ? params.owner.kpmId : `company/${params.owner.companyId}`;
+    const owner = ownerSegment(params.owner);
     const storageKey = `dev/${owner}/${params.folder}/${params.name}`;
     const held = this.objects.get(storageKey);
     if (held) return { ...held, sent: false };

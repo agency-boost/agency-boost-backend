@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 
@@ -12,7 +13,7 @@ const COMPANY = '66f0000000000000000000c1';
 const ctxFor = (kpmId: string, over: Record<string, unknown> = {}) => new RequestContext('u1', 'none', {
   membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
-} as never);
+} as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 const agent = (kpmId = KPM_A) => ctxFor(kpmId);
 const leader = () => ctxFor(KPM_A, { membershipId: 'mem-leader', orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1 });
 const owner = (kpmId = KPM_A) => ctxFor(kpmId, { isKpmOwner: true });
@@ -98,13 +99,14 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
   describe('AC-3 — judged against the office’s own benchmark (testing obligation 5)', () => {
     it('reads one office against its raised benchmark, and leaves the other on the default', async () => {
       for (const kpmId of [KPM_A, KPM_B]) {
-        await day(TODAY, { SELL_SUBMISSION: 2, SELL_PRESENTATION: 10 }, { kpmId, membershipId: `mem-${kpmId}` });
+        await day(TODAY, { SELL_SUBMISSION: 4, SELL_PRESENTATION: 10 }, { kpmId, membershipId: `mem-${kpmId}` });
       }
       const ssr = (await wired.ratios.list(owner())).find((r) => r.code === 'SELLING_SUCCESS_RATE')!;
-      await wired.ratios.update(owner(), ssr.id, { benchmark: 0.25 });
+      await wired.ratios.update(owner(), ssr.id, { benchmark: 0.45 });
 
-      expect((await byCode(agent(KPM_A))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.2, benchmark: 0.25, status: 'alert' });
-      expect((await byCode(agent(KPM_B))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.2, benchmark: 0.15, status: 'success' });
+      expect((await byCode(agent(KPM_A))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.4, benchmark: 0.45, status: 'alert' });
+      // The default is 30% since ADR-0160 §2.
+      expect((await byCode(agent(KPM_B))).SELLING_SUCCESS_RATE).toMatchObject({ value: 0.4, benchmark: 0.3, status: 'success' });
     });
   });
 
@@ -113,16 +115,23 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
       await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
       expect((await byCode(leader())).SELLING_VS_RECRUITMENT).toMatchObject({
         comparison: 'band', displayUnit: 'points', value: 80, share: 90, status: 'alert', tag: { label: 'Balance' },
-        sides: { numerator: 'Selling', denominator: 'Recruitment' },
+        sides: { numerator: 'Penjualan', denominator: 'Recruitment' },
       });
       expect((await byCode(leader())).SELLING_SUCCESS_RATE.sides).toBeNull();
+    });
+
+    it('P18.98-T5 AC-4 tags the balance in the reader’s language; its sides are the office’s own labels, as typed', async () => {
+      await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
+      expect((await byCode(leader().withReader(readerIn('id')))).SELLING_VS_RECRUITMENT).toMatchObject({
+        tag: { code: null, label: 'Keseimbangan' }, sides: { numerator: 'Penjualan', denominator: 'Recruitment' },
+      });
     });
 
     it('names each side’s terms as the office numbers them, tags the section, and says what it measures', async () => {
       const view = await byCode(agent());
       expect(view.SELLING_SUCCESS_RATE.numerator).toEqual([{ code: 'SELL_SUBMISSION', label: expect.any(String), displayOrder: 6 }]);
       expect(view.SELLING_SUCCESS_RATE.denominator.map((t) => t.displayOrder)).toEqual([4, 5]);
-      expect(view.SELLING_SUCCESS_RATE.tag).toEqual({ code: 'SELLING', label: 'Selling' });
+      expect(view.SELLING_SUCCESS_RATE.tag).toEqual({ code: 'SELLING', label: 'Penjualan' });
       expect(view.MEETING_PER_APPROACH.tag).toMatchObject({ code: 'LEADS_GENERATION' });
       expect(view.SELLING_SUCCESS_RATE.purpose).toBe('Mengukur tingkat konversi aktivitas selling menjadi submission');
       expect(view.SELLING_SUCCESS_RATE.divergesFromStandard).toBe(false);

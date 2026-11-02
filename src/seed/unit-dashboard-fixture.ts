@@ -62,7 +62,7 @@ export const UNIT_DASHBOARD_INDAH_LEAD = {
   name: 'Sdri. Laras Wulandari',
   path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'],
   nextActionInDays: 5,
-  nextActionNote: 'Invite her to Thursday’s BOP.',
+  nextActionNote: 'Undang ke BOP hari Kamis.',
 } as const;
 
 /** Sari's correction of Budi's year to date: the company report's figure, Rp 14 M above last month's. */
@@ -111,10 +111,10 @@ export async function seedUnitDashboardFixture(deps: UnitDashboardFixtureDeps): 
       contact: { phone: null, email: null },
       statusCode: path.at(-1), statusId: status ? String((status as { _id: unknown })._id) : null,
       commitments: [{ month, at: new Date(now.getTime() - 2 * DAY_MS), byMembershipId: deps.indah }],
-      remarks: 'Met at a family gathering; curious about a second income.',
+      remarks: 'Ketemu di acara keluarga; penasaran soal penghasilan tambahan.',
       // Dated, so a session with Indah never refuses to finalize over it (`LEAD_THIS_MONTH_UNDATED`).
       nextActionDate: addDays(today, nextActionInDays), nextActionNote,
-      outcome: null, outcomeAt: null, dateRegistered: new Date(now.getTime() - 10 * DAY_MS), source: 'Personal network',
+      outcome: null, outcomeAt: null, dateRegistered: new Date(now.getTime() - 10 * DAY_MS), source: 'Jaringan pribadi',
       version: 1 + transitions.length, transitions, deletedAt: null, createdBy: deps.indah, updatedBy: deps.indah,
     });
     written += 1;

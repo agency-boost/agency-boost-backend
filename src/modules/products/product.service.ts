@@ -1,13 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { SEED_PRODUCTS, type ProductLifecycle } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { plainText } from '@/common/validation/plain-text';
 import { Product, ProductDocument } from './product.schema';
+import { PRODUCTS_REFUSALS } from './products.messages';
+
+/** The company's catalogue, refused in both languages (P18.98-T5 AC-3). */
+const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
 
 export interface CommissionYearView {
   year: number;
@@ -110,7 +115,7 @@ export class ProductService {
     ctx: RequestContext, companyId: string, productId: string, input: Record<string, unknown>,
   ): Promise<ProductView> {
     const set = this.writable(input);
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     /*
      * **The row as it was, taken by the write itself** (the Phase 14 exit review, N3): the audit row
@@ -149,9 +154,7 @@ export class ProductService {
     if (replacedByProductId) {
       const successor = await this.of(companyId).findOne({ _id: replacedByProductId }).exec();
       if (!successor) {
-        throw new BadRequestException(
-          'The product you named as its replacement is not on this company’s shelf.',
-        );
+        throw new InvalidRequestException(SAY.replacementNotOnShelf);
       }
     }
 
@@ -184,9 +187,7 @@ export class ProductService {
     const wanted = new Set(ids);
     if (ids.length !== rows.length || wanted.size !== ids.length
       || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException(
-        `Send every product of this company, once each — ${rows.length} of them.`,
-      );
+      throw new InvalidRequestException(SAY.sendEveryProduct({ count: rows.length }));
     }
 
     await Promise.all(ids.map((id, index) => this.products.updateOne(
@@ -237,6 +238,49 @@ export class ProductService {
     return rows.length;
   }
 
+  /**
+   * **A new company's catalog, copied from another company's** (ADR-0164 §4): every live product of the
+   * Template library, its lifecycle included, as the new company's own — version 1, nobody's edit. A copy,
+   * never a link: a later change to either shelf is that company's alone.
+   *
+   * Two things are not copied. **Commission**, which each company states for itself — a figure an agent reads
+   * as their pay is the source's, not this insurer's (parity F-15). **The product documents**, which are the
+   * source company's files: the new company uploads its own. A replacement is pointed at the copy of the
+   * product it names. A company that already has products is left alone, as `seedForCompany` leaves it.
+   */
+  async copyFromCompany(sourceCompanyId: string, companyId: string): Promise<number> {
+    if (await this.products.exists({ companyId, deletedAt: null })) return 0;
+    const source = await this.products.find({ companyId: sourceCompanyId, deletedAt: null }).lean().exec();
+    if (source.length === 0) return 0;
+
+    const now = this.clock.now();
+    const ids = new Map(source.map((p) => [String(p._id), new Types.ObjectId()]));
+    const rows = source.map((product) => {
+      const { _id, createdAt: _c, updatedAt: _u, __v: _v, ...fields } = product as typeof product & {
+        createdAt?: Date; updatedAt?: Date; __v?: number;
+      };
+      const replacement = product.replacedByProductId ? ids.get(product.replacedByProductId) ?? null : null;
+      return {
+        ...structuredClone(fields),
+        _id: ids.get(String(_id)),
+        companyId,
+        commissionSchedule: [],
+        defaultDocuments: {},
+        replacedByProductId: replacement ? String(replacement) : null,
+        lifecycleChangedAt: null,
+        lifecycleChangedBy: null,
+        version: 1,
+        deletedAt: null,
+        createdBy: null,
+        updatedBy: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+    await this.products.insertMany(rows);
+    return rows.length;
+  }
+
   // -------------------------------------------------------------------- internals
 
   /**
@@ -260,9 +304,7 @@ export class ProductService {
     // Counting withdrawn rows: a retired code that came back as something else would change the
     // meaning of every policy and every attack plan still pointing at it.
     if (await this.products.exists({ companyId, code, deletedAt: null })) {
-      throw new BadRequestException(
-        `This company already has a product with the code ${code}. A code is never reused.`,
-      );
+      throw new InvalidRequestException(SAY.codeTaken({ code }));
     }
   }
 
@@ -314,10 +356,7 @@ export class ProductService {
       .map((row) => ({ year: row.year, rate: row.rate }))
       .sort((a, b) => a.year - b.year);
     if (sorted.some((row, index) => row.year !== index + 1)) {
-      throw new BadRequestException(
-        'A commission schedule is a rate for each policy year from year 1, with no year missing and '
-        + `none twice. This one has year ${sorted.map((row) => row.year).join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.scheduleGaps({ years: sorted.map((row) => row.year) }));
     }
     return sorted;
   }

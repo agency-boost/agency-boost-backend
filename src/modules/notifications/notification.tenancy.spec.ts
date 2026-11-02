@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from './notification.schema';
@@ -26,6 +27,7 @@ const KPM_B = new mongoose.Types.ObjectId().toString();
  * an id that selects whose inbox to read.** These tests assert the absence of that door,
  * not that a door is locked.
  */
+/** A person reading in English — the copy asserted below — since nobody's choice is Bahasa Indonesia (P18.98-T4's exit). */
 function person(userId: string, kpmId: string | null) {
   return new RequestContext(
     userId,
@@ -36,7 +38,7 @@ function person(userId: string, kpmId: string | null) {
           isKpmOwner: false, isKpmAdmin: false, directCount: 0,
         }
       : null,
-  );
+  ).withReader(readerIn('en'));
 }
 
 /** The words are not what this file is about; isolation is. */

@@ -1,4 +1,16 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { decodeUpload, decodeWindows1252, delimiterOf, parseCsv } from './production-csv';
+
+/** A refusal's words for an Indonesian reader (P18.98-T5 AC-2). */
+const inIndonesian = (fn: () => unknown): string => {
+  try {
+    fn();
+  } catch (err) {
+    return (err as DomainException).messageFor(readerIn('id'));
+  }
+  throw new Error('nothing was refused');
+};
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const bytes = (...b: number[]) => Uint8Array.from(b);
@@ -29,14 +41,23 @@ describe('reading the bytes (ADR-0052)', () => {
       expect(() => decodeUpload(bytes())).toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV' }));
     });
 
-    it('refuses a workbook, saying to save it as CSV', () => {
-      expect(() => decodeUpload(bytes(0x50, 0x4b, 0x03, 0x04, 0x14)))
-        .toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV', message: expect.stringContaining('save it as CSV') }));
+    it('no longer refuses a workbook: ADR-0184 reads one, before it would reach the text decoder', () => {
+      // `readFileUpload` sends bytes that start as a ZIP to `readXlsx`; `production-preview.spec.ts` reads one through.
+      // The decoder itself refuses nothing for starting with PK.
+      expect(decodeUpload(bytes(0x50, 0x4b, 0x03, 0x04, 0x14))).toMatchObject({ encoding: 'utf-8' });
     });
 
-    it('refuses anything with a NUL byte — no text file has one', () => {
-      expect(() => decodeUpload(bytes(0x41, 0x00, 0x42)))
-        .toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV', message: expect.stringContaining('not a text file') }));
+    it('refuses anything with a NUL byte — no text file has one — saying a workbook or a CSV will do', () => {
+      expect(() => decodeUpload(bytes(0x41, 0x00, 0x42))).toThrow(expect.objectContaining({
+        code: 'UPLOAD_MALFORMED_CSV',
+        message: 'This is neither a text file nor an Excel workbook. Upload the filled template as .xlsx or .csv.',
+      }));
+    });
+
+    it('P18.98-T5 AC-2 says each in Indonesian too', () => {
+      expect(inIndonesian(() => decodeUpload(bytes()))).toBe('File ini kosong.');
+      expect(inIndonesian(() => decodeUpload(bytes(0x41, 0x00, 0x42))))
+        .toBe('Ini bukan file teks maupun workbook Excel. Unggah template yang sudah diisi sebagai .xlsx atau .csv.');
     });
   });
 
@@ -95,6 +116,10 @@ describe('reading the bytes (ADR-0052)', () => {
     it('refuses a quote that is never closed, naming the line it opened on (AC-3)', () => {
       expect(() => parseCsv('a,b\nc,"never\nclosed', ','))
         .toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV', details: { line: 2 } }));
+      expect(() => parseCsv('a,b\nc,"never\nclosed', ','))
+        .toThrow('A quote opened on line 2 is never closed, so the rest of the file cannot be read.');
+      expect(inIndonesian(() => parseCsv('a,b\nc,"never\nclosed', ',')))
+        .toBe('Tanda kutip yang dibuka di baris 2 tidak pernah ditutup, jadi sisa file tidak dapat dibaca.');
     });
   });
 });

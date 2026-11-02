@@ -5,7 +5,27 @@ import {
   IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
+import {
+  DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, ROSTER_UPLOAD, SUBSCRIPTION, type LeaderTier,
+} from '@/domain/constants';
+import { field } from '@/common/validation/violations';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them to the pipe. */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
+
+/**
+ * A rung's leader tier on the wire (ADR-0156): `senior`, `associate`, or `null` for *Not a leader*.
+ * `@IsOptional` passes `null` through, which is the point — `null` is a value here, and only a string
+ * outside the two tiers is refused.
+ */
+const LEADER_TIER_PROPERTY = {
+  enum: [...LEADER_TIERS],
+  nullable: true,
+  description:
+    '*Senior Leader* (what AB is), *Associate Leader* (what AAB is), or `null` — *Not a leader*. A member\u2019s '
+    + 'role class is derived from it wherever they are placed on the rung (ADR-0156).',
+};
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Prudential', minLength: 2, maxLength: 120 })
@@ -31,13 +51,11 @@ export class CreateCompanyDto {
   })
   @IsString()
   @MaxLength(64)
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-    message: 'slug must be lower-case letters and digits, separated by single hyphens',
-  })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: field(SAY.slugShape) })
   slug!: string;
 
   /**
-   * Start this company from the platform's presets, or from nothing.
+   * Start this company from the Template library, or from nothing (ADR-0164 §4).
    *
    * **Default true, and absent means true** — a company created before this field existed,
    * and every caller that does not care, gets what they always got.
@@ -45,11 +63,13 @@ export class CreateCompanyDto {
   @ApiPropertyOptional({
     default: true,
     description:
-      'True gives the company the platform\'s activity taxonomy, ratios, lead ladders, '
-      + 'training tree, activation checklist, capability ladder, event types, carrier rules '
-      + 'and product catalog to edit. False leaves every one of them empty, for a company '
-      + 'whose presets are being authored from scratch. The role ladder is seeded either '
-      + 'way: an office whose company has none is one nobody can join.',
+      'True copies the Template library: its role ladder with the leader tiers, product catalog, '
+      + 'carrier rules and recruitment playbook, and its Default template — activity taxonomy, ratios, '
+      + 'lead ladders, training tree, activation checklist, capability ladder and event types — as the '
+      + 'company\'s first, default template. A copy: changing the Template later changes no company made '
+      + 'from it. Where no Template library exists, the AgencyBoost defaults. False leaves every one of '
+      + 'them empty, for a company whose presets are being authored from scratch. The role ladder is '
+      + 'seeded either way: an office whose company has none is one nobody can join.',
   })
   @IsOptional()
   @IsBoolean()
@@ -76,9 +96,7 @@ export class UpdateCompanyDto {
   @IsOptional()
   @IsString()
   @MaxLength(64)
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-    message: 'slug must be lower-case letters and digits, separated by single hyphens',
-  })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: field(SAY.slugShape) })
   slug?: string;
 }
 
@@ -107,9 +125,7 @@ export class CreateOrgLevelDto {
     pattern: '^[A-Z][A-Z0-9_]{1,31}$',
   })
   @IsString()
-  @Matches(/^[A-Za-z][A-Za-z0-9_]{1,31}$/, {
-    message: 'code must be letters, digits and underscores, starting with a letter',
-  })
+  @Matches(/^[A-Za-z][A-Za-z0-9_]{1,31}$/, { message: field(SAY.rungCodeShape) })
   code!: string;
 
   @ApiProperty({ example: 'Associate Agency Business', minLength: 1, maxLength: 60 })
@@ -123,6 +139,11 @@ export class CreateOrgLevelDto {
   @Min(1)
   @Max(99)
   displayOrder!: number;
+
+  @ApiPropertyOptional({ ...LEADER_TIER_PROPERTY, description: `${LEADER_TIER_PROPERTY.description} Absent is \`null\`.` })
+  @IsOptional()
+  @IsIn([...LEADER_TIERS])
+  leaderTier?: LeaderTier | null;
 }
 
 /** No `code`. Renaming is what `label` is for; a different rung is a different level. */
@@ -140,6 +161,14 @@ export class UpdateOrgLevelDto {
   @Min(1)
   @Max(99)
   displayOrder?: number;
+
+  @ApiPropertyOptional({
+    ...LEADER_TIER_PROPERTY,
+    description: `${LEADER_TIER_PROPERTY.description} Refused \`409 ORG_LEVEL_TIER_IN_USE\` while anybody holds the rung.`,
+  })
+  @IsOptional()
+  @IsIn([...LEADER_TIERS])
+  leaderTier?: LeaderTier | null;
 
   @ApiPropertyOptional({
     enum: ['active', 'archived'],
@@ -196,14 +225,13 @@ export class CreateKpmDto {
       'and the office inherits the same value from its company (ADR-0016).',
   })
   @IsOptional()
-  @IsIn([DEFAULT_TENANT_TIMEZONE], {
-    message: `timezone must be ${DEFAULT_TENANT_TIMEZONE} — v1 runs on a single time zone`,
-  })
+  @IsIn([DEFAULT_TENANT_TIMEZONE], { message: field(SAY.timezoneOnly({ zone: DEFAULT_TENANT_TIMEZONE })) })
   timezone?: string;
 
   /**
-   * **Start from** (ADR-0115 §4): one of the company's active templates, the AgencyBoost defaults,
-   * or *Empty*. Absent, the company's default template — what approving a KPM request uses.
+   * **Start from** (ADR-0115 §4): one of the company's active templates, the Template library's, or
+   * *Empty*. Absent, the company's default template — what approving a KPM request uses. The AgencyBoost
+   * defaults are refused by the route (ADR-0168 §2; `AdminController.createTenant`).
    */
   @ApiPropertyOptional({
     type: () => StartFromDto,
@@ -268,7 +296,7 @@ export class UpdateSubscriptionDto {
   })
   @ValidateIf((o: UpdateSubscriptionDto) => o.startDate !== null)
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'startDate must be a date written YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: field(SAY.startDateShape) })
   startDate!: string | null;
 
   @ApiProperty({
@@ -279,7 +307,7 @@ export class UpdateSubscriptionDto {
   })
   @ValidateIf((o: UpdateSubscriptionDto) => o.endDate !== null)
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'endDate must be a date written YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: field(SAY.endDateShape) })
   endDate!: string | null;
 
   @ApiProperty({
@@ -338,7 +366,7 @@ export class AuditQueryDto {
 export class ApproveKpmRequestDto {
   @ApiProperty({ example: '0629', description: 'Unique within the company.' })
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'code must be four digits' })
+  @Matches(/^\d{4}$/, { message: field(SAY.kpmCodeShape) })
   code!: string;
 }
 
@@ -372,29 +400,45 @@ export class CreateKpmRequestDto {
 }
 
 /**
- * The roster, as text.
+ * The roster, as text: **the paste**.
  *
- * Named `rows` rather than `csv` because it is not always CSV: the screen sends a
- * downloaded file's contents, or the **tab-separated** text a spreadsheet puts on the
- * clipboard when somebody copies cells. One field, because the parser decides the
- * delimiter from the first line and neither the caller nor the reader gains from saying
- * which it is.
+ * Named `rows` rather than `csv` because it is not always CSV: it is the **tab-separated**
+ * text a spreadsheet puts on the clipboard when somebody copies cells, or a CSV's. One
+ * field, because the parser decides the delimiter from the first line and neither the
+ * caller nor the reader gains from saying which it is.
  *
- * Sent as JSON rather than `multipart/form-data`: the payload is a few kilobytes, the
- * screen has already read it to show a preview, and multipart would mean a second parser,
- * a size limit of its own, and a different shape for preview and commit — and no shape at
- * all for a paste, which is not a file. The cap is 512 KB, which is a roster of tens of
- * thousands and far past the 500-member office ceiling `performance-and-scale.md` sets.
+ * Sent as JSON, because a paste is not a file. **A file is sent as one since ADR-0184** —
+ * `roster/file/preview` and `roster/file`, `multipart/form-data`, a workbook or a CSV read
+ * on the server — and reaches the same parser as this text. The cap is
+ * `ROSTER_UPLOAD.MAX_TEXT_LENGTH`, 512,000 characters: a roster of tens of thousands and
+ * far past the 500-member office ceiling `performance-and-scale.md` sets.
  */
+/**
+ * **`GET /admin/tenants/roster-template`'s query** (S4 of the T17–T20 permission review). `kpmId` reaches a lookup by
+ * id, so it is an ObjectId or nothing — `?kpmId[$ne]=…` is a 400, never an operator handed to the database — and
+ * `format` is one of the two files the template comes in, or absent for the JSON.
+ */
+export class RosterTemplateQueryDto {
+  @ApiPropertyOptional({ enum: ['xlsx', 'csv'], description: 'Absent: the JSON. `xlsx` or `csv`: the template as that file.' })
+  @IsOptional()
+  @IsIn(['xlsx', 'csv'], { message: field(SAY.unknownTemplateFormat) })
+  format?: 'xlsx' | 'csv';
+
+  @ApiPropertyOptional({ description: 'The office whose ladder fills the `role` dropdown (xlsx only). Another office’s is 404.' })
+  @IsOptional()
+  @IsMongoId()
+  kpmId?: string;
+}
+
 export class RosterRowsDto {
   @ApiProperty({
     description:
-      'The rows, as text. Comma-separated from a file, tab-separated from a spreadsheet '
-      + 'paste. The header row is optional.',
-    maxLength: 512_000,
+      'The rows, as text. Tab-separated from a spreadsheet paste, or comma-separated. '
+      + 'The header row is optional. A file is sent to `roster/file/preview` and `roster/file`.',
+    maxLength: ROSTER_UPLOAD.MAX_TEXT_LENGTH,
   })
   @IsString()
-  @MaxLength(512_000)
+  @MaxLength(ROSTER_UPLOAD.MAX_TEXT_LENGTH)
   rows!: string;
 }
 

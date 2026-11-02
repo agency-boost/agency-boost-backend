@@ -6,6 +6,8 @@
  * the five phases that call this service.
  */
 
+import type { Reader } from '@/common/i18n/reader';
+
 export type NotificationChannel = 'in_app' | 'email';
 
 export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ['in_app', 'email'] as const;
@@ -26,9 +28,23 @@ export const NotificationTemplate = {
   JOIN_REQUEST_APPROVED: 'join_request.approved',
   JOIN_REQUEST_DECLINED: 'join_request.declined',
   MEMBER_TAGGED_BY_LEADER: 'member.tagged_by_leader',
+  /*
+   * P18.96-T3 (ADR-0170): the invitee accepted a leader's invite and is in their unit, to the leader; a transfer
+   * request, to the office's Owner and Admins; and its decision — to whoever asked, and when approved to the member and
+   * the leader they left (`payload.audience`). The payload names people by their names and ids, never a phone.
+   */
+  MEMBER_INVITE_ACCEPTED: 'member_invite.accepted',
+  TRANSFER_REQUEST_RECEIVED: 'transfer_request.received',
+  TRANSFER_REQUEST_DECIDED: 'transfer_request.decided',
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
   ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
+  /*
+   * AgencyBoost's answer to a leader past the office's limit (ADR-0157 §3), to whoever asked. The payload is the
+   * subject's name and, for a decline, the reason — the request says the rest.
+   */
+  LEADER_LIMIT_REQUEST_APPROVED: 'leader_limit_request.approved',
+  LEADER_LIMIT_REQUEST_DECLINED: 'leader_limit_request.declined',
   /**
    * A leader set somebody's goal (§3.6, ADR-0046).
    *
@@ -52,6 +68,12 @@ export const NotificationTemplate = {
   CALENDAR_INVITATION: 'calendar.invitation',
   CALENDAR_BLOCK_PLACED: 'calendar.block_placed',
   CALENDAR_ENTRY_CHANGED: 'calendar.entry_changed',
+  /*
+   * An office event is coming up. The payload is the event as it stood when the reminder went: `eventId`, its
+   * `title`, `startsAt` (the instant, ISO) with the office's `timezone` that instant is read in, and its `location` —
+   * so the notice names its time and place (P18.95-T7 AC-4; `inbox-copy.ts`). A reminder written before those four,
+   * with its title alone, still reads, in the words it had.
+   */
   EVENT_REMINDER: 'event.reminder',
   /*
    * A support session, announced to the person and their Owner (§3.13, P4-T10).
@@ -64,6 +86,13 @@ export const NotificationTemplate = {
   IMPERSONATION_ELEVATED: 'impersonation.elevated',
   EMAIL_VERIFICATION: 'auth.email_verification',
   PASSWORD_RESET: 'auth.password_reset',
+  /*
+   * A change of the account's email (UI V1, UI-111; ADR-0181): the link that applies it, **to the new address**
+   * (`SendRequest.toAddress`), and a notice that it was asked for, to the address the account has now, with no link
+   * that applies anything. Email only, as the two above: the link proves the mailbox, and an inbox row proves nothing.
+   */
+  EMAIL_CHANGE_VERIFICATION: 'auth.email_change_verification',
+  EMAIL_CHANGE_REQUESTED: 'auth.email_change_requested',
 } as const;
 
 export type NotificationTemplateId =
@@ -82,9 +111,14 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.JOIN_REQUEST_APPROVED]: ['in_app', 'email'],
   [NotificationTemplate.JOIN_REQUEST_DECLINED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_TAGGED_BY_LEADER]: ['in_app', 'email'],
+  [NotificationTemplate.MEMBER_INVITE_ACCEPTED]: ['in_app', 'email'],
+  [NotificationTemplate.TRANSFER_REQUEST_RECEIVED]: ['in_app', 'email'],
+  [NotificationTemplate.TRANSFER_REQUEST_DECIDED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
+  [NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED]: ['in_app', 'email'],
+  [NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED]: ['in_app', 'email'],
   [NotificationTemplate.GOAL_SET_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.COACHING_SESSION_FINALIZED]: ['in_app'],
   // The inbox always, as ADR-0010's authoritative channel; email by the member's preferences.
@@ -96,6 +130,8 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.IMPERSONATION_ELEVATED]: ['in_app', 'email'],
   [NotificationTemplate.EMAIL_VERIFICATION]: ['email'],
   [NotificationTemplate.PASSWORD_RESET]: ['email'],
+  [NotificationTemplate.EMAIL_CHANGE_VERIFICATION]: ['email'],
+  [NotificationTemplate.EMAIL_CHANGE_REQUESTED]: ['email'],
 };
 
 export interface SendRequest {
@@ -104,6 +140,18 @@ export interface SendRequest {
   readonly userId?: string;
   readonly templateId: NotificationTemplateId;
   readonly payload: Record<string, unknown>;
+  /**
+   * **The reader of the request that caused it**, for a recipient with no saved language (P18.98-T5 AC-5): set only
+   * where that request was the recipient's own — the verification and reset emails, whose page asked for them in its
+   * language. Every other email reads the recipient's `users.locale`, or a reader who has chosen nothing.
+   */
+  readonly reader?: Reader;
+  /**
+   * **An address the account does not have yet** (UI V1, UI-111; ADR-0181): the email change's link goes to the new
+   * address, which is not `users.email` until that link is opened. The email channel sends there instead of looking
+   * the recipient up; every other send leaves it unset, so mail goes to the address the account has at sending.
+   */
+  readonly toAddress?: string;
 }
 
 /** A channel implementation. Adding WhatsApp means implementing this once. */

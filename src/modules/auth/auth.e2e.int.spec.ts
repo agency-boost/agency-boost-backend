@@ -1,3 +1,4 @@
+import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import {
   TrainingCategory, TrainingCategorySchema,
@@ -19,6 +20,7 @@ import mongoose, { Connection, Model } from 'mongoose';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
+import { addDays, localDayOf } from '@/common/time/local-day';
 import { AuthGuard } from '@/common/auth/auth.guard';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
@@ -56,9 +58,12 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { ProfileLineReader } from '@/modules/org/profile-line';
 import {
-  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MembershipHistoryRepository,
 } from '@/modules/org/org.repositories';
+import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
@@ -80,7 +85,7 @@ import {
 import {
   NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
 } from '@/modules/notifications/notification.types';
-import { AuthController } from './auth.controller';
+import { AuthController, registrationLimitKey } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ContextResolver } from './context-resolver';
 import { ImpersonationService } from './impersonation.service';
@@ -196,6 +201,16 @@ class Mailbox extends NotificationChannelAdapter {
 
 const mailbox = new Mailbox();
 
+/** The emails sent to one person for one template, once at least `count` of them have left (they leave off the request). */
+async function waitForMail(userId: string, templateId: string, count = 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const found = mailbox.sent.filter((m) => m.to.userId === userId && m.to.templateId === templateId);
+    if (found.length >= count) return found;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`fewer than ${count} ${templateId} were sent to ${userId}`);
+}
+
 describe('auth and admin over HTTP', () => {
   let app: INestApplication;
   let mongoUri: string;
@@ -248,6 +263,8 @@ describe('auth and admin over HTTP', () => {
         // Phase 18: the roster's *Last activity* and *Last coached* read the log and the sessions.
         { name: ActivityLog.name, schema: ActivityLogSchema },
         { name: CoachingSession.name, schema: CoachingSessionSchema },
+        // P18.8-T2: `/members/:id/leader-limit-requests` and the Super Admin's queue are OrgController's.
+        { name: LeaderLimitRequest.name, schema: LeaderLimitRequestSchema },
         ]),
       ],
       controllers: [
@@ -289,7 +306,7 @@ describe('auth and admin over HTTP', () => {
         { provide: CampaignKindsApplier, useExisting: ProvisioningService },
         ProductService,
         // P5-T2: a training module's content is files (ADR-0032). The vendor is stubbed —
-        // this file's subject is the HTTP contract, not Cloudinary.
+        // this file's subject is the HTTP contract, not storage.
         AssetRepository,
         AssetService,
         // P5-T7: TenantService seeds a company's carrier rules at creation.
@@ -305,6 +322,10 @@ describe('auth and admin over HTTP', () => {
     GroupRepository,
     JoinRequestRepository,
     MembershipHistoryRepository, HierarchyService, DirectoryService, OnboardingService, LeaderCodeService, ApprovalsService, RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService,
+        // P18.8-T6: the profile line's groups and office on `/auth/me`.
+        ProfileLineReader,
+        // P18.8-T2: the leader-limit requests OrgController answers.
+        LeaderLimitRequestRepository, LeaderLimitRequestService,
         AuthGuard, PermissionsGuard,
       ],
     }).compile();
@@ -313,12 +334,8 @@ describe('auth and admin over HTTP', () => {
     app.use(cookieParser());
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true, forbidNonWhitelisted: true, transform: true,
-        transformOptions: { enableImplicitConversion: false },
-      }),
-    );
+    // The server's own pipe (`VALIDATION_PIPE_OPTIONS`), its refusals in the reader's language (P18.98-T5 AC-3).
+    app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
     app.useGlobalGuards(app.get(AuthGuard), app.get(PermissionsGuard));
     await app.init();
     // Listen once, for the whole suite.
@@ -349,6 +366,8 @@ describe('auth and admin over HTTP', () => {
       Object.values(connection.collections).map((c) => c.deleteMany({})),
     );
     app.get(RateLimiter).prune();
+    // The P18.96 exit review, L2: sign-ups are limited per address, and every test here signs up from the loopback.
+    for (const ip of ['127.0.0.1', '::ffff:127.0.0.1', '::1']) app.get(RateLimiter).reset(registrationLimitKey(ip));
   });
 
   const api = () => request(app.getHttpServer());
@@ -361,6 +380,12 @@ describe('auth and admin over HTTP', () => {
    * fixture built in `beforeAll`.
    */
   let e2eCodeSeq = 0;
+  /** What a person records at registration (ADR-0158), required since P18.8-T4. */
+  const PERSONAL = {
+    dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', workStatus: 'full_time', gender: 'female',
+  } as const;
+  /** A fresh digits-only agent code (ADR-0158 §4), unique enough for one suite's run. */
+  const digits = () => `${Date.now() % 1_000_000_000}${Math.floor(Math.random() * 1000)}`.padStart(6, '1');
   async function anInsurer(): Promise<string> {
     const companies = app.get<Model<CompanyDocument>>(getModelToken(Company.name));
     // Named the thing the assertions below expect. A person and the office they own must
@@ -393,7 +418,7 @@ describe('auth and admin over HTTP', () => {
     await api().post('/api/v1/auth/register')
       .send({
         email, password: PASSWORD, fullName: 'Test Person',
-        companyId, agentCode: `PRU-${9000 + e2eCodeSeq}`,
+        companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
       }).expect(201);
 
     const users = app.get<Model<UserDocument>>(getModelToken(User.name));
@@ -497,7 +522,7 @@ describe('auth and admin over HTTP', () => {
       const res = await api().post('/api/v1/auth/register')
         .send({
           email: `num-${Math.random()}@kpm.test`, password: PASSWORD, fullName: 'N',
-          companyId, agentCode: 88213,
+          companyId, agentCode: 88213, ...PERSONAL,
         })
         .expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
@@ -768,6 +793,42 @@ describe('auth and admin over HTTP', () => {
 
       await api().get('/api/v1/auth/me')
         .set({ Authorization: `Bearer ${started.body.accessToken}` }).expect(401);
+    });
+
+    it('ADR-0168 §4: a second start as the same person in the same second is 409, not 500, and writes nothing', async () => {
+      /*
+       * `iat` is in seconds, so two starts by one Super Admin as one person within a second sign the same token,
+       * and the second row's `tokenHash` met the unique index: an `E11000` the API answered `500`. The clock is
+       * held still across the two requests, so they cannot straddle a second.
+       */
+      const sa = await makeUser(`sa-twice-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`twice-target-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const sessions = app.get<Model<ImpersonationSessionDocument>>(getModelToken(ImpersonationSession.name));
+      // The unique index the collision meets, built before the two requests rather than racing them.
+      await sessions.syncIndexes();
+      const held = jest.spyOn(app.get(Clock), 'now').mockReturnValue(new Date());
+      try {
+        const first = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+          .set(auth).send({ reason: 'Ticket 42' }).expect(201);
+        const refused = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+          .set(auth).send({ reason: 'Ticket 42' }).expect(409);
+        expect(refused.body.error).toMatchObject({
+          code: 'IMPERSONATION_JUST_STARTED',
+          message: 'A session as this person started a moment ago. Use that one, or wait a second and start again.',
+        });
+
+        expect(await sessions.countDocuments({ effectiveUserId: target.id })).toBe(1);
+        const audit = app.get<Model<unknown>>(getModelToken(AuditLog.name));
+        expect(await audit.countDocuments({ action: 'impersonation.started', targetId: target.id })).toBe(1);
+        const notices = app.get<Model<NotificationDocument>>(getModelToken(Notification.name));
+        expect(await notices.countDocuments({ userId: target.id, templateId: 'impersonation.started' })).toBe(1);
+
+        // The first session is the one to use, and it works.
+        await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${first.body.accessToken}` }).expect(200);
+      } finally {
+        held.mockRestore();
+      }
     });
 
     it('P4-T10: a session may look and not touch', async () => {
@@ -1271,7 +1332,8 @@ describe('auth and admin over HTTP', () => {
       });
       // Their insurer's producer id (ADR-0017), not a code the office minted. This
       // asserted /^KPM\d+-001$/ until 2026-09-08.
-      expect(res.body.members[0].agentCode).toMatch(/^PRU-\d+$/);
+      // Digits only on every new code since ADR-0158 §4.
+      expect(res.body.members[0].agentCode).toMatch(/^\d{3,32}$/);
       expect(res.body.nextCursor).toBeNull();
     });
 
@@ -1465,7 +1527,9 @@ describe('auth and admin over HTTP', () => {
       const auth = { Authorization: `Bearer ${user.accessToken}` };
 
       await api().post('/api/v1/auth/logout-all').set(auth).expect(204);
-      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      const refused = await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      // A presented cookie that no longer works says the session ended (ADR-0168 §1).
+      expect(refused.body.error.code).toBe('AUTH_SESSION_ENDED');
     });
 
     it('AC-1: resends a verification email, and answers the same either way', async () => {
@@ -1498,6 +1562,105 @@ describe('auth and admin over HTTP', () => {
         cookie = next.find((c) => c.startsWith('agencyboost_refresh=')) ?? cookie;
       }
       expect(limited).toBe(true);
+    });
+  });
+
+  /*
+   * **P18.98-T5 — the auth family in the reader's language** (ADR-0179 §7): a refusal, a validation message and the two
+   * auth emails, over HTTP. The request's language is the `Accept-Language` the app sends, else the signed-in person's
+   * saved `users.locale`, else a reader who has chosen nothing — Bahasa Indonesia, the default since P18.98-T4's exit
+   * (2026-10-29; English before it went live).
+   */
+  describe('P18.98-T5 the auth family in the reader’s language', () => {
+    it('AC-7 refuses a wrong password in Indonesian, the code unchanged', async () => {
+      const user = await makeUser(`id-login-${Math.random()}@kpm.test`);
+      const refused = await api().post('/api/v1/auth/login').set('Accept-Language', 'id')
+        .send({ email: user.email, password: 'not the password at all' }).expect(401);
+      expect(refused.body.error).toMatchObject({
+        code: 'AUTH_INVALID_CREDENTIALS', message: 'Email atau kata sandi itu salah.',
+      });
+      const english = await api().post('/api/v1/auth/login')
+        .send({ email: user.email, password: 'not the password at all' }).expect(401);
+      expect(english.body.error.message).toBe('That email or password is not correct.');
+    });
+
+    it('AC-7 refuses a request with no token in Indonesian, before anybody is known', async () => {
+      const refused = await api().get('/api/v1/auth/me').set('Accept-Language', 'id').expect(401);
+      expect(refused.body.error).toMatchObject({ code: 'AUTH_TOKEN_INVALID', message: 'Masuk untuk melanjutkan.' });
+    });
+
+    it('AC-3 writes a validation message in Indonesian, the field named as the API names it', async () => {
+      const user = await makeUser(`id-locale-${Math.random()}@kpm.test`);
+      const refused = await api().patch('/api/v1/auth/me').set('Accept-Language', 'id')
+        .set({ Authorization: `Bearer ${user.accessToken}` }).send({ locale: 'fr' }).expect(400);
+      expect(refused.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'locale harus id atau en',
+        details: { violations: ['locale harus id atau en'] },
+      });
+    });
+
+    it('AC-1 reads the saved language where no header names one, and the header over it', async () => {
+      const user = await makeUser(`id-saved-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${user.accessToken}` };
+      await api().patch('/api/v1/auth/me').set(auth).send({ locale: 'id' }).expect(200);
+
+      const saved = await api().patch('/api/v1/auth/me').set('Accept-Language', '').set(auth).send({ locale: 'fr' }).expect(400);
+      expect(saved.body.error.message).toBe('locale harus id atau en');
+      const sent = await api().patch('/api/v1/auth/me').set('Accept-Language', 'en').set(auth).send({ locale: 'fr' }).expect(400);
+      expect(sent.body.error.message).toBe('locale must be id or en');
+      // A browser's own header is no choice: the saved language stands.
+      const browser = await api().patch('/api/v1/auth/me').set('Accept-Language', 'en-US,en;q=0.9').set(auth)
+        .send({ locale: 'fr' }).expect(400);
+      expect(browser.body.error.message).toBe('locale harus id atau en');
+    });
+
+    it('AC-1 reads nobody’s choice as Bahasa Indonesia, the default being live, with no header and nothing saved', async () => {
+      const user = await makeUser(`id-none-${Math.random()}@kpm.test`);
+      const refused = await api().patch('/api/v1/auth/me').set('Accept-Language', '')
+        .set({ Authorization: `Bearer ${user.accessToken}` }).send({ locale: 'fr' }).expect(400);
+      expect(refused.body.error.message).toBe('locale harus id atau en');
+    });
+
+    it('AC-5 writes the verification email in the language of the page that asked for it', async () => {
+      const companyId = await anInsurer();
+      e2eCodeSeq += 1;
+      const email = `id-verify-${Math.random()}@kpm.test`;
+      await api().post('/api/v1/auth/register').set('Accept-Language', 'id').send({
+        email, password: PASSWORD, fullName: 'Rina Wijaya', companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
+      }).expect(201);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const user = await users.findOne({ email }).exec();
+      const [sent] = await waitForMail(String(user!._id), 'auth.email_verification');
+      expect(sent.rendered.subject).toBe('[AgencyBoost] Verifikasi alamat email Anda');
+      expect(sent.rendered.body.startsWith('Halo Rina Wijaya,')).toBe(true);
+    });
+
+    it('AC-5 writes the reset email in the language of the page that asked, and English for one with no choice', async () => {
+      const user = await makeUser(`id-reset-${Math.random()}@kpm.test`);
+      await api().post('/api/v1/auth/forgot-password').set('Accept-Language', 'id').send({ email: user.email }).expect(202);
+      const [inIndonesian] = (await waitForMail(user.id, 'auth.password_reset')).slice(-1);
+      expect(inIndonesian.rendered.subject).toBe('[AgencyBoost] Atur ulang kata sandi Anda');
+
+      await api().post('/api/v1/auth/forgot-password').send({ email: user.email }).expect(202);
+      const [inEnglish] = (await waitForMail(user.id, 'auth.password_reset', 2)).slice(-1);
+      expect(inEnglish.rendered.subject).toBe('[AgencyBoost] Reset your password');
+    });
+
+    it('sends one verification email per resend, not two', async () => {
+      const companyId = await anInsurer();
+      e2eCodeSeq += 1;
+      const email = `resend-once-${Math.random()}@kpm.test`;
+      await api().post('/api/v1/auth/register').send({
+        email, password: PASSWORD, fullName: 'Once', companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
+      }).expect(201);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const id = String((await users.findOne({ email }).exec())!._id);
+      await waitForMail(id, 'auth.email_verification');
+      await api().post('/api/v1/auth/resend-verification').send({ email }).expect(202);
+      await waitForMail(id, 'auth.email_verification', 2);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mailbox.sent.filter((m) => m.to.userId === id)).toHaveLength(2);
     });
   });
 
@@ -1568,9 +1731,9 @@ describe('auth and admin over HTTP', () => {
       const submission = selling.types.find((t: { code: string }) => t.code === 'SELL_SUBMISSION');
 
       const type = await api().delete(`/api/v1/kpm/settings/activity-types/${submission.id}`).set(auth).expect(409);
-      expect(type.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: ['SELL_SUBMISSION'] } });
+      expect(type.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_BOUND', details: { codes: ['SELL_SUBMISSION'] } });
       const section = await api().delete(`/api/v1/kpm/settings/activity-categories/${selling.id}`).set(auth);
-      expect([section.status, section.body.error?.code]).toEqual([409, 'ACTIVITY_TYPE_RESERVED']);
+      expect([section.status, section.body.error?.code]).toEqual([409, 'ACTIVITY_TYPE_BOUND']);
       expect(section.body.error.details.codes).toEqual(['SELL_PRESENTATION', 'SELL_SUBMISSION']);
 
       // Renaming and describing it are the office's.
@@ -1783,27 +1946,31 @@ describe('auth and admin over HTTP', () => {
       return { auth, kpmId: String(kpm.body._id) };
     }
 
-    const file = (...rows: string[]) =>
-      ['fullName,email,agentCode,role,leaderAgentCode', ...rows].join('\n');
+    /** Each row gains the four a person records (ADR-0158), valid ones. */
+    const file = (...rows: string[]) => [
+      'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      ...rows.map((row) => `${row},1990-03-15,2021-07,full-time,female`),
+    ].join('\n');
 
     it('offers the template, on a route an :id would otherwise swallow', async () => {
       const { auth } = await anOffice();
       const res = await api().get('/api/v1/admin/tenants/roster-template').set(auth).expect(200);
-      expect(res.body.header).toBe('fullName,email,agentCode,role,leaderAgentCode');
+      expect(res.body.header).toBe(
+        'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      );
       // The same three rows as cells, for the paste box. A screen splitting the CSV out
-      // of `template` would be a second parser, disagreeing over the quoted row.
+      // of `template` would be a second parser, disagreeing over the quoted row. The rungs
+      // written AB, AAB and Agent since P18.8-T4 (ADR-0158 §5).
       expect(res.body.examples).toEqual([
-        ['Agus Prasetyo', 'agus@example.test', 'PRU-88001', 'ab', ''],
-        ['Puspita, Sari', 'sari@example.test', 'PRU-88002', 'aab', 'PRU-88001'],
-        ['Rina Wijaya', 'rina@example.test', 'PRU-88003', 'agent', 'PRU-88002'],
+        ['Agus Prasetyo', 'agus@example.test', '88001', 'AB', '', '1984-05-12', '2012-03', 'full-time', 'male'],
+        ['Puspita, Sari', 'sari@example.test', '88002', 'AAB', '88001', '1990-11-02', '2016-08', 'full-time', 'female'],
+        ['Rina Wijaya', 'rina@example.test', '88003', 'Agent', '88002', '1998-07-21', '2024-01', 'part-time', 'female'],
       ]);
     });
 
     it('previews without writing, then commits the whole file', async () => {
       const { auth, kpmId } = await anOffice();
-      const csv = file(
-        `Root,root-${Math.random()}@k.test,RT-${Math.random()},ab,`,
-      ).replace(/RT-0\./, 'RT-');
+      const csv = file(`Root,root-${Math.random()}@k.test,${digits()},ab,`);
 
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
         .set(auth).send({ rows: csv }).expect(200);
@@ -1822,7 +1989,7 @@ describe('auth and admin over HTTP', () => {
       // person signs in with it, and the product is shut to them until it is theirs.
       const { auth, kpmId } = await anOffice();
       const email = `imported-${Math.random()}@k.test`;
-      const csv = file(`Imported Person,${email},IMP-${Date.now()},ab,`);
+      const csv = file(`Imported Person,${email},${digits()},ab,`);
 
       const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
         .set(auth).send({ rows: csv }).expect(201);
@@ -1850,8 +2017,8 @@ describe('auth and admin over HTTP', () => {
     it('refuses the whole file for one bad row, and writes nothing', async () => {
       const { auth, kpmId } = await anOffice();
       const csv = file(
-        `Good,good-${Math.random()}@k.test,GD-${Date.now()},ab,`,
-        'Bad,not-an-email,BD-1,agent,',
+        `Good,good-${Math.random()}@k.test,${digits()},ab,`,
+        'Bad,not-an-email,101,agent,',
       );
 
       const refused = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
@@ -1862,7 +2029,7 @@ describe('auth and admin over HTTP', () => {
       const roster = await api().get('/api/v1/admin/tenants').set(auth).expect(200);
       expect(roster.body.find((k: { _id: string }) => k._id === kpmId)).toBeDefined();
       const preview = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(auth).send({ rows: file(`Good,good2-${Math.random()}@k.test,GD2-${Date.now()},ab,`) })
+        .set(auth).send({ rows: file(`Good,good2-${Math.random()}@k.test,${digits()},ab,`) })
         .expect(200);
       expect(preview.body.willCreate).toBe(1);
     });
@@ -1879,7 +2046,7 @@ describe('auth and admin over HTTP', () => {
 
       await api().get('/api/v1/admin/tenants/roster-template').set(theirs).expect(200);
       const mine = await api().post(`/api/v1/admin/tenants/${kpmId}/roster/preview`)
-        .set(theirs).send({ rows: file(`R,r-${Math.random()}@k.test,OW-${Date.now()},agent,`) })
+        .set(theirs).send({ rows: file(`R,r-${Math.random()}@k.test,${digits()},agent,`) })
         .expect(200);
       expect(mine.body.willCreate).toBe(1);
 
@@ -1938,6 +2105,9 @@ describe('auth and admin over HTTP', () => {
 
       const res = await api().get('/api/v1/join/requests').set(asJoiner).expect(403);
       expect(res.body.error.details.permission).toBe('leader_request:read_inbox');
+      // UI-085: the tab's count is the inbox's, and refused the same way.
+      const count = await api().get('/api/v1/join/requests/count').set(asJoiner).expect(403);
+      expect(count.body.error.details.permission).toBe('leader_request:read_inbox');
     });
 
     it('shows the request, approves it, and empties the inbox', async () => {
@@ -1949,16 +2119,24 @@ describe('auth and admin over HTTP', () => {
       const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
       expect(inbox.body).toHaveLength(1);
       expect(inbox.body[0].role).toBe('agent');
+      // UI-085: the Pending Requests tab's count says the same.
+      expect((await api().get('/api/v1/join/requests/count').set(auth).expect(200)).body).toEqual({ count: 1 });
 
       const after = await api()
         .post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
         .set(auth).send({}).expect(200);
       expect(after.body).toEqual([]);
+      expect((await api().get('/api/v1/join/requests/count').set(auth).expect(200)).body).toEqual({ count: 0 });
 
       // They are in, under the approver, and their own view says so.
       const me = await api().get('/api/v1/join/me').set(asJoiner).expect(200);
       expect(me.body.status).toBe('active');
       expect(me.body.leaderMembershipId).toBe(leaderId);
+
+      // T1 (the Phase 18.99 exit review): an active Agent, who leads nobody, is refused the tab's count as the inbox.
+      const agentCount = await api().get('/api/v1/join/requests/count').set(asJoiner).expect(403);
+      expect(agentCount.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'leader_request:read_inbox' } });
+      await api().get('/api/v1/join/requests').set(asJoiner).expect(403);
     });
 
     it('AC-4: refuses a second decision, naming which way the first went', async () => {
@@ -2035,6 +2213,61 @@ describe('auth and admin over HTTP', () => {
 
       await api().post(`/api/v1/join/requests/${inbox.body[0].requestId}/approve`)
         .set(mine.auth).send({}).expect(404);
+    });
+
+    /** The office's today in Jakarta, as the server works it out (ADR-0016). */
+    const officeToday = () => localDayOf(new Date(), 'Asia/Jakarta');
+    const membershipRow = (id: string) =>
+      app.get<Connection>(getConnectionToken()).collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(id) });
+
+    it('P18.96-T2 AC-1: an approval carries the join date the leader gives; a bad one is refused 400 naming it, and nothing moves', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(auth).expect(200);
+      const { asJoiner } = await asked(kpmId, list.body.members[0].membershipId);
+      const inbox = await api().get('/api/v1/join/requests').set(auth).expect(200);
+      const { requestId, membershipId } = inbox.body[0];
+
+      for (const bad of [addDays(officeToday(), 1), '1979-12-31', '2026-02-30', '27/10/2026', 20261027]) {
+        const res = await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: bad }).expect(400);
+        expect([bad, res.body.error.code, res.body.error.message]).toEqual([bad, 'VALIDATION_FAILED', expect.stringContaining('joinDate')]);
+      }
+      expect((await api().get('/api/v1/join/requests').set(auth).expect(200)).body).toHaveLength(1);
+      expect((await api().get('/api/v1/join/me').set(asJoiner).expect(200)).body.status).toBe('pending');
+
+      // An existing agent who joined years ago: accepted, and classified once.
+      await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: '2009-03-01' }).expect(200);
+      const member = await api().get(`/api/v1/members/${membershipId}`).set(auth).expect(200);
+      expect(member.body).toMatchObject({ status: 'active', joinDate: '2009-03-01' });
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ joinDate: '2009-03-01', joinedAs: 'existing_agent' });
+    });
+
+    it('P18.96-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire', async () => {
+      const { kpmId, auth } = await officeWithLeader();
+      const joiner = await makeUser(`dated-${Math.random()}@kpm.test`);
+      await api().post('/api/v1/join/kpm').set({ Authorization: `Bearer ${joiner.accessToken}` }).send({ kpmId }).expect(200);
+      const pool = await api().get('/api/v1/join/untagged').set(auth).expect(200);
+      const { membershipId } = pool.body[0];
+
+      const refused = await api().post(`/api/v1/join/untagged/${membershipId}`).set(auth).send({ joinDate: 'yesterday' }).expect(400);
+      expect(refused.body.error.code).toBe('VALIDATION_FAILED');
+      await api().post(`/api/v1/join/untagged/${membershipId}`).set(auth).expect(200);
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ joinDate: officeToday(), joinedAs: 'new_hire' });
+    });
+
+    it('P18.96-T2 AC-1: another office’s member is not reached with a join date either, and nothing is written there', async () => {
+      const mine = await officeWithLeader();
+      const theirs = await officeWithLeader();
+      const list = await api().get('/api/v1/members').set(theirs.auth).expect(200);
+      await asked(theirs.kpmId, list.body.members[0].membershipId);
+      const inbox = await api().get('/api/v1/join/requests').set(theirs.auth).expect(200);
+      const { requestId, membershipId } = inbox.body[0];
+
+      await api().post(`/api/v1/join/requests/${requestId}/approve`).set(mine.auth).send({ joinDate: '2026-01-05' }).expect(404);
+      await api().post(`/api/v1/join/untagged/${membershipId}`).set(mine.auth).send({ joinDate: '2026-01-05' }).expect(404);
+      expect(await membershipRow(membershipId))
+        .toMatchObject({ status: 'pending', joinDate: null, joinedAs: null });
     });
   });
 
@@ -2139,7 +2372,9 @@ describe('auth and admin over HTTP', () => {
       const res = await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
         .set(agent.as).send({ toRole: 'ab' }).expect(403);
       expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
-      expect(res.body.error.message).toContain('Agency Builder');
+      // The rung by the name a role is called — the default ladder's *AB* (P18.95-T9 AC-1, ADR-0167 §10).
+      expect(res.body.error.message).toBe('Only the office’s Owner or an Admin can change somebody’s role to or from AB.');
+      expect(res.body.error.message).not.toContain('Agency Builder');
     });
 
     it('refuses somebody who has the permission but is not their leader', async () => {
@@ -2202,8 +2437,14 @@ describe('auth and admin over HTTP', () => {
     it('validates the role rather than writing whatever arrives', async () => {
       const { asOwner, agent } = await officeWithAgent();
       const res = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
-        .set(asOwner).send({ toRole: 'manager' }).expect(400);
+        .set(asOwner).send({ toRole: 'not a rung!' }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
+
+      // A rung code's shape, since a company may add rungs (ADR-0156): one the ladder has not got is refused by
+      // the ladder, not by the shape.
+      const offLadder = await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'manager' }).expect(409);
+      expect(offLadder.body.error.code).toBe('ORG_LEVEL_NOT_ON_LADDER');
 
       await api().patch(`/api/v1/members/${agent.membershipId}/role`)
         .set(asOwner).send({ toRole: 'aab', note: 'dropped?' }).expect(400);
@@ -2624,9 +2865,10 @@ describe('auth and admin over HTTP', () => {
 
       const before = await api().get('/api/v1/members').set(one.as).expect(200);
 
+      // Groups alone: since ADR-0159 the Core Leader tag is a leader's, and these two are agents.
       for (const person of [one, two]) {
         await api().put(`/api/v1/members/${person.membershipId}/tags`).set(asOwner)
-          .send({ groupIds: [made.body[0].groupId], isCoreLeader: true }).expect(200);
+          .send({ groupIds: [made.body[0].groupId], isCoreLeader: false }).expect(200);
       }
 
       const after = await api().get('/api/v1/members').set(one.as).expect(200);
@@ -2675,6 +2917,114 @@ describe('auth and admin over HTTP', () => {
         .send({ groupIds: 'not-an-array', isCoreLeader: false }).expect(400);
       await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
         .send({ groupIds: [], isCoreLeader: 'yes' }).expect(400);
+    });
+  });
+
+  describe('the Core Leader and the profile line, over HTTP (P18.8-T5, P18.8-T6)', () => {
+    /** An office, its Owner, an AAB in the Owner's unit and an Agent. */
+    async function office() {
+      const sa = await makeUser(`sa-cl-${Math.random()}@agencyboost.test`, 'super_admin');
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const owner = await makeUser(`owner-cl-${Math.random()}@kpm.test`);
+      const code = `${Math.floor(Math.random() * 9000) + 1000}`;
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: await anInsurer(), code, branchName: 'Cempaka Putih' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const kpmId = String(kpm.body._id);
+      const joins = async () => {
+        const email = `cl-${Math.random()}@kpm.test`;
+        const user = await makeUser(email);
+        const as = { Authorization: `Bearer ${user.accessToken}` };
+        await api().post('/api/v1/join/kpm').set(as).send({ kpmId }).expect(200);
+        const pool = await api().get('/api/v1/join/untagged').set(asOwner).expect(200);
+        const mine = pool.body.find((row: { email: string }) => row.email === email);
+        await api().post(`/api/v1/join/untagged/${mine.membershipId}`).set(asOwner).expect(200);
+        return { as, membershipId: String(mine.membershipId) };
+      };
+      const leader = await joins();
+      await api().patch(`/api/v1/members/${leader.membershipId}/role`).set(asOwner)
+        .send({ toRole: 'aab', reason: 'Leads a unit' }).expect(200);
+      const agent = await joins();
+      return { kpmId, code, asOwner, leader, agent };
+    }
+
+    it('P18.8-T5 AC-2 refuses tagging an Agent on both routes, 400 CORE_LEADER_NOT_A_LEADER, and writes nothing', async () => {
+      const { asOwner, agent } = await office();
+      for (const res of [
+        await api().put(`/api/v1/members/${agent.membershipId}/core-leader`).set(asOwner).send({ isCoreLeader: true }),
+        await api().put(`/api/v1/members/${agent.membershipId}/tags`).set(asOwner).send({ groupIds: [], isCoreLeader: true }),
+      ]) {
+        expect([res.status, res.body.error.code]).toEqual([400, 'CORE_LEADER_NOT_A_LEADER']);
+      }
+      const tags = await api().get(`/api/v1/members/${agent.membershipId}/tags`).set(asOwner).expect(200);
+      expect(tags.body).toMatchObject({ isCoreLeader: false, canBeCoreLeader: false });
+    });
+
+    it('P18.8-T5 AC-1, AC-3 tags a leader from the row; the row, the tags and their session say so; untagging ends it', async () => {
+      const { asOwner, leader, agent } = await office();
+      const before = await api().get('/api/v1/auth/me').set(leader.as).expect(200);
+      expect(before.body.membership.isCoreLeader).toBe(false);
+
+      const tagged = await api().put(`/api/v1/members/${leader.membershipId}/core-leader`).set(asOwner)
+        .send({ isCoreLeader: true }).expect(200);
+      expect(tagged.body).toMatchObject({ membershipId: leader.membershipId, isCoreLeader: true, canBeCoreLeader: true });
+
+      const roster = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members as {
+        membershipId: string; isCoreLeader: boolean; canTagCoreLeader: boolean;
+      }[];
+      const row = (id: string) => roster.find((m) => m.membershipId === id)!;
+      expect(row(leader.membershipId)).toMatchObject({ isCoreLeader: true, canTagCoreLeader: true });
+      expect(row(agent.membershipId)).toMatchObject({ isCoreLeader: false, canTagCoreLeader: false });
+
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership.isCoreLeader).toBe(true);
+      await api().put(`/api/v1/members/${leader.membershipId}/core-leader`).set(asOwner).send({ isCoreLeader: false }).expect(200);
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
+    });
+
+    it('P18.8-T5 AC-2, AC-6 a leader, an Agent and another office’s Owner may not set it', async () => {
+      const mine = await office();
+      const theirs = await office();
+      for (const as of [mine.leader.as, mine.agent.as]) {
+        const res = await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(as).send({ isCoreLeader: true });
+        expect([res.status, res.body.error.details.permission]).toEqual([403, 'member:tag_core_leader']);
+      }
+      await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(theirs.asOwner)
+        .send({ isCoreLeader: true }).expect(404);
+      await api().put(`/api/v1/members/${mine.leader.membershipId}/core-leader`).set(mine.asOwner)
+        .send({ isCoreLeader: 'yes' }).expect(400);
+      expect((await api().get('/api/v1/auth/me').set(mine.leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
+    });
+
+    it('P18.8-T6 AC-1 /auth/me names the live tag groups A to Z and the office’s code and branch', async () => {
+      const { asOwner, leader, code } = await office();
+      const ownerMembershipId = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members
+        .find((m: { isKpmOwner: boolean }) => m.isKpmOwner).membershipId;
+      const make = async (name: string) => (await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name, ownerMembershipId }).expect(201)).body.find((g: { name: string }) => g.name === name).groupId as string;
+      const top = await make('Top Producers 2026');
+      const circle = await make('Mentoring Circle');
+      const retired = await make('Class of 2025');
+      await api().put(`/api/v1/members/${leader.membershipId}/tags`).set(asOwner)
+        .send({ groupIds: [top, circle, retired], isCoreLeader: true }).expect(200);
+      await api().delete(`/api/v1/members/groups/${retired}`).set(asOwner).expect(200);
+
+      const me = (await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership;
+      expect(me).toMatchObject({
+        isCoreLeader: true,
+        groups: ['Mentoring Circle', 'Top Producers 2026'],
+        office: { code, branch: 'Cempaka Putih' },
+      });
+      // The Owner: in no group, not tagged, the same office.
+      expect((await api().get('/api/v1/auth/me').set(asOwner).expect(200)).body.membership)
+        .toMatchObject({ isCoreLeader: false, groups: [], office: { code, branch: 'Cempaka Putih' } });
+    });
+
+    it('P18.8-T6 AC-1 somebody in no office has no membership, so no line beyond their role', async () => {
+      const nobody = await makeUser(`no-office-${Math.random()}@kpm.test`);
+      const me = await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${nobody.accessToken}` }).expect(200);
+      expect(me.body.membership).toBeNull();
     });
   });
 
@@ -2856,11 +3206,73 @@ describe('auth and admin over HTTP', () => {
       expect(rotated.body.refreshToken).toBeUndefined();
 
       // Replaying the cookie the client already spent trips family revocation.
-      await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      const replayed = await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(401);
+      expect(replayed.body.error.code).toBe('AUTH_SESSION_ENDED');
     });
 
     it('refuses a refresh with no cookie and no body', async () => {
-      await api().post('/api/v1/auth/refresh').expect(401);
+      const res = await api().post('/api/v1/auth/refresh').expect(401);
+      expect(res.body.error.code).toBe('AUTH_TOKEN_INVALID');
+    });
+
+    /*
+     * ADR-0168 §1 (OD-208; the client's UI review, UI-006): **a refresh tells a session that ended from none at
+     * all.** No token is `AUTH_TOKEN_INVALID`, as it always was; a token presented that no longer works — for any
+     * reason — is `AUTH_SESSION_ENDED`, one sentence, so the sign-in page can say the session ended and the answer
+     * says nothing of why.
+     */
+    describe('a session that ended, and none at all (ADR-0168 §1)', () => {
+      const ENDED = { code: 'AUTH_SESSION_ENDED', message: 'Your session ended. Sign in again.' };
+      const refreshWith = (cookie: string) => api().post('/api/v1/auth/refresh').set('Cookie', cookie).expect(401);
+
+      it('no token at all: AUTH_TOKEN_INVALID, an empty body token included', async () => {
+        const none = await api().post('/api/v1/auth/refresh').expect(401);
+        expect(none.body.error).toMatchObject({ code: 'AUTH_TOKEN_INVALID', message: 'No session to refresh. Sign in again.' });
+        const empty = await api().post('/api/v1/auth/refresh').send({ refreshToken: '' }).expect(401);
+        expect(empty.body.error.code).toBe('AUTH_TOKEN_INVALID');
+      });
+
+      it('a malformed or unknown cookie was still presented: AUTH_SESSION_ENDED, and a body token alike', async () => {
+        expect((await refreshWith('agencyboost_refresh=%%%not-a-token%%%')).body.error).toMatchObject(ENDED);
+        expect((await refreshWith('agencyboost_refresh=never-issued')).body.error).toMatchObject(ENDED);
+        const body = await api().post('/api/v1/auth/refresh').send({ refreshToken: 'never-issued' }).expect(401);
+        expect(body.body.error).toMatchObject(ENDED);
+      });
+
+      it('signed out everywhere: AUTH_SESSION_ENDED', async () => {
+        const user = await makeUser(`ended-everywhere-${Math.random()}@kpm.test`);
+        await api().post('/api/v1/auth/logout-all').set({ Authorization: `Bearer ${user.accessToken}` }).expect(204);
+        expect((await refreshWith(user.refreshCookie)).body.error).toMatchObject(ENDED);
+      });
+
+      it('expired: AUTH_SESSION_ENDED, the same sentence — the answer does not say which', async () => {
+        const user = await makeUser(`ended-expired-${Math.random()}@kpm.test`);
+        const later = jest.spyOn(app.get(Clock), 'now').mockReturnValue(new Date(Date.now() + 31 * 86_400_000));
+        try {
+          const res = await refreshWith(user.refreshCookie);
+          expect(res.body.error).toEqual({ ...ENDED, requestId: expect.any(String) });
+        } finally {
+          later.mockRestore();
+        }
+      });
+
+      it('a refused refresh clears no cookie, as before', async () => {
+        const user = await makeUser(`ended-cookie-${Math.random()}@kpm.test`);
+        await api().post('/api/v1/auth/logout-all').set({ Authorization: `Bearer ${user.accessToken}` }).expect(204);
+        const res = await refreshWith(user.refreshCookie);
+        expect(res.headers['set-cookie']).toBeUndefined();
+      });
+
+      it('a deliberate sign-out clears the cookie, so the browser\'s next refresh has none: AUTH_TOKEN_INVALID', async () => {
+        const user = await makeUser(`ended-signout-${Math.random()}@kpm.test`);
+        const out = await api().post('/api/v1/auth/logout').set('Cookie', user.refreshCookie).expect(204);
+        const cleared = (out.headers['set-cookie'] as unknown as string[])[0];
+        expect(cleared).toContain('agencyboost_refresh=;');
+        expect(cleared).toContain('Expires=Thu, 01 Jan 1970');
+        // What the browser sends once that clear has landed: nothing.
+        const next = await api().post('/api/v1/auth/refresh').expect(401);
+        expect(next.body.error.code).toBe('AUTH_TOKEN_INVALID');
+      });
     });
 
     it('clears the cookie on logout', async () => {
@@ -2874,6 +3286,302 @@ describe('auth and admin over HTTP', () => {
     it('carries a requestId on every error', async () => {
       const res = await api().get('/api/v1/auth/me').expect(401);
       expect(res.body.error.requestId).toBeDefined();
+    });
+  });
+
+  /*
+   * P18.8-T4 (ADR-0158): what a person records — a birth date, a gender, the month they joined their
+   * insurer and how they work — asked at registration, theirs to complete on `/profile`, and never a
+   * support session's to write. The agent code is digits on every new write.
+   */
+  describe('what a person records, over HTTP (P18.8-T4)', () => {
+    const registration = async (over: Record<string, unknown> = {}) => ({
+      email: `reg-${Math.random()}@kpm.test`, password: PASSWORD, fullName: 'Reg Person',
+      companyId: await anInsurer(), agentCode: digits(), ...PERSONAL, ...over,
+    });
+
+    it('AC-3: refuses a registration missing any of the four, naming each', async () => {
+      const body = await registration();
+      for (const field of ['dateOfBirth', 'companyJoinMonth', 'workStatus', 'gender'] as const) {
+        const { [field]: _left, ...rest } = body;
+        const res = await api().post('/api/v1/auth/register').send(rest).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(JSON.stringify(res.body.error.details)).toContain(field);
+      }
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect(await users.countDocuments({ email: body.email })).toBe(0);
+    });
+
+    it('AC-3: refuses a gender or a work status that is not one of the two', async () => {
+      await api().post('/api/v1/auth/register').send(await registration({ gender: 'other' })).expect(400);
+      await api().post('/api/v1/auth/register').send(await registration({ workStatus: 'full-time' })).expect(400);
+    });
+
+    it('AC-4: refuses a birth date under 18 years ago and a join month in the future, naming each', async () => {
+      const young = await api().post('/api/v1/auth/register')
+        .send(await registration({ dateOfBirth: '2020-01-01' })).expect(400);
+      expect(young.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'A date of birth must be at least 18 years ago.', details: { field: 'dateOfBirth' },
+      });
+      const later = await api().post('/api/v1/auth/register')
+        .send(await registration({ companyJoinMonth: '2999-01' })).expect(400);
+      expect(later.body.error.details).toEqual({ field: 'companyJoinMonth' });
+    });
+
+    it('AC-5: refuses an agent code with anything but 3 to 32 digits', async () => {
+      for (const agentCode of ['PRU-88213', '88', '8'.repeat(33), '88 213']) {
+        const res = await api().post('/api/v1/auth/register').send(await registration({ agentCode })).expect(400);
+        expect(JSON.stringify(res.body.error.details)).toContain('agentCode must be digits only');
+      }
+      await api().post('/api/v1/auth/register').send(await registration({ agentCode: ' 88213 ' })).expect(201);
+    });
+
+    it('AC-3: carries the work status onto the membership the person gets, and /auth/me reads it from there', async () => {
+      const sa = await makeUser(`sa-ws-${Math.random()}@agencyboost.test`, 'super_admin');
+      const owner = await makeUser(`owner-ws-${Math.random()}@kpm.test`);
+      const auth = { Authorization: `Bearer ${sa.accessToken}` };
+      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
+        .send({ companyId: await anInsurer(), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'WS Branch' })
+        .expect(201);
+      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+
+      const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
+      const me = await api().get('/api/v1/auth/me').set(asOwner).expect(200);
+      expect(me.body.user).toMatchObject({
+        dateOfBirth: '1990-03-15', companyJoinMonth: '2021-07', gender: 'female', workStatus: 'full_time',
+      });
+      const memberships = app.get(MembershipRepository);
+      const row = await memberships.findById(
+        RequestContext.tenantRead(String(kpm.body._id), 'test'), me.body.membership.membershipId,
+      );
+      expect(row?.workStatus).toBe('full_time');
+    });
+
+    it('AC-6: PATCH /auth/me sets the four for oneself, work status on the membership', async () => {
+      const person = await makeUser(`self-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const res = await api().patch('/api/v1/auth/me').set(theirs).send({
+        dateOfBirth: '1985-01-31', gender: 'male', companyJoinMonth: '2010-02', workStatus: 'part_time',
+      }).expect(200);
+      expect(res.body.user).toMatchObject({
+        dateOfBirth: '1985-01-31', gender: 'male', companyJoinMonth: '2010-02', workStatus: 'part_time',
+      });
+      // No office yet, so the work status waits on the account for the membership they are given.
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect((await users.findById(person.id).lean())?.registeredWorkStatus).toBe('part_time');
+      // The rest of the profile keeps its own rules.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+    });
+
+    it('P18.8-T15 AC-1: an empty, blank or null preferred name is stored as none, and a real one trimmed', async () => {
+      const person = await makeUser(`named-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const stored = async () => (await users.findById(person.id).lean())?.preferredName;
+
+      const named = await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: '  Ari ' }).expect(200);
+      expect(named.body.user.preferredName).toBe('Ari');
+      expect(await stored()).toBe('Ari');
+
+      // What the profile sent for an empty field until this, and what printed a blank header (UI-005).
+      for (const blank of ['', '   ', null]) {
+        await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+        const res = await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: blank }).expect(200);
+        expect(res.body.user.preferredName).toBeNull();
+        expect(await stored()).toBeNull();
+      }
+
+      // Left out, it is left alone.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 'Ari' }).expect(200);
+      await api().patch('/api/v1/auth/me').set(theirs).send({ pronoun: 'he' }).expect(200);
+      expect(await stored()).toBe('Ari');
+
+      // One saved blank before the fix still reads as none.
+      await users.updateOne({ _id: person.id }, { $set: { preferredName: ' ' } });
+      const me = await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      expect(me.body.user.preferredName).toBeNull();
+
+      // Not a string at all is still refused.
+      await api().patch('/api/v1/auth/me').set(theirs).send({ preferredName: 42 }).expect(400);
+    });
+
+    it('AC-4, AC-6: refuses a profile birth date under 18, a future join month, a null and a malformed value', async () => {
+      const person = await makeUser(`bad-${Math.random()}@kpm.test`);
+      const theirs = { Authorization: `Bearer ${person.accessToken}` };
+      const young = await api().patch('/api/v1/auth/me').set(theirs).send({ dateOfBirth: '2020-01-01' }).expect(400);
+      expect(young.body.error.details).toEqual({ field: 'dateOfBirth' });
+      const later = await api().patch('/api/v1/auth/me').set(theirs).send({ companyJoinMonth: '2999-12' }).expect(400);
+      expect(later.body.error.details).toEqual({ field: 'companyJoinMonth' });
+      await api().patch('/api/v1/auth/me').set(theirs).send({ gender: null }).expect(400);
+      await api().patch('/api/v1/auth/me').set(theirs).send({ dateOfBirth: '15/03/1990' }).expect(400);
+      // Nothing of it landed.
+      const me = await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      expect(me.body.user).toMatchObject({ dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07' });
+    });
+
+    it('AC-6: refuses the four in any support session, read-only or elevated', async () => {
+      const sa = await makeUser(`sa-pd-${Math.random()}@agencyboost.test`, 'super_admin');
+      const other = await makeUser(`sa-pd2-${Math.random()}@agencyboost.test`, 'super_admin');
+      const target = await makeUser(`pd-target-${Math.random()}@kpm.test`);
+      const started = await api().post(`/api/v1/admin/impersonate/${target.id}`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` }).send({ reason: 'Support' }).expect(201);
+      const asThem = { Authorization: `Bearer ${started.body.accessToken}` };
+
+      // Read-only: refused as every write is.
+      await api().patch('/api/v1/auth/me').set(asThem).send({ gender: 'male' }).expect(403);
+
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${other.accessToken}` })
+        .send({ reason: 'Their profile will not save from the screen.' }).expect(204);
+
+      // Elevated: the four are still the person's own word.
+      for (const body of [{ gender: 'male' }, { dateOfBirth: '1980-01-01' }, { companyJoinMonth: '2000-01' }, { workStatus: 'part_time' }]) {
+        const refused = await api().patch('/api/v1/auth/me').set(asThem).send(body).expect(403);
+        expect(refused.body.error.code).toBe('PERM_DENIED');
+      }
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body.user).toMatchObject({ gender: 'female', dateOfBirth: '1990-03-15', workStatus: 'full_time' });
+      // ADR-0162 §4: and the rest of the profile with them — the whole route is refused in every session now.
+      await api().patch('/api/v1/auth/me').set(asThem).send({ preferredName: 'Supported' }).expect(403);
+    });
+  });
+
+  /*
+   * ADR-0162 (P18.9-T1 AC-1 to AC-4, AC-6): **a setup session**, started by one Super Admin as an office's
+   * Owner, writing the setup screens' permissions and nothing else. The data upload, a lead and a goal are
+   * asked in `setup-session.int.spec.ts`; these are the routes this module mounts.
+   */
+  describe('a setup session, over HTTP (P18.9-T1, ADR-0162)', () => {
+    /** One Super Admin, and two offices of one insurer, each with its Owner. */
+    async function twoOffices() {
+      const sa = await makeUser(`sa-setup-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const companyId = await anInsurer();
+      const office = async (branchName: string) => {
+        const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
+          .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName }).expect(201);
+        const owner = await makeUser(`owner-setup-${Math.random()}@kpm.test`);
+        await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(saAuth)
+          .send({ userId: owner.id }).expect(200);
+        // The grant lands on the membership, so the Owner's own token is minted after it.
+        const again = await api().post('/api/v1/auth/login').send({ email: owner.email, password: PASSWORD }).expect(200);
+        return {
+          kpmId: String(kpm.body._id), owner,
+          asOwner: { Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}` },
+        };
+      };
+      return { sa, saAuth, a: await office('Setup A'), b: await office('Setup B') };
+    }
+
+    async function setupAs(saAuth: Record<string, string>, userId: string) {
+      const started = await api().post(`/api/v1/admin/impersonate/${userId}`).set(saAuth)
+        .send({ reason: 'Setting the office up', purpose: 'setup' }).expect(201);
+      return { started, asThem: { Authorization: `Bearer ${started.body.accessToken}` } };
+    }
+
+    const typeCodes = async (auth: Record<string, string>) => {
+      const res = await api().get('/api/v1/kpm/settings/activity-types').set(auth).expect(200);
+      return res.body.flatMap((c: { types: { code: string }[] }) => c.types.map((t) => t.code)) as string[];
+    };
+    const ROSTER = (email: string) => [
+      'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+      `Setup Person,${email},${digits()},agent,,1990-03-15,2021-07,full-time,female`,
+    ].join('\n');
+
+    it('AC-1, AC-6: one Super Admin starts it as the Owner, and /auth/me says what it may write', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { started, asThem } = await setupAs(saAuth, a.owner.id);
+      expect(started.body).toMatchObject({ readOnly: true, purpose: 'setup' });
+      expect(started.body.writeScope).toEqual(expect.arrayContaining(['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']));
+
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body).toMatchObject({
+        isImpersonating: true, impersonationReadOnly: true, impersonationPurpose: 'setup',
+        impersonationWriteScope: started.body.writeScope,
+      });
+      // The settings screens decide editability from these, so they open for editing.
+      expect(me.body.permissions).toEqual(expect.arrayContaining(['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']));
+      for (const write of ['member:change_role', 'kpm_admin:grant', 'kpm_overview:set_recruit_target', 'activity_log:create']) {
+        expect(me.body.permissions).not.toContain(write);
+      }
+    });
+
+    it('AC-6: saves an activity type and imports people, in the Owner\'s office', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+
+      await api().post('/api/v1/kpm/settings/activity-types').set(asThem)
+        .send({ code: 'SETUP_CALL', categoryCode: 'SELLING', label: 'Telepon setup' }).expect(201);
+      expect(await typeCodes(a.asOwner)).toContain('SETUP_CALL');
+
+      const email = `setup-person-${Math.random()}@k.test`;
+      const preview = await api().post(`/api/v1/admin/tenants/${a.kpmId}/roster/preview`).set(asThem)
+        .send({ rows: ROSTER(email) }).expect(200);
+      expect(preview.body.issues).toEqual([]);
+      const created = await api().post(`/api/v1/admin/tenants/${a.kpmId}/roster`).set(asThem)
+        .send({ rows: ROSTER(email) }).expect(201);
+      expect(created.body.created).toHaveLength(1);
+    });
+
+    it('AC-3, AC-6: may not change a role, nor the Owner\'s profile, password or sign-ins', async () => {
+      const { saAuth, a } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+
+      const role = await api().patch('/api/v1/members/66f0000000000000000000a1/role').set(asThem)
+        .send({ toRole: 'aab', reason: 'Not support' }).expect(403);
+      expect(role.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'member:change_role' } });
+      expect(role.body.error.message).toContain('This setup session can change the office');
+
+      const profile = await api().patch('/api/v1/auth/me').set(asThem).send({ fullName: 'Renamed By Setup' }).expect(403);
+      expect(profile.body.error.message).toContain('own account');
+      await api().post('/api/v1/auth/change-password').set(asThem)
+        .send({ currentPassword: PASSWORD, newPassword: 'another horse battery' }).expect(403);
+      await api().delete('/api/v1/auth/sessions/66f0000000000000000000a1').set(asThem).expect(403);
+      await api().post('/api/v1/auth/logout-all').set(asThem).expect(403);
+
+      // The Owner is untouched, and still signs in with their own password.
+      const own = await api().get('/api/v1/auth/me').set(a.asOwner).expect(200);
+      expect(own.body.user.fullName).toBe('Test Person');
+      await api().post('/api/v1/auth/login').send({ email: a.owner.email, password: PASSWORD }).expect(200);
+    });
+
+    it('AC-6: a setup session for office A writes nothing of office B', async () => {
+      const { saAuth, a, b } = await twoOffices();
+      const { asThem } = await setupAs(saAuth, a.owner.id);
+      const before = await typeCodes(b.asOwner);
+
+      // The settings routes name no office: the session's own is the only one they reach.
+      await api().post('/api/v1/kpm/settings/activity-types').set(asThem)
+        .send({ code: 'SETUP_ONLY_A', categoryCode: 'SELLING', label: 'Hanya A' }).expect(201);
+      // The import names one, and another office's is not there for it — 404, never 403.
+      const email = `cross-${Math.random()}@k.test`;
+      await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster/preview`).set(asThem).send({ rows: ROSTER(email) }).expect(404);
+      await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster`).set(asThem).send({ rows: ROSTER(email) }).expect(404);
+
+      expect(await typeCodes(b.asOwner)).toEqual(before);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      expect(await users.countDocuments({ email })).toBe(0);
+    });
+
+    it('AC-1: refuses one as somebody who is neither an Owner nor an Admin, 409', async () => {
+      const { saAuth } = await twoOffices();
+      const nobody = await makeUser(`setup-nobody-${Math.random()}@kpm.test`);
+      const refused = await api().post(`/api/v1/admin/impersonate/${nobody.id}`).set(saAuth)
+        .send({ reason: 'Setting up', purpose: 'setup' }).expect(409);
+      expect(refused.body.error).toMatchObject({ code: 'IMPERSONATION_SETUP_TARGET', details: { purpose: 'setup' } });
+      // A purpose that is neither is refused at the DTO.
+      await api().post(`/api/v1/admin/impersonate/${nobody.id}`).set(saAuth)
+        .send({ reason: 'Setting up', purpose: 'write' }).expect(400);
+    });
+
+    it('AC-6: elevation still needs a second Super Admin', async () => {
+      const { sa, saAuth, a } = await twoOffices();
+      const { started, asThem } = await setupAs(saAuth, a.owner.id);
+      await api().post(`/api/v1/admin/impersonation/${started.body.sessionId}/elevate`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` })
+        .send({ reason: 'I would like to change a role as well.' }).expect(403);
+      const me = await api().get('/api/v1/auth/me').set(asThem).expect(200);
+      expect(me.body.impersonationReadOnly).toBe(true);
     });
   });
 });

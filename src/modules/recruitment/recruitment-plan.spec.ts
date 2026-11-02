@@ -1,13 +1,17 @@
 import { DomainException } from '@/common/errors/domain.exception';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import {
   RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS, RECRUITMENT_MOTIVATIONS, SEED_RECRUITMENT_PLAYBOOK,
   type RecruitmentPlaybookBody,
 } from '@/domain/constants';
 import {
-  inChipOrder, nonEmptySubsets, PROTOTYPE, prototypeChips, renderPlanPort, type PrototypeWords, type RenderedPlan,
+  inChipOrder, nonEmptySubsets, PROTOTYPE, renderPlanPort, shippedChips, type PrototypeWords, type RenderedPlan,
 } from '../../../test/recruitment-prototype';
 import { readBrief, recruitmentPlanFor, recruitmentVocabulary, type RecruitmentPlan } from './recruitment-plan';
 import { defaultPlaybookBody } from './recruitment-playbook-defaults';
+
+/** The API's English, as an `Accept-Language: en` request reads it (ADR-0179 §9). */
+const EN = SOURCE_READER;
 
 const TYPES = RECRUITMENT_CANDIDATE_TYPES.map((c) => c.code);
 const MOTIVATIONS = RECRUITMENT_MOTIVATIONS.map((c) => c.code);
@@ -93,7 +97,7 @@ describe('the recruitment plan (D-plan)', () => {
           motivation: [...state.motivation].reverse().join(','),
           hesitation: [...state.hesitation].reverse().join(','),
         })!;
-        const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, brief);
+        const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, brief, EN);
         const expected = renderPlanPort(PROTOTYPE, {
           type: state.type, motivation: inChipOrder('motivation', state.motivation), hesitation: inChipOrder('hesitation', state.hesitation),
         });
@@ -107,7 +111,7 @@ describe('the recruitment plan (D-plan)', () => {
       const words = prototypeWordsOf(allianz);
       const differing: string[] = [];
       for (const state of briefs) {
-        const plan = recruitmentPlanFor(allianz, { type: state.type, motivations: state.motivation, hesitations: state.hesitation });
+        const plan = recruitmentPlanFor(allianz, { type: state.type, motivations: state.motivation, hesitations: state.hesitation }, EN);
         const expected = renderPlanPort(words, state);
         if (JSON.stringify(rendered(plan)) !== JSON.stringify(expected)) differing.push(JSON.stringify(state));
         // And none of the AgencyBoost words leaks into another company's plan.
@@ -120,7 +124,7 @@ describe('the recruitment plan (D-plan)', () => {
       for (const state of briefs.filter((_, i) => i % 7 === 0)) {
         const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, {
           type: state.type, motivations: state.motivation, hesitations: state.hesitation,
-        });
+        }, EN);
         expect(plan.objections.map((o) => o.profileOwn))
           .toEqual(state.hesitation.map((h) => Boolean(PROTOTYPE.OBJECTION_OVERRIDES[state.type]?.[h])));
       }
@@ -128,13 +132,13 @@ describe('the recruitment plan (D-plan)', () => {
   });
 
   describe('the walk’s four briefs (Seed; the fixture header)', () => {
-    it('Business owner · Extra income on the side · Already has a stable job — one opening, untagged, and the business owner’s own objection (`:497`)', () => {
+    it('Business owner · Side income · Already has a stable job — one opening, untagged, and the business owner’s own objection (`:497`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'business-owner', motivation: 'side-income', hesitation: 'stable-job',
-      })!);
+      })!, EN);
       expect(plan.brief).toEqual({
         type: { code: 'business-owner', label: 'Business owner' },
-        motivations: [{ code: 'side-income', label: 'Extra income on the side' }],
+        motivations: [{ code: 'side-income', label: 'Side income' }],
         hesitations: [{ code: 'stable-job', label: 'Already has a stable job' }],
       });
       expect(plan.openings).toHaveLength(1);
@@ -146,11 +150,12 @@ describe('the recruitment plan (D-plan)', () => {
       }]);
     });
 
-    it('Retiree · Flexibility and Building a team · No network and Worried about time — two openings in the chips’ order, the base no network and the retiree’s own time (`:501`)', () => {
+    it('Retiree · Flexibility and Lead a team · No network and Worried about time — two openings in the chips’ order, the base no network and the retiree’s own time (`:501`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'retiree', motivation: 'leadership,flexibility', hesitation: 'time,no-network',
-      })!);
-      expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Flexibility / time freedom', 'Building a team / leadership']);
+      })!, EN);
+      // The client's shorter words tag the openings as they label the chips (P18.95-T6 AC-2).
+      expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Flexibility', 'Lead a team']);
       expect(plan.objections.map((o) => [o.hesitation.code, o.profileOwn, o.theySay])).toEqual([
         ['no-network', false, 'I don\'t really have a network of people to sell to.'],
         ['time', true, 'I\'m not sure I have much time to give this right now.'],
@@ -160,7 +165,7 @@ describe('the recruitment plan (D-plan)', () => {
     it('Fresh grad with every motivation and every hesitation — four openings, five objections, the profile reading Fresh graduate', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'fresh-grad', motivation: MOTIVATIONS.join(','), hesitation: HESITATIONS.join(','),
-      })!);
+      })!, EN);
       expect(plan.openings).toHaveLength(4);
       expect(plan.objections).toHaveLength(5);
       expect(plan.objections.every((o) => !o.profileOwn)).toBe(true);
@@ -169,10 +174,10 @@ describe('the recruitment plan (D-plan)', () => {
       expect(plan.nextAction).toBe(PROTOTYPE.CLOSING);
     });
 
-    it('Agent (other insurer) · Full career change · Already has a stable job — the other insurer’s own reply (`:505`)', () => {
+    it('Agent (other insurer) · Career change · Already has a stable job — the other insurer’s own reply (`:505`)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'other-insurer', motivation: 'full-career', hesitation: 'stable-job',
-      })!);
+      })!, EN);
       expect(plan.objections[0]).toMatchObject({
         theySay: 'I\'ve already built relationships at my current agency — why start over?', profileOwn: true,
       });
@@ -224,9 +229,48 @@ describe('the recruitment plan (D-plan)', () => {
     });
   });
 
-  it('serves the vocabulary as the chips draw it, in their order', () => {
-    expect(recruitmentVocabulary()).toEqual({
-      types: prototypeChips('type'), motivations: prototypeChips('motivation'), hesitations: prototypeChips('hesitation'),
+  it('P18.95-T6 AC-2 serves the vocabulary as the chips draw it, in their order, in the client’s shorter words', () => {
+    expect(recruitmentVocabulary(EN)).toEqual({
+      types: shippedChips('type'), motivations: shippedChips('motivation'), hesitations: shippedChips('hesitation'),
+    });
+  });
+  describe('P18.98-T7 the chips in the reader’s language (ADR-0179 §7)', () => {
+    const ID = readerIn('id');
+
+    it('serves every chip’s label in Indonesian to an Indonesian reader, the codes and order unchanged', () => {
+      const vocabulary = recruitmentVocabulary(ID);
+      expect(vocabulary.types.map((c) => c.code)).toEqual(TYPES);
+      expect(vocabulary.types.map((c) => c.label)).toEqual(
+        ['Lulusan baru', 'Pindah karier', 'Pemilik usaha', 'Pensiunan', 'Agent (asuransi lain)'],
+      );
+      expect(vocabulary.motivations.map((c) => c.label)).toEqual(
+        ['Penghasilan tambahan', 'Ganti karier', 'Fleksibilitas', 'Memimpin tim'],
+      );
+      expect(vocabulary.hesitations.map((c) => c.label)).toEqual([
+        'Belum berpengalaman menjual', 'Sudah memiliki pekerjaan tetap', 'Reputasi buruk', 'Tidak memiliki jaringan',
+        'Khawatir akan komitmen waktu',
+      ]);
+    });
+
+    it('keeps the English byte for byte for an English reader: the registry’s own labels', () => {
+      const vocabulary = recruitmentVocabulary(readerIn('en'));
+      expect(vocabulary.types).toEqual(RECRUITMENT_CANDIDATE_TYPES.map(({ code, label }) => ({ code, label })));
+      expect(vocabulary.motivations).toEqual(RECRUITMENT_MOTIVATIONS.map(({ code, label }) => ({ code, label })));
+      expect(vocabulary.hesitations).toEqual(RECRUITMENT_HESITATIONS.map(({ code, label }) => ({ code, label })));
+    });
+
+    it('tags a plan’s brief, openings and objections in the reader’s language; the company’s words stay as typed', () => {
+      const brief = readBrief({ type: 'retiree', motivation: 'leadership,flexibility', hesitation: 'time' })!;
+      const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, brief, ID);
+      expect(plan.brief.type).toEqual({ code: 'retiree', label: 'Pensiunan' });
+      expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Fleksibilitas', 'Memimpin tim']);
+      expect(plan.objections[0].hesitation).toEqual({ code: 'time', label: 'Khawatir akan komitmen waktu' });
+      // The playbook is the company's: its profile, openings and answers read as the company typed them.
+      const english = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, brief, EN);
+      expect(plan.profile).toEqual(english.profile);
+      expect(plan.openings.map((o) => o.text)).toEqual(english.openings.map((o) => o.text));
+      expect(plan.objections.map((o) => [o.theySay, o.youSay])).toEqual(english.objections.map((o) => [o.theySay, o.youSay]));
+      expect(plan.nextAction).toBe(english.nextAction);
     });
   });
 });

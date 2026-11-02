@@ -1,5 +1,7 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { english, indonesian } from '../../../test/i18n';
 import {
   CoachingSessionService, shownActionItems, shownLastWeekItems, showsLeadsTo, type Standing,
 } from './coaching-session.service';
@@ -115,6 +117,47 @@ describe('the coaching session’s races (P11-T5)', () => {
     });
     const view = await svc.read(ctx, 's1');
     expect(view.lastWeekItems[0].lead).toEqual({ leadId: 'L', name: '' });
+  });
+
+  /*
+   * **A 1:1 logged after it was held refuses in both languages** (P18.96-T4 AC-3; P18.98-T5 AC-2). The checklist's
+   * route checks the date and the note before it asks, so these are the service's own backstop, read here directly.
+   */
+  it('P18.98-T5 AC-2 a 1:1 logged for a day to come, with a blank note, or by an Agent is refused in both languages', async () => {
+    const svc = service({});
+    const refusal = async (run: Promise<unknown>): Promise<DomainException> => {
+      try {
+        await run;
+      } catch (err) {
+        return err as DomainException;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    const future = await refusal(svc.logOneOnOne(ctx, INDAH, { date: '2026-09-15', note: 'Talked it through.' }));
+    expect([future.code, future.details, english(future.sentence), indonesian(future.sentence)]).toEqual([
+      'VALIDATION_FAILED', { field: 'date' },
+      'The day the 1:1 was held is a date, written YYYY-MM-DD, and no later than today.',
+      'Tanggal 1:1 diadakan ditulis dengan format YYYY-MM-DD, dan tidak boleh setelah hari ini.',
+    ]);
+
+    const blank = await refusal(svc.logOneOnOne(ctx, INDAH, { date: '2026-09-10', note: '   ' }));
+    expect([blank.code, blank.details, english(blank.sentence), indonesian(blank.sentence)]).toEqual([
+      'VALIDATION_FAILED', { field: 'note' },
+      'The note is 1 to 500 characters once trimmed.',
+      'Catatan harus 1 sampai 500 karakter, tanpa spasi di awal dan akhir.',
+    ]);
+
+    const agent = new RequestContext('u-tari', 'none', {
+      membershipId: 'tari', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
+      isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+    } as never);
+    const refused = await refusal(svc.logOneOnOne(agent, INDAH, { date: '2026-09-10', note: 'Talked it through.' }));
+    expect([refused.code, refused.details, english(refused.sentence), indonesian(refused.sentence)]).toEqual([
+      'PERM_DENIED', { permission: 'coaching_session:create' },
+      'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
+      '1:1 dicatat oleh leader yang menjalankan sesi coaching: AB atau AAB.',
+    ]);
   });
 });
 

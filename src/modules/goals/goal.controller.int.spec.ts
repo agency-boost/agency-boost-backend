@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -21,6 +22,7 @@ const COMPANY = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare (§3.6). */
 const ROUTES: Record<string, string> = {
   read: 'goal:read',
+  preview: 'goal:read',
   save: 'goal:update',
 };
 
@@ -207,6 +209,91 @@ describe('goals over HTTP (P8-T3)', () => {
     });
   });
 
+  /*
+   * **The preview over HTTP** (P18.99-T5, UI V1 UI-014): the body a save takes, a read's `for`, a 200 that writes
+   * nothing. Its reach and the cross-office 404 are `goal-access.tenancy.spec.ts`'.
+   */
+  describe('P18.99-T5 UI-014 the preview', () => {
+    const preview = `${url}/preview`;
+
+    it('P18.99-T5 UI-014 works out what the inputs would make, as a save would, and writes nothing', async () => {
+      const res = await http().post(preview).send(plan()).expect(200);
+
+      expect(res.body).toMatchObject({
+        period: '2026', monthsLeft: 5, monthsLeftIsOverride: true,
+        achieved: { minor: 0, provenance: 'self_reported', month: null },
+        projected: { policiesPerMonth: 6, appointmentsPerMonth: 20, leadsPerMonth: 67, policiesPerWeek: 1.4 },
+      });
+      expect((await http().get(url).expect(200)).body.savedAt).toBeNull();
+      // And the save stores exactly what the preview showed.
+      const saved = await http().put(url).send(plan()).expect(200);
+      expect(saved.body.projected).toEqual(res.body.projected);
+    });
+
+    it('P18.99-T5 UI-014 moves with an input: a case size halved doubles the policies', async () => {
+      const res = await http().post(preview).send(plan({ caseSizeMinor: 9_000_000_00 })).expect(200);
+
+      expect(res.body.projected.policiesPerMonth).toBe(12);
+    });
+
+    it('P18.99-T5 UI-014 answers an unusable assumption with projected: null, where a save answers 422', async () => {
+      const res = await http().post(preview).send(plan({ caseSizeMinor: 0 })).expect(200);
+
+      expect(res.body.projected).toBeNull();
+      await http().put(url).send(plan({ caseSizeMinor: 0 })).expect(422);
+    });
+
+    it('P18.99-T5 UI-014 refuses a field that is no number, and a field nobody defined, by name', async () => {
+      const shape = await http().post(preview).send(plan({ caseSizeMinor: 'many' })).expect(400);
+      expect(JSON.stringify(shape.body)).toMatch(/caseSizeMinor/);
+      const extra = await http().post(preview).send({ ...plan(), snapshot: { policiesPerMonth: 6 } }).expect(400);
+      expect(JSON.stringify(extra.body)).toMatch(/snapshot/);
+      await http().post('/goals/2026-Q1/preview').send(plan()).expect(400);
+    });
+
+    it('P18.99-T5 UI-014 takes a read’s for, and an Agent naming anybody else is not found', async () => {
+      const SUBJECT = '66f0000000000000000000d2';
+      await mongoose.connection.db!.collection('memberships').insertOne({
+        _id: new mongoose.Types.ObjectId(SUBJECT), kpmId: FIXTURE_KPM, userId: 'u-subject', leaderCode: 'LC-D2',
+        orgLevelCode: 'AGENT', hierarchyRole: 'agent', leaderId: 'mem-a', ancestorIds: ['mem-a'],
+        status: 'active', deletedAt: null,
+      } as never);
+
+      expect((await http().post(preview).query({ for: SUBJECT }).send(plan()).expect(404)).body.error.code).toBe('NOT_FOUND');
+      session.current = AB;
+      const res = await http().post(preview).query({ for: SUBJECT }).send(plan({ apeAchievedMinor: 400_000_000_00 }))
+        .expect(200);
+      // ADR-0183: with no figure held for the member, the leader's typed one is what the plan is measured against —
+      // and it would be theirs (S2): `mem-a`, whom this spec's office holds no membership row to name.
+      expect(res.body.achieved).toEqual({
+        minor: 400_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: 'mem-a', name: null },
+      });
+      await http().post(preview).query({ membershipId: SUBJECT }).send(plan()).expect(400);
+    });
+
+    it.each(EVERY_MEMBER)('P18.99-T5 UI-014 lets %s preview their own plan', async (_name, who) => {
+      session.current = who;
+      await http().post(preview).send(plan()).expect(200);
+    });
+
+    it('L4 a read-only support session previews, as it reads: it writes nothing — and the save stays refused', async () => {
+      session.current = new RequestContext(AGENT.userId, 'none', AGENT.membership, 'u-support', null, false, true);
+
+      const res = await http().post(preview).send(plan()).expect(200);
+
+      expect(res.body.projected).not.toBeNull();
+      expect((await http().put(url).send(plan()).expect(403)).body.error.code).toBe('PERM_DENIED');
+      expect(await mongoose.connection.db!.collection('goals').countDocuments({})).toBe(0);
+    });
+
+    it('P18.99-T5 UI-014 refuses a Super Admin by name, as the read does', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await http().post(preview).send(plan()).expect(403);
+
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+  });
+
   describe('a period that has ended (P8-T6)', () => {
     it('refuses a write to last year with a code a client can branch on', async () => {
       const res = await http().put('/goals/2025').send(plan()).expect(409);
@@ -248,6 +335,48 @@ describe('goals over HTTP (P8-T3)', () => {
       const res = await http().put(url).send(plan({ closingRatePct: 101 })).expect(422);
 
       expect(res.body.error.code).toBe('GOAL_INVALID_ASSUMPTION');
+    });
+  });
+
+  /*
+   * **The same refusals in Indonesian** (P18.98-T5 AC-7): the request's `Accept-Language` decides the words. Goal
+   * Settings' own labels — *Closing rate* — stay English in both (glossary §A.4), and a figure is written the reader's
+   * way: *12,5*.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    it('P18.98-T5 AC-7 refuses a period that has ended in Indonesian, its details unchanged', async () => {
+      const res = await http().put('/goals/2025').set('Accept-Language', 'id').send(plan()).expect(409);
+
+      expect(res.body.error).toMatchObject({
+        code: 'GOAL_PERIOD_LOCKED',
+        message: '2025 sudah berakhir. Rencananya adalah yang disepakati saat itu dan tetap seperti semula; '
+          + 'buat rencana untuk 2026 sebagai gantinya.',
+        details: { period: '2025', currentPeriod: '2026' },
+      });
+    });
+
+    it('P18.98-T5 AC-7 says every assumption that cannot make a plan in Indonesian, one after another', async () => {
+      const res = await http().put(url).set('Accept-Language', 'id')
+        .send(plan({ caseSizeMinor: 0, closingRatePct: 101 })).expect(422);
+
+      const violations = [
+        'Average case size harus di atas nol: itulah nilai satu polis.',
+        'Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+      ];
+      expect(res.body.error).toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION', message: violations.join(' '), details: { violations } });
+    });
+
+    it('P18.98-T5 AC-7 refuses a goal’s own fields in Indonesian, a figure in Indonesian figures', async () => {
+      const res = await http().put(url).set('Accept-Language', 'id')
+        .send(plan({ caseSizeMinor: 1_000.5, commissionRatePct: -1 })).expect(400);
+
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: [
+          'caseSizeMinor dalam satuan sen IDR dan harus berupa bilangan bulat.',
+          'commissionRatePct harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.',
+        ] },
+      });
     });
   });
 

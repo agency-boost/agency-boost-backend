@@ -43,7 +43,9 @@ describe('0008 — ratio display unit', () => {
     expect(await unitOf('SELLING_SUCCESS_RATE')).toBe('percent');
     expect(await unitOf('RECRUITMENT_SUCCESS_RATE')).toBe('percent');
     expect(await unitOf('LEADS_PER_ACTIVITY')).toBe('decimal');
-    expect(await unitOf('MEETING_PER_APPROACH')).toBe('decimal');
+    // The seed's unit today: a percent since ADR-0160 §2. Every database had run this before then, so a row
+    // left without a unit can only be one written since, and takes the unit a new office is given.
+    expect(await unitOf('MEETING_PER_APPROACH')).toBe('percent');
   });
 
   it('lets a row’s rule outrank its seed', async () => {

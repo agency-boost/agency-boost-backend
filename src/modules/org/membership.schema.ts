@@ -1,6 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
+import { JOINED_AS, WORK_STATUSES, type JoinedAs, type WorkStatus } from '@/domain/constants';
+import { ACTIVATION_3M_LOCKS, type Activation3MLock } from '@/domain/metrics/activation-3m';
+import {
+  FIRST_SALE_SOURCES, type FirstSaleRecordCollection, type FirstSaleSource,
+} from '@/domain/metrics/first-sale';
 
 export type MembershipDocument = HydratedDocument<Membership>;
 
@@ -43,11 +48,14 @@ export class Membership {
   userId!: string;
 
   /**
-   * `KPM0417-001`. Server-issued from the tenant counter and immutable: the monthly
-   * production import joins on it, so changing one silently breaks the attribution of
-   * every row already imported under the old value.
+   * **A copy of `users.agentCode`**, the producer id the person's insurer issued them (ADR-0017),
+   * written once when the membership is made and never minted here. It was `KPM0417-001`, issued
+   * from the tenant counter, until 2026-09-08; that format is gone. Digits only on every new code
+   * since ADR-0158 §4 — a code already held keeps its letters.
    *
-   * Unique within the office, not globally — two offices may both have a `-001`.
+   * Immutable: the monthly production import joins on it, so changing one silently breaks the
+   * attribution of every row already imported under the old value. Unique where it is owned,
+   * `(companyId, agentCode)` on `users`; the index below serves the roster's search.
    */
   @Prop({ type: String, required: true })
   agentCode!: string;
@@ -99,28 +107,27 @@ export class Membership {
    * has to be here rather than joined because `ContextResolver` reads it on **every
    * request**, and a third lookup on that path is not free.
    *
-   * This is what a hierarchy permission grant is compared against since `P4-T9`. `role`
-   * below is the enum it used to be compared against, and an enum of three fixed names
-   * cannot describe a ladder a second insurer has not published yet.
+   * A hierarchy permission grant was compared against this from `P4-T9` until ADR-0156,
+   * and a rung a company named itself therefore held nobody's rights. Grants read the
+   * class below now; this is what the badge and the config bound to rungs read.
    */
   @Prop({ type: String, required: true, uppercase: true, trim: true })
   orgLevelCode!: string;
 
   /**
-   * **Derived from `orgLevelId`, never written on its own.**
+   * **The class, derived from the rung's leader tier, never written on its own** (ADR-0156).
    *
-   * **No longer an authorisation input** (P4-T9). Permission grants compare against
-   * `orgLevelCode`; this is read by the services that sort, group and label — the org
-   * tree, the directory, the unit dashboard — where a stable three-value enum is a
-   * convenience rather than a constraint.
+   * *Senior Leader* → `ab`, *Associate Leader* → `aab`, none → `agent`, whatever the rung's
+   * code. **The authorisation input again since ADR-0156**: a hierarchy grant matches the
+   * class, so a custom rung holds its tier's rights; *Leaders used* counts `ab` and `aab`;
+   * the Owner's agency and unit partitions read it; and the services that sort, group and
+   * label — the org tree, the directory, the unit dashboard — read it as they always did.
    *
-   * It stays because removing the *field* is a data migration across seven services, and
-   * because v1 seeds exactly one ladder so the two are one-to-one. What P4-T9 removed is
-   * the part that mattered: an enum of three fixed names deciding who may do what, in a
-   * product whose ladder is company configuration (ADR-0012).
+   * It was derived from the rung's code lower-cased from P3.5-T8 until P18.8-T1, which made
+   * it one-to-one with v1's one ladder and meaningless for any other (OD-50, narrowed).
    *
    * Every write goes through `HierarchyService`, which sets it from the resolved level's
-   * `code`. Setting it directly is how the two come to disagree.
+   * tier. Setting it directly is how the two come to disagree.
    */
   @Prop({ type: String, enum: ['ab', 'aab', 'agent'], required: true })
   role!: HierarchyRole;
@@ -158,8 +165,77 @@ export class Membership {
   @Prop({ type: String, enum: ['active', 'pending', 'removed'], default: 'pending', index: true })
   status!: MembershipStatus;
 
+  /**
+   * **The system's stamp**: the instant the membership was made active (ADR-0169 §5). Not the person's join date,
+   * which is `joinDate` — the two can differ, and every business rule reads `joinDate`.
+   */
   @Prop({ type: Date, default: null })
   joinedAt!: Date | null;
+
+  /**
+   * ***Join date*: the day this person joined the office, as their leader gives it** (ADR-0169 §1, P18.96-T2). An
+   * **office date** `YYYY-MM-DD` in `kpms.timezone`, never an instant (invariant §9), set when the membership is
+   * made active — an approval, a tag, a leader's code, a roster import, an Owner assigned — and the office's today
+   * unless a leader named another. A new hire's activation starts on it, and a leader's correction moves both
+   * (ADR-0102 as noted). `null` while the membership is pending: nobody has let them in yet.
+   */
+  @Prop({ type: String, default: null })
+  joinDate!: string | null;
+
+  /**
+   * ***New hire* or *existing agent*, decided once** (ADR-0169 §3): `new_hire` when `joinDate` was no more than
+   * `JOINING.NEW_HIRE_MAX_DAYS_BACK` days before the office's today when it was first set, else `existing_agent`.
+   * **Nothing recomputes it**: a later correction of the date does not reclassify. Only a new hire is given an
+   * activation. A roster import and an office's Owner are existing agents. `null` while pending.
+   */
+  @Prop({ type: String, enum: [...JOINED_AS, null], default: null })
+  joinedAs!: JoinedAs | null;
+
+  /**
+   * **The instant a leader marked this new hire as having left** (ADR-0169 §4 as amended 2026-10-27, ADR-0173): written
+   * by *Mark left* (P18.96-T6), which then removes the membership through the removal's own path — `status: removed`,
+   * `removedAt` the same instant — so a leaver leaves every count of people. The record and its history stay, and a
+   * removed membership with `leftAt` is a new hire who left, which `/new-hires` lists for their year. `null` until then.
+   */
+  @Prop({ type: Date, default: null })
+  leftAt!: Date | null;
+
+  /**
+   * **`FIRST_SALE_DATE`: the day of this person's first sale since joining** (ADR-0171 §1, P18.96-T4 AC-1) — an office
+   * date, the earliest of a sales lead reaching *Paid and issued*, a closing logged by a checklist tick, and — failing
+   * both — the production file's first month with a policy. Computed by `firstSaleOf` and written by
+   * `FirstSaleService` from the leads, the production file and migration 0042; **it only ever moves earlier**: a
+   * lead deleted or moved back, or an import reverted, leaves it where it is. `null` until there is one.
+   */
+  @Prop({ type: String, default: null })
+  firstSaleDate!: string | null;
+
+  /** Where the first sale came from: `lead`, `manual` (a checklist tick) or `monthly_file`. `null` with no date. */
+  @Prop({ type: String, enum: [...FIRST_SALE_SOURCES, null], default: null })
+  firstSaleSource!: FirstSaleSource | null;
+
+  /** The record it came from: a lead, or the production file's month row. Both `null` with no date. */
+  @Prop({ type: String, enum: ['leads', 'monthlyAgentData', null], default: null })
+  firstSaleRecordCollection!: FirstSaleRecordCollection | null;
+
+  @Prop({ type: String, default: null })
+  firstSaleRecordId!: string | null;
+
+  /**
+   * **`ACTIVATION_3M`, kept once decided** (ADR-0171 §2, P18.96-T6 AC-1; `metrics-and-definitions.md`, *3M
+   * activation*): `activated` or `not_activated` — decided after day 90 of the join date, or on the day a new hire
+   * left within it — and **never written over**, so a closing logged later with an earlier day, a production file
+   * uploaded late or a corrected join date moves nothing. `null` while in progress, for an existing agent, and for a
+   * decided result nothing has kept yet, which `activation3MOf` computes the same. Written by `Activation3MService`
+   * alone, in a conditional write on `null`: before any write that would change its inputs, by *Mark left*, and by
+   * the `/new-hires` read.
+   */
+  @Prop({ type: String, enum: [...ACTIVATION_3M_LOCKS, null], default: null })
+  activation3M!: Activation3MLock | null;
+
+  /** When the result was kept. `null` with none. */
+  @Prop({ type: Date, default: null })
+  activation3MLockedAt!: Date | null;
 
   @Prop({ type: Date, default: null })
   removedAt!: Date | null;
@@ -175,6 +251,19 @@ export class Membership {
     default: () => ({ isKpmAdmin: false, grantedByUserId: null, grantedAt: null, revokedAt: null }),
   })
   adminAccess!: AdminAccess;
+
+  /**
+   * ***Full-time* or *part-time*: how this person works in this office** (ADR-0158 §1, P18.8-T4).
+   *
+   * On the membership, not the account, because somebody may work one way here and another way in an
+   * office they join later. **Optional**: a member who arrived before it has none, which a screen reads
+   * as *Not recorded*, and they set it on `/profile`. Written by the roster import from its
+   * `workStatus` column, and copied by `HierarchyService` from `users.registeredWorkStatus` — what a
+   * person said when they registered — onto whichever membership they are given. The person's own to
+   * change (`PATCH /auth/me`); the Owner and the Admins read it on the person page.
+   */
+  @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
+  workStatus!: WorkStatus | null;
 
   /** Who brought them in, and from which recruitment lead. Attribution, set at join. */
   @Prop({ type: String, default: null })

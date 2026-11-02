@@ -156,10 +156,10 @@ export async function clearCollections(): Promise<void> {
 export async function seedLadder(companyId: string): Promise<void> {
   const model = mongoose.models[CompanyOrgLevel.name]
     ?? mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
-  for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+  for (const { code, label, displayOrder, leaderTier } of DEFAULT_ORG_LADDER) {
     if (await model.findOne({ companyId, code, deletedAt: null }).exec()) continue;
     await model.create({
-      companyId, code, label, displayOrder,
+      companyId, code, label, displayOrder, leaderTier,
       status: 'active', archivedAt: null, deletedAt: null,
     });
   }

@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { HttpStatus } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { AssetDocument } from './asset.schema';
 import { AssetRepository } from './asset.repository';
 import { ASSET_LIMITS } from '@/domain/constants';
+import { ASSETS_REFUSALS } from './assets.messages';
 import { SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 @Injectable()
@@ -34,7 +35,7 @@ export class AssetService {
     if (!kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You have not joined a KPM yet.',
+        ASSETS_REFUSALS.TENANT_NO_MEMBERSHIP.notJoined,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -79,7 +80,7 @@ export class AssetService {
   ): Promise<AssetDocument> {
     const asset = await this.assets.findOne(ctx, { storageKey });
     if (!asset) {
-      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+      throw new NotFoundException('Asset');
     }
 
     const stored = await this.requireStored(storageKey, allowed);
@@ -104,7 +105,7 @@ export class AssetService {
   async urlFor(ctx: RequestContext, storageKey: string): Promise<string> {
     const asset = await this.assets.findOne(ctx, { storageKey });
     if (!asset) {
-      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+      throw new NotFoundException('Asset');
     }
     this.requireConfirmed(asset);
     return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS, asset.mimeType);
@@ -171,7 +172,7 @@ export class AssetService {
   async confirmCompanyUpload(companyId: string, storageKey: string): Promise<AssetDocument> {
     const asset = await this.assets.findCompanyAsset(companyId, storageKey);
     if (!asset) {
-      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+      throw new NotFoundException('Asset');
     }
     const stored = await this.requireStored(storageKey);
     return (await this.assets.updateCompanyAsset(companyId, storageKey, {
@@ -190,7 +191,7 @@ export class AssetService {
   async companyUrlFor(companyId: string, storageKey: string): Promise<string> {
     const asset = await this.assets.findCompanyAsset(companyId, storageKey);
     if (!asset) {
-      throw new DomainException(ErrorCode.NOT_FOUND, 'Asset not found.', HttpStatus.NOT_FOUND);
+      throw new NotFoundException('Asset');
     }
     this.requireConfirmed(asset);
     return this.storage.createSignedUrl(storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS, asset.mimeType);
@@ -242,7 +243,7 @@ export class AssetService {
     if (!stored) {
       throw new DomainException(
         ErrorCode.ASSET_NOT_UPLOADED,
-        'That file never finished uploading. Try again.',
+        ASSETS_REFUSALS.ASSET_NOT_UPLOADED.neverFinished,
         HttpStatus.CONFLICT,
         { storageKey },
       );
@@ -255,7 +256,7 @@ export class AssetService {
     if (asset.uploadState !== 'confirmed') {
       throw new DomainException(
         ErrorCode.ASSET_NOT_CONFIRMED,
-        'This file has not finished uploading yet. Try again shortly.',
+        ASSETS_REFUSALS.ASSET_NOT_CONFIRMED.notYet,
         HttpStatus.CONFLICT,
       );
     }
@@ -274,7 +275,7 @@ export class AssetService {
     if (bytes > ASSET_LIMITS.MAX_BYTES) {
       throw new DomainException(
         ErrorCode.ASSET_TOO_LARGE,
-        `Files must be ${ASSET_LIMITS.MAX_BYTES / 1024 / 1024} MB or smaller.`,
+        ASSETS_REFUSALS.ASSET_TOO_LARGE.atMost({ mb: ASSET_LIMITS.MAX_BYTES / 1024 / 1024 }),
         HttpStatus.PAYLOAD_TOO_LARGE,
         { maxBytes: ASSET_LIMITS.MAX_BYTES, receivedBytes: bytes },
       );
@@ -282,7 +283,7 @@ export class AssetService {
     if (!allowed.includes(mimeType)) {
       throw new DomainException(
         ErrorCode.ASSET_TYPE_NOT_ALLOWED,
-        'That file type is not accepted.',
+        ASSETS_REFUSALS.ASSET_TYPE_NOT_ALLOWED.notAccepted,
         HttpStatus.UNSUPPORTED_MEDIA_TYPE,
         { mimeType, allowed },
       );

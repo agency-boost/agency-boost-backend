@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { BadRequestException, INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString } from 'class-validator';
 import { SwaggerModule } from '@nestjs/swagger';
 
 import { configureApp } from './bootstrap';
+import { DomainException } from './common/errors/domain.exception';
 
 jest.mock('@nestjs/swagger', () => ({
   SwaggerModule: { setup: jest.fn() },
@@ -37,21 +38,26 @@ type Recorded = {
   enableVersioning: jest.Mock;
   useGlobalPipes: jest.Mock;
   enableCors: jest.Mock;
+  /** The Express instance's `set`, where `trust proxy` goes. */
+  expressSet: jest.Mock;
 };
 
-function recordingApp(env: Record<string, string>): Recorded {
+/** `env` holds what `ConfigService` hands back: validated values, so `TRUST_PROXY` is `false` or a number. */
+function recordingApp(env: Record<string, unknown>): Recorded {
   const use = jest.fn();
   const setGlobalPrefix = jest.fn();
   const enableVersioning = jest.fn();
   const useGlobalPipes = jest.fn();
   const enableCors = jest.fn();
+  const expressSet = jest.fn();
 
   const config = {
-    get: (key: string, fallback?: string) => env[key] ?? fallback,
+    get: (key: string, fallback?: unknown) => env[key] ?? fallback,
   } as unknown as ConfigService;
 
   const app = {
     get: () => config,
+    getHttpAdapter: () => ({ getInstance: () => ({ set: expressSet }) }),
     use,
     setGlobalPrefix,
     enableVersioning,
@@ -59,7 +65,7 @@ function recordingApp(env: Record<string, string>): Recorded {
     enableCors,
   } as unknown as INestApplication;
 
-  return { app, use, setGlobalPrefix, enableVersioning, useGlobalPipes, enableCors };
+  return { app, use, setGlobalPrefix, enableVersioning, useGlobalPipes, enableCors, expressSet };
 }
 
 describe('configureApp', () => {
@@ -96,18 +102,25 @@ describe('configureApp', () => {
       return pipe;
     }
 
+    /*
+     * The refusal is `400 VALIDATION_FAILED` with `details.violations`, as Nest's own was — now a `DomainException`
+     * whose sentences the error filter writes in the reader's language (P18.98-T5 AC-3; `validationRefusal`).
+     */
     it('rejects an unknown field rather than dropping it silently', async () => {
       const pipe = pipeFrom({ NODE_ENV: 'production' });
-      await expect(
-        pipe.transform({ name: 'ok', typo: 'x' }, { type: 'body', metatype: Dto }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      const refused = pipe.transform({ name: 'ok', typo: 'x' }, { type: 'body', metatype: Dto });
+      await expect(refused).rejects.toBeInstanceOf(DomainException);
+      await expect(refused).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED', details: { violations: ['property typo should not exist'] },
+      });
+      await expect(refused.catch((err: DomainException) => err.getStatus())).resolves.toBe(400);
     });
 
     it('does not coerce a number into a string — implicit conversion stays off', async () => {
       const pipe = pipeFrom({ NODE_ENV: 'production' });
       await expect(
         pipe.transform({ name: 42 }, { type: 'body', metatype: Dto }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { violations: ['name must be a string'] } });
     });
 
     it('accepts a valid body', async () => {
@@ -128,7 +141,14 @@ describe('configureApp', () => {
       expect(r.enableCors).toHaveBeenCalledWith({
         origin: ['https://a.example', 'https://b.example'],
         credentials: true,
+        maxAge: 600,
       });
+    });
+
+    it('P18.95-T5 (UI-030) lets a browser keep a preflight for ten minutes, not Chrome’s five seconds', () => {
+      const r = recordingApp({ NODE_ENV: 'production', CORS_ORIGINS: 'https://a.example' });
+      configureApp(r.app);
+      expect(r.enableCors.mock.calls[0][0]).toMatchObject({ maxAge: 600 });
     });
 
     it('allows no origin at all when none is configured', () => {
@@ -136,8 +156,35 @@ describe('configureApp', () => {
       // that leaks an authenticated session to any site that asks.
       const r = recordingApp({ NODE_ENV: 'production' });
       configureApp(r.app);
-      expect(r.enableCors).toHaveBeenCalledWith({ origin: false, credentials: true });
+      expect(r.enableCors).toHaveBeenCalledWith({ origin: false, credentials: true, maxAge: 600 });
     });
+  });
+
+  /*
+   * P18.7-T1 (ADR-0152): behind Caddy the socket is always the proxy, so without this every client
+   * shares one `req.ip`, one login bucket, and one address on every session row.
+   */
+  describe('trust proxy (P18.7-T1)', () => {
+    it('P18.7-T1 trusts no proxy by default', () => {
+      const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: false });
+      configureApp(r.app);
+      expect(r.expressSet).toHaveBeenCalledWith('trust proxy', false);
+    });
+
+    it('P18.7-T1 trusts the configured number of hops', () => {
+      const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: 1 });
+      configureApp(r.app);
+      expect(r.expressSet).toHaveBeenCalledWith('trust proxy', 1);
+    });
+
+    it.each([undefined, 'true', true, '1', 0, -1])(
+      'P18.7-T1 trusts nothing when handed %j, which validation never produces',
+      (value) => {
+        const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: value });
+        configureApp(r.app);
+        expect(r.expressSet).toHaveBeenCalledWith('trust proxy', false);
+      },
+    );
   });
 
   describe('Swagger', () => {

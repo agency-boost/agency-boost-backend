@@ -10,6 +10,7 @@ import {
 import { FixedClock } from '@/common/clock/clock.port';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -72,7 +73,7 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
           isKpmAdmin: opts.admin ?? false, directCount: 0,
         }
       : null,
-  );
+  ).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /** Inferring the model type keeps mongoose's generics out of the test's way. */
@@ -841,6 +842,21 @@ describe('TenantService', () => {
       });
     });
 
+    it('P18.98-T5 AC-4 writes the queue’s rows for the Super Admin reading them, in Indonesian for an Indonesian one', async () => {
+      const sa = ctx({ superAdmin: true });
+      await service.createKpm(sa, input());
+
+      const { attention } = await service.platformOverview(sa.withReader(readerIn('id')));
+      expect(attention).toEqual([{
+        tag: 'KPM Owner',
+        severity: 'structural',
+        title: '1 KPM belum memiliki Owner',
+        detail: 'Tidak ada yang dapat mengelola KPM sampai Owner ditetapkan, dan hanya platform yang dapat menetapkannya.',
+        href: '/admin/tenants',
+        actionLabel: 'Tinjau',
+      }]);
+    });
+
     it('I-48: raises a pending KPM request, which is the only way to reach that screen', async () => {
       // P3.5-T2 built the entity, the endpoints and the screen and left this row behind,
       // so `/admin/kpm-requests` was reachable from nowhere — the nav item was still
@@ -1339,7 +1355,7 @@ describe('TenantService', () => {
         ['SELL_SUBMISSION', 'SELLING', 'active'],
       ]);
       expect((await col('activityCategories').find({ kpmId: kpm._id }).sort({ displayOrder: 1 }).toArray())
-        .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Leads Generation'], ['SELLING', 'Selling']]);
+        .map((c) => [c.code, c.label])).toEqual([['LEADS_GENERATION', 'Pencarian leads'], ['SELLING', 'Penjualan']]);
       // ADR-0116: the platform capability ladder, recorded on the office and in kpm.created as supplied.
       const ladder = (await col('capabilityCatalogs').findOne({ kpmId: kpm._id }))!;
       expect([ladder.stages.length, ladder.milestones.length, ladder.grids.length]).toEqual([4, 5, 4]);

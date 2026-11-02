@@ -19,6 +19,8 @@ export interface CalendarEntryFields {
   endsAt: Date;
   startsOn: string | null;
   endsOn: string | null;
+  /** A trip's *Sepanjang hari*; `false` on a timed trip and on every other type (UI-104 point 8). */
+  allDay?: boolean;
 }
 
 /**

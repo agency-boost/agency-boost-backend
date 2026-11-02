@@ -2,10 +2,13 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import {
-  ASSET_LIMITS, PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_NEEDS, PRODUCT_RUN_OFF_NOTE,
+  ASSET_LIMITS, PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_LUMP_SUM_BUDGET_BAND, PRODUCT_NEEDS, PRODUCT_RUN_OFF_NOTE,
+  SEED_PRODUCTS,
 } from '@/domain/constants';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { english, indonesian } from '../../../test/i18n';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { configModule } from '../../../test/config-module';
 import { OFFICE_0417, prototypeRender, shelf0417 } from '../../../test/sales-tools';
 import { ProductCatalogService } from './product-catalog.service';
@@ -24,7 +27,7 @@ const agent = (kpmId: string, over: Record<string, unknown> = {}) =>
   new RequestContext(`u-${kpmId}`, 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
-  } as never);
+  } as never).withReader(SOURCE_READER); // the API's English, as `english(...)` reads it: nobody's choice is Indonesian
 /** The office's Owner, who writes its decisions on the settings screen. */
 const owner = (kpmId: string) => agent(kpmId, { orgLevelCode: 'AB', hierarchyRole: 'ab', isKpmOwner: true });
 const superAdmin = () => RequestContext.platform('root');
@@ -93,12 +96,12 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
   }
 
   /**
-   * P5-T5's and P5-T10's five decisions, as `demo.ts` writes them for 0417 and 0555: renamed, turned off,
-   * pending, approved-then-edited, sent back.
+   * P5-T5's and P5-T10's five decisions: renamed, turned off, pending, approved-then-edited, sent back — as
+   * `demo.ts` wrote them for 0417 and 0555 until P18.95-T6, which dropped its placeholder rename (UI-023).
    */
   async function fiveStates(kpmId: string) {
     const ctx = owner(kpmId);
-    await wired.kpmProducts.saveOverrides(ctx, ids.PRUMAPAN, { displayName: 'PRUMapan (nama kami)' });
+    await wired.kpmProducts.saveOverrides(ctx, ids.PRUMAPAN, { displayName: 'PRUMapan BSD' });
     await wired.kpmProducts.setActive(ctx, ids.PRUSMART_PLAN, false);
     await wired.kpmProducts.saveOverrides(ctx, ids.PRUFUTURE, {
       opening: 'Halo Pak/Bu, boleh saya cerita sebentar soal proteksi keluarga?',
@@ -124,7 +127,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
 
       expect(products.map((p) => p.code)).toEqual(shelf0417().map((p) => p.code));
       expect(products[0]).toEqual({
-        code: 'PRUMAPAN', name: 'PRUMapan (nama kami)',
+        code: 'PRUMAPAN', name: 'PRUMapan BSD',
         tagline: 'Endowment-style life with guaranteed retirement payouts from age 55.',
         category: { code: 'life', label: 'Life' }, channel: 'conventional', lifecycle: 'active', needs: ['retirement'],
       });
@@ -305,7 +308,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const mapan = await service.product(agent(KPM_A), 'prumapan');
       expect(mapan).toMatchObject({
         code: 'PRUMAPAN', name: 'PRUMapan', lifecycle: 'active', needs: ['retirement'],
-        ageBands: ['< 25', '25–34', '35–49'], budgetBands: ['< Rp500K', 'Rp500K–Rp2M', 'Rp2M–Rp5M'],
+        ageBands: ['< 25', '25–34', '35–49'], budgetBands: ['< Rp 500 rb', 'Rp 500 rb–Rp 2 jt', 'Rp 2 jt–Rp 5 jt'],
         runOffNote: null, successorCode: null,
       });
       expect(mapan.benefits.length).toBeGreaterThan(0);
@@ -316,13 +319,30 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       ]);
     });
 
+    it('P18.98-T7 a band that is a word, *Lump-sum*, is written for the reader; a range of sums reads the same', async () => {
+      const lumpSum = SEED_PRODUCTS.find((p) => p.activeByDefault && p.eligibleBudgetBands.includes(PRODUCT_LUMP_SUM_BUDGET_BAND))!;
+      const english = await service.product(agent(KPM_A), lumpSum.code);
+      const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), lumpSum.code);
+      expect(english.budgetBands).toContain('Lump-sum');
+      expect(inIndonesian.budgetBands).toContain('Sekaligus');
+      expect(inIndonesian.budgetBands).not.toContain('Lump-sum');
+      expect(inIndonesian.budgetBands.filter((b) => b !== 'Sekaligus'))
+        .toEqual(english.budgetBands.filter((b) => b !== 'Lump-sum'));
+      expect(inIndonesian.documents.map((d) => d.label)).toEqual(['Brosur', 'Ilustrasi / Simulasi', 'Dokumen produk']);
+      expect(english.documents.map((d) => d.label)).toEqual(['Brochure', 'Illustration / Simulation', 'Product Document']);
+    });
+
     it('P14-T7 AC-5 a run-off product carries the drawer’s note, its blank script, and its successor’s code', async () => {
       await decide0417();
       await wired.products.setLifecycle(
         superAdmin(), PRUDENTIAL, ids.PRULINK_GENERASI_BARU_PGB, 'closed_to_new_business', ids.PRULINK_NEXTGEN,
       );
       const pgb = await service.product(agent(KPM_A), 'PRULINK_GENERASI_BARU_PGB');
-      expect(pgb.runOffNote).toBe(PRODUCT_RUN_OFF_NOTE);
+      expect(pgb.runOffNote).toBe(english(PRODUCT_RUN_OFF_NOTE));
+      // P18.98-T5 AC-4: written for the reader — an Indonesian one reads it in Indonesian.
+      const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), 'PRULINK_GENERASI_BARU_PGB');
+      expect(inIndonesian.runOffNote).toBe(indonesian(PRODUCT_RUN_OFF_NOTE));
+      expect(inIndonesian.runOffNote).toMatch(/^Dalam masa run-off/);
       expect(pgb.script.fullScript).toBe('');
       expect(pgb.successorCode).toBe('PRULINK_NEXTGEN');
     });
@@ -451,7 +471,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const good = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 2, budget: 2 });
       expect(good).toMatchObject({
         brief: { need: 'retirement', age: 2, budget: 2 },
-        product: { code: 'PRUMAPAN', name: 'PRUMapan (nama kami)' },
+        product: { code: 'PRUMAPAN', name: 'PRUMapan BSD' },
         verdict: 'good_fit', outside: [], alternatives: [{ code: 'PRUANUGERAH', name: 'PRUAnugerah' }], moreCount: 0,
       });
       const check = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 5, budget: 6 });
@@ -463,7 +483,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const switched = await service.attackPlan(agent(KPM_A), { need: 'retirement', age: 2, budget: 2 }, 'pruanugerah');
       expect(switched).toMatchObject({
         product: { code: 'PRUANUGERAH' }, verdict: 'check_fit', outside: ['age', 'budget'],
-        alternatives: [{ code: 'PRUMAPAN', name: 'PRUMapan (nama kami)' }], moreCount: 0,
+        alternatives: [{ code: 'PRUMAPAN', name: 'PRUMapan BSD' }], moreCount: 0,
       });
     });
 

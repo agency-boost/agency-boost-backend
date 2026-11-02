@@ -1,9 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Max,
+  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
+import { field } from '@/common/validation/violations';
+import { JOINING_REFUSALS } from '@/domain/constants/joining.messages';
+import { ORG_REFUSALS } from './org.messages';
+import { PHONE_FIELD_SHAPE, phoneFromBody } from '@/modules/users/phone-input';
+import { MEMBER_SEARCH_DEFAULT, MEMBER_SEARCH_MAX } from './directory.service';
 
 export class DirectoryQueryDto {
   @ApiPropertyOptional({ description: 'Name, email or agent code. Case-insensitive.' })
@@ -41,6 +46,44 @@ export class DirectoryQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/**
+ * **Search agent** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): who the picker offers, by name or agent code.
+ */
+export class MemberSearchQueryDto {
+  @ApiPropertyOptional({
+    description: 'Part of a name or an agent code, case-insensitive. Empty or absent lists the first people A to Z.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: MEMBER_SEARCH_MAX, default: MEMBER_SEARCH_DEFAULT })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MEMBER_SEARCH_MAX)
+  limit?: number;
+}
+
+/**
+ * **A leader saves an agent's WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22): *Isi nomor
+ * WhatsApp* on a person they coach. Required here — clearing a number is the person's own, on `PATCH /auth/me`.
+ */
+export class SetMemberPhoneDto {
+  @ApiProperty({
+    type: String,
+    example: '0812-1100-2200',
+    description: 'Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 to 13 '
+      + 'digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`.',
+  })
+  @Transform(({ value }) => phoneFromBody(value))
+  @Matches(PHONE_FIELD_SHAPE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.phoneShape) })
+  phone!: string;
 }
 
 export class KpmSearchDto {
@@ -91,6 +134,26 @@ export class InviteCodeQueryDto {
   code!: string;
 }
 
+/** An office date, as every date field in a body is written. Whether it is a real day is the service's check. */
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * The pipe's refusal of a join date's shape: the same sentence the service refuses a date that is no real day with
+ * (`joinDateViolation`), both languages (`field`, P18.98-T5 AC-3).
+ */
+const JOIN_DATE_MESSAGE = field(JOINING_REFUSALS.VALIDATION_FAILED.notADate);
+
+/** The join date a leader gives when letting somebody in (ADR-0169, P18.96-T2), on an approval and on a tag. */
+const JOIN_DATE_PROPERTY = {
+  type: String,
+  format: 'date',
+  example: '2026-10-27',
+  description:
+    'The day they joined, an office date: the office\u2019s today at the latest, and not before 1980 \u2014 an existing '
+    + 'agent may have joined years ago. Omitted, the office\u2019s today. It decides once whether they are a new hire '
+    + '(no more than 90 days back) or an existing agent, and a new hire\u2019s activation starts on it. Ignored for '
+    + 'somebody who already has a join date in this office.',
+} as const;
+
 export class ApproveRequestDto {
   @ApiPropertyOptional({
     description:
@@ -101,6 +164,20 @@ export class ApproveRequestDto {
   @IsOptional()
   @IsString()
   routeToMembershipId?: string;
+
+  @ApiPropertyOptional(JOIN_DATE_PROPERTY)
+  @IsOptional()
+  @IsString()
+  @Matches(DATE_SHAPE, { message: JOIN_DATE_MESSAGE })
+  joinDate?: string;
+}
+
+export class TagUntaggedDto {
+  @ApiPropertyOptional(JOIN_DATE_PROPERTY)
+  @IsOptional()
+  @IsString()
+  @Matches(DATE_SHAPE, { message: JOIN_DATE_MESSAGE })
+  joinDate?: string;
 }
 
 export class DeclineRequestDto {
@@ -124,10 +201,20 @@ export class UntaggedSearchDto {
   q?: string;
 }
 
+/** A rung's code as the company's ladder writes it: letters, digits and underscores, starting with a letter. */
+const RUNG_CODE = /^[A-Za-z][A-Za-z0-9_]{1,31}$/;
+
 export class ChangeRoleDto {
-  @ApiProperty({ enum: ['ab', 'aab', 'agent'] })
-  @IsEnum(['ab', 'aab', 'agent'])
-  toRole!: 'ab' | 'aab' | 'agent';
+  @ApiProperty({
+    example: 'aab',
+    description:
+      'The rung, by its code on the company\u2019s ladder, in any case: `ab`, `aab`, `agent`, or a rung the company '
+      + 'added. What the member is given — AB, AAB or Agent rights — follows the rung\u2019s leader tier. A code that '
+      + 'is no active rung is refused `409 ORG_LEVEL_NOT_ON_LADDER`.',
+  })
+  @IsString()
+  @Matches(RUNG_CODE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.toRoleShape) })
+  toRole!: string;
 
   @ApiPropertyOptional({
     example: 'Ready to bring on their own agents',
@@ -220,9 +307,60 @@ export class TagMemberDto {
 
   @ApiProperty({
     description:
-      'Who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum’s ' +
-      'meetings, and nothing else. It grants no hierarchy and no data scope.',
+      'Core Leader (ADR-0159): who, besides the Owner and the Admins, opens and writes in the Strategic Leader ' +
+      'Forum’s meetings and reads the office’s KPM analytics. A leader’s only: setting it on a member whose rung ' +
+      'is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`, and changing it needs ' +
+      '`member:tag_core_leader`. It grants no hierarchy.',
   })
   @IsBoolean()
   isCoreLeader!: boolean;
+}
+
+/** `PUT /members/:membershipId/core-leader` — the directory row's control (ADR-0159 §1). */
+export class SetCoreLeaderDto {
+  @ApiProperty({
+    description:
+      'Tag (`true`) or untag (`false`) this member *Core Leader*. Their groups are untouched. Setting it on a ' +
+      'member whose rung is not a leader rung is refused `400 CORE_LEADER_NOT_A_LEADER`.',
+  })
+  @IsBoolean()
+  isCoreLeader!: boolean;
+}
+
+/** Asking AgencyBoost to approve one leader past the office's limit (ADR-0157 §1). */
+export class CreateLeaderLimitRequestDto {
+  @ApiProperty({
+    enum: ['promote', 'activate'],
+    description:
+      '`promote`: the role change the limit refused, onto the rung named. `activate`: letting in a pending member '
+      + 'who stands on a leader rung — approving their join request, or tagging them into your unit.',
+  })
+  @IsEnum(['promote', 'activate'])
+  action!: 'promote' | 'activate';
+
+  @ApiPropertyOptional({ example: 'AAB', description: 'For `promote`: the rung, by its code on the company\u2019s ladder.' })
+  @IsOptional()
+  @IsString()
+  @Matches(RUNG_CODE, { message: field(ORG_REFUSALS.VALIDATION_FAILED.orgLevelCodeShape) })
+  orgLevelCode?: string;
+
+  @ApiPropertyOptional({
+    example: 'Ready to bring on their own agents',
+    description: 'For `promote`: kept in the role change log when AgencyBoost approves it.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
+/** Declining a leader-limit request: the reason is required, and travels back to whoever asked. */
+export class DeclineLeaderLimitRequestDto {
+  @ApiProperty({ example: 'Raise the limit at renewal instead.', maxLength: 500 })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reason!: string;
 }

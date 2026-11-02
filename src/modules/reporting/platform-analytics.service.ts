@@ -1,15 +1,15 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
-import { ErrorCode } from '@/common/errors/error-codes';
+import { PermissionDeniedException } from '@/common/errors/domain.exception';
 import { rollingWindow } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, PERIOD } from '@/domain/constants';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { OrgLevelService, type OrgLevelRow } from '@/modules/tenants/org-level.service';
 import { subscriptionStateOf } from '@/modules/tenants/subscription';
 import type { RungCount } from './kpm-overview.service';
@@ -70,14 +70,8 @@ export class PlatformAnalyticsService {
   ) {}
 
   async read(ctx: RequestContext): Promise<PlatformAnalyticsView> {
-    if (!ctx.isSuperAdmin || ctx.isImpersonating) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'platform_analytics:read' },
-      );
-    }
+    // The shared refusal: `403 PERM_DENIED`, its words in both languages, `details.permission` naming the grant.
+    if (!ctx.isSuperAdmin || ctx.isImpersonating) throw new PermissionDeniedException('platform_analytics:read');
     const timezone = DEFAULT_TENANT_TIMEZONE;
     const today = this.clock.localDateFor(timezone);
     const month = today.slice(0, 7);
@@ -86,7 +80,8 @@ export class PlatformAnalyticsService {
 
     const [kpms, companies, adoption, signIns] = await Promise.all([
       this.kpms.find({ deletedAt: null }).select('code branchName companyId status subscription timezone').lean().exec(),
-      this.companies.find({ deletedAt: null }).select('name').sort({ name: 1 }).lean().exec(),
+      // The insurers: the Template library holds templates and no office (ADR-0164 §3).
+      this.companies.find({ deletedAt: null, ...INSURERS_ONLY }).select('name').sort({ name: 1 }).lean().exec(),
       this.memberships.adoptionPerOfficeAcrossTenants(ctx, this.clock.monthBounds(timezone, month)),
       this.memberships.signInsPerOfficeAcrossTenants(ctx, signedInSince),
     ]);

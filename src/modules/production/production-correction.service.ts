@@ -1,17 +1,22 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { isValidObjectId } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render, type Sentence } from '@/common/i18n/sentence';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
 import type { MetricValue, ProductionMetric, Provenance } from './monthly-agent-data.schema';
 import type { Cadence } from './production-preview';
 import { type MonthState, ProductionMonths } from './production-months.service';
 import { breaksYtd, refusalFor } from './production-rules';
 import { requireMonth, requireOffice } from './production.service';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS;
 
 export interface CorrectionInput {
   month: string;
@@ -46,8 +51,13 @@ export interface ApeCorrectionBatch {
   /** The month's revision the reader saw: one claim for the whole save. */
   revision: number;
   rows: readonly { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[];
-  /** The fixed reason every cell carries (`UNIT_DASHBOARD_CORRECTION_REASON`). */
-  reason: string;
+  /**
+   * The fixed reason every cell carries (`UNIT_DASHBOARD_MESSAGES.correctionReason`). **The API's own words are a
+   * sentence, stored in the language of the leader saving** (P18.98-T5 AC-6), as text, and shown as stored. A string
+   * is stored exactly as given: words somebody typed, or `UNIT_DASHBOARD_CORRECTION_REASON`'s English from a caller
+   * that does not pass the sentence yet.
+   */
+  reason: string | Sentence<null>;
   /** Where the save came from, on every audit entry's `after` — `unit_dashboard`. */
   surface: string;
 }
@@ -69,13 +79,14 @@ interface CellWrite {
   held: MetricValue | undefined;
 }
 
-/** The six figures as a sentence names them — never in the file's *Rp M*: a correction is typed in rupiah. */
+/**
+ * The six figures as a sentence names them — never in the file's *Rp M*: a correction is typed in rupiah. Metric names,
+ * the same in both languages (§A.4); the cadence after them is the sentence's (`PRODUCTION_REFUSALS`).
+ */
 const NAME: Record<ProductionMetric, string> = {
   ape: 'APE', persistency: 'Rolling persistency', recruitment: 'Recruitment',
   newActiveAgents: 'New active agents', fyp: 'FYP', policyCount: '# of policy',
 };
-const labelOf = (metric: ProductionMetric, cadence: Cadence) =>
-  `${NAME[metric]} ${cadence === 'monthly' ? 'this month' : 'year to date'}`;
 const fieldOf = (metric: ProductionMetric, cadence: Cadence) =>
   `${metric}${cadence === 'monthly' ? 'Monthly' : 'Ytd'}`;
 
@@ -105,17 +116,20 @@ export class ProductionCorrections {
     private readonly memberships: MembershipRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P18.96-T4 AC-1: a month's policies corrected above zero may be the member's first sale. Failing open.
+    @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
   ) {}
 
   async correct(ctx: RequestContext, input: CorrectionInput): Promise<CorrectionResult> {
     requireOffice(ctx);
     requireMonth(input.month);
     const { month, membershipId, metric, cadence, value } = input;
+    // Typed by the person correcting: stored as typed, trimmed (P18.98-T5 AC-6).
     const reason = input.reason.trim();
     if (!reason || reason.length > REASON_MAX) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        reason ? `Keep the reason under ${REASON_MAX} characters.` : 'Say why the figure is being corrected.',
+        reason ? SAY.VALIDATION_FAILED.reasonTooLong({ max: REASON_MAX }) : SAY.VALIDATION_FAILED.reasonRequired,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -131,18 +145,18 @@ export class ProductionCorrections {
     const cells = (row ?? {}) as unknown as Record<string, MetricValue | undefined>;
     const field = fieldOf(metric, cadence);
     const before = { value: cells[field]?.value ?? null, provenance: cells[field]?.provenance ?? null };
-    const label = labelOf(metric, cadence);
+    const name = NAME[metric];
 
     if (value !== null) {
       const why = refusalFor(metric, value);
       const cell = { metric, cadence, value };
-      if (why) throw outOfRange(`${label} ${why}`, cell);
+      if (why) throw outOfRange(SAY.UPLOAD_VALUE_OUT_OF_RANGE.correction({ name, cadence, reason: why }), cell);
       const other = cells[fieldOf(metric, cadence === 'monthly' ? 'ytd' : 'monthly')]?.value ?? null;
       const [m, y] = cadence === 'monthly' ? [value, other] : [other, value];
       if (breaksYtd(metric, m, y)) {
         throw outOfRange(cadence === 'monthly'
-          ? `${label} would be more than the year to date already held. Correct the year to date first.`
-          : `${label} would be less than this month's figure. Correct this month first.`, cell);
+          ? SAY.UPLOAD_VALUE_OUT_OF_RANGE.correctYtdFirst({ name })
+          : SAY.UPLOAD_VALUE_OUT_OF_RANGE.correctMonthFirst({ name }), cell);
       }
     }
 
@@ -156,6 +170,13 @@ export class ProductionCorrections {
       held: cells[field],
     });
 
+    /*
+     * P18.96-T4 AC-1 (ADR-0171 §1): a month's policies above zero may be the member's first sale — and, since the P18.96
+     * exit review (M4), a month's policies corrected to none, or cleared, may take away the one the file gave them.
+     */
+    if (metric === 'policyCount' && cadence === 'monthly') {
+      await signalSales(this.sales, ctx, [membershipId]);
+    }
     return {
       membershipId, metric, cadence, changed: true, before,
       after: { value, provenance: 'corrected' },
@@ -183,7 +204,9 @@ export class ProductionCorrections {
   async correctApe(ctx: RequestContext, input: ApeCorrectionBatch): Promise<ApeCorrectionResult> {
     requireOffice(ctx);
     requireMonth(input.month);
-    const { month, reason } = input;
+    const { month } = input;
+    // AC-6: the API's own words in the saving leader's language, stored as text; a string as it was given.
+    const reason = typeof input.reason === 'string' ? input.reason : render(input.reason, ctx.reader);
     const ids = input.rows.map((row) => row.membershipId);
 
     const members = ids.every((id) => isValidObjectId(id))
@@ -206,7 +229,12 @@ export class ProductionCorrections {
       for (const [cadence, value] of asked) {
         if (value === undefined) continue;
         const why = refusalFor('ape', value);
-        if (why) throw outOfRange(`${labelOf('ape', cadence)} ${why}`, { membershipId: row.membershipId, metric: 'ape', cadence, value });
+        if (why) {
+          throw outOfRange(
+            SAY.UPLOAD_VALUE_OUT_OF_RANGE.correction({ name: NAME.ape, cadence, reason: why }),
+            { membershipId: row.membershipId, metric: 'ape', cadence, value },
+          );
+        }
       }
       const held = (cadence: Cadence) => cells[fieldOf('ape', cadence)];
       const monthly = row.apeMonthlyMinor ?? held('monthly')?.value ?? null;
@@ -214,8 +242,8 @@ export class ProductionCorrections {
       if (breaksYtd('ape', monthly, ytd)) {
         const cadence: Cadence = row.apeYtdMinor !== undefined ? 'ytd' : 'monthly';
         throw outOfRange(cadence === 'monthly'
-          ? `${labelOf('ape', 'monthly')} would be more than the year to date already held. Correct the year to date too.`
-          : `${labelOf('ape', 'ytd')} would be less than this month's figure.`,
+          ? SAY.UPLOAD_VALUE_OUT_OF_RANGE.correctYtdToo({ name: NAME.ape })
+          : SAY.UPLOAD_VALUE_OUT_OF_RANGE.ytdWouldBeBelowMonth({ name: NAME.ape }),
         { membershipId: row.membershipId, metric: 'ape', cadence, value: cadence === 'monthly' ? monthly : ytd });
       }
       for (const [cadence, value] of asked) {
@@ -293,7 +321,7 @@ export class ProductionCorrections {
 }
 
 function outOfRange(
-  message: string,
+  message: Sentence<'UPLOAD_VALUE_OUT_OF_RANGE'>,
   input: { membershipId?: string; metric: ProductionMetric; cadence: Cadence; value: number | null },
 ): DomainException {
   return new DomainException(

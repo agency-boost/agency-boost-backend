@@ -24,6 +24,13 @@ export const CALENDAR = {
   PEOPLE_PAGE_MAX: 50,
   /** Any id a request names: an entry, a member, an invitee. */
   ID_MAX: 64,
+  /**
+   * **The Agenda's days** (UI V1, 2026-10-30, UI-104 point 10): the list starts on the day asked for — the office's
+   * today when it opens — and runs this many days; ‹ and › move it by as many.
+   */
+  AGENDA_DAYS: 7,
+  /** **The *3 Hari* view's days** (UI-104 point 5): three columns from the day asked for, and one swipe moves three. */
+  THREE_DAYS: 3,
 } as const;
 
 /**

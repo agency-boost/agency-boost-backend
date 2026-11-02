@@ -5,18 +5,26 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { isLeaderClass } from '@/domain/constants';
 import { ActivationStarter, startActivation } from './activation-starter.port';
-import { HierarchyService } from './hierarchy.service';
+import { HierarchyService, type JoiningFields } from './hierarchy.service';
 import { JoinRequestDocument } from './join-request.schema';
+import { leaderLimitRequestStale, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
+import { STALE_REASONS } from './leader-limit.messages';
 import { JoinRequestRepository } from './org.repositories';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ONBOARDING_REFUSALS;
 
 export interface PendingRequest {
   requestId: string;
@@ -106,7 +114,7 @@ export class ApprovalsService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        ORG_REFUSALS.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -120,6 +128,31 @@ export class ApprovalsService {
   private async named(userIds: string[]): Promise<Map<string, UserDocument>> {
     const users = await this.users.find({ _id: { $in: userIds } }).exec();
     return new Map(users.map((u) => [String(u._id), u]));
+  }
+
+  /**
+   * **How many requests are waiting on this approver** (UI V1, UI-085: the orange count on the *Pending Requests* tab,
+   * read on all four User Management screens). The inbox's own filter — what was addressed or routed to them; the
+   * office's whole queue for the Owner or an Admin — and, as the inbox drops a request whose member is gone, only
+   * requests whose member is still in the office. Two narrow reads, ids only, never the names the inbox reads.
+   */
+  async waitingCount(ctx: RequestContext): Promise<{ count: number }> {
+    const me = this.requireLeader(ctx);
+    const rows = await this.requests.find(
+      ctx,
+      {
+        status: 'pending',
+        ...(this.isTenantAdmin(ctx) ? {} : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+      },
+      { projection: { membershipId: 1 } },
+    );
+    if (rows.length === 0) return { count: 0 };
+    const present = new Set((await this.members.find(
+      ctx,
+      { _id: { $in: [...new Set(rows.map((r) => r.membershipId))] } },
+      { projection: { _id: 1 } },
+    )).map((m) => String(m._id)));
+    return { count: rows.filter((r) => present.has(r.membershipId)).length };
   }
 
   /**
@@ -166,12 +199,13 @@ export class ApprovalsService {
     const leaderName = new Map(
       leaderRows.map((m) => [String(m._id), names.get(m.userId)?.fullName ?? null]),
     );
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows
       .map((r) => {
         const membership = byId.get(r.membershipId);
         if (!membership) return null;
-        const fullName = names.get(membership.userId)?.fullName ?? 'Unknown';
+        const fullName = names.get(membership.userId)?.fullName ?? unknown;
         return {
           requestId: String(r._id),
           membershipId: r.membershipId,
@@ -186,7 +220,7 @@ export class ApprovalsService {
               ? (leaderName.get(r.leaderMembershipId) ?? null)
               : null,
           leaderMembershipId: r.leaderMembershipId,
-          leaderName: leaderName.get(r.leaderMembershipId) ?? 'Unknown',
+          leaderName: leaderName.get(r.leaderMembershipId) ?? unknown,
         };
       })
       .filter((r): r is PendingRequest => r !== null);
@@ -241,9 +275,10 @@ export class ApprovalsService {
       { sort: { agentSeq: 1 } },
     );
     const names = await this.named(units.map((u) => u.userId));
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     return units.map((u) => ({
       membershipId: String(u._id),
-      fullName: names.get(u.userId)?.fullName ?? 'Unknown',
+      fullName: names.get(u.userId)?.fullName ?? unknown,
       unitSize: u.subtreeCount ?? 0,
       forLeaderMembershipId: String(u.leaderId),
     }));
@@ -270,7 +305,7 @@ export class ApprovalsService {
       // more use than saying "no".
       throw new DomainException(
         ErrorCode.ORG_REQUEST_ALREADY_DECIDED,
-        `That request was already ${request.status}.`,
+        SAY.ORG_REQUEST_ALREADY_DECIDED.request({ status: request.status }),
         HttpStatus.CONFLICT,
         { status: request.status, decidedAt: request.decidedAt },
       );
@@ -278,10 +313,19 @@ export class ApprovalsService {
     return request;
   }
 
+  /**
+   * Approve a join request — into the requested leader's unit, or one of their AABs'.
+   *
+   * **`joinDate`** (ADR-0169, P18.96-T2) is the day the person joined, as the approver gives it; omitted, the
+   * office's today. It is checked before anything is written. It classifies them **once**, so for somebody who
+   * already has a join date here — an active member whose request moves them — it changes nothing: their date is
+   * corrected on their new hire's detail, never by a second approval.
+   */
   async approve(
     ctx: RequestContext,
     requestId: string,
     routeToMembershipId?: string,
+    joinDate?: string,
   ): Promise<PendingRequest[]> {
     const me = this.requireLeader(ctx);
     const request = await this.openRequest(ctx, requestId, me);
@@ -300,7 +344,7 @@ export class ApprovalsService {
       if (!can(ctx, 'leader_request:route_to_sub_unit')) {
         throw new DomainException(
           ErrorCode.PERM_DENIED,
-          'You cannot send this request into somebody else’s unit.',
+          SAY.PERM_DENIED.routeElsewhere,
           HttpStatus.FORBIDDEN,
           { permission: 'leader_request:route_to_sub_unit' },
         );
@@ -318,7 +362,7 @@ export class ApprovalsService {
       ) {
         throw new DomainException(
           ErrorCode.ORG_LEADER_NOT_IN_KPM,
-          'That is not one of your own units.',
+          SAY.ORG_LEADER_NOT_IN_KPM.notYourUnit,
           HttpStatus.UNPROCESSABLE_ENTITY,
           { routeToMembershipId },
         );
@@ -329,10 +373,12 @@ export class ApprovalsService {
       if (joiner.role === 'agent') leaderId = routeToMembershipId;
     }
 
+    // ADR-0169: the join date and who it makes them, refused before anything is written.
+    const joining = await this.joiningFor(ctx, joiner, joinDate);
     await this.attach(ctx, joiner, leaderId, {
       action: 'leader_request.approved',
       requestId,
-    });
+    }, { requestable: true }, joining);
 
     // `openRequest` has already proved this row is in `ctx.kpmId`, so the tenant clause
     // changes no outcome today. It is here because a write addressed by `_id` alone is
@@ -414,10 +460,11 @@ export class ApprovalsService {
 
     const names = await this.named(candidates.map((r) => r.userId));
     const term = q?.trim().toLowerCase();
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return candidates
       .map((r) => {
-        const fullName = names.get(r.userId)?.fullName ?? 'Unknown';
+        const fullName = names.get(r.userId)?.fullName ?? unknown;
         return {
           membershipId: String(r._id),
           fullName,
@@ -430,19 +477,186 @@ export class ApprovalsService {
       .filter((m) => !term || m.fullName.toLowerCase().includes(term));
   }
 
-  /** Pull an untagged person into your unit. No approval from them — Flow D. */
-  async tag(ctx: RequestContext, membershipId: string): Promise<UntaggedMember[]> {
+  /**
+   * Pull an untagged person into your unit. No approval from them — Flow D.
+   *
+   * `joinDate` as `approve` takes it (ADR-0169): the day they joined, the office's today when omitted, and nothing
+   * for somebody who already has one — an orphan picked up again keeps theirs.
+   */
+  async tag(ctx: RequestContext, membershipId: string, joinDate?: string): Promise<UntaggedMember[]> {
     const me = this.requireLeader(ctx);
+    await this.placeUnder(ctx, membershipId, me, joinDate);
+    return this.untagged(ctx);
+  }
 
+  /**
+   * **Put a leaderless member of this office under `leaderId`, now** — a tag, and *+ Add agent* for an account that
+   * has no leader here (ADR-0170 §4, P18.96-T3 AC-3). Every refusal a tag meets (`assertTaggable`), with the leader
+   * in the caller's place: somebody already in a unit, the leader themselves, the office's root, an orphan who leads
+   * a unit for anybody but the office. Then the join date (ADR-0169), the placement, any request they had open
+   * cancelled, and their notice. `via` is what the audit row and the notice say brought them: a tag, or the form.
+   */
+  async placeUnder(
+    ctx: RequestContext,
+    membershipId: string,
+    leaderId: string,
+    joinDate?: string,
+    via: 'tagged' | 'add_agent' = 'tagged',
+  ): Promise<MembershipDocument> {
+    this.requireLeader(ctx);
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
+    await this.assertTaggable(ctx, target, leaderId);
 
+    const joining = await this.joiningFor(ctx, target, joinDate);
+    await this.attach(ctx, target, leaderId, { action: 'member.tagged_by_leader', via }, { requestable: true }, joining);
+
+    // Any request they had open is moot — they are in somebody's unit now.
+    await this.requests.updateMany(
+      ctx,
+      { membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+
+    await this.notifications.send({
+      userId: target.userId,
+      kpmId: ctx.kpmId,
+      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+      payload: { leaderMembershipId: leaderId, via: 'tagged' },
+    });
+    return (await this.members.findById(ctx, membershipId)) as MembershipDocument;
+  }
+
+  /**
+   * **What letting this pending member in would be, if this reader may do it** (ADR-0157 §1) — for asking
+   * AgencyBoost to approve it past the leader limit.
+   *
+   * Two acts can let a pending leader in, and the ask names whichever this reader could make: **approving their
+   * join request**, when one is open and is theirs to decide (addressed to them, or the office's for the Owner
+   * and an Admin), joining the leader it names; or else **tagging them** into the reader's own unit, refused
+   * wherever `tag` would be. Anybody else's member is not found, as in the inbox. And only an act the limit
+   * stops is asked about: a pending member whose rung leads nobody is let in directly.
+   */
+  async activationFor(
+    ctx: RequestContext,
+    membershipId: string,
+  ): Promise<{ target: MembershipDocument; joinRequestId: string | null; leaderMembershipId: string }> {
+    const me = this.requireLeader(ctx);
+    const target = await this.members.findById(ctx, membershipId);
+    if (!target || target.status === 'removed') throw new NotFoundException('Membership');
+    if (target.status !== 'pending' || !isLeaderClass(target.role)) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        SAY.VALIDATION_FAILED.letInDirectly,
+        HttpStatus.BAD_REQUEST,
+        { membershipId },
+      );
+    }
+
+    const open = await this.requests.findOne(ctx, { membershipId, status: 'pending' });
+    if (open) {
+      const addressedToMe = open.leaderMembershipId === me || open.routedToMembershipId === me;
+      if (!can(ctx, 'leader_request:approve') || !(addressedToMe || this.isTenantAdmin(ctx))) {
+        throw new NotFoundException('Membership');
+      }
+      // A leader who asked is joined to the leader they asked for: routing places agents, never leaders.
+      return { target, joinRequestId: String(open._id), leaderMembershipId: open.leaderMembershipId };
+    }
+    if (!can(ctx, 'member:add_untagged_to_unit')) throw new NotFoundException('Membership');
+    await this.assertTaggable(ctx, target, me);
+    return { target, joinRequestId: null, leaderMembershipId: me };
+  }
+
+  /**
+   * **AgencyBoost approved it: the approval or the tag the office asked for, made past the limit** (ADR-0157 §3).
+   *
+   * `ctx` is the Super Admin acting in the request's office. The act is the one `approve` or `tag` makes — the
+   * same `attach`, the join request decided by whoever asked, the member's notice — with `pastLimit`, so the
+   * activation re-checks the request with the office's leader lease held and is not counted. A join request
+   * decided since, a member placed since, or a leader who has left makes it stale, and nothing is written.
+   */
+  async carryOutApproved(
+    ctx: RequestContext,
+    request: {
+      requestId: string;
+      subjectMembershipId: string;
+      joinRequestId: string | null;
+      leaderMembershipId: string;
+      requestedByMembershipId: string;
+    },
+    stillApplies: (target: MembershipDocument | null) => Promise<void>,
+  ): Promise<void> {
+    const target = await this.members.findById(ctx, request.subjectMembershipId);
+    await stillApplies(target);
+    const member = target as MembershipDocument;
+    const pastLimit: ApprovedPastLimit = {
+      approvedRequestId: request.requestId,
+      stillApplies: async () => stillApplies(await this.members.findById(ctx, request.subjectMembershipId)),
+    };
+
+    const leader = await this.members.findById(ctx, request.leaderMembershipId);
+    if (!leader || leader.status !== 'active') {
+      throw leaderLimitRequestStale(request.requestId, STALE_REASONS.leaderGone);
+    }
+
+    if (request.joinRequestId) {
+      const joinRequest = await this.requests.findOne(ctx, { _id: request.joinRequestId, status: 'pending' });
+      if (!joinRequest) {
+        throw leaderLimitRequestStale(request.requestId, STALE_REASONS.joinRequestDecided);
+      }
+      await this.attach(ctx, member, request.leaderMembershipId, {
+        action: 'leader_request.approved',
+        requestId: request.joinRequestId,
+      }, { pastLimit }, await this.joiningFor(ctx, member));
+      await this.requests.updateById(ctx, request.joinRequestId, {
+        $set: {
+          status: 'approved',
+          decidedAt: this.clock.now(),
+          // Whoever asked AgencyBoost decided it; the Super Admin is on the audit row.
+          decidedByMembershipId: request.requestedByMembershipId,
+          routedToMembershipId: null,
+        },
+      });
+      await this.notifications.send({
+        userId: member.userId,
+        kpmId: ctx.kpmId,
+        templateId: NotificationTemplate.JOIN_REQUEST_APPROVED,
+        payload: { leaderMembershipId: request.leaderMembershipId },
+      });
+      return;
+    }
+
+    if (member.leaderId) {
+      throw leaderLimitRequestStale(request.requestId, STALE_REASONS.placedSince);
+    }
+    await this.attach(ctx, member, request.leaderMembershipId, { action: 'member.tagged_by_leader' }, { pastLimit }, await this.joiningFor(ctx, member));
+    await this.requests.updateMany(
+      ctx,
+      { membershipId: request.subjectMembershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+    await this.notifications.send({
+      userId: member.userId,
+      kpmId: ctx.kpmId,
+      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+      payload: { leaderMembershipId: request.leaderMembershipId, via: 'tagged' },
+    });
+  }
+
+  /**
+   * Every refusal a tag meets, before anything is written: somebody already in a unit, yourself, the office's
+   * root or Owner, and — for anybody but the office — an orphan who still leads a unit. Shared by `tag` and by
+   * asking AgencyBoost to approve one past the leader limit (`activationFor`), so the ask is refused exactly
+   * where the tag would be.
+   */
+  private async assertTaggable(ctx: RequestContext, target: MembershipDocument, me: string): Promise<void> {
+    const membershipId = String(target._id);
     if (target.leaderId) {
       // Taking somebody out of another leader's unit is a re-parent, not a tag, and it
       // is not a thing you do from a search result.
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'They already report to somebody. Moving them is a different operation.',
+        SAY.ORG_AGENT_ALREADY_TAGGED.reportsToSomebody,
         HttpStatus.CONFLICT,
         { membershipId, leaderId: target.leaderId },
       );
@@ -450,7 +664,7 @@ export class ApprovalsService {
     if (membershipId === me) {
       throw new DomainException(
         ErrorCode.ORG_CYCLE_DETECTED,
-        'You cannot add yourself to your own unit.',
+        SAY.ORG_CYCLE_DETECTED.addYourself,
         HttpStatus.CONFLICT,
       );
     }
@@ -472,7 +686,7 @@ export class ApprovalsService {
     if (isRoot || (await this.hierarchy.ownsTheOffice(ctx, target))) {
       throw new DomainException(
         ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
-        'They lead the office. Nobody tags them into a unit.',
+        SAY.ORG_NOT_PERMITTED_TO_TAG.leadsTheOffice,
         HttpStatus.FORBIDDEN,
         { membershipId },
       );
@@ -491,29 +705,21 @@ export class ApprovalsService {
     if (!tenantAdmin && (target.directCounts?.total ?? 0) > 0) {
       throw new DomainException(
         ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
-        'They lead a unit of their own. Only the office can place them.',
+        SAY.ORG_NOT_PERMITTED_TO_TAG.leadsOwnUnit,
         HttpStatus.FORBIDDEN,
         { membershipId, directCount: target.directCounts?.total ?? 0 },
       );
     }
+  }
 
-    await this.attach(ctx, target, me, { action: 'member.tagged_by_leader' });
-
-    // Any request they had open is moot — they are in somebody's unit now.
-    await this.requests.updateMany(
-      ctx,
-      { membershipId, status: 'pending' },
-      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
-    );
-
-    await this.notifications.send({
-      userId: target.userId,
-      kpmId: ctx.kpmId,
-      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
-      payload: { leaderMembershipId: me, via: 'tagged' },
-    });
-
-    return this.untagged(ctx);
+  /**
+   * **The join date and classification this placement writes, or none** (ADR-0169 §1, §3): for a member who has no
+   * join date in this office yet — a pending one being let in — the date given or the office's today, checked, and
+   * the classification it gives, once. Somebody who already has one keeps it: a move is not a join.
+   */
+  private async joiningFor(ctx: RequestContext, member: MembershipDocument, joinDate?: string): Promise<JoiningFields | null> {
+    if (member.joinedAs) return null;
+    return this.hierarchy.joining(ctx, { joinDate });
   }
 
   /**
@@ -527,7 +733,10 @@ export class ApprovalsService {
     ctx: RequestContext,
     member: MembershipDocument,
     leaderId: string,
-    audit: { action: string; requestId?: string },
+    audit: { action: string; requestId?: string; via?: 'tagged' | 'add_agent' },
+    seat: LeaderSeatOptions = {},
+    /** ADR-0169: written with the activation, for a member who had no join date yet. */
+    joining: JoiningFields | null = null,
   ): Promise<void> {
     const leader = await this.members.findById(ctx, leaderId);
     if (!leader) throw new NotFoundException('Membership');
@@ -570,9 +779,12 @@ export class ApprovalsService {
     const fields = {
       joinedAt: member.joinedAt ?? this.clock.now(),
       recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
+      ...(joining ?? {}),
     };
     if (member.status !== 'active') {
-      await this.hierarchy.activate(ctx, String(member._id), fields);
+      // `seat`: refused here, an approval or a tag may be asked about instead, and comes back approved past the
+      // limit (ADR-0157 §1, §3).
+      await this.hierarchy.activate(ctx, String(member._id), fields, seat);
     } else {
       await this.members.updateById(ctx, String(member._id), { $set: { status: 'active', ...fields } });
     }
@@ -598,13 +810,21 @@ export class ApprovalsService {
       targetCollection: 'memberships',
       targetId: String(member._id),
       targetMembershipId: String(member._id),
-      after: { leaderId, requestId: audit.requestId },
+      after: {
+        leaderId,
+        requestId: audit.requestId,
+        // P18.96-T3: *+ Add agent* linking an account says so, beside a tag from the untagged pool.
+        ...(audit.via === 'add_agent' ? { via: 'add_agent' } : {}),
+        ...(joining ?? {}),
+        ...(seat.pastLimit ? { leaderLimitRequestId: seat.pastLimit.approvedRequestId } : {}),
+      },
     });
 
     /*
      * **Joining under a leader starts an activation** (OD-119): only a member who was pending — an
-     * orphan picked up again, or an active member's leader request, is a move, not a join — and only at
-     * the Agent rung, which the activation module decides. It fails open: the placement above stands.
+     * orphan picked up again, or an active member's leader request, is a move, not a join — and only for a
+     * new hire at the Agent rung (ADR-0169), which the activation module decides. It fails open: the placement
+     * above stands.
      */
     if (wasPending) await startActivation(this.activations, ctx, String(member._id));
   }

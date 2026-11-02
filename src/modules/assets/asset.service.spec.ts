@@ -1,13 +1,15 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
 import { AssetService } from './asset.service';
-import { ASSET_LIMITS } from '@/domain/constants';
+import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
 import {
-  AssetOwner, SignedUpload, StoragePort, StoredObject,
+  AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
 
 /** The folder the adapter would use, mirrored so a stub key still reads like a real one. */
-const ownerFolder = (o: AssetOwner) => (o.kind === 'kpm' ? o.kpmId : `company/${o.companyId}`);
+const ownerFolder = (o: AssetOwner) => ownerSegment(o);
 
 class StubStorage extends StoragePort {
   removed: string[] = [];
@@ -179,6 +181,43 @@ describe('AssetService', () => {
         .rejects.toMatchObject({ code: 'ASSET_TOO_LARGE' });
     });
 
+    /*
+     * P18.7-T2 (the code review's L6): storage reports the type the bytes are (`content-sniff.ts`), which may differ
+     * from the claim — a PNG saved as `.jpg` — and the route's own list is what decides whether the file stays.
+     */
+    it('P18.7-T2 a PNG claimed as a JPEG, on an image route: accepted, and recorded as image/png', async () => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'image/jpeg' });
+      storage.stored = { storageKey: 'k', mimeType: 'image/png', bytes: 2048 };
+
+      const confirmed = await service.confirmUpload(ctx, 'dev/kpm-a/events/1');
+
+      expect(confirmed).toMatchObject({ mimeType: 'image/png', uploadState: 'confirmed' });
+      expect((assets.updateById as jest.Mock).mock.calls[0][2].$set).toEqual({
+        mimeType: 'image/png', bytes: 2048, uploadState: 'confirmed',
+      });
+    });
+
+    it('P18.7-T2 a JPEG on a PDF-only route: refused 415 by the route’s list, and nothing recorded', async () => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
+      storage.stored = { storageKey: 'k', mimeType: 'image/jpeg', bytes: 2048 };
+
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/products/1', DOCUMENT_MIME_TYPES))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415, details: { mimeType: 'image/jpeg' } });
+      expect(assets.updateById).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the whole allow-list', ASSET_LIMITS.ALLOWED_MIME_TYPES],
+      ['a PDF-only route', DOCUMENT_MIME_TYPES],
+    ])('P18.7-T2 an .exe claimed as a PDF — storage reports octet-stream — on %s: refused, and nothing recorded', async (_route, allowed) => {
+      const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
+      storage.stored = { storageKey: 'k', mimeType: 'application/octet-stream', bytes: 4096 };
+
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/recruitment-pitch/1', allowed))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415 });
+      expect(assets.updateById).not.toHaveBeenCalled();
+    });
+
     it('404s an asset belonging to another tenant, without asking storage', async () => {
       const { service, storage } = makeService(null);
       const asked = jest.spyOn(storage, 'describe');
@@ -187,6 +226,34 @@ describe('AssetService', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
       expect(asked).not.toHaveBeenCalled();
     });
+  });
+
+  it('P18.98-T5 AC-2 says each refusal in both languages: the English as it always was, and Indonesian', async () => {
+    const said = async (call: Promise<unknown>) => {
+      const refusal = (await call.catch((err: unknown) => err)) as DomainException;
+      return [refusal.code, refusal.message, refusal.messageFor(readerIn('id'))];
+    };
+    const { service, storage } = makeService();
+    expect(await said(service.requestUpload(ctx, {
+      folder: 'training', filename: 'big.pdf', mimeType: 'application/pdf', bytes: ASSET_LIMITS.MAX_BYTES + 1,
+    }))).toEqual(['ASSET_TOO_LARGE', 'Files must be 25 MB or smaller.', 'Ukuran file paling besar 25 MB.']);
+    expect(await said(service.requestUpload(ctx, { folder: 'x', filename: 'x.exe', mimeType: 'application/x-msdownload', bytes: 10 })))
+      .toEqual(['ASSET_TYPE_NOT_ALLOWED', 'That file type is not accepted.', 'Jenis file itu tidak diterima.']);
+    expect(await said(service.requestUpload(new RequestContext('u2', 'none', null), {
+      folder: 'x', filename: 'a.pdf', mimeType: 'application/pdf', bytes: 10,
+    }))).toEqual(['TENANT_NO_MEMBERSHIP', 'You have not joined a KPM yet.', 'Anda belum bergabung dengan KPM.']);
+    expect(await said(service.urlFor(ctx, 'dev/kpm-b/x/1')))
+      .toEqual(['NOT_FOUND', 'Asset not found.', 'File tidak ditemukan.']);
+    expect(await said(makeService({ uploadState: 'pending' }).service.urlFor(ctx, 'dev/kpm-a/x/1'))).toEqual([
+      'ASSET_NOT_CONFIRMED', 'This file has not finished uploading yet. Try again shortly.',
+      'File ini belum selesai diunggah. Coba lagi sebentar lagi.',
+    ]);
+    const pending = makeService({ _id: 'a1', uploadState: 'pending' });
+    pending.storage.stored = null;
+    expect(await said(pending.service.confirmUpload(ctx, 'dev/kpm-a/x/1'))).toEqual([
+      'ASSET_NOT_UPLOADED', 'That file never finished uploading. Try again.', 'File itu tidak selesai diunggah. Coba lagi.',
+    ]);
+    expect(storage.removed).toEqual([]);
   });
 
   describe('orphan reporting', () => {

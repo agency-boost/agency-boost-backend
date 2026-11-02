@@ -1,0 +1,4 @@
+# shellcheck for deploy/ (P18.7-T3): a sourced lib.sh is found beside the script that sources it,
+# wherever shellcheck is run from.
+source-path=SCRIPTDIR
+external-sources=true

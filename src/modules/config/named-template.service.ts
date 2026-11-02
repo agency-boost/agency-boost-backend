@@ -1,10 +1,13 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
@@ -12,11 +15,12 @@ import { CompanyTemplate, CompanyTemplateDocument } from './company-template.sch
 import {
   NamedTemplate, NamedTemplateDocument, type TemplateOrigin,
 } from './named-template.schema';
-import { OfficeCounter, type TemplateScope } from './office-counter.port';
+import { OfficeCounter, standingOf, type TemplateScope } from './office-counter.port';
 import type { TemplateKinds } from './office-template';
 import {
   OFFICE_TEMPLATE_KINDS, platformDefaultPayload, type OfficeTemplateKind,
 } from './template-defaults';
+import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * How a new template starts (ADR-0115 §5): empty, the AgencyBoost defaults, or **a copy of one of the
@@ -28,6 +32,31 @@ export type NewTemplateFrom = 'empty' | 'defaults' | { templateId: string };
 export interface PublishedKinds {
   kinds: TemplateKinds;
   versions: Partial<Record<OfficeTemplateKind, number>>;
+}
+
+/**
+ * **Where one kind of a template stands** (ADR-0185 §3): what the template card's *x/6 bagian terbit* and *n perubahan
+ * belum terbit*, and the checklist's *Terbit vN · Draf · Kosong*, are read from.
+ */
+export interface TemplateSectionState {
+  /** The newest published version, `null` where none is — which an office made from the template gets empty. */
+  publishedVersion: number | null;
+  /** A draft is waiting: saved, not published. */
+  hasDraft: boolean;
+}
+
+/**
+ * **One office the template answers for, and the kinds it is behind on** (ADR-0185 §4): the list behind the checklist's
+ * *N KPM memakai versi lama*. `behind` and `unrecorded` are counted apart, as `standing` counts them (P5-T12).
+ */
+export interface TemplateOfficeView {
+  id: string;
+  code: string;
+  branchName: string;
+  /** Kinds this template has published a newer version of than the office was built from, or held none of then. */
+  behind: OfficeTemplateKind[];
+  /** Kinds the office has no record of — created before provisioning recorded them, so not known. */
+  unrecorded: OfficeTemplateKind[];
 }
 
 /** One named template as the console reads it. */
@@ -44,6 +73,11 @@ export interface NamedTemplateView {
    * which an office made from it gets **empty** (ADR-0115 §3).
    */
   publishedVersions: Record<OfficeTemplateKind, number | null>;
+  /**
+   * **Each of its seven kinds: its newest published version and whether a draft waits** (ADR-0185 §3), for the
+   * template's card and its checklist — one read for the list, never one per kind.
+   */
+  sections: Record<OfficeTemplateKind, TemplateSectionState>;
   /** The live offices it answers for: started from it, and for the migration's, those before 13.2. */
   officeCount: number;
   createdAt: string;
@@ -195,9 +229,7 @@ export class NamedTemplateService {
     if (renaming && template.status === 'active') await this.refuseNameTaken(companyId, name, templateId);
     if (input.isDefault === false && template.isDefault) {
       // A company always has exactly one default: it moves by making another the default.
-      throw this.isDefault(
-        template.name, 'cannot stop being the default on its own. Make another template the default instead.',
-      );
+      throw this.isDefault(TEMPLATE_REFUSALS.TEMPLATE_IS_DEFAULT.cannotStopBeingDefault({ name: template.name }));
     }
     const makingDefault = input.isDefault === true && !template.isDefault;
     if (makingDefault && template.status === 'archived') throw this.archivedCannotBeDefault();
@@ -274,6 +306,40 @@ export class NamedTemplateService {
     return { templateId: String(template._id), holdsLegacyOffices: template.origin?.kind === 'migration' };
   }
 
+  /**
+   * **The live offices one template answers for, each with the kinds it is behind on** (ADR-0185 §4): what the
+   * checklist's *N KPM memakai versi lama* opens. Information only — copy, never link (ADR-0115 §6): nothing here
+   * changes an office. Every office the template answers for, by code; an archived template's too, as it stays
+   * readable. `404` for a company or a template that is not the company's.
+   *
+   * **`company_template:read`, asked here as well as on the route** (S6 of the T17–T20 permission review): this lists
+   * offices across the company, so it is refused before anything is read to a caller without it, whoever calls it —
+   * as `publishAll` asks `company_template:write`.
+   */
+  async offices(ctx: RequestContext, companyId: string, templateId: string): Promise<TemplateOfficeView[]> {
+    if (!can(ctx, 'company_template:read')) throw new PermissionDeniedException('company_template:read');
+    await this.requireCompany(companyId);
+    const template = await this.find(companyId, templateId);
+    const [states, offices] = await Promise.all([
+      this.sectionsOf(companyId, [String(template._id)]),
+      this.officesOf.officesOf(companyId, this.scopeOf(template)),
+    ]);
+    const sections = states.get(String(template._id))!;
+    return offices.map((office) => {
+      const behind: OfficeTemplateKind[] = [];
+      const unrecorded: OfficeTemplateKind[] = [];
+      for (const kind of OFFICE_TEMPLATE_KINDS) {
+        const published = sections[kind].publishedVersion;
+        // Nothing published of the kind: there is no version to be behind, or unrecorded against.
+        if (published === null) continue;
+        const standing = standingOf(office.seededFrom[kind], published);
+        if (standing === 'behind') behind.push(kind);
+        if (standing === 'unrecorded') unrecorded.push(kind);
+      }
+      return { id: office.id, code: office.code, branchName: office.branchName, behind, unrecorded };
+    });
+  }
+
   // ------------------------------------------------- what the copies share (P13.2-T7)
 
   /**
@@ -290,6 +356,42 @@ export class NamedTemplateService {
   /** The company exists and is not deleted, or `404`. */
   async checkCompany(companyId: string): Promise<void> {
     await this.requireCompany(companyId);
+  }
+
+  /**
+   * **The Template library and its default template** (ADR-0164): the one company of kind `template`, which a
+   * new company copies and a new office may start from. `null` where there is none — a database migration
+   * `0037` has not run on, as a spec's may be — and the caller falls back to the AgencyBoost defaults.
+   */
+  async library(): Promise<{ companyId: string; template: NamedTemplateDocument } | null> {
+    const company = await this.companies.findOne({ kind: 'template', deletedAt: null }, { _id: 1 }).exec();
+    if (!company) return null;
+    const companyId = String(company._id);
+    const template = await this.named.findOne({ companyId, isDefault: true, deletedAt: null }).exec();
+    return template ? { companyId, template } : null;
+  }
+
+  /**
+   * **A company-level kind, copied to a new company** (ADR-0164 §4): the source's newest published
+   * `campaign_kinds`, as the new company's published version 1 under no template — so its tab reads what its
+   * carrier rules were copied from, not the platform's. Nothing where the source never published one. A copy,
+   * never a link. `true` when it wrote.
+   */
+  async copyCompanyKind(
+    ctx: RequestContext, kind: 'campaign_kinds', fromCompanyId: string, companyId: string,
+  ): Promise<boolean> {
+    const source = await this.rows
+      .findOne({ companyId: fromCompanyId, templateId: null, kind, status: 'published', deletedAt: null })
+      .sort({ version: -1 })
+      .exec();
+    if (!source) return false;
+    if (await this.rows.exists({ companyId, templateId: null, kind, deletedAt: null }).exec()) return false;
+    await this.rows.create({
+      companyId, templateId: null, kind, version: 1, status: 'published',
+      payload: structuredClone(source.toObject().payload), publishedAt: this.clock.now(),
+      deletedAt: null, createdBy: ctx.userId, updatedBy: ctx.userId,
+    });
+    return true;
   }
 
   /** One of the company's templates, archived ones included; `404` for any other id. */
@@ -386,7 +488,7 @@ export class NamedTemplateService {
 
   private cleanName(raw: string): string {
     const name = raw.trim().replace(/\s+/g, ' ');
-    if (!name) throw new BadRequestException('A template needs a name.');
+    if (!name) throw new InvalidRequestException(TEMPLATE_REFUSALS.VALIDATION_FAILED.templateNeedsName);
     return name;
   }
 
@@ -403,14 +505,7 @@ export class NamedTemplateService {
 
   /** `company_template:write`, or `403 PERM_DENIED` — before anything is read or written. */
   private require(ctx: RequestContext): void {
-    if (!can(ctx, 'company_template:write')) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You do not have permission to perform this action.',
-        HttpStatus.FORBIDDEN,
-        { permission: 'company_template:write' },
-      );
-    }
+    if (!can(ctx, 'company_template:write')) throw new PermissionDeniedException('company_template:write');
   }
 
   /**
@@ -473,13 +568,11 @@ export class NamedTemplateService {
   }
 
   private archivingTheDefault(name: string): DomainException {
-    return this.isDefault(
-      name, 'cannot be archived. Make another template the default first, then archive this one.',
-    );
+    return this.isDefault(TEMPLATE_REFUSALS.TEMPLATE_IS_DEFAULT.cannotArchive({ name }));
   }
 
-  private archivedCannotBeDefault(): BadRequestException {
-    return new BadRequestException('An archived template cannot be the default. Use an active one.');
+  private archivedCannotBeDefault(): InvalidRequestException {
+    return new InvalidRequestException(TEMPLATE_REFUSALS.VALIDATION_FAILED.archivedCannotBeDefault);
   }
 
   /**
@@ -490,25 +583,20 @@ export class NamedTemplateService {
   private defaultMoved(): DomainException {
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,
-      'This company’s default template changed while this was being saved, and nothing was changed. '
-        + 'Reload the templates and try again.',
+      TEMPLATE_REFUSALS.VERSION_CONFLICT.defaultMoved,
       HttpStatus.CONFLICT,
     );
   }
 
   /** `TEMPLATE_IS_DEFAULT` (409): archiving the default, or un-defaulting it without a successor. */
-  private isDefault(name: string, what: string): DomainException {
-    return new DomainException(
-      ErrorCode.TEMPLATE_IS_DEFAULT,
-      `${name} is this company’s default template, so it ${what}`,
-      HttpStatus.CONFLICT,
-    );
+  private isDefault(why: Sentence<'TEMPLATE_IS_DEFAULT'>): DomainException {
+    return new DomainException(ErrorCode.TEMPLATE_IS_DEFAULT, why, HttpStatus.CONFLICT);
   }
 
   private nameTaken(name: string): DomainException {
     return new DomainException(
       ErrorCode.TEMPLATE_NAME_TAKEN,
-      `This company already has a template called ${name}. Choose another name.`,
+      TEMPLATE_REFUSALS.TEMPLATE_NAME_TAKEN.taken({ name }),
       HttpStatus.CONFLICT,
       { name },
     );
@@ -527,26 +615,16 @@ export class NamedTemplateService {
     if (templates.length === 0) return [];
     const legacy = await this.named
       .findOne({ companyId, 'origin.kind': 'migration', deletedAt: null }, { _id: 1 }).exec();
-    const [counts, published] = await Promise.all([
+    const [counts, states] = await Promise.all([
       this.officesOf.countsByTemplate(companyId, legacy ? String(legacy._id) : null),
-      this.rows
-        .aggregate<{ _id: { templateId: string; kind: OfficeTemplateKind }; version: number }>([
-          {
-            $match: {
-              companyId, status: 'published', deletedAt: null,
-              templateId: { $in: templates.map((t) => String(t._id)) },
-            },
-          },
-          { $group: { _id: { templateId: '$templateId', kind: '$kind' }, version: { $max: '$version' } } },
-        ])
-        .exec(),
+      this.sectionsOf(companyId, templates.map((t) => String(t._id))),
     ]);
 
     return templates.map((t) => {
       const id = String(t._id);
+      const sections = states.get(id)!;
       const publishedVersions = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [
-        kind,
-        published.find((p) => p._id.templateId === id && p._id.kind === kind)?.version ?? null,
+        kind, sections[kind].publishedVersion,
       ])) as Record<OfficeTemplateKind, number | null>;
       const stamps = t as unknown as { createdAt?: Date; updatedAt?: Date };
       return {
@@ -558,11 +636,46 @@ export class NamedTemplateService {
         archivedAt: t.archivedAt ? t.archivedAt.toISOString() : null,
         origin: t.origin,
         publishedVersions,
+        sections,
         officeCount: counts.get(id) ?? 0,
         createdAt: (stamps.createdAt ?? this.clock.now()).toISOString(),
         updatedAt: (stamps.updatedAt ?? this.clock.now()).toISOString(),
       };
     });
+  }
+
+  /**
+   * **Each template's seven kinds: the newest published version and whether a draft waits** (ADR-0185 §3) — one
+   * aggregate over `companyTemplates` for every template asked about, filtered by the company and the ids. A kind with
+   * no row at all is `{ publishedVersion: null, hasDraft: false }`: *Kosong*.
+   */
+  private async sectionsOf(
+    companyId: string, templateIds: string[],
+  ): Promise<Map<string, Record<OfficeTemplateKind, TemplateSectionState>>> {
+    const rows = await this.rows
+      .aggregate<{ _id: { templateId: string; kind: OfficeTemplateKind; status: 'draft' | 'published' }; version: number }>([
+        {
+          $match: {
+            companyId, status: { $in: ['draft', 'published'] }, deletedAt: null,
+            templateId: { $in: templateIds },
+          },
+        },
+        {
+          $group: {
+            _id: { templateId: '$templateId', kind: '$kind', status: '$status' }, version: { $max: '$version' },
+          },
+        },
+      ])
+      .exec();
+
+    return new Map(templateIds.map((id) => {
+      const mine = rows.filter((r) => r._id.templateId === id);
+      const sections = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, {
+        publishedVersion: mine.find((r) => r._id.kind === kind && r._id.status === 'published')?.version ?? null,
+        hasDraft: mine.some((r) => r._id.kind === kind && r._id.status === 'draft'),
+      }])) as Record<OfficeTemplateKind, TemplateSectionState>;
+      return [id, sections];
+    }));
   }
 }
 

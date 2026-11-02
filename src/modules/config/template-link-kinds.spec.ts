@@ -1,11 +1,13 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { activationLinkKinds } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, givenDefaultTemplate } from '../../../test/config-module';
 
 const NOW = new Date('2026-10-10T03:00:00Z');
-const root = new RequestContext('u-root', 'super_admin', null);
+/** The Super Admin, reading the API's English as an `Accept-Language: en` request does (ADR-0179 §9). */
+const root = new RequestContext('u-root', 'super_admin', null).withReader(SOURCE_READER);
 
 /**
  * **The Company template's *Auto*, from the `live` the server serves** (P18.5-T3 AC-6, I-80): an
@@ -41,7 +43,7 @@ describe('the Company template’s link kinds (P18.5-T3 AC-6)', () => {
   };
 
   it('P18.5-T3 AC-6 an activation checklist read answers every kind, the training kind live', async () => {
-    const empty = await wired.templateService.read(companyId, 'activation_checklist');
+    const empty = await wired.templateService.read(companyId, 'activation_checklist', undefined, SOURCE_READER);
     expect(empty.linkKinds).toEqual(expected);
     expect(empty.linkKinds).toEqual(activationLinkKinds());
   });
@@ -60,7 +62,29 @@ describe('the Company template’s link kinds (P18.5-T3 AC-6)', () => {
   });
 
   it('P18.5-T3 AC-6 every other kind answers none', async () => {
-    const taxonomy = await wired.templateService.read(companyId, 'training_taxonomy');
+    const taxonomy = await wired.templateService.read(companyId, 'training_taxonomy', undefined, SOURCE_READER);
     expect(taxonomy).not.toHaveProperty('linkKinds');
+  });
+  it('P18.98-T7 what completes each kind is written for the reader — the activation module’s own words', async () => {
+    const id = readerIn('id');
+    const read = await wired.templateService.read(companyId, 'activation_checklist', undefined, id);
+    expect(Object.fromEntries(Object.entries(read.linkKinds!).map(([k, v]) => [k, v.completesWhen]))).toEqual({
+      'feature:goals': 'rekrut telah menyimpan goal apa pun sejak bergabung',
+      'feature:leads': 'rekrut telah menambahkan setidaknya satu prospek',
+      'feature:activity': 'rekrut telah mencatat aktivitas selama empat minggu berturut-turut',
+      training: 'rekrut telah menyelesaikan modul training tersebut',
+    });
+    // The labels are page names and the kind's own, the same in both; route and live as they are.
+    expect(Object.values(read.linkKinds!).map((k) => [k.label, k.route, k.live]))
+      .toEqual(Object.values(expected).map((k) => [k.label, k.route, k.live]));
+    const history = await wired.templateService.history(companyId, 'activation_checklist', undefined, id);
+    for (const row of history) expect(row.linkKinds).toEqual(read.linkKinds);
+    const saved = await wired.templateService.saveDraft(root.withReader(id), companyId, 'activation_checklist', {
+      aspects: [{
+        code: 'TRAINING', label: '1. Pelatihan', displayOrder: 1,
+        items: [{ code: 'ROLE_PLAY', label: 'Role play', displayOrder: 1, autoLink: null }],
+      }],
+    });
+    expect(saved.linkKinds).toEqual(read.linkKinds);
   });
 });

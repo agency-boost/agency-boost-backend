@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn } from '@/common/i18n/reader';
 import { SUBJECT_READ_ACTION } from '@/modules/audit/subject-read-audit';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { type Who } from '../../../test/coaching-office';
@@ -99,7 +100,7 @@ describe('compare and Block time (P12-T5)', () => {
         type: 'client', title: 'Client visit — Kusuma', notes: 'Client site — Kusuma residence, Jl. Melati 4', inviteeIds: [h.id('RINA')],
       }));
       const pane = (await compare('AGUS', h.id('SARI')).expect(200)).body;
-      expect(pane.subject).toEqual({ membershipId: h.id('SARI'), name: 'Sari Puspita', rung: { code: 'AAB', label: 'AAB' } });
+      expect(pane.subject).toEqual({ membershipId: h.id('SARI'), name: 'Sari Puspita', rung: { code: 'AAB', label: 'AAB' }, phone: null });
       expect(pane.entries).toEqual([{
         ...visit,
         readerIs: 'ancestor', myAnswer: null,
@@ -158,6 +159,29 @@ describe('compare and Block time (P12-T5)', () => {
       expect(await reads()).toEqual([]);
     });
 
+    it('P18.95-T8 AC-2 a compared month answers in the same projection, and writes one record with the month’s span', async () => {
+      const visit = await create('SARI', timed(2, '10:00', '11:00', { type: 'client', title: 'Client visit — Kusuma', notes: 'Kusuma residence' }));
+      await create('PEER_AB', timed(3, '13:00', '14:00', { title: 'Peer planning', inviteeIds: [h.id('SARI')] }));
+      h.as('AGUS');
+      const res = await h.http().get('/calendar/entries').query({ view: 'month', date: WEEK.monday, for: h.id('SARI') }).expect(200);
+      expect(res.body).toMatchObject({ view: 'month', month: '2026-09', from: '2026-08-31', to: '2026-10-04' });
+      expect(res.body.subject).toMatchObject({ membershipId: h.id('SARI'), name: 'Sari Puspita' });
+      const [own, attended] = res.body.entries;
+      // What she organised, in full (ADR-0093); what she only attends, from a peer, as a busy block.
+      expect(own).toMatchObject({ entryId: visit.entryId, title: 'Client visit — Kusuma', notes: 'Kusuma residence', readerIs: 'ancestor' });
+      expect(Object.keys(attended).sort()).toEqual(BUSY_KEYS);
+      expect(JSON.stringify(res.body.entries)).not.toContain('Peer planning');
+      expect((await reads()).map((e) => [e.actorMembershipId, e.targetMembershipId, e.after])).toEqual([
+        [h.id('AGUS'), h.id('SARI'), { surface: 'calendar', from: '2026-08-31', to: '2026-10-04' }],
+      ]);
+      // Outside COACH, a month is refused as a week is, and writes nothing.
+      await h.col('auditLog').deleteMany({});
+      h.as('SARI');
+      const up = await h.http().get('/calendar/entries').query({ view: 'month', for: h.id('AGUS') }).expect(404);
+      expect(up.body.error.code).toBe('NOT_FOUND');
+      expect(await reads()).toEqual([]);
+    });
+
     it('calendar_compare_outside_coach P12-T5 AC-5 an AAB reaches a nested unit; outside COACH is 404 and writes no record', async () => {
       await compare('SARI', h.id('DODI')).expect(200);
       await h.col('auditLog').deleteMany({});
@@ -178,6 +202,27 @@ describe('compare and Block time (P12-T5)', () => {
         expect([who, member, res.status, res.body.error?.code]).toEqual([who, member, 404, 'NOT_FOUND']);
       }
       expect(await reads()).toEqual([]);
+    });
+
+    it('P18.95-T8 AC-2, the permission review: a month answers every reader exactly as a week does, refusals writing nothing', async () => {
+      const readers: [Who, string][] = [
+        ['AGUS', h.id('SARI')], ['SARI', h.id('DODI')], // within COACH
+        ['OWNER', h.id('SARI')], ['ADMIN', h.id('SARI')], ['OWNER', h.id('B_AGENT')], ['ADMIN', h.id('B_AGENT')],
+        ['SARI', h.id('PEER_AGENT')], ['SARI', h.id('AGUS')], ['AGUS', h.id('B_AGENT')], ['INDAH', h.id('DIMAS')],
+        ['LUKAS', h.id('TARI')], ['B_AB', h.id('SARI')],
+      ];
+      for (const [who, member] of readers) {
+        await h.col('auditLog').deleteMany({});
+        const week = await compare(who, member);
+        const weekReads = (await reads()).length;
+        await h.col('auditLog').deleteMany({});
+        h.as(who);
+        const month = await h.http().get('/calendar/entries').query({ for: member, date: WEEK.monday, view: 'month' });
+        const monthReads = (await reads()).length;
+        expect([who, member, month.status, month.body.error?.code ?? null, monthReads])
+          .toEqual([who, member, week.status, week.body.error?.code ?? null, weekReads]);
+        if (month.status !== 200) expect([who, member, monthReads]).toEqual([who, member, 0]);
+      }
     });
 
     it('m2 an empty `for` names nobody: 400 VALIDATION_FAILED, never the reader’s own calendar, and no record', async () => {
@@ -244,7 +289,7 @@ describe('compare and Block time (P12-T5)', () => {
       expect(rows[0].delivery).toMatchObject({ in_app: { status: 'sent' }, email: { status: 'sent' } });
       expect(h.email!.sent.filter((s) => s.to.templateId === NotificationTemplate.CALENDAR_BLOCK_PLACED)).toHaveLength(1);
       expect(await inbox('AGUS')).toEqual([]);
-      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership);
+      const indah = new RequestContext(await userOf('INDAH'), 'none', h.office.as('INDAH').membership).withReader(readerIn('en'));
       expect((await h.notifications!.inbox(indah)).items[0]).toMatchObject({
         title: 'Time was blocked on your calendar', detail: 'A leader above you placed it. Open it to see when.',
         href: `/calendar?entry=${placed.entryId}&date=2026-09-16`,

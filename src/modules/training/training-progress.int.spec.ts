@@ -58,20 +58,19 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   // ------------------------------------------------------------------ T1: the list
 
   describe('GET /training/progress (T1, T2)', () => {
-    it('P18.5-T1 AC-4 answers the offered catalog in the contract’s shape: six categories, Sales’s six skills, its ten modules', async () => {
+    /*
+     * *Amended 2026-10-28 (P18.97-T4 AC-9, ADR-0176 §9; UI-031):* the five categories the seed leaves empty were in the
+     * answer, each at *(0/0)*, and an agent opened their tabs onto *coming soon*. A category with no published module
+     * is not offered now, so the answer holds Sales alone; the Owner's settings still list the five.
+     */
+    it('P18.5-T1 AC-4 answers the offered catalog in the contract’s shape: Sales, its six skills, its ten modules', async () => {
       h.as('RINA');
       const view: View = (await h.http().get('/training/progress').expect(200)).body;
 
       expect(Object.keys(view).sort()).toEqual(VIEW_KEYS);
       expect(view).toMatchObject({ membershipId: id('RINA'), done: 0, total: 10, pct: 0, allOfferedDone: false });
-      expect(view.categories.map((c) => [c.code, c.label, c.offered, c.total])).toEqual([
-        ['SALES', 'Sales', true, 10], ['PRODUCT', 'Product', true, 0], ['RECRUITING', 'Recruiting', true, 0],
-        ['TEAM_MANAGEMENT', 'Team Management', true, 0], ['SOFT_SKILLS', 'Soft Skills', true, 0],
-        ['COMPANY_AND_KPM', 'Company and KPM', true, 0],
-      ]);
+      expect(view.categories.map((c) => [c.code, c.label, c.offered, c.total])).toEqual([['SALES', 'Sales', true, 10]]);
       expect(Object.keys(view.categories[0]).sort()).toEqual(CATEGORY_KEYS);
-      // An empty category: no skills, and a null share — drawn (0/0), never 0%.
-      expect(view.categories[1]).toMatchObject({ skills: [], done: 0, total: 0, pct: null });
       expect(sales(view).skills.map((s) => [s.code, s.modules.length])).toEqual([
         ['PROSPECTING', 3], ['NEEDS_ANALYSIS', 2], ['OBJECTION_HANDLING', 2], ['CLOSING', 1], ['CROSS_SELL', 1], ['RETENTION', 1],
       ]);
@@ -236,7 +235,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
         $set: { officeContent: { files: [], videos: [], links: [{ id: '01JLINKNEW000000000000000', label: 'New talk', url: 'https://learn.example.com/close' }] } },
       });
       const page = (await h.http().get('/training/modules/CLOSING_TECHNIQUES').expect(200)).body;
-      expect(page.title).toBe('Closing Techniques That Work');
+      expect(page.title).toBe('Teknik closing yang efektif');
       expect(page.items.map((i: { label: string }) => i.label)).toEqual(['New talk']);
     });
   });
@@ -249,8 +248,8 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       const page = (await h.http().get('/training/modules/prospect_list').expect(200)).body;
       expect(Object.keys(page).sort()).toEqual(PAGE_KEYS);
       expect(page).toMatchObject({
-        code: 'PROSPECT_LIST', title: 'Building Your Prospect List',
-        category: { code: 'SALES', label: 'Sales' }, skill: { code: 'PROSPECTING', label: 'Prospecting' },
+        code: 'PROSPECT_LIST', title: 'Menyusun daftar prospek Anda',
+        category: { code: 'SALES', label: 'Sales' }, skill: { code: 'PROSPECTING', label: 'Pencarian prospek' },
         status: 'not_started', startedAt: null, completedAt: null, openedItemIds: [], can: { update: true },
       });
       expect(page.items).toEqual([
@@ -448,7 +447,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       // The skill is still offered, with nothing offered in it: its card holds the history alone.
       expect(retention).toMatchObject({ offered: true, done: 0, total: 0, modules: [] });
       expect(retention.archived).toEqual([
-        { code: 'CLIENT_RETENTION', title: 'Client Retention Best Practices', formats: [], status: 'done', completedAt: '2026-09-14T03:00:00.000Z' },
+        { code: 'CLIENT_RETENTION', title: 'Praktik terbaik mempertahankan nasabah', formats: [], status: 'done', completedAt: '2026-09-14T03:00:00.000Z' },
       ]);
       // A module in progress when it was withdrawn is not history: only done is.
       expect(await stored('RINA', 'CLIENT_RETENTION')).toMatchObject({ status: 'done' });
@@ -495,10 +494,8 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.wired.training.archiveCategory(owner, salesRow.id);
       await h.publish();
       view = (await h.http().get('/training/progress').expect(200)).body;
-      expect(view.categories.map((c) => [c.code, c.offered])).toEqual([
-        ['PRODUCT', true], ['RECRUITING', true], ['TEAM_MANAGEMENT', true], ['SOFT_SKILLS', true], ['COMPANY_AND_KPM', true],
-        ['SALES', false],
-      ]);
+      // The five empty categories offer nothing (P18.97-T4 AC-9) and hold no history, so only Sales's history is drawn.
+      expect(view.categories.map((c) => [c.code, c.offered])).toEqual([['SALES', false]]);
       expect(view.categories.at(-1)).toMatchObject({ done: 0, total: 0, pct: null, skills: [{ code: 'RETENTION', archived: [{ code: 'CLIENT_RETENTION' }] }] });
       expect([view.done, view.total]).toEqual([0, 0]);
     });
@@ -520,6 +517,87 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       } finally {
         await h.col('memberships').deleteOne({ _id: rejoined });
       }
+    });
+  });
+
+  // ------------------------------------------------------------------ P18.97-T4: an empty category is not offered
+
+  /*
+   * **A training category with no published module is not offered to a field member** (P18.97-T4 AC-9, ADR-0176 §9;
+   * the client's UI-031: *Product, Recruiting, Team Management, Soft Skills, Company and KPM are EMPTY but appear as
+   * tabs for agents*). `GET /training/progress` leaves it out, for an agent and for the Owner reading their own; the
+   * Owner's settings still list it, and a member's history under one is still read, as a category no longer offered.
+   */
+  describe('a category with nothing published (P18.97-T4 AC-9)', () => {
+    const EMPTY = ['PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM'];
+    const codes = (view: View) => view.categories.map((c) => c.code);
+
+    it('P18.97-T4 AC-9 a field member’s read leaves out every category with no published module', async () => {
+      for (const who of ['RINA', 'SARI', 'AGUS'] as const) {
+        h.as(who);
+        const view: View = (await h.http().get('/training/progress').expect(200)).body;
+        expect(codes(view)).toEqual(['SALES']);
+      }
+    });
+
+    it('P18.97-T4 AC-9 the Owner’s own read leaves them out too, and the Owner’s settings still list all six', async () => {
+      h.as('OWNER');
+      const own: View = (await h.http().get('/training/progress').expect(200)).body;
+      expect(codes(own)).toEqual(['SALES']);
+
+      const settings = (await h.http().get('/kpm/settings/training').expect(200)).body as { code: string; skills: unknown[] }[];
+      expect(settings.map((c) => c.code)).toEqual(['SALES', ...EMPTY]);
+      // The Owner's list keeps them as the office holds them: each empty, for the Owner to fill.
+      expect(settings.filter((c) => EMPTY.includes(c.code)).every((c) => c.skills.length === 0)).toBe(true);
+    });
+
+    it('P18.97-T4 AC-9 a category whose skill holds only drafts is not offered either; publishing one offers it', async () => {
+      const owner = h.office.as('OWNER');
+      const product = (await h.wired.training.list(owner, true)).find((c) => c.code === 'PRODUCT')!;
+      await h.wired.training.createSkill(owner, { code: 'PRODUCT_BASICS', categoryCode: product.code, label: 'Product Basics' });
+      const draft = await h.wired.training.createModule(owner, {
+        code: 'PRUFUTURE_101', skillCode: 'PRODUCT_BASICS', title: 'PRUFuture in ten minutes',
+      });
+      await h.publish();
+      h.as('RINA');
+      expect(codes((await h.http().get('/training/progress').expect(200)).body)).toEqual(['SALES']);
+
+      await h.wired.training.updateModule(owner, draft.id, { publishState: 'published' });
+      await h.publish();
+      const view: View = (await h.http().get('/training/progress').expect(200)).body;
+      expect(view.categories.map((c) => [c.code, c.offered, c.total])).toEqual([['SALES', true, 10], ['PRODUCT', true, 1]]);
+    });
+
+    it('P18.97-T4 AC-9 a member’s history under a category that has nothing published is read as no longer offered', async () => {
+      h.as('RINA');
+      await h.col('trainingProgress').insertOne({
+        kpmId: KPM_A, membershipId: id('RINA'), moduleCode: 'OLD_PRODUCT_TALK', status: 'done', startedAt: new Date('2026-03-01'),
+        completedAt: new Date('2026-03-02'), opened: [], version: 2, deletedAt: null, createdBy: id('RINA'), updatedBy: id('RINA'),
+      });
+      const owner = h.office.as('OWNER');
+      await h.wired.training.createSkill(owner, { code: 'PRODUCT_BASICS', categoryCode: 'PRODUCT', label: 'Product Basics' });
+      const old = await h.wired.training.createModule(owner, {
+        code: 'OLD_PRODUCT_TALK', skillCode: 'PRODUCT_BASICS', title: 'The old product talk',
+      });
+      await h.wired.training.archiveModule(owner, old.id);
+      await h.publish();
+
+      const view: View = (await h.http().get('/training/progress').expect(200)).body;
+      expect(view.categories.map((c) => [c.code, c.offered])).toEqual([['SALES', true], ['PRODUCT', false]]);
+      expect(view.categories[1]).toMatchObject({
+        done: 0, total: 0, pct: null,
+        skills: [{ code: 'PRODUCT_BASICS', offered: false, modules: [], archived: [{ code: 'OLD_PRODUCT_TALK' }] }],
+      });
+      expect([view.done, view.total]).toEqual([0, 10]);
+    });
+
+    it('P18.97-T4 AC-9 a coach’s read is the same answer, and another office’s member is 404', async () => {
+      h.as('SARI');
+      expect(codes((await h.http().get(`/training/progress?for=${id('RINA')}`).expect(200)).body)).toEqual(['SALES']);
+      const res = await h.http().get(`/training/progress?for=${id('B_AGENT')}`).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      h.as('OWNER');
+      await h.http().get(`/training/progress?for=${id('B_AB')}`).expect(404);
     });
   });
 
@@ -662,7 +740,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(view, 'MANDATORY_TRAINING')).toMatchObject({
         done: false,
         link: {
-          kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', live: true,
+          kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', live: true,
           route: '/training/SALES/CLOSING_TECHNIQUES', completesWhen: 'the hire has completed that training module',
         },
       });
@@ -746,7 +824,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('CLOSING_TECHNIQUES')).id);
       await h.publish();
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({
-        kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', route: null, live: false,
+        kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', route: null, live: false,
       });
 
       h.as('BUDI');
@@ -802,11 +880,11 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       // *Go to* to a page that would not answer (the second training review, a).
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({
         done: true, source: 'link',
-        link: { kind: 'training:CLOSING_TECHNIQUES', label: 'Closing Techniques That Work', route: null, live: true },
+        link: { kind: 'training:CLOSING_TECHNIQUES', label: 'Teknik closing yang efektif', route: null, live: true },
       });
       h.as('SARI');
       expect(itemOf((await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body, 'MANDATORY_TRAINING').link)
-        .toMatchObject({ label: 'Closing Techniques That Work', route: null, live: true });
+        .toMatchObject({ label: 'Teknik closing yang efektif', route: null, live: true });
       h.as('BUDI');
       for (const done of [false, true]) {
         const res = await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done }).expect(409);
@@ -837,10 +915,10 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       const module = await h.moduleRow('CLOSING_TECHNIQUES');
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { title: 'Closing, renamed in the draft' });
       // Not yet published: the hire and the leader read the offered title.
-      expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({ label: 'Closing Techniques That Work' });
+      expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({ label: 'Teknik closing yang efektif' });
       h.as('SARI');
       expect(itemOf((await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body, 'MANDATORY_TRAINING').link)
-        .toMatchObject({ label: 'Closing Techniques That Work' });
+        .toMatchObject({ label: 'Teknik closing yang efektif' });
 
       // Unpublished and published since: not offered, so its code, and the catalog — never the draft's title.
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { publishState: 'draft' });

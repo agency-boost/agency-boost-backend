@@ -1,6 +1,6 @@
 import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
-  activityTargets, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
+  activityTargets, goalFigures, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
   ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
 } from './summary-figures';
 
@@ -25,6 +25,13 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
 
     it('caps the printed attainment at 999', () => {
       expect(periodFigures(1 * M, 50 * M, 18 * M).attainmentPct).toBe(999);
+    });
+
+    it('P18.97-T3 F-254 rounds an exact half up in integers: Rp 23 jt of Rp 40 jt is 58%, which the float read 57', () => {
+      expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
+      expect(periodFigures(40 * M, 23 * M, 18 * M).attainmentPct).toBe(58);
+      // The cap and the zero target's null are kept: only the rounding changed.
+      expect(periodFigures(40 * M, 23 * M * 100, 18 * M).attainmentPct).toBe(999);
     });
 
     it('AC-5: has no attainment without a goal — null, not 0%', () => {
@@ -149,20 +156,29 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
   });
 
   describe('P10-T5 AC-1 — the three chips, logged against the period’s targets', () => {
-    const mapping = { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' };
+    const mapping = { leads: ['LEADS_CONTACTED'], appointments: ['SELL_PRESENTATION'], closings: ['SELL_SUBMISSION'] };
     const logged = new Map([['LEADS_CONTACTED', 62], ['SELL_PRESENTATION', 18], ['SELL_SUBMISSION', 2], ['RECRUIT_FOLLOWUP', 9]]);
 
-    it('reads each count by the goal’s own code, in the prototype’s order', () => {
+    it('reads each count by the office’s bound codes, in the prototype’s order', () => {
       expect(activityTargets({ leads: 80, appointments: 24, policies: 6 }, mapping, logged)).toEqual([
-        { key: 'leads', code: 'LEADS_CONTACTED', logged: 62, target: 80, attainmentPct: 78, targetMet: false },
-        { key: 'appointments', code: 'SELL_PRESENTATION', logged: 18, target: 24, attainmentPct: 75, targetMet: false },
-        { key: 'closings', code: 'SELL_SUBMISSION', logged: 2, target: 6, attainmentPct: 33, targetMet: false },
+        { key: 'leads', code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED'], logged: 62, target: 80, attainmentPct: 78, targetMet: false },
+        { key: 'appointments', code: 'SELL_PRESENTATION', codes: ['SELL_PRESENTATION'], logged: 18, target: 24, attainmentPct: 75, targetMet: false },
+        { key: 'closings', code: 'SELL_SUBMISSION', codes: ['SELL_SUBMISSION'], logged: 2, target: 6, attainmentPct: 33, targetMet: false },
       ]);
     });
 
-    it('follows a goal bound to other codes (invariant §4)', () => {
-      const [leads] = activityTargets({ leads: 10, appointments: 1, policies: 1 }, { ...mapping, leadsCode: 'RECRUIT_FOLLOWUP' }, logged);
+    it('follows an office bound to other codes (invariant §4)', () => {
+      const [leads] = activityTargets({ leads: 10, appointments: 1, policies: 1 }, { ...mapping, leads: ['RECRUIT_FOLLOWUP'] }, logged);
       expect(leads).toMatchObject({ code: 'RECRUIT_FOLLOWUP', logged: 9 });
+    });
+
+    it('P18.9-T2 AC-2 a role bound to [A, B] counts both: the replaced activity’s history and its replacement', () => {
+      const [leads] = activityTargets(
+        { leads: 80, appointments: 1, policies: 1 }, { ...mapping, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }, logged,
+      );
+      expect(leads).toMatchObject({
+        code: 'LEADS_CONTACTED', codes: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'], logged: 71, attainmentPct: 89,
+      });
     });
 
     it('F-25: no target is null, never NaN% — and a code with nothing logged is 0, not missing', () => {
@@ -173,6 +189,11 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
     it('a target of 0 is a month that needs nothing more: met, with no percentage to show', () => {
       const [, , closings] = activityTargets({ leads: 0, appointments: 0, policies: 0 }, mapping, logged);
       expect(closings).toMatchObject({ target: 0, attainmentPct: null, targetMet: true });
+    });
+
+    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 logged of a target of 40 is 58%, never 57', () => {
+      const [leads] = activityTargets({ leads: 40, appointments: 1, policies: 1 }, mapping, new Map([['LEADS_CONTACTED', 23]]));
+      expect(leads).toMatchObject({ logged: 23, target: 40, attainmentPct: 58, targetMet: false });
     });
 
     it('meets a target on reaching it, and caps the percentage past it', () => {
@@ -213,9 +234,56 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       });
     });
 
-    it('totals every code logged, in any section or none', () => {
-      expect(totalLogged(new Map([['A', 3], ['B', 0], ['C', 4]]))).toBe(7);
-      expect(totalLogged(new Map())).toBe(0);
+    it('P18.9-T2 AC-5 an archived section keeps, on its tile, the types the period holds counts for', () => {
+      const archived: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
+        ] },
+        { code: 'OLD_OUTREACH', label: 'Old outreach', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', status: 'archived', types: [
+          { code: 'FLYERS', label: 'Flyers', status: 'archived' },
+          { code: 'BOOTH', label: 'Booth', status: 'archived' },
+        ] },
+        { code: 'RETIRED', label: 'Retired', status: 'archived', types: [{ code: 'CANVAS', label: 'Canvas', status: 'archived' }] },
+      ];
+      // A period holding Flyers: the tile keeps it beside the live section, and Booth with nothing is gone.
+      expect(sectionChips(archived, new Map([['COMMUNITY_EVENT', 1], ['FLYERS', 4]]), cascade)).toEqual([
+        { code: 'OUTREACH', label: 'Outreach', total: 5, rows: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', count: 1 }, { code: 'FLYERS', label: 'Flyers', count: 4 },
+        ] },
+      ]);
+      // A tile of its own, archived, is a chip only for a period that counted it.
+      expect(sectionChips(archived, new Map([['CANVAS', 2]]), cascade).map((c) => [c.code, c.total])).toEqual([
+        ['OUTREACH', 0], ['RETIRED', 2],
+      ]);
+    });
+
+    it('P18.9-T2 AC-5 an archived section holding a bound code never takes a live tile out with it', () => {
+      const archived: ShownSection[] = [
+        { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
+          { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
+        ] },
+        { code: 'OLD_SELLING', label: 'Old selling', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', status: 'archived', types: [
+          { code: 'SELL_SUBMISSION', label: 'Submission', status: 'archived' },
+        ] },
+      ];
+      // The bound code's count is the target chips': the tile keeps its live row and does not repeat it.
+      expect(sectionChips(archived, new Map([['SELL_SUBMISSION', 3]]), cascade)).toEqual([
+        { code: 'OUTREACH', label: 'Outreach', total: 0, rows: [{ code: 'COMMUNITY_EVENT', label: 'Event', count: 0 }] },
+      ]);
+    });
+
+    it('UI-052 the total is the breakdown’s sum — the three targets and every chip row, each code once; nothing unshown', () => {
+      // Agus on staging: Set appointment 1, Recruitment 1, Development 2 shown — and two of a selling type no chip shows.
+      const counts = new Map([['SET_APPT', 1], ['MEETING', 0], ['SUBMIT', 0], ['RECRUIT', 1], ['DEV_A', 1], ['DEV_B', 1], ['UNSHOWN', 2]]);
+      const targets = [{ codes: ['SET_APPT'] }, { codes: ['MEETING'] }, { codes: ['SUBMIT'] }];
+      const chips = [
+        { code: 'RECRUITMENT', label: 'Recruitment', total: 1, rows: [{ code: 'RECRUIT', label: 'r', count: 1 }] },
+        { code: 'DEVELOPMENT', label: 'Development', total: 2, rows: [{ code: 'DEV_A', label: 'a', count: 1 }, { code: 'DEV_B', label: 'b', count: 1 }] },
+      ];
+      expect(totalLogged(counts, targets, chips)).toBe(4);
+      // A code in two places is counted once.
+      expect(totalLogged(counts, [...targets, { codes: ['SET_APPT'] }], chips)).toBe(4);
+      expect(totalLogged(new Map(), [], [])).toBe(0);
     });
   });
 
@@ -236,9 +304,10 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
 
     it('the seed gives the prototype’s two: Recruitment and Development (`Overall.html:3164-3183`)', () => {
       const chips = sectionChips(seed, new Map(), cascade);
+      // *Development* in Bahasa Indonesia since P18.98-T7 (OD-238); *Recruitment* is kept English.
       expect(chips.map((c) => [c.code, c.label])).toEqual([
         ['RECRUITMENT', 'Recruitment'],
-        ['DEVELOPMENT', 'Development'],
+        ['DEVELOPMENT', 'Pengembangan'],
       ]);
     });
 
@@ -361,6 +430,29 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
         goal: goal({ caseSizeMinor: 0 }), month: '2026-09', throughLastMonthMinor: 160 * M, thisMonthMinor: null,
       });
       expect(plan).toMatchObject({ monthlyTargetMinor: 85 * M, monthlyCounts: null, yearlyCounts: null });
+    });
+
+    /** `goalFigures` over the goal above: Rp 500 jt for the year, Rp 240 jt done, Rp 18 jt a case. */
+    const figuresOf = (over: Partial<PlannedGoal> = {}) => goalFigures({
+      goal: goal(over), month: '2026-09', throughLastMonth: { minor: 160 * M }, thisMonth: null, yearToDate: null, names: new Map(),
+    });
+
+    it('UI-052 the year’s Submission polis target is Polis yang dibutuhkan — the cascade on what the year still needs', () => {
+      const { plan, yearly, monthly } = figuresOf();
+      // (500 − 240) ÷ 18 → 15 policies still needed; ÷ 0.3 → 50 meetings; ÷ 0.3 → 167 appointments.
+      expect(yearly.policiesNeeded).toBe(15);
+      expect(plan.yearlyCounts).toEqual({ policies: 15, appointments: 50, leads: 167 });
+      expect(plan.yearlyCounts!.policies).toBe(yearly.policiesNeeded);
+      // The month is unchanged: its target fixed when it began (ADR-0056), 85 M → 5 policies.
+      expect(plan.monthlyCounts).toEqual({ policies: 5, appointments: 17, leads: 57 });
+      expect(monthly.targetMinor).toBe(85 * M);
+    });
+
+    it('UI-052 a year made needs nothing more — 0 of each — and a year with no goal has no targets', () => {
+      expect(figuresOf({ achieved: { minor: 520 * M, month: '2026-09', provenance: 'imported' } }).plan.yearlyCounts)
+        .toEqual({ policies: 0, appointments: 0, leads: 0 });
+      expect(figuresOf({ savedAt: null }).plan.yearlyCounts).toBeNull();
+      expect(figuresOf({ caseSizeMinor: 0 }).plan.yearlyCounts).toBeNull();
     });
   });
 });

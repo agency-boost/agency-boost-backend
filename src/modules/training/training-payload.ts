@@ -1,3 +1,5 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { FieldSentence } from '@/common/validation/fields';
 import {
   SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS,
   type TrainingPublishState,
@@ -5,6 +7,9 @@ import {
 import {
   checkTrainingCategoryCreate, checkTrainingModuleCreate, checkTrainingSkillCreate,
 } from './training-input';
+import { TRAINING_REFUSALS } from './training.messages';
+
+const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 
 /** A `training_taxonomy` payload: the three levels, without ids, versions or status. */
 export interface TrainingTaxonomyPayload {
@@ -61,13 +66,16 @@ export function defaultTrainingTaxonomy(): TrainingTaxonomyPayload {
  * wrong: a code twice in one level, a skill naming a category the payload does not define, a
  * module naming a skill it does not define. **An empty level is fine** — a company may publish
  * categories with nothing in them yet, which is what the prototype draws for five of six.
+ *
+ * **Each problem in both languages** (P18.98-T5 AC-3): a row the office's checker refused keeps that checker's own
+ * sentence, after the row's place in its level.
  */
-export function trainingTaxonomyProblems(payload: unknown): string[] {
-  const problems: string[] = [];
+export function trainingTaxonomyProblems(payload: unknown): FieldSentence[] {
+  const problems: FieldSentence[] = [];
   const source = (payload ?? {}) as Record<string, unknown>;
   const rows = (key: 'categories' | 'skills' | 'modules'): Record<string, unknown>[] => {
     if (Array.isArray(source[key])) return source[key] as Record<string, unknown>[];
-    problems.push(`${key} must be a list.`);
+    problems.push(SAY.notAList({ key }));
     return [];
   };
 
@@ -89,25 +97,24 @@ export function trainingTaxonomyProblems(payload: unknown): string[] {
     list.forEach((row, index) => {
       try {
         const input = check(row) as unknown as Record<string, string>;
-        if (codes[level].has(input.code)) {
-          problems.push(`The ${level} code ${input.code} is used twice.`);
-        }
+        if (codes[level].has(input.code)) problems.push(SAY.levelCodeTwice({ level, code: input.code }));
         codes[level].add(input.code);
         checked[level].push(input);
       } catch (err) {
-        problems.push(`${level[0].toUpperCase()}${level.slice(1)} ${index + 1}: ${(err as Error).message}`);
+        // The checkers refuse through `Fields`, so this is the row's own refusal, in both languages.
+        problems.push(SAY.atLevel({ level, n: index + 1, inner: (err as DomainException<'VALIDATION_FAILED'>).sentence }));
       }
     });
   }
 
   for (const skill of checked.skill) {
     if (!codes.category.has(skill.categoryCode)) {
-      problems.push(`The skill ${skill.code} names ${skill.categoryCode}, which no category in this taxonomy is.`);
+      problems.push(SAY.skillUnknownCategory({ code: skill.code, categoryCode: skill.categoryCode }));
     }
   }
   for (const module of checked.module) {
     if (!codes.skill.has(module.skillCode)) {
-      problems.push(`The module ${module.code} names ${module.skillCode}, which no skill in this taxonomy is.`);
+      problems.push(SAY.moduleUnknownSkill({ code: module.code, skillCode: module.skillCode }));
     }
   }
   return problems;

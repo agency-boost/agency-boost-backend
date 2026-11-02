@@ -12,7 +12,10 @@ Read `../CLAUDE.md` first. In particular:
 
 ## Stack
 
-NestJS · MongoDB (Mongoose) · Cloudinary · Jest · GitHub Actions.
+NestJS · MongoDB (Mongoose) · Google Cloud Storage · Jest · GitHub Actions. Deployed as a Docker image
+to one Google Compute Engine VM that serves staging and production while production is dark, each with
+its own API container and database, MongoDB beside them on its own disk (ADR-0152, ADR-0153, ADR-0155;
+`README.md`, Deployment).
 
 ## The rules that bite here
 

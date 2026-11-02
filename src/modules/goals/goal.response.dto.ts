@@ -1,7 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalMeasured, GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalAchieved, GoalMeasured, GoalPreview, GoalSnapshotView, GoalTypist, GoalView } from './goal.service';
 
 export class GoalMeasuredDto implements GoalMeasured {
   @ApiProperty({ example: '2026-08-30' }) from!: string;
@@ -22,18 +22,31 @@ export class GoalMeasuredDto implements GoalMeasured {
   closingRate!: number | null;
 }
 
+/** Somebody who typed a member's figure for them (S2). */
+export class GoalTypistDto implements GoalTypist {
+  @ApiProperty({ description: 'The membership: the person in this office, never their account.' }) membershipId!: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Sari Puspita', description: '`null` when they can no longer be named.' })
+  name!: string | null;
+}
+
 export class GoalAchievedDto implements GoalAchieved {
   @ApiProperty({ type: Number, description: 'The APE `projected` is computed from, in IDR minor units.' })
   minor!: number;
 
   @ApiProperty({
     enum: ['imported', 'corrected', 'self_reported'],
-    description: 'The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year.',
+    description: 'The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`) — the last only while the office holds no year-to-date figure for the year.',
   })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
   @ApiProperty({ type: String, nullable: true, example: '2026-08', description: 'The month whose year-to-date figure it is; `null` for the agent’s own.' })
   month!: string | null;
+
+  @ApiPropertyOptional({
+    type: GoalTypistDto,
+    description: 'Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the member typed it, and on the office’s own figure.',
+  })
+  typedBy?: GoalTypistDto;
 }
 
 export class GoalSnapshotDto implements GoalSnapshotView {
@@ -66,19 +79,23 @@ export class GoalProjectionDto implements CascadeResult {
   @ApiProperty({ type: Number })
   policiesPerMonth!: number;
 
-  @ApiProperty({ type: Number, description: 'The screen’s `≈ n/week` sub-line. Ceil, like every step.' })
+  @ApiProperty({
+    type: Number,
+    description: 'Steps 3 and 5’s `≈ n/week`: `policiesPerMonth` ÷ 4.33 to **one decimal**, a whole figure '
+      + 'whole — `1.4` for six a month (ADR-0160 §5).',
+  })
   policiesPerWeek!: number;
 
   @ApiProperty({ type: Number })
   appointmentsPerMonth!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count.' })
   appointmentsPerWeek!: number;
 
   @ApiProperty({ type: Number })
   leadsPerMonth!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'The `≈ n/week` sub-line: ÷ 4.33, rounded up, a whole count.' })
   leadsPerWeek!: number;
 
   @ApiProperty({
@@ -100,6 +117,18 @@ export class GoalCascadeMappingDto {
 
   @ApiProperty({ type: String, example: 'SELL_SUBMISSION' })
   closingsCode!: string;
+}
+
+/** The office's activity binding as the plan's columns count it: each role a list of codes, summed. */
+export class GoalCascadeBindingDto {
+  @ApiProperty({ type: [String], example: ['LEADS_CONTACTED'], description: '*Set appointment*.' })
+  leads!: string[];
+
+  @ApiProperty({ type: [String], example: ['SELL_PRESENTATION'], description: '*Sales meeting*.' })
+  appointments!: string[];
+
+  @ApiProperty({ type: [String], example: ['SELL_SUBMISSION'], description: '*Submission polis*.' })
+  closings!: string[];
 }
 
 export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | 'version'> {
@@ -133,7 +162,7 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   monthsLeftIsOverride!: boolean;
 
-  @ApiProperty({ type: Number, description: 'The agent’s own typed figure — kept, and used only until production arrives.' })
+  @ApiProperty({ type: Number, description: 'The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used only until production arrives.' })
   apeAchievedMinor!: number;
 
   @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is.' })
@@ -142,10 +171,18 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   @ApiProperty({ type: Number })
   caseSizeMinor!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({
+    type: Number,
+    description: '*Appointment to Sales meeting*, a percentage. Unsaved, the office’s *Set appointment to meeting* '
+      + 'benchmark, or 30 (ADR-0160 §3).',
+  })
   leadsToApptPct!: number;
 
-  @ApiProperty({ type: Number })
+  @ApiProperty({
+    type: Number,
+    description: '*Closing rate*, a percentage. Unsaved, the office’s *Selling success rate* benchmark, or 30 '
+      + '(ADR-0160 §3).',
+  })
   closingRatePct!: number;
 
   @ApiProperty({
@@ -166,13 +203,24 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   projected!: CascadeResult | null;
 
-  @ApiProperty({ type: GoalCascadeMappingDto, description: 'Activity **codes**, never positions.' })
+  @ApiProperty({
+    type: GoalCascadeMappingDto,
+    description: 'Activity **codes**, never positions: the first code of each role in the office’s binding when the '
+      + 'plan was first saved, kept as its record and never rewritten. Nothing counts from it — see `cascadeBinding`.',
+  })
   cascadeMapping!: { leadsCode: string; appointmentsCode: string; closingsCode: string };
+
+  @ApiProperty({
+    type: GoalCascadeBindingDto,
+    description: 'What the three columns count today: the office’s activity binding, each role a list of codes, '
+      + 'summed. The *Activity #n* chips are drawn from it.',
+  })
+  cascadeBinding!: { leads: string[]; appointments: string[]; closings: string[] };
 
   @ApiProperty({
     type: GoalMeasuredDto,
     nullable: true,
-    description: 'Your own conversion rates over the last 30 days, over **this goal’s** cascade codes — '
+    description: 'Your own conversion rates over the last 30 days, over the office’s cascade binding — '
       + 'printed under the assumptions they measure. Read only: nothing is filled in (ADR-0048, ADR-0055). '
       + '**`null` on anybody else’s plan**: reading or saving somebody else’s goal answers no rate from '
       + 'their log.',
@@ -190,4 +238,35 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
       + 'columns, no flag (ADR-0046).',
   })
   savedByMembershipId!: string | null;
+}
+
+/**
+ * **`POST /goals/:period/preview`** (P18.99-T5, UI V1 UI-014): what the inputs a screen holds would mean, worked out
+ * by the formula a save uses and written nowhere — the months in force, the APE produced the plan is measured
+ * against, and the cascade.
+ */
+export class GoalPreviewDto implements GoalPreview {
+  @ApiProperty({ type: String, example: '2026' })
+  period!: string;
+
+  @ApiProperty({ type: Number, example: 2.1, description: 'The divisor in force: the typed one, or the office’s calendar.' })
+  monthsLeft!: number;
+
+  @ApiProperty({ type: Boolean, description: 'Whether `monthsLeft` was typed over (`true`) or is the office’s calendar.' })
+  monthsLeftIsOverride!: boolean;
+
+  @ApiProperty({
+    type: GoalAchievedDto,
+    description: 'The APE the plan is measured against: the office’s year to date where it holds one, else the typed '
+      + 'figure on your own plan and the stored one on anybody else’s.',
+  })
+  achieved!: GoalAchievedDto;
+
+  @ApiProperty({
+    type: GoalProjectionDto,
+    nullable: true,
+    description: 'The cascade, as a save would store it. `null` when the inputs cannot make a plan — a save refuses '
+      + 'that with `GOAL_INVALID_ASSUMPTION`.',
+  })
+  projected!: CascadeResult | null;
 }

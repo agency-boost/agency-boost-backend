@@ -10,6 +10,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, seedLadder, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { NO_CLASS } from '../../../test/http-permissions';
 import { CoachResolver } from './coach-resolver';
 import { HierarchyService } from './hierarchy.service';
 import { MembershipHistory, MembershipHistorySchema } from './membership-history.schema';
@@ -331,7 +332,7 @@ describe('COACH(actor, subject) — P11-T3', () => {
     });
 
     it('P11-T3 AC-3: no grant at all reaches nobody, rather than falling back to the caller', async () => {
-      const unknownRung = as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG' });
+      const unknownRung = as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS });
       await expect(coach.subject(unknownRung, m.DIRECT, 'goal:read', 'Goal'))
         .rejects.toMatchObject({ status: 404, message: 'Goal not found.' });
     });
@@ -427,7 +428,7 @@ describe('COACH(actor, subject) — P11-T3', () => {
       } finally {
         find.mockRestore();
       }
-      expect(await coach.unitOf(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG' }), 'lead:read'))
+      expect(await coach.unitOf(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS }), 'lead:read'))
         .toEqual({ office: false, below: [], self: false });
     });
   });
@@ -441,7 +442,7 @@ describe('COACH(actor, subject) — P11-T3', () => {
     it('P11-T3: the whole office as null for own-kpm, the caller alone for own, nobody for no grant', async () => {
       expect(await coach.reach(ownerOfA(), 'lead:read_aggregate_counts')).toBeNull();
       expect(await coach.reach(as(m.AGENT, 'AGENT'), 'lead:read')).toEqual([m.AGENT]);
-      expect(await coach.reach(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG' }), 'lead:read')).toEqual([]);
+      expect(await coach.reach(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS }), 'lead:read')).toEqual([]);
     });
 
     it('P11-T3: reach is coacheesOf with the caller added, for every actor — a member who left and a broken chain included', async () => {

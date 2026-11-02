@@ -67,6 +67,26 @@ export function prototypeChips(question: 'type' | 'motivation' | 'hesitation'): 
   return [...block.matchAll(/data-val="([^"]+)">([^<]+)<\/button>/g)].map((m) => ({ code: m[1], label: m[2] }));
 }
 
+/**
+ * **The client's shorter chip words** (ADR-0167; the client's UI review of 2026-10-26, UI-015; P18.95-T6 AC-2;
+ * parity I-421), typed here as the client gave them, by the prototype's `data-val`: the one place the shipped
+ * vocabulary departs from the file. Every other chip keeps the prototype's text.
+ */
+export const CLIENT_CHIP_WORDS: Readonly<Record<string, string>> = {
+  'side-income': 'Side income',
+  'full-career': 'Career change',
+  flexibility: 'Flexibility',
+  leadership: 'Lead a team',
+  'no-experience': 'No sales exp.',
+  reputation: 'Bad reputation',
+  'no-network': 'No network',
+};
+
+/** One question's chips as they ship: the prototype's, with the client's shorter words where it gave one. */
+export function shippedChips(question: 'type' | 'motivation' | 'hesitation'): { code: string; label: string }[] {
+  return prototypeChips(question).map(({ code, label }) => ({ code, label: CLIENT_CHIP_WORDS[code] ?? label }));
+}
+
 /** The words of the plan a playbook in the prototype's own shapes renders. */
 export interface PrototypeWords {
   PROFILES: Record<string, PrototypeProfile>;
@@ -92,12 +112,15 @@ export interface RenderedPlan {
 /**
  * **A port of `renderPlan`** (`:565-621`), statement for statement, over a playbook in the prototype's
  * shapes — the HTML template replaced by the values it interpolates, so a test can compare them.
+ *
+ * A motivation's tag is its chip's label, as `renderPlan` reads it from the chip — the chip **as it ships**
+ * (`shippedChips`), so the client's shorter words tag an opening as they label its chip (P18.95-T6 AC-2).
  */
 export function renderPlanPort(
   words: PrototypeWords,
   state: { type: string; motivation: string[]; hesitation: string[] },
 ): RenderedPlan {
-  const labelFor = (q: 'motivation', val: string) => prototypeChips(q).find((c) => c.code === val)!.label;
+  const labelFor = (q: 'motivation', val: string) => shippedChips(q).find((c) => c.code === val)!.label;
   const profile = words.PROFILES[state.type];
   const multiMotivation = state.motivation.length > 1;
   const openings = state.motivation.map((m) => ({

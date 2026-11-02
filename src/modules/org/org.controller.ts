@@ -7,7 +7,11 @@ import { DirectoryService } from './directory.service';
 import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
 import { OrgTreeService } from './org-tree.service';
-import { ChangeRoleDto, DirectoryQueryDto, GroupDto, RemoveMemberDto, TagMemberDto } from './org.dto';
+import {
+  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, RemoveMemberDto,
+  SetCoreLeaderDto, TagMemberDto,
+} from './org.dto';
+import { LeaderLimitRequestService } from './leader-limit-request.service';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 
@@ -32,6 +36,8 @@ export class OrgController {
     private readonly admins: AdminDelegationService,
     // Phase 18 (D-directory): the roster's *Last activity* and *Last coached*, and the read entries they write.
     private readonly columns: DirectoryColumns,
+    // ADR-0157: a leader past the office's limit, asked about instead of refused.
+    private readonly leaderLimit: LeaderLimitRequestService,
   ) {}
 
   @Get('my-team')
@@ -45,6 +51,25 @@ export class OrgController {
   })
   async myTeam(@Ctx() ctx: RequestContext) {
     return this.roles.team(ctx);
+  }
+
+  /*
+   * Before `GET :membershipId`, or that route would read `search` as somebody's id: Nest matches in the order the
+   * handlers are declared.
+   */
+  @Get('search')
+  @RequirePermission('member:read_profile')
+  @ApiOperation({
+    summary: 'Search agent: the people you may see, by name or agent code',
+    description:
+      'UI V1 (UI-012, UI-059, D-14): the picker that opens a person\'s page. Part of a name (full or preferred) or an '
+      + 'agent code, case-insensitive; empty or absent lists the first people. Narrowed exactly as the roster is — '
+      + 'the office for its Owner and Admins, an AB\'s downline, an AAB\'s own unit — **never yourself**, so an Agent '
+      + 'finds nobody. Active members only, A to Z by name, the first `limit` (10, at most 20). Names and codes only: '
+      + 'nothing is recorded as read, as the tree records nothing.',
+  })
+  async search(@Ctx() ctx: RequestContext, @Query() query: MemberSearchQueryDto) {
+    return { members: await this.directory.search(ctx, query) };
   }
 
   @Patch(':membershipId/role')
@@ -75,6 +100,53 @@ export class OrgController {
   })
   async roleLog(@Ctx() ctx: RequestContext) {
     return this.roles.log(ctx);
+  }
+
+  /*
+   * **A leader past the office's limit waits for AgencyBoost** (ADR-0157). Declared before `:membershipId`, so
+   * `leader-limit-requests` is never read as a member's id.
+   */
+  @Get('leader-limit-requests')
+  @RequirePermission('leader_limit_request:read')
+  @ApiOperation({
+    summary: 'The office\u2019s requests to make a leader past its limit',
+    description:
+      'Every request of the office for its Owner and an Admin; for an AB or AAB, the ones they asked. Pending ' +
+      'first. Each carries the office\u2019s limit and Leaders used now.',
+  })
+  async leaderLimitRequests(@Ctx() ctx: RequestContext) {
+    return this.leaderLimit.list(ctx);
+  }
+
+  @Delete('leader-limit-requests/:requestId')
+  @RequirePermission('leader_limit_request:create')
+  @ApiOperation({
+    summary: 'Cancel a request to make a leader past the limit',
+    description:
+      'Whoever asked, or the Owner or an Admin, may withdraw an open one; nothing about the member changes. ' +
+      'Another office\u2019s request is 404. One already decided or cancelled is 409 LEADER_LIMIT_REQUEST_DECIDED.',
+  })
+  async cancelLeaderLimitRequest(@Ctx() ctx: RequestContext, @Param('requestId') requestId: string) {
+    return this.leaderLimit.cancel(ctx, requestId);
+  }
+
+  @Post(':membershipId/leader-limit-request')
+  @RequirePermission('leader_limit_request:create')
+  @ApiOperation({
+    summary: 'Ask AgencyBoost to approve one leader past the office\u2019s limit',
+    description:
+      'For the write the limit refused with LEADER_LIMIT_REACHED and canRequest: a role change onto a leader ' +
+      'rung (`promote`, naming the rung and the reason), or letting in a pending member who stands on one ' +
+      '(`activate`). Refused wherever that write would be, in its words; a change that makes no new leader is ' +
+      '400. One open request per member: a second is 409 LEADER_LIMIT_REQUEST_OPEN. Nothing about the member ' +
+      'changes while it waits.',
+  })
+  async requestPastLeaderLimit(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: CreateLeaderLimitRequestDto,
+  ) {
+    return this.leaderLimit.create(ctx, membershipId, dto);
   }
 
   @Delete(':membershipId')
@@ -214,9 +286,11 @@ export class OrgController {
   @ApiOperation({
     summary: 'Set this person’s groups and Core Leader flag',
     description:
-      'Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic ' +
-      'Leader Forum’s meetings, and nothing else — no hierarchy, no data scope. A group is the same: a ' +
-      'label, not a rule.',
+      'Core Leader (ADR-0159) decides who, besides the Owner and the Admins, opens and writes in the Strategic ' +
+      'Leader Forum’s meetings and reads the office’s KPM analytics — no hierarchy. **A leader’s only**: a change ' +
+      'to it is checked against `member:tag_core_leader`, and setting it on a member whose rung is not a leader ' +
+      'rung is refused `400 CORE_LEADER_NOT_A_LEADER`; an unchanged flag is not asked about. A group is a label, ' +
+      'not a rule.',
   })
   async tagMember(
     @Ctx() ctx: RequestContext,
@@ -224,6 +298,23 @@ export class OrgController {
     @Body() dto: TagMemberDto,
   ) {
     return this.groups.tag(ctx, membershipId, dto);
+  }
+
+  @Put(':membershipId/core-leader')
+  @RequirePermission('member:tag_core_leader')
+  @ApiOperation({
+    summary: 'Tag or untag this person Core Leader',
+    description:
+      'The directory row’s control (ADR-0159 §1): the Core Leader flag alone, the person’s groups untouched. ' +
+      'A leader’s only — `400 CORE_LEADER_NOT_A_LEADER` for a member whose rung is not a leader rung. Audited ' +
+      'as `member.tagged`, before and after; the same value again writes nothing. Answers the person’s tags.',
+  })
+  async setCoreLeader(
+    @Ctx() ctx: RequestContext,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: SetCoreLeaderDto,
+  ) {
+    return this.groups.setCoreLeader(ctx, membershipId, dto.isCoreLeader);
   }
 
   @Get()

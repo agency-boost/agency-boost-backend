@@ -2,12 +2,18 @@ import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
 
 /**
  * **Recruitment tools** (Phase 17; `functional/recruitment.md`): the candidate brief's vocabulary, the
- * office's four pitch slots and the rule that says when one is done, and the playbook a company started
- * from the defaults is given — each once, here, and served to the browser rather than re-declared there
- * (invariant §7).
+ * office's six pitch slots — the four the readiness counts, and two optional — with the rule that says when one
+ * is done and what the banner counts, and the playbook a company started from the defaults is given — each
+ * once, here, and served to the browser rather than re-declared there (invariant §7).
  *
  * `:NNN` is a line of `prototype/AgencyBoost_Recruitment_Section.html`. Every string below is the
- * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file.
+ * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file — except seven chip
+ * labels, the client's shorter words of 2026-10-26 (UI-015, below), which the spec pins as the client gave them.
+ *
+ * **The English source of words the API serves in the reader's language** (P18.98-T7; ADR-0179 §7): the chips' labels,
+ * the pitch slots' titles and lines and the checklist's labels are the platform's own words, not the company's, and
+ * `modules/recruitment/recruitment.messages.ts` (`RECRUITMENT_MESSAGES`) holds each beside its Indonesian, its English
+ * read from here. A code never changes. The playbook below is the company's content, shown as typed (§5).
  */
 
 /**
@@ -23,21 +29,36 @@ export const RECRUITMENT_CANDIDATE_TYPES = [
 ] as const;
 export type RecruitmentTypeCode = (typeof RECRUITMENT_CANDIDATE_TYPES)[number]['code'];
 
-/** *What's driving them* (`:313-321`), in the chips' order. Several may be chosen; at least one. */
+/**
+ * *What's driving them* (`:313-321`), in the chips' order. Several may be chosen; at least one.
+ *
+ * **The labels are the client's shorter words** (ADR-0167; the client's UI review of 2026-10-26, UI-015;
+ * P18.95-T6 AC-2, parity I-421), at every size: the prototype's *Extra income on the side*, *Full career
+ * change*, *Flexibility / time freedom* and *Building a team / leadership* stacked one chip per line on a
+ * phone. **The codes are the prototype's and do not change**: an address, a playbook's openings and every
+ * test key on them, never on a label. The plan prints the same label beside the opening it tags.
+ */
 export const RECRUITMENT_MOTIVATIONS = [
-  { code: 'side-income', label: 'Extra income on the side' },
-  { code: 'full-career', label: 'Full career change' },
-  { code: 'flexibility', label: 'Flexibility / time freedom' },
-  { code: 'leadership', label: 'Building a team / leadership' },
+  { code: 'side-income', label: 'Side income' },
+  { code: 'full-career', label: 'Career change' },
+  { code: 'flexibility', label: 'Flexibility' },
+  { code: 'leadership', label: 'Lead a team' },
 ] as const;
 export type RecruitmentMotivationCode = (typeof RECRUITMENT_MOTIVATIONS)[number]['code'];
 
-/** *Their biggest hesitation* (`:323-332`), in the chips' order. Several may be chosen; at least one. */
+/**
+ * *Their biggest hesitation* (`:323-332`), in the chips' order. Several may be chosen; at least one.
+ *
+ * **Three labels are the client's shorter words** (UI-015, as above): *No sales exp.*, *Bad reputation* and
+ * *No network*. The client gave none for *Already has a stable job* or *Worried about time commitment*, so
+ * those two keep the prototype's words — nothing is invented in their place — and wrap inside their cell of
+ * the phone's two columns. Codes unchanged.
+ */
 export const RECRUITMENT_HESITATIONS = [
-  { code: 'no-experience', label: 'No sales experience' },
+  { code: 'no-experience', label: 'No sales exp.' },
   { code: 'stable-job', label: 'Already has a stable job' },
-  { code: 'reputation', label: 'Insurance has a bad reputation' },
-  { code: 'no-network', label: 'No network to sell to' },
+  { code: 'reputation', label: 'Bad reputation' },
+  { code: 'no-network', label: 'No network' },
   { code: 'time', label: 'Worried about time commitment' },
 ] as const;
 export type RecruitmentHesitationCode = (typeof RECRUITMENT_HESITATIONS)[number]['code'];
@@ -95,16 +116,24 @@ export const RECRUITMENT = {
 } as const;
 
 /**
- * **The office's four pitch documents** (D-slots; `SLOTS`, `:626-661`), in the order drawn, each with its
- * title and line. *Opportunity Overview* alone carries a checklist — *"Confirm this PDF actually includes"*
- * — of four items, by the prototype's ids (`:634-637`). The prototype's `tooltip` is never drawn and is not
- * carried (contradiction 15).
+ * **The office's six pitch documents** (D-slots; ADR-0177 §2), in the order drawn, each with its title, its
+ * line, and whether the office's readiness counts it (`required`).
+ *
+ * - **The four the prototype draws** (`SLOTS`, `:626-661`), each `required`, verbatim. *Opportunity Overview*
+ *   alone carries a checklist — *"Confirm this PDF actually includes"* — of four items, by the prototype's ids
+ *   (`:634-637`). The prototype's `tooltip` is never drawn and is not carried (contradiction 15).
+ * - **Then two optional ones**, the product owner's (UI-042; OD-233 → ADR-0177): *Company Profile* and
+ *   *Agency Profile*, each the office's own PDF as the four are (ADR-0032), with no checklist, uploaded,
+ *   replaced and opened as the others, and counted in neither the ring nor the banner
+ *   (`recruitmentPitchSummary`). Not in the prototype: their titles are the request's words, and their lines —
+ *   served and drawn on no card, as the four's are — say what each document is for, from the glossary's rows.
  */
 export const RECRUITMENT_PITCH_SLOTS = [
   {
     code: 'opportunity',
     title: 'Opportunity Overview',
     line: 'The core pitch: the role, what it pays, and what it takes.',
+    required: true,
     checklist: [
       { code: 'career-path', label: 'Career Path Ladder (Agent → AAB → AB)' },
       { code: 'income', label: 'Income Potential / compensation illustration' },
@@ -112,9 +141,11 @@ export const RECRUITMENT_PITCH_SLOTS = [
       { code: 'commitment', label: 'Commitment needed — contract maintenance and required activity' },
     ],
   },
-  { code: 'proof', title: 'Proof & Credibility', line: 'Track record, testimonials, and reasons to believe.', checklist: [] },
-  { code: 'faq', title: 'FAQ', line: 'Straight answers to the questions candidates always ask.', checklist: [] },
-  { code: 'howtojoin', title: 'How to Join', line: 'Steps to register, documents needed, and KPM tagging.', checklist: [] },
+  { code: 'proof', title: 'Proof & Credibility', line: 'Track record, testimonials, and reasons to believe.', required: true, checklist: [] },
+  { code: 'faq', title: 'FAQ', line: 'Straight answers to the questions candidates always ask.', required: true, checklist: [] },
+  { code: 'howtojoin', title: 'How to Join', line: 'Steps to register, documents needed, and KPM tagging.', required: true, checklist: [] },
+  { code: 'company', title: 'Company Profile', line: 'A profile of the insurer the agency sells for.', required: false, checklist: [] },
+  { code: 'agency', title: 'Agency Profile', line: 'A profile of the agency itself.', required: false, checklist: [] },
 ] as const;
 export type RecruitmentPitchSlotCode = (typeof RECRUITMENT_PITCH_SLOTS)[number]['code'];
 
@@ -124,8 +155,10 @@ export type RecruitmentPitchState = (typeof RECRUITMENT_PITCH_STATES)[number];
 
 /**
  * **The completion rule, stated once** (D-slots): no file is *missing*; a file with every item of its
- * checklist ticked is *complete*; a file with an item open is *partial* (*"{n}/{m} confirmed"*); a file on a
- * slot with no checklist is *uploaded*.
+ * checklist ticked is *complete*; a file with an item open is *partial* (*Uploaded · needs confirmation*,
+ * ADR-0177 §1 — the prototype's *"{n}/{m} confirmed"*); a file on a slot with no checklist is *uploaded*. The
+ * same for a required slot and an optional one: an optional slot has no checklist, so it is *missing* or
+ * *uploaded*.
  */
 export function recruitmentPitchState(
   hasFile: boolean, checklist: readonly { readonly ticked: boolean }[],
@@ -138,6 +171,36 @@ export function recruitmentPitchState(
 /** Whether a slot counts as done for the banner's ring (`:797-799`): complete, or uploaded with nothing to confirm. */
 export function recruitmentPitchDone(state: RecruitmentPitchState): boolean {
   return state === 'complete' || state === 'uploaded';
+}
+
+/** The banner's counts (`PitchMaterialsView.summary`). */
+export interface RecruitmentPitchSummary {
+  /** Required slots complete, or uploaded with nothing to confirm. */
+  done: number;
+  /** How many slots are required: the ring's *x/4*. */
+  total: number;
+  /** Required slots with no file. */
+  missing: number;
+  /** Required slots with a file and an item still open. */
+  unconfirmed: number;
+}
+
+/**
+ * **What the ring and the banner count, stated once** (`:797-820`; ADR-0177 §3): **the required slots alone**
+ * — `done` by `recruitmentPitchDone`, `missing`, and `unconfirmed` (`partial`) — over `total`, how many are
+ * required. An optional slot counts in none of them, whatever it holds: uploading or leaving *Company Profile*
+ * or *Agency Profile* moves nothing on the banner, so an office with neither still reads *complete*.
+ */
+export function recruitmentPitchSummary(
+  slots: readonly { readonly required: boolean; readonly state: RecruitmentPitchState }[],
+): RecruitmentPitchSummary {
+  const required = slots.filter((slot) => slot.required);
+  return {
+    done: required.filter((slot) => recruitmentPitchDone(slot.state)).length,
+    total: required.length,
+    missing: required.filter((slot) => slot.state === 'missing').length,
+    unconfirmed: required.filter((slot) => slot.state === 'partial').length,
+  };
 }
 
 /**

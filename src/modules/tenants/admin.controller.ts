@@ -1,12 +1,16 @@
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
-  Query,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
+  Query, StreamableFile, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProduces, ApiTags,
+} from '@nestjs/swagger';
 import {
   AllowWhileOfficeUnavailable, AllowWhileReadOnly, Ctx, RequirePermission,
 } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
+import { DomainException, InvalidRequestException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
@@ -21,6 +25,7 @@ import {
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
   RosterRowsDto,
+  RosterTemplateQueryDto,
   SetStatusDto,
   UpdateOrgLevelDto,
   UpdateSubscriptionDto,
@@ -39,6 +44,10 @@ import { TemplateService } from '@/modules/config/template.service';
 import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
 import { TemplateQueryDto } from '@/modules/config/named-template.dto';
 import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-template.schema';
+import { TENANTS_REFUSALS } from './tenants.messages';
+import { RosterUploadInterceptor } from './roster-upload.interceptor';
+import type { FileUpload } from '@/common/spreadsheet/file-upload.interceptor';
+import { ROSTER_UPLOAD, XLSX_MIME_TYPE } from '@/domain/constants';
 
 /**
  * The Super Admin console.
@@ -214,7 +223,9 @@ export class AdminController {
     description:
       'The ladder belongs to the company, not to any office (ADR-0012): a KPM cannot add, ' +
       'rename or remove a rung. `code` is stable and semantic and is never reused \u2014 not ' +
-      'even after archiving \u2014 because it is what every membership holds.',
+      'even after archiving \u2014 because it is what every membership holds. `leaderTier` ' +
+      '(`senior`, `associate` or `null`, absent being `null`) decides the class its members are ' +
+      'given (ADR-0156).',
   })
   async createOrgLevel(@Ctx() ctx: RequestContext, @Body() dto: CreateOrgLevelDto) {
     return this.orgLevels.create(ctx, dto);
@@ -223,10 +234,12 @@ export class AdminController {
   @Patch('org-levels/:id')
   @RequirePermission('org_level:crud')
   @ApiOperation({
-    summary: 'Rename, reorder or archive a rung',
+    summary: 'Rename, reorder, archive or set the leader tier of a rung',
     description:
       'The code is not updatable, by construction \u2014 it is absent from the body. ' +
-      'Archiving retires a rung and keeps every membership that references it readable.',
+      'Archiving retires a rung and keeps every membership that references it readable. ' +
+      'A change of `leaderTier` is refused `409 ORG_LEVEL_TIER_IN_USE`, with `details.members`, ' +
+      'while any live membership stands on the rung: nobody is re-classed silently (ADR-0156 \u00a75).',
   })
   async updateOrgLevel(
     @Ctx() ctx: RequestContext,
@@ -251,14 +264,38 @@ export class AdminController {
       'The only way an office comes into existence — there is no self-service path ' +
       '(ADR-0005). Seeds the per-office settings every prototype screen hardcodes, and its ' +
       'configuration from `startFrom` (ADR-0115): one of the company\'s active templates, the ' +
-      'AgencyBoost defaults, or empty — the company\'s default template when absent. There is no ' +
+      'Template library\'s (`templateLibrary`, ADR-0164), or empty — the company\'s default template ' +
+      'when absent. `kind: \'defaults\'` is refused 400 VALIDATION_FAILED, `details.field: ' +
+      '\'startFrom.kind\'`: the Template\'s Default template holds the AgencyBoost defaults (ADR-0168 §2). There is no ' +
       'fallback: a kind the source holds none of is empty in the office, and every office has the ' +
       'three cascade activity types. The whole source is checked before the office is written, so ' +
-      'a refusal (400, naming what is broken; 404 for a template that is not the company\'s) leaves ' +
-      'nothing behind.',
+      'a refusal (400, naming what is broken; 404 for a template that is not the company\'s; 409 ' +
+      'TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company\'s ladder lacks) leaves ' +
+      'nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.',
   })
   async createTenant(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmDto) {
+    this.refuseTheDefaults(dto);
     return this.tenants.createKpm(ctx, dto);
+  }
+
+  /**
+   * **No office is started from the AgencyBoost defaults through this route** (ADR-0168 §2). The Template's
+   * Default template holds them as data the Super Admin edits, and one editable source is what keeps the two
+   * from drifting apart unseen.
+   *
+   * Refused here, at the request, and nowhere deeper: `ProvisioningService.planFor` keeps its `defaults` source
+   * — the code's own starting point, `platformDefaultPayload`, which migration `0037` builds the Template from —
+   * for the callers that are not a request. `StartFromDto` still admits the value, so the refusal names the field
+   * and says what to choose instead rather than reading as an unknown enum member.
+   */
+  private refuseTheDefaults(dto: CreateKpmDto): void {
+    if (dto.startFrom?.kind !== 'defaults') return;
+    throw new DomainException(
+      ErrorCode.VALIDATION_FAILED,
+      TENANTS_REFUSALS.VALIDATION_FAILED.startFromDefaults,
+      HttpStatus.BAD_REQUEST,
+      { field: 'startFrom.kind' },
+    );
   }
 
   // ---- Filling a new office from a spreadsheet (P3.6-T4). ----
@@ -268,14 +305,30 @@ export class AdminController {
   @ApiOperation({
     summary: 'The roster template',
     description:
-      'The file to download: the header, plus worked examples **commented out**, so they '
-      + 'can be read and copied without ever importing. `examples` carries the same three '
-      + 'rows as cells, which is what the paste box shows — a screen splitting the CSV '
-      + 'itself would be a second parser, disagreeing with this one over the quoted row. '
-      + 'Declared above the routes that take an `:id`, because Nest would otherwise read '
-      + '"roster-template" as one.',
+      'Absent `format`: the JSON below — the header, the columns, `template` (the CSV: **the header and nothing '
+      + 'else**, ADR-0184) and `examples`, three worked rows as cells, which is what the paste box shows; a screen '
+      + 'splitting a CSV itself would be a second parser. `format=csv`: that CSV as the file itself, '
+      + '`roster-template.csv`. `format=xlsx`: the template as an Excel workbook, `roster-template.xlsx` — a guide sheet '
+      + 'in the reader’s language (*Petunjuk*, *Guide*: the steps, each column, the rules, the examples) apart from the '
+      + '*Data* sheet, which holds the header alone, its code and date columns as text and its fixed choices as '
+      + 'dropdowns. With `kpmId` (or, for an Owner or an Admin, their own office) `role` is a dropdown of the company '
+      + 'ladder\'s rung codes; another office\'s id is 404. Any other `format`, a `kpmId` that is not an id, or any '
+      + 'other query field is `400 VALIDATION_FAILED`. Declared above the routes that take an `:id`, because Nest would '
+      + 'otherwise read "roster-template" as one.',
   })
-  async rosterTemplate() {
+  @ApiProduces('application/json', 'text/csv', XLSX_MIME_TYPE)
+  async rosterTemplate(@Ctx() ctx: RequestContext, @Query() query: RosterTemplateQueryDto) {
+    const { format, kpmId } = query;
+    if (format === 'xlsx') {
+      return new StreamableFile(await this.roster.workbook(ctx, kpmId || null), {
+        type: XLSX_MIME_TYPE, disposition: 'attachment; filename="roster-template.xlsx"',
+      });
+    }
+    if (format === 'csv') {
+      return new StreamableFile(Buffer.from(ROSTER_TEMPLATE, 'utf8'), {
+        type: 'text/csv; charset=utf-8', disposition: 'attachment; filename="roster-template.csv"',
+      });
+    }
     return {
       header: ROSTER_TEMPLATE_HEADER,
       columns: ROSTER_COLUMNS,
@@ -302,11 +355,12 @@ export class AdminController {
       + 'puts on its front page.',
   })
   async readTemplate(
+    @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.read(companyId, this.kindOf(kind), query.templateId);
+    return this.templates.read(companyId, this.kindOf(kind), query.templateId, ctx.reader);
   }
 
   @Get('companies/:companyId/template/:kind/history')
@@ -318,11 +372,12 @@ export class AdminController {
       + 'published version is immutable; this is the record of them.',
   })
   async templateHistory(
+    @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('kind') kind: string,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.history(companyId, this.kindOf(kind), query.templateId);
+    return this.templates.history(companyId, this.kindOf(kind), query.templateId, ctx.reader);
   }
 
   @Put('companies/:companyId/template/:kind')
@@ -375,8 +430,8 @@ export class AdminController {
   /** An unknown kind is a 400 naming the ones that exist, not an empty answer. */
   private kindOf(raw: string): TemplateKind {
     if (!(TEMPLATE_KINDS as readonly string[]).includes(raw)) {
-      throw new BadRequestException(
-        `Unknown template kind "${raw}". One of: ${TEMPLATE_KINDS.join(', ')}.`,
+      throw new InvalidRequestException(
+        TENANTS_REFUSALS.VALIDATION_FAILED.unknownTemplateKind({ kind: raw, kinds: TEMPLATE_KINDS }),
       );
     }
     return raw as TemplateKind;
@@ -502,6 +557,66 @@ export class AdminController {
     return this.roster.commit(ctx, id, dto.rows);
   }
 
+  /** The file's form, for the two routes that take one. */
+  private static readonly ROSTER_FILE_BODY = {
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string', format: 'binary',
+          description: `The filled template — an Excel workbook (.xlsx) or a CSV. At most ${ROSTER_UPLOAD.MAX_BYTES / 1024 / 1024} MiB.`,
+        },
+      },
+    },
+  };
+
+  @Post('tenants/:id/roster/file/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm:import_roster')
+  @UseInterceptors(RosterUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(AdminController.ROSTER_FILE_BODY)
+  @ApiOperation({
+    summary: 'What an uploaded roster file would do',
+    description:
+      'The same check as the pasted rows\' (`roster/preview`), for a file sent as `multipart/form-data` (ADR-0184). '
+      + '**An Excel workbook** is opened only after its parts, as its own directory declares them, are checked to unpack '
+      + 'to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413), and its *Data* sheet is read — or the sheet '
+      + 'that starts with the header — at most 10,000 rows, each line numbered as the sheet numbers its row. **A CSV** '
+      + 'is read as UTF-8, or Windows-1252 when it is not valid UTF-8. Either way the rows meet the same parser and the '
+      + 'same issues. Writes nothing. `413 ASSET_TOO_LARGE` over 1 MiB; `422 UPLOAD_MALFORMED_CSV` for a file that is '
+      + 'neither text nor a workbook that opens, or a workbook with no sheet to read; `400 VALIDATION_FAILED` with no '
+      + 'file; 404 for an office not the caller\'s.',
+  })
+  async previewRosterFile(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @UploadedFile() file?: FileUpload,
+  ) {
+    return this.roster.previewFile(ctx, id, file);
+  }
+
+  @Post('tenants/:id/roster/file')
+  @RequirePermission('kpm:import_roster')
+  @UseInterceptors(RosterUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(AdminController.ROSTER_FILE_BODY)
+  @ApiOperation({
+    summary: 'Create everybody in a roster file',
+    description:
+      'The same import as the pasted rows\' (`roster`), for the file the preview read (ADR-0184): read again, checked '
+      + 'again, and **all or nothing**. Returns each account with the password it starts on — the only place those '
+      + 'exist. The file\'s own refusals are the preview\'s.',
+  })
+  async importRosterFile(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @UploadedFile() file?: FileUpload,
+  ) {
+    return this.roster.commitFile(ctx, id, file);
+  }
+
   @Get('audit')
   @RequirePermission('audit_log:read')
   @ApiOperation({
@@ -548,14 +663,19 @@ export class AdminController {
     description:
       'Time-boxed to an hour, reason required, and every action it produces records ' +
       'both the real Super Admin and the person acted as. Refused for another Super ' +
-      'Admin — that would erase the attribution the feature depends on.',
+      'Admin — that would erase the attribution the feature depends on. Read-only, unless ' +
+      '`purpose` is `setup`: then it may also write the office\'s settings, its people import ' +
+      'and its production file, and nothing else, without a second Super Admin — for an ' +
+      'active office\'s Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`). A second start ' +
+      'as the same person within one second would sign the same token, and is refused ' +
+      '(`409 IMPERSONATION_JUST_STARTED`) with nothing written.',
   })
   async impersonate(
     @Ctx() ctx: RequestContext,
     @Param('userId') userId: string,
     @Body() dto: ImpersonateDto,
   ) {
-    return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes);
+    return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes, dto.purpose);
   }
 
 }

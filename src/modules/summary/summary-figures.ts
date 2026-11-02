@@ -1,6 +1,8 @@
 import { PERFORMANCE, TIME } from '@/domain/constants';
 import { goalSet } from '@/domain/metrics/goal-set';
+import { wholePercent } from '@/domain/metrics/rate';
 import { cascadeCounts, type CascadeCounts } from '@/modules/goals/goal-cascade';
+import { countOf, type CascadeBinding } from '@/modules/config/activity-binding';
 
 /**
  * The Personal Summary's arithmetic (P10-T4). Pure: figures in, figures out, so every rule is a unit
@@ -39,7 +41,8 @@ export function periodFigures(
   return {
     targetMinor,
     actualMinor,
-    attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((actualMinor / targetMinor) * 100)),
+    // Half up in integers (P18.97-T3, parity F-254): Rp 23 jt of Rp 40 jt is 58%, which the float read 57.
+    attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(actualMinor, targetMinor)),
     gapMinor: gap,
     overMinor: Math.max(0, actualMinor - targetMinor),
     policiesNeeded: caseSizeMinor > 0 ? Math.ceil(gap / caseSizeMinor) : null,
@@ -100,8 +103,14 @@ export interface PlannedGoal {
   savedAt: string | null;
   /** The cascade's resolved plan, or `null` when the goal's stored assumptions cannot make one. */
   projected: { annualApeTargetMinor: number } | null;
-  /** The year to date the goal reads, and whose figure it is (P9-T6). */
-  achieved: { minor: number; month: string | null; provenance: string };
+  /**
+   * The year to date the goal reads, and whose figure it is (P9-T6) — and, for one typed in the app by somebody other
+   * than the member, who (S2).
+   */
+  achieved: {
+    minor: number; month: string | null; provenance: string;
+    typedBy?: { membershipId: string; name: string | null };
+  };
   caseSizeMinor: number;
   leadsToApptPct: number;
   closingRatePct: number;
@@ -165,8 +174,27 @@ export function summaryPlan(input: {
   };
 }
 
+/**
+ * **The year's activity targets are what the year still needs** (UI V1, 2026-10-30, UI-052 — *"the yearly Submission
+ * polis target equals the Gap number"*): the cascade run on the year's APE gap (`APE_GAP_TO_TARGET`), so the
+ * *Submission polis* target is *Polis yang dibutuhkan* itself — `ceil(gap ÷ case size)` both — and *Set appointment*
+ * and *Sales meeting* follow from it at the goal's own rates. A year whose gap is unmeasured keeps the cascade on the
+ * annual target (`summaryPlan`); a year made needs nothing more, 0 of each. The month is unchanged: its target is fixed
+ * when the month begins (ADR-0056), and its gap shrinks as its APE lands.
+ */
+function yearlyCountsOf(
+  plan: SummaryPlan, yearly: PeriodFigures, rates: Pick<PlannedGoal, 'caseSizeMinor' | 'closingRatePct' | 'leadsToApptPct'>,
+): CascadeCounts | null {
+  if (plan.yearlyCounts === null || yearly.gapMinor === null || rates.caseSizeMinor <= 0) return plan.yearlyCounts;
+  return cascadeCounts(yearly.gapMinor, rates);
+}
+
 /** Where a production figure came from, said with it (ADR-0008, P9-T6). */
 export interface FigureSource {
+  /**
+   * `self_reported` is **typed in the app, not uploaded** (ADR-0183): by the member, or by whoever coaches them — then
+   * `typedBy` names them (S2). Kept as the code, and documented as that, in `metrics-and-definitions.md`.
+   */
   provenance: 'imported' | 'corrected' | 'self_reported';
   /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
   month: string | null;
@@ -178,6 +206,12 @@ export interface FigureSource {
   correctedBy: { membershipId: string; name: string } | null;
   /** When, for a correction; `null` otherwise. ISO. */
   correctedAt: string | null;
+  /**
+   * **Who typed a `self_reported` figure, when it was not the member** (S2 of the T17–T20 permission review): a coach,
+   * by membership and name (`null` when they can no longer be named), so no screen calls it the member's own. Absent
+   * when the member typed it, and on every other source.
+   */
+  typedBy?: { membershipId: string; name: string | null };
 }
 
 /** A figure the office holds, as `ProductionReadings` answers it, with who corrected it. */
@@ -206,7 +240,10 @@ export interface GoalFigures {
   /** Whether a goal has been **saved** for the year. The defaults a first-time reader sees are not one. */
   set: boolean;
   caseSizeMinor: number;
-  /** The month's and the year's targets, before anything is measured against them. */
+  /**
+   * The month's and the year's targets. `yearlyCounts` is the cascade on what the year still needs (UI-052), so its
+   * *Submission polis* is `yearly.policiesNeeded`.
+   */
   plan: SummaryPlan;
   /** *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE. */
   monthly: PeriodFigures & { source: FigureSource | null };
@@ -249,7 +286,7 @@ export function goalFigures(input: {
   return {
     set: goal.savedAt !== null,
     caseSizeMinor: goal.caseSizeMinor,
-    plan,
+    plan: { ...plan, yearlyCounts: yearlyCountsOf(plan, yearly, goal) },
     monthly: {
       ...monthly,
       source: thisMonth
@@ -263,6 +300,8 @@ export function goalFigures(input: {
         month: goal.achieved.month,
         // The agent's own figure is nobody's correction, whatever the office holds beside it.
         ...correctionOf(goal.achieved.provenance === 'corrected' ? input.yearToDate : null, names),
+        // A typed figure a coach typed says who (S2); the member's own says nothing more.
+        ...(goal.achieved.provenance === 'self_reported' && goal.achieved.typedBy ? { typedBy: goal.achieved.typedBy } : {}),
       },
     },
   };
@@ -278,7 +317,8 @@ export interface Pace {
   /** *M*: the month's closing target, from the plan — the closings chip's own target. */
   closingTarget: number;
   /**
-   * *N*, `CLOSINGS_LAST_30_DAYS`: the goal's closing code logged over the last `SUMMARY.PACE_WINDOW_DAYS`,
+   * *N*, `CLOSINGS_LAST_30_DAYS`: the codes the office binds to *Submission polis* (ADR-0163), summed,
+   * logged over the last `SUMMARY.PACE_WINDOW_DAYS`,
    * today included, in the office's calendar — the prototype's `loggedClosing` (`:6316`). Early in a month
    * it counts last month's closings too; that is the prototype's reading, and every day has one.
    */
@@ -335,11 +375,16 @@ export function paceFor(input: {
 /** Which of the cascade's three counts a chip is (`Overall.html:3146-3160`). */
 export type ActivityTargetKey = 'leads' | 'appointments' | 'closings';
 
-/** One of *Your sales activity targets* (P10-T5): a cascade code logged against the period's target. */
+/** One of *Your sales activity targets* (P10-T5): a cascade role's codes logged against the period's target. */
 export interface ActivityTarget {
   key: ActivityTargetKey;
-  /** The goal's own code for this count — `cascadeMapping`, never an item number (invariant §4). */
+  /**
+   * The first code the office binds to this role (ADR-0163) — never an item number (invariant §4). Kept so a
+   * reader naming *the* code has one; `codes` is every code counted.
+   */
   code: string;
+  /** Every code the office binds to this role, in its order. `logged` is their sum. */
+  codes: string[];
   logged: number;
   /**
    * `SUMMARY_ACTIVITY_TARGET`: `null` without an APE target to derive it from. **0 is a month that needs
@@ -352,32 +397,34 @@ export interface ActivityTarget {
 }
 
 /**
- * The three chips, in the prototype's order: leads contacted, appointments, closings.
+ * The three chips, in the prototype's order: *Set appointment*, *Sales meeting*, *Submission polis*.
  *
  * `counts` is the cascade run on the period's APE target — this month's fixed one, or the year's — so
- * the closings chip and the pace sentence name one number. `null` is no target to run it on.
+ * the closings chip and the pace sentence name one number. `null` is no target to run it on. `binding` is
+ * the office's (`resolveCascadeBinding`, ADR-0163): a role bound to `[A, B]` counts both.
  */
 export function activityTargets(
   counts: { leads: number; appointments: number; policies: number } | null,
-  mapping: { leadsCode: string; appointmentsCode: string; closingsCode: string },
+  binding: CascadeBinding,
   logged: ReadonlyMap<string, number>,
 ): ActivityTarget[] {
-  const chip = (key: ActivityTargetKey, code: string, target: number | null): ActivityTarget => {
-    const n = logged.get(code) ?? 0;
+  const chip = (key: ActivityTargetKey, codes: readonly string[], target: number | null): ActivityTarget => {
+    const n = countOf(logged, codes);
     return {
       key,
-      code,
+      code: codes[0] ?? '',
+      codes: [...codes],
       logged: n,
       target,
       attainmentPct: target !== null && target > 0
-        ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, Math.round((n / target) * 100)) : null,
+        ? Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(n, target)) : null,
       targetMet: target !== null && n >= target,
     };
   };
   return [
-    chip('leads', mapping.leadsCode, counts?.leads ?? null),
-    chip('appointments', mapping.appointmentsCode, counts?.appointments ?? null),
-    chip('closings', mapping.closingsCode, counts?.policies ?? null),
+    chip('leads', binding.leads, counts?.leads ?? null),
+    chip('appointments', binding.appointments, counts?.appointments ?? null),
+    chip('closings', binding.closings, counts?.policies ?? null),
   ];
 }
 
@@ -391,6 +438,11 @@ export interface ShownSection {
    */
   summaryGroupCode?: string | null;
   summaryGroupLabel?: string | null;
+  /**
+   * `archived` for a section the office archived (ADR-0163 §6): it keeps, on its tile, the types the period holds
+   * counts for — and only those. Absent is active.
+   */
+  status?: 'active' | 'archived';
   types: { code: string; label: string; status: 'active' | 'archived' }[];
 }
 
@@ -420,14 +472,23 @@ export interface SectionChip {
  *
  * A type the office archived stays as a row while the period holds a count against it, so the chip's rows
  * add up to its total; one with nothing in the period is gone, as it is from the log screen.
+ *
+ * **So does a section the office archived** (ADR-0163 §6, P18.9-T2 AC-5): it keeps, on its tile, the types the
+ * period holds counts for, and is gone where it holds none. Its bound types are left to the target chips that
+ * count them, so an archived section never takes a live tile out with it.
  */
 export function sectionChips(
   sections: readonly ShownSection[], counts: ReadonlyMap<string, number>, cascadeCodes: readonly string[],
 ): SectionChip[] {
+  const held = sections.flatMap((section): ShownSection[] => {
+    if ((section.status ?? 'active') === 'active') return [section];
+    const types = section.types.filter((type) => !cascadeCodes.includes(type.code) && (counts.get(type.code) ?? 0) > 0);
+    return types.length ? [{ ...section, types }] : [];
+  });
   // A `Map` keeps insertion order: each tile's first section. Keys are prefixed because a section's own
   // code may equal another section's group code, and the two are different tiles.
   const tiles = new Map<string, { code: string; label: string; sections: ShownSection[] }>();
-  for (const section of sections) {
+  for (const section of held) {
     const group = section.summaryGroupCode?.trim() || null;
     const key = group ? `group:${group}` : `own:${section.code}`;
     const tile = tiles.get(key);
@@ -451,9 +512,17 @@ export function sectionChips(
     });
 }
 
-/** *N total activities logged … across all categories* — every code, archived and unshown included. */
-export function totalLogged(counts: ReadonlyMap<string, number>): number {
+/**
+ * ***n aktivitas*** (UI V1, UI-052): **the sum of the breakdown the Summary returns** — the three target chips' codes and
+ * every row of every section chip, each code once — so the total and the rows it sits over always agree. A code logged
+ * in no chip the reader is shown (a selling type that is not one of the three, a section their rung does not see) is
+ * in neither: the page counts what it shows.
+ */
+export function totalLogged(
+  counts: ReadonlyMap<string, number>, targets: readonly Pick<ActivityTarget, 'codes'>[], sections: readonly SectionChip[],
+): number {
+  const shown = new Set([...targets.flatMap((t) => t.codes), ...sections.flatMap((s) => s.rows.map((r) => r.code))]);
   let total = 0;
-  for (const n of counts.values()) total += n;
+  for (const code of shown) total += counts.get(code) ?? 0;
   return total;
 }

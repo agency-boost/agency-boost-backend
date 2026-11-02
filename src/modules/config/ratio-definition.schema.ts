@@ -53,8 +53,8 @@ export class RatioDefinition {
   comparison!: RatioComparison;
 
   /**
-   * How `benchmark` is written for a reader (P4-T25): `percent` (`0.15` → `15.0%`),
-   * `decimal` (`0.30` → `0.30`) or `points` (`30` → `±30 points`).
+   * How `benchmark` is written for a reader (P4-T25): `percent` (`0.15` → `15%`, as typed since ADR-0174 §2),
+   * `decimal` (`0.30` → `0,30`) or `points` (`30` → `±30 points`).
    *
    * Presentation, not arithmetic — the stored benchmark is compared exactly as before. It is
    * a column rather than something a screen works out because it cannot be worked out: the

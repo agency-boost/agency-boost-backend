@@ -10,6 +10,7 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import { latestFinalized } from './coaching-session.rules';
 import type { CoachingSessionDocument, SnapshotPeriodFigures } from './coaching-session.schema';
+import { COACHING_REFUSALS } from './coaching.messages';
 import {
   COUNTED, historyCounts, NEWEST, notFound, readsFinalized, requireMe, reviewedCounts, shownActionItems, shownLastWeekItems,
   showsLeadsTo, standingOf, type SessionHistoryRow, type SessionPerson,
@@ -113,7 +114,7 @@ export class CoachingRecordService {
       if (!standing.live) throw notFound();
       throw new DomainException(
         ErrorCode.COACHING_SESSION_NOT_FINALIZED,
-        'Only a finalized session can be printed. Finalize it first.',
+        COACHING_REFUSALS.COACHING_SESSION_NOT_FINALIZED.printFinalizedOnly,
         HttpStatus.CONFLICT,
         { status: session.status },
       );

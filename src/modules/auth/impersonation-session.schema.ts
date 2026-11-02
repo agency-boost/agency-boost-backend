@@ -4,6 +4,10 @@ import { baseSchemaOptions } from '@/common/schema/base.schema';
 
 export type ImpersonationSessionDocument = HydratedDocument<ImpersonationSession>;
 
+/** Why a session is started (ADR-0162 §1): to look, or to set an office up as its Owner or Admin would. */
+export const IMPERSONATION_PURPOSES = ['support', 'setup'] as const;
+export type ImpersonationPurpose = (typeof IMPERSONATION_PURPOSES)[number];
+
 /**
  * One support session: who ran it, as whom, in which office, and what they could do
  * (P4-T10).
@@ -45,6 +49,21 @@ export class ImpersonationSession {
    */
   @Prop({ type: Boolean, required: true, default: true })
   readOnly!: boolean;
+
+  /**
+   * **Why the session was started** (ADR-0162 §1): `support` to look, `setup` to configure an office as its
+   * Owner or Admin would. Chosen at the start and never changed.
+   */
+  @Prop({ type: String, enum: [...IMPERSONATION_PURPOSES], required: true, default: 'support' })
+  purpose!: ImpersonationPurpose;
+
+  /**
+   * **What a read-only session may write all the same** (ADR-0162 §2): `SETUP_SESSION_WRITE_SCOPE` for a setup
+   * session, empty for a support one. Stored rather than derived from `purpose`, so a session already running
+   * keeps the scope it was started with and the row says exactly what was extended.
+   */
+  @Prop({ type: [String], default: [] })
+  writeScope!: string[];
 
   /** The second Super Admin who approved writing. Never the one who started the session. */
   @Prop({ type: String, default: null })

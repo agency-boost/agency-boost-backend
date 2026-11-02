@@ -291,6 +291,12 @@ export class OrgLevelRowDto implements OrgLevelRow {
   @ApiProperty({ type: Number })
   displayOrder!: number;
 
+  @ApiProperty({
+    enum: ['senior', 'associate'], type: String, nullable: true,
+    description: '*Senior Leader*, *Associate Leader*, or `null` — *Not a leader* (ADR-0156).',
+  })
+  leaderTier!: 'senior' | 'associate' | null;
+
   @ApiProperty({ enum: ['active', 'archived'], type: String })
   status!: 'active' | 'archived';
 
@@ -302,18 +308,26 @@ export class OrgLevelRowDto implements OrgLevelRow {
 
 /** The roster template's header row, so a client can offer the download. */
 export class RosterTemplateDto {
-  @ApiProperty({ type: String, example: 'fullName,email,agentCode,role,leaderAgentCode' })
+  @ApiProperty({
+    type: String,
+    example: 'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender',
+    description: 'Nine columns: the four a person records follow the five, each required (ADR-0158).',
+  })
   header!: string;
 
   @ApiProperty({ type: [String] })
   columns!: string[];
 
   /**
-   * The whole file, examples included. Every example line is commented, so a person can
-   * copy one, edit it, or leave it alone — and none of those creates anybody.
+   * The CSV template: **the header and nothing else** since ADR-0184. Its guide and examples were `#` lines above the
+   * header until then; they are the Excel template's guide sheet (`format=xlsx`) and the page's now.
    */
-  @ApiProperty({ type: String })
+  @ApiProperty({ type: String, example: 'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender\n' })
   template!: string;
+
+  /** Three worked rows, as cells: what the paste box shows, tab-joined, and the workbook's guide lists. */
+  @ApiProperty({ type: 'array', items: { type: 'array', items: { type: 'string' } } })
+  examples!: string[][];
 }
 
 export class RosterIssueDto {

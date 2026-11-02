@@ -77,12 +77,31 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it.each(['AGUS', 'SARI', 'RINA'] as const)('P18.6-T1 AC-1 negative: %s, a field member, is refused by the guard and writes nothing', async (who) => {
-      h.as(who);
+    it('P18.6-T1 AC-1 negative: RINA, an Agent, is refused by the guard and writes nothing', async () => {
+      h.as('RINA');
       const before = await auditCount();
       const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_analytics:read' } });
       expect(await auditCount()).toBe(before);
+    });
+
+    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-6 negative: %s, a leader not tagged Core Leader, is answered 404 and writes nothing', async (who) => {
+      h.as(who);
+      const before = await auditCount();
+      const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      expect(await auditCount()).toBe(before);
+    });
+
+    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-4 positive: %s, a Core Leader, reads the whole office’s tree, read-only (ADR-0159 §2)', async (who) => {
+      const owners = await read({ category: 'goals' });
+      const base = h.ctx(who);
+      h.as(new RequestContext(base.userId, 'none', { ...base.membership!, isCoreLeader: true }));
+      const view = await read({ category: 'goals' });
+      expect([view.people, view.units]).toEqual([owners.people, owners.units]);
+      expect(rows(view).map((r) => r.membershipId).sort()).toEqual(rows(owners).map((r) => r.membershipId).sort());
+      // Read-only: no override offered (`campaign_qualification:override` is no field role's).
+      expect(view.can.override).toBe(false);
     });
 
     it('P18.6-T1 AC-1 negative: a Super Admin outside a support session belongs to no office', async () => {
@@ -144,6 +163,18 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
+    it('P18.98-T5 AC-7 refuses an item on a one-item category in Indonesian, and a module not offered', async () => {
+      const said = 'item tidak diterima oleh kategori goals: kategori ini hanya memiliki satu item.';
+      const refused = await http().get('/kpm/analytics/compliance').set('Accept-Language', 'id')
+        .query({ category: 'goals', item: '2026' }).expect(400);
+      expect(refused.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: said, details: { violations: [said] } });
+      expect((await http().get('/kpm/analytics/compliance').query({ category: 'goals', item: '2026' }).expect(400)).body.error.message)
+        .toBe('item is not taken by category goals: it has one item only.');
+      const missing = await http().get('/kpm/analytics/compliance').set('Accept-Language', 'id')
+        .query({ category: 'training', item: 'NOT_A_MODULE' }).expect(404);
+      expect(missing.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Modul training tidak ditemukan.' });
+    });
+
     it('P18.6-T1 AC-1 a module the office does not offer is 404, and writes nothing', async () => {
       const before = await auditCount();
       for (const item of ['NOT_A_MODULE', 'prospect_list']) {
@@ -187,7 +218,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
   describe('P18.6-T1 AC-2, AC-3 — the read’s shape and the summary', () => {
     it('P18.6-T1 AC-2 the sub-line’s two counts, six chips in order, the catalog, the selection, the tree and what the reader may do', async () => {
       const view = await read();
-      expect(Object.keys(view).sort()).toEqual(['can', 'catalog', 'people', 'selected', 'summary', 'today', 'tree', 'units']);
+      expect(Object.keys(view).sort()).toEqual(['can', 'catalog', 'people', 'selected', 'summary', 'thresholds', 'today', 'tree', 'units']);
       expect({ today: view.today, people: view.people, units: view.units }).toEqual({ today: TODAY, people: 16, units: 4 });
       expect(view.summary.map((c) => c.category)).toEqual([...COMPLIANCE_CATEGORIES]);
       expect(view.selected).toEqual({ category: 'training', item: 'PROSPECT_LIST' });
@@ -269,6 +300,11 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       ]);
     });
 
+    it('UI-109 serves where a bar turns red and green, the registry’s 50% and 80%, so the phone re-declares neither', async () => {
+      const view = await read({ category: 'training' });
+      expect(view.thresholds).toEqual({ lowBelowPct: 50, highFromPct: 80 });
+    });
+
     it('P18.6-T1 AC-8 a card counts the rows the item applies to; a section, its cards', async () => {
       const view = await read({ category: 'activation' });
       const agus = view.tree[0];
@@ -287,14 +323,14 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     it('P18.6-T1 AC-4 the office’s categories in order, an empty one included; the skills holding a module; their modules', async () => {
       const { catalog } = await read();
       expect(catalog.training.map((c) => [c.code, c.skills.length])).toEqual([
-        ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
+        ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['MOTIVATION', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
       ]);
       expect(catalog.training[0].skills[0]).toEqual({
-        code: 'PROSPECTING', label: 'Prospecting',
+        code: 'PROSPECTING', label: 'Pencarian prospek',
         modules: [
-          { code: 'PROSPECT_LIST', title: 'Building Your Prospect List' },
-          { code: 'REFERRAL_GENERATION', title: 'Referral Generation Techniques' },
-          { code: 'COLD_APPROACH_SCRIPTS', title: 'Cold Approach Scripts' },
+          { code: 'PROSPECT_LIST', title: 'Menyusun daftar prospek Anda' },
+          { code: 'REFERRAL_GENERATION', title: 'Teknik mendapatkan referensi' },
+          { code: 'COLD_APPROACH_SCRIPTS', title: 'Script pendekatan prospek baru' },
         ],
       });
       expect(catalog.training.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.code)))).toEqual(h.sales);

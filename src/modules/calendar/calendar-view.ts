@@ -1,7 +1,8 @@
 import type { LocalDate } from '@/common/time/local-day';
 import type { CalendarEntryType } from '@/domain/constants';
+import type { CalendarHiddenTaskView, CalendarJoinedEventView, CalendarTaskView } from './calendar-auto-items';
 import type { CalendarAnswer, CalendarEvent } from './calendar-event.schema';
-import { officeTimingOf, type OfficeTiming } from './calendar-time';
+import { officeTimingOf, type CalendarView, type OfficeTiming } from './calendar-time';
 
 /**
  * **What each reader is answered of an entry** (`functional/calendar.md`, *Who reads what* and the Data
@@ -62,7 +63,7 @@ export interface CalendarBusyView extends OfficeTiming {
 export type StoredEntry = Pick<
   CalendarEvent,
   'organiserMembershipId' | 'type' | 'title' | 'notes' | 'startsAt' | 'endsAt' | 'startsOn' | 'endsOn' | 'attendees' | 'version'
-> & { _id: unknown };
+> & { _id: unknown; allDay?: boolean | null };
 
 /** Who is reading, and what the service has resolved about them. */
 export interface Reader {
@@ -109,7 +110,9 @@ export function entryView(entry: StoredEntry, reader: Reader, readerIs: ReaderIs
 }
 
 /** An entry by its time alone. */
-export function busyView(entry: StoredEntry, timezone: string): CalendarBusyView {
+export function busyView(
+  entry: Pick<StoredEntry, 'type' | 'allDay' | 'startsAt' | 'endsAt' | 'startsOn' | 'endsOn'>, timezone: string,
+): CalendarBusyView {
   return {
     busy: true,
     ...officeTimingOf(entry, timezone),
@@ -154,7 +157,7 @@ export function namedIn(entries: readonly StoredEntry[]): string[] {
 
 /** The period read's own fields, as `periodOf` and the office answer them. */
 export interface CalendarPeriodView {
-  view: 'week' | 'month';
+  view: CalendarView;
   from: LocalDate;
   to: LocalDate;
   month: string | null;
@@ -163,6 +166,14 @@ export interface CalendarPeriodView {
   next: LocalDate;
   today: LocalDate;
   now: { at: string; minute: number };
-  subject: { membershipId: string; name: string; rung: { code: string; label: string } };
+  /** `phone`: a compared person's WhatsApp number (UI-104 point 9); `null` on the reader's own read, and when none. */
+  subject: { membershipId: string; name: string; rung: { code: string; label: string }; phone: string | null };
   entries: (CalendarEntryView | CalendarBusyView)[];
+  /**
+   * **Tugas** (UI V1, UI-104 points 1, 2 and 9): the subject's lead next actions and open coaching action items dated
+   * in the period, in the checklist's order — or, for a compared member who hides their details, each as its day alone.
+   */
+  tasks: (CalendarTaskView | CalendarHiddenTaskView)[];
+  /** **Events the subject joined** (UI-104 point 1), overlapping the period — busy blocks for one who hides them. */
+  events: (CalendarJoinedEventView | CalendarBusyView)[];
 }

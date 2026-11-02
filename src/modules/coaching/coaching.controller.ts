@@ -182,7 +182,12 @@ export class CoachingController {
   })
   @ApiResponse({ status: 200, type: CoachingSessionDto })
   @ApiResponse(refusal(409, '`COACHING_SESSION_FINALIZED` — already finalized. `VERSION_CONFLICT` — it changed since you read it.'))
-  @ApiResponse(refusal(422, '`COACHING_SESSION_INCOMPLETE` — `details.rule` names the check; `details.leadId` and `details.leadName` the lead, for `LEAD_THIS_MONTH_UNDATED`.'))
+  @ApiResponse(refusal(
+    422,
+    '`COACHING_SESSION_INCOMPLETE` — `details.rule` names the check; `details.leadId` and `details.leadName` the lead, '
+    + 'for `LEAD_THIS_MONTH_UNDATED`; `details.count` and `details.itemIds` the action items with no date, for '
+    + '`UNDATED_ACTION_ITEM` (UI-060).',
+  ))
   async finalize(
     @Ctx() ctx: RequestContext, @Param('sessionId') sessionId: string, @Body() body: PinnedSessionDto,
   ) {

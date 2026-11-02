@@ -1,4 +1,4 @@
-import type { CountedMembership } from './office-headcount';
+import { countedFrom, type CountedMembership } from './office-headcount';
 
 /**
  * `PRODUCING_AGENTS` (Phase 18.1, P18.1-T1 AC-4; OD-144) — the forum's *Producing agents* (`KPM_Owner.html:2465`),
@@ -11,14 +11,15 @@ import type { CountedMembership } from './office-headcount';
  */
 
 /**
- * **A membership belonged to the office at some moment of `[start, endExclusive)`** — joined before it ended, and not
- * removed before it began. The month's reading of `memberAt` (OD-24, `office-headcount.ts`), whose rows it reads the
- * same way: a pending membership never, an active one with no `joinedAt` always, a removed one with no `removedAt`
- * never — nobody can say when it was here.
+ * **A membership belonged to the office at some moment of `[start, endExclusive)`** — joined before it ended, by their
+ * join date (`countedFrom`, ADR-0172 §1; `joinedAt` for a row with none), and not removed before it began. The month's
+ * reading of `memberAt` (OD-24, `office-headcount.ts`), whose rows it reads the same way: a pending membership never,
+ * an active one with neither date always, a removed one with no `removedAt` never — nobody can say when it was here.
  */
 export function belongedDuring(membership: CountedMembership, start: Date, endExclusive: Date): boolean {
   if (membership.status === 'pending') return false;
-  if (membership.joinedAt !== null && membership.joinedAt.getTime() >= endExclusive.getTime()) return false;
+  const from = countedFrom(membership);
+  if (from !== null && from.getTime() >= endExclusive.getTime()) return false;
   if (membership.status === 'removed') {
     return membership.removedAt !== null && membership.removedAt.getTime() > start.getTime();
   }

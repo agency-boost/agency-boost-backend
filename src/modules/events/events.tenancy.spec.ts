@@ -48,6 +48,7 @@ describe('events, isolated (invariant §1)', () => {
     ['GET one event', () => http().get(`/events/${id}`)],
     ['POST an RSVP', () => http().post(`/events/${id}/rsvp`)],
     ['POST a cancellation', () => http().post(`/events/${id}/rsvp/cancel`)],
+    ['POST a withdrawal (UI-108)', () => http().post(`/events/${id}/rsvp/withdraw`)],
     ['POST a claim', () => http().post(`/events/${id}/attendance/claim`)],
     ['POST an answer', () => http().post(`/events/${id}/feedback`).send({ score: 9 })],
     ['GET the roll call', () => http().get(`/kpm/settings/events/${id}/attendance`)],

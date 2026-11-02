@@ -295,7 +295,7 @@ describe('an agent’s activity log (P6)', () => {
   describe('the correction window (P6-T3, ADR-0042)', () => {
     it('refuses a day that has not happened', async () => {
       await expect(save(member(KPM_A), { SELL_SUBMISSION: 1 }, '2026-03-12'))
-        .rejects.toThrow(/has not happened yet/);
+        .rejects.toThrow('12 Mar 2026 has not happened yet in this office. A day is logged after it, not before.');
     });
 
     it('takes a day earlier in the same month freely', async () => {
@@ -353,7 +353,7 @@ describe('an agent’s activity log (P6)', () => {
     it('refuses to correct a day that was never logged', async () => {
       await expect(wired.activityLogs.correctDay(member(KPM_A), {
         date: '2026-01-05', counts: {}, reason: 'Because.',
-      })).rejects.toThrow(/no entry for 2026-01-05/);
+      })).rejects.toThrow(/no entry for 5 Jan 2026 to correct/);
     });
   });
 

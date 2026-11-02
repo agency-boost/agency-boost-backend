@@ -174,6 +174,65 @@ describe('logging a day over HTTP (P6)', () => {
 
       expect(res.body.error.message).toMatch(/still open/);
     });
+
+    it('refuses a day nobody logged as not found, the sentence alone (P18.98-T5)', async () => {
+      // It was raised as `NotFoundException(sentence)`, which answered *… Log the day instead. not found.*
+      const res = await request(app.getHttpServer()).post(`${url}/log/correction`)
+        .send({ date: '2025-12-05', counts: {}, reason: 'Because.' }).expect(404);
+
+      // In the English reader's figures (`test/setup.ts`), as the default is live: 5 Dec, where nobody's choice read 5 Des.
+      expect(res.body.error).toMatchObject({
+        code: 'NOT_FOUND', message: 'There is no entry for 5 Dec 2025 to correct. Log the day instead.',
+      });
+    });
+  });
+
+  /*
+   * **The same refusals in Indonesian** (P18.98-T5 AC-7; ADR-0179 §7): the request's `Accept-Language` decides the
+   * words, and a day in them is in Indonesian figures. The code and every other detail are the same in both.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    const indonesian = () => request(app.getHttpServer());
+
+    it('P18.98-T5 AC-7 refuses a day that has not happened in Indonesian, the day in Indonesian figures', async () => {
+      const res = await indonesian().put(`${url}/log`).set('Accept-Language', 'id')
+        .send({ date: '2026-05-12', counts: {} }).expect(422);
+
+      expect(res.body.error).toMatchObject({
+        code: 'ACTIVITY_FUTURE_DATE',
+        message: '12 Mei 2026 belum terjadi di KPM ini. Aktivitas sebuah hari dicatat setelah hari itu, bukan sebelumnya.',
+        details: { date: '2026-05-12', today: TODAY },
+      });
+    });
+
+    it('P18.98-T5 AC-7 refuses a day of the wrong shape with the DTO’s own sentence, in Indonesian', async () => {
+      const res = await indonesian().get(`${url}/log`).set('Accept-Language', 'id')
+        .query({ date: '11-03-2026' }).expect(400);
+
+      expect(res.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Tanggal ditulis dengan format YYYY-MM-DD, menurut zona waktu KPM ini.',
+        details: { violations: ['Tanggal ditulis dengan format YYYY-MM-DD, menurut zona waktu KPM ini.'] },
+      });
+    });
+
+    it('P18.98-T5 AC-7 refuses an unknown code, and a correction of an open day, in Indonesian', async () => {
+      const unknown = await indonesian().put(`${url}/log`).set('Accept-Language', 'id')
+        .send({ counts: { NOT_A_CODE: 1 } }).expect(400);
+      expect(unknown.body.error).toEqual({
+        code: 'VALIDATION_FAILED',
+        message: 'KPM ini tidak memiliki jenis aktivitas dengan kode NOT_A_CODE di daftar yang telah diterbitkannya.',
+        requestId: expect.any(String),
+      });
+
+      await request(app.getHttpServer()).put(`${url}/log`).send({ counts: {} }).expect(200);
+      const open = await indonesian().post(`${url}/log/correction`).set('Accept-Language', 'id')
+        .send({ date: TODAY, counts: {}, reason: 'Karena.' }).expect(400);
+      expect(open.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: '11 Mar 2026 masih terbuka — simpan seperti biasa. Koreksi untuk hari yang sudah dibaca orang lain.',
+      });
+    });
   });
 
   describe('the reads', () => {

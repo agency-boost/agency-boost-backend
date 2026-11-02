@@ -6,8 +6,9 @@ import {
   DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { addDays, isLocalDate } from '@/common/time/local-day';
-import { refuseWith } from '@/common/validation/fields';
+import type { ResourceName } from '@/common/errors/resources';
+import { addDays, isLocalDate, type LocalDate } from '@/common/time/local-day';
+import { refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { CALENDAR_ALL_DAY_TYPE, type CalendarEntryType } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -18,11 +19,13 @@ import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
+import { CalendarAutoItems, type CalendarTaskView, type JoinedEvent } from './calendar-auto-items';
 import { CalendarEventRepository, type CalendarEntryFields } from './calendar-event.repository';
 import type { CalendarAnswer, CalendarAttendee, CalendarEventDocument } from './calendar-event.schema';
 import { CalendarNotices } from './calendar-notices';
+import { CALENDAR_REFUSALS } from './calendar.messages';
 import {
-  officeClockOf, officeDateOf, officeTimingOf, periodOf, startOfOfficeDay, timingOf,
+  isAllDayTrip, officeClockOf, officeDateOf, officeTimingOf, periodOf, startOfOfficeDay, timingOf,
   type CalendarView, type TimingInput,
 } from './calendar-time';
 import {
@@ -77,10 +80,39 @@ export interface CalendarSettings {
   hideDetails: boolean;
 }
 
+/** One timed thing on the reader's today, for Home's *Aksi hari ini* to fill up with (UI-100, UI-104 point 7). */
+export interface CalendarTodayItem {
+  kind: 'entry' | 'event';
+  /** The calendar entry's id, or the event's. */
+  id: string;
+  title: string;
+  /** A calendar entry's type code, or the event's type label as the office typed it. */
+  type: string;
+  start: string;
+  end: string;
+  startsAt: string;
+}
+
+/**
+ * **The reader's today on their calendar, counted** (UI V1, UI-104 point 7; Home's *Jadwal hari ini* and *Aksi hari
+ * ini*, UI-100). `CalendarService.today` — the read the Home endpoint calls, so the two screens count alike.
+ */
+export interface CalendarTodayView {
+  today: LocalDate;
+  /** **Timed things today** (*n meeting*): the reader's entries not declined — a trip of any kind left out — and the events they joined. */
+  meetings: number;
+  /** **Open Tugas today** (*Tugas n*): lead next actions and coaching action items due today, a ticked one excluded. */
+  tasks: number;
+  /** Today's Tugas, in the Agenda checklist's order. */
+  taskItems: CalendarTaskView[];
+  /** Today's timed things not yet ended, soonest first. */
+  upcoming: CalendarTodayItem[];
+}
+
 /** The record a change of the settings leaves: ids and the setting, never anything typed. */
 export const CALENDAR_SETTINGS_AUDIT_ACTION = 'calendar_settings.updated';
 
-const ENTRY = 'Calendar entry';
+const ENTRY: ResourceName = 'Calendar entry';
 const TIMING_FIELDS = ['date', 'start', 'end', 'startsOn', 'endsOn'] as const;
 
 /**
@@ -121,6 +153,7 @@ export class CalendarService {
     private readonly subjectReads: SubjectReadAudit,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly auto: CalendarAutoItems,
   ) {}
 
   // ------------------------------------------------------------------ reads
@@ -134,19 +167,20 @@ export class CalendarService {
    * - **With `for`**, a compared pane: `COACH(reader, member)` resolved now, 404 outside it — a peer, a
    *   peer AAB's agent, another office's member, a member who left, nobody's id, and the reader
    *   themselves, since compare never reaches oneself. An empty `for` is the DTO's 400, never the
-   *   reader's own calendar. Week only. In *Who reads what*'s projection
-   *   (`comparedView`), and one §3.5 entry, surface `calendar`, written last, so a refused read writes
-   *   none. **Each organiser in the week who hides their details** (ADR-0110) is read in the same round
-   *   trip as the names, so their entries go out as busy blocks to a reader who is not on them.
+   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.95-T8 AC-2: it was Week
+   *   only — the client asked for compare in Month, UI-020*). In *Who reads what*'s projection
+   *   (`comparedView`), and one §3.5 entry, surface `calendar`, with the period's `from` and `to`,
+   *   written last, so a refused read writes none. **Each organiser in the period who hides their
+   *   details** (ADR-0110) is read in the same round trip as the names, so their entries go out as busy
+   *   blocks to a reader who is not on them.
    */
   async read(ctx: RequestContext, query: CalendarReadQuery): Promise<CalendarPeriodView> {
     const me = requireMembership(ctx);
     const view = query.view ?? 'week';
     const compared = query.for !== undefined;
-    if (compared && view !== 'week') refuseWith(['for is read with view=week only.']);
     const office = await this.days.office(ctx);
     const date = query.date ?? office.today;
-    if (!isLocalDate(date)) refuseWith(['date must be a day, written YYYY-MM-DD.']);
+    if (!isLocalDate(date)) refuseWith([CALENDAR_REFUSALS.VALIDATION_FAILED.dayShape({ field: 'date' })]);
 
     let subject = { membershipId: me, orgLevelCode: ctx.membership!.orgLevelCode };
     if (compared) {
@@ -157,17 +191,23 @@ export class CalendarService {
 
     const period = periodOf(view, date);
     const timezone = office.timezone;
-    const rows = await this.entries.overlapping(
-      ctx, onCalendarOf(subject.membershipId),
-      startOfOfficeDay(timezone, period.from), startOfOfficeDay(timezone, addDays(period.to, 1)),
-    );
-    const [coaches, names, labels, hidden] = await Promise.all([
+    const start = startOfOfficeDay(timezone, period.from);
+    const endExclusive = startOfOfficeDay(timezone, addDays(period.to, 1));
+    const [rows, tasks, joined] = await Promise.all([
+      this.entries.overlapping(ctx, onCalendarOf(subject.membershipId), start, endExclusive),
+      // What other features put on the calendar, read from their sources now (UI-104 point 1).
+      this.auto.tasksOf(ctx, subject.membershipId, period.from, period.to),
+      this.auto.joinedEventsOf(ctx, subject.membershipId, start, endExclusive, timezone),
+    ]);
+    const [coaches, names, labels, hidden, phones] = await Promise.all([
       compared || rows.some((e) => e.type === 'coaching') ? this.coachedBy(ctx, me) : Promise.resolve(new Set<string>()),
       this.names.byMembershipId(ctx, [subject.membershipId, ...namedIn(rows)]),
       this.rungLabels(ctx, office),
       compared
         ? this.hidingDetails(ctx, [subject.membershipId, ...rows.map((e) => e.organiserMembershipId)])
         : Promise.resolve(new Set<string>()),
+      // A compared person's number, for the one WhatsApp beside their tasks (UI-104 point 9).
+      compared ? this.auto.phonesOf(ctx, [subject.membershipId]) : Promise.resolve(new Map<string, string>()),
     ]);
     const reader: Reader = { membershipId: me, coaches, names, timezone };
     const now = this.clock.now();
@@ -181,10 +221,27 @@ export class CalendarService {
         membershipId: subject.membershipId,
         name: names.get(subject.membershipId) ?? '',
         rung: { code: subject.orgLevelCode, label: labels.get(subject.orgLevelCode) ?? subject.orgLevelCode },
+        // A person who hides their details hides their number as well (the Phase 18.99 exit review, L2), as their tasks
+        // and events go out as *Sibuk*: the WhatsApp beside their tasks is part of what they chose not to show.
+        phone: hidden.has(subject.membershipId) ? null : phones.get(subject.membershipId) ?? null,
       },
       entries: rows.map((entry) => (compared
         ? comparedView(entry, subject.membershipId, reader, hidden)
         : entryView(entry, reader, standingOf(entry, me)!))),
+      /*
+       * **A member who hides their details** (ADR-0110, UI-104 point 9) is read by a leader as *Sibuk*: each task as its
+       * day alone — a count — and each event they joined as a busy block at its time. Their own read is in full.
+       */
+      ...(compared && hidden.has(subject.membershipId)
+        ? {
+          tasks: tasks.map((task) => ({ busy: true as const, date: task.date })),
+          events: joined.map((event) => ({
+            busy: true as const,
+            allDay: event.allDay, date: event.date, start: event.start, end: event.end,
+            startsOn: event.startsOn, endsOn: event.endsOn, startsAt: event.startsAt, endsAt: event.endsAt,
+          })),
+        }
+        : { tasks, events: joined }),
     };
     if (compared) {
       await this.subjectReads.record(ctx, { membershipId: subject.membershipId }, 'calendar', { from: period.from, to: period.to });
@@ -205,6 +262,64 @@ export class CalendarService {
     } as FilterQuery<CalendarEventDocument>);
     if (!entry) throw new NotFoundException(ENTRY);
     return this.answerAs(ctx, entry, (await this.days.office(ctx)).timezone);
+  }
+
+  /**
+   * **The reader's today, counted** (UI V1, 2026-10-30, UI-104 point 7): no route of its own — Home's endpoint calls it
+   * (UI-100), so *Jadwal hari ini* counts what the Agenda draws for today. The office's today (invariant §9).
+   *
+   * - `meetings`: the reader's own entries on today that are not trips and not declined, and the events they joined that
+   *   touch today. A trip is a line at the top of the day, not a meeting.
+   * - `tasks`: today's open *Tugas* — the moment one is ticked it is gone from here, as from the Agenda.
+   * - `upcoming`: today's timed things not yet ended, soonest first, for *Aksi hari ini* after its tasks.
+   */
+  async today(ctx: RequestContext): Promise<CalendarTodayView> {
+    const me = requireMembership(ctx);
+    const office = await this.days.office(ctx);
+    const timezone = office.timezone;
+    const start = startOfOfficeDay(timezone, office.today);
+    const endExclusive = startOfOfficeDay(timezone, addDays(office.today, 1));
+    const [rows, taskItems, joined] = await Promise.all([
+      this.entries.overlapping(ctx, onCalendarOf(me), start, endExclusive),
+      this.auto.tasksOf(ctx, me, office.today, office.today),
+      this.auto.joinedEventsOf(ctx, me, start, endExclusive, timezone),
+    ]);
+    const timed = rows.filter((entry) => entry.type !== CALENDAR_ALL_DAY_TYPE);
+    const now = this.clock.now();
+    const upcoming: CalendarTodayItem[] = [
+      ...timed.filter((entry) => entry.endsAt > now).map((entry) => entryItem(entry, timezone)),
+      ...joined.filter((event) => new Date(event.endsAt) > now).map(eventItem),
+    ].sort(soonestFirst);
+    return { today: office.today, meetings: timed.length + joined.length, tasks: taskItems.length, taskItems, upcoming };
+  }
+
+  /**
+   * **The reader's next timed things after today** (UI V1, UI-100 *Aksi hari ini*: *fill the rest with my next agenda
+   * items — timed events, soonest first, from now on; today first, then the next days*). `today().upcoming` is today's.
+   * This is the days after: the reader's calendar entries and **the events they joined** (UI-104 #1), soonest first, at
+   * most `limit`. A trip is left out, as `today()` leaves it out: it is a line, never a meeting. There is no horizon:
+   * the next one is the next one, however far off. Home reads it (T16); no route of its own.
+   */
+  async nextAfterToday(ctx: RequestContext, limit: number): Promise<(CalendarTodayItem & { date: LocalDate })[]> {
+    if (limit <= 0) return [];
+    const me = requireMembership(ctx);
+    const office = await this.days.office(ctx);
+    const timezone = office.timezone;
+    const tomorrow = startOfOfficeDay(timezone, addDays(office.today, 1));
+    const [rows, joined] = await Promise.all([
+      this.entries.find(
+        ctx,
+        { $and: [onCalendarOf(me), { startsAt: { $gte: tomorrow } }, { type: { $ne: CALENDAR_ALL_DAY_TYPE } }] } as FilterQuery<CalendarEventDocument>,
+        { sort: { startsAt: 1, _id: 1 }, limit },
+      ),
+      // Every joined event still to start: the reader's RSVPs are few, so no horizon is needed to keep the read small.
+      this.auto.joinedEventsOf(ctx, me, tomorrow, NO_HORIZON, timezone),
+    ]);
+    const items = [
+      ...rows.map((entry) => ({ ...entryItem(entry, timezone), date: officeClockOf(timezone, entry.startsAt).date })),
+      ...joined.filter((event) => new Date(event.startsAt) >= tomorrow).map((event) => ({ ...eventItem(event), date: event.date })),
+    ].sort(soonestFirst);
+    return items.slice(0, limit);
   }
 
   /**
@@ -382,7 +497,7 @@ export class CalendarService {
     if (entry.attendees.some((a) => a.membershipId === me && a.placed)) {
       throw new DomainException(
         ErrorCode.CALENDAR_BLOCK_NOT_ANSWERABLE,
-        'This time was placed on your calendar by a leader above you. There is nothing to accept or decline.',
+        CALENDAR_REFUSALS.CALENDAR_BLOCK_NOT_ANSWERABLE.placedByLeader,
         HttpStatus.CONFLICT,
         { entryId },
       );
@@ -540,7 +655,35 @@ function requireMembership(ctx: RequestContext): string {
   return me;
 }
 
+/**
+ * **A timed entry as *Aksi hari ini* lists it** (UI-100, UI-104 point 7): its times on the office's wall clock, an end at
+ * the next midnight `00:00` as `officeTimingOf` answers it. Never a trip: `today` and `nextAfterToday` leave trips out.
+ */
+function entryItem(entry: CalendarEventDocument, timezone: string): CalendarTodayItem {
+  return {
+    kind: 'entry', id: String(entry._id), title: entry.title, type: entry.type,
+    start: officeClockOf(timezone, entry.startsAt).time, end: officeClockOf(timezone, entry.endsAt).time,
+    startsAt: entry.startsAt.toISOString(),
+  };
+}
+
+/** **A joined event as *Aksi hari ini* lists it** (UI-104 point 1): its times, and its type's label as the office typed it. */
+function eventItem(event: JoinedEvent): CalendarTodayItem {
+  return {
+    kind: 'event', id: event.eventId, title: event.title, type: event.type.label,
+    start: event.start, end: event.end, startsAt: event.startsAt,
+  };
+}
+
+/** Soonest first, and by id on a tie, so two reads never shuffle: `today`'s and `nextAfterToday`'s order. */
+function soonestFirst(a: CalendarTodayItem, b: CalendarTodayItem): number {
+  return a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id);
+}
+
 /** A member's calendar: every entry they organise, and every one they attend but have not declined. */
+/** The far end of a read with no horizon: the latest instant a `Date` holds. */
+const NO_HORIZON = new Date(8_640_000_000_000_000);
+
 function onCalendarOf(membershipId: string): FilterQuery<CalendarEventDocument> {
   return {
     $or: [
@@ -584,22 +727,29 @@ function fieldsOf(
 }
 
 /**
- * **An edit's timing**: within a kind — timed to timed, Travel to Travel — the stored office timing
- * with any field sent laid over it; across kinds, only what was sent, since the new kind's fields cannot
- * be inferred. A field of the other kind that was sent is kept, so `timingOf` refuses it.
+ * **An edit's timing**: within a kind — timed to timed, an all-day trip to an all-day trip, a trip with times to a
+ * trip with times (UI V1, UI-104 point 8) — the stored office timing with any field sent laid over it; across kinds,
+ * only what was sent, since the new kind's fields cannot be inferred. A field of the other kind that was sent is kept,
+ * so `timingOf` refuses it. A trip's `allDay` not sent keeps the stored one; a type changed to Travel starts all-day.
  */
 function mergedTiming(
   entry: CalendarEventDocument, input: TimingInput, type: CalendarEntryType, timezone: string,
 ): TimingInput {
   const travel = type === CALENDAR_ALL_DAY_TYPE;
-  const sameKind = travel === (entry.type === CALENDAR_ALL_DAY_TYPE);
+  const wasTravel = entry.type === CALENDAR_ALL_DAY_TYPE;
+  const allDay = travel && (input.allDay ?? (wasTravel ? isAllDayTrip(entry) : true)) !== false;
+  const kindOf = (isTravel: boolean, isAllDay: boolean) => (!isTravel ? 'timed' : isAllDay ? 'trip' : 'timed_trip');
+  const sameKind = kindOf(travel, allDay) === kindOf(wasTravel, isAllDayTrip(entry));
   const stored = officeTimingOf(entry, timezone);
-  const merged: TimingInput = !sameKind ? {} : travel
-    ? { startsOn: stored.startsOn, endsOn: stored.endsOn }
-    : { date: stored.date, start: stored.start, end: stored.end };
+  const merged: TimingInput = !sameKind ? {}
+    : !travel ? { date: stored.date, start: stored.start, end: stored.end }
+      : allDay ? { startsOn: stored.startsOn, endsOn: stored.endsOn }
+        : { startsOn: stored.startsOn, start: stored.start, endsOn: stored.endsOn, end: stored.end };
   for (const field of TIMING_FIELDS) {
     if (input[field] !== undefined) merged[field] = input[field];
   }
+  // A timed type sent `allDay: true` is passed on, so `timingOf` refuses it rather than this ignoring it.
+  merged.allDay = travel ? allDay : input.allDay;
   return merged;
 }
 
@@ -608,10 +758,10 @@ function mergedTiming(
  * that member is placed, not invited, and no list names them. Distinct and at most 50 the DTO has said.
  */
 function inviteesOf(ids: readonly string[], not: { reader: string; placed?: string | null }): string[] {
-  const violations: string[] = [];
-  if (ids.includes(not.reader)) violations.push('inviteeIds must not include you: you are on your own entry already.');
+  const violations: FieldSentence[] = [];
+  if (ids.includes(not.reader)) violations.push(CALENDAR_REFUSALS.VALIDATION_FAILED.inviteeSelf);
   if (not.placed && ids.includes(not.placed)) {
-    violations.push('inviteeIds must not include the member the time is placed on: they are on it already.');
+    violations.push(CALENDAR_REFUSALS.VALIDATION_FAILED.inviteePlaced);
   }
   if (violations.length) refuseWith(violations);
   return [...ids];

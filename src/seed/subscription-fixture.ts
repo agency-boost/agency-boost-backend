@@ -16,6 +16,7 @@ import { seedObjectId } from './coaching-fixture';
  * | **0555** Kelapa Gading | ends **five days** after today; Rp 400,000 a leader; **no limit** | the list's near end: *Active*, its end five days away, *2* leaders |
  * | **0601** Cikarang (new) | **ended ten days ago**, not kept active | `owner@kpm0601.test` and `agent@kpm0601.test`: the page saying the subscription ended and to contact AgencyBoost, at whatever address they open. The list reads *Ended* |
  * | **0602** Bekasi Barat (new) | **ended three days ago, kept active**; at its limit of **2** leaders (the Owner and Sinta, an AAB) | `owner@kpm0602.test`: everything works; at `/people/members`, promoting Joko (Agent) to AAB is refused with the limit's words. The list reads *Ended — kept active* and *2 / 2* |
+ * | **0603** Tangerang (new) | six months to run; Rp 350,000 a leader; a limit of **10**, and **13** used — the Owner and nine AABs, then three Agents AgencyBoost approved past the limit (ADR-0157); a fourth asked for and waiting | `superadmin@agencyboost.test` at `/admin/tenants`: *13 / 10*, *3 over*; at `/admin/leader-limit-requests`, Rizky waiting and the three approved. `owner@kpm0603.test` at Rizky's page: *Waiting for AgencyBoost's approval* |
  *
  * **Dates count from the run's today in `Asia/Jakarta`**, through the clock port. **Written only where
  * missing**: an office's subscription is set when it has none, offices are found by their derived ids,
@@ -50,7 +51,7 @@ function ending(
 }
 
 /** Each office's subscription on a given today — pure, so the spec and the guide read the same plan. */
-export function planSubscriptions(today: string): Record<'0417' | '0555' | '0601' | '0602', KpmSubscription> {
+export function planSubscriptions(today: string): Record<'0417' | '0555' | '0601' | '0602' | '0603', KpmSubscription> {
   return {
     '0417': ending(shift(today, { months: 3 }), { years: 1 }, {
       pricePerLeaderMinor: rupiah(350_000), maxLeaders: 10, keepActiveAfterEnd: false,
@@ -64,6 +65,9 @@ export function planSubscriptions(today: string): Record<'0417' | '0555' | '0601
     '0602': ending(shift(today, { days: -3 }), { years: 1 }, {
       pricePerLeaderMinor: rupiah(350_000), maxLeaders: 2, keepActiveAfterEnd: true,
     }),
+    '0603': ending(shift(today, { months: 6 }), { years: 1 }, {
+      pricePerLeaderMinor: rupiah(350_000), maxLeaders: 10, keepActiveAfterEnd: false,
+    }),
   };
 }
 
@@ -72,17 +76,43 @@ export function planSubscriptions(today: string): Record<'0417' | '0555' | '0601
  * move every account made after them onto another number than a fresh seed has always given it.
  */
 export const SUBSCRIPTION_FIXTURE_PEOPLE = {
-  owner0601: { email: 'owner@kpm0601.test', fullName: 'Rudi Hartanto', pronoun: 'he', agentCode: 'PRU-86001' },
-  agent0601: { email: 'agent@kpm0601.test', fullName: 'Fitri Handayani', pronoun: 'she', agentCode: 'PRU-86002' },
-  owner0602: { email: 'owner@kpm0602.test', fullName: 'Yohanes Saputra', pronoun: 'he', agentCode: 'PRU-86003' },
-  aab0602: { email: 'aab@kpm0602.test', fullName: 'Sinta Maharani', pronoun: 'she', agentCode: 'PRU-86004' },
-  agent0602: { email: 'agent@kpm0602.test', fullName: 'Joko Prasetyo', pronoun: 'he', agentCode: 'PRU-86005' },
+  owner0601: { email: 'owner@kpm0601.test', fullName: 'Rudi Hartanto', pronoun: 'he', agentCode: '86001' },
+  agent0601: { email: 'agent@kpm0601.test', fullName: 'Fitri Handayani', pronoun: 'she', agentCode: '86002' },
+  owner0602: { email: 'owner@kpm0602.test', fullName: 'Yohanes Saputra', pronoun: 'he', agentCode: '86003' },
+  aab0602: { email: 'aab@kpm0602.test', fullName: 'Sinta Maharani', pronoun: 'she', agentCode: '86004' },
+  agent0602: { email: 'agent@kpm0602.test', fullName: 'Joko Prasetyo', pronoun: 'he', agentCode: '86005' },
+  owner0603: { email: 'owner@kpm0603.test', fullName: 'Hendra Gunawan', pronoun: 'he', agentCode: '86101' },
+  agent0603: { email: 'agent@kpm0603.test', fullName: 'Rizky Ramadhan', pronoun: 'he', agentCode: '86114' },
 } as const;
 
+/**
+ * **0603's leaders past the limit** (ADR-0157): nine AABs who fill its limit of ten beside the Owner, and three
+ * Agents AgencyBoost approved as AABs past it — each with their request, approved, and the promotion it carried
+ * out on the role change log. Codes from `86102`, after the Owner's.
+ */
+export const LEADER_LIMIT_PEOPLE: readonly { email: string; fullName: string; pronoun: 'she' | 'he'; approvedDaysAgo?: number }[] = [
+  { email: 'aab01@kpm0603.test', fullName: 'Lestari Wulandari', pronoun: 'she' },
+  { email: 'aab02@kpm0603.test', fullName: 'Bambang Sutrisno', pronoun: 'he' },
+  { email: 'aab03@kpm0603.test', fullName: 'Ratna Sari', pronoun: 'she' },
+  { email: 'aab04@kpm0603.test', fullName: 'Teguh Santoso', pronoun: 'he' },
+  { email: 'aab05@kpm0603.test', fullName: 'Maya Anggraini', pronoun: 'she' },
+  { email: 'aab06@kpm0603.test', fullName: 'Andi Kurniawan', pronoun: 'he' },
+  { email: 'aab07@kpm0603.test', fullName: 'Nurul Hidayah', pronoun: 'she' },
+  { email: 'aab08@kpm0603.test', fullName: 'Wahyu Pratama', pronoun: 'he' },
+  { email: 'aab09@kpm0603.test', fullName: 'Dian Puspita', pronoun: 'she' },
+  { email: 'aab10@kpm0603.test', fullName: 'Irfan Hakim', pronoun: 'he', approvedDaysAgo: 40 },
+  { email: 'aab11@kpm0603.test', fullName: 'Siska Amelia', pronoun: 'she', approvedDaysAgo: 25 },
+  { email: 'aab12@kpm0603.test', fullName: 'Fajar Nugroho', pronoun: 'he', approvedDaysAgo: 9 },
+];
+
 /** The two offices this fixture makes, by derived id. */
+/** The Owner's reason on each approved promotion past 0603's limit, as typed (P18.98-T7: in Bahasa Indonesia). */
+export const SUBSCRIPTION_PROMOTION_REASON = 'Sudah memimpin tim akhir pekan';
+
 export const SUBSCRIPTION_OFFICES = {
   '0601': { _id: seedObjectId('subscription-fixture', 'kpm', '0601'), branchName: 'Cikarang Branch' },
   '0602': { _id: seedObjectId('subscription-fixture', 'kpm', '0602'), branchName: 'Bekasi Barat Branch' },
+  '0603': { _id: seedObjectId('subscription-fixture', 'kpm', '0603'), branchName: 'Tangerang Branch' },
 } as const;
 
 type Role = 'ab' | 'aab' | 'agent';
@@ -102,10 +132,17 @@ export interface SubscriptionFixtureDeps {
   configure: (kpmId: string) => Promise<unknown>;
   publish: (kpmId: string, at: Date) => Promise<unknown>;
   place: (
-    kpm: OfficeRef, userId: string, role: Role, leader: Placed | null, opts?: { joinedDaysAgo?: number },
+    kpm: OfficeRef, userId: string, role: Role, leader: Placed | null, opts?: { joinedDaysAgo?: number; joinedAs?: Role },
   ) => Promise<Placed>;
   recount: (kpmId: string, membershipId: string) => Promise<unknown>;
   daysAgo: (days: number) => Date;
+  /** A role change that happened before today, on the role change log (the seed's `promotedEarlier`). */
+  promote: (
+    kpmId: string, membership: Placed, from: Role, to: Role, actor: Placed, reason: string, days: number,
+  ) => Promise<unknown>;
+  /** `leaderLimitRequests` (ADR-0157), and the Super Admin who decided 0603's. */
+  LeaderLimitRequests: mongoose.Model<never>;
+  superAdminUserId: string;
 }
 
 export interface SubscriptionFixture {
@@ -125,7 +162,7 @@ async function subscribe(Kpms: mongoose.Model<never>, kpmId: string, subscriptio
 /** One of the two new offices, found by its derived id or made with it. */
 async function officeOf(
   deps: SubscriptionFixtureDeps,
-  code: '0601' | '0602',
+  code: '0601' | '0602' | '0603',
   ownerUserId: string,
 ): Promise<OfficeRef> {
   const { _id, branchName } = SUBSCRIPTION_OFFICES[code];
@@ -180,6 +217,8 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
   await deps.recount(String(kpm0602._id), root0602.id);
   await subscribe(deps.Kpms, String(kpm0602._id), plan['0602']);
 
+  await seedPastTheLimit(deps, plan);
+
   const guide = `
   SUBSCRIPTIONS at /admin/tenants  (Super Admin; from src/seed/subscription-fixture.ts, dated from the
              office's today ${today}. A subscription is written only where an office has none, so one
@@ -195,7 +234,59 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
                                  is refused, naming the limit of 2
       aab@kpm0602.test           Sinta, an AAB leading Joko
       agent@kpm0602.test         Joko, an Agent — the one to try to promote
+    KPM 0603 · Tangerang         ends ${plan['0603'].endDate}; limit 10, Leaders 13 / 10 — "3 over": the Owner and
+                                 nine AABs, and three Agents AgencyBoost approved past the limit (ADR-0157)
+      owner@kpm0603.test         Hendra, the Owner. Rizky's page reads "Waiting for AgencyBoost's approval"
+      agent@kpm0603.test         Rizky, an Agent the Owner asked to make an AAB — pending at
+                                 /admin/leader-limit-requests, beside Irfan, Siska and Fajar, approved
 `;
 
   return { today, plan, guide };
+}
+
+/**
+ * **0603 · Tangerang: thirteen leaders on a limit of ten** (ADR-0157, P18.8-T2). The Owner and nine AABs fill the
+ * limit; Irfan, Siska and Fajar joined as Agents and were made AABs past it, each on an approved request and a
+ * promotion on the role change log with the Owner's reason; Rizky, an Agent, waits on the Owner's request.
+ * Written only where missing, like the rest: people by address, requests by subject.
+ */
+async function seedPastTheLimit(deps: SubscriptionFixtureDeps, plan: ReturnType<typeof planSubscriptions>) {
+  const ownerUser = await person(deps, 'owner0603');
+  const kpm = await officeOf(deps, '0603', String(ownerUser._id));
+  const kpmId = String(kpm._id);
+  await deps.configure(kpmId);
+  await deps.publish(kpmId, deps.daysAgo(400));
+  const root = await deps.place(kpm, String(ownerUser._id), 'ab', null, { joinedDaysAgo: 390 });
+
+  const Requests = deps.LeaderLimitRequests as unknown as mongoose.Model<Record<string, unknown>>;
+  const request = async (subject: Placed, fields: Record<string, unknown>) => {
+    if (await Requests.findOne({ kpmId, subjectMembershipId: subject.id }).exec()) return;
+    await Requests.create({
+      kpmId, subjectMembershipId: subject.id, action: 'promote', fromOrgLevelCode: 'AGENT', toOrgLevelCode: 'AAB',
+      joinRequestId: null, leaderMembershipId: null, requestedByMembershipId: root.id, decidedAt: null,
+      decidedByUserId: null, declineReason: null, deletedAt: null, createdBy: root.id, updatedBy: null,
+      ...fields,
+    });
+  };
+
+  for (const [i, who] of LEADER_LIMIT_PEOPLE.entries()) {
+    const account = await deps.user(who.email, who.fullName, { pronoun: who.pronoun, agentCode: String(86102 + i) });
+    if (who.approvedDaysAgo === undefined) {
+      await deps.place(kpm, String(account._id), 'aab', root, { joinedDaysAgo: 360 - i * 20 });
+      continue;
+    }
+    const reason = SUBSCRIPTION_PROMOTION_REASON;
+    const placed = await deps.place(kpm, String(account._id), 'aab', root, { joinedDaysAgo: 200, joinedAs: 'agent' });
+    await request(placed, {
+      reason, status: 'approved', createdAt: deps.daysAgo(who.approvedDaysAgo + 2),
+      decidedAt: deps.daysAgo(who.approvedDaysAgo), decidedByUserId: deps.superAdminUserId,
+    });
+    await deps.promote(kpmId, placed, 'agent', 'aab', root, reason, who.approvedDaysAgo);
+  }
+
+  const rizkyUser = await person(deps, 'agent0603');
+  const rizky = await deps.place(kpm, String(rizkyUser._id), 'agent', root, { joinedDaysAgo: 200 });
+  await request(rizky, { reason: 'Siap merekrut agennya sendiri', status: 'pending', createdAt: deps.daysAgo(1) });
+  await deps.recount(kpmId, root.id);
+  await subscribe(deps.Kpms, kpmId, plan['0603']);
 }

@@ -5,6 +5,7 @@ import {
   capabilityStageFor,
 } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { capabilityLadderProblems, defaultCapabilityLadder } from './capability-payload';
 
@@ -95,7 +96,7 @@ describe('the capability catalog (P5-T8)', () => {
       await wired.capability.rename(member(KPM_A), 'grid', 'PERSONAL_SELLING', 'Selling skills');
 
       expect((await wired.capability.read(member(KPM_A))).grids[0].label).toBe('Selling skills');
-      expect((await wired.capability.read(member(KPM_B))).grids[0].label).toBe('Personal selling');
+      expect((await wired.capability.read(member(KPM_B))).grids[0].label).toBe('Penjualan pribadi');
     });
   });
 
@@ -162,11 +163,11 @@ describe('the capability catalog (P5-T8)', () => {
 
   describe('a broken payload never reaches an office (AC-5)', () => {
     it('passes the defaults', () => {
-      expect(capabilityLadderProblems(defaultCapabilityLadder())).toEqual([]);
+      expect(englishAll(capabilityLadderProblems(defaultCapabilityLadder()))).toEqual([]);
     });
 
     it('refuses a catalog with no stages, and one with no milestones', () => {
-      expect(capabilityLadderProblems({ stages: [], milestones: [], grids: [] }))
+      expect(englishAll(capabilityLadderProblems({ stages: [], milestones: [], grids: [] })))
         .toEqual(expect.arrayContaining([
           expect.stringMatching(/no stages/),
           expect.stringMatching(/no milestones/),
@@ -177,7 +178,7 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       payload.grids[1].items[0].code = 'LEADS_GEN';
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/LEADS_GEN is used twice/)]));
     });
 
@@ -185,7 +186,7 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       (payload.grids[2].items[0] as { code: string }).code = '';
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/has no code/)]));
     });
 
@@ -193,7 +194,7 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       payload.stages[0].requiredMilestoneCodes = ['NOT_A_MILESTONE'];
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/nobody could ever reach it/)]));
     });
 
@@ -201,7 +202,7 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       payload.stages[1].stageOrder = 1;
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/share stageOrder 1/)]));
     });
 
@@ -214,7 +215,7 @@ describe('the capability catalog (P5-T8)', () => {
     it('refuses a part that is not a list at all, rather than reading it as empty', () => {
       // `{ stages: {} }` is what a hand-edited template or a half-migrated row looks like, and
       // treating it as an empty list would report "no stages" — true, but not what is wrong.
-      expect(capabilityLadderProblems({ stages: {}, milestones: null, grids: 'none' }))
+      expect(englishAll(capabilityLadderProblems({ stages: {}, milestones: null, grids: 'none' })))
         .toEqual(expect.arrayContaining([
           expect.stringMatching(/stages must be a list/),
           expect.stringMatching(/milestones must be a list/),
@@ -229,7 +230,7 @@ describe('the capability catalog (P5-T8)', () => {
         const payload = defaultCapabilityLadder();
         (payload.stages[0] as { stageOrder: unknown }).stageOrder = bad;
 
-        expect(capabilityLadderProblems(payload))
+        expect(englishAll(capabilityLadderProblems(payload)))
           .toEqual(expect.arrayContaining([expect.stringMatching(/stageOrder of 1 or more/)]));
       }
     });
@@ -238,7 +239,7 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       payload.stages[0].requiredMilestoneCodes = [];
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/requires no milestone/)]));
     });
 
@@ -246,8 +247,28 @@ describe('the capability catalog (P5-T8)', () => {
       const payload = defaultCapabilityLadder();
       payload.grids[0].items = [];
 
-      expect(capabilityLadderProblems(payload))
+      expect(englishAll(capabilityLadderProblems(payload)))
         .toEqual(expect.arrayContaining([expect.stringMatching(/has no items/)]));
+    });
+
+    it('P18.98-T5 AC-7 says each problem in Indonesian too, naming the place as the screen does', () => {
+      const payload = defaultCapabilityLadder();
+      payload.stages[0].requiredMilestoneCodes = ['NOT_A_MILESTONE'];
+      (payload.grids[2].items[0] as { code: string }).code = '';
+      payload.grids[0].items = [];
+
+      expect(indonesianAll(capabilityLadderProblems(payload))).toEqual(expect.arrayContaining([
+        'Tahap 1 mensyaratkan NOT_A_MILESTONE, yang bukan milestone mana pun di katalog ini — tidak ada yang dapat '
+          + 'mencapainya.',
+        'Grid 3, item 1 tidak memiliki kode. Setiap item memilikinya, sehingga mengganti nama tidak pernah '
+          + 'memindahkan centang.',
+        'Grid 1 tidak memiliki item, jadi tidak ada yang dapat dinilai di dalamnya.',
+      ]));
+      expect(indonesianAll(capabilityLadderProblems({ stages: {}, milestones: [], grids: [] }))).toEqual([
+        'stages harus berupa daftar.',
+        'Katalog capability tanpa tahap adalah ladder yang tidak dapat ditempati siapa pun.',
+        'Katalog capability tanpa milestone tidak akan pernah dapat menempatkan siapa pun di suatu tahap.',
+      ]);
     });
   });
 

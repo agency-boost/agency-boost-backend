@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
+import type { ResourceName } from '@/common/errors/resources';
 import { isReadLike, scopeFor, type Permission, type Scope } from '@/modules/rbac/permissions';
 import { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
@@ -208,8 +209,8 @@ export class CoachResolver {
     ctx: RequestContext,
     asked: string | undefined,
     permission: Permission,
-    /** Named in the 404's message. */
-    resource = 'Membership',
+    /** Named in the 404's message, in the reader's language (`resources.ts`). */
+    resource: ResourceName = 'Membership',
   ): Promise<Subject> {
     const me = requireMembership(ctx);
     if (!asked || asked === me) {

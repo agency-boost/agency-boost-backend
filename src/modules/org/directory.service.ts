@@ -1,13 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
-import { RequestContext } from '@/common/context/request-context';
-import { Permission, scopeFor } from '@/modules/rbac/permissions';
+import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
+import { can } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { render } from '@/common/i18n/sentence';
+import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
+import { ORG_MESSAGES } from './org.messages';
+import { rejoinedOn, type RejoinFacts } from './rejoined';
+import { DIRECTORY_READ, siblingsWithinReach, visibleTo, withinReach } from './reader-visibility';
+import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
 
 export interface DirectoryQuery {
   q?: string;
@@ -21,6 +27,8 @@ export interface DirectoryMember {
   membershipId: string;
   agentCode: string;
   role: HierarchyRole;
+  /** The rung, by its ladder code; `role` is the class it gives (ADR-0156). The person page's role select reads it. */
+  orgLevelCode: string;
   status: MembershipStatus;
   fullName: string;
   preferredName: string | null;
@@ -34,9 +42,26 @@ export interface DirectoryMember {
   isLeader: boolean;
   isKpmOwner: boolean;
   isKpmAdmin: boolean;
+  /** A Core Leader now: tagged, on a leader rung (ADR-0159 §1). */
+  isCoreLeader: boolean;
+  /** This viewer may tag or untag them from the row (P18.8-T5 AC-3) — an offer, never the gate. */
+  canTagCoreLeader: boolean;
   joinedAt: string | null;
+  /**
+   * The person's **join date** in this office, an office date (ADR-0169 §1): what the person page prints as *Join
+   * date*. `null` while pending. Not `joinedAt`, the system's stamp.
+   */
+  joinDate: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
+  /**
+   * **The day the person came back to this office, if they did** (P18.97-T4 AC-3, ADR-0176 §5; `rejoinedOn` in
+   * `rejoined.ts`): on a live membership that follows a removed one, its own join date — the directory's *Rejoined*;
+   * on a removed membership the person has since returned from, the later one's — *Rejoined {date}* under
+   * *Removed*. `null` otherwise. Read from the memberships of the same person this reader may see, so it says nothing
+   * about a unit outside their reach.
+   */
+  rejoinedOn: string | null;
 
   /**
    * What **this viewer** may do to **this person** (P3.5-T13).
@@ -53,6 +78,22 @@ export interface DirectoryMember {
   canChangeRole: boolean;
   canPromoteToAb: boolean;
   canRemove: boolean;
+
+  /**
+   * **What the person records** (ADR-0158 §6, P18.8-T4 AC-6): on **one member's read** —
+   * `GET /members/:membershipId`, the person page's *Personal* card — and only to the office's
+   * Owner, its Admins, or the person themselves. Absent from every other read: the roster's rows,
+   * a leader's read of somebody in their unit, the reports list. A `null` inside is *Not recorded*.
+   */
+  personal?: MemberPersonal;
+}
+
+/** A member's birth date, gender, company join month and work status, as the person page shows them. */
+export interface MemberPersonal {
+  dateOfBirth: string | null;
+  gender: Gender | null;
+  companyJoinMonth: string | null;
+  workStatus: WorkStatus | null;
 }
 
 export interface DirectoryPage {
@@ -71,63 +112,28 @@ export interface DirectoryPage {
 export const DIRECTORY_PAGE_SIZE = 25;
 export const DIRECTORY_MAX_PAGE_SIZE = 100;
 
-/**
- * Who this requester may see, as a filter fragment.
- *
- * It is exported and shared because the roster and the org tree must narrow
- * **identically** — two copies of a visibility rule drift, and the drift is a cross-unit
- * leak rather than a rendering bug.
- *
- * **The scope comes from the grant list**, resolved for the permission the caller was
- * gated on, so the matrix column is the implementation rather than a description of one.
- * It was not until 2026-09-06: this returned self-plus-whole-downline for everybody who
- * was not a tenant admin, and no caller passed a scope because it took none.
- *
- * **`own-unit` resolves to the subtree here, and that is deliberate.** The matrix's rules
- * 1 and 2 (`roles-and-permissions.md:187-196`) say so in as many words: *"`own-unit` for
- * an AB resolves to `own-downline`"*, with role change and removal named as the only
- * exceptions, and for an AAB *"`own-downline` is still the correct token"* even where a
- * KPM nests AAB under AAB. This function serves **reading** — the roster and the org
- * tree — and neither is one of those exceptions. The exceptions act on the leader edge
- * the actor owns and check `leaderId` directly; they never come through here.
- *
- * A first pass on 2026-09-06 read the matrix *cells* and not the rules beneath them, and
- * narrowed an AAB to their direct reports. That is a real narrowing: a nested AAB would
- * have lost sight of their own grandchildren in the group tree, on a screen whose manual
- * says it draws "your unit and everyone below it". Corrected the same day, with the test
- * below rewritten to assert the downline rather than the narrowing.
- *
- * Somebody with no membership sees nothing, and says so as an impossible filter rather
- * than an absent one — an absent filter would return the office.
- */
-export function visibleTo(
-  ctx: RequestContext,
-  permission: Permission = 'member:read_profile',
-): FilterQuery<MembershipDocument> {
-  if (ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin || ctx.isSuperAdmin) return {};
-  const self = ctx.membershipId;
-  if (!self) return { _id: null };
+/** *Search agent*'s list (UI V1; UI-012, D-14): ten people unless asked for fewer or more, and never more than twenty. */
+export const MEMBER_SEARCH_DEFAULT = 10;
+export const MEMBER_SEARCH_MAX = 20;
 
-  switch (scopeFor(ctx, permission)) {
-    case 'all':
-    case 'own-kpm':
-      return {};
-    // `ancestorIds` makes the downline arm a single indexed lookup on
-    // `(kpmId, ancestorIds, status)`.
-    //
-    // Both tokens land here: see the note above on rules 1 and 2. A leader reads their
-    // subtree; the rules that are genuinely limited to direct reports do not use this.
-    case 'own-downline':
-    case 'own-unit':
-      return { $or: [{ _id: self }, { ancestorIds: self }] };
-    case 'own':
-      return { _id: self };
-    // No grant at all. The guard refuses these before a service is reached; a filter
-    // that fails closed is the backstop for the day one is not behind the guard.
-    default:
-      return { _id: null };
-  }
+/**
+ * **One person *Search agent* offers** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): the NAME on the left, the
+ * agent code on the right, and the membership the pick opens (`/coaching/{membershipId}/summary`). Nothing else — no
+ * email, no leader, no counts — so the read records no disclosure, as the org tree, which shows the same, records none.
+ */
+export interface MemberSearchHit {
+  membershipId: string;
+  fullName: string;
+  preferredName: string | null;
+  agentCode: string | null;
+  role: HierarchyRole;
+  orgLevelCode: string;
 }
+
+/** Which of a user's fields a search reads: the roster's three, or *Search agent*'s name alone (its code is the membership's). */
+type NameFields = readonly ('fullName' | 'preferredName' | 'email')[];
+const ROSTER_SEARCH: NameFields = ['fullName', 'email'];
+const PICKER_SEARCH: NameFields = ['fullName', 'preferredName'];
 
 /**
  * Avatar initials.
@@ -169,22 +175,13 @@ export class DirectoryService {
     return kpm?.ownerUserId ?? null;
   }
 
-  /**
-   * What this requester may see.
-   *
-   * A tenant admin — Owner or KPM Admin — sees everyone. Below that it is the scope
-   * `member:read_profile` grants — the permission the roster route is gated on, and
-   * documented at the same scopes as `member:list_directory`: an AB their downline, an AAB their own unit. Both
-   * arms are an `$or` so an indexed lookup still does the work.
-   */
-  private visibility(ctx: RequestContext): FilterQuery<MembershipDocument> {
-    return visibleTo(ctx, 'member:read_profile');
-  }
-
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {
     const limit = Math.min(Math.max(query.limit ?? DIRECTORY_PAGE_SIZE, 1), DIRECTORY_MAX_PAGE_SIZE);
 
-    const filter: FilterQuery<MembershipDocument> = { ...this.visibility(ctx) };
+    // What this requester may see (`reader-visibility.ts`): a tenant admin the office, below that the scope
+    // `DIRECTORY_READ` grants. Spread, because no key of a narrowing is one this page adds; a filter that names an id
+    // goes through `withinReach` instead.
+    const filter: FilterQuery<MembershipDocument> = { ...visibleTo(ctx, DIRECTORY_READ) };
     // **Active only.** The roster's question is who is here now, and somebody still
     // waiting for a leader is not here yet — they have registered, nothing more.
     //
@@ -209,7 +206,7 @@ export class DirectoryService {
     });
 
     const page = rows.slice(0, limit);
-    const visible = this.visibility(ctx);
+    const visible = visibleTo(ctx, DIRECTORY_READ);
     const [directory, pending, removed] = await Promise.all([
       this.members.count(ctx, { ...visible, status: 'active' }),
       this.members.count(ctx, { ...visible, status: 'pending' }),
@@ -226,6 +223,53 @@ export class DirectoryService {
   }
 
   /**
+   * **Search agent** (UI V1, 2026-10-30; UI-012, UI-059, the owner's D-14): the people this reader may see, by part of a
+   * name or an agent code, for a picker that opens the one chosen.
+   *
+   * - **Narrowed as the roster is** (`visibleTo`, `reader-visibility.ts`): a tenant admin the office, an AB their
+   *   downline, an AAB their own unit's subtree, an Agent only themselves — and **never the reader**, whose own page is
+   *   not somebody to look up, so an Agent finds nobody. Active members only: the picker opens a person's page now.
+   * - **Name or agent code, nothing else**: the roster's search also reads the email, which the picker never shows.
+   * - **A to Z by name**, then by code, the first `limit`. Every match in reach is read and sorted here, because the
+   *   name is on the global user and the reach on the membership; a reader's reach is their office at most.
+   * - **No disclosure recorded**: names and codes only, what the org tree shows, which records none either.
+   */
+  async search(ctx: RequestContext, query: { q?: string; limit?: number } = {}): Promise<MemberSearchHit[]> {
+    const limit = Math.min(Math.max(query.limit ?? MEMBER_SEARCH_DEFAULT, 1), MEMBER_SEARCH_MAX);
+    // Under `$and`, never spread: the narrowing for an Agent is `{ _id: self }`, which would collide with the `$ne`.
+    const filter = await this.byName(
+      { $and: [visibleTo(ctx, DIRECTORY_READ), { _id: { $ne: ctx.membershipId ?? null }, status: 'active' }] },
+      query.q,
+      PICKER_SEARCH,
+    );
+    const rows = await this.members.find(ctx, filter, {
+      projection: { userId: 1, agentCode: 1, role: 1, orgLevelCode: 1 },
+    });
+    if (rows.length === 0) return [];
+
+    const users = await this.users
+      .find({ _id: { $in: rows.map((r) => r.userId) } })
+      .select('fullName preferredName')
+      .exec();
+    const byUser = new Map(users.map((u) => [String(u._id), u]));
+    return rows
+      .map((m): MemberSearchHit => {
+        const user = byUser.get(m.userId);
+        return {
+          membershipId: String(m._id),
+          fullName: user?.fullName ?? '',
+          preferredName: preferredNameOf(user?.preferredName),
+          agentCode: m.agentCode ?? null,
+          role: m.role,
+          orgLevelCode: m.orgLevelCode,
+        };
+      })
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, 'id', { sensitivity: 'base' })
+        || (a.agentCode ?? '').localeCompare(b.agentCode ?? ''))
+      .slice(0, limit);
+  }
+
+  /**
    * Search spans two collections: the agent code is on the membership, the name and
    * email are on the global user. Resolving the user side first keeps the membership
    * query a single indexed lookup instead of a `$lookup` that would have to be checked
@@ -234,13 +278,14 @@ export class DirectoryService {
   private async byName(
     filter: FilterQuery<MembershipDocument>,
     q?: string,
+    fields: NameFields = ROSTER_SEARCH,
   ): Promise<FilterQuery<MembershipDocument>> {
     const term = q?.trim();
     if (!term) return filter;
 
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const matching = await this.users
-      .find({ $or: [{ fullName: new RegExp(escaped, 'i') }, { email: new RegExp(escaped, 'i') }] })
+      .find({ $or: fields.map((name) => ({ [name]: new RegExp(escaped, 'i') })) })
       .select('_id')
       .exec();
 
@@ -281,19 +326,38 @@ export class DirectoryService {
     );
 
     const owner = await this.ownerUserId(ctx);
-    return rows.map((m) =>
-      this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+    const returns = await this.returnsOf(ctx, rows);
+    return rows.map((m) => ({
+      ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+      rejoinedOn: rejoinedOn(rejoinFacts(m), returns.get(m.userId) ?? []),
+    }));
+  }
+
+  /**
+   * **Every membership of these people in this office that the reader may see** (P18.97-T4 AC-3), in one query and
+   * whatever their state, by person — what `rejoinedOn` reads to say who came back. Narrowed as the page was
+   * (`siblingsWithinReach`), so a leader's roster says nothing of a membership outside their unit.
+   */
+  private async returnsOf(ctx: RequestContext, rows: MembershipDocument[]): Promise<Map<string, RejoinFacts[]>> {
+    const siblings = await this.members.find(
+      ctx,
+      siblingsWithinReach(ctx, rows.map((r) => r.userId)),
+      { projection: { userId: 1, status: 1, joinDate: 1, joinedAt: 1, createdAt: 1 } },
     );
+    const out = new Map<string, RejoinFacts[]>();
+    for (const sibling of siblings) out.set(sibling.userId, [...(out.get(sibling.userId) ?? []), rejoinFacts(sibling)]);
+    return out;
   }
 
   private present(
     m: MembershipDocument,
     user: UserDocument | undefined,
     leaderNameValue: string | null,
-    ctx?: RequestContext,
-    ownerUserId?: string | null,
-  ): DirectoryMember {
-    const fullName = user?.fullName ?? 'Unknown';
+    ctx: RequestContext,
+    ownerUserId: string | null,
+  ): Omit<DirectoryMember, 'rejoinedOn'> {
+    // A person whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    const fullName = user?.fullName ?? render(ORG_MESSAGES.unknownName, ctx.reader);
     const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
     const removed = m.status === 'removed';
@@ -305,9 +369,10 @@ export class DirectoryService {
       membershipId: String(m._id),
       agentCode: m.agentCode,
       role: m.role,
+      orgLevelCode: m.orgLevelCode,
       status: m.status,
       fullName,
-      preferredName: user?.preferredName ?? null,
+      preferredName: preferredNameOf(user?.preferredName),
       email: user?.email ?? '',
       initials: initialsOf(fullName),
       leaderId: m.leaderId,
@@ -320,7 +385,13 @@ export class DirectoryService {
       isLeader: (m.directCounts?.total ?? 0) > 0,
       isKpmOwner: isOwner,
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
+      // ADR-0159 §1: the effective flag — the tag on a leader rung — which is what the row's chip says.
+      isCoreLeader: isEffectiveCoreLeader(m),
+      // The row's control (P18.8-T5 AC-3): the viewer may tag, and the member leads by rung and has not left.
+      // `GroupService.setCoreLeader` refuses regardless.
+      canTagCoreLeader: !removed && isLeaderClass(m.role) && ctx !== undefined && can(ctx, 'member:tag_core_leader'),
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
+      joinDate: m.joinDate ?? null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
       // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
       // where these are actually enforced. A refusal the screen did not anticipate is a
@@ -360,27 +431,50 @@ export class DirectoryService {
     // it are precisely the ones you may not read.
     const rows = await this.members.find(
       ctx,
-      {
-        $and: [{ leaderId: membershipId, status: { $ne: 'removed' } }, this.visibility(ctx)],
-      },
+      withinReach(ctx, { leaderId: membershipId, status: { $ne: 'removed' } }),
       { sort: { agentSeq: 1 } },
     );
     return this.decorate(ctx, rows);
   }
 
   async read(ctx: RequestContext, membershipId: string): Promise<DirectoryMember> {
-    // `$and`, not a spread. The narrowing for `own` is `{ _id: self }`, which is the one
-    // filter shape that collides with the id being asked for — spread second, it replaced
-    // the id and the read answered about the caller while claiming to be about somebody
-    // else. Under `$and` a colliding narrowing can only ever match nothing, which is the
-    // direction a visibility filter must fail in.
-    const scoped = await this.members.findOne(ctx, {
-      $and: [{ _id: membershipId }, this.visibility(ctx)],
-    });
+    // `$and`, not a spread (`withinReach`). The narrowing for `own` is `{ _id: self }`, which is
+    // the one filter shape that collides with the id being asked for — spread second, it
+    // replaced the id and the read answered about the caller while claiming to be about
+    // somebody else. Under `$and` a colliding narrowing can only ever match nothing.
+    const scoped = await this.members.findOne(ctx, withinReach(ctx, { _id: membershipId }));
     // 404 rather than 403 for someone outside your scope: a 403 would confirm they
     // exist, which is the same leak the cross-tenant rule closes.
     if (!scoped) throw new NotFoundException('Membership');
     const [decorated] = await this.decorate(ctx, [scoped]);
-    return decorated;
+
+    // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here.
+    const office = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    if (!office && String(scoped._id) !== ctx.membershipId) return decorated;
+    const user = await this.users
+      .findOne({ _id: scoped.userId })
+      .select('dateOfBirth gender companyJoinMonth')
+      .exec();
+    return {
+      ...decorated,
+      personal: {
+        dateOfBirth: user?.dateOfBirth ?? null,
+        gender: user?.gender ?? null,
+        companyJoinMonth: user?.companyJoinMonth ?? null,
+        workStatus: scoped.workStatus ?? null,
+      },
+    };
   }
+}
+
+/** What `rejoinedOn` reads of a membership: begun when it was made active, else when it was made. */
+function rejoinFacts(m: MembershipDocument): RejoinFacts {
+  const made = (m as unknown as { createdAt?: Date }).createdAt;
+  return {
+    id: String(m._id),
+    userId: m.userId,
+    status: m.status,
+    joinDate: m.joinDate ?? null,
+    startedAt: m.joinedAt ?? made ?? new Date(0),
+  };
 }

@@ -14,9 +14,13 @@ export type ActivationOrigin = (typeof ACTIVATION_ORIGINS)[number];
 
 /**
  * The collections a linked item completes from: a goal, a lead, the day that made the fourth week — and, since
- * P18.5-T3, the hire's progress row of the training module the item binds.
+ * P18.5-T3, the hire's progress row of the training module the item binds; since P18.96-T4, the production file's
+ * month that showed a policy, and the coaching session that made the fourth 1:1. A data-backed item ticked by hand
+ * names its record here too: the closing (`leads`) or the 1:1 (`coachingSessions`) saved with the tick.
  */
-export const ACTIVATION_RECORD_COLLECTIONS = ['goals', 'leads', 'activityLogs', 'trainingProgress'] as const;
+export const ACTIVATION_RECORD_COLLECTIONS = [
+  'goals', 'leads', 'activityLogs', 'trainingProgress', 'monthlyAgentData', 'coachingSessions',
+] as const;
 export type ActivationRecordCollection = (typeof ACTIVATION_RECORD_COLLECTIONS)[number];
 
 /**
@@ -50,7 +54,9 @@ export class ActivationItemState {
 
   /**
    * For a link: **the record that completed it**, by collection and id. A link stays done when that
-   * record is later replaced, deleted or corrected to zero (ADR-0031, sticky).
+   * record is later replaced, deleted or corrected to zero (ADR-0031, sticky). For a data-backed item ticked by
+   * hand (P18.96-T4 AC-3): the record the tick was saved with — the closing it named, the 1:1 it logged — or none,
+   * for the hire's own *Log 1:1*, which is their note and date on the item.
    */
   @Prop({ type: String, enum: ACTIVATION_RECORD_COLLECTIONS, default: null })
   recordCollection!: ActivationRecordCollection | null;
@@ -91,8 +97,8 @@ export const ActivationNoteSchema = SchemaFactory.createForClass(ActivationNote)
  * - **Pinned** to `(templateId, templateVersion)`, the office's published version when it was created
  *   (D-version). An Owner's later publish never moves a running activation: a published version is
  *   immutable, and this is the reason.
- * - **`startDate` is an office date**, never an instant (invariant §9): the day the person joined, in
- *   `kpms.timezone`, until a leader corrects it (OD-118).
+ * - **`startDate` is an office date**, never an instant (invariant §9): **the membership's `joinDate`**, in
+ *   `kpms.timezone` (ADR-0169 §2). A leader's correction moves both together (OD-118), and they never differ.
  * - **The end is graduation or six calendar months**, whichever is first (OD-120). Graduation is stored —
  *   here and nowhere else: `memberships.activationGraduatedAt`, which nothing ever wrote, is gone, so the
  *   fact lives in one place. *Expired* is derived on every read from `startDate` and the office's today.
@@ -117,11 +123,14 @@ export class ActivationProgress {
   @Prop({ type: Number, required: true })
   templateVersion!: number;
 
-  /** `YYYY-MM-DD` in the office's timezone. Day 1. */
+  /** `YYYY-MM-DD` in the office's timezone. Day 1: the membership's `joinDate` (ADR-0169 §2). */
   @Prop({ type: String, required: true })
   startDate!: string;
 
-  /** A leader's correction of `startDate` (OD-118): when, and who. `null` while it is the join date. */
+  /**
+   * A leader's correction of the join date, which is `startDate` (OD-118, ADR-0169 §2): when, and who. `null` while
+   * it is the date the hire was added with.
+   */
   @Prop({ type: Date, default: null })
   startCorrectedAt!: Date | null;
 

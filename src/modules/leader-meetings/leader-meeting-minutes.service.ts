@@ -5,7 +5,8 @@ import { DomainException, VersionConflictException } from '@/common/errors/domai
 import { ErrorCode } from '@/common/errors/error-codes';
 import { refuseWith } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
-import { NEW_ACTION_ITEM, NEW_AGENDA_ITEM_TEXT } from './leader-meeting-agenda';
+import { newActionItem, newAgendaItemText } from './leader-meeting-agenda';
+import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 import { LeaderMeetingPeople, meetingNotFound } from './leader-meeting-people';
 import { LeaderMeetingRepository } from './leader-meeting.repository';
 import {
@@ -13,9 +14,11 @@ import {
   type LeaderMeetingDocument,
 } from './leader-meeting.schema';
 import {
-  actionItemOf, actionItemsInOrder, agendaItemOf, type ActionItem, type AgendaItem,
+  actionItemOf, actionItemsInOrder, agendaItemOf, monthlyTargetOf, type ActionItem, type AgendaItem, type MonthlyTarget,
 } from './leader-meeting.view';
 import { MEETINGS, newItemId } from './leader-meetings.service';
+import { frozenRecord } from './scorecard/scorecard-record';
+import { LeaderScorecardService } from './scorecard/scorecard.service';
 import { TARGET_ROW_KEYS } from './scorecard/scorecard.types';
 
 type ActionField = 'initiative' | 'metric' | 'action' | 'pic' | 'remarks' | 'status';
@@ -25,7 +28,7 @@ const AGENDA_FIELDS = ['text', 'pic', 'done'] as const;
 /** One field per write (D-forum-model): the name of the one sent, or the refusal. */
 function oneField<K extends string>(input: Partial<Record<K, unknown>>, fields: readonly K[]): K {
   const sent = fields.filter((field) => input[field] !== undefined);
-  if (sent.length !== 1) refuseWith([`Send exactly one of ${fields.join(', ')}, with the version you read.`]);
+  if (sent.length !== 1) refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.exactlyOne({ fields })]);
   return sent[0];
 }
 
@@ -60,12 +63,19 @@ export class LeaderMeetingMinutes {
     private readonly people: LeaderMeetingPeople,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P18.97-T1 AC-10: a target's write answers its value, `rate × # of units` — the meeting's units, read here.
+    private readonly scorecards: LeaderScorecardService,
   ) {}
 
-  /** *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section. */
+  /**
+   * *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section — in the adder's language,
+   * stored as text (P18.98-T5 AC-6).
+   */
   async addAgendaItem(ctx: RequestContext, meetingId: string, section: AgendaSection): Promise<AgendaItem> {
     const meeting = await this.writable(ctx, meetingId);
-    const item: LeaderMeetingAgendaItem = { itemId: newItemId(), text: NEW_AGENDA_ITEM_TEXT, pic: '', done: false, version: 1 };
+    const item: LeaderMeetingAgendaItem = {
+      itemId: newItemId(), text: newAgendaItemText(ctx.reader), pic: '', done: false, version: 1,
+    };
     await this.writing(ctx, meeting);
     if (!(await this.meetings.pushAgendaItem(ctx, meetingId, section, item))) throw meetingNotFound();
     await this.audited(ctx, meeting, 'leader_meeting.agenda_item_added', null, { section, item: agendaItemOf(item) });
@@ -73,7 +83,7 @@ export class LeaderMeetingMinutes {
   }
 
   /**
-   * **One agenda field**: its text, its PIC, or — on *During* only, where the prototype draws the boxes — its box.
+   * **One agenda field**: its text, its PIC, or its box — in any section since UI V1 (UI-110).
    * **A text that trims to nothing removes the item** (the prototype draws no remove), answered `{ removed: true }`.
    */
   async saveAgendaItem(
@@ -82,8 +92,9 @@ export class LeaderMeetingMinutes {
   ): Promise<AgendaItem | { removed: true }> {
     const meeting = await this.writable(ctx, meetingId);
     const field = oneField(input, AGENDA_FIELDS);
+    // UI V1 (UI-110): every item has its box, in each of the three sections — it was *During*'s alone, as the
+    // prototype drew it, until the owner's mockup of 30 Oct gave each card a done count.
     const found = findAgendaItem(meeting, itemId);
-    if (field === 'done' && found && found.section !== 'during') refuseWith(['done is ticked on During items only.']);
     if (!found) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
     const { section, item: before } = found;
 
@@ -103,11 +114,11 @@ export class LeaderMeetingMinutes {
     return after;
   }
 
-  /** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*, last. */
+  /** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*, last — its words the adder's (AC-6). */
   async addActionItem(ctx: RequestContext, meetingId: string): Promise<ActionItem> {
     const meeting = await this.writable(ctx, meetingId);
     const last = Math.max(-1, ...meeting.actionItems.map((row) => row.order));
-    const row: LeaderMeetingActionItem = { itemId: newItemId(), ...NEW_ACTION_ITEM, order: last + 1, version: 1 };
+    const row: LeaderMeetingActionItem = { itemId: newItemId(), ...newActionItem(ctx.reader), order: last + 1, version: 1 };
     await this.writing(ctx, meeting);
     if (!(await this.meetings.pushActionItem(ctx, meetingId, row))) throw meetingNotFound();
     await this.audited(ctx, meeting, 'leader_meeting.action_item_added', null, { item: actionItemOf(row) });
@@ -157,7 +168,7 @@ export class LeaderMeetingMinutes {
       if (!(await this.meetings.findById(ctx, meetingId))) throw meetingNotFound();
       throw new DomainException(
         ErrorCode.VERSION_CONFLICT,
-        'The tracker’s rows changed since you loaded them. Reload and try again.',
+        LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.trackerRowsChanged,
         HttpStatus.CONFLICT,
         { itemIds: before },
       );
@@ -167,28 +178,44 @@ export class LeaderMeetingMinutes {
   }
 
   /**
-   * **One *Monthly Target* cell** (ADR-0129 §5): the six rows the prototype leaves unblocked, short text, *TBD* a
-   * value. A blocked or unknown row is refused 400. Never frozen: a past meeting's targets stay editable.
+   * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4, reversing ADR-0129 §5's free text; P18.97-T1
+   * AC-10): the five rows that take one — *APE*, *Manpower*, *FLC*, *Avg. monthly AA* and *Case submission* — a number
+   * from 0 in the row's unit, or `null` to clear it. *APE*'s is IDR minor units, held to whole sen (invariant §9); a
+   * count's is checked to two places by the request. Any other row is refused 400 — *New AA*'s included: its targets
+   * stay stored, and none is typed again (AC-6). Never frozen: a past meeting's targets stay editable.
+   *
+   * **The answer is the cell as the table draws it** — its value `rate × # of units`, the meeting's own units: the ones
+   * it froze with once it is over, today's while it is upcoming (`LeaderScorecardService.units`).
    */
   async saveMonthlyTarget(
-    ctx: RequestContext, meetingId: string, row: string, input: { value: string; version: number },
-  ): Promise<{ value: string; version: number }> {
+    ctx: RequestContext, meetingId: string, row: string, input: { rate: number | null; version: number },
+  ): Promise<MonthlyTarget> {
     const meeting = await this.writable(ctx, meetingId);
     if (!(TARGET_ROW_KEYS as readonly string[]).includes(row)) {
-      refuseWith([`row must be one of ${TARGET_ROW_KEYS.join(', ')}: the others take no Monthly Target.`]);
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.targetRow({ rows: TARGET_ROW_KEYS })]);
     }
-    const before = meeting.monthlyTargets?.[row] ?? { value: '', version: 0 };
-    const value = input.value.trim();
+    if (row === 'ape' && input.rate !== null && !Number.isInteger(input.rate)) {
+      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.apeWholeSen]);
+    }
+    const stored = meeting.monthlyTargets?.[row];
+    const before = stored ?? { rate: null, typed: null, version: 0 };
     await this.writing(ctx, meeting);
-    const saved = await this.meetings.setMonthlyTarget(ctx, meetingId, row, input.version, value);
+    const saved = await this.meetings.setMonthlyTarget(ctx, meetingId, row, input.version, input.rate);
     if (!saved) {
       const now = await this.meetings.findById(ctx, meetingId);
       if (!now) throw meetingNotFound();
       throw new VersionConflictException(input.version, now.monthlyTargets?.[row]?.version ?? 0);
     }
-    const after = { value, version: input.version + 1 };
+    const after = { rate: input.rate, typed: null, version: input.version + 1 };
     await this.audited(ctx, meeting, 'leader_meeting.monthly_target_saved', { row, ...before }, { row, ...after });
-    return after;
+    return monthlyTargetOf(after, await this.unitsOf(ctx, saved));
+  }
+
+  /** The meeting's own *# of units*: as frozen once it is over (AC-19), counted today while it is upcoming. */
+  private async unitsOf(ctx: RequestContext, meeting: LeaderMeetingDocument): Promise<number> {
+    if (meeting.frozenAt) return frozenRecord(meeting.frozenScorecard, meeting.date).chips.units;
+    const office = await this.people.office(ctx);
+    return this.scorecards.units({ kpmId: ctx.kpmId!, timezone: office.timezone, meetingDate: meeting.date });
   }
 
   /** A meeting the reader may write, by its address: an editor's, in their office, not deleted. */
@@ -234,7 +261,7 @@ export class LeaderMeetingMinutes {
     if (item) return new VersionConflictException(version, item.version);
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,
-      'This item is no longer in the meeting. Reload to see what is there now.',
+      LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.itemGone,
       HttpStatus.CONFLICT,
       { expectedVersion: version, actualVersion: null },
     );

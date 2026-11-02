@@ -251,6 +251,35 @@ describe('a Personal Summary with a subject, over HTTP (P11-T4)', () => {
     });
   });
 
+  describe('an earlier month, for the subject (P18.8-T11, ADR-0161 §4)', () => {
+    // The office opened in January in Jakarta: August is a month it has.
+    beforeAll(() => mongoose.connection.db!.collection('kpms').updateOne(
+      { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { createdAt: new Date('2025-12-31T17:00:00Z') } },
+    ));
+
+    it('P18.8-T11 AC-2 a leader reads a coachee’s August as the coachee does, and one entry records it', async () => {
+      as('INDAH');
+      const hers = (await get({ month: '2026-08' }).expect(200)).body;
+      as('AGUS');
+      const theirs = (await get({ for: office.id.INDAH, month: '2026-08' }).expect(200)).body;
+
+      expect(theirs).toEqual(hers);
+      expect(theirs).toMatchObject({ month: '2026-08', pace: null, period: { currentMonth: false } });
+      const entries = await reads();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ targetMembershipId: office.id.INDAH, after: { surface: 'personal_summary' } });
+    });
+
+    it('P18.8-T11 AC-1 a refused period records nothing, and a stranger is still 404 before the period is checked', async () => {
+      as('AGUS');
+      const future = await get({ for: office.id.INDAH, month: '2027-01' }).expect(400);
+      expect(future.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'month' } });
+      as('INDAH');
+      await get({ for: office.id.AGUS, month: '2027-01' }).expect(404);
+      expect(await audit().countDocuments()).toBe(0);
+    });
+  });
+
   it('P11-T4 a Super Admin, who has no membership, is refused by name', async () => {
     session.current = SUPER_ADMIN;
     const res = await get({ for: office.id.INDAH }).expect(403);

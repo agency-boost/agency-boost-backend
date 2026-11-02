@@ -1,23 +1,25 @@
+import { AvatarDto, ProfileFactsDto } from '@/modules/users/profile.dto';
 import { SummaryDto } from '@/modules/summary/summary.response.dto';
 import { Type } from '@nestjs/common';
+import { XLSX_MIME_TYPE } from '@/domain/constants';
 import {
-  AccessTokenDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
+  AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
   RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import {
   InboxDto, NotificationReadStateDto, UnreadCountDto,
 } from '@/modules/notifications/notification.response.dto';
-import { DeletedLeadDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
-import { GoalResponseDto } from '@/modules/goals/goal.response.dto';
+import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
+import { GoalPreviewDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
   UploadPreviewDto,
 } from '@/modules/production/production.response.dto';
 import {
   DelegatedAdminDto, DirectoryMemberDto, DirectoryPageDto, GroupSummaryDto, InvitePreviewDto,
-  JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, MemberTagsDto,
+  JoinStateDto, KpmDirectoryEntryDto, LeaderChoiceDto, LeaderLimitRequestRowDto, MemberTagsDto,
   MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
-  UntaggedMemberDto,
+  UntaggedMemberDto, MemberPhoneDto, MemberSearchResultDto, WaitingRequestCountDto,
 } from '@/modules/org/org.response.dto';
 import {
   KpmAdminViewDto, KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto,
@@ -28,7 +30,8 @@ import {
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  CompanyTemplateDto, NamedTemplateDto, PublishStateDto, SavedOfficeTemplateDto, TenantConfigDto,
+  ActivityBindingDto, CompanyTemplateDto, NamedTemplateDto, OfficeActivityBindingDto, PublishAllDto, PublishStateDto,
+  SavedOfficeTemplateDto, TemplateOfficeDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
@@ -38,7 +41,7 @@ import {
 } from '@/modules/training/training-progress.response.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
-  ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
+  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
 } from '@/modules/activation/activation-progress.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
@@ -62,11 +65,20 @@ import {
 } from '@/modules/campaigns/campaign-agent.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
 import { BillingPricesDto } from '@/modules/billing/billing.response.dto';
+import {
+  AcceptedInviteDto, AddAgentResultDto, InviteBannerDto, InviteListDto, RequestedTransferDto, SharedInviteDto,
+  TransferDto,
+} from '@/modules/org/invites.response.dto';
 
 /** What one operation answers with: a class, and whether it comes back as an array. */
 export interface ResponseShape {
   type: Type<unknown>;
   isArray?: true;
+  /**
+   * Media types the operation may answer **as a file** instead, by a query parameter: the two templates' `format`
+   * (ADR-0184). Documented beside the JSON body as binary.
+   */
+  files?: readonly string[];
 }
 
 /**
@@ -86,6 +98,8 @@ import {
 } from '@/modules/activity/activity.response.dto';
 import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
 import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
+import { UnitActivitiesDto } from '@/modules/unit-dashboard/unit-activities.response.dto';
+import { HomeDto } from '@/modules/home/home.response.dto';
 import {
   AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
 } from '@/modules/reporting/reporting.response.dto';
@@ -101,6 +115,7 @@ import {
   CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeoplePageDto, CalendarPeriodDto,
   CalendarSettingsDto,
 } from '@/modules/calendar/calendar.response.dto';
+import { CoachingItemDoneResponseDto } from '@/modules/coaching/coaching-action-done.controller';
 import {
   AgendaItemDto, AgendaItemSavedDto, LEADER_FORUM_SHARED_SHAPES, LeaderActionItemDto, MeetingCardDto, MeetingListViewDto,
   MeetingViewDto, MonthlyTargetSavedDto, ShareLinkDto, ShareLinksRevokedDto,
@@ -118,6 +133,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // Phase 15: a leader's unit, and *Update production*.
   UnitDashboardController_read: { type: UnitDashboardDto },
   UnitDashboardController_updateProduction: { type: ProductionUpdatedDto },
+  // UI V1 (Phase 18.99 T4, UI-001): the Activities tab's table.
+  UnitActivitiesController_read: { type: UnitActivitiesDto },
+  HomeController_read: { type: HomeDto },
   // Phase 18: the Owner's reporting — the Overview, its not-logged list and target, the analytics, the platform's.
   KpmOverviewController_read: { type: KpmOverviewDto },
   KpmOverviewController_notLogged: { type: NotLoggedDto },
@@ -161,6 +179,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P11-T10: a finalized session's print, and the reader's own coaching.
   CoachingRecordController_mine: { type: MySessionsDto },
   CoachingRecordController_print: { type: SessionPrintDto },
+  // UI V1 (UI-104): a coachee's tick on an action item, from Calendar.
+  CoachingActionDoneController_set: { type: CoachingItemDoneResponseDto },
   // Phase 12: the calendar — a period of one calendar, one entry, its writes, the picker and the compare list.
   CalendarController_read: { type: CalendarPeriodDto },
   CalendarController_readOne: { type: CalendarEntryDto },
@@ -183,6 +203,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NewHiresController_tick: { type: ActivationViewDto },
   NewHiresController_correctStart: { type: ActivationViewDto },
   NewHiresController_saveNote: { type: ActivationNoteSavedDto },
+  // P18.96-T4: the closings *Which case?* names — the hire's own, and a hire's for a leader.
+  ActivationProgressController_closings: { type: ActivationClosingsDto },
+  NewHiresController_closings: { type: ActivationClosingsDto },
+  // P18.96-T6 AC-4: *Mark left*.
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },
@@ -201,8 +225,16 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AuthController_forgotPassword: { type: StatusAckDto },
   AuthController_resetPassword: { type: StatusAckDto },
   AuthController_changePassword: { type: StatusAckDto },
+  // UI V1 (UI-111, ADR-0181): an email change asked for, and its link opened.
+  AuthController_requestEmailChange: { type: StatusAckDto },
+  AuthController_verifyEmailChange: { type: EmailChangedDto },
   AuthController_me: { type: MeDto },
   AuthController_updateMe: { type: MeDto },
+  // UI V1 (UI-111): *Profil saya*'s read-only facts and its photo.
+  ProfileController_facts: { type: ProfileFactsDto },
+  ProfileController_requestAvatarUpload: { type: SignedUploadDto },
+  ProfileController_attachAvatar: { type: AvatarDto },
+  ProfileController_removeAvatar: { type: AvatarDto },
 
   OnboardingController_me: { type: JoinStateDto },
   OnboardingController_kpms: { type: KpmDirectoryEntryDto, isArray: true },
@@ -216,11 +248,23 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_previewInvite: { type: InvitePreviewDto },
   OnboardingController_redeem: { type: RedeemedInviteDto },
   OnboardingController_inbox: { type: PendingRequestDto, isArray: true },
+  OnboardingController_waitingCount: { type: WaitingRequestCountDto },
   OnboardingController_routing: { type: RoutingChoiceDto, isArray: true },
   OnboardingController_approve: { type: PendingRequestDto, isArray: true },
   OnboardingController_decline: { type: PendingRequestDto, isArray: true },
   OnboardingController_untagged: { type: UntaggedMemberDto, isArray: true },
   OnboardingController_tag: { type: UntaggedMemberDto, isArray: true },
+  // P18.96-T3 (ADR-0170): + Add agent, its invites and transfers; an invite's link; the office's transfer requests.
+  NewHireAgentsController_add: { type: AddAgentResultDto },
+  NewHireAgentsController_list: { type: InviteListDto },
+  NewHireAgentsController_resend: { type: SharedInviteDto },
+  NewHireAgentsController_cancel: { type: InviteListDto },
+  NewHireAgentsController_myTransfers: { type: RequestedTransferDto, isArray: true },
+  InviteLinkController_banner: { type: InviteBannerDto },
+  InviteLinkController_accept: { type: AcceptedInviteDto },
+  TransferRequestsController_queue: { type: TransferDto, isArray: true },
+  TransferRequestsController_approve: { type: TransferDto, isArray: true },
+  TransferRequestsController_decline: { type: TransferDto, isArray: true },
 
   TenantConfigController_listActivityTypes: { type: ActivityCategoryDto, isArray: true },
   TenantConfigController_createCategory: { type: ActivityCategoryDto },
@@ -235,6 +279,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_updateType: { type: ActivityTypeDto },
   TenantConfigController_archiveType: { type: ActivityTypeDto },
   TenantConfigController_restoreType: { type: ActivityTypeDto },
+  // P18.9-T2 (ADR-0163): an office's activity binding — the Owner's and Admin's read, the Super Admin's read and write.
+  ActivityBindingReadController_read: { type: ActivityBindingDto },
+  ActivityBindingAdminController_read: { type: OfficeActivityBindingDto },
+  ActivityBindingAdminController_update: { type: OfficeActivityBindingDto },
   TenantConfigController_listLeadStatuses: { type: LeadPipelineDto, isArray: true },
   TenantConfigController_createLeadStatus: { type: LeadStatusDto },
   TenantConfigController_reorderLeadStatuses: { type: LeadPipelineDto },
@@ -243,8 +291,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setLateStage: { type: LeadStatusDto },
   GoalController_read: { type: GoalResponseDto },
   GoalController_save: { type: GoalResponseDto },
+  GoalController_preview: { type: GoalPreviewDto },
   ProductionController_readMonth: { type: MonthViewDto },
-  ProductionController_template: { type: TemplateFileDto },
+  // ADR-0184: `format=xlsx` answers the workbook itself.
+  ProductionController_template: { type: TemplateFileDto, files: [XLSX_MIME_TYPE] },
   ProductionController_preview: { type: UploadPreviewDto },
   ProductionController_commit: { type: ImportResultDto },
   ProductionController_revert: { type: ImportResultDto },
@@ -255,9 +305,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   LeadController_list: { type: LeadPageDto },
   LeadController_read: { type: LeadResponseDto },
   LeadController_create: { type: LeadResponseDto },
+  LeadController_reorder: { type: LeadOrderDto },
   LeadController_update: { type: LeadResponseDto },
   LeadController_setStatus: { type: LeadResponseDto },
   LeadController_setOutcome: { type: LeadResponseDto },
+  // UI V1 (UI-104): the owner's tick on a next action, from Calendar.
+  LeadController_setNextActionDone: { type: LeadResponseDto },
   LeadController_remove: { type: DeletedLeadDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
@@ -271,6 +324,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NamedTemplateController_create: { type: NamedTemplateDto },
   NamedTemplateController_update: { type: NamedTemplateDto },
   NamedTemplateController_archive: { type: NamedTemplateDto },
+  // ADR-0185: *Terbitkan semua*, and the offices behind the checklist's count.
+  NamedTemplateController_publishAll: { type: PublishAllDto },
+  NamedTemplateController_offices: { type: TemplateOfficeDto, isArray: true },
   // P13.2-T7: the copies across an owner boundary answer with the template they made.
   NamedTemplateController_importFrom: { type: NamedTemplateDto },
   // P13.2's exit review (finding 2): with what the office held that the template left out, and why.
@@ -365,6 +421,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventGuestController_read: { type: GuestEventDto },
   EventGuestController_rsvp: { type: GuestEventDto },
   EventGuestController_cancelRsvp: { type: GuestEventDto },
+  // UI V1 (Phase 18.99 T13, UI-108): *Tidak ikut* after *Ikut*, the RSVP back to none.
+  EventGuestController_withdrawRsvp: { type: GuestEventDto },
   EventGuestController_claim: { type: GuestEventDto },
   EventGuestController_submitFeedback: { type: GuestEventDto },
 
@@ -393,9 +451,19 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CapabilityController_add: { type: CapabilityCatalogDto },
   CapabilityController_reorder: { type: CapabilityCatalogDto },
   OrgController_myTeam: { type: TeamMemberDto, isArray: true },
+  // UI V1 (2026-10-30): *Search agent* (UI-012, D-14), and a leader saving an agent's WhatsApp number (UI-081, D-22).
+  OrgController_search: { type: MemberSearchResultDto },
+  MemberPhoneController_set: { type: MemberPhoneDto },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
   OrgController_remove: { type: TeamMemberDto, isArray: true },
   OrgController_roleLog: { type: RoleChangeEntryDto, isArray: true },
+  // ADR-0157: a leader past the office's limit, asked about and decided.
+  OrgController_leaderLimitRequests: { type: LeaderLimitRequestRowDto, isArray: true },
+  OrgController_cancelLeaderLimitRequest: { type: LeaderLimitRequestRowDto, isArray: true },
+  OrgController_requestPastLeaderLimit: { type: LeaderLimitRequestRowDto },
+  LeaderLimitRequestAdminController_queue: { type: LeaderLimitRequestRowDto, isArray: true },
+  LeaderLimitRequestAdminController_approve: { type: LeaderLimitRequestRowDto, isArray: true },
+  LeaderLimitRequestAdminController_decline: { type: LeaderLimitRequestRowDto, isArray: true },
   OrgController_orgTree: { type: OrgTreeDto },
   OrgController_listAdmins: { type: DelegatedAdminDto, isArray: true },
   OrgController_grantAdmin: { type: DelegatedAdminDto, isArray: true },
@@ -406,6 +474,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_archiveGroup: { type: GroupSummaryDto, isArray: true },
   OrgController_readTags: { type: MemberTagsDto },
   OrgController_tagMember: { type: MemberTagsDto },
+  OrgController_setCoreLeader: { type: MemberTagsDto },
   OrgController_list: { type: DirectoryPageDto },
   OrgController_read: { type: DirectoryMemberDto },
   OrgController_reports: { type: DirectoryMemberDto, isArray: true },
@@ -438,9 +507,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_assignOwner: { type: KpmAdminViewDto },
   AdminController_setStatus: { type: KpmAdminViewDto },
   AdminController_updateSubscription: { type: KpmAdminViewDto },
-  AdminController_rosterTemplate: { type: RosterTemplateDto },
+  // ADR-0184: `format=csv` and `format=xlsx` answer the file itself.
+  AdminController_rosterTemplate: { type: RosterTemplateDto, files: ['text/csv', XLSX_MIME_TYPE] },
   AdminController_previewRoster: { type: RosterPreviewDto },
   AdminController_importRoster: { type: RosterCommitDto },
+  // ADR-0184: the roster as a file, a workbook or a CSV — the same answers as the paste's.
+  AdminController_previewRosterFile: { type: RosterPreviewDto },
+  AdminController_importRosterFile: { type: RosterCommitDto },
   AdminController_readAudit: { type: AuditEntryResponseDto, isArray: true },
   AdminController_impersonate: { type: ImpersonationSessionDto },
   AdminController_endImpersonation: { type: StatusAckDto },

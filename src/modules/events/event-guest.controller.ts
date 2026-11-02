@@ -62,11 +62,28 @@ export class EventGuestController {
 
   @Post(':eventId/rsvp/cancel')
   @RequirePermission('event:cancel_rsvp')
-  @ApiOperation({ summary: '*Cancel RSVP*', description: `Idempotent; refused from \`endsAt\`. ${OUTSIDE}` })
+  @ApiOperation({
+    summary: '*Cancel RSVP* — the card’s *Tidak ikut*',
+    description: 'From going, or from no answer at all, which makes the row (UI V1, UI-108). '
+      + `Idempotent; refused from \`endsAt\`. ${OUTSIDE}`,
+  })
   @ApiResponse({ status: 201, type: GuestEventDto })
   @ApiResponse(refusal(409, '`EVENT_RSVP_CLOSED` — the event has ended.'))
   async cancelRsvp(@Ctx() ctx: RequestContext, @Param('eventId') eventId: string, @Body() _body: NoEventBodyDto) {
     return this.guests.cancelRsvp(ctx, eventId);
+  }
+
+  @Post(':eventId/rsvp/withdraw')
+  @RequirePermission('event:cancel_rsvp')
+  @ApiOperation({
+    summary: 'The RSVP taken back',
+    description: 'The card’s *Ikut* or *Tidak ikut* tapped again (UI V1, UI-108): the member is left with no answer. '
+      + `Idempotent: no answer changes nothing and makes no row. Refused from \`endsAt\`. ${OUTSIDE}`,
+  })
+  @ApiResponse({ status: 201, type: GuestEventDto })
+  @ApiResponse(refusal(409, '`EVENT_RSVP_CLOSED` — the event has ended.'))
+  async withdrawRsvp(@Ctx() ctx: RequestContext, @Param('eventId') eventId: string, @Body() _body: NoEventBodyDto) {
+    return this.guests.withdrawRsvp(ctx, eventId);
   }
 
   @Post(':eventId/attendance/claim')

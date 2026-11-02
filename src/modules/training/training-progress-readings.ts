@@ -227,11 +227,18 @@ function compose(
   const offeredSkills = new Set(catalog.tree.flatMap((c) => c.skills.map((s) => s.code)));
   const offeredCategories = new Set(catalog.tree.map((c) => c.code));
 
-  const categories: TrainingCategoryProgressView[] = catalog.tree.map((category) => {
+  /*
+   * **A category with no published module is not offered** (P18.97-T4 AC-9, ADR-0176 §9; the client's UI-031): the
+   * snapshot carries every active category, and *Product* or *Recruiting* with nothing in them drew a tab an agent
+   * opened onto *coming soon*. Such a category is left out — or, where the member's history sits under it, read as
+   * no longer offered, its skills with it, so the person tab still draws what was done and no tab is drawn.
+   */
+  const categories: TrainingCategoryProgressView[] = catalog.tree.flatMap((category) => {
+    const offersSomething = category.skills.some((skill) => skill.modules.length > 0);
     const skills: TrainingSkillProgressView[] = category.skills.map((skill) => ({
       code: skill.code,
       label: skill.label,
-      offered: true,
+      offered: offersSomething,
       ...(counts.skills.get(skill.code) ?? NOTHING),
       modules: skill.modules.map((module) => {
         const row = byCode.get(module.code);
@@ -246,18 +253,20 @@ function compose(
       }),
       archived: archivedOf(skill.code),
     }));
-    return {
+    // A skill with nothing offered and no history has nothing to draw.
+    const drawn = [
+      ...skills,
+      ...withdrawnSkills(archivedBySkill, offeredSkills, category.code, archivedOf),
+    ].filter((s) => s.modules.length > 0 || s.archived.length > 0);
+    if (!offersSomething && drawn.length === 0) return [];
+    return [{
       code: category.code,
       label: category.label,
       description: category.description,
-      offered: true,
+      offered: offersSomething,
       ...(counts.categories.get(category.code) ?? NOTHING),
-      // A skill with nothing offered and no history has nothing to draw.
-      skills: [
-        ...skills,
-        ...withdrawnSkills(archivedBySkill, offeredSkills, category.code, archivedOf),
-      ].filter((s) => s.modules.length > 0 || s.archived.length > 0),
-    };
+      skills: drawn,
+    }];
   });
 
   // A category no longer offered that still holds the member's history: after the offered ones, in its order.

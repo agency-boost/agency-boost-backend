@@ -29,12 +29,16 @@ export class SignedUploadDto {
     type: 'object',
     additionalProperties: { type: 'string' },
     example: {
-      api_key: '123456789012345', timestamp: '1791511200', public_id: 'dev/66f0…/recruitment-pitch/01J…',
-      type: 'authenticated', signature: '3f2a…',
+      key: 'dev/66f0…/recruitment-pitch/01J…', 'Content-Type': 'application/pdf',
+      'x-goog-date': '20261019T030000Z',
+      'x-goog-credential': 'api-runtime@agencyboost-staging.iam.gserviceaccount.com/20261019/auto/storage/goog4_request',
+      'x-goog-algorithm': 'GOOG4-RSA-SHA256', policy: 'eyJjb25kaXRpb25zIjpb…', 'x-goog-signature': '3f2a…',
     },
     description:
-      'The exact form fields storage needs beside `file`, every one sent as it is — the browser need not know '
-      + 'which they are. Today: `api_key`, `timestamp`, `public_id`, `type` and `signature`.',
+      'The exact form fields storage needs beside `file`, every one sent as it is and **before** `file`, which '
+      + 'goes last — the browser need not know which they are. Today, a Cloud Storage V4 POST policy: `key`, '
+      + '`Content-Type`, `x-goog-date`, `x-goog-credential`, `x-goog-algorithm`, `policy` and `x-goog-signature`. '
+      + 'Storage answers a successful upload `204` with no body.',
   })
   fields!: Record<string, string>;
 }

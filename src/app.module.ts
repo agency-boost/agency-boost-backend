@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { validateEnv } from '@/config/env.validation';
+import { GracefulShutdown } from '@/graceful-shutdown';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { LoggingModule } from '@/common/logging/logging.module';
@@ -55,7 +56,9 @@ import { NotificationRepository } from '@/modules/notifications/notification.rep
 import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
 import { RecipientAddressBook, SmtpChannelAdapter } from '@/modules/notifications/smtp.adapter';
 import { UserAddressBook } from '@/modules/notifications/user-address-book';
+import { RecipientLanguages, UserLanguages } from '@/modules/notifications/recipient-languages';
 import { InAppChannelAdapter, LogEmailAdapter } from '@/modules/notifications/local-adapters';
+import { resolveMailProvider } from '@/modules/notifications/mail-provider';
 import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
@@ -67,6 +70,12 @@ import {
 import {
   ConfigSnapshot, ConfigSnapshotSchema,
 } from '@/modules/config/config-snapshot.schema';
+import { ActivityBinding, ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
+import { ActivityBindingRepository } from '@/modules/config/activity.repository';
+import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import {
+  ActivityBindingAdminController, ActivityBindingReadController,
+} from '@/modules/config/activity-binding.controller';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -123,6 +132,10 @@ import { ActivationProgressController } from '@/modules/activation/activation-pr
 import { NewHiresController } from '@/modules/activation/new-hires.controller';
 import { BillingController } from '@/modules/billing/billing.controller';
 import { ActivationEvents } from '@/modules/activation/activation-events.port';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
+import { FirstSaleService } from '@/modules/activation/first-sale.service';
+import { Activation3MService } from '@/modules/activation/activation-3m.service';
+import { SalesEvents } from '@/modules/activation/sales-events.port';
 import { ActivationNav } from '@/modules/activation/activation-nav.port';
 import { ActivationStarter } from '@/modules/org/activation-starter.port';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
@@ -186,8 +199,7 @@ import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
-import { StoragePort } from '@/modules/assets/storage.port';
-import { CloudinaryAdapter } from '@/modules/assets/cloudinary.adapter';
+import { STORAGE_PROVIDER } from '@/modules/assets/storage.provider';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import {
@@ -195,6 +207,9 @@ import {
 } from '@/modules/auth/impersonation-session.schema';
 import { AuthService } from '@/modules/auth/auth.service';
 import { AuthController } from '@/modules/auth/auth.controller';
+import { ProfileController } from '@/modules/users/profile.controller';
+import { ProfileService } from '@/modules/users/profile.service';
+import { AvatarLinks, AvatarService } from '@/modules/users/avatar.service';
 import { PasswordService } from '@/modules/auth/password.service';
 import { RateLimiter } from '@/modules/auth/rate-limiter';
 import { ContextResolver } from '@/modules/auth/context-resolver';
@@ -217,13 +232,27 @@ import {
   MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { ProfileLineReader } from '@/modules/org/profile-line';
 import {
-  GroupRepository, JoinRequestRepository, MembershipHistoryRepository,
+  GroupRepository, JoinRequestRepository, LeaderLimitRequestRepository, MemberInviteRepository, MembershipHistoryRepository,
+  TransferRequestRepository,
 } from '@/modules/org/org.repositories';
+import { MemberInvite, MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { TransferRequest, TransferRequestSchema } from '@/modules/org/transfer-request.schema';
+import {
+  InviteLinkController, NewHireAgentsController, TransferRequestsController,
+} from '@/modules/org/invites.controller';
+import { InvitesService } from '@/modules/org/invites.service';
+import { TransfersService } from '@/modules/org/transfers.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
+import { MemberPhoneController } from '@/modules/org/member-phone.controller';
+import { MemberPhoneService } from '@/modules/org/member-phone.service';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { LeaderLimitRequestAdminController } from '@/modules/org/leader-limit-request.controller';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { OnboardingService } from '@/modules/org/onboarding.service';
 import { OnboardingController } from '@/modules/org/onboarding.controller';
 import { LeaderCodeService } from '@/modules/org/leader-code.service';
@@ -262,9 +291,17 @@ import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
 import { CalendarLeave } from '@/modules/calendar/calendar-leave';
 import { CalendarController } from '@/modules/calendar/calendar.controller';
+import { CalendarAutoItems } from '@/modules/calendar/calendar-auto-items';
+import { CoachingActionDone } from '@/modules/coaching/coaching-action-done.service';
+import { CoachingActionDoneController } from '@/modules/coaching/coaching-action-done.controller';
 import { RoleChangeService } from '@/modules/org/role-change.service';
+import { ActivityRatioReadings } from '@/modules/activity/activity-ratio-readings';
+import { UnitActivitiesController } from '@/modules/unit-dashboard/unit-activities.controller';
+import { UnitActivitiesService } from '@/modules/unit-dashboard/unit-activities.service';
 import { UnitDashboardController } from '@/modules/unit-dashboard/unit-dashboard.controller';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
+import { HomeController } from '@/modules/home/home.controller';
+import { HomeService } from '@/modules/home/home.service';
 import {
   RecruitmentController, RecruitmentPitchController, RecruitmentPlaybookController,
 } from '@/modules/recruitment/recruitment.controller';
@@ -312,7 +349,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
 @Module({
   imports: [
     LoggingModule,
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // Under Jest (which sets NODE_ENV=test) no `.env` is read: a suite is configured by what it sets
+    // (test/boot-env.ts), so it runs on a laptop as it runs on CI, where there is no `.env` to read.
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv, ignoreEnvFile: process.env.NODE_ENV === 'test' }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -351,12 +390,19 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       { name: Goal.name, schema: GoalSchema },
       { name: MembershipHistory.name, schema: MembershipHistorySchema },
       { name: JoinRequest.name, schema: JoinRequestSchema },
+      // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
+      { name: LeaderLimitRequest.name, schema: LeaderLimitRequestSchema },
+      // P18.96-T3 (ADR-0170): a leader's invites, and the requests to move a member to another leader.
+      { name: MemberInvite.name, schema: MemberInviteSchema },
+      { name: TransferRequest.name, schema: TransferRequestSchema },
       { name: Group.name, schema: GroupSchema },
       { name: ActivityCategory.name, schema: ActivityCategorySchema },
       { name: ActivityType.name, schema: ActivityTypeSchema },
       { name: LeadStatus.name, schema: LeadStatusSchema },
       { name: RatioDefinition.name, schema: RatioDefinitionSchema },
       { name: ConfigSnapshot.name, schema: ConfigSnapshotSchema },
+      // ADR-0163: which activity types each cascade role counts, one row per office.
+      { name: ActivityBinding.name, schema: ActivityBindingSchema },
       { name: CompanyTemplate.name, schema: CompanyTemplateSchema },
       // ADR-0115: a company's named templates, each a name over seven kinds of companyTemplates.
       { name: NamedTemplate.name, schema: NamedTemplateSchema },
@@ -405,6 +451,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ProductionController,
     HealthController,
     AuthController,
+    // UI V1 (UI-111): *Profil saya*'s photo and read-only facts, under `/auth/me`.
+    ProfileController,
     AdminController,
     // P13.2-T6: a company's named templates (ADR-0115).
     NamedTemplateController,
@@ -412,10 +460,20 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     OfficeTemplateController,
     CompanyController,
     OrgController,
+    // UI V1 (2026-10-30; UI-081, D-22): a leader saves an agent's WhatsApp number.
+    MemberPhoneController,
+    // ADR-0157: the Super Admin's queue of leaders past an office's limit.
+    LeaderLimitRequestAdminController,
     OnboardingController,
+    // P18.96-T3: an invite's link, and the office's transfer requests (ADR-0170 §3, §4).
+    InviteLinkController,
+    TransferRequestsController,
     NotificationController,
     TenantConfigController,
     TenantConfigReadController,
+    // ADR-0163: an office's activity binding — the Super Admin's per office, the Owner's and Admin's read.
+    ActivityBindingAdminController,
+    ActivityBindingReadController,
     TrainingController,
     // P18.5-T1, T4: the learner's training, and the coach's read of it.
     TrainingProgressController,
@@ -437,15 +495,26 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CoachingProfileController,
     // P11-T10: the print of a finalized session, and the reader's own coaching.
     CoachingRecordController,
+    // UI V1 (UI-104): a coachee's tick on an action item, from Calendar.
+    CoachingActionDoneController,
     // Phase 12: the calendar.
     CalendarController,
     // Phase 13: the hire's own activation, and a leader's new hires.
     ActivationProgressController,
+    /*
+     * P18.96-T3: *+ Add agent*, its invites and its transfers, under `/new-hires` — **before** `NewHiresController`, whose
+     * `GET /new-hires/:membershipId` would otherwise read `invites` and `transfers` as an id (`app.module.int.spec.ts`).
+     */
+    NewHireAgentsController,
     NewHiresController,
     // P13.2-T2: the quote tool's price read; it stores nothing (ADR-0111).
     BillingController,
     // Phase 15: a leader's unit, and *Update production*.
     UnitDashboardController,
+    // UI V1 (Phase 18.99 T4, UI-001): the Unit Dashboard's Activities tab.
+    UnitActivitiesController,
+    // UI V1, Phase 18.99 T11 (UI-100, UI-101): Home's one read.
+    HomeController,
     // Phase 17: the agents' Recruitment, the office's pitch settings, and the company's playbook.
     RecruitmentController,
     RecruitmentPitchController,
@@ -469,6 +538,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     },
     { provide: TemplateRenderer, useClass: EmailTemplateRenderer },
     { provide: RecipientAddressBook, useClass: UserAddressBook },
+    // P18.98-T5 AC-5: whose language an email is written in — the recipient's `users.locale`.
+    { provide: RecipientLanguages, useClass: UserLanguages },
     InAppChannelAdapter,
     LogEmailAdapter,
     SmtpChannelAdapter,
@@ -479,10 +550,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      * adapter every in-app send recorded `failed: 'no adapter'` beside a row that had
      * been delivered.
      *
-     * Email over SMTP, or into the log for a developer with no mail catcher.
-     * `MAIL_TRANSPORT=log` is refused in production by `env.validation.ts`, so this
-     * factory cannot quietly choose the wrong one there: the process will not have
-     * started.
+     * Email over SMTP, through the provider `MAIL_PROVIDER` names (P18.99-T18, ADR-0182), or into the
+     * log for a developer with no mail catcher. `log`, by either key, is refused in production by
+     * `env.validation.ts`, so this factory cannot quietly choose the wrong one there: the process
+     * will not have started. An env file with `MAIL_TRANSPORT` alone still chooses as it did.
      */
     {
       provide: NOTIFICATION_ADAPTERS,
@@ -494,7 +565,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
         smtp: SmtpChannelAdapter,
       ) => [
         inApp,
-        config.get<string>('MAIL_TRANSPORT') === 'log' ? log : smtp,
+        resolveMailProvider(config).provider === 'log' ? log : smtp,
       ],
     },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
@@ -504,6 +575,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ActivityCategoryRepository,
     ActivityTypeRepository,
     ActivityConfigService,
+    // ADR-0163: the activity binding, and `resolveCascadeBinding`, the one reader every cascade count goes through.
+    ActivityBindingRepository,
+    ActivityBindingService,
     LeadStatusRepository,
     LeadStatusService,
     RatioDefinitionRepository,
@@ -539,6 +613,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ActivityLogRepository,
     ActivityService,
     ActivityReadings,
+    // UI V1 (Phase 18.99 T4): the ratios over sets of members — the Ratio page's and the Unit Dashboard's.
+    ActivityRatioReadings,
     SummaryService,
     CampaignRepository,
     CampaignService,
@@ -566,7 +642,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      */
     AssetRepository,
     AssetService,
-    { provide: StoragePort, useClass: CloudinaryAdapter },
+    // P18.7-T2 (ADR-0153, D12): the bucket when `GCS_BUCKET` names one; in development and test without one,
+    // storage that refuses with `STORAGE_NOT_CONFIGURED` so the API still boots.
+    STORAGE_PROVIDER,
     ConfigSnapshotRepository,
     TenantConfigService,
     TemplateService,
@@ -599,6 +677,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TenantDay,
     NotificationRepository,
     NotificationService,
+    // P18.7-T1: on shutdown, stop listening and finish the open requests, then wait for their email.
+    GracefulShutdown,
     PasswordService,
     RateLimiter,
     AuthService,
@@ -611,6 +691,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     MembershipRepository,
     GroupRepository,
     JoinRequestRepository,
+    LeaderLimitRequestRepository,
     MembershipHistoryRepository,
     HierarchyService,
     DirectoryService,
@@ -618,7 +699,18 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     LeaderCodeService,
     MemberNames,
     ApprovalsService,
+    // P18.96-T3 (ADR-0170): + Add agent, the invites it makes, and the transfers it asks for.
+    MemberInviteRepository,
+    TransferRequestRepository,
+    InvitesService,
+    TransfersService,
     RoleChangeService,
+    MemberPhoneService,
+    // UI V1 (UI-111): the profile photo, its signed links, and the profile's read-only facts.
+    AvatarService,
+    AvatarLinks,
+    ProfileService,
+    LeaderLimitRequestService,
     RemovalService,
     OrgTreeService,
     // P11-T3: `COACH(actor, subject)`, and every read of a member's data that goes through it.
@@ -646,6 +738,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     CalendarEventRepository,
     CalendarNotices,
     CalendarService,
+    // UI V1 (UI-104): lead next actions, open coaching action items and joined events, merged at query time.
+    CalendarAutoItems,
+    CoachingActionDone,
     CalendarPeopleService,
     CalendarLeave,
     /*
@@ -671,13 +766,26 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     { provide: ActivationStarter, useExisting: ActivationProgressService },
     { provide: ActivationEvents, useExisting: ActivationProgressService },
     { provide: ActivationNav, useExisting: ActivationProgressService },
+    /*
+     * P18.96-T4 (ADR-0171 §1, §3): each person's first sale, kept on the membership and answered to the leads' and the
+     * production file's writes through `SalesEvents`; and a data-backed item's hand tick, saved with its record.
+     */
+    FirstSaleService,
+    { provide: SalesEvents, useExisting: FirstSaleService },
+    ActivationItemRecords,
+    // P18.96-T6 (ADR-0171 §2, ADR-0173 §3): each new hire's 3M activation, kept once decided, and *Mark left*.
+    Activation3MService,
     GroupService,
+    // P18.8-T6: the groups and the office on the sidebar's profile line, read with `/auth/me` (ADR-0159 §5).
+    ProfileLineReader,
     AdminDelegationService,
     /*
      * Phase 15: the Unit Dashboard — one roster read through the readings the person's own screens use, and
      * a leader's corrections through the month table's own function. No collection of its own.
      */
     UnitDashboardService,
+    UnitActivitiesService,
+    HomeService,
     /*
      * Phase 17: recruitment tools — the company's playbook (read live, written by the Super Admin, given to a
      * company started from the defaults by `TenantService`), the plan built from it, and an office's pitch.

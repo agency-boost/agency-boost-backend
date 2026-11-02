@@ -67,7 +67,7 @@ describe('the forum’s writes when another leader’s lands first (P18.1-T2 AC-
 
       const { id: targeted } = await make('Target gone');
       first('setMonthlyTarget', () => deleted(targeted));
-      await expect(office.minutes.saveMonthlyTarget(owner(), targeted, 'flc', { value: '8', version: 0 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(office.minutes.saveMonthlyTarget(owner(), targeted, 'flc', { rate: 1, version: 0 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('P18.1-T2 AC-7 a move, and a second delete at once', async () => {
@@ -93,7 +93,7 @@ describe('the forum’s writes when another leader’s lands first (P18.1-T2 AC-
     it.each([
       ['an agenda item added', 'pushAgendaItem', (id: string) => office.minutes.addAgendaItem(owner(), id, 'post')],
       ['an action item added', 'pushActionItem', (id: string) => office.minutes.addActionItem(owner(), id)],
-      ['a Monthly Target typed', 'setMonthlyTarget', (id: string) => office.minutes.saveMonthlyTarget(owner(), id, 'ape', { value: 'TBD', version: 0 })],
+      ['a Monthly Target typed', 'setMonthlyTarget', (id: string) => office.minutes.saveMonthlyTarget(owner(), id, 'ape', { rate: null, version: 0 })],
     ] as const)('P18.1-T2 AC-7 %s, then another Admin’s delete: LEADER_MEETING_HAS_MINUTES', async (_name, method, write) => {
       const { id } = await make('First write');
       const original = (office.meetings[method] as (...args: unknown[]) => Promise<unknown>).bind(office.meetings);
@@ -133,7 +133,7 @@ describe('the forum’s writes when another leader’s lands first (P18.1-T2 AC-
 
     it('P18.1-T2 AC-4, AC-7 a Monthly Target sent at a version the cell never reached: its version is 0', async () => {
       const { id } = await make('Target');
-      await expect(office.minutes.saveMonthlyTarget(owner(), id, 'case_submission', { value: 'TBD', version: 3 }))
+      await expect(office.minutes.saveMonthlyTarget(owner(), id, 'case_submission', { rate: 2, version: 3 }))
         .rejects.toMatchObject({ code: 'VERSION_CONFLICT', details: { expectedVersion: 3, actualVersion: 0 } });
     });
   });

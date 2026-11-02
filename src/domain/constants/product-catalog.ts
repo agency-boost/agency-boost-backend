@@ -46,6 +46,10 @@ export type ProductNeed = (typeof PRODUCT_NEEDS)[number];
  *
  * Named slots rather than a list: an agent looking for the illustration is looking for **the**
  * illustration, and a list would make "which one is the brochure" a question about ordering.
+ *
+ * The labels are the English source of words the API serves in the reader's language (P18.98-T7; ADR-0179 §7):
+ * `modules/products/products.messages.ts` (`PRODUCTS_MESSAGES`) holds each beside its Indonesian — as it does
+ * *Lump-sum*, the one budget band below that is a word. The keys never change.
  */
 export const PRODUCT_DOCUMENT_SLOTS = [
   { key: 'brochure', label: 'Brochure' },
@@ -115,14 +119,32 @@ export type ProductLifecycle = (typeof PRODUCT_LIFECYCLES)[number];
 export const PRODUCT_AGE_BANDS = [1, 2, 3, 4, 5] as const;
 export const PRODUCT_BUDGET_BANDS = [1, 2, 3, 4, 5, 6, 7] as const;
 
-/** What each band means, from `Overall.html:9527-9533`. The screens read these; nothing keys on them. */
+/**
+ * What each band means, from `Overall.html:9527-9533`. The screens read these; nothing keys on them.
+ *
+ * The budget bands' sums are written compact, as ADR-0167 §1 writes a chip — *Rp 500 rb*, *Rp 2 jt* — where the
+ * prototype wrote *Rp500K* and *Rp2M*, its `M` a million (*juta*, `jt`; `M` is *miliar*). Literal strings, so the
+ * frontend's pin (`lib/product-catalog.spec.ts`) can read them from this file's text.
+ */
 export const PRODUCT_AGE_BAND_LABELS: Readonly<Record<number, string>> = {
   1: '< 25', 2: '25–34', 3: '35–49', 4: '50–64', 5: '65+',
 };
 export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
-  1: '< Rp500K', 2: 'Rp500K–Rp2M', 3: 'Rp2M–Rp5M', 4: 'Rp5M–Rp10M',
-  5: 'Rp10M–Rp20M', 6: '> Rp20M', 7: 'Lump-sum',
+  1: '< Rp 500 rb', 2: 'Rp 500 rb–Rp 2 jt', 3: 'Rp 2 jt–Rp 5 jt', 4: 'Rp 5 jt–Rp 10 jt',
+  5: 'Rp 10 jt–Rp 20 jt', 6: '> Rp 20 jt', 7: 'Lump-sum',
 };
+
+/**
+ * **The one budget band that is not a monthly premium**: *Lump-sum*, a single payment (ADR-0167; the client's
+ * UI review of 2026-10-26, UI-030; P18.95-T6 AC-3, parity I-422).
+ *
+ * The prototype drew it as the seventh chip under *Monthly premium budget* (`Overall.html:3826-3834`), which
+ * reads a single premium as a monthly one. The brief now asks it as an option of its own, beside that
+ * question. **The band keeps its number**: a product's `eligibleBudgetBands`, the scorer and every address
+ * (`?budget=7`) mean the same thing as before, so nothing stored or linked has to move. Bands 1 to 6 are
+ * the monthly ones.
+ */
+export const PRODUCT_LUMP_SUM_BUDGET_BAND = 7;
 
 /** The seven fields the Owner's override modal names, in its order. */
 export interface SeedAttackPlan {
@@ -133,6 +155,21 @@ export interface SeedAttackPlan {
   readonly objectionTheySay: string;
   readonly objectionYouSay: string;
   readonly nextAction: string;
+}
+
+/**
+ * **A seed product's words in another language, field for field** (UI V1, UI-107; Phase 18.99 T13): what
+ * `product-words-id.ts` holds for every product below, so a reader in that language reads the platform's default words
+ * in it. Every list is the seed's length and order; a field the seed leaves blank (a run-off product's `opening` and
+ * `nextAction`) stays blank. `objectionYouSay` is not here: it is the need's reply (`SEED_REPLY_BY_NEED`), translated
+ * once by need.
+ */
+export interface SeedProductWords {
+  readonly tagline: string;
+  readonly benefits: readonly string[];
+  readonly differentiator: string;
+  readonly bestFor: string;
+  readonly defaultAttackPlan: Omit<SeedAttackPlan, 'objectionYouSay'>;
 }
 
 export interface SeedProduct {

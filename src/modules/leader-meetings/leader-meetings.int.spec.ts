@@ -8,6 +8,7 @@ import { configModule } from '../../../test/config-module';
 import { declaredPermissions, session, SUPER_ADMIN } from '../../../test/http-permissions';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_A, type ForumOffice } from '../../../test/forum-office';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { LeaderMeetingsController } from './leader-meetings.controller';
 
 /**
@@ -30,18 +31,22 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
   const make = async (title: string, date: string) => office.forum.create(office.as('OWNER'), { title, date });
   const audits = (action: string) => db().collection('auditLog').find({ action }).toArray();
 
-  /** Every editor by the address — the Owner, the Admin, and a tagged AB, AAB and Agent. */
-  const EDITORS: Who[] = ['OWNER', 'ADMIN', 'AGUS', 'SARI', 'INDAH'];
-  /** The tagged field members: editors who make, move and delete nothing. */
-  const CORE_LEADERS: Who[] = ['AGUS', 'SARI', 'INDAH'];
-  /** An AB, an AAB and an Agent of the office, none tagged. */
-  const NOT_TAGGED: Who[] = ['PEER_AB', 'DEWI', 'RINA'];
+  /** Every editor by the address — the Owner, the Admin, and a tagged AB and AAB. */
+  const EDITORS: Who[] = ['OWNER', 'ADMIN', 'AGUS', 'SARI'];
+  /** The Core Leaders — tagged, on a leader rung (ADR-0159 §1): editors who make, move and delete nothing. */
+  const CORE_LEADERS: Who[] = ['AGUS', 'SARI'];
+  /**
+   * An AB, an AAB and an Agent of the office, none tagged; and INDAH, an Agent **tagged** — a tag written before
+   * ADR-0159 made it a leader's, which stays on her row and makes her no Core Leader (P18.8-T5).
+   */
+  const NOT_TAGGED: Who[] = ['PEER_AB', 'DEWI', 'RINA', 'INDAH'];
 
   beforeAll(async () => {
     await startMongo();
     wired = configModule(ROSTER_NOW);
     await clearCollections();
     office = await buildForumOffice(wired);
+    // An Agent tagged before ADR-0159: the flag stays on her row and does nothing (P18.8-T5 AC-1).
     await office.tag('INDAH', true);
     app = await forumApp(office);
   }, 120_000);
@@ -88,7 +93,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       { name: 'add an action item', call: () => http().post(`/leader-meetings/${id}/action-items`), ok: 201 },
       { name: 'a Monthly Target', call: async () => {
         const cell = (await office.meetings.findById(office.as('OWNER'), id))!.monthlyTargets?.ape;
-        return http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ value: 'TBD', version: cell?.version ?? 0 });
+        return http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 100_000_000 * 100, version: cell?.version ?? 0 });
       }, ok: 200 },
       { name: 'share', call: () => http().post(`/leader-meetings/${id}/share-links`), ok: 201 },
       { name: 'stop sharing', call: () => http().delete(`/leader-meetings/${id}/share-links`), ok: 200 },
@@ -102,7 +107,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       }
     });
 
-    it.each(NOT_TAGGED)('P18.1-T2 AC-1 negative: %s, a field member not tagged, is answered 404 on every route, the list included', async (who) => {
+    it.each(NOT_TAGGED)('P18.1-T2 AC-1, P18.8-T5 AC-1 negative: %s, a field member who is no Core Leader, is answered 404 on every route, the list included', async (who) => {
       as(who);
       const before = await db().collection('auditLog').countDocuments();
       for (const route of routes(meetingId)) {
@@ -200,7 +205,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
           await http().delete(`/leader-meetings/${meetingId}`).query({ version: 1 }),
           await http().post(`/leader-meetings/${meetingId}/agenda-items`).send({ section: 'post' }),
           await http().post(`/leader-meetings/${meetingId}/action-items`),
-          await http().put(`/leader-meetings/${meetingId}/monthly-targets/flc`).send({ value: 'x', version: 0 }),
+          await http().put(`/leader-meetings/${meetingId}/monthly-targets/flc`).send({ rate: 1, version: 0 }),
           await http().put(`/leader-meetings/${meetingId}/action-items/order`).send({ itemIds: [] }),
           await http().post(`/leader-meetings/${meetingId}/share-links`),
           await http().delete(`/leader-meetings/${meetingId}/share-links`),
@@ -217,6 +222,21 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       const row = (await http().post(`/leader-meetings/${meetingId}/action-items`).expect(201)).body;
       const [entry] = (await audits('leader_meeting.action_item_added')).filter((e) => (e.after as { item: { id: string } }).item.id === row.id);
       expect(entry).toMatchObject({ actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A });
+    });
+
+    it('P18.97-T8 L4 an elevated support session’s Monthly Target write is its member’s, both actors on the audit row', async () => {
+      const version = (await office.meetings.findById(office.as('OWNER'), meetingId))!.monthlyTargets?.case_submission?.version ?? 0;
+      session.current = office.supported('OWNER', false);
+      const saved = (await http().put(`/leader-meetings/${meetingId}/monthly-targets/case_submission`).send({ rate: 2, version }).expect(200)).body;
+      expect(saved).toMatchObject({ rate: 2, typed: null, version: version + 1 });
+      const entries = (await audits('leader_meeting.monthly_target_saved')).filter((e) => e.targetId === meetingId
+        && (e.after as { row: string; version: number }).row === 'case_submission'
+        && (e.after as { row: string; version: number }).version === version + 1);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A,
+        before: { row: 'case_submission', version }, after: { row: 'case_submission', rate: 2, typed: null, version: version + 1 },
+      });
     });
   });
 
@@ -235,9 +255,10 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       expect(list.meetings.find((m: { id: string }) => m.id === older.id).state).toBe('completed');
       expect(card.editors.owner).toMatchObject({ membershipId: office.id.OWNER, name: 'Wilson Tanoto', isReader: true, rung: { code: 'AB', label: 'AB' } });
       expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
-      expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Indah Permatasari', 'Sari Puspita']);
-      // Every editor tagged but the Owner: the three tagged; the Admin is not tagged.
-      expect(card.editors).toMatchObject({ coreLeaderCount: 3, frozen: false });
+      // The Core Leaders: Indah's tag, an Agent's, makes her none (ADR-0159 §1).
+      expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Sari Puspita']);
+      // Every editor tagged but the Owner: the two Core Leaders; the Admin is not tagged.
+      expect(card.editors).toMatchObject({ coreLeaderCount: 2, frozen: false });
       expect(list.can).toEqual({ create: true });
       expect(list.limits).toEqual(LEADER_MEETING_LIMITS);
       as('AGUS');
@@ -258,8 +279,8 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
         const [card] = (await http().get('/leader-meetings').expect(200)).body.meetings;
         expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
         expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).not.toContain('Maya Kusuma');
-        expect(card.editors.coreLeaderCount).toBe(4);
-        // Each editor says whether they are tagged, so the card draws exactly the four it counts.
+        expect(card.editors.coreLeaderCount).toBe(3);
+        // Each editor says whether they are tagged, so the card draws exactly the three it counts.
         const drawn = [card.editors.owner, ...card.editors.admins, ...card.editors.coreLeaders];
         expect(drawn.filter((p: { tagged: boolean }, i: number) => i > 0 && p.tagged)).toHaveLength(card.editors.coreLeaderCount);
         expect(card.editors.admins[0].tagged).toBe(true);
@@ -392,7 +413,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       await http().patch(`/leader-meetings/${written.id}`).send({ title: 'Moved', version: 1 }).expect(200);
       await http().post(`/leader-meetings/${written.id}/share-links`).expect(201);
       expect((await http().get(`/leader-meetings/${written.id}`).expect(200)).body.writtenIn).toBe(false);
-      await http().put(`/leader-meetings/${written.id}/monthly-targets/flc`).send({ value: '8 (1 @ unit)', version: 0 }).expect(200);
+      await http().put(`/leader-meetings/${written.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
       const after = (await http().get(`/leader-meetings/${written.id}`).expect(200)).body;
       expect([after.writtenIn, after.can.delete]).toEqual([true, false]);
       const refused = await http().delete(`/leader-meetings/${written.id}`).query({ version: 2 }).expect(409);
@@ -425,15 +446,182 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
         can: { edit: true, share: true, reschedule: true, delete: true, manageTags: true, print: true },
       });
       expect(view.scorecard.frozenAt).toBeNull();
+      // P18.97-T1 AC-4: the reference slide's rows, in its order.
       expect(view.scorecard.rows.map((r: { key: string }) => r.key)).toEqual([
-        'ape', 'manpower', 'flc', 'producing_agents', 'new_aa', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'average_case_size',
+        'ape', 'manpower', 'flc', 'producing_agents', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'cases_per_producing_agent',
+        'average_case_size',
       ]);
       expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'producing_agents').monthlyTarget).toBeNull();
-      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'ape').monthlyTarget).toEqual({ value: '', version: 0 });
+      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'ape').monthlyTarget).toEqual({ rate: null, value: null, typed: null, version: 0 });
       as('SARI');
       const sari = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
       expect(sari.can).toEqual({ edit: true, share: true, reschedule: false, delete: false, manageTags: false, print: true });
       expect(sari.editors.coreLeaders.find((p: { name: string }) => p.name === 'Sari Puspita')).toMatchObject({ isReader: true, rung: { code: 'AAB' } });
+    });
+  });
+
+  /*
+   * **A saved photo shows on every avatar of that person** (UI V1, UI-111): the forum's editors, on the list's cards and
+   * the meeting's head. `users.avatarUrl` is a storage key in a private bucket, signed per read (`AvatarLinks`).
+   */
+  describe('UI-111 the editors’ profile photos', () => {
+    const KEY = 'user/66f0000000000000000009b1/avatar/01JBBBBBBBBBBBBBBBBBBBBBBB.jpg';
+    const SIGNED = `https://cdn.test/${KEY}?sig=abc`;
+    const sari = { email: 'sari@coaching.test' };
+    beforeAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: KEY } }); });
+    afterAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: null } }); });
+
+    it('UI-111 the list and the head carry an editor’s photo as a signed link, and an editor without one null', async () => {
+      const meeting = await make('Photos', '2026-10-16');
+      as('OWNER');
+      const card = (await http().get('/leader-meetings').expect(200)).body.meetings.find((m: { id: string }) => m.id === meeting.id);
+      const view = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
+      for (const editors of [card.editors, view.editors]) {
+        expect(editors.coreLeaders.map((p: { name: string; photoUrl: string | null }) => [p.name, p.photoUrl])).toEqual([
+          ['Agus Salim', null], ['Sari Puspita', SIGNED],
+        ]);
+        expect(editors.owner.photoUrl).toBeNull();
+      }
+      expect(JSON.stringify(view)).not.toContain(`"${KEY}"`);
+    });
+  });
+
+  describe('P18.97-T8 F1 a phone card’s change, as the meeting is served (parity F-256)', () => {
+    it('P18.97-T8 F1 3M new agent % at 60% against 100% is served −40 points; a sum and a count keep a percentage of last year’s', async () => {
+      const meeting = await make('Points', '2026-09-12');
+      const owner = office.as('OWNER');
+      const editors = await office.people.liveEditors(owner, await office.people.office(owner));
+      const f = (value: number) => ({ kind: 'figure', value, leavesOut: [] });
+      // Kept on the meeting in today's shape, last year's YTD and all: the scorecard a read serves, never recomputed.
+      await db().collection('leaderMeetings').updateOne({ _id: new mongoose.Types.ObjectId(meeting.id) }, {
+        $set: {
+          frozenAt: new Date('2026-09-13T02:00:00Z'),
+          frozenCoeditors: editors,
+          frozenScorecard: {
+            chips: { manpower: 28, agents: 19, units: 9, ab: 5, aab: 4 },
+            rows: [
+              { key: 'ape', unit: 'idr_minor', cells: { ytdLastYear: f(10_000_000_000), ytd: f(11_800_000_000) } },
+              { key: 'producing_agents', unit: 'count', cells: { ytdLastYear: f(0), ytd: f(4) } },
+              { key: 'new_agent_3m', unit: 'percentage', cells: { ytdLastYear: f(100), ytd: f(60) } },
+              { key: 'case_submission', unit: 'count', cells: { ytdLastYear: f(100), ytd: f(60) } },
+            ],
+            asOf: '2026-09-10',
+          },
+        },
+      });
+      as('OWNER');
+      const { rows } = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body.scorecard;
+      const change = (key: string) => rows.find((r: { key: string }) => r.key === key).ytdChange;
+      expect(change('new_agent_3m')).toEqual({ kind: 'figure', value: -40, unit: 'points' });
+      // The same 60 against 100 on a count: a fall of 40%.
+      expect(change('case_submission')).toEqual({ kind: 'figure', value: -40, unit: 'percent' });
+      expect(change('ape')).toEqual({ kind: 'figure', value: 18, unit: 'percent' });
+      // A count over last year's 0, and a row kept without last year's YTD: —.
+      expect(change('producing_agents')).toEqual({ kind: 'none' });
+      expect(change('manpower')).toEqual({ kind: 'none' });
+    });
+  });
+
+  /**
+   * **A new meeting's words are its maker's, and stored** (P18.98-T5 AC-6; ADR-0179 §7; the glossary's §C9): the first
+   * agenda an Indonesian reader makes is Bahasa Indonesia, *RBDO/BDO* kept; an English reader's is the English byte for
+   * byte; either reads as stored in both languages, and a copy keeps the stored words, re-dating its month in them.
+   * The office's meetings are put out of sight for the test — a new one is its first — and back after it.
+   */
+  describe('P18.98-T5 AC-6 a new meeting’s agenda, in its maker’s language', () => {
+    const oid = (id: string) => new mongoose.Types.ObjectId(id);
+    const stored = async (id: string) => (await db().collection('leaderMeetings').findOne({ _id: oid(id) }))!.agenda as
+      Record<'preparation' | 'during' | 'post', { text: string }[]>;
+    const texts = (agenda: Record<string, { text: string }[]>) =>
+      ['preparation', 'during', 'post'].map((section) => agenda[section].map((i) => i.text));
+
+    it('P18.98-T5 AC-6 an Indonesian reader’s first meeting stores Bahasa Indonesia, an English reader’s the English', async () => {
+      const shown = (await db().collection('leaderMeetings').find({ kpmId: KPM_A, deletedAt: null }).toArray()).map((m) => m._id);
+      await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: new Date() } });
+      const made: string[] = [];
+      const create = async (title: string, date: string, indonesian: boolean) => {
+        const req = http().post('/leader-meetings');
+        const card = (await (indonesian ? req.set(...IN_INDONESIAN) : req).send({ title, date }).expect(201)).body;
+        made.push(card.id);
+        return card.id as string;
+      };
+      try {
+        as('OWNER');
+        const id = await create('Rapat pertama', '2026-10-13', true);
+        const indonesianAgenda = [
+          ['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja Oktober', 'Tinjau scorecard, susun poin pembahasan'],
+          [
+            'Pembaruan proses — tinjau follow-up sebelumnya', 'Tinjauan kinerja terhadap ambang batas utama',
+            'Prioritas strategis (Korporat)', 'Prioritas strategis (Agency)', 'Rangkum langkah berikutnya & tetapkan penanggung jawab',
+          ],
+          ['Catat hasil ke dalam template', 'Catat masukan untuk RBDO/BDO'],
+        ];
+        expect(texts(await stored(id))).toEqual(indonesianAgenda);
+        // Read as stored, in both languages: the office's text now, never translated.
+        expect(texts((await http().get(`/leader-meetings/${id}`).expect(200)).body.agenda)).toEqual(indonesianAgenda);
+        expect(texts((await http().get(`/leader-meetings/${id}`).set(...IN_INDONESIAN).expect(200)).body.agenda)).toEqual(indonesianAgenda);
+
+        // The next meeting, made by an English reader, copies the stored words — its month item re-dated in them.
+        const next = await create('Next', '2026-11-10', false);
+        expect(texts(await stored(next))[0])
+          .toEqual(['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja November', 'Tinjau scorecard, susun poin pembahasan']);
+
+        // An office's first made by an English reader: the English, byte for byte.
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
+        const english = await create('First in English', '2026-10-13', false);
+        expect(texts(await stored(english))).toEqual([
+          ['Compile follow-ups & commitments from prior session', 'Prepare October performance data', 'Review scorecard, draft talking points'],
+          [
+            'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
+            'Strategic priorities (Agency)', 'Summarize next steps & assign owners',
+          ],
+          ['Document outcomes into template', 'Note feedback for RBDO/BDO'],
+        ]);
+        // + Add item and + Add action item store their words in the adder's language.
+        expect((await http().post(`/leader-meetings/${english}/agenda-items`).set(...IN_INDONESIAN).send({ section: 'post' }).expect(201))
+          .body).toMatchObject({ text: 'Item agenda baru', pic: '' });
+        expect((await http().post(`/leader-meetings/${english}/action-items`).set(...IN_INDONESIAN).expect(201)).body).toMatchObject({
+          initiative: 'Inisiatif baru', metric: 'Ukuran keberhasilan', action: 'Tindakan baru', pic: 'TBD', status: 'not_planned', remarks: 'TBD',
+        });
+        expect(texts(await stored(english))[2]).toEqual(['Document outcomes into template', 'Note feedback for RBDO/BDO', 'Item agenda baru']);
+      } finally {
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
+        await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: null } });
+      }
+    });
+  });
+
+  /** **Making, moving and removing a meeting, refused in Bahasa Indonesia** (P18.98-T5 AC-7): the codes as in English. */
+  describe('P18.98-T5 AC-7 the forum’s refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 the DTO’s own sentences, a move with nothing in it, a completed meeting and one with minutes', async () => {
+      as('OWNER');
+      const blank = await http().post('/leader-meetings').set(...IN_INDONESIAN).send({ title: '   ', date: '2026-02-31' }).expect(400);
+      expect(blank.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: ['title tidak boleh kosong', 'date harus berupa tanggal yang benar, dengan format YYYY-MM-DD'] },
+      });
+      // The English, as the DTO wrote it before.
+      expect((await http().post('/leader-meetings').send({ title: '   ', date: '2026-10-05' }).expect(400)).body.error.details.violations)
+        .toEqual(['title must not be empty']);
+
+      const upcoming = await make('Upcoming in Indonesian', '2026-10-20');
+      const nothing = await http().patch(`/leader-meetings/${upcoming.id}`).set(...IN_INDONESIAN).send({ version: 1 }).expect(400);
+      expect(nothing.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'Kirim judul, tanggal, atau keduanya.', details: { violations: ['Kirim judul, tanggal, atau keduanya.'] },
+      });
+      const past = await make('Past in Indonesian', '2026-09-08');
+      const completed = await http().patch(`/leader-meetings/${past.id}`).set(...IN_INDONESIAN).send({ date: '2026-09-30', version: 1 })
+        .expect(409);
+      expect(completed.body.error).toMatchObject({
+        code: 'LEADER_MEETING_COMPLETED', message: 'Rapat ini sudah berlangsung, jadi tanggalnya tetap.', details: { date: '2026-09-08' },
+      });
+      await http().put(`/leader-meetings/${upcoming.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
+      const written = await http().delete(`/leader-meetings/${upcoming.id}`).query({ version: 1 }).set(...IN_INDONESIAN).expect(409);
+      expect(written.body.error).toMatchObject({
+        code: 'LEADER_MEETING_HAS_MINUTES', message: 'Sudah ada yang ditulis di rapat ini, jadi rapat ini tidak dapat dihapus.',
+      });
+      expect((await http().get('/leader-meetings/66f00000000000000000ffff').set(...IN_INDONESIAN).expect(404)).body.error.message)
+        .toBe('Rapat tidak ditemukan.');
     });
   });
 });

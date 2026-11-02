@@ -16,6 +16,11 @@ import {
  * every item not done, and `origin: 'backfill'` — the record that this migration, and not a placement,
  * wrote it. The rung is the current one: somebody promoted since joining has none.
  *
+ * **Never an existing agent** (ADR-0169, P18.96-T2): this runs on every deploy, so once 0040 has classified a
+ * membership, one whose `joinedAs` is `existing_agent` is passed over — an activation is a new hire's alone — and a
+ * new hire's starts on their `joinDate`. A row 0040 has not reached yet (the deploy that brings both runs this first)
+ * is read as it always was, from `joinedAt`.
+ *
  * **Idempotent**: a membership that already has an activation, in any state, is left alone, and the
  * database's unique index refuses a second open one. An office with no published checklist is counted and
  * skipped — there is nothing to pin, and its hires' first read creates theirs once one is published.
@@ -41,7 +46,10 @@ export async function up(
     const today = localDayOf(now, timezone);
     const hires = await memberships
       // Under a leader, as creation and the heal require (ADR-0103): an Agent nobody placed has none.
-      .find({ kpmId, status: 'active', role: 'agent', leaderId: { $ne: null }, joinedAt: { $ne: null }, deletedAt: null })
+      .find({
+        kpmId, status: 'active', role: 'agent', leaderId: { $ne: null }, joinedAt: { $ne: null }, deletedAt: null,
+        joinedAs: { $ne: 'existing_agent' },
+      })
       .toArray();
     if (hires.length === 0) continue;
 
@@ -53,7 +61,7 @@ export async function up(
 
     for (const hire of hires) {
       const membershipId = String(hire._id);
-      const startDate = localDayOf(hire.joinedAt as Date, timezone);
+      const startDate = (hire.joinDate as string | null | undefined) ?? localDayOf(hire.joinedAt as Date, timezone);
       if (activationState(null, today, activationEndsOn(timezone, startDate)) !== 'open') {
         ended += 1;
         continue;

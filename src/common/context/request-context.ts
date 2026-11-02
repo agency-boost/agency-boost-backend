@@ -1,3 +1,6 @@
+import { isLeaderClass } from '@/domain/constants/leader-tier';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+
 /**
  * Everything authorization needs, resolved once per request and immutable thereafter.
  *
@@ -16,17 +19,16 @@ export interface TenantMembership {
    * The rung of the **company's ladder** this person stands on (P4-T9, ADR-0012).
    *
    * `AGENT`, `AAB`, `AB` in v1's seeded ladder — and whatever a second insurer publishes
-   * after that. This is what a hierarchy grant is compared against; `hierarchyRole` below
-   * is the enum it used to be compared against, and cannot describe a ladder nobody has
-   * enumerated in advance.
+   * after that. What the badge, and the config bound to rungs, read. A hierarchy grant was
+   * compared against it from P4-T9 until ADR-0156, which made a rung a company named itself
+   * hold nobody's rights.
    */
   readonly orgLevelCode: string;
   /**
-   * The three-value enum, kept while it is one-to-one with the ladder.
-   *
-   * Still read by seven services that sort, group and label by it. Retiring the *field*
-   * is a data migration; retiring its use as an **authorisation input** is P4-T9, and that
-   * is what `orgLevelCode` above is for.
+   * The **class** — `ab`, `aab` or `agent` — derived from the rung's leader tier wherever the
+   * member is placed on it (ADR-0156): *Senior Leader* → `ab`, *Associate Leader* → `aab`,
+   * none → `agent`. **What a hierarchy grant is compared against**, and what *Leaders used*
+   * and the Owner's agency and unit partitions read, so a custom rung holds its tier's rights.
    */
   readonly hierarchyRole: HierarchyRole;
   readonly status: 'active' | 'pending' | 'removed';
@@ -38,6 +40,22 @@ export interface TenantMembership {
    * leadership is asking about people you actually lead.
    */
   readonly directCount: number;
+  /**
+   * **A Core Leader now** (ADR-0159 §1, §4): the membership is tagged *Core Leader* **and** stands on a leader
+   * rung — the effective flag, as `ContextResolver` reads it on every request, never the bare tag. A tagged member
+   * moved off a leader rung keeps the tag and loses this until they lead again. Optional so a context built for a
+   * job or a test that is about something else need not say it; absent is *not one*.
+   */
+  readonly isCoreLeader?: boolean;
+}
+
+/**
+ * **The effective Core Leader** (ADR-0159 §1): the tag, on a leader class — a rung marked *Senior Leader* or
+ * *Associate Leader* (`LEADER_CLASSES`, ADR-0156). One rule for every reader of it — the context, the directory,
+ * the forum and KPM analytics — so none of them can disagree about who one is.
+ */
+export function isEffectiveCoreLeader(member: { isCoreLeader?: boolean | null; role?: string | null } | null | undefined): boolean {
+  return member?.isCoreLeader === true && isLeaderClass(member.role);
 }
 
 export class RequestContext {
@@ -81,8 +99,43 @@ export class RequestContext {
      * restrained; `can()` reads it and nothing else has to.
      */
     readonly impersonationReadOnly: boolean = false,
+    /**
+     * **What a setup session may write** (ADR-0162 §2): permission names, read from the session row on every
+     * request. `can()` and `PermissionsGuard` let a read-only session's write through when its permission is
+     * here, and refuse every other write as before.
+     *
+     * Empty outside a session and in a support session. A setup session keeps it once a second Super Admin
+     * elevates it — enforcement no longer needs it then, and it still says which kind of session this is.
+     */
+    readonly impersonationWriteScope: readonly string[] = [],
+    /**
+     * **Who this request's sentences are written for** (ADR-0179 §7; P18.98-T5 AC-1): the `Accept-Language` the app
+     * sent, else the person's saved `users.locale`, else a reader who has chosen nothing (`readerOf`). Resolved once,
+     * by `AuthGuard`, from the user `ContextResolver` already reads — no extra read. What a service writes a sentence
+     * for — a notice in the inbox, a figure's words — and the language of a sentence it stores (AC-6).
+     *
+     * A context built for a job, or by hand in a test, reads as a reader who has chosen nothing.
+     */
+    readonly reader: Reader = readerOf(),
   ) {
     Object.freeze(this);
+  }
+
+  /** **The same context, written for another reader** — what a test's stand-in for `AuthGuard` hands a request. */
+  withReader(reader: Reader): RequestContext {
+    return new RequestContext(
+      this.userId, this.platformRole, this.membership, this.impersonatorUserId, this.actingInKpmId,
+      this.mustChangePassword, this.impersonationReadOnly, this.impersonationWriteScope, reader,
+    );
+  }
+
+  /**
+   * Which kind of support session this is (ADR-0162 §1): `setup` with a write scope, `support` without one,
+   * `null` outside a session. Read off the scope rather than carried beside it, so the two cannot disagree.
+   */
+  get impersonationPurpose(): 'support' | 'setup' | null {
+    if (!this.isImpersonating) return null;
+    return this.impersonationWriteScope.length > 0 ? 'setup' : 'support';
   }
 
   get isSuperAdmin(): boolean {
@@ -115,6 +168,15 @@ export class RequestContext {
    */
   get isLeader(): boolean {
     return (this.membership?.directCount ?? 0) > 0;
+  }
+
+  /**
+   * **A Core Leader at this request** (ADR-0159 §4): tagged, on a leader class. The class is checked again here
+   * rather than trusted from whoever built the membership, so a context that carries the bare tag for an Agent
+   * still answers *no*. What KPM analytics' services read (§2) and `/auth/me` serves.
+   */
+  get isCoreLeader(): boolean {
+    return isEffectiveCoreLeader({ isCoreLeader: this.membership?.isCoreLeader, role: this.membership?.hierarchyRole });
   }
 
   /**
@@ -184,7 +246,7 @@ export class RequestContext {
    * `auditActors` still answers *who really did this*.
    */
   static joiningTenant(ctx: RequestContext, kpmId: string): RequestContext {
-    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId);
+    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId, false, false, [], ctx.reader);
   }
 
   /**

@@ -1,4 +1,7 @@
+import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_ACTIVATION_ITEMS } from '@/domain/constants';
 import type { ActivationService } from './activation.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -14,7 +17,7 @@ function ctx(kpmId: string, opts: { admin?: boolean } = {}) {
   return new RequestContext('u1', 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
     isKpmOwner: !opts.admin, isKpmAdmin: Boolean(opts.admin), directCount: 0,
-  });
+  }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
 }
 
 /**
@@ -54,8 +57,8 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(view.draft).toBeNull();
       expect(view.published).toMatchObject({ version: 1, status: 'published' });
       expect(view.published!.aspects.map((a) => a.label)).toEqual([
-        '1. Introduction', '2. Initial Setup', '3. Training & Certification',
-        '4. First Sale', '5. Ongoing Habits',
+        '1. Pengenalan', '2. Persiapan awal', '3. Pelatihan & sertifikasi',
+        '4. Penjualan pertama', '5. Kebiasaan rutin',
       ]);
       expect(view.published!.aspects.flatMap((a) => a.items)).toHaveLength(16);
     });
@@ -73,8 +76,71 @@ describe('the office activation checklist (P5-T3)', () => {
         route: '/goals',
         completesWhen: 'the hire has saved any goal since joining',
         live: true,
+        // P18.96-T4: no form — only a data-backed item opens one when ticked by hand.
+        form: null,
       });
       expect(items.find((i) => i.code === 'CRM_SETUP')!.link).toBeNull();
+    });
+
+    it('P18.96-T4 AC-2 keeps the Owner’s settings as stored: the three data-backed items store no link there, and their published version is not edited', async () => {
+      const view = await activation.read(ctx(KPM_A));
+      const items = view.published!.aspects.flatMap((a) => a.items);
+      for (const code of ['FIRST_CASE_CLOSED', 'INDEPENDENT_AGENT_MILESTONE', 'WEEKLY_CHECK_IN']) {
+        expect([code, items.find((i) => i.code === code)!.autoLink]).toEqual([code, null]);
+      }
+      const template = await mongoose.connection.db!.collection('activationTemplates').findOne({ kpmId: KPM_A, version: 1 });
+      const storedItems = (template!.aspects as { items: { code: string; autoLink: string | null }[] }[]).flatMap((a) => a.items);
+      expect(storedItems.find((i) => i.code === 'FIRST_CASE_CLOSED')!.autoLink).toBeNull();
+    });
+
+    it('P18.96-T7 G2 serves the Owner’s settings what completes the three: each item’s link is its bound data kind, its autoLink still null', async () => {
+      const view = await activation.read(ctx(KPM_A));
+      const byCode = new Map(view.published!.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
+      expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
+        autoLink: null, link: { kind: 'sales:first', label: 'Sales data', route: null, live: true, form: 'closing' },
+      });
+      expect(byCode.get('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        autoLink: null, link: { kind: 'sales:closings:3', label: 'Sales data', live: true, form: 'closing' },
+      });
+      expect(byCode.get('WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: null, link: { kind: 'coaching:weekly:4', label: 'Coaching sessions', live: true, form: 'one_on_one' },
+      });
+      // Every other item reads as it did: its stored link, resolved, or none.
+      expect(byCode.get('GOAL_SETTING')).toMatchObject({ autoLink: 'feature:goals', link: { kind: 'feature:goals', form: null } });
+      expect(byCode.get('CRM_SETUP')).toMatchObject({ autoLink: null, link: null });
+      // The draft the screen saves back is what is stored: saving it as read stores no data kind.
+      const draft = {
+        aspects: view.published!.aspects.map((a) => ({
+          code: a.code, label: a.label, items: a.items.map((i) => ({ code: i.code, label: i.label, autoLink: i.autoLink })),
+        })),
+      };
+      const saved = await activation.saveDraft(ctx(KPM_A), draft);
+      expect(saved.draft!.aspects.flatMap((a) => a.items).find((i) => i.code === 'WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: null, link: { kind: 'coaching:weekly:4' },
+      });
+    });
+
+    it('P18.96-T4 AC-2 binds them by code for a field reader: the version a hire pins reads each with its data kind', async () => {
+      const version = (await activation.findVersion(ctx(KPM_A), 1))!;
+      const byCode = new Map(version.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
+      expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
+        autoLink: 'sales:first', link: { kind: 'sales:first', label: 'Sales data', route: null, live: true, form: 'closing' },
+      });
+      expect(byCode.get('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        autoLink: 'sales:closings:3', link: { kind: 'sales:closings:3', label: 'Sales data', form: 'closing' },
+      });
+      expect(byCode.get('WEEKLY_CHECK_IN')).toMatchObject({
+        autoLink: 'coaching:weekly:4', link: { kind: 'coaching:weekly:4', label: 'Coaching sessions', form: 'one_on_one' },
+      });
+      // Everything else reads as it is stored.
+      expect(byCode.get('GOAL_SETTING')!.autoLink).toBe('feature:goals');
+      expect(byCode.get('CRM_SETUP')!.link).toBeNull();
+    });
+
+    it('P18.96-T4 AC-2 refuses a data kind in a stored link: it belongs to the item its code names', async () => {
+      await expect(activation.saveDraft(ctx(KPM_A), {
+        aspects: [{ code: 'START', label: 'Start', items: [{ code: 'MY_SALE', label: 'My sale', autoLink: 'sales:first' }] }],
+      })).rejects.toThrow(/sales:first is not chosen for an item/);
     });
 
     it('reads the office’s own activation window beside it', async () => {
@@ -170,7 +236,7 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(after.draft!.aspects[0].label).toBe('1. Welcome');
       // Hires starting now still get what they were promised.
       expect(after.published!.version).toBe(1);
-      expect(after.published!.aspects[0].label).toBe('1. Introduction');
+      expect(after.published!.aspects[0].label).toBe('1. Pengenalan');
     });
 
     it('publishes the draft as the next version, and leaves no draft behind', async () => {
@@ -193,7 +259,7 @@ describe('the office activation checklist (P5-T3)', () => {
 
       const one = await activation.findVersion(ctx(KPM_A), 1);
       const two = await activation.findVersion(ctx(KPM_A), 2);
-      expect(one!.aspects[0].items[0].label).toBe('Learn insurance basics');
+      expect(one!.aspects[0].items[0].label).toBe('Pelajari dasar-dasar asuransi');
       expect(two!.aspects[0].items[0].label).toBe('Learn the basics');
       expect(await activation.findVersion(ctx(KPM_A), 3)).toBeNull();
     });
@@ -258,10 +324,11 @@ describe('the office activation checklist (P5-T3)', () => {
       // The link reads as the module's own title, not its code, and goes to the module's own page (P18.5-T3 AC-1, AC-5).
       expect(item.link).toEqual({
         kind: 'training:PROSPECT_LIST',
-        label: 'Building Your Prospect List',
+        label: 'Menyusun daftar prospek Anda',
         route: '/training/SALES/PROSPECT_LIST',
         completesWhen: 'the hire has completed that training module',
         live: true,
+        form: null,
       });
     });
 
@@ -302,6 +369,78 @@ describe('the office activation checklist (P5-T3)', () => {
       await wired.training.archiveModule(ctx(KPM_A), module.id);
 
       await expect(activation.publish(ctx(KPM_A))).rejects.toThrow(/archived/);
+    });
+  });
+
+  describe('P18.98-T5 in the reader’s language', () => {
+    const inIndonesian = (kpmId: string) => ctx(kpmId).withReader(readerIn('id'));
+    const refusalOf = async (call: Promise<unknown>): Promise<DomainException> =>
+      (await call.catch((err: unknown) => err)) as DomainException;
+
+    it('P18.98-T5 AC-4 says what completes each link in the reader’s words: page names and module titles as they are', async () => {
+      const items = (await activation.read(inIndonesian(KPM_A))).published!.aspects.flatMap((a) => a.items);
+      const link = (code: string) => items.find((i) => i.code === code)!.link;
+      expect(link('GOAL_SETTING')).toEqual({
+        kind: 'feature:goals', label: 'Goal Settings', route: '/goals',
+        completesWhen: 'rekrut telah menyimpan goal apa pun sejak bergabung', live: true, form: null,
+      });
+      expect(link('ADD_PROSPECTS')).toMatchObject({ label: 'Leads Management', completesWhen: 'rekrut telah menambahkan setidaknya satu prospek' });
+      expect(link('ACTIVITY_TRACKER_WEEKLY')).toMatchObject({
+        label: 'Activity Management', completesWhen: 'rekrut telah mencatat aktivitas selama empat minggu berturut-turut',
+      });
+      // The three data-backed items: their source line's label and what completes them.
+      expect(link('FIRST_CASE_CLOSED')).toMatchObject({
+        kind: 'sales:first', label: 'Data penjualan', form: 'closing',
+        completesWhen: 'rekrut telah melakukan penjualan pertama sejak bergabung: sebuah sales lead yang dibayar dan '
+          + 'diterbitkan, atau sebuah polis di file produksi',
+      });
+      expect(link('INDEPENDENT_AGENT_MILESTONE')).toMatchObject({
+        label: 'Data penjualan', completesWhen: 'rekrut telah memiliki 3 sales leads yang dibayar dan diterbitkan sejak bergabung',
+      });
+      expect(link('WEEKLY_CHECK_IN')).toMatchObject({
+        label: 'Sesi coaching', form: 'one_on_one',
+        completesWhen: '4 kali 1:1 dengan rekrut telah dicatat sebagai sesi coaching sejak bergabung',
+      });
+      // An English reader reads the registry's own words, as before.
+      const english = (await activation.read(ctx(KPM_A))).published!.aspects.flatMap((a) => a.items);
+      expect(english.find((i) => i.code === 'WEEKLY_CHECK_IN')!.link).toMatchObject({
+        label: 'Coaching sessions', completesWhen: '4 1:1s with the hire are recorded in coaching sessions since joining',
+      });
+    });
+
+    it('P18.98-T5 AC-4 a training link reads its module’s title in both, and what completes it in the reader’s words', async () => {
+      const next = asDraft(await activation.read(ctx(KPM_A)));
+      next.aspects[2].items[0].autoLink = 'training:PROSPECT_LIST';
+      const saved = await activation.saveDraft(inIndonesian(KPM_A), next);
+      expect(saved.draft!.aspects[2].items[0].link).toMatchObject({
+        label: 'Menyusun daftar prospek Anda', completesWhen: 'rekrut telah menyelesaikan modul training tersebut',
+      });
+    });
+
+    it('P18.98-T5 AC-3 refuses to publish in Indonesian: 400 VALIDATION_FAILED, the same answer, the reader’s words', async () => {
+      const nothing = await refusalOf(activation.publish(inIndonesian(KPM_A)));
+      expect([nothing.code, nothing.getStatus(), nothing.details]).toEqual(['VALIDATION_FAILED', 400, undefined]);
+      expect(nothing.message).toBe('There is nothing to publish. Change something first — a published version is immutable, '
+        + 'because every hire records which one they started on.');
+      expect(nothing.messageFor(readerIn('id'))).toBe('Tidak ada yang dapat diterbitkan. Ubah sesuatu dulu — versi yang sudah '
+        + 'diterbitkan tidak dapat diubah, karena setiap rekrut mencatat versi yang dia mulai.');
+
+      await activation.saveDraft(ctx(KPM_A), asDraft(await activation.read(ctx(KPM_A))));
+      expect((await refusalOf(activation.publish(ctx(KPM_A)))).messageFor(readerIn('id'))).toBe(
+        'Draf ini sama dengan versi 1, jadi tidak ada yang dapat diterbitkan. Ubah sesuatu dulu — setiap rekrut mencatat '
+          + 'versi yang dia mulai.',
+      );
+    });
+
+    it('P18.98-T5 AC-3 names a module nobody is offered in Indonesian, each module’s own sentence after the first', async () => {
+      const next = asDraft(await activation.read(ctx(KPM_A)));
+      next.aspects[2].items[0].autoLink = 'training:NO_SUCH_MODULE';
+      next.aspects[2].items[1].autoLink = 'training:OTHER_MODULE';
+      const refused = await refusalOf(activation.saveDraft(ctx(KPM_A), next));
+      expect(refused.message).toBe('A checklist item is linked to a training module it cannot wait for. '
+        + 'NO_SUCH_MODULE is not a training module in this office. OTHER_MODULE is not a training module in this office.');
+      expect(refused.messageFor(readerIn('id'))).toBe('Sebuah item checklist ditautkan ke modul training yang tidak dapat '
+        + 'ditunggunya. NO_SUCH_MODULE bukan modul training di KPM ini. OTHER_MODULE bukan modul training di KPM ini.');
     });
   });
 

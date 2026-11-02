@@ -18,8 +18,8 @@ export type BatchStatus = (typeof BATCH_STATUSES)[number];
 /**
  * One confirmed import of a filled template into one month (P9-T4, AC-1).
  *
- * **What the batch says about the file**: its name, its SHA-256, the template version, the encoding
- * and delimiter it was read with, and the month revision its preview was taken against. The file
+ * **What the batch says about the file**: its name, its SHA-256, the template version, whether it was a
+ * CSV or a workbook (ADR-0184), the encoding and delimiter it was read with, and the month revision its preview was taken against. The file
  * itself is not kept: its figures are in `dataUploadRows`, and a copy of a spreadsheet of names is
  * personal data held for no reader.
  *
@@ -47,6 +47,14 @@ export class DataUploadBatch {
   @Prop({ type: Number, required: true })
   templateVersion!: number;
 
+  /**
+   * A CSV or an Excel workbook (ADR-0184). A batch written before workbooks were read has none stored, and reads
+   * `csv` — which it was.
+   */
+  @Prop({ type: String, enum: ['csv', 'xlsx'], default: 'csv' })
+  format!: 'csv' | 'xlsx';
+
+  /** How a CSV's bytes were read; `utf-8` for a workbook, whose text is UTF-8 by its own format. */
   @Prop({ type: String, required: true })
   encoding!: string;
 

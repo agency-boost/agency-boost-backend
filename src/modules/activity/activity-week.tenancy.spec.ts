@@ -83,17 +83,14 @@ describe('P11-T4 AC-4 — the week’s targets are the month’s, pro-rated', ()
       .toEqual([expected!.leads, expected!.appointments, expected!.policies]);
   });
 
-  it('P11-T4 AC-4 counts against the goal’s own codes, never a position (invariant §4)', async () => {
-    await db().collection('goals').updateOne(
-      { membershipId: office.id.DIMAS }, { $set: { 'cascadeMapping.leadsCode': 'LEADS_GEN_ACTIVITY' } },
-    );
+  it('P11-T4 AC-4 counts against the office’s bound codes, never a position (invariant §4, ADR-0163)', async () => {
+    const bindings = () => db().collection('activityBindings');
+    await bindings().updateOne({ kpmId: KPM_A, deletedAt: null }, { $set: { leads: ['LEADS_GEN_ACTIVITY'] } });
     try {
       const [leads] = await weekTargets('DIMAS');
-      expect(leads).toMatchObject({ key: 'leads', code: 'LEADS_GEN_ACTIVITY', logged: 0 });
+      expect(leads).toMatchObject({ key: 'leads', code: 'LEADS_GEN_ACTIVITY', codes: ['LEADS_GEN_ACTIVITY'], logged: 0 });
     } finally {
-      await db().collection('goals').updateOne(
-        { membershipId: office.id.DIMAS }, { $set: { 'cascadeMapping.leadsCode': 'LEADS_CONTACTED' } },
-      );
+      await bindings().updateOne({ kpmId: KPM_A, deletedAt: null }, { $set: { leads: ['LEADS_CONTACTED'] } });
     }
   });
 

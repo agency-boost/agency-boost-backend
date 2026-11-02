@@ -7,9 +7,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import {
-  ADMIN, declaredPermissions, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
-} from '../../../test/http-permissions';
+import { ADMIN, declaredPermissions, NO_CLASS, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import {
   buildCoachingOffice, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
@@ -151,7 +149,9 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
 
     it('P11-T6 a membership on no rung the matrix names is refused by the guard', async () => {
       const agus = office.as('AGUS');
-      session.current = new RequestContext('u-x', 'none', { ...agus.membership!, orgLevelCode: 'NOT_A_RUNG' });
+      session.current = new RequestContext('u-x', 'none', {
+        ...agus.membership!, orgLevelCode: 'NOT_A_RUNG', hierarchyRole: NO_CLASS,
+      });
       const res = await get().expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'coaching_session:read' } });
     });
@@ -190,7 +190,7 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
     as('AGUS');
     const res = await get().expect(200);
     const rina = everybody(res.body).find((r) => r.membershipId === office.id.RINA);
-    expect(Object.keys(rina!).sort()).toEqual(['depth', 'lastOneOnOne', 'membershipId', 'name', 'rung', 'status']);
+    expect(Object.keys(rina!).sort()).toEqual(['depth', 'lastOneOnOne', 'membershipId', 'name', 'photoUrl', 'rung', 'status']);
     // Rina logged 53 recruiting follow-ups a day for a fortnight: not one of those numbers is in the answer.
     expect(JSON.stringify(res.body)).not.toMatch(/"(count|logged|total|totalCount|entries|compliant\w*)"/);
   });

@@ -5,6 +5,8 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+// Above AppModule: its import validates the configuration (test/boot-env.ts says why).
+import '../../../test/boot-env';
 import { AppModule } from '@/app.module';
 import {
   AAB, AB, ADMIN, AGENT, declaredPermissions, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth,
@@ -112,6 +114,24 @@ describe('GET /admin/billing/prices (P13.2-T2)', () => {
     expect(res.body.error.details).toEqual({ permission: 'billing:read_prices' });
     // Not one figure of the table, the 101+ tier's least of all.
     expect(JSON.stringify(res.body)).not.toMatch(/TIER_|Minor/);
+  });
+
+  /*
+   * P18.98-T5: billing writes no sentence of its own — the table is codes and figures — so its one refusal is the guard's,
+   * and it reads in the reader's language like every other.
+   */
+  it('P18.98-T5 AC-7 refuses a tenant role in Indonesian: the same code and details, and still no rate', async () => {
+    session.current = OWNER;
+    const res = await request(app.getHttpServer()).get(url).set('Accept-Language', 'id').expect(403);
+    expect(res.body.error).toMatchObject({
+      code: 'PERM_DENIED', message: 'Anda tidak memiliki izin untuk melakukan tindakan ini.',
+      details: { permission: 'billing:read_prices' },
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(/TIER_|Minor/);
+    // The table itself is the same in both languages: codes and figures, no word to translate.
+    session.current = SUPER_ADMIN;
+    const english = await request(app.getHttpServer()).get(url).expect(200);
+    expect((await request(app.getHttpServer()).get(url).set('Accept-Language', 'id').expect(200)).body).toEqual(english.body);
   });
 
   it('AC-9 writes nothing: the route answers GET alone', async () => {

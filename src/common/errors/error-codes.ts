@@ -1,9 +1,13 @@
 /**
- * Stable, machine-readable error codes. Clients switch on these; `message` is English,
- * may change, and is never parsed.
+ * Stable, machine-readable error codes. Clients switch on these; `message` is written in the
+ * reader's language — the request's `Accept-Language`, else the person's saved language
+ * (P18.98-T5, ADR-0179 §7) — may change, and is never parsed. `code` and `details` are the
+ * same in both languages.
  *
- * Every code here has a row in docs/02-specs/api/error-catalog.md. A new failure mode
- * without a catalog entry fails review.
+ * Every code here has a row in docs/02-specs/api/error-catalog.md, and its sentence, in
+ * English and Indonesian, in its module's catalogue (`<module>.messages.ts`, filed under
+ * the code: `refusals`, `common/i18n/sentence.ts`). A new failure mode without either fails
+ * review, and one with no sentence in both languages fails `error-codes.spec.ts`.
  */
 export const ErrorCode = {
   // Authentication
@@ -14,6 +18,29 @@ export const ErrorCode = {
   AUTH_RESET_TOKEN_INVALID: 'AUTH_RESET_TOKEN_INVALID',
   AUTH_ACCOUNT_DEACTIVATED: 'AUTH_ACCOUNT_DEACTIVATED',
   AUTH_RATE_LIMITED: 'AUTH_RATE_LIMITED',
+  /**
+   * A refresh or a sign-out carrying the refresh cookie, sent from a page whose `Origin` is not one
+   * `CORS_ORIGINS` lists (P18.7-T1, ADR-0152). `403`. Every host shares the `agencyboost.id` site, so
+   * the browser sends production's `SameSite=Lax` cookie from a staging page as well; CORS hides the
+   * answer from that page but cannot stop the token rotating or the session ending. A request with
+   * no `Origin` (a server, curl) is not refused.
+   */
+  AUTH_ORIGIN_REFUSED: 'AUTH_ORIGIN_REFUSED',
+  /**
+   * `POST /auth/refresh` was **given a refresh token, and it no longer works** (ADR-0168 §1): unknown or malformed,
+   * expired, revoked (signed out, signed out everywhere, a password change) or already rotated away. `401`, one
+   * code and one message for all of them, so the answer says the session ended and nothing of why. The browser
+   * then knows this reader had a session — the sign-in page says *Your session ended. Sign in again.* A refresh
+   * with **no token at all** is still `AUTH_TOKEN_INVALID`: there was no session to end.
+   */
+  AUTH_SESSION_ENDED: 'AUTH_SESSION_ENDED',
+  /**
+   * **The address asked for belongs to another account** (UI V1, UI-111; ADR-0181): `POST /auth/me/email` when the new
+   * address is taken, and `POST /auth/verify-email-change` when it was taken between the request and the link. `409`,
+   * `details: { field: 'newEmail' }`. Registration never says this — an address taken there is answered as a success
+   * (the enumeration oracle) — but this route is behind a session and the password, and rate limited.
+   */
+  AUTH_EMAIL_TAKEN: 'AUTH_EMAIL_TAKEN',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -113,6 +140,20 @@ export const ErrorCode = {
    * a member's page and not the Super Admin's.
    */
   IMPERSONATION_OFFICE_UNAVAILABLE: 'IMPERSONATION_OFFICE_UNAVAILABLE',
+  /**
+   * A **setup** session named somebody who is neither an office's Owner nor one of its Admins (ADR-0162 §1):
+   * a setup session acts as the person who configures an office, and anybody else has no settings to change.
+   * `409`, with `details: { purpose: 'setup' }`; nothing is written and nobody is told. A support session as
+   * the same person starts as before.
+   */
+  IMPERSONATION_SETUP_TARGET: 'IMPERSONATION_SETUP_TARGET',
+  /**
+   * A second start by the same Super Admin as the same person **within one second** (ADR-0168 §4): `iat` is in
+   * seconds, so the two tokens are identical and the second session row's `tokenHash` collides with the first's.
+   * `409`, and nothing is written for the second start — no row, no `impersonation.started`, no notice. It was a
+   * `500`.
+   */
+  IMPERSONATION_JUST_STARTED: 'IMPERSONATION_JUST_STARTED',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
   /**
@@ -122,6 +163,11 @@ export const ErrorCode = {
    * name the company they collided with.
    */
   COMPANY_SLUG_TAKEN: 'COMPANY_SLUG_TAKEN',
+  /**
+   * An office was to be made in the Template library (ADR-0164 §3): the company that holds the platform's
+   * templates is not an insurer, and holds no office. `409`, `details: { companyId }`; nothing is written.
+   */
+  COMPANY_IS_TEMPLATE_LIBRARY: 'COMPANY_IS_TEMPLATE_LIBRARY',
   AGENT_CODE_TAKEN: 'AGENT_CODE_TAKEN',
   AUTH_PASSWORD_CHANGE_REQUIRED: 'AUTH_PASSWORD_CHANGE_REQUIRED',
   /**
@@ -136,6 +182,11 @@ export const ErrorCode = {
    * so it is a loud refusal rather than a silent null on the membership.
    */
   ORG_LEVEL_NOT_ON_LADDER: 'ORG_LEVEL_NOT_ON_LADDER',
+  /**
+   * A rung's leader tier was to change while live memberships stand on it (ADR-0156 §5). Each member's class
+   * was derived from the tier, so nobody is re-classed silently: `details.members` is how many to move first.
+   */
+  ORG_LEVEL_TIER_IN_USE: 'ORG_LEVEL_TIER_IN_USE',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */
@@ -151,6 +202,19 @@ export const ErrorCode = {
    * passes through; `details` carry `maxLeaders` and `leadersUsed`. AB to AAB is never refused.
    */
   LEADER_LIMIT_REACHED: 'LEADER_LIMIT_REACHED',
+  /**
+   * A leader-limit request for a member who already has one waiting (ADR-0157 §2): one open request per subject.
+   * `details.requestId` names the open one.
+   */
+  LEADER_LIMIT_REQUEST_OPEN: 'LEADER_LIMIT_REQUEST_OPEN',
+  /**
+   * An approved leader-limit request whose act no longer applies — the member left, moved rung, or was let in
+   * some other way since it was asked (ADR-0157 §3). Nothing is written for the member; the request is closed as
+   * declined, with that reason.
+   */
+  LEADER_LIMIT_REQUEST_STALE: 'LEADER_LIMIT_REQUEST_STALE',
+  /** A leader-limit request decided or cancelled already; the second answer says which. */
+  LEADER_LIMIT_REQUEST_DECIDED: 'LEADER_LIMIT_REQUEST_DECIDED',
   ORG_LEADER_NOT_IN_KPM: 'ORG_LEADER_NOT_IN_KPM',
   ORG_AGENT_ALREADY_TAGGED: 'ORG_AGENT_ALREADY_TAGGED',
   /**
@@ -164,6 +228,23 @@ export const ErrorCode = {
   // three they hit.
   ORG_INVITE_EXPIRED: 'ORG_INVITE_EXPIRED',
   ORG_INVITE_EXHAUSTED: 'ORG_INVITE_EXHAUSTED',
+  /**
+   * *+ Add agent* for an agent code that already has an invite waiting in the company — this office's or another's
+   * (ADR-0170 §2, P18.96-T3 AC-2). `409`. An agent code belongs to one person, so two invites for it could only let
+   * two people try to be them. Resend the one waiting, or cancel it first.
+   */
+  ORG_INVITE_PENDING: 'ORG_INVITE_PENDING',
+  /**
+   * A transfer request for a member who already has one waiting (ADR-0170 §4, P18.96-T3 AC-3). `409`, one per member:
+   * two would let the Owner approve both and move them twice. `details.transferId` names the open one.
+   */
+  ORG_TRANSFER_PENDING: 'ORG_TRANSFER_PENDING',
+  /**
+   * Approving a transfer request whose member **no longer reports to the leader it was asked from** (the P18.96 exit
+   * review, L4): somebody moved them since. `409`, and the request is closed, `cancelled` — approving it would move
+   * them from a unit nobody asked about. `details.transferId`. Whoever wants the move asks again.
+   */
+  ORG_TRANSFER_STALE: 'ORG_TRANSFER_STALE',
   ORG_REQUEST_ALREADY_DECIDED: 'ORG_REQUEST_ALREADY_DECIDED',
   ORG_ROLE_CHANGE_NOT_PERMITTED: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
   ORG_HAS_DIRECT_REPORTS: 'ORG_HAS_DIRECT_REPORTS',
@@ -175,6 +256,20 @@ export const ErrorCode = {
   ORG_GROUP_NAME_TAKEN: 'ORG_GROUP_NAME_TAKEN',
   ORG_GROUP_OWNER_NOT_IN_KPM: 'ORG_GROUP_OWNER_NOT_IN_KPM',
   ORG_GROUP_NOT_FOUND: 'ORG_GROUP_NOT_FOUND',
+  /**
+   * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.8-T5 AC-2). `400`. The tag is
+   * a leader's: a Core Leader reads the whole office's analytics, and a tagged Agent would read every member's
+   * production without leading anyone. Refused only when the tag is being **set**; a member already tagged and
+   * since moved off a leader rung keeps the flag, and re-saving their other tags is not refused.
+   */
+  CORE_LEADER_NOT_A_LEADER: 'CORE_LEADER_NOT_A_LEADER',
+  /**
+   * **A leader's *Isi nomor WhatsApp* for somebody who already has a number** (the Phase 18.99 exit review, M1).
+   * `409`, from `PUT /members/:membershipId/phone`: a leader fills a missing number, and never replaces one — a number on
+   * file is the person's own to change, on *Profil saya* (`PATCH /auth/me`). The write is conditional on the stored
+   * number being empty, so two leaders saving at once cannot overwrite each other either. Nothing is written.
+   */
+  MEMBER_PHONE_ON_FILE: 'MEMBER_PHONE_ON_FILE',
   ORG_ALREADY_ADMIN: 'ORG_ALREADY_ADMIN',
   ORG_NOT_AN_ADMIN: 'ORG_NOT_AN_ADMIN',
   ORG_ADMIN_TARGET_NOT_ACTIVE: 'ORG_ADMIN_TARGET_NOT_ACTIVE',
@@ -280,15 +375,22 @@ export const ErrorCode = {
   ACTIVATION_CLOSED: 'ACTIVATION_CLOSED',
   /** A graduation below 100%: every item, the linked ones included, is done first (OD-28). `409`. */
   ACTIVATION_INCOMPLETE: 'ACTIVATION_INCOMPLETE',
+  /**
+   * A bare hand tick of a **data-backed item** (P18.96-T4 AC-3, ADR-0171 §3): *Close first case independently*, *Reach
+   * Independent Agent milestone* and *Weekly 1-on-1 check-in* are ticked by hand only with their record — the closing
+   * it names, or the 1:1 — saved together. `422`, `details.code` and `details.form` (`closing` | `one_on_one`).
+   */
+  ACTIVATION_RECORD_REQUIRED: 'ACTIVATION_RECORD_REQUIRED',
 
   /*
    * Templates and the cascade types (P13.2-T6; ADR-0115; `functional/tenant-config.md`).
    */
   /**
-   * Archiving `LEADS_CONTACTED`, `SELL_PRESENTATION` or `SELL_SUBMISSION`, or a category while it holds
-   * one (ADR-0115 §2): the goal cascade and the summary count them by code. `409`, `details.codes`.
+   * Archiving an activity type the office's **activity binding** names, or a category while it holds one active
+   * (ADR-0163 §5): the goal cascade, the summary and the pace count it. `409`, `details.codes` and `details.roles`.
+   * It replaced `ACTIVITY_TYPE_RESERVED` (ADR-0115 §2), which refused the three platform codes in themselves.
    */
-  ACTIVITY_TYPE_RESERVED: 'ACTIVITY_TYPE_RESERVED',
+  ACTIVITY_TYPE_BOUND: 'ACTIVITY_TYPE_BOUND',
   /** A name an active template of the same company already has. `409`, `details.name`. */
   TEMPLATE_NAME_TAKEN: 'TEMPLATE_NAME_TAKEN',
   /** Archiving the company's default template: make another the default first. `409`. */
@@ -357,6 +459,13 @@ export const ErrorCode = {
   ASSET_TYPE_NOT_ALLOWED: 'ASSET_TYPE_NOT_ALLOWED',
   ASSET_NOT_CONFIRMED: 'ASSET_NOT_CONFIRMED',
   ASSET_NOT_UPLOADED: 'ASSET_NOT_UPLOADED',
+  /**
+   * This instance has no storage bucket (P18.7-T2, D12): local development or a test without `GCS_BUCKET`. Every
+   * upload signature, file link, copy and confirm is refused; nothing else is affected. `503` — see
+   * `modules/assets/unconfigured-storage.ts` for why not `501`. Staging and production cannot raise it: they refuse
+   * to boot without a bucket (`env.validation.ts`).
+   */
+  STORAGE_NOT_CONFIGURED: 'STORAGE_NOT_CONFIGURED',
 
   // Generic
   NOT_FOUND: 'NOT_FOUND',

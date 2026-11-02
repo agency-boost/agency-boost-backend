@@ -166,13 +166,13 @@ describe('the Sales Attack Plan’s scorer (D-scoring)', () => {
   });
 
   describe('the walk’s briefs (P14-T8 AC-14), over the seed constant', () => {
-    it('Retirement income, 25–34, Rp500K–Rp2M: PRUMapan, Good fit, PRUAnugerah the one alternative', () => {
+    it('Retirement income, 25–34, Rp 500 rb–Rp 2 jt: PRUMapan, Good fit, PRUAnugerah the one alternative', () => {
       const plan = planFor(SHELF_0417, { need: 'retirement', age: 2, budget: 2 })!;
       expect([plan.shown!.code, plan.fit!.verdict, plan.alternatives.map((p) => p.code), plan.moreCount])
         .toEqual(['PRUMAPAN', 'good_fit', ['PRUANUGERAH'], 0]);
     });
 
-    it('Retirement income, 65+, > Rp20M: PRUAnugerah, Check fit, outside the age band', () => {
+    it('Retirement income, 65+, > Rp 20 jt: PRUAnugerah, Check fit, outside the age band', () => {
       const plan = planFor(SHELF_0417, { need: 'retirement', age: 5, budget: 6 })!;
       expect([plan.shown!.code, plan.fit]).toEqual(['PRUANUGERAH', { verdict: 'check_fit', outside: ['age'] }]);
     });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { OrgLevelRow, OrgLevelService } from '@/modules/tenants/org-level.service';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -7,6 +7,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { ConfigSnapshotRepository } from './activity.repository';
 import { ConfigSnapshotDocument } from './config-snapshot.schema';
 import { ActivityConfigService, type ActivityCategoryView } from './activity.service';
+import { ActivityBindingService, type ActivityBindingView } from './activity-binding.service';
 import { LeadStatusService, type LeadPipelineView } from './lead-status.service';
 import { RatioService, type RatioDefinitionView } from './ratio.service';
 import { TrainingService, type TrainingCategoryView } from '@/modules/training/training.service';
@@ -90,6 +91,16 @@ export interface TenantConfigView {
    */
   capability: CapabilityCatalogView | null;
   /**
+   * **The activity binding in force when this was published** (ADR-0163 §1): which activity types each cascade
+   * role counts, with its version. A record, carried so a published copy says what it was counted against and
+   * *Save as template* has it — **not what the counts read**: the Super Admin keeps the binding and a rebind
+   * counts from the moment it is saved, so every count reads the live one (`ActivityBindingService
+   * .resolveCascadeBinding`). For the same reason it is not in the publish fingerprint: a rebind is not an
+   * Owner's change waiting on Publish. `null` in a snapshot published before ADR-0163 that migration `0034` has
+   * not reached.
+   */
+  activityBinding: ActivityBindingView | null;
+  /**
    * The highest `version` across everything above.
    *
    * **Not a change detector, and it was used as one.** It does not move when a row is
@@ -128,6 +139,8 @@ export class TenantConfigService {
     private readonly activation: ActivationService,
     private readonly events: EventService,
     private readonly capability: CapabilityService,
+    // ADR-0163: the binding rendered into each snapshot. Optional for a hand-built instance; absent, none is rendered.
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
 
   /**
@@ -169,6 +182,7 @@ export class TenantConfigService {
       activationChecklist: published.activationChecklist ?? null,
       eventTypes: published.eventTypes ?? [],
       capability: published.capability ?? null,
+      activityBinding: published.activityBinding ?? null,
     };
   }
 
@@ -322,7 +336,7 @@ export class TenantConfigService {
   }
 
   async read(ctx: RequestContext): Promise<TenantConfigView> {
-    const [activity, ratios, leadPipelines, training, activation, eventTypes, capability]
+    const [activity, ratios, leadPipelines, training, activation, eventTypes, capability, activityBinding]
       = await Promise.all([
         this.activity.list(ctx),
         this.ratios.list(ctx),
@@ -334,6 +348,7 @@ export class TenantConfigService {
         this.events.listTypes(ctx),
         // Whole: archived rows included, each with its status (P11-T9 AC-3).
         this.capability.own(ctx),
+        this.bindings ? this.bindings.readOwn(ctx) : Promise.resolve(null),
       ]);
 
     /*
@@ -386,6 +401,7 @@ export class TenantConfigService {
         })),
       // Unfiltered, unlike `eventTypes`: the catalog's archived rows travel with their status.
       capability,
+      activityBinding,
       version: versions.length ? Math.max(...versions) : 0,
     };
   }

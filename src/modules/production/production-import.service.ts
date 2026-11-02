@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { PRODUCTION_UPLOAD } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
+import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { type BatchStatus, DataUploadBatchDocument } from './data-upload-batch.schema';
 import { DataUploadBatchRepository } from './data-upload-batch.repository';
@@ -15,8 +16,11 @@ import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
 import type { MetricValue, MonthlyAgentDataDocument } from './monthly-agent-data.schema';
 import type { Cadence, PreviewCell, PreviewRow } from './production-preview';
 import { type MonthState, ProductionMonths } from './production-months.service';
-import type { UploadedCsv } from './production-upload.interceptor';
+import type { FileUpload } from './production-upload.interceptor';
 import { ProductionService, requireMonth, requireOffice } from './production.service';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS;
 
 /** An import as the history panel shows it. */
 export interface BatchView {
@@ -95,6 +99,8 @@ export class ProductionImportService {
     private readonly names: MemberNames,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    // P18.96-T4 AC-1: a policy in the file may be a member's first sale. A port activation answers; failing open.
+    @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
   ) {}
 
   /**
@@ -112,7 +118,7 @@ export class ProductionImportService {
     ctx: RequestContext,
     month: string,
     revision: string | undefined,
-    upload: UploadedCsv | undefined,
+    upload: FileUpload | undefined,
     replace?: string,
   ): Promise<ImportResult> {
     requireOffice(ctx);
@@ -121,7 +127,7 @@ export class ProductionImportService {
     if (revision === undefined || !/^\d+$/.test(revision) || !Number.isSafeInteger(basedOn)) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Send the `revision` the preview was taken against.',
+        SAY.VALIDATION_FAILED.revisionRequired,
         HttpStatus.BAD_REQUEST,
         { field: 'revision' },
       );
@@ -134,7 +140,7 @@ export class ProductionImportService {
     if (await this.batches.exists(ctx, { month, fileSha256: sha, basedOnRevision: basedOn, status: { $in: WENT_THROUGH } })) {
       throw new DomainException(
         ErrorCode.UPLOAD_BATCH_ALREADY_COMMITTED,
-        'This file was imported already, from this same preview. Its figures are in the table.',
+        SAY.UPLOAD_BATCH_ALREADY_COMMITTED.importedAlready,
         HttpStatus.CONFLICT,
         { month },
       );
@@ -151,7 +157,7 @@ export class ProductionImportService {
       if (!conflicts.has(key)) {
         throw new DomainException(
           ErrorCode.VALIDATION_FAILED,
-          'A correction named to be replaced is not one this file would change. Upload the file again.',
+          SAY.VALIDATION_FAILED.correctionNotInFile,
           HttpStatus.BAD_REQUEST,
           { field: 'replace', key },
         );
@@ -164,7 +170,7 @@ export class ProductionImportService {
     if (writable.length === 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'This file would change nothing: every figure in it is blank, already stored, or not taken.',
+        SAY.VALIDATION_FAILED.changesNothing,
         HttpStatus.BAD_REQUEST,
         { month },
       );
@@ -178,6 +184,7 @@ export class ProductionImportService {
       filename: upload!.originalname,
       fileSha256: sha,
       templateVersion: a.read.templateVersion,
+      format: a.read.format,
       encoding: a.read.encoding,
       delimiter: a.read.delimiter,
       basedOnRevision: basedOn,
@@ -232,6 +239,10 @@ export class ProductionImportService {
         keptCorrectionCount: conflicts.size - ticked.size, replacedCorrectionCount: ticked.size,
       },
     });
+    // P18.96-T4 AC-1: everybody this file gave a policy may have had their first sale (ADR-0171 §1).
+    await signalSales(this.sales, ctx, writable
+      .filter((r) => r.membershipId && r.cells.some((c) => writesHere(r)(c) && fieldOf(c) === 'policyCountMonthly' && (c.after as number) > 0))
+      .map((r) => r.membershipId as string));
     return this.result(ctx, batchId, month);
   }
 
@@ -256,8 +267,8 @@ export class ProductionImportService {
       throw new DomainException(
         ErrorCode.UPLOAD_NOTHING_TO_REVERT,
         batch.status === 'reverted'
-          ? 'This import has been reverted already.'
-          : 'This import never completed, so there is nothing of it to revert.',
+          ? SAY.UPLOAD_NOTHING_TO_REVERT.reverted
+          : SAY.UPLOAD_NOTHING_TO_REVERT.neverCompleted,
         HttpStatus.CONFLICT,
         { batchId, status: batch.status },
       );
@@ -267,7 +278,7 @@ export class ProductionImportService {
     if (String(latest._id) !== batchId) {
       throw new DomainException(
         ErrorCode.UPLOAD_BATCH_NOT_LATEST,
-        `“${latest.filename}” was imported into this month after it. Revert that one first.`,
+        SAY.UPLOAD_BATCH_NOT_LATEST.revertThatFirst({ filename: latest.filename }),
         HttpStatus.CONFLICT,
         { batchId, latestBatchId: String(latest._id) },
       );
@@ -278,7 +289,7 @@ export class ProductionImportService {
     await this.months.claim(ctx, month, state.revision);
 
     await this.batches.updateById(ctx, batchId, { $set: { status: 'reverting', startedAt: this.clock.now() } });
-    const { restored, kept } = await this.undo(ctx, batchId, month);
+    const { restored, kept, policiesRestored } = await this.undo(ctx, batchId, month);
     await this.batches.updateById(ctx, batchId, {
       $set: {
         status: 'reverted', revertedAt: this.clock.now(), revertedBy: ctx.membershipId,
@@ -293,6 +304,11 @@ export class ProductionImportService {
       before: { status: 'committed' },
       after: { status: 'reverted', restoredCellCount: restored, keptCellCount: kept },
     });
+    /*
+     * The P18.96 exit review, M4 (ADR-0171 §1 as noted): the policies this file gave are gone, so a first sale read from
+     * this month is recomputed from what remains — while the member's 3M result is not kept; a kept one stays.
+     */
+    await signalSales(this.sales, ctx, policiesRestored);
     return this.result(ctx, batchId, month);
   }
 
@@ -322,23 +338,29 @@ export class ProductionImportService {
     await this.months.claim(ctx, month, (await this.months.state(ctx, month)).revision);
     for (const batch of stranded) {
       const id = String(batch._id);
-      const { restored, kept } = await this.undo(ctx, id, month);
+      const { restored, kept, policiesRestored } = await this.undo(ctx, id, month);
       await this.batches.updateById(ctx, id, {
         $set: batch.status === 'pending'
           ? { status: 'failed' }
           : { status: 'reverted', revertedAt: this.clock.now(), restoredCellCount: restored, keptCellCount: kept },
       });
+      // A revert finished here never signalled its own (M4); a failed commit never signalled at all.
+      if (batch.status === 'reverting') await signalSales(this.sales, ctx, policiesRestored);
     }
   }
 
   /**
    * Put back what a batch wrote, cell by cell, where the cell still holds what it wrote.
    *
-   * A cell whose `sourceBatchId` is no longer this batch has been written since, and is kept.
+   * A cell whose `sourceBatchId` is no longer this batch has been written since, and is kept. `policiesRestored` names
+   * the members whose month's policies went back (M4): their first sale may have been read from them.
    */
-  private async undo(ctx: RequestContext, batchId: string, month: string): Promise<{ restored: number; kept: number }> {
+  private async undo(
+    ctx: RequestContext, batchId: string, month: string,
+  ): Promise<{ restored: number; kept: number; policiesRestored: string[] }> {
     let restored = 0;
     let kept = 0;
+    const policiesRestored: string[] = [];
     const rows = await this.rows.find(ctx, { batchId, membershipId: { $ne: null } });
     for (const row of rows) {
       const fields = Object.keys(row.values ?? {});
@@ -357,8 +379,9 @@ export class ProductionImportService {
       if (Object.keys(set).length > 0) {
         await this.data.updateMany(ctx, { membershipId: row.membershipId, month }, { $set: set });
       }
+      if (set.policyCountMonthly) policiesRestored.push(row.membershipId as string);
     }
-    return { restored, kept };
+    return { restored, kept, policiesRestored };
   }
 
   private async result(ctx: RequestContext, batchId: string, month: string): Promise<ImportResult> {

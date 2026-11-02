@@ -1,6 +1,10 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Reader } from '@/common/i18n/reader';
+import { render, type Sentence } from '@/common/i18n/sentence';
+import { readXlsx } from '@/common/spreadsheet/read-xlsx';
+import { looksLikeZip } from '@/common/spreadsheet/zip-guard';
 import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
 import {
   type CsvRecord, decodeUpload, delimiterOf, parseCsv, type UploadDelimiter, type UploadEncoding,
@@ -8,6 +12,9 @@ import {
 import { breaksYtd, isMoney, refusalFor } from './production-rules';
 import { METRIC_FILE_LABEL, TEMPLATE_HEADERS } from './production-template';
 import { minorToRpMillions, rpMillionsToMinor } from './production-units';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS;
 
 /**
  * What a filled file would change, before anything does (P9-T3).
@@ -24,6 +31,7 @@ export type CellStatus = 'new' | 'changed' | 'unchanged' | 'not_provided' | 'ref
 
 export interface PreviewIssue {
   code: string;
+  /** Written for the reader of the preview — and kept with the batch, in its language, by the commit (P18.98-T5 AC-6). */
   message: string;
   metric: ProductionMetric | null;
   cadence: Cadence | null;
@@ -101,8 +109,17 @@ export interface RosterMember {
 /** What is stored for one member this month, per metric and cadence. */
 export type StoredFigures = Record<ProductionMetric, Record<Cadence, number | null>>;
 
+/** What the file was (ADR-0184): text read as CSV, or an Excel workbook whose Data sheet was read. */
+export type UploadFormat = 'csv' | 'xlsx';
+
 export interface ReadUpload {
+  format: UploadFormat;
+  /** How a CSV's bytes were read. A workbook's text is UTF-8 by its own format, and reads `utf-8`. */
   encoding: UploadEncoding;
+  /**
+   * A CSV's delimiter. **A workbook has none, and reads `,`**: what the delimiter decides is the decimal mark
+   * (`buildPreview`), and a workbook's numbers reach the preview written with the point (`cellText`).
+   */
   delimiter: UploadDelimiter;
   templateVersion: number;
   /** Every record after the header, blank ones included; `buildPreview` skips those. */
@@ -161,17 +178,17 @@ export function templateVersionOf(cells: readonly string[]): number {
   const expected = at === -1 ? null : latest[at];
   const actual = shown[column - 1] ?? null;
 
-  let message: string;
+  let message: Sentence<'UPLOAD_TEMPLATE_MISMATCH'>;
   if (expected === null) {
-    message = `The header has a column the template does not: “${actual}”, column ${column}.`;
+    message = SAY.UPLOAD_TEMPLATE_MISMATCH.extraColumn({ actual, column });
   } else if (actual === null) {
-    message = `The header stops at column ${shown.length}; the template’s column ${column} reads “${expected}”.`;
+    message = SAY.UPLOAD_TEMPLATE_MISMATCH.headerStops({ shown: shown.length, column, expected });
   } else {
-    message = `Column ${column} of the header reads “${actual}”; the template’s reads “${expected}”.`;
+    message = SAY.UPLOAD_TEMPLATE_MISMATCH.columnDiffers({ column, actual, expected });
   }
   throw new DomainException(
     ErrorCode.UPLOAD_TEMPLATE_MISMATCH,
-    `${message} Download the template for this month and fill that in — nothing has been read.`,
+    message,
     HttpStatus.UNPROCESSABLE_ENTITY,
     { column, expected, found: actual },
   );
@@ -185,24 +202,57 @@ function trimTrailingEmpty(cells: readonly string[]): string[] {
 
 const isBlank = (r: CsvRecord) => r.cells.every((c) => c.trim() === '');
 
-/** Bytes → a known template, its records, and how the file was written. File-level refusals throw. */
+/** Bytes of a CSV → a known template, its records, and how the file was written. File-level refusals throw. */
 export function readUpload(bytes: Uint8Array): ReadUpload {
   const { text, encoding } = decodeUpload(bytes);
   const delimiter = delimiterOf(text.replace(/^[\r\n]+/, ''));
-  const records = parseCsv(text, delimiter);
+  return { format: 'csv', encoding, delimiter, ...templateOf(parseCsv(text, delimiter)) };
+}
+
+/**
+ * **Any filled template, a CSV or an Excel workbook** (ADR-0184): what the service reads an upload with.
+ *
+ * A workbook — bytes that start as a ZIP — is opened by `readXlsx`, within the bounds a workbook is held to, and its
+ * Data sheet's rows become the records a CSV's lines would have been, each numbered as the sheet numbers its row. From
+ * there it is the same file: **the header matched exactly as a CSV's**, `UPLOAD_TEMPLATE_MISMATCH` naming the first
+ * column that differs, and the same preview. Anything else is read as a CSV.
+ */
+export async function readFileUpload(bytes: Uint8Array): Promise<ReadUpload> {
+  if (!looksLikeZip(bytes)) return readUpload(bytes);
+  const { rows } = await readXlsx(bytes, { isHeader: isTemplateHeader });
+  return {
+    format: 'xlsx',
+    encoding: 'utf-8',
+    delimiter: ',',
+    ...templateOf(rows.map((cells, i): CsvRecord => ({ line: i + 1, cells }))),
+  };
+}
+
+/** Whether a row is a header this product issued — how a workbook's data sheet is found when it is not called Data. */
+function isTemplateHeader(cells: readonly string[]): boolean {
+  try {
+    templateVersionOf(cells);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first row with anything in it is the header; the rest are the records. A file of nothing is refused. */
+function templateOf(records: CsvRecord[]): Pick<ReadUpload, 'templateVersion' | 'records'> {
   const headerAt = records.findIndex((r) => !isBlank(r));
   if (headerAt === -1) {
     throw new DomainException(
-      ErrorCode.UPLOAD_MALFORMED_CSV, 'The file is empty.', HttpStatus.UNPROCESSABLE_ENTITY,
+      ErrorCode.UPLOAD_MALFORMED_CSV, SAY.UPLOAD_MALFORMED_CSV.empty, HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
-  const templateVersion = templateVersionOf(records[headerAt].cells);
-  return { encoding, delimiter, templateVersion, records: records.slice(headerAt + 1) };
+  return { templateVersion: templateVersionOf(records[headerAt].cells), records: records.slice(headerAt + 1) };
 }
 
 // ── one value ─────────────────────────────────────────────────────────────────────────────────
 
-type Read = { value: number } | { reason: string };
+/** A value read, or why it is refused: the end of a sentence, in both languages, said after the cell. */
+type Read = { value: number } | { reason: Sentence<'UPLOAD_VALUE_OUT_OF_RANGE'> };
 
 /**
  * A number, where **the decimal mark follows the delimiter**: `,` in a `;` file, `.` otherwise
@@ -214,17 +264,14 @@ export function readNumber(raw: string, decimalMark: ',' | '.', allowPercent: bo
   if (allowPercent && s.endsWith('%')) s = s.slice(0, -1).trimEnd();
   const other = decimalMark === ',' ? '.' : ',';
   if (s.includes(decimalMark) && s.includes(other)) {
-    return { reason: 'carries both “.” and “,”. Write it without a thousands separator.' };
+    return { reason: SAY.UPLOAD_VALUE_OUT_OF_RANGE.bothMarks };
   }
   if (s.includes(other)) {
-    return {
-      reason: `uses “${other}”, and in this file the decimal mark is “${decimalMark}”. `
-        + 'Write it without a thousands separator.',
-    };
+    return { reason: SAY.UPLOAD_VALUE_OUT_OF_RANGE.otherMark({ other, mark: decimalMark }) };
   }
   const pattern = decimalMark === ',' ? /^([+-]?)(\d+)(?:,(\d+))?$/ : /^([+-]?)(\d+)(?:\.(\d+))?$/;
   const m = pattern.exec(s);
-  if (!m) return { reason: 'is not a number.' };
+  if (!m) return { reason: SAY.UPLOAD_VALUE_OUT_OF_RANGE.notANumber };
   return { value: Number(`${m[1]}${m[2]}${m[3] ? `.${m[3]}` : ''}`) };
 }
 
@@ -261,7 +308,7 @@ const DATE_LIKE = [
 interface CodeMatch {
   member: RosterMember | null;
   recovered: boolean;
-  reason: string | null;
+  reason: Sentence<'UPLOAD_UNKNOWN_AGENT_CODE'> | null;
 }
 
 /**
@@ -271,7 +318,7 @@ interface CodeMatch {
  * message says so.
  */
 export function matchCode(code: string, roster: readonly RosterMember[]): CodeMatch {
-  if (code === '') return { member: null, recovered: false, reason: 'This row has no agent code.' };
+  if (code === '') return { member: null, recovered: false, reason: SAY.UPLOAD_UNKNOWN_AGENT_CODE.noCode };
 
   const upper = code.toUpperCase();
   const exact = roster.find((m) => m.agentCode.toUpperCase() === upper);
@@ -282,30 +329,20 @@ export function matchCode(code: string, roster: readonly RosterMember[]): CodeMa
     const fits = roster.filter((m) => /^\d+$/.test(m.agentCode) && stripZeros(m.agentCode) === key);
     if (fits.length === 1) return { member: fits[0], recovered: true, reason: null };
     if (fits.length > 1) {
-      return {
-        member: null, recovered: false,
-        reason: 'More than one member’s code reads like this without its leading zeros, so it is not guessed.',
-      };
+      return { member: null, recovered: false, reason: SAY.UPLOAD_UNKNOWN_AGENT_CODE.ambiguous };
     }
   }
 
-  const spreadsheet = ' A spreadsheet may have rewritten it: format the Agent Code column as text, and copy the codes from the template.';
-  if (SCIENTIFIC.test(code)) {
-    return { member: null, recovered: false, reason: `No active member has this code, and it reads like a number in scientific notation.${spreadsheet}` };
-  }
+  if (SCIENTIFIC.test(code)) return { member: null, recovered: false, reason: SAY.UPLOAD_UNKNOWN_AGENT_CODE.scientific };
   if (DATE_LIKE.some((p) => p.test(code))) {
-    return { member: null, recovered: false, reason: `No active member has this code, and it reads like a date.${spreadsheet}` };
+    return { member: null, recovered: false, reason: SAY.UPLOAD_UNKNOWN_AGENT_CODE.dateLike };
   }
-  return { member: null, recovered: false, reason: 'No active member of this office has this code.' };
+  return { member: null, recovered: false, reason: SAY.UPLOAD_UNKNOWN_AGENT_CODE.unknown };
 }
 
 const nameKey = (name: string) => name.replace(/^'/, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 // ── the whole preview ─────────────────────────────────────────────────────────────────────────
-
-const issue = (
-  code: string, message: string, metric: ProductionMetric | null = null, cadence: Cadence | null = null,
-): PreviewIssue => ({ code, message, metric, cadence });
 
 /**
  * Every data row of the file against the roster and what is stored.
@@ -313,13 +350,22 @@ const issue = (
  * A row is **refused** when it cannot be attributed to exactly one member — no code, an unknown
  * one, an agent listed twice, or more cells than the template. A **ready** row previews each of its
  * twelve cells: new, changed, unchanged, not provided, or refused with the reason.
+ *
+ * **Each issue is written for `reader`** (P18.98-T5): the preview is answered to them, and a commit keeps its issues
+ * with the batch — the words of whoever imported it, as they read them. Its code is the same in both languages.
  */
-export function buildPreview(input: {
-  records: readonly CsvRecord[];
-  delimiter: UploadDelimiter;
-  roster: readonly RosterMember[];
-  stored: (membershipId: string) => StoredFigures;
-}): { rows: PreviewRow[]; summary: PreviewSummary } {
+export function buildPreview(
+  input: {
+    records: readonly CsvRecord[];
+    delimiter: UploadDelimiter;
+    roster: readonly RosterMember[];
+    stored: (membershipId: string) => StoredFigures;
+  },
+  reader: Reader,
+): { rows: PreviewRow[]; summary: PreviewSummary } {
+  const issue = (
+    code: string, message: Sentence, metric: ProductionMetric | null = null, cadence: Cadence | null = null,
+  ): PreviewIssue => ({ code, message: render(message, reader), metric, cadence });
   const decimalMark = input.delimiter === ';' ? ',' : '.';
   const data = input.records.filter((r) => !isBlank(r));
 
@@ -353,8 +399,7 @@ export function buildPreview(input: {
 
     if (extra > COLUMN_COUNT) {
       return refuse(issue(
-        ErrorCode.UPLOAD_MALFORMED_CSV,
-        `This row has ${extra} cells; the template has ${COLUMN_COUNT}. A value holding a comma or a semicolon must be in quotes.`,
+        ErrorCode.UPLOAD_MALFORMED_CSV, SAY.UPLOAD_MALFORMED_CSV.tooManyCells({ cells: extra, template: COLUMN_COUNT }),
       ));
     }
     if (!member) return refuse(issue(ErrorCode.UPLOAD_UNKNOWN_AGENT_CODE, match.reason!));
@@ -363,7 +408,7 @@ export function buildPreview(input: {
       const others = lines.filter((l) => l !== record.line).join(', ');
       return refuse(issue(
         ErrorCode.UPLOAD_DUPLICATE_AGENT_CODE,
-        `${member.name || member.agentCode} is also on line ${others}. Neither row is taken — keep one and upload again.`,
+        SAY.UPLOAD_DUPLICATE_AGENT_CODE.alsoOnLine({ who: member.name || member.agentCode, lines: others }),
       ));
     }
 
@@ -375,7 +420,11 @@ export function buildPreview(input: {
       if (raw === '') return { metric, cadence, status: 'not_provided', before, after: null, raw: null, correction: null };
       const read = readCell(metric, raw, decimalMark);
       if ('reason' in read) {
-        issues.push(issue(ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE, `${columnLabel(metric, cadence)}: “${raw}” ${read.reason}`, metric, cadence));
+        issues.push(issue(
+          ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE,
+          SAY.UPLOAD_VALUE_OUT_OF_RANGE.cell({ column: columnLabel(metric, cadence), raw, reason: read.reason }),
+          metric, cadence,
+        ));
         return { metric, cadence, status: 'refused', before, after: null, raw, correction: null };
       }
       const status: CellStatus = before === null ? 'new' : before === read.value ? 'unchanged' : 'changed';
@@ -394,7 +443,10 @@ export function buildPreview(input: {
       if (fromFile(ytd)) {
         issues.push(issue(
           ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE,
-          `${columnLabel(metric, 'ytd')}: “${ytd.raw}” is less than this month’s ${fromFile(month) ? `“${month.raw}”` : asWritten(metric, m)} — the year so far includes this month.`,
+          SAY.UPLOAD_VALUE_OUT_OF_RANGE.ytdBelowMonth({
+            column: columnLabel(metric, 'ytd'), raw: ytd.raw!,
+            month: fromFile(month) ? `“${month.raw}”` : asWritten(metric, m),
+          }),
           metric, 'ytd',
         ));
         ytd.status = 'refused';
@@ -404,14 +456,16 @@ export function buildPreview(input: {
           month.after = null;
           issues.push(issue(
             ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE,
-            `${columnLabel(metric, 'monthly')}: “${month.raw}” is held back with its YTD, which is refused.`,
+            SAY.UPLOAD_VALUE_OUT_OF_RANGE.heldBack({ column: columnLabel(metric, 'monthly'), raw: month.raw! }),
             metric, 'monthly',
           ));
         }
       } else {
         issues.push(issue(
           ErrorCode.UPLOAD_VALUE_OUT_OF_RANGE,
-          `${columnLabel(metric, 'monthly')}: “${month.raw}” is more than the year to date already held, ${asWritten(metric, y)}. Fill in the YTD column too.`,
+          SAY.UPLOAD_VALUE_OUT_OF_RANGE.monthAboveYtd({
+            column: columnLabel(metric, 'monthly'), raw: month.raw!, ytd: asWritten(metric, y),
+          }),
           metric, 'monthly',
         ));
         month.status = 'refused';

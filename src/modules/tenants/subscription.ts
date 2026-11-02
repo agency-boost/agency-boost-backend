@@ -3,8 +3,10 @@ import { DateTime } from 'luxon';
 import type { Clock } from '@/common/clock/clock.port';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { DEFAULT_TENANT_TIMEZONE, MINOR_UNITS_PER_MAJOR, SUBSCRIPTION } from '@/domain/constants';
+import type { Sentence } from '@/common/i18n/sentence';
+import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
 import type { KpmSubscription } from './kpm.schema';
+import { TENANTS_REFUSALS } from './tenants.messages';
 
 /**
  * An office's subscription, as rules (ADR-0112). Pure: the dates in, the state out — so the one
@@ -75,20 +77,15 @@ function isOfficeDate(value: string): boolean {
 }
 
 /**
- * Rupiah as the dialog shows it, `Rp 100.000.000`: whole rupiah from minor units, grouped with dots
- * (id-ID). The refusals are read by the Super Admin under the field they typed rupiah into, so they
- * name rupiah — never sen, the unit the API carries.
+ * **The refusals, in both languages** (P18.98-T5 AC-3), each said under the field it names (`details.field`). A bound
+ * is rupiah as the dialog shows it, **in full** — `Rp 100.000.000` — through the shared formatter (ADR-0167 §1): the
+ * Super Admin reads it under the field they typed rupiah into, so it is written in the digits they type, and in rupiah —
+ * never sen, the unit the API carries. Every bound is whole rupiah, so nothing rounds. A count is grouped as the
+ * console's number fields group it, `10.000`. Both in the reader's figures (`TENANTS_REFUSALS`).
  */
-function rupiah(minor: number): string {
-  return `Rp ${grouped(Math.floor(minor / MINOR_UNITS_PER_MAJOR))}`;
-}
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
 
-/** `10000` as `10.000`, the grouping the console's number fields use. */
-function grouped(value: number): string {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-}
-
-function refuse(field: string, message: string): DomainException {
+function refuse(field: string, message: Sentence<'VALIDATION_FAILED'>): DomainException {
   return new DomainException(
     ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, { field },
   );
@@ -108,19 +105,16 @@ export function validateSubscription(input: SubscriptionInput): KpmSubscription 
   const { startDate, endDate, pricePerLeaderMinor, maxLeaders, keepActiveAfterEnd } = input;
 
   if (startDate !== null && !isOfficeDate(startDate)) {
-    throw refuse('startDate', 'The start date is not a real day.');
+    throw refuse('startDate', SAY.startNotADay);
   }
   if (endDate !== null && !isOfficeDate(endDate)) {
-    throw refuse('endDate', 'The end date is not a real day.');
+    throw refuse('endDate', SAY.endNotADay);
   }
   if ((startDate === null) !== (endDate === null)) {
-    throw refuse(
-      startDate === null ? 'startDate' : 'endDate',
-      'Enter a start date and an end date, or neither.',
-    );
+    throw refuse(startDate === null ? 'startDate' : 'endDate', SAY.datesBothOrNeither);
   }
   if (startDate !== null && endDate !== null && endDate < startDate) {
-    throw refuse('endDate', 'The end date must be on or after the start date.');
+    throw refuse('endDate', SAY.endBeforeStart);
   }
 
   if (pricePerLeaderMinor !== null) {
@@ -131,11 +125,11 @@ export function validateSubscription(input: SubscriptionInput): KpmSubscription 
     ) {
       throw refuse(
         'pricePerLeaderMinor',
-        `The price per leader must be from ${rupiah(0)} to ${rupiah(SUBSCRIPTION.PRICE_PER_LEADER_MAX_MINOR)} a month.`,
+        SAY.priceRange({ min: 0, max: SUBSCRIPTION.PRICE_PER_LEADER_MAX_MINOR }),
       );
     }
     if (pricePerLeaderMinor % SUBSCRIPTION.PRICE_STEP_MINOR !== 0) {
-      throw refuse('pricePerLeaderMinor', 'The price per leader must be whole rupiah, with no sen.');
+      throw refuse('pricePerLeaderMinor', SAY.priceWholeRupiah);
     }
   }
 
@@ -146,13 +140,12 @@ export function validateSubscription(input: SubscriptionInput): KpmSubscription 
   )) {
     throw refuse(
       'maxLeaders',
-      `The leader limit must be a whole number from ${grouped(SUBSCRIPTION.MAX_LEADERS_MIN)} to `
-        + `${grouped(SUBSCRIPTION.MAX_LEADERS_MAX)}, or empty for no limit.`,
+      SAY.leaderLimitRange({ min: SUBSCRIPTION.MAX_LEADERS_MIN, max: SUBSCRIPTION.MAX_LEADERS_MAX }),
     );
   }
 
   if (typeof keepActiveAfterEnd !== 'boolean') {
-    throw refuse('keepActiveAfterEnd', 'Keep active after the end date must be on or off.');
+    throw refuse('keepActiveAfterEnd', SAY.keepActiveOnOrOff);
   }
 
   return {

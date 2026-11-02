@@ -1,6 +1,11 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
+import { decodeText, decodeWindows1252, type TextEncoding } from '@/common/spreadsheet/text';
+import { PRODUCTION_REFUSALS } from './production.messages';
+
+const SAY = PRODUCTION_REFUSALS.UPLOAD_MALFORMED_CSV;
 
 /**
  * Bytes to records, for a file that may have been through a spreadsheet (P9-T3, ADR-0052).
@@ -10,7 +15,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
  * half can be tested against literals without the other.
  */
 
-export type UploadEncoding = 'utf-8' | 'windows-1252';
+export type UploadEncoding = TextEncoding;
 export type UploadDelimiter = ',' | ';' | '\t';
 
 /** A record as a spreadsheet would number it: the line it starts on, and its fields, untrimmed. */
@@ -19,65 +24,23 @@ export interface CsvRecord {
   cells: string[];
 }
 
-const malformed = (message: string, details?: Record<string, unknown>) =>
+const malformed = (message: Sentence<'UPLOAD_MALFORMED_CSV'>, details?: Record<string, unknown>) =>
   new DomainException(ErrorCode.UPLOAD_MALFORMED_CSV, message, HttpStatus.UNPROCESSABLE_ENTITY, details);
 
-/** `PK\x03\x04` — every `.xlsx` is a zip. */
-const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
-const UTF8_BOM = [0xef, 0xbb, 0xbf];
-
-const startsWith = (bytes: Uint8Array, prefix: number[]) => prefix.every((b, i) => bytes[i] === b);
-
 /**
- * The bytes as text: UTF-8, and Windows-1252 when they are not valid UTF-8 (ADR-0052).
+ * The bytes of a CSV as text: UTF-8, and Windows-1252 when they are not valid UTF-8 (ADR-0052) — `decodeText`, which
+ * the roster's file shares since ADR-0184 moved it to `common/spreadsheet/text.ts`.
  *
- * **Why the order.** The template is issued as UTF-8 with a byte-order mark. A spreadsheet that saves
- * it as *CSV UTF-8* keeps both; one that saves it as plain *CSV* writes the machine's code page, where
- * the header's em dash is the single byte `0x97` — which is not valid UTF-8, and is how the fallback
- * is chosen. Windows-1252 decodes every byte, so the fallback cannot fail; a file that is neither
- * reaches the header check and is refused there, with a message about its columns.
- *
- * **Refused here, whole**: an empty file, a workbook saved as `.xlsx`, and anything with a NUL byte
- * in it, which no text file has.
+ * **Refused here, whole**: an empty file, and anything with a NUL byte in it, which no text file has. **A workbook is
+ * not refused any more** (ADR-0184): `readFileUpload` (`production-preview.ts`) sends one to `readXlsx` before it would
+ * reach this, and a ZIP that did reach it has NUL bytes and is answered as neither text nor a workbook.
  */
 export function decodeUpload(bytes: Uint8Array): { text: string; encoding: UploadEncoding } {
-  if (bytes.length === 0) throw malformed('The file is empty.');
-  if (startsWith(bytes, ZIP_MAGIC)) {
-    throw malformed(
-      'This is a spreadsheet workbook, not a CSV file. In the spreadsheet, save it as CSV and upload that.',
-    );
-  }
-  if (bytes.includes(0)) throw malformed('This is not a text file. Upload the filled template as a CSV file.');
-
-  const body = startsWith(bytes, UTF8_BOM) ? bytes.subarray(UTF8_BOM.length) : bytes;
-  try {
-    return { text: new TextDecoder('utf-8', { fatal: true }).decode(body), encoding: 'utf-8' };
-  } catch {
-    return { text: decodeWindows1252(body), encoding: 'windows-1252' };
-  }
+  if (bytes.length === 0) throw malformed(SAY.empty);
+  return decodeText(bytes);
 }
 
-/**
- * Windows-1252's 0x80–0x9F, where it differs from Latin-1. The five bytes it leaves undefined keep
- * their Latin-1 control character, as the WHATWG decoder does.
- */
-const CP1252_HIGH: Record<number, number> = {
-  0x80: 0x20ac, 0x82: 0x201a, 0x83: 0x0192, 0x84: 0x201e, 0x85: 0x2026, 0x86: 0x2020, 0x87: 0x2021,
-  0x88: 0x02c6, 0x89: 0x2030, 0x8a: 0x0160, 0x8b: 0x2039, 0x8c: 0x0152, 0x8e: 0x017d,
-  0x91: 0x2018, 0x92: 0x2019, 0x93: 0x201c, 0x94: 0x201d, 0x95: 0x2022, 0x96: 0x2013, 0x97: 0x2014,
-  0x98: 0x02dc, 0x99: 0x2122, 0x9a: 0x0161, 0x9b: 0x203a, 0x9c: 0x0153, 0x9e: 0x017e, 0x9f: 0x0178,
-};
-
-/**
- * **Not `new TextDecoder('windows-1252')`.** Node accepts the label and decodes Latin-1, where
- * `0x97` is a C1 control character and not the em dash — so the one byte this fallback exists for
- * would vanish from the header. Found by this module's own test; the table above is the difference.
- */
-export function decodeWindows1252(bytes: Uint8Array): string {
-  let out = '';
-  for (const b of bytes) out += String.fromCharCode(CP1252_HIGH[b] ?? b);
-  return out;
-}
+export { decodeWindows1252 };
 
 /**
  * Comma, semicolon or tab — whichever the header line uses most, counted outside quotes.
@@ -145,12 +108,7 @@ export function parseCsv(text: string, delimiter: UploadDelimiter): CsvRecord[] 
     } else field += c;
   }
 
-  if (quoted) {
-    throw malformed(
-      `A quote opened on line ${quoteOpenedOn} is never closed, so the rest of the file cannot be read.`,
-      { line: quoteOpenedOn },
-    );
-  }
+  if (quoted) throw malformed(SAY.unclosedQuote({ line: quoteOpenedOn }), { line: quoteOpenedOn });
   // The last record, unless the file ended on a line break.
   if (field !== '' || cells.length > 0) endRecord();
   return records;

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@/common/errors/domain.exception';
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTS } from '@/domain/constants';

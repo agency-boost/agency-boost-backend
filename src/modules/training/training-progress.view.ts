@@ -32,7 +32,10 @@ export interface TrainingArchivedModuleView {
 export interface TrainingSkillProgressView extends TrainingCountsView {
   code: string;
   label: string;
-  /** `false` only for a skill no longer offered that still holds the member's history. */
+  /**
+   * `false` for a skill no longer offered that still holds the member's history, and for a skill of a category with no
+   * published module (P18.97-T4 AC-9), which offers nothing.
+   */
   offered: boolean;
   modules: TrainingModuleRowView[];
   archived: TrainingArchivedModuleView[];
@@ -42,7 +45,10 @@ export interface TrainingCategoryProgressView extends TrainingCountsView {
   code: string;
   label: string;
   description: string | null;
-  /** `false` only for a category no longer offered that still holds the member's history. */
+  /**
+   * `false` for a category no longer offered — or one with no published module (P18.97-T4 AC-9) — that still holds the
+   * member's history. One with no published module and no history is left out of the read.
+   */
   offered: boolean;
   skills: TrainingSkillProgressView[];
 }

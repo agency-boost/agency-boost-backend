@@ -11,14 +11,14 @@
  *
  * | Account | Activation | What it shows |
  * |---|---|---|
- * | `rina@kpm0417.test` (Agent, Sari) | **Day 59**, 8 of 16 (50%) | Her goal, leads and activity complete all three linked items from her real data. Three manual items ticked by her, two with her **note and date**; *Join KPM introduction session* and *Role play with leader* ticked by **Sari**, attributed. **Sari's coaching note**, which Rina reads on her page |
+ * | `rina@kpm0417.test` (Agent, Sari) | **Day 59**, 11 of 16 (69%) | Her goal, leads and activity complete all three linked items from her real data; since P18.96-T4 her closings tick *Close first case independently* and *Reach Independent Agent milestone*, and her four 1:1s *Weekly 1-on-1 check-in* (`first-sale-fixture.ts`). Three manual items ticked by her, two with her **note and date**; *Join KPM introduction session* and *Role play with leader* ticked by **Sari**, attributed. **Sari's coaching note**, which Rina reads on her page |
  * | `budi@kpm0417.test` (Agent, Sari) | **Day 62**, 6 of 16 | Part-way: two items of his, one of Sari's, and his three links |
  * | `removed@kpm0417.test` → Yanti (Agent, Sari) | **Day 29**, 5 of 16 | **The re-join**: her current membership's activation starts afresh; her first membership, removed, has none (ADR-0022) |
- * | `novi@kpm0417.test` (Agent, Arief) | **Day 85**, 9 of 16 | Her goal item done and attributed to **Arief**, who saved her goal (ADR-0046); three of Arief's ticks |
+ * | `novi@kpm0417.test` (Agent, Arief) | **Day 85**, 10 of 16 | Her goal item done and attributed to **Arief**, who saved her goal (ADR-0046); three of Arief's ticks; since P18.96-T4 *Close first case independently* from her closing on day 20 (`first-sale-fixture.ts`) |
  * | `wahyu@kpm0417.test` (Agent, Arief) | **Day 87**, 5 of 16 | **A start date a leader corrected** (OD-118): Arief moved it from the day Wahyu joined here, 79 days ago, to his contract date a week earlier — audited with both dates |
  * | `siti@kpm0417.test` (Agent, Agus) | **Day 102, complete** | **Graduated** three days ago by her own *Mark activation complete →*, every item done, with the audit row. She has left every roster and her *New agent* section |
- * | `dimas@kpm0417.test` (Agent, Agus) | **Day 95**, 8 of 16 (50%), **overdue** | About half done and past the window: his day is red |
- * | `indah@kpm0417.test` (Agent, Agus) | **Day 98**, 15 of 16 (94%), **overdue** | One item short — *Reach Independent Agent milestone* — and red too. *Close first case independently* is done: the roster's *Active Agent* ✓ |
+ * | `dimas@kpm0417.test` (Agent, Agus) | **Day 95**, 9 of 16 (56%), **overdue** | About half done and past the window: his day is red. Since P18.96-T4 *Close first case independently* ticks itself from his production file (`first-sale-fixture.ts`) |
+ * | `indah@kpm0417.test` (Agent, Agus) | **Day 98**, 15 of 16 (94%), **overdue** | One item short — *Reach Independent Agent milestone* — and red too. *Close first case independently* is done: the roster's *Active Agent* ✓ — her tick, replaced on the first read by the production file's month since P18.96-T4; Agus's tick of *Weekly 1-on-1 check-in* reads *waiting for data* |
  * | `agent@kpm0555.test` → Lina (Agent, office 0555) | **Day 61**, her prospects item done from her leads | The other office's hire, which every cross-office test reads. Her start is the day she joined, 60 days back (`OFFICE_0555_JOINED_DAYS_AGO`) |
  *
  * **Who sees what.** Agus's *Your New Hires*: *Direct Unit* (Indah, Dimas), then the leader cards A to Z,
@@ -126,9 +126,17 @@ export interface ActivationFixture {
 /** A manual tick: the item, who ticked it, how many days after the start, and the hire's note and date. */
 type Tick = [code: string, by: 'hire' | ActivationLeaderKey, afterStart: number, note?: string];
 
-/** Sari's coaching note to Rina (OD-117). None of the six words. */
+/** Sari's coaching note to Rina (OD-117). None of the six words, in either language. */
 export const SARI_NOTE_TO_RINA =
-  'Strong first two months — your prospect list keeps growing. Next: book your first Joint Field Work with me this week.';
+  'Dua bulan pertama yang kuat — daftar prospek Anda terus bertambah. Berikutnya: jadwalkan JFW pertama Anda dengan saya minggu ini.';
+
+/** The notes hires typed on their own ticks, by who and item (P18.98-T7: in Bahasa Indonesia, as an office types them). */
+export const ACTIVATION_TICK_NOTES = {
+  rinaBasics: 'Baca starter pack bersama Sari di minggu pertama.',
+  rinaProfile: 'Nonton video perusahaan dua kali dan mencatat poin-poinnya.',
+  yantiBasics: 'Yang kedua kali — sekarang lebih cepat.',
+  indahProfile: 'Tur kantor cabang lebih membantu daripada slide-nya.',
+} as const;
 
 export function buildActivationFixture(input: ActivationFixtureInput): ActivationFixture {
   const { clock, timezone, members } = input;
@@ -224,9 +232,9 @@ export function buildActivationFixture(input: ActivationFixtureInput): Activatio
 
   const rinaNoteAt = at(addDays(today, -2));
   const rina = hire('rina', 'sari', [
-    ['INSURANCE_BASICS', 'hire', 2, 'Read the starter pack with Sari in my first week.'],
+    ['INSURANCE_BASICS', 'hire', 2, ACTIVATION_TICK_NOTES.rinaBasics],
     ['CAREER_MINDSET', 'hire', 5],
-    ['COMPANY_PROFILE', 'hire', 6, 'Watched the company video twice and took notes.'],
+    ['COMPANY_PROFILE', 'hire', 6, ACTIVATION_TICK_NOTES.rinaProfile],
     ['KPM_INTRO_SESSION', 'sari', 9],
     ['ROLE_PLAY', 'sari', 30],
   ], { note: { text: SARI_NOTE_TO_RINA, byMembershipId: members.sari, at: rinaNoteAt } });
@@ -238,7 +246,7 @@ export function buildActivationFixture(input: ActivationFixtureInput): Activatio
   ]));
 
   activations.push(hire('yanti', 'sari', [
-    ['INSURANCE_BASICS', 'hire', 1, 'Second time round — quicker now.'], ['KPM_INTRO_SESSION', 'sari', 3],
+    ['INSURANCE_BASICS', 'hire', 1, ACTIVATION_TICK_NOTES.yantiBasics], ['KPM_INTRO_SESSION', 'sari', 3],
   ]));
 
   // ---------------------------------------------------------------- under Arief
@@ -290,7 +298,7 @@ export function buildActivationFixture(input: ActivationFixtureInput): Activatio
 
   activations.push(hire('indah', 'agus', [
     ['INSURANCE_BASICS', 'hire', 1], ['CAREER_MINDSET', 'hire', 2],
-    ['COMPANY_PROFILE', 'hire', 2, 'The branch tour helped more than the slides.'],
+    ['COMPANY_PROFILE', 'hire', 2, ACTIVATION_TICK_NOTES.indahProfile],
     ['KPM_INTRO_SESSION', 'agus', 4], ['CRM_SETUP', 'hire', 6], ['CHECK_CONTEST', 'hire', 9],
     ['MANDATORY_TRAINING', 'hire', 18], ['ROLE_PLAY', 'agus', 21], ['CERTIFY_PRODUCTS', 'hire', 30],
     ['JOINT_FIELD_WORK', 'agus', 40], ['FIRST_CASE_CLOSED', 'hire', 47], ['WEEKLY_CHECK_IN', 'agus', 60],

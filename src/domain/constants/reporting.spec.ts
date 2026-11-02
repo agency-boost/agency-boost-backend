@@ -18,6 +18,11 @@ describe('the Owner’s reporting constants (Phase 18, §B)', () => {
     expect(KPM_REPORTING.STATUS_SPLIT_PCT).toBe(70);
   });
 
+  it('UI-109 a compliance bar is red below 50% done and green from 80% (`kpm-mobile` 3)', () => {
+    expect(KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT).toBe(50);
+    expect(KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT).toBe(80);
+  });
+
   it('P18-T1 AC-4 the not-logged reveal lists three and counts the rest (`KPM_Owner.html:988-1001`)', () => {
     expect(KPM_REPORTING.NOT_LOGGED_SHOWN).toBe(3);
   });

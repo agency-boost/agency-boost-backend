@@ -181,9 +181,20 @@ export class Goal {
   @Prop({ type: Number, default: null })
   monthsLeftOverride!: number | null;
 
-  /** Typed by the agent until Phase 9 imports production. */
+  /**
+   * Typed in the app, until the office holds a year-to-date figure — by the member, or by whoever coaches them
+   * (ADR-0183). Who typed it is `apeAchievedTypedBy`.
+   */
   @Prop({ type: Number, required: true, default: 0 })
   apeAchievedMinor!: number;
+
+  /**
+   * **Who typed the figure above** (S2 of the T17–T20 permission review): the membership whose save last changed it —
+   * the member's own, or a coach's (ADR-0183). `null`, and absent on a row from before the field, reads as the member.
+   * What makes the screens say *entered by* a coach rather than *their own figure*. Not on a revision.
+   */
+  @Prop({ type: String, default: null })
+  apeAchievedTypedBy!: string | null;
 
   @Prop({ type: Number, required: true, default: 0 })
   caseSizeMinor!: number;

@@ -1,3 +1,5 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
 import { SEED_ACTIVATION_ASPECTS, SEED_ACTIVATION_ITEMS } from '@/domain/constants';
 import {
   checkActivationChecklist, trainingLinkModuleCode,
@@ -27,21 +29,26 @@ export function defaultActivationChecklist(): ActivationChecklistPayload {
 }
 
 /**
- * What would make an `activation_checklist` payload produce a broken office — one sentence each,
- * empty when there is nothing.
+ * What would make an `activation_checklist` payload produce a broken office — one sentence each, in both languages
+ * (P18.98-T5 AC-3), empty when there is nothing.
  *
  * **The same checker an office's own save meets** (ADR-0030), so a template cannot publish a
  * checklist an office could not have written. What it cannot check is whether a training link names
  * a module that exists: a template has no office to ask, and provisioning checks it against the
  * modules it has just copied (P5-T3 AC-5).
+ *
+ * **Read from the refusal's `givenDetails`**, the sentences as given — `details` holds their English only. The checker
+ * refuses through `refuseWith` alone, which names every violation; anything else it throws is a fault, not the
+ * payload's, and is thrown on.
  */
-export function activationChecklistProblems(payload: unknown): string[] {
+export function activationChecklistProblems(payload: unknown): Sentence<'VALIDATION_FAILED'>[] {
   try {
     checkActivationChecklist(payload);
     return [];
   } catch (err) {
-    const details = (err as { details?: { violations?: string[] } }).details;
-    return details?.violations ?? [(err as Error).message];
+    const violations = (err as Partial<DomainException>).givenDetails?.violations;
+    if (!violations) throw err;
+    return violations as Sentence<'VALIDATION_FAILED'>[];
   }
 }
 

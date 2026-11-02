@@ -51,6 +51,12 @@ export class RosterRowDto implements RosterRow {
 
   @ApiProperty({ example: 'Rina Wijaya' }) name!: string;
 
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise.',
+  })
+  photoUrl!: string | null;
+
   @ApiProperty({ type: RosterRungDto }) rung!: { code: string; label: string };
 
   @ApiProperty({ example: 1, description: 'Levels below the reader: 1 is somebody who answers to the reader directly.' })
@@ -133,6 +139,12 @@ export class CoacheeDto implements CoacheeView {
 
   @ApiProperty({ example: 'Rina Wijaya' })
   name!: string;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the header draws initials otherwise.',
+  })
+  photoUrl!: string | null;
 
   @ApiProperty({
     enum: ['she', 'he', 'they'],

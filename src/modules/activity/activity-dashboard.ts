@@ -1,8 +1,12 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import { addDays, daysBetween, isLocalDate, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { ACTIVITY, PERIOD } from '@/domain/constants';
+import { ACTIVITY_REFUSALS } from './activity.messages';
+
+const SAY = ACTIVITY_REFUSALS.VALIDATION_FAILED;
 
 /**
  * The Activity Dashboard's range and its columns (P10-T1). Pure: no clock, no repository — the
@@ -33,7 +37,7 @@ export interface ResolvedRange {
   days: number;
 }
 
-function refuse(message: string, details: Record<string, unknown>): never {
+function refuse(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): never {
   throw new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }
 
@@ -50,14 +54,14 @@ export function dashboardRange(
 ): ResolvedRange {
   const range = (input.range ?? 'ROLLING_7D') as DashboardRange;
   if (!DASHBOARD_RANGES.includes(range)) {
-    refuse(`${input.range} is not a range. One of: ${DASHBOARD_RANGES.join(', ')}.`, { field: 'range' });
+    refuse(SAY.notARange({ range: input.range as string, ranges: DASHBOARD_RANGES }), { field: 'range' });
   }
 
   if (range !== 'CUSTOM') {
     // A preset with dates would be a request answered as a different one; `from` and `to` are the
     // custom range's, and saying so is cheaper than a reader wondering why their dates were ignored.
     if (input.from || input.to) {
-      refuse(`from and to are for a CUSTOM range; ${range} ends today.`, { field: 'range' });
+      refuse(SAY.presetWithDates({ range }), { field: 'range' });
     }
     const length = range === 'ROLLING_7D' ? PERIOD.ROLLING_7D_DAYS : PERIOD.ROLLING_30D_DAYS;
     return { range, ...rollingWindow(today, length), days: length };
@@ -65,13 +69,13 @@ export function dashboardRange(
 
   for (const field of ['from', 'to'] as const) {
     const value = input[field];
-    if (!value) refuse(`A custom range needs both dates; ${field} is missing.`, { field });
-    if (!isLocalDate(value)) refuse(`${value} is not a date. Days are written YYYY-MM-DD.`, { field });
+    if (!value) refuse(SAY.customNeedsBoth({ field }), { field });
+    if (!isLocalDate(value)) refuse(SAY.notADay({ value }), { field });
   }
   const from = input.from as LocalDate;
   const to = input.to as LocalDate;
-  if (from > to) refuse('The range starts after it ends.', { field: 'from', from, to });
-  if (to > today) refuse(`The range ends after today, ${today}. Nothing has been logged yet.`, { field: 'to', to, today });
+  if (from > to) refuse(SAY.rangeBackwards, { field: 'from', from, to });
+  if (to > today) refuse(SAY.rangeAfterToday({ today }), { field: 'to', to, today });
 
   // Counted by arithmetic, **before** anything is built per day: a `from` in the year 0100 is a valid
   // date, and listing seven hundred thousand of them to learn the range is too long took a third of a
@@ -79,7 +83,7 @@ export function dashboardRange(
   const days = spanDays(from, to);
   if (days > ACTIVITY.DASHBOARD_RANGE_MAX_DAYS) {
     refuse(
-      `The range covers ${days} days. The dashboard shows up to ${ACTIVITY.DASHBOARD_RANGE_MAX_DAYS} at a time.`,
+      SAY.rangeTooLong({ days, max: ACTIVITY.DASHBOARD_RANGE_MAX_DAYS }),
       { field: 'from', days, max: ACTIVITY.DASHBOARD_RANGE_MAX_DAYS },
     );
   }

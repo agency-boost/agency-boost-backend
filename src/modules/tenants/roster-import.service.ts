@@ -5,10 +5,14 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
+import type { FileUpload } from '@/common/spreadsheet/file-upload.interceptor';
+import { localDayOf } from '@/common/time/local-day';
 import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
-import { countLeadersUsed, isLeaderRung, leaderLimitReached } from '@/modules/org/leader-limit';
+import { isLeaderClass } from '@/domain/constants';
+import { countLeadersUsed, leaderLimitReached } from '@/modules/org/leader-limit';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -16,14 +20,27 @@ import { Kpm, KpmDocument } from './kpm.schema';
 import {
   generateTemporaryPassword,
   inLeaderFirstOrder,
+  isRungCode,
   parseRoster,
   type RosterIssue,
   type RosterRow,
 } from './roster-csv';
+import { rosterTextOf, rosterWorkbook } from './roster-file';
+import { TENANTS_REFUSALS } from './tenants.messages';
+
+/** The import's refusals and each row's issue, in both languages (P18.98-T5 AC-3). */
+const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
+
+/** One row's issue as the preview answers it: its words written for the reader (P18.98-T5 AC-3). */
+export interface RosterIssueView {
+  line: number;
+  column: string;
+  message: string;
+}
 
 export interface RosterPreview {
   /** Everything wrong, per row, in one pass. Empty means the file will commit. */
-  issues: RosterIssue[];
+  issues: RosterIssueView[];
   /** How many people the commit would create. Zero when anything is wrong. */
   willCreate: number;
   rows: Array<{ line: number; fullName: string; email: string; agentCode: string; role: string }>;
@@ -68,7 +85,7 @@ export class RosterImportService {
     if (!can(ctx, 'kpm:import_roster')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You do not have permission to import a roster.',
+        TENANTS_REFUSALS.PERM_DENIED.importRoster,
         HttpStatus.FORBIDDEN,
         { permission: 'kpm:import_roster' },
       );
@@ -105,6 +122,14 @@ export class RosterImportService {
    * importing Owner to `platformRole: 'super_admin'` for the duration of the write, and
    * every membership they created would have been attributed to a platform operator.
    */
+  /**
+   * The office's calendar day, which a birth date and a join month are measured against (ADR-0158 §2):
+   * the injected clock, in the office's own timezone (invariant §9).
+   */
+  private todayIn(kpm: KpmDocument): string {
+    return localDayOf(this.clock.now(), kpm.timezone);
+  }
+
   private writeContext(ctx: RequestContext, kpmId: string): RequestContext {
     return ctx.kpmId === kpmId ? ctx : RequestContext.superAdminInTenant(ctx.userId, kpmId);
   }
@@ -116,20 +141,37 @@ export class RosterImportService {
    * is what the company and the office already contain, which is all of this.
    */
   private async issuesAgainstTheOffice(
+    ctx: RequestContext,
     kpm: KpmDocument,
     rows: RosterRow[],
   ): Promise<RosterIssue[]> {
     const issues: RosterIssue[] = [];
     const inFile = new Set(rows.map((r) => r.agentCode));
+    // The company's own ladder (OD-50): a row may name any of its live rungs, a rung it added included.
+    const rungs = await this.hierarchy.rungClassesOf(String(kpm._id));
 
     for (const row of rows) {
+      // A code the parser found well-formed, which is no live rung of this company's ladder. A malformed one
+      // already has the parser's issue.
+      if (isRungCode(row.role) && !rungs.has(row.role.toUpperCase())) {
+        issues.push({
+          line: row.line,
+          column: 'role',
+          message: SAY.notALadderRung({ role: row.role.toUpperCase(), rungs: [...rungs.keys()].sort() }),
+        });
+      }
       if (row.email) {
+        /*
+         * **That an address has an account, and nothing else**: no name, no office. The same fact `POST /auth/me/email`
+         * already answers any signed-in person (`409 AUTH_EMAIL_TAKEN`), and the row cannot be created without it. Public
+         * registration stays silent (`AuthService.registerAccount`), which is where an anonymous caller would ask.
+         */
         const existing = await this.users.findOne({ email: row.email, deletedAt: null }).exec();
         if (existing) {
           issues.push({
             line: row.line,
             column: 'email',
-            message: 'Already has an account. Import creates people; this one exists already.',
+            message: SAY.emailHasAccount,
           });
         }
       }
@@ -144,7 +186,9 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'agentCode',
-            message: `Already registered at this insurer by ${held.email}.`,
+            message: await this.mayNameTheHolder(ctx, kpm, String(held._id))
+              ? SAY.agentCodeHeld({ email: held.email })
+              : SAY.agentCodeHeldElsewhere,
           });
         }
       }
@@ -160,8 +204,7 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'leaderAgentCode',
-            message: `No active member of this office has the code ${row.leaderAgentCode}, and `
-              + 'it is not in this file either.',
+            message: SAY.leaderNotFound({ code: row.leaderAgentCode }),
           });
         }
       }
@@ -171,11 +214,27 @@ export class RosterImportService {
       issues.push({
         line: 1,
         column: 'leaderAgentCode',
-        message: 'The leader columns form a loop, so nobody in it could be created first.',
+        message: SAY.leaderLoop,
       });
     }
 
     return issues;
+  }
+
+  /**
+   * **Whether the issue may name who holds a code** (B1 of the T17–T20 permission review). The holder can be anybody
+   * at the insurer — a member of another office of the same company — and an Owner or an Admin who could read their
+   * address here could collect another office's people by uploading a file of sequential codes. So the address is shown
+   * only to a Super Admin, who holds every office's directory already (as `pastLimitForSuperAdmin` speaks to them), or
+   * when the holder holds a live membership in this very office, whom the importer can see on *Anggota* anyway. Anybody
+   * else is told the code is taken at the insurer, and nothing about whom.
+   */
+  private async mayNameTheHolder(ctx: RequestContext, kpm: KpmDocument, userId: string): Promise<boolean> {
+    if (ctx.isSuperAdmin) return true;
+    return this.members.exists(
+      RequestContext.tenantRead(String(kpm._id), 'roster-import'),
+      { userId, status: { $ne: 'removed' } },
+    );
   }
 
   /**
@@ -209,40 +268,89 @@ export class RosterImportService {
     if (max === null) return [];
 
     const issues: RosterIssue[] = [];
+    const leads = await this.leadsOnTheLadder(kpm);
     let leaders = used;
     for (const row of [...rows].sort((a, b) => a.line - b.line)) {
-      if (!isLeaderRung(row.role)) continue;
+      if (!leads(row.role)) continue;
       leaders += 1;
       if (leaders <= max) continue;
-      const already = `${used} ${used === 1 ? 'is' : 'are'} in use already`;
       issues.push({
         line: row.line,
         column: 'role',
+        /*
+         * ADR-0157 §5: a row past the limit is still refused, never queued — its temporary password is shown
+         * once, to the importer, and could not be handed over after an approval. So the office is told the way
+         * through that asks: import them as an Agent, then promote them, which asks AgencyBoost.
+         */
         message: ctx.isSuperAdmin
-          ? `This office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
-            + `row would be one too many. Raise the limit with Edit subscription on the offices list `
-            + 'first, or import them as an Agent.'
-          : `Your office’s leader limit is ${max} — ABs and AABs together — and ${already}, so this `
-            + 'row would be one too many. Import them as an Agent, or ask AgencyBoost to raise the limit.',
+          ? SAY.pastLimitForSuperAdmin({ max, used })
+          : SAY.pastLimitForOffice({ max, used }),
       });
     }
     return issues;
   }
 
+  /**
+   * **The roster template as an Excel workbook** (ADR-0184), for the office named — or, for an Owner or an Admin who
+   * names none, their own. The office decides one thing in it: `role` is a dropdown of its company ladder's rung codes.
+   * With no office (a Super Admin naming none) the column is free text. Another office's id is 404, as everywhere here.
+   */
+  async workbook(ctx: RequestContext, kpmId: string | null): Promise<Buffer> {
+    this.require(ctx);
+    const named = kpmId ?? ctx.kpmId;
+    const rungs = named
+      ? [...(await this.hierarchy.rungClassesOf(String((await this.office(ctx, named))._id))).keys()].sort()
+      : null;
+    return rosterWorkbook(ctx.reader, rungs);
+  }
+
+  /** The rows as text, pasted (`RosterRowsDto`): what a check reads. */
   async preview(ctx: RequestContext, kpmId: string, text: string): Promise<RosterPreview> {
     this.require(ctx);
-    const kpm = await this.office(ctx, kpmId);
+    return this.previewOf(ctx, await this.office(ctx, kpmId), text);
+  }
 
-    const { rows, issues } = parseRoster(text);
+  /**
+   * **The rows as a file — an Excel workbook or a CSV** (ADR-0184), read to the same text a paste is and checked by the
+   * same parser: one set of issues, whichever way the rows came. The office is checked before the file is read.
+   */
+  async previewFile(ctx: RequestContext, kpmId: string, file: FileUpload | undefined): Promise<RosterPreview> {
+    this.require(ctx);
+    const kpm = await this.office(ctx, kpmId);
+    return this.previewOf(ctx, kpm, await this.textOf(file));
+  }
+
+  async commit(ctx: RequestContext, kpmId: string, text: string): Promise<RosterCommitResult> {
+    this.require(ctx);
+    return this.commitOf(ctx, await this.office(ctx, kpmId), text);
+  }
+
+  /** The file's rows, all or nothing, as `commit` writes a paste's. */
+  async commitFile(ctx: RequestContext, kpmId: string, file: FileUpload | undefined): Promise<RosterCommitResult> {
+    this.require(ctx);
+    const kpm = await this.office(ctx, kpmId);
+    return this.commitOf(ctx, kpm, await this.textOf(file));
+  }
+
+  private async textOf(file: FileUpload | undefined): Promise<string> {
+    if (!file) {
+      throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.attachRosterFile, HttpStatus.BAD_REQUEST, { field: 'file' });
+    }
+    return rosterTextOf(file.buffer);
+  }
+
+  private async previewOf(ctx: RequestContext, kpm: KpmDocument, text: string): Promise<RosterPreview> {
+    const { rows, issues } = parseRoster(text, this.todayIn(kpm));
     const all = [
       ...issues,
-      ...(await this.issuesAgainstTheOffice(kpm, rows)),
+      ...(await this.issuesAgainstTheOffice(ctx, kpm, rows)),
       ...(await this.issuesAgainstTheLimit(ctx, kpm, rows)),
     ]
       .sort((a, b) => a.line - b.line || a.column.localeCompare(b.column));
 
     return {
-      issues: all,
+      // Each issue written for the reader (P18.98-T5 AC-3): the same words the commit's refusal carries.
+      issues: all.map((issue) => ({ ...issue, message: render(issue.message, ctx.reader) })),
       willCreate: all.length === 0 ? rows.length : 0,
       rows: rows.map(({ line, fullName, email, agentCode, role }) => ({
         line, fullName, email, agentCode, role,
@@ -250,25 +358,22 @@ export class RosterImportService {
     };
   }
 
-  async commit(ctx: RequestContext, kpmId: string, text: string): Promise<RosterCommitResult> {
-    this.require(ctx);
-    const kpm = await this.office(ctx, kpmId);
-
-    const { rows, issues } = parseRoster(text);
-    const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))];
+  private async commitOf(ctx: RequestContext, kpm: KpmDocument, text: string): Promise<RosterCommitResult> {
+    const { rows, issues } = parseRoster(text, this.todayIn(kpm));
+    const all = [...issues, ...(await this.issuesAgainstTheOffice(ctx, kpm, rows))];
     if (all.length > 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        `${all.length} row${all.length === 1 ? '' : 's'} would not import. Nothing was created — `
-          + 'fix the file and upload it again.',
+        SAY.rowsWouldNotImport({ count: all.length }),
         HttpStatus.BAD_REQUEST,
+        // Each issue's words are written for the reader by the error filter; `details` holds the English.
         { issues: all },
       );
     }
     if (rows.length === 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'That file has a header and no people in it.',
+        SAY.headerOnly,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -281,7 +386,8 @@ export class RosterImportService {
      * this very loop runs.
      */
     const { max, used } = await this.seats(kpm);
-    const leadersInFile = rows.filter((row) => isLeaderRung(row.role)).length;
+    const leads = max === null ? () => false : await this.leadsOnTheLadder(kpm);
+    const leadersInFile = rows.filter((row) => leads(row.role)).length;
     if (max !== null && leadersInFile > 0 && used + leadersInFile > max) {
       throw leaderLimitReached(max, used);
     }
@@ -305,6 +411,10 @@ export class RosterImportService {
           fullName: row.fullName,
           companyId: kpm.companyId,
           agentCode: row.agentCode,
+          // What the person records (ADR-0158): checked by the parser, so none is missing here.
+          dateOfBirth: row.dateOfBirth,
+          companyJoinMonth: row.companyJoinMonth,
+          gender: row.gender,
           // **The credential the admin has read opens nothing but the screen that replaces
           // it.** Set here rather than by a later sweep: an account that reached `active`
           // without it would be a permanent hole.
@@ -330,9 +440,15 @@ export class RosterImportService {
        * import. `createWithAccount` makes it only once the row has its seat, with the lease held.
        */
       const membership = await this.hierarchy.createWithAccount(scoped, {
-        role: row.role as 'ab' | 'aab' | 'agent',
+        // The rung's code, a lookup key — any live rung of the company's ladder (OD-50).
+        role: row.role,
         leaderId,
         status: 'active',
+        // How they work in this office is the membership's (ADR-0158 §1), not the account's.
+        workStatus: row.workStatus,
+        // An existing agent, joined on the day of the import (ADR-0169 §6): a roster is the office's people as
+        // they already are, so nobody on it is a new hire, and nobody on it is given an activation (ADR-0103).
+        joining: { joinedAs: 'existing_agent' },
       }, makeAccount);
       madeInThisRun.set(row.agentCode, String(membership._id));
 
@@ -354,6 +470,16 @@ export class RosterImportService {
     });
 
     return { created };
+  }
+
+  /**
+   * **Whether a row's rung makes a leader**, by the rung's tier on the office's company ladder (ADR-0156): the
+   * file names the rung by code, and the class it gives — not the code — is what the leader limit counts. A code
+   * that is no active rung leads nobody here, and its own write is refused `ORG_LEVEL_NOT_ON_LADDER`.
+   */
+  private async leadsOnTheLadder(kpm: KpmDocument): Promise<(rung: string) => boolean> {
+    const classes = await this.hierarchy.rungClassesOf(String(kpm._id));
+    return (rung) => isLeaderClass(classes.get(rung.toUpperCase()));
   }
 
   private async existingLeader(kpm: KpmDocument, row: RosterRow): Promise<string> {

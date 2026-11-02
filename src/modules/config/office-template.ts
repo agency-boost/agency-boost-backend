@@ -1,7 +1,15 @@
+import type { Sentence } from '@/common/i18n/sentence';
 import { trainingLinkModuleCode } from '@/modules/activation/activation-input';
 import type { StoredObject } from '@/modules/assets/storage.port';
 import type { TrainingContentPayload, TrainingTaxonomyPayload } from '@/modules/training/training-payload';
 import { withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
+import {
+  BINDING_ROLE_LABEL, BINDING_ROLES, bindingOfPayload, defaultBinding, type CascadeBinding,
+} from './activity-binding';
+import { TEMPLATE_MESSAGES } from './template.messages';
+
+/** Why a setting was left out, in both languages (P18.98-T5 AC-4): written for the person who saved. */
+const SAY = TEMPLATE_MESSAGES;
 
 /**
  * **An office's published settings, as a template's kinds** (P13.2-T7, ADR-0115 §5, §6).
@@ -40,6 +48,12 @@ export interface OfficeSettings {
    * code the snapshot does not offer is never asked for, and a row for one is ignored.
    */
   moduleContent: { code: string; companyContent?: ContentRows | null; officeContent?: ContentRows | null }[];
+  /**
+   * The office's **live** activity binding (ADR-0163): the Super Admin keeps it and the Owner does not publish it,
+   * so the live row is never an unpublished edit — it is what the office counts. Absent, the snapshot's
+   * `activityBinding`, and without either the template carries none and its offices count the default binding.
+   */
+  binding?: CascadeBinding | null;
 }
 
 /** The snapshot's training, as `TrainingService.offered` rendered it: nested, each row with its status. */
@@ -112,18 +126,20 @@ export interface DroppedSetting {
   kind: OfficeTemplateKind;
   /** The ratio, stage, grid or checklist item concerned; `null` when the whole kind is left out. */
   code: string | null;
-  /** One sentence, naming the codes, as the office page shows it. */
+  /**
+   * One sentence, naming the codes, in both languages (P18.98-T5 AC-4): written for the person who saved where the
+   * answer and the audit row are made (`TemplateCopyService.saveOffice`), as the office page shows it.
+   */
+  reason: Sentence<null>;
+}
+
+/** A dropped setting as the answer and the audit row carry it: its reason written for its reader. */
+export interface DroppedSettingView extends Omit<DroppedSetting, 'reason'> {
   reason: string;
 }
 
 const live = (row: { status?: Status }) => (row.status ?? 'active') === 'active';
 const byOrder = <T extends { displayOrder: number }>(a: T, b: T) => a.displayOrder - b.displayOrder;
-const list = (codes: readonly string[]) => codes.join(', ');
-const isAre = (codes: readonly string[]) => (codes.length === 1 ? 'which is' : 'which are');
-/** `OLD_VISIT, which is not an active activity type` — or, for several, `…, which are not active activity types`. */
-const notActiveTypes = (codes: readonly string[]) => (codes.length === 1
-  ? `${codes[0]}, which is not an active activity type`
-  : `${list(codes)}, which are not active activity types`);
 
 /**
  * **What an office's agents read, as template kinds** (ADR-0115 §5).
@@ -176,6 +192,8 @@ export function templateKindsFromOffice(
           displayOrder: t.displayOrder,
         }))),
     };
+    const bindings = bindingFrom(settings, kinds.activity_taxonomy, dropped);
+    if (bindings) kinds.activity_taxonomy.bindings = bindings;
   }
 
   const statuses = ((snapshot.leadPipelines ?? []) as { statuses?: Row[] }[])
@@ -218,6 +236,38 @@ export function templateKindsFromOffice(
 }
 
 /**
+ * **The office's activity binding, for the template** (ADR-0163 §1): each role's codes that are among the
+ * template's activity types — the office's active ones. An archived code counts in the office for its history, and
+ * an office made from the template has no history: it is taken out, and said. A role left counting nothing leaves
+ * the whole binding out, said too, and the template's offices count the default binding.
+ */
+function bindingFrom(settings: OfficeSettings, taxonomy: Record<string, unknown>, dropped: DroppedSetting[]): CascadeBinding | null {
+  const held = settings.binding
+    ?? bindingOfPayload({ bindings: (settings.snapshot as Row | null)?.activityBinding ?? null });
+  if (!held) return null;
+  const typeCodes = new Set(((taxonomy.types ?? []) as Row[]).map((t) => String(t.code)));
+  const kept = Object.fromEntries(BINDING_ROLES.map((role) => [role, held[role].filter((c) => typeCodes.has(c))])) as unknown as CascadeBinding;
+  const gone = [...new Set(BINDING_ROLES.flatMap((role) => held[role].filter((c) => !typeCodes.has(c))))];
+  const empty = BINDING_ROLES.filter((role) => kept[role].length === 0);
+  if (empty.length) {
+    dropped.push({
+      kind: 'activity_taxonomy',
+      code: null,
+      reason: SAY.bindingLeftOut({ roles: empty.map((role) => BINDING_ROLE_LABEL[role]), gone }),
+    });
+    return null;
+  }
+  if (gone.length) {
+    dropped.push({
+      kind: 'activity_taxonomy',
+      code: null,
+      reason: SAY.bindingNoLonger({ gone }),
+    });
+  }
+  return kept;
+}
+
+/**
  * The active ratios, each counting only activity types an office made from the template will have: the
  * template's own, and the three cascade types every office is given (ADR-0115 §2) — the set provisioning's
  * whole-source check holds a ratio to. An archived code is taken out; a ratio with a side left counting
@@ -228,7 +278,10 @@ function ratiosFrom(snapshot: Row, kinds: TemplateKinds, dropped: DroppedSetting
     categories?: Parameters<typeof withCascadeTypes>[0];
     types?: Parameters<typeof withCascadeTypes>[1];
   };
-  const given = withCascadeTypes(taxonomy.categories ?? [], taxonomy.types ?? []);
+  // The types the template's own binding gives an office, or the default binding's (ADR-0163 §5).
+  const given = withCascadeTypes(
+    taxonomy.categories ?? [], taxonomy.types ?? [], bindingOfPayload(kinds.activity_taxonomy) ?? defaultBinding(),
+  );
   const sections = new Set(given.categories.map((c) => c.code));
   const typeCodes = new Set(given.types.filter((t) => sections.has(t.categoryCode)).map((t) => t.code));
 
@@ -243,20 +296,15 @@ function ratiosFrom(snapshot: Row, kinds: TemplateKinds, dropped: DroppedSetting
     const bottom = denominator.filter((c) => typeCodes.has(c));
 
     if (gone.length && (top.length === 0 || bottom.length === 0)) {
-      const side = top.length === 0 && bottom.length === 0 ? 'its numerator and its denominator count'
-        : top.length === 0 ? 'its numerator counts' : 'its denominator counts';
-      dropped.push({
-        kind: 'ratio_set',
-        code,
-        reason: `Ratio ${code} was left out: ${side} only ${notActiveTypes(gone)} in this office.`,
-      });
+      const side = top.length === 0 && bottom.length === 0 ? 'both' : top.length === 0 ? 'numerator' : 'denominator';
+      dropped.push({ kind: 'ratio_set', code, reason: SAY.ratioLeftOut({ code, side, gone }) });
       continue;
     }
     if (gone.length) {
       dropped.push({
         kind: 'ratio_set',
         code,
-        reason: `Ratio ${code} no longer counts ${notActiveTypes(gone)} in this office.`,
+        reason: SAY.ratioNoLonger({ code, gone }),
       });
     }
     kept.push({
@@ -297,8 +345,7 @@ function checklistFrom(
           dropped.push({
             kind: 'activation_checklist',
             code: item.code,
-            reason: `Checklist item ${item.code} is kept as a manual item: the training module ${moduleCode} `
-              + 'it linked to is not offered in this office.',
+            reason: SAY.checklistManual({ item: item.code, moduleCode }),
           });
           return { code: item.code, label: item.label, autoLink: null };
         }
@@ -388,8 +435,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: s.code,
-        reason: `Stage ${s.code} was left out: every milestone it requires (${list(gone)}) is archived in `
-          + 'this office, so an office made from the template would put everybody on it.',
+        reason: SAY.stageLeftOut({ code: s.code, gone }),
       });
       return [];
     }
@@ -397,7 +443,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: s.code,
-        reason: `Stage ${s.code} no longer requires ${list(gone)}, ${isAre(gone)} archived in this office.`,
+        reason: SAY.stageNoLonger({ code: s.code, gone }),
       });
     }
     return [{ code: s.code, label: s.label, requiredMilestoneCodes: required, stageOrder: s.stageOrder }];
@@ -409,7 +455,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
       found.push({
         kind: 'capability_ladder',
         code: g.code,
-        reason: `Grid ${g.code} was left out: every item in it is archived in this office.`,
+        reason: SAY.gridLeftOut({ code: g.code }),
       });
       return [];
     }
@@ -425,9 +471,7 @@ function capabilityFrom(catalog: SnapshotCapability | null, dropped: DroppedSett
     dropped.push(...found, {
       kind: 'capability_ladder',
       code: null,
-      reason: `The capability ladder was left out: it has no active ${stages.length === 0 ? 'stage' : 'milestone'} `
-        + 'left, so it could place nobody. An office made from the template starts with AgencyBoost’s standard '
-        + 'capability ladder instead.',
+      reason: SAY.ladderLeftOut({ missing: stages.length === 0 ? 'stage' : 'milestone' }),
     });
     return null;
   }

@@ -157,7 +157,9 @@ describe('the Unit Dashboard, measured (P15-T1 AC-8)', () => {
     expect(view.yourUnit.rows).toHaveLength(1);
     expect(view.units).toHaveLength(UNITS);
     expect(view.units.map((u) => u.members.length)).toEqual(Array(UNITS).fill(PER_UNIT));
-    expect(view.tiles.team).toEqual({ total: 1 + UNITS * (PER_UNIT + 1), direct: 1, units: UNITS, underUnits: UNITS * PER_UNIT });
+    expect(view.tiles.team).toEqual({
+      total: 1 + UNITS * (PER_UNIT + 1), direct: 1, units: UNITS, underUnits: UNITS * PER_UNIT, newHires: 0,
+    });
   });
 
   it('P15-T1 AC-8 sends the same queries for fifty people as for five hundred: none per person', async () => {

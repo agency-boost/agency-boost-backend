@@ -1,3 +1,6 @@
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import { checkActivationChecklist, trainingLinkModuleCode } from './activation-input';
 import {
   activationChecklistProblems, activationTrainingLinks, defaultActivationChecklist,
@@ -18,6 +21,16 @@ function violations(body: unknown): string[] {
     return [];
   } catch (err) {
     return (err as { details?: { violations?: string[] } }).details?.violations ?? [];
+  }
+}
+
+/** The same sentences as given — both languages — read in Indonesian (P18.98-T5 AC-3). */
+function indonesianViolations(body: unknown): string[] {
+  try {
+    checkActivationChecklist(body);
+    return [];
+  } catch (err) {
+    return indonesianAll((err as DomainException).givenDetails!.violations as Sentence[]);
   }
 }
 
@@ -136,6 +149,49 @@ describe('what a write to an activation checklist may contain (P5-T3, ADR-0030)'
     expect(violations(null).join(' ')).toContain('aspects must be a list');
     expect(violations({ aspects: ['nope'] }).join(' ')).toContain('must be an object of fields');
   });
+
+  it('P18.98-T5 AC-3 names every problem in Indonesian too, each place in the checklist as the reader counts it', () => {
+    const body = {
+      aspects: [
+        { code: 'INTRODUCTION', label: '', items: [item({ autoLink: 'feature:coaching' }), item({ code: 'X_ITEM', autoLink: 7 })] },
+        { code: 'INTRODUCTION', label: 'Again', items: [item({ autoLink: 'sales:first' }), item({ code: 'Y_ITEM', autoLink: 'training:no' })] },
+        { code: 'THIRD', label: 'Third', items: 'none' },
+        'nope',
+      ],
+    };
+    expect(violations(body)).toEqual([
+      'Aspect 1: label must be 1–80 characters.',
+      'Aspect 1, item 1: feature:coaching is not a link this product has. Use one of feature:goals, feature:leads, '
+        + 'feature:activity, training:<module code>, or nothing at all for a manual item.',
+      'Aspect 1, item 2: autoLink must be text, or null for a manual item.',
+      'The aspect code INTRODUCTION is used twice.',
+      'Aspect 2, item 1: sales:first is not chosen for an item. It belongs to the item whose code it is bound to, '
+        + 'which reads it on its own.',
+      'The item code INSURANCE_BASICS is used twice.',
+      'Aspect 2, item 2: a training link names a module code. A code is 3–40 characters of A–Z, 0–9 and underscore, '
+        + 'starting with a letter.',
+      'Aspect 3: items must be a list.',
+      'Aspect 4 must be an object of fields.',
+    ]);
+    expect(indonesianViolations(body)).toEqual([
+      'Aspek 1: label harus 1–80 karakter.',
+      'Aspek 1, item 1: feature:coaching bukan tautan yang dimiliki produk ini. Gunakan salah satu dari feature:goals, '
+        + 'feature:leads, feature:activity, training:<kode modul>, atau kosongkan untuk item manual.',
+      'Aspek 1, item 2: autoLink harus berupa teks, atau null untuk item manual.',
+      'Kode aspek INTRODUCTION dipakai dua kali.',
+      'Aspek 2, item 1: sales:first tidak dipilih untuk sebuah item. Tautan ini milik item yang kodenya terikat padanya, '
+        + 'dan item itu membacanya sendiri.',
+      'Kode item INSURANCE_BASICS dipakai dua kali.',
+      'Aspek 2, item 2: tautan training menyebut kode modul. Kode terdiri dari 3–40 karakter A–Z, 0–9 dan garis bawah, '
+        + 'diawali huruf.',
+      'Aspek 3: items harus berupa daftar.',
+      'Aspek 4 harus berupa objek berisi kolom.',
+    ]);
+    expect(indonesianViolations({ aspects: [] })).toEqual(['Checklist memiliki 1–20 aspek; checklist ini memiliki 0.']);
+    expect(indonesianViolations(checklist({ aspects: [{ code: 'INTRODUCTION', label: '1. Introduction', items: [] }] })))
+      .toEqual(['Aspek 1 memiliki 0 item; satu aspek berisi 1–50 item.']);
+    expect(indonesianViolations(null)).toEqual(['aspects harus berupa daftar.']);
+  });
 });
 
 describe('the checklist as a company template payload', () => {
@@ -150,10 +206,20 @@ describe('the checklist as a company template payload', () => {
   });
 
   it('reports a broken payload as sentences rather than throwing', () => {
-    expect(activationChecklistProblems({ aspects: [] })[0]).toContain('1–20 aspects');
+    expect(englishAll(activationChecklistProblems({ aspects: [] }))[0]).toContain('1–20 aspects');
     // Two sentences: it is not an object, and it has no aspects. A caller hears both.
-    expect(activationChecklistProblems('not a checklist').join(' '))
+    expect(englishAll(activationChecklistProblems('not a checklist')).join(' '))
       .toContain('The change must be an object of fields. aspects must be a list.');
+  });
+
+  it('P18.98-T5 AC-3 reports them in both languages, read from the refusal’s sentences as given', () => {
+    expect(indonesianAll(activationChecklistProblems('not a checklist')))
+      .toEqual(['Perubahan harus berupa objek berisi kolom.', 'aspects harus berupa daftar.']);
+  });
+
+  it('throws on what is not a refusal: a fault is not the payload’s problem', () => {
+    const faulty = { get aspects(): unknown { throw new Error('the payload could not be read'); } };
+    expect(() => activationChecklistProblems(faulty)).toThrow('the payload could not be read');
   });
 
   it('lists every training module a checklist names, once each', () => {

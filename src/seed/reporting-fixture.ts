@@ -32,7 +32,9 @@ import { monthField, seedMonthFigures } from './production-figures';
  * **Every new member joined more than six months ago** — so no New hires roster changes (ADR-0104) — and none is
  * in Agus's, Sari's or Arief's downline, so their walks do not change. **Yosef is tagged *Core Leader***, beside
  * Agus and Sari. The two new ABs and Winda are leaders, so **the subscription walk's *Leaders* reads 9 / 10** where
- * it read 6 / 10, and the Owner's field view gains the two agencies.
+ * it read 6 / 10, and the Owner's field view gains the two agencies. *Since P18.97-T1 (AC-20):* **Yosef and Winda joined
+ * before January of last year** (`BEFORE_LAST_YEAR`), so the office's file holds every month of last year and the forum's
+ * *Full Year* and *YTD* of last year read whole years.
  *
  * **Derived ids, written once until `--reset`**: every row this writes carries an `_id` from `seedObjectId`, or
  * is keyed by what makes it unique — a month's file is written only into a month the office holds nothing for, an
@@ -71,27 +73,36 @@ export type ReportingKey =
 
 const RECENT = [0, 2, 4, 6, 8, 10, 12];
 
+/**
+ * **The longest-serving leaders' join, before January of last year whatever day the seed runs** (P18.97-T1 AC-20): 800
+ * days is more than two years back from any day of the run's year, so **0417's file holds every month of last year** —
+ * Yosef and Winda on each — and the forum's *Full Year {Y−1}* and *YTD {Y−1}* read whole years, with no *(\*)* note
+ * (ADR-0175 §9). Neither is a new hire, so no cohort, *New hires* roster or 3M figure moves; this year's files list
+ * them already.
+ */
+const BEFORE_LAST_YEAR = { yosef: 800, winda: 780 } as const;
+
 /** The two new agencies, leaders first. Nobody here is in Agus's, Sari's or Arief's downline. */
 export const REPORTING_CAST: readonly ReportingCastMember[] = [
-  { key: 'yosef', email: 'yosef@kpm0417.test', fullName: 'Yosef Tambunan', role: 'ab', leader: 'owner', agentCode: 'PRU-87001', joinedDaysAgo: 420, apeMillions: 18, persistency: 88, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'arini', email: 'arini@kpm0417.test', fullName: 'Arini Kusuma', role: 'agent', leader: 'yosef', agentCode: 'PRU-87002', joinedDaysAgo: 390, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'bonar', email: 'bonar@kpm0417.test', fullName: 'Bonar Hutapea', role: 'agent', leader: 'yosef', agentCode: 'PRU-87003', joinedDaysAgo: 380, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'cahya', email: 'cahya@kpm0417.test', fullName: 'Cahya Ningrum', role: 'agent', leader: 'yosef', agentCode: 'PRU-87004', joinedDaysAgo: 360, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'damar', email: 'damar@kpm0417.test', fullName: 'Damar Pangestu', role: 'agent', leader: 'yosef', agentCode: 'PRU-87005', joinedDaysAgo: 340, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'elsa', email: 'elsa@kpm0417.test', fullName: 'Elsa Marbun', role: 'agent', leader: 'yosef', agentCode: 'PRU-87006', joinedDaysAgo: 320, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'winda', email: 'winda@kpm0417.test', fullName: 'Winda Anggraeni', role: 'aab', leader: 'yosef', agentCode: 'PRU-87007', joinedDaysAgo: 400, apeMillions: 17, persistency: 85, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'ikhsan', email: 'ikhsan@kpm0417.test', fullName: 'Ikhsan Prabowo', role: 'agent', leader: 'winda', agentCode: 'PRU-87008', joinedDaysAgo: 300, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
-  { key: 'jihan', email: 'jihan@kpm0417.test', fullName: 'Jihan Mardiyah', role: 'agent', leader: 'winda', agentCode: 'PRU-87009', joinedDaysAgo: 290, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'yosef', email: 'yosef@kpm0417.test', fullName: 'Yosef Tambunan', role: 'ab', leader: 'owner', agentCode: '87001', joinedDaysAgo: BEFORE_LAST_YEAR.yosef, apeMillions: 18, persistency: 88, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'arini', email: 'arini@kpm0417.test', fullName: 'Arini Kusuma', role: 'agent', leader: 'yosef', agentCode: '87002', joinedDaysAgo: 390, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'bonar', email: 'bonar@kpm0417.test', fullName: 'Bonar Hutapea', role: 'agent', leader: 'yosef', agentCode: '87003', joinedDaysAgo: 380, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'cahya', email: 'cahya@kpm0417.test', fullName: 'Cahya Ningrum', role: 'agent', leader: 'yosef', agentCode: '87004', joinedDaysAgo: 360, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'damar', email: 'damar@kpm0417.test', fullName: 'Damar Pangestu', role: 'agent', leader: 'yosef', agentCode: '87005', joinedDaysAgo: 340, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'elsa', email: 'elsa@kpm0417.test', fullName: 'Elsa Marbun', role: 'agent', leader: 'yosef', agentCode: '87006', joinedDaysAgo: 320, apeMillions: 16, persistency: 82, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'winda', email: 'winda@kpm0417.test', fullName: 'Winda Anggraeni', role: 'aab', leader: 'yosef', agentCode: '87007', joinedDaysAgo: BEFORE_LAST_YEAR.winda, apeMillions: 17, persistency: 85, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'ikhsan', email: 'ikhsan@kpm0417.test', fullName: 'Ikhsan Prabowo', role: 'agent', leader: 'winda', agentCode: '87008', joinedDaysAgo: 300, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
+  { key: 'jihan', email: 'jihan@kpm0417.test', fullName: 'Jihan Mardiyah', role: 'agent', leader: 'winda', agentCode: '87009', joinedDaysAgo: 290, apeMillions: 15, persistency: 80, annualTargetMillions: 180, loggedDaysBack: RECENT },
   // A quiet agent: no APE, no policy, every month — *not active*.
-  { key: 'kemal', email: 'kemal@kpm0417.test', fullName: 'Kemal Rasyid', role: 'agent', leader: 'winda', agentCode: 'PRU-87010', joinedDaysAgo: 280, apeMillions: 0, persistency: 80, annualTargetMillions: 180, loggedDaysBack: [8, 11, 15, 20] },
-  { key: 'satria', email: 'satria@kpm0417.test', fullName: 'Satria Nugraha', role: 'ab', leader: 'owner', agentCode: 'PRU-87011', joinedDaysAgo: 330, apeMillions: 6, persistency: 70, annualTargetMillions: 300, loggedDaysBack: [1, 3] },
-  { key: 'oscar', email: 'oscar@kpm0417.test', fullName: 'Oscar Lumbantobing', role: 'agent', leader: 'satria', agentCode: 'PRU-87012', joinedDaysAgo: 310, apeMillions: 4, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [9, 15] },
-  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: 'PRU-87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [12] },
+  { key: 'kemal', email: 'kemal@kpm0417.test', fullName: 'Kemal Rasyid', role: 'agent', leader: 'winda', agentCode: '87010', joinedDaysAgo: 280, apeMillions: 0, persistency: 80, annualTargetMillions: 180, loggedDaysBack: [8, 11, 15, 20] },
+  { key: 'satria', email: 'satria@kpm0417.test', fullName: 'Satria Nugraha', role: 'ab', leader: 'owner', agentCode: '87011', joinedDaysAgo: 330, apeMillions: 6, persistency: 70, annualTargetMillions: 300, loggedDaysBack: [1, 3] },
+  { key: 'oscar', email: 'oscar@kpm0417.test', fullName: 'Oscar Lumbantobing', role: 'agent', leader: 'satria', agentCode: '87012', joinedDaysAgo: 310, apeMillions: 4, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [9, 15] },
+  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: '87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [12] },
   // Joined long ago and has never logged: *Never logged* on the Overview, *Never* in the directory.
-  { key: 'raka', email: 'raka@kpm0417.test', fullName: 'Raka Aditama', role: 'agent', leader: 'satria', agentCode: 'PRU-87014', joinedDaysAgo: 220, apeMillions: null, persistency: 0, annualTargetMillions: 300, loggedDaysBack: [] },
+  { key: 'raka', email: 'raka@kpm0417.test', fullName: 'Raka Aditama', role: 'agent', leader: 'satria', agentCode: '87014', joinedDaysAgo: 220, apeMillions: null, persistency: 0, annualTargetMillions: 300, loggedDaysBack: [] },
   // Yosef's agent until last month: on every file this year to three months ago, removed since (OD-74). Placed
   // last, so every member above keeps the agent sequence a fresh seed has always given them.
-  { key: 'gilang', email: 'gilang@kpm0417.test', fullName: 'Gilang Saputra', role: 'agent', leader: 'yosef', agentCode: 'PRU-87015', joinedDaysAgo: 400, apeMillions: 14, persistency: 81, annualTargetMillions: 180, loggedDaysBack: [], removedLastMonth: true },
+  { key: 'gilang', email: 'gilang@kpm0417.test', fullName: 'Gilang Saputra', role: 'agent', leader: 'yosef', agentCode: '87015', joinedDaysAgo: 400, apeMillions: 14, persistency: 81, annualTargetMillions: 180, loggedDaysBack: [], removedLastMonth: true },
 ];
 
 /** This month's recruitment target, set by the Owner (D-recruit). */
@@ -332,7 +343,7 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     await db.collection('coachingSessions').insertOne({
       _id: oid(id), kpmId: office, coachMembershipId: coach, coacheeMembershipId: coachee, status: 'finalized', date: day,
       lastWeek: null, lastWeekItems: [], tips: [], leadActions: [],
-      actionItems: [{ itemId: seedObjectId('reporting-fixture', 'item', office, slot), text: 'Book two presentations', dueDate: addDays(day, 7), carriedFromItemId: null }],
+      actionItems: [{ itemId: seedObjectId('reporting-fixture', 'item', office, slot), text: 'Jadwalkan dua presentasi', dueDate: addDays(day, 7), carriedFromItemId: null }],
       snapshot: null, finalizedAt: at(day, 4), finalizedByMembershipId: coach, version: 3, frozenAt: at(day, 4), corrections: [],
       deletedAt: null, createdAt: at(day, 3), createdBy: coach, updatedAt: at(day, 4), updatedBy: coach,
     });
@@ -353,9 +364,9 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     await db.collection('leads').insertOne({
       _id: oid(id), kpmId, ownerMembershipId: ownerId, name, type: 'recruitment', contact: { phone: null, email: null },
       statusCode, statusId: status ? String(status._id) : null, commitments: [], remarks: null,
-      nextActionDate: closedWonOn ? null : addDays(today, 3), nextActionNote: closedWonOn ? null : 'Confirm the AAJI exam date.',
+      nextActionDate: closedWonOn ? null : addDays(today, 3), nextActionNote: closedWonOn ? null : 'Konfirmasi tanggal ujian AAJI.',
       outcome: closedWonOn ? 'won' : null, outcomeAt: closedWonOn ? at(closedWonOn, 5) : null, dateRegistered: registered,
-      source: 'Personal network', version: path.length + (closedWonOn ? 2 : 1),
+      source: 'Jaringan pribadi', version: path.length + (closedWonOn ? 2 : 1),
       transitions: path.map((code, i) => ({
         fromStatusCode: i === 0 ? null : path[i - 1], toStatusCode: code,
         at: at(addDays(closedWonOn ?? today, -(path.length - i) * 4), 4), byMembershipId: ownerId,
@@ -455,7 +466,8 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
                                  somebody, Satria at 0% (coached by nobody this week). Who hasn't logged:
                                  Agus Prasetyo and Raka Aditama never; the Owner and Maya 11 to 19 days ago.
                                  Recruitment target ${REPORTING_RECRUIT_TARGET}, set by the Owner this month; three
-                                 candidates at late stages and two closed won last month. A year of files to
+                                 candidates at late stages and two closed won last month. Files from January
+                                 last year — every month of it, Yosef and Winda here since the year before — to
                                  three months ago; the month before last is empty. Gilang Saputra left
                                  Yosef's agency last month: on the Removed tab, their production this year
                                  still the office's

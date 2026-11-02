@@ -1,14 +1,13 @@
 import mongoose from 'mongoose';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
-import { MonthlyAgentData } from '@/modules/production/monthly-agent-data.schema';
-import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
 import { VALUE_COLUMNS } from '@/modules/production/production-preview';
 import { TEMPLATE_HEADER_V1 } from '@/modules/production/production-template';
 import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule } from '../../../../test/config-module';
 import { KPM_A, ROSTER_NOW, type Who } from '../../../../test/coaching-office';
+import { scorecardServiceOf } from '../../../../test/forum-office';
 import { buildReportingOffice, type ReportingOffice } from '../../../../test/reporting-office';
 import { LeaderScorecardService } from './scorecard.service';
 import type { ColumnKey, ComputedScorecard, RowKey, ScorecardCell } from './scorecard.types';
@@ -18,6 +17,8 @@ const JAKARTA = 'Asia/Jakarta';
 /** In two days: live, its periods ending today, 14 September 2026. */
 const MEETING = '2026-09-16';
 const LAST_YEAR = Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}`);
+/** *YTD 2025* for a meeting in September 2026: the months *YTD 2026* covers, a year earlier (P18.97-T1 AC-1). */
+const LAST_YEAR_TO_DATE = LAST_YEAR.slice(0, 9);
 const THIS_YEAR = Array.from({ length: 9 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
 /** The end of a local day, and of a month, in Jakarta: 00:00 the next day, as `Clock` gives it. */
 const endOfDay = (day: string) => new Date(new Date(`${day}T00:00:00+07:00`).getTime() + 86_400_000);
@@ -93,10 +94,7 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       );
     }
 
-    scorecard = new LeaderScorecardService(
-      wired.officePeople, wired.productionReadings,
-      new MonthlyAgentDataRepository(mongoose.model(MonthlyAgentData.name) as never), wired.activationRows, wired.clock,
-    );
+    scorecard = scorecardServiceOf(wired);
   }, 120_000);
 
   afterAll(stopMongo);
@@ -143,18 +141,19 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     for (const month of [...LAST_YEAR, ...THIS_YEAR]) files.set(month, await fileOf(month));
     const held = (month: string) => files.get(month)!.some((r) => r.ape !== null || r.ytd !== null);
 
-    // ---- The headcount and the chips: the Overview's, today.
+    // ---- The headcount and the chips: the Overview's, today. *# of units* is every AB and AAB (P18.97-T1 AC-9).
+    const rung = (code: string) => overview.composition.rungs.find((r) => r.code === code)?.count ?? 0;
     expect([at('chips'), card.chips]).toEqual([at('chips'), {
       manpower: overview.composition.total,
-      agents: overview.composition.rungs.find((r) => r.code === 'AGENT')?.count ?? 0,
-      ab: overview.composition.rungs.find((r) => r.code === 'AB')?.count ?? 0,
-      units: overview.composition.rungs.find((r) => r.code === 'AB')?.count ?? 0,
-      aab: overview.composition.rungs.find((r) => r.code === 'AAB')?.count ?? 0,
+      agents: rung('AGENT'),
+      ab: rung('AB'),
+      units: rung('AB') + rung('AAB'),
+      aab: rung('AAB'),
     }]);
     expect([at('manpower'), value('manpower', 'thisMonth'), value('manpower', 'ytd')])
       .toEqual([at('manpower'), overview.composition.total, overview.composition.total]);
     // An earlier period's last day: OFFICE_HEADCOUNT on the office's memberships, the Overview's function.
-    for (const [column, day] of [['fy', '2025-12-31'], ['thisMonthLastYear', '2025-09-30'], ['lastMonth', '2026-08-31']] as const) {
+    for (const [column, day] of [['fy', '2025-12-31'], ['ytdLastYear', '2025-09-30'], ['thisMonthLastYear', '2025-09-30'], ['lastMonth', '2026-08-31']] as const) {
       expect([at(`manpower ${column}`), value('manpower', column)]).toEqual([at(`manpower ${column}`), officeHeadcount(memberships, endOfDay(day))]);
     }
 
@@ -165,10 +164,13 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     for (const [column, month] of [['thisMonth', '2026-09'], ['lastMonth', '2026-08'], ['thisMonthLastYear', '2025-09']] as const) {
       expect([at(`APE ${month}`), value('ape', column)]).toEqual([at(`APE ${month}`), sum(files.get(month)!.map((r) => r.ape)) ?? 'pending']);
     }
-    // FY: each member's latest year to date of last year, from the tables, a leaver's included.
-    const latestYtd = new Map<string, number>();
-    for (const month of LAST_YEAR) for (const r of files.get(month)!) if (r.ytd !== null) latestYtd.set(r.membershipId, r.ytd);
-    expect([at('APE FY'), value('ape', 'fy')]).toEqual([at('APE FY'), sum([...latestYtd.values()]) ?? 'pending']);
+    // FY, and last year to September (P18.97-T1 AC-1): each member's latest year to date of the months, from the tables,
+    // a leaver's included.
+    for (const [column, months] of [['fy', LAST_YEAR], ['ytdLastYear', LAST_YEAR_TO_DATE]] as const) {
+      const latestYtd = new Map<string, number>();
+      for (const month of months) for (const r of files.get(month)!) if (r.ytd !== null) latestYtd.set(r.membershipId, r.ytd);
+      expect([at(`APE ${column}`), value('ape', column)]).toEqual([at(`APE ${column}`), sum([...latestYtd.values()]) ?? 'pending']);
+    }
 
     // ---- Avg. Monthly AA: the analytics' total row's *Active this month* and *last month*, and their mean.
     expect([at('MAA this month'), value('avg_monthly_aa', 'thisMonth')]).toEqual([at('MAA this month'), now.total.activeAgents ?? 'pending']);
@@ -183,27 +185,24 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     expect(thisYearHeld).toEqual(expect.arrayContaining(['2026-08', '2026-09']));
     expect([at('MAA YTD = the analytics’ months'), value('avg_monthly_aa', 'ytd')])
       .toEqual([at('MAA YTD = the analytics’ months'), thisYearHeld.reduce((n, m) => n + countOf(m), 0) / thisYearHeld.length]);
-    const lastYearHeld = LAST_YEAR.filter(held);
-    expect([at('MAA FY'), value('avg_monthly_aa', 'fy')]).toEqual([
-      at('MAA FY'), lastYearHeld.reduce((n, m) => n + maaIn(m, endOf(m)), 0) / lastYearHeld.length,
-    ]);
+    for (const [column, months] of [['fy', LAST_YEAR], ['ytdLastYear', LAST_YEAR_TO_DATE]] as const) {
+      const lastYearHeld = months.filter(held);
+      expect([at(`MAA ${column}`), value('avg_monthly_aa', column)]).toEqual([
+        at(`MAA ${column}`), lastYearHeld.reduce((n, m) => n + maaIn(m, endOf(m)), 0) / lastYearHeld.length,
+      ]);
+    }
     expect([at('MAA months agree'), maaIn('2026-09', endOf('2026-09')), maaIn('2026-08', endOf('2026-08'))])
       .toEqual([at('MAA months agree'), now.total.activeAgents, then.total.activeAgents]);
 
-    // ---- Case submission and New AA: the table's policies and new active agents, with its leavers.
+    // ---- Case submission: the table's policies, with its leavers. (*New AA* is drawn nowhere since P18.97-T1 AC-6.)
     const perMonth = (pick: (r: FileRow) => number | null) => (month: string) => sum(files.get(month)!.map(pick));
     const policies = perMonth((r) => r.policies);
-    const newAA = perMonth((r) => r.newAA);
     for (const [column, month] of [['thisMonth', '2026-09'], ['lastMonth', '2026-08'], ['thisMonthLastYear', '2025-09']] as const) {
       expect([at(`policies ${month}`), value('case_submission', column)]).toEqual([at(`policies ${month}`), policies(month) ?? 'pending']);
-      expect([at(`new AA ${month}`), value('new_aa', column)]).toEqual([at(`new AA ${month}`), newAA(month) ?? 'pending']);
     }
-    for (const [column, months] of [['fy', LAST_YEAR], ['ytd', THIS_YEAR]] as const) {
+    for (const [column, months] of [['fy', LAST_YEAR], ['ytdLastYear', LAST_YEAR_TO_DATE], ['ytd', THIS_YEAR]] as const) {
       expect([at(`policies ${column}`), value('case_submission', column)])
         .toEqual([at(`policies ${column}`), sum(months.map(policies)) ?? 'pending']);
-      const carried = months.map(newAA).filter((v): v is number => v !== null);
-      expect([at(`new AA ${column}`), value('new_aa', column)])
-        .toEqual([at(`new AA ${column}`), carried.length === 0 ? 'pending' : carried.reduce((a, b) => a + b, 0) / carried.length]);
       // Average Case Size: the same months' APE over their policies.
       const both = months.filter((m) => sum(files.get(m)!.map((r) => r.ape)) !== null && policies(m) !== null);
       const pols = both.reduce((n, m) => n + policies(m)!, 0);
@@ -220,29 +219,33 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       }).map((r) => r.membershipId)));
       expect([at(`producing ${column}`), value('producing_agents', column)])
         .toEqual([at(`producing ${column}`), months.some(held) ? producing.size : 'pending']);
+      // Cases/producing agents (P18.97-T1 AC-5): the same months' policies over the same members.
+      const cases = sum(months.map(policies));
+      expect([at(`cases/producing ${column}`), value('cases_per_producing_agent', column)])
+        .toEqual([at(`cases/producing ${column}`), cases === null || !months.some(held) ? 'pending' : producing.size === 0 ? 'none' : cases / producing.size]);
     }
 
     // ---- FLC: pending everywhere (OD-26).
     expect([at('FLC'), Object.values(card.rows.find((r) => r.key === 'flc')!.cells).map((x) => x.kind)])
-      .toEqual([at('FLC'), Array(5).fill('pending')]);
+      .toEqual([at('FLC'), Array(6).fill('pending')]);
     return card;
   }
 
-  it('P18.1-T2 AC-4 exit test 1 over the office as it stands', async () => {
+  it('P18.1-T2 AC-4 exit test 1 over the office as it stands — P18.97-T1 AC-1, AC-21: YTD {Y−1} equal to the month table’s figures for its months', async () => {
     const card = await reconciles('as it stands');
     // The office holds August and September this year, and last year whole: what reconciled are figures, not two
     // *pending data* agreeing — FLC and This Month's new active agents aside, which nothing on file carries.
     const kinds = Object.fromEntries(card.rows.map((r) => [r.key, Object.values(r.cells).map((x) => x.kind).join(' ')]));
     expect(kinds).toEqual({
-      ape: 'figure figure figure figure figure',
-      manpower: 'figure figure figure figure figure',
-      flc: 'pending pending pending pending pending',
-      producing_agents: 'figure figure blocked blocked blocked',
-      new_aa: 'figure figure figure figure figure',
-      new_agent_3m: 'pending pending blocked blocked blocked',
-      avg_monthly_aa: 'figure figure figure figure figure',
-      case_submission: 'figure figure figure figure figure',
-      average_case_size: 'figure figure blocked blocked blocked',
+      ape: 'figure figure figure figure figure figure',
+      manpower: 'figure figure figure figure figure figure',
+      flc: 'pending pending pending pending pending pending',
+      producing_agents: 'figure figure figure blocked blocked blocked',
+      new_agent_3m: 'pending pending pending blocked blocked blocked',
+      avg_monthly_aa: 'figure figure figure figure figure figure',
+      case_submission: 'figure figure figure figure figure figure',
+      cases_per_producing_agent: 'figure figure figure blocked blocked blocked',
+      average_case_size: 'figure figure figure blocked blocked blocked',
     });
   }, 120_000);
 

@@ -82,15 +82,22 @@ describe('the measured rates beside the conversion assumptions (P10-T9)', () => 
     expect(read.measured).toEqual(saved.measured);
   });
 
-  it('AC-1: follows the codes the goal binds, not the seeded ones', async () => {
+  it('AC-1: follows the codes the office binds, not the seeded ones (ADR-0163)', async () => {
     await wired.goals.save(agent(), plan);
-    await mongoose.connection.db!.collection('goals').updateOne(
-      { membershipId: AGENT }, { $set: { cascadeMapping: { leadsCode: 'CALLS', appointmentsCode: 'MEETINGS', closingsCode: 'SALES' } } },
-    );
+    // The office's activity binding, as the Super Admin keeps it — not the goal's stored mapping, which is a record.
+    await mongoose.connection.db!.collection('activityBindings').insertOne({
+      kpmId: KPM, leads: ['CALLS'], appointments: ['MEETINGS'], closings: ['SALES'], version: 2, status: 'active',
+      archivedAt: null, deletedAt: null,
+    });
     await day('2026-09-20', { CALLS: 10, MEETINGS: 5, SALES: 1, LEADS_CONTACTED: 999 });
 
-    expect((await wired.goals.readOrDefaults(agent(), '2026')).measured)
-      .toMatchObject({ leadToAppointmentRate: 0.5, closingRate: 0.2 });
+    const read = await wired.goals.readOrDefaults(agent(), '2026');
+    expect(read.measured).toMatchObject({ leadToAppointmentRate: 0.5, closingRate: 0.2 });
+    // The plan was saved before the rebind: its record still names what it was first counted against.
+    expect(read.cascadeMapping).toEqual({
+      leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION',
+    });
+    expect(read.cascadeBinding).toEqual({ leads: ['CALLS'], appointments: ['MEETINGS'], closings: ['SALES'] });
   });
 
   it('AC-2: is not enough data — null, never 0% — where there is nothing to divide by', async () => {

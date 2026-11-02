@@ -1,6 +1,6 @@
 import type { LocalDate } from '@/common/time/local-day';
 import type { ActivationLinkView } from './activation.service';
-import type { ActivationItemSource } from './activation-progress.schema';
+import type { ActivationItemSource, ActivationRecordCollection } from './activation-progress.schema';
 import type { ActivationState, AspectStatus } from './activation-rules';
 
 /**
@@ -31,6 +31,34 @@ export interface ActivationItemProgressView {
   note: string | null;
   /** The hire's own date, an office date: **only** in the hire's own read. */
   date: LocalDate | null;
+  /**
+   * **Ticked by hand, waiting for data** (P18.96-T4 AC-4): a data-backed item done by the hire or a leader, which its
+   * data has not confirmed yet. It reads as the link's — `source: 'link'`, this `false` — from the read its data
+   * appears on.
+   */
+  waiting: boolean;
+  /** The record a done data-backed item names — the lead, the 1:1, the file's month — for its source line. */
+  record: ActivationItemRecordView | null;
+}
+
+/** A record an item names (P18.96-T4 AC-2): its collection and its id, which the screen turns into a link. */
+export interface ActivationItemRecordView {
+  collection: ActivationRecordCollection;
+  id: string;
+}
+
+/** One of a member's closings (P18.96-T4 AC-3): what *Which case?* offers to name. */
+export interface ActivationClosingView {
+  leadId: string;
+  /** The person the case was sold to: the lead's name. */
+  name: string;
+  /** The office day it first reached *Paid and issued*. */
+  date: LocalDate;
+}
+
+/** `GET /activation/me/closings` and `GET /new-hires/:membershipId/closings`. */
+export interface ActivationClosingsView {
+  closings: ActivationClosingView[];
 }
 
 export interface ActivationAspectProgressView {
@@ -74,35 +102,158 @@ export interface ActivationView {
   note: ActivationNoteView | null;
 }
 
-/** One row of *Your New Hires*. */
-export interface NewHireRowView {
-  hire: ActivationPersonView;
-  /** What the *Joined* column prints (`:6734-6736`). */
-  startDate: LocalDate;
-  day: number;
-  window: number;
-  overdue: boolean;
-  pct: number;
-  /** *Active Agent*: the item `FIRST_CASE_CLOSED` is done. */
-  firstCaseClosed: boolean;
-}
-
 /**
- * A card of the roster: *Direct Unit*, or the nearest leader below the reader — an AAB, or an AB under
- * an AB, the card naming the rung (D-group).
+ * *Direct Unit*, or the nearest leader below the reader — an AAB, or an AB under an AB, naming the rung (D-group): the
+ * unit a new hire is counted in on `/new-hires`.
  */
-export interface NewHireGroupView {
+export interface NewHireUnitRefView {
   kind: 'direct' | 'aab' | 'ab';
   /** `null` for `direct`. */
   leader: ActivationPersonView | null;
-  /** By day, highest first. */
-  hires: NewHireRowView[];
 }
 
+/** A new hire's checklist, where they have one (an Agent placed by a leader, ADR-0103): how far it is, and overdue. */
+export interface NewHireChecklistView {
+  state: ActivationState;
+  done: number;
+  total: number;
+  pct: number;
+  /** Open past the office's window below 100% (`isOverdue`). */
+  overdue: boolean;
+}
+
+/**
+ * Where a first sale came from, as `/new-hires` says it (UI V1, UI-023, D-26): `sales` — a sales lead at *Paid and
+ * issued* or the production file — or `manual`, a closing a leader or the hire logged from the checklist.
+ */
+export type FirstSaleSourceView = 'sales' | 'manual';
+
+/** One new hire on `/new-hires` (ADR-0173 §2; P18.96-T6 AC-3; UI V1, UI-023). */
+export interface NewHireRowView {
+  hire: ActivationPersonView;
+  unit: NewHireUnitRefView;
+  /** *Join date*: day 1. */
+  joinDate: LocalDate;
+  /** Which day since joining today is (`activation3MDay`): *"Hari ke-X"*. */
+  day: number;
+  /** `FIRST_SALE_DATE`, or `null` with none. */
+  firstSaleDate: LocalDate | null;
+  /** The first sale's day since joining, the join date day 1: *"Pecah telor di hari ke-X"*. `null` with none. */
+  firstSaleDay: number | null;
+  /** Where `firstSaleDate` came from; `null` with none. */
+  firstSaleSource: FirstSaleSourceView | null;
+  /**
+   * **The row's status** (UI V1, D-24): `activated` — a first sale by day 90; `activated_late` — a first sale after it,
+   * amber, outside the 3M share; `not_yet` — none.
+   */
+  status: NewHireStatusView;
+  /** `ACTIVATION_3M`: the 3M result itself — `activated` by day 90, `not_activated` past it, else `in_progress`. */
+  activation3M: Activation3MResultView;
+  /**
+   * The office day they were marked left; `null` while not. **Stored, not a status** (UI V1, D-24, UI-025): nothing on
+   * the page reads it, and it decides nothing.
+   */
+  leftOn: LocalDate | null;
+  /** `null` for a new hire with no checklist: an AB or an AAB, or an office with none published. */
+  checklist: NewHireChecklistView | null;
+}
+
+/** `ACTIVATION_3M`'s three values. */
+export type Activation3MResultView = 'in_progress' | 'activated' | 'not_activated';
+
+/** A row's status (UI V1, D-24): *Teraktivasi*, *Teraktivasi* in amber, or *Belum*. */
+export type NewHireStatusView = 'activated' | 'activated_late' | 'not_yet';
+
+/**
+ * `ACTIVATION_3M_PCT` over a set (rule A, UI V1): the counts and the share, `pct` `null` while nobody is decided. The
+ * screen shows the `pct` only (D-24); the counts are for the reader of the API.
+ */
+export interface Activation3MShareView {
+  /** Activated by day 90: the numerator. */
+  activated: number;
+  /** Past day 90 with no first sale: with `activated`, the denominator. */
+  notActivated: number;
+  /** A first sale after day 90: in neither part. */
+  late: number;
+  /** Inside the 90 days with no first sale: in neither part. */
+  inProgress: number;
+  pct: number | null;
+}
+
+/** The share of one join month's new hires: its cohort. */
+export interface Activation3MMonthView extends Activation3MShareView {
+  /** `YYYY-MM`. */
+  month: string;
+}
+
+/** A set's `ACTIVATION_3M_PCT`: all of it, and each join month in it, newest first. */
+export interface Activation3MFiguresView {
+  all: Activation3MShareView;
+  byMonth: Activation3MMonthView[];
+}
+
+/** One unit's figures: *Direct Unit*, or an AAB's or an AB's below the reader. */
+export interface NewHireUnitView extends NewHireUnitRefView {
+  activation3M: Activation3MFiguresView;
+}
+
+/** `GET /new-hires` (ADR-0173; P18.96-T6 AC-2, AC-3). */
 export interface NewHiresRosterView {
-  /** Empty groups are omitted. */
-  groups: NewHireGroupView[];
   today: LocalDate;
+  /** The join dates listed: the page's year (`newHiresWindow`). */
+  window: { from: LocalDate; to: LocalDate };
+  /** `ACTIVATION_3M.DAYS`: the day the result locks on, what *Day 64 of 90* prints. */
+  days: number;
+  /** The reader's scope: every new hire listed. */
+  activation3M: Activation3MFiguresView;
+  /** Each unit with a new hire listed — *Direct Unit* first, then the leaders A to Z. */
+  units: NewHireUnitView[];
+  /** By status (UI V1, D-24), each by join date, newest first, ties by name — except `inProgress`, by day. */
+  sections: {
+    /** `not_yet` inside their 90 days: by day, highest first; ties by name. */
+    inProgress: NewHireRowView[];
+    /** *Teraktivasi*: `activated` and `activated_late`, newest joiner first. */
+    activated: NewHireRowView[];
+    /** `not_yet` past day 90: no first sale by then nor since, newest joiner first. */
+    notActivated: NewHireRowView[];
+  };
+}
+
+/**
+ * **A new hire's 3M standing, on their detail** (UI V1, UI-023; D-25): what the strip at the top of
+ * `/new-hires/[membershipId]` says — the same status, day and source as their row on `/new-hires`, from the same
+ * function. `null` for somebody who is not a new hire.
+ */
+export interface NewHireStandingView {
+  status: NewHireStatusView;
+  activation3M: Activation3MResultView;
+  joinDate: LocalDate;
+  /** Today's day since joining: *Hari ke-X* — the *Hari 88 /90* tile, *3M selesai* past 90. */
+  day: number;
+  firstSaleDate: LocalDate | null;
+  /** *Pecah telor di hari ke-X*; `null` with no first sale. */
+  firstSaleDay: number | null;
+  firstSaleSource: FirstSaleSourceView | null;
+  /**
+   * **Who they report to** (UI V1, UI-027; D-25): the header's *AAB Arief · Bergabung 3 Agu 2026* — their leader's
+   * membership, name and hierarchy role. `null` for somebody who reports to nobody.
+   */
+  leader: NewHireLeaderView | null;
+  /**
+   * **Their WhatsApp number** (UI V1, UI-027; UI-081, D-22): `users.phone` as stored, `+62…`, or `null` with none — the
+   * detail's *WhatsApp* opens it, or *Isi nomor WhatsApp* first. Read only by a leader who coaches them.
+   */
+  phone: string | null;
+}
+
+/** The hire's leader on their detail (UI-027): who, and on which rung. */
+export interface NewHireLeaderView extends ActivationPersonView {
+  role: 'ab' | 'aab' | 'agent';
+}
+
+/** One hire's activation as a leader reads it on `/new-hires/:membershipId` (and its writes): the view and the standing. */
+export interface NewHireDetailView extends ActivationView {
+  newHire: NewHireStandingView | null;
 }
 
 /** What saving the coaching note answers. */

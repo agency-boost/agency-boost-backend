@@ -6,6 +6,8 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, KPM_A, type ForumOffice } from '../../../test/forum-office';
+import { frozenBeforeTheSlide } from '../../../test/frozen-scorecard';
+import { columnPeriods } from './scorecard/scorecard.service';
 
 const M = 1_000_000 * 100;
 
@@ -32,6 +34,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     periods: view.scorecard.periods,
     chips: view.scorecard.chips,
     rows: view.scorecard.rows.map(({ key, unit, cells }) => ({ key, unit, cells })),
+    asOf: view.scorecard.asOf.kind === 'date' ? view.scorecard.asOf.date : null,
   });
 
   beforeAll(async () => {
@@ -49,7 +52,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     const first = await office.forum.read(owner(), meeting.id);
     expect(first.scorecard.frozenAt).toBeNull();
     expect(bare(first)).toEqual(await computed('2026-09-17'));
-    expect(first.scorecard.periods).toEqual({ fy: '2025', ytd: '2026', thisMonthLastYear: '2025-09', lastMonth: '2026-08', thisMonth: '2026-09' });
+    expect(first.scorecard.periods).toEqual(columnPeriods('2026-09-17'));
     expect(first.editors.frozen).toBe(false);
     // A member's figures move: the next read shows it.
     await db().collection('monthlyAgentData').updateOne(
@@ -65,7 +68,10 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
   it('P18.1-T2 AC-4 the columns are named from the meeting’s own year: a 2025 meeting reads FY 2024 and YTD 2025', async () => {
     const meeting = await make('Last year', '2025-06-10');
     const view = await office.forum.read(office.supported('OWNER'), meeting.id);
-    expect(view.scorecard.periods).toMatchObject({ fy: '2024', ytd: '2025', thisMonthLastYear: '2024-06', lastMonth: '2025-05', thisMonth: '2025-06' });
+    expect(view.scorecard.periods).toEqual({
+      fy: { from: '2024-01', to: '2024-12' }, ytdLastYear: { from: '2024-01', to: '2024-06' }, ytd: { from: '2025-01', to: '2025-06' },
+      thisMonthLastYear: { from: '2024-06', to: '2024-06' }, lastMonth: { from: '2025-05', to: '2025-05' }, thisMonth: { from: '2025-06', to: '2025-06' },
+    });
   });
 
   it('P18.1-T2 AC-4 the first read once Completed writes the scorecard and the editors onto it, once, audited', async () => {
@@ -154,14 +160,57 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     }
   });
 
-  it('P18.1-T2 AC-4 the Monthly Target is never frozen: typed after the freeze, served over the frozen figures', async () => {
+  it('P18.1-T2 AC-4, P18.97-T1 AC-10 the Monthly Target is never frozen: typed after the freeze, its rate × the frozen units', async () => {
     const meeting = await make('Targets after', '2026-09-12');
     const frozen = await office.forum.read(owner(), meeting.id);
-    await office.minutes.saveMonthlyTarget(office.as('AGUS'), meeting.id, 'case_submission', { value: 'TBD', version: 0 });
+    const units = frozen.scorecard.chips.units;
+    const saved = await office.minutes.saveMonthlyTarget(office.as('AGUS'), meeting.id, 'case_submission', { rate: 2, version: 0 });
+    expect(saved).toEqual({ rate: 2, value: 2 * units, typed: null, version: 1 });
     const after = await office.forum.read(owner(), meeting.id);
-    expect(after.scorecard.rows.find((r) => r.key === 'case_submission')!.monthlyTarget).toEqual({ value: 'TBD', version: 1 });
+    expect(after.scorecard.rows.find((r) => r.key === 'case_submission')!.monthlyTarget).toEqual(saved);
     expect(bare(after)).toEqual(bare(frozen));
     expect(after.scorecard.frozenAt).toBe(frozen.scorecard.frozenAt);
+  });
+
+  it('P18.97-T1 AC-19 a scorecard frozen before the reference slide is read tolerantly: — where it lacks, its own units, nothing recomputed or written', async () => {
+    const meeting = await make('Kept before the slide', '2026-09-12');
+    const editors = await office.people.liveEditors(owner(), await office.people.office(owner()));
+    const frozenAt = new Date('2026-09-13T02:00:00Z');
+    await db().collection('leaderMeetings').updateOne({ _id: new mongoose.Types.ObjectId(meeting.id) }, {
+      $set: {
+        frozenScorecard: frozenBeforeTheSlide(), frozenAt, frozenCoeditors: editors,
+        // A rate typed since, and New AA's text from before, which stays.
+        monthlyTargets: { flc: { rate: 2, typed: null, version: 1 }, new_aa: { value: 'TBD', version: 1 } },
+      },
+    });
+    const before = { meeting: await stored(meeting.id), audit: await db().collection('auditLog').countDocuments() };
+
+    const view = await office.forum.read(owner(), meeting.id);
+    const row = (key: string) => view.scorecard.rows.find((r) => r.key === key)!;
+    expect(view.scorecard.frozenAt).toBe(frozenAt.toISOString());
+    // What it lacks reads —: last year's YTD on every row, Cases/producing agents' years, AS OF.
+    expect(view.scorecard.rows.map((r) => r.cells.ytdLastYear.kind)).toEqual(Array(9).fill('unrecorded'));
+    expect(Object.values(row('cases_per_producing_agent').cells).map((c) => c.kind))
+      .toEqual(['unrecorded', 'unrecorded', 'unrecorded', 'blocked', 'blocked', 'blocked']);
+    expect(view.scorecard.asOf).toEqual({ kind: 'unrecorded' });
+    // What it has that the table no longer draws is kept, and not served.
+    expect(view.scorecard.rows.map((r) => r.key)).not.toContain('new_aa');
+    expect(row('ape').cells.ytd).toEqual({ kind: 'figure', value: 5_800 * M, leavesOut: [] });
+    // Its # of units is the five it froze with, and its target's multiplier follows: 2 per unit, 10.
+    expect(view.scorecard.chips.units).toBe(5);
+    expect(row('flc').monthlyTarget).toEqual({ rate: 2, value: 10, typed: null, version: 1 });
+    expect(row('ape').ytdChange).toEqual({ kind: 'none' });
+    // A target written now answers at the frozen units too.
+    const saved = await office.minutes.saveMonthlyTarget(owner(), meeting.id, 'avg_monthly_aa', { rate: 3, version: 0 });
+    expect(saved).toEqual({ rate: 3, value: 15, typed: null, version: 1 });
+
+    // Nothing recomputed, nothing written but the target: the stored scorecard is the one it froze, New AA and all.
+    const after = await stored(meeting.id);
+    expect(after!.frozenScorecard).toEqual(before.meeting!.frozenScorecard);
+    expect(after!.frozenScorecard).toEqual(frozenBeforeTheSlide());
+    expect(after!.monthlyTargets.new_aa).toEqual({ value: 'TBD', version: 1 });
+    expect(await frozenRows(meeting.id)).toEqual([]);
+    expect(await db().collection('auditLog').countDocuments()).toBe(before.audit + 1);
   });
 
   describe('exit test 2 — frozen: what was discussed stays what was discussed', () => {

@@ -6,6 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
+import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
   EVENT_FEEDBACK_TEXT_MAX, NPS, type EventAudienceScope, type EventIssuer, type EventPhase,
 } from '@/domain/constants';
@@ -23,6 +24,7 @@ import {
 } from './event.repository';
 import { hasEnded, localTimeOf } from './event-phase';
 import { EventReadings } from './event-readings';
+import { EVENTS_REFUSALS } from './events.messages';
 
 /** The NPS scale as the screens read it (invariant §7: served, never re-declared). */
 export interface NpsConstants {
@@ -157,18 +159,47 @@ export class EventGuestService {
     return this.fresh(ctx, event, me);
   }
 
-  /** `POST /events/:eventId/rsvp/cancel` — idempotent; refused from `endsAt`. */
+  /**
+   * `POST /events/:eventId/rsvp/cancel` — *Tidak ikut*; idempotent; refused from `endsAt`.
+   *
+   * **From going, or from no answer at all** (UI V1, UI-108: *Ikut* and *Tidak ikut* both on the card): a member who
+   * never RSVP'd says they are not coming, and a row is made to hold it, as *Join* makes one. Until UI V1 it changed
+   * only a row still *going*, since the only way to it was the modal's *Cancel RSVP*.
+   */
   async cancelRsvp(ctx: RequestContext, eventId: string): Promise<GuestEvent> {
     const me = this.member(ctx);
     const event = await this.visible(ctx, eventId, me);
     this.refuseOnceEnded(event);
-    // Only a row still *going*; never a row made by cancelling nothing.
+    // Only a row not yet *cancelled*: two taps at once change it once, and the second writes no audit row.
     const changed = await this.rsvps.writeWhen(
-      ctx, String(event._id), me, { rsvpStatus: 'going' },
-      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now() }, false,
+      ctx, String(event._id), me, { rsvpStatus: { $ne: 'cancelled' } },
+      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now() }, true,
     );
     if (changed) {
-      await this.record(ctx, 'event.rsvp_cancelled', event, me, changed.id, { rsvpStatus: 'going' }, { rsvpStatus: 'cancelled' });
+      await this.record(ctx, 'event.rsvp_cancelled', event, me, changed.id,
+        { rsvpStatus: changed.before?.rsvpStatus ?? null }, { rsvpStatus: 'cancelled' });
+    }
+    return this.fresh(ctx, event, me);
+  }
+
+  /**
+   * `POST /events/:eventId/rsvp/withdraw` — **the answer taken back** (UI V1, UI-108: *tap the chosen one again to undo
+   * it*): *Ikut* or *Tidak ikut* tapped a second time leaves the member with no answer, as before they gave one.
+   * Idempotent — no answer changes nothing and makes no row; refused from `endsAt`, as the other two are. The row stays
+   * (soft-delete is for erasure, not for an answer withdrawn), its status `null`.
+   */
+  async withdrawRsvp(ctx: RequestContext, eventId: string): Promise<GuestEvent> {
+    const me = this.member(ctx);
+    const event = await this.visible(ctx, eventId, me);
+    this.refuseOnceEnded(event);
+    const changed = await this.rsvps.writeWhen(
+      ctx, String(event._id), me, { rsvpStatus: { $ne: null } },
+      { rsvpStatus: null, rsvpAt: null, cancelledAt: null }, false,
+    );
+    if (changed) {
+      // No upsert: the row was there, and its answer was not none, or the condition would not have matched it.
+      await this.record(ctx, 'event.rsvp_withdrawn', event, me, changed.id,
+        { rsvpStatus: changed.before.rsvpStatus }, { rsvpStatus: null });
     }
     return this.fresh(ctx, event, me);
   }
@@ -206,7 +237,7 @@ export class EventGuestService {
     if (!eligible) {
       throw new DomainException(
         ErrorCode.EVENT_NOT_ATTENDED,
-        'Feedback is only collected from people who joined or say they attended this event.',
+        EVENTS_REFUSALS.EVENT_NOT_ATTENDED.feedbackFromAttendees,
         HttpStatus.CONFLICT,
       );
     }
@@ -250,7 +281,7 @@ export class EventGuestService {
   private refuseOnceEnded(event: EventDocument): void {
     if (hasEnded(event, this.clock.now())) {
       throw new DomainException(
-        ErrorCode.EVENT_RSVP_CLOSED, 'This event has ended, so its RSVP is closed.', HttpStatus.CONFLICT,
+        ErrorCode.EVENT_RSVP_CLOSED, EVENTS_REFUSALS.EVENT_RSVP_CLOSED.ended, HttpStatus.CONFLICT,
       );
     }
   }
@@ -258,7 +289,7 @@ export class EventGuestService {
   private refuseUntilEnded(event: EventDocument): void {
     if (!hasEnded(event, this.clock.now())) {
       throw new DomainException(
-        ErrorCode.EVENT_NOT_ENDED, 'This event has not ended yet.', HttpStatus.CONFLICT,
+        ErrorCode.EVENT_NOT_ENDED, EVENTS_REFUSALS.EVENT_NOT_ENDED.notYet, HttpStatus.CONFLICT,
       );
     }
   }
@@ -342,7 +373,8 @@ export class EventGuestService {
 
 function alreadySubmitted(): DomainException {
   return new DomainException(
-    ErrorCode.EVENT_FEEDBACK_ALREADY_SUBMITTED, 'You have already given feedback for this event.', HttpStatus.CONFLICT,
+    ErrorCode.EVENT_FEEDBACK_ALREADY_SUBMITTED, EVENTS_REFUSALS.EVENT_FEEDBACK_ALREADY_SUBMITTED.already,
+    HttpStatus.CONFLICT,
   );
 }
 
@@ -353,8 +385,10 @@ export function checkFeedback(body: unknown): { score: number; why: string; impr
   const improve = f.text('improve', { min: 0, max: EVENT_FEEDBACK_TEXT_MAX }, false);
   const violations = [...f.violations];
   const score = (body as Record<string, unknown> | null)?.score;
-  if (score === undefined) violations.push('score is required.');
-  else if (!isNpsScore(score)) violations.push(`score must be a whole number from ${NPS.SCALE_MIN} to ${NPS.SCALE_MAX}.`);
+  if (score === undefined) violations.push(VALIDATION_REFUSALS.VALIDATION_FAILED.required({ field: 'score' }));
+  else if (!isNpsScore(score)) {
+    violations.push(EVENTS_REFUSALS.VALIDATION_FAILED.scoreWhole({ min: NPS.SCALE_MIN, max: NPS.SCALE_MAX }));
+  }
   if (violations.length > 0) refuseWith(violations);
   return { score: score as number, why: why ?? '', improve: improve ?? '' };
 }

@@ -1,3 +1,4 @@
+import { english, indonesian } from '../../../test/i18n';
 import {
   ATTACK_PLAN, PRODUCT_CATEGORIES, PRODUCT_CATEGORY_LABELS, PRODUCT_CHANNEL_LABELS, PRODUCT_CHANNELS, PRODUCT_NEED_LABELS,
   PRODUCT_NEEDS, PRODUCT_RUN_OFF_NOTE,
@@ -49,8 +50,15 @@ describe('the words the two sales screens print (Overall.html)', () => {
   });
 
   it('carries the drawer’s run-off note verbatim (`:10240`)', () => {
-    expect(PRODUCT_RUN_OFF_NOTE).toBe(
+    expect(english(PRODUCT_RUN_OFF_NOTE)).toBe(
       'In run-off — not actively issued to new applicants. Shown for reference only; not part of the current sales shelf.',
+    );
+  });
+
+  it('P18.98-T5 AC-4 says the run-off note in Indonesian too, *run-off* kept as the insurer’s word', () => {
+    expect(indonesian(PRODUCT_RUN_OFF_NOTE)).toBe(
+      'Dalam masa run-off — tidak lagi diterbitkan untuk pemohon baru. Ditampilkan hanya sebagai referensi; bukan '
+        + 'bagian dari etalase penjualan saat ini.',
     );
   });
 });

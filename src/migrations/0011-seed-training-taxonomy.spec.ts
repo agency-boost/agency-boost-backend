@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
-import { SEED_TRAINING_MODULES } from '@/domain/constants';
+import { SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES } from '@/domain/constants';
 import { up } from './0011-seed-training-taxonomy';
 
 const NOW = new Date('2026-09-17T02:00:00Z');
@@ -35,7 +35,7 @@ describe('0011 — the training taxonomy for offices that already exist', () => 
     expect(await up(db(), NOW)).toEqual({ seeded: 1, skipped: 0 });
 
     const kpmId = String(insertedId);
-    expect(await col('trainingCategories').countDocuments({ kpmId })).toBe(6);
+    expect(await col('trainingCategories').countDocuments({ kpmId })).toBe(SEED_TRAINING_CATEGORIES.length);
     expect(await col('trainingSkills').countDocuments({ kpmId })).toBe(6);
     expect(await col('trainingModules').countDocuments({ kpmId })).toBe(SEED_TRAINING_MODULES.length);
     const module = await col('trainingModules').findOne({ kpmId, code: 'PROSPECT_LIST' });
@@ -75,7 +75,7 @@ describe('0011 — the training taxonomy for offices that already exist', () => 
     await up(db(), NOW);
 
     expect(await up(db(), NOW)).toEqual({ seeded: 0, skipped: 1 });
-    expect(await col('trainingCategories').countDocuments({ kpmId: String(insertedId) })).toBe(6);
+    expect(await col('trainingCategories').countDocuments({ kpmId: String(insertedId) })).toBe(SEED_TRAINING_CATEGORIES.length);
   });
 
   it('counts an office with only a skill or only a module as already seeded', async () => {

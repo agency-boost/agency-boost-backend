@@ -31,6 +31,9 @@ describe('the events port for many events (P18.6-T1 AC-3)', () => {
     wired = configModule(ROSTER_NOW);
     await clearCollections();
     office = await buildEventsOffice(wired);
+    // Every model's indexes built before anything is counted: under a loaded run a lazy `createIndex` otherwise
+    // lands inside the first count, and the query lists differ by that alone.
+    await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
     await db().collection('eventRsvps').insertMany([
       rsvp('PAST_ALL', 'RINA', { confirmedAttended: true, confirmedByMembershipId: office.id.ADMIN, confirmedAt: ROSTER_NOW }),
       rsvp('PAST_ALL', 'BUDI'),

@@ -15,6 +15,7 @@ import {
 import { KpmProductController } from './kpm-product.controller';
 import { KpmProductService } from './kpm-product.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -146,6 +147,28 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       await request(app.getHttpServer())
         .post(`${url}/${mapanId}/script/reject`).send({ reason: 'Terlalu menjanjikan.' })
         .expect(403);
+    });
+
+    /*
+     * P18.97-T4 AC-7 (ADR-0176 §7; the client's UI-028): the shelf's *Waiting for your approval* now carries *Review*,
+     * for whoever holds `sales_script:approve`. A reader who reads the badge without the permission — a read-only
+     * support session as the Owner reads the shelf and the queue — is offered no *Review*, and the decisions it opens
+     * are refused by the server, not only left off the screen.
+     */
+    it('P18.97-T4 AC-7 refuses Review’s decisions to a reader who sees the badge but does not hold sales_script:approve', async () => {
+      await writeScript();
+      session.current = READ_ONLY_OWNER;
+      const shelf = await request(app.getHttpServer()).get(url).expect(200);
+      expect(shelf.body.find((p: { code: string }) => p.code === 'PRUMAPAN').reviewState).toBe('pending');
+      await request(app.getHttpServer()).get(`${url}/script-reviews`).expect(200);
+
+      await request(app.getHttpServer()).post(`${url}/${mapanId}/script/approve`).send({}).expect(403);
+      await request(app.getHttpServer())
+        .post(`${url}/${mapanId}/script/reject`).send({ reason: 'Terlalu menjanjikan.' }).expect(403);
+
+      session.current = OWNER;
+      const after = await request(app.getHttpServer()).get(url).expect(200);
+      expect(after.body.find((p: { code: string }) => p.code === 'PRUMAPAN').reviewState).toBe('pending');
     });
 
     it('leaves the script unapproved after a refusal, not merely unanswered', async () => {
@@ -418,7 +441,7 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       it('P17-T9 AC-1 signs a PDF into the office’s own products folder, and the existing route attaches it — no confirm step between', async () => {
         const signed = await sign({ filename: 'Brosur PRUMapan.pdf', mimeType: 'application/pdf', bytes: 2_048_000 }).expect(201);
         expect(Object.keys(signed.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
-        expect(signed.body.fields).toMatchObject({ public_id: signed.body.storageKey, signature: signed.body.signature });
+        expect(signed.body.fields).toMatchObject({ key: signed.body.storageKey, 'x-goog-signature': signed.body.signature });
         expect(signed.body.storageKey).toMatch(new RegExp(`^dev/${KPM_A}/products/`));
 
         // The browser sends the bytes to storage; the stub holds them from the signature on.
@@ -486,7 +509,8 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
       it('N5 signs a PDF-only upload: the storage is asked for PDFs alone, and the fields say so', async () => {
         const res = await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201);
         expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'products', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
-        expect(res.body.fields).toMatchObject({ overwrite: 'false', allowed_formats: 'pdf' });
+        // P18.7-T2: the V4 POST policy pins the Content-Type to the one type the route accepts.
+        expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
       });
 
       it('N2 lets an elevated support session as the Owner sign and attach, as its member', async () => {
@@ -547,6 +571,26 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
     it('refuses a slot a product does not have', async () => {
       await request(app.getHttpServer())
         .delete(`${url}/${mapanId}/documents/poster`).expect(400);
+    });
+
+    it('P18.98-T5 AC-7 refuses a slot, an empty change and another company’s product in Indonesian for an Indonesian reader', async () => {
+      const slot = await request(app.getHttpServer())
+        .delete(`${url}/${mapanId}/documents/poster`).set(...IN_INDONESIAN).expect(400);
+      expect(slot.body.error.code).toBe('VALIDATION_FAILED');
+      expect(slot.body.error.message).toMatch(/^poster bukan slot dokumen\. Produk memiliki: /);
+
+      const empty = await request(app.getHttpServer())
+        .patch(`${url}/${mapanId}/overrides`).set(...IN_INDONESIAN).send({}).expect(400);
+      expect(empty.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Tidak ada yang diubah.' });
+
+      // Ours now, not Nest's: *Product not found.* where Nest answered *Product* — and, in Indonesian, *Produk*.
+      const unknown = '66f0000000000000000000ff';
+      const missing = await request(app.getHttpServer())
+        .patch(`${url}/${unknown}/overrides`).set(...IN_INDONESIAN).send({ displayName: 'Ours' }).expect(404);
+      expect(missing.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Produk tidak ditemukan.' });
+      const inEnglish = await request(app.getHttpServer())
+        .patch(`${url}/${unknown}/overrides`).send({ displayName: 'Ours' }).expect(404);
+      expect(inEnglish.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Product not found.' });
     });
 
     it('writes only the field sent, so renaming a product leaves its script the company’s', async () => {

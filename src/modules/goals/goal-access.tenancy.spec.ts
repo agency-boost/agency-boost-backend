@@ -326,4 +326,112 @@ describe('who may set whose goal (P8-T4)', () => {
       expect(read.savedByMembershipId).toBe(AAB);
     });
   });
+
+  /*
+   * **The preview reaches whom a read reaches, and writes nothing** (P18.99-T5, UI V1 UI-014): Goal Settings' result
+   * card and a coachee's *Goal Setting* tab work a plan out as a slider moves, through `goal:read`'s reach.
+   */
+  describe('P18.99-T5 UI-014 — the preview', () => {
+    const preview = (who: RequestContext, forWhom?: string, over: Record<string, unknown> = {}) =>
+      wired.goals.preview(who, '2026', plan(over), forWhom);
+    const goals = () => mongoose.connection.db!.collection('goals').countDocuments();
+
+    it('P18.99-T5 UI-014 works a downline’s plan out for their leader and saves nothing', async () => {
+      const worked = await preview(aab(), AGENT, { caseSizeMinor: 9_000_000_00 });
+
+      // 500 jt over 5 months is 100 jt a month: 12 policies of 9 jt, 40 meetings at 30%, 134 appointments at 30%.
+      expect(worked.projected).toMatchObject({ monthlyApeTargetMinor: 100_000_000_00, policiesPerMonth: 12, leadsPerMonth: 134 });
+      expect(await goals()).toBe(0);
+      expect(wired.sentNotifications).toHaveLength(0);
+    });
+
+    /*
+     * ADR-0183 (partly reversing ADR-0075): while the office holds no figure, the leader types the downline's APE
+     * produced, and the preview works the plan out against what they type; once it holds one, the file's.
+     */
+    it('ADR-0183 measures a downline’s plan against the leader’s typed figure while the office holds none', async () => {
+      await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+
+      const worked = await preview(aab(), AGENT, { apeAchievedMinor: 400_000_000_00 });
+
+      // The leader's typed figure, said to be theirs (S2).
+      expect(worked.achieved).toEqual({
+        minor: 400_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: AAB, name: 'Ibu Sari' },
+      });
+      expect(worked.projected!.remainingApeMinor).toBe(100_000_000_00);
+      expect(await goals()).toBe(1);
+    });
+
+    it('ADR-0183 measures it against the office’s figure once one is held, whatever the leader types', async () => {
+      await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+      } as never);
+
+      const worked = await preview(aab(), AGENT, { apeAchievedMinor: 400_000_000_00 });
+
+      expect(worked.achieved).toEqual({ minor: 200_000_000_00, provenance: 'imported', month: '2026-08' });
+    });
+
+    it('ADR-0183 a leader’s save stores the figure they typed while the office holds none; an office figure keeps the member’s', async () => {
+      await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+      expect((await save(aab(), AGENT, { apeAchievedMinor: 300_000_000_00 })).apeAchievedMinor).toBe(300_000_000_00);
+
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'corrected', sourceBatchId: null },
+      } as never);
+      const locked = await save(ab(), AGENT, { apeAchievedMinor: 900_000_000_00 });
+      expect(locked.apeAchievedMinor).toBe(300_000_000_00);
+      expect(locked.achieved).toEqual({ minor: 200_000_000_00, provenance: 'corrected', month: '2026-08' });
+    });
+
+    it('ADR-0183 another office’s production never unlocks or locks this office’s figure (invariant §1)', async () => {
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: '66f0000000000000000009ff', membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+      } as never);
+      expect((await save(aab(), AGENT, { apeAchievedMinor: 300_000_000_00 })).achieved)
+        .toEqual({ minor: 300_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: AAB, name: 'Ibu Sari' } });
+    });
+
+    it('P18.99-T5 UI-014 takes the member’s own typed figure on their own plan', async () => {
+      const worked = await preview(agent(), undefined, { apeAchievedMinor: 400_000_000_00 });
+
+      expect(worked.achieved.minor).toBe(400_000_000_00);
+      expect(worked.projected!.remainingApeMinor).toBe(100_000_000_00);
+    });
+
+    it('P18.99-T5 UI-014 keeps an agent out of a colleague’s plan, and an AAB out of somebody not below them: 404', async () => {
+      await expect(preview(sibling(), AGENT)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      await expect(preview(aab(), OUTSIDER)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    });
+
+    it('P18.99-T5 UI-014 keeps an Owner out of a real membership in another office: 404 (invariant §1)', async () => {
+      const FOREIGN = '66f000000000000000000107';
+      await mongoose.connection.db!.collection('memberships').insertOne({
+        ...person(FOREIGN, 'AGENT', null, []),
+        kpmId: '66f0000000000000000000b2',
+      } as never);
+
+      await expect(preview(owner(), FOREIGN)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    });
+
+    it('P18.99-T5 UI-014 answers an assumption that cannot make a plan with projected: null, not a refusal', async () => {
+      const worked = await preview(agent(), undefined, { caseSizeMinor: 0 });
+
+      expect(worked.projected).toBeNull();
+      expect(worked.monthsLeft).toBe(5);
+    });
+
+    it('P18.99-T5 UI-014 reads the months left from the office’s calendar when none is typed', async () => {
+      const worked = await preview(agent(), undefined, { monthsLeft: null });
+      const read = await wired.goals.readOrDefaults(agent(), '2026');
+
+      expect(worked.monthsLeftIsOverride).toBe(false);
+      expect(worked.monthsLeft).toBe(read.monthsLeft);
+      expect(worked.projected!.monthlyApeTargetMinor).toBe(read.projected!.monthlyApeTargetMinor);
+    });
+  });
 });

@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
 import { RECRUITMENT, type RecruitmentPlaybookBody } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
@@ -74,14 +75,32 @@ export class RecruitmentPlaybookService {
     return true;
   }
 
-  /** `GET /admin/companies/:companyId/recruitment-playbook`: the company's playbook or none, and the defaults. */
-  async readForAdmin(companyId: string): Promise<PlaybookAdminView> {
+  /**
+   * **A new company's playbook, copied from another company's** (ADR-0164 §4): the Template library's words as
+   * the new company's version 1. A copy, never a link: rewording either afterwards is that company's alone. A
+   * source with no playbook gives none; a company that has one is left alone. `true` when it wrote.
+   */
+  async copyFromCompany(sourceCompanyId: string, companyId: string): Promise<boolean> {
+    if (await this.ofCompany(companyId)) return false;
+    const source = await this.ofCompany(sourceCompanyId);
+    if (!source) return false;
+    await this.playbooks.create({
+      companyId, body: structuredClone(source.toObject().body), version: 1, updatedBy: null, createdBy: null, deletedAt: null,
+    });
+    return true;
+  }
+
+  /**
+   * `GET /admin/companies/:companyId/recruitment-playbook`: the company's playbook or none, and the defaults — the
+   * chips' labels written for the reader (P18.98-T7), the playbook's words as typed.
+   */
+  async readForAdmin(companyId: string, reader: Reader): Promise<PlaybookAdminView> {
     await this.requireCompany(companyId);
     const row = await this.ofCompany(companyId);
     return {
       playbook: row ? await this.view(row) : null,
       defaults: defaultPlaybookBody(),
-      vocabulary: recruitmentVocabulary(),
+      vocabulary: recruitmentVocabulary(reader),
       limits: { textMax: RECRUITMENT.TEXT_MAX_LENGTH, benefitsMax: RECRUITMENT.BENEFITS_MAX },
     };
   }

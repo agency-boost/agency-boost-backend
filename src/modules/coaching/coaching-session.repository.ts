@@ -43,4 +43,33 @@ export class CoachingSessionRepository extends TenantScopedRepository<CoachingSe
       )
       .exec();
   }
+
+  /**
+   * **A coachee's tick on an action item, or its undo** (UI V1, UI-104 point 4): one targeted write on the session's
+   * `actionItemsDone`, never on what was agreed — so **no `version`, no `updatedBy`**, which stay the coach's: a tick
+   * conflicts with no edit, as a calendar answer conflicts with none. Scoped, soft-delete aware, and only on a session
+   * whose coachee is `coacheeMembershipId` and that has been finalized. `null` when nothing matched.
+   */
+  async setItemDone(
+    ctx: RequestContext,
+    id: string,
+    coacheeMembershipId: string,
+    change: { itemId: string; done: true; at: Date } | { itemId: string; done: false },
+  ): Promise<CoachingSessionDocument | null> {
+    const filter = this.scope(ctx, 'setItemDone', {
+      _id: id, coacheeMembershipId, status: { $in: ['finalized', 'reopened'] },
+    } as FilterQuery<CoachingSessionDocument>);
+    // Pulled first, then pushed when ticking: a second tick replaces the first rather than adding a row.
+    const pulled = await this.model
+      .findOneAndUpdate(filter, { $pull: { actionItemsDone: { itemId: change.itemId } } }, { new: true, timestamps: false })
+      .exec();
+    if (!pulled || !change.done) return pulled;
+    return this.model
+      .findOneAndUpdate(
+        filter,
+        { $push: { actionItemsDone: { itemId: change.itemId, at: change.at, byMembershipId: coacheeMembershipId } } },
+        { new: true, timestamps: false },
+      )
+      .exec();
+  }
 }

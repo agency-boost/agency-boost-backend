@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import type { DomainException } from '@/common/errors/domain.exception';
+import { readerIn } from '@/common/i18n/reader';
+import { UNIT_DASHBOARD_MESSAGES } from '@/domain/constants/unit-dashboard.messages';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { MonthlyAgentData } from './monthly-agent-data.schema';
@@ -307,6 +310,85 @@ describe('correcting one figure by hand (P9-T5)', () => {
       await correct({ value: 200_000_000 });
       await expect(importWith(file(['PRU-001', { 'ape.monthly': '1.5' }]))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
       expect((await monthRow(A1))!.apeMonthly.value).toBe(200_000_000);
+    });
+  });
+
+  /*
+   * **P18.98-T5 AC-6 — a stored sentence.** A reason a person typed is stored as typed, whatever language they read in;
+   * a reason the API writes for them — the Unit Dashboard's *Update production* — is written in the language of the
+   * leader saving, stored as text, and read back as stored by every later reader, in either language.
+   */
+  describe('P18.98-T5 AC-6 — the reason, stored in the words it was written in', () => {
+    const IN_ID = ctxFor(KPM_A, A1).withReader(readerIn('id'));
+    /** A leader reading English, named: nobody's choice is Bahasa Indonesia since P18.98-T4's exit. */
+    const IN_EN = A.withReader(readerIn('en'));
+    const saveApe = async (
+      ctx: RequestContext, row: { apeMonthlyMinor?: number; apeYtdMinor?: number }, reason: Parameters<typeof wired.productionCorrections.correctApe>[1]['reason'],
+    ) => wired.productionCorrections.correctApe(ctx, {
+      month: '2026-09', revision: await revisionOf(), rows: [{ membershipId: A1, ...row }], reason, surface: 'unit_dashboard',
+    });
+    const cellOf = async (ctx: RequestContext) => (await wired.production.readMonth(ctx, '2026-09')).rows
+      .find((row) => row.membershipId === A1)!.metrics.ape;
+
+    it('writes the API’s own reason in the saving leader’s language, as text, and reads it as stored in either', async () => {
+      await saveApe(IN_ID, { apeMonthlyMinor: 200_000_000 }, UNIT_DASHBOARD_MESSAGES.correctionReason);
+      await saveApe(IN_EN, { apeYtdMinor: 900_000_000 }, UNIT_DASHBOARD_MESSAGES.correctionReason);
+      const row = (await monthRow(A1))!;
+      expect([row.apeMonthly.reason, row.apeYtd.reason]).toEqual([
+        'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',
+      ]);
+      // The audit keeps the words that were written, beside the figure.
+      const audited = await db().collection('auditLog').find({ action: 'upload.cell_corrected' }).sort({ _id: 1 }).toArray();
+      expect(audited.map((entry) => entry.after.reason)).toEqual([
+        'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',
+      ]);
+      // Stored as text: an English reader reads the Indonesian a leader saved, and the other way about — never re-written.
+      for (const ctx of [IN_EN, IN_ID]) {
+        const cell = await cellOf(ctx);
+        expect([cell.monthly.correction!.reason, cell.ytd.correction!.reason]).toEqual([
+          'Diperbarui di Unit Dashboard dari laporan perusahaan.', 'Updated on the Unit Dashboard from the company report.',
+        ]);
+      }
+    });
+
+    it('stores a reason a person typed as typed, whatever language they read the product in', async () => {
+      await correct({ reason: 'Carrier mengoreksi lewat email' });
+      await saveApe(IN_ID, { apeYtdMinor: 900_000_000 }, 'The carrier restated the year');
+      const row = (await monthRow(A1))!;
+      expect([row.apeMonthly.reason, row.apeYtd.reason]).toEqual(['Carrier mengoreksi lewat email', 'The carrier restated the year']);
+      expect((await cellOf(IN_ID)).monthly.correction!.reason).toBe('Carrier mengoreksi lewat email');
+    });
+
+    it('P18.98-T5 AC-2 refuses a correction in the reader’s language: the reason, the figure, the order to correct in', async () => {
+      const said = async (call: Promise<unknown>) => {
+        const refusal = (await call.catch((err: unknown) => err)) as DomainException;
+        return [refusal.code, refusal.message, refusal.messageFor(readerIn('id'))];
+      };
+      expect(await said(correct({ reason: 'x'.repeat(501) }))).toEqual([
+        'VALIDATION_FAILED', 'Keep the reason under 500 characters.', 'Alasan tidak boleh lebih dari 500 karakter.',
+      ]);
+      expect(await said(correct({ metric: 'policyCount', cadence: 'ytd', value: 2.5 }))).toEqual([
+        'UPLOAD_VALUE_OUT_OF_RANGE', '# of policy year to date is not a whole number — it counts policies.',
+        '# of policy YTD bukan bilangan bulat — angka ini menghitung polis.',
+      ]);
+      await importFile(file(['PRU-001', { 'ape.monthly': '1', 'ape.ytd': '5' }]));
+      expect((await said(correct({ value: 600_000_000 })))[2])
+        .toBe('APE bulan ini akan lebih besar dari YTD yang sudah tersimpan. Koreksi YTD dulu.');
+      expect((await said(correct({ cadence: 'ytd', value: 50_000_000 })))[2])
+        .toBe('APE YTD akan lebih kecil dari angka bulan ini. Koreksi bulan ini dulu.');
+      // A leader's save: the same rules, its own two sentences.
+      expect(await said(saveApe(A, { apeMonthlyMinor: 600_000_000 }, 'x'))).toEqual([
+        'UPLOAD_VALUE_OUT_OF_RANGE',
+        'APE this month would be more than the year to date already held. Correct the year to date too.',
+        'APE bulan ini akan lebih besar dari YTD yang sudah tersimpan. Koreksi juga YTD-nya.',
+      ]);
+      expect(await said(saveApe(A, { apeYtdMinor: 50_000_000 }, 'x'))).toEqual([
+        'UPLOAD_VALUE_OUT_OF_RANGE', 'APE year to date would be less than this month\'s figure.',
+        'APE YTD akan lebih kecil dari angka bulan ini.',
+      ]);
+      expect(await said(saveApe(A, { apeMonthlyMinor: 1.5 }, 'x'))).toEqual([
+        'UPLOAD_VALUE_OUT_OF_RANGE', 'APE this month is a fraction of a sen.', 'APE bulan ini berupa pecahan sen.',
+      ]);
     });
   });
 

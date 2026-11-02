@@ -1,3 +1,4 @@
+import { english, indonesian } from '../../../test/i18n';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SEED_RATIO_DEFINITIONS } from './activity-taxonomy';
@@ -22,8 +23,9 @@ describe('resolveDisplayUnit', () => {
     });
 
     it('refuses any other unit, because it is judged either side of an even split', () => {
-      expect(resolveDisplayUnit('band', 'percent').refusal).toMatch(/percentage points/);
-      expect(resolveDisplayUnit('band', 'decimal').refusal).toMatch(/percentage points/);
+      expect(english(resolveDisplayUnit('band', 'percent').refusal)).toMatch(/percentage points/);
+      expect(english(resolveDisplayUnit('band', 'decimal').refusal)).toMatch(/percentage points/);
+      expect(indonesian(resolveDisplayUnit('band', 'decimal').refusal)).toMatch(/poin persentase/);
     });
 
     it('overrides a unit the row carried from before it was a band', () => {
@@ -49,12 +51,14 @@ describe('resolveDisplayUnit', () => {
     });
 
     it('refuses points', () => {
-      expect(resolveDisplayUnit('gte', 'points').refusal).toMatch(/Points are for the balance rule/);
+      expect(english(resolveDisplayUnit('gte', 'points').refusal)).toMatch(/Points are for the balance rule/);
+      expect(indonesian(resolveDisplayUnit('gte', 'points').refusal)).toMatch(/^Poin hanya untuk aturan keseimbangan/);
     });
   });
 
   it('refuses a unit that is not one, naming it', () => {
-    expect(resolveDisplayUnit('gte', 'basis_points').refusal).toMatch(/^basis_points is not/);
+    expect(english(resolveDisplayUnit('gte', 'basis_points').refusal)).toMatch(/^basis_points is not/);
+    expect(indonesian(resolveDisplayUnit('gte', 'basis_points').refusal)).toMatch(/^basis_points bukan cara/);
   });
 });
 
@@ -66,7 +70,8 @@ describe('defaultDisplayUnitFor', () => {
         SELLING_SUCCESS_RATE: 'percent',
         RECRUITMENT_SUCCESS_RATE: 'percent',
         LEADS_PER_ACTIVITY: 'decimal',
-        MEETING_PER_APPROACH: 'decimal',
+        // *Set appointment to meeting*, a share of the appointments set (ADR-0160 §2).
+        MEETING_PER_APPROACH: 'percent',
       });
   });
 

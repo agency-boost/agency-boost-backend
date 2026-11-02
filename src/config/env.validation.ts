@@ -1,15 +1,12 @@
 import { z } from 'zod';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import {
+  LEGACY_MAIL_TRANSPORTS, MAIL_PROVIDERS, mailConfigProblems, resolveMailProvider, SMTP_TIMEOUT_MS_DEFAULT,
+  SMTP_TIMEOUT_MS_RANGE,
+} from '@/modules/notifications/mail-provider';
 
-/**
- * **How long a mail relay may take to answer a dial, or to greet once dialled** (P12.1-T1), unless
- * `SMTP_TIMEOUT_MS` says otherwise. nodemailer's own default is two minutes. Email is no longer awaited
- * inside a request, so this bounds how long a delivery stays `pending` and how long a start-up check
- * waits, not how long anybody waits for a save.
- */
-export const SMTP_TIMEOUT_MS_DEFAULT = 5_000;
-/** The range `SMTP_TIMEOUT_MS` may take: long enough for a slow relay, never nodemailer's two minutes. */
-export const SMTP_TIMEOUT_MS_RANGE = { MIN: 1_000, MAX: 60_000 } as const;
+/** An empty or blank value is unset, as `.env.example` writes an optional key: `KEY=`. */
+const blankIsUnset = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
 
 /**
  * Configuration is validated at boot. A missing or malformed key stops the process
@@ -29,31 +26,60 @@ export const envSchema = z.object({
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL: z.string().default('30d'),
 
-  CLOUDINARY_CLOUD_NAME: z.string().min(1),
-  CLOUDINARY_API_KEY: z.string().min(1),
-  CLOUDINARY_API_SECRET: z.string().min(1),
-  CLOUDINARY_FOLDER_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
+  /**
+   * **The private Cloud Storage bucket every file lives in** (P18.7-T2, ADR-0153): one per environment.
+   * Required in staging and production (below, in `superRefine`). Unset in development or test, the API
+   * still boots, with storage that refuses every upload and file link with `STORAGE_NOT_CONFIGURED`
+   * (plan decision D12). An empty value is unset, as `.env.example`'s `GCS_BUCKET=` writes it.
+   *
+   * There are no storage credentials in configuration: the client uses Application Default
+   * Credentials — the VM's service account when deployed, an impersonated one on a laptop.
+   */
+  GCS_BUCKET: z.string().trim().optional().transform((v) => v || undefined),
+  /** Optional: the bucket's project, for when Application Default Credentials cannot tell. */
+  GCS_PROJECT_ID: z.string().trim().optional().transform((v) => v || undefined),
+  /**
+   * **The first segment of every storage key** (`<prefix>/<owner>/<folder>/<id>`), naming the
+   * environment that wrote it. `prod` in production and nowhere else (below, in `superRefine`), so a
+   * laptop pointed at the wrong bucket still never writes where production's files are.
+   */
+  STORAGE_KEY_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
 
-  SMTP_HOST: z.string().min(1),
-  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  /**
+   * **Which provider sends the mail** (P18.99-T18, ADR-0182): `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`,
+   * `smtp` (any relay, named by `SMTP_HOST`) or `log`. A preset fills the host, the port and TLS
+   * (`mail-provider.ts`); `SMTP_HOST` and `SMTP_PORT`, when written, override it. Unset, `MAIL_TRANSPORT` decides,
+   * and with neither it is `smtp`, so an env file written before this key boots as it did.
+   *
+   * `log` writes each message to the log instead of sending it, so a developer with no local mail catcher can still
+   * read the link and finish a registration. **It is refused in production** (ADR-0019): an API that accepts a
+   * registration and writes the verification link to stdout is the defect this was added to make impossible, not a
+   * fallback. The refusal, and every rule that joins two keys, is below, in `superRefine`.
+   */
+  MAIL_PROVIDER: z.preprocess(blankIsUnset, z.enum(MAIL_PROVIDERS).optional()),
+  /** The key `MAIL_PROVIDER` replaces, read only when that is unset: `smtp` or `log`. */
+  MAIL_TRANSPORT: z.preprocess(blankIsUnset, z.enum(LEGACY_MAIL_TRANSPORTS).optional()),
+  /** Required for `smtp` alone (below); a preset has its own host. */
+  SMTP_HOST: z.preprocess(blankIsUnset, z.string().trim().optional()),
+  /** The preset's port unless written; 587 for a plain relay. 465 is implicit TLS, anything else STARTTLS. */
+  SMTP_PORT: z.preprocess(blankIsUnset, z.coerce.number().int().positive().optional()),
+  /** Required for every preset (below). SendGrid's is the literal `apikey`. */
   SMTP_USER: z.string().default(''),
+  /** Required for every preset. A Gmail App Password is read without the spaces Google shows it with. */
   SMTP_PASSWORD: z.string().default(''),
   MAIL_FROM: z.string().min(1),
+  /** Optional: where a reply goes, when not to `MAIL_FROM`. */
+  MAIL_REPLY_TO: z.preprocess(blankIsUnset, z.string().trim().optional()),
   /** Connection and greeting timeout for SMTP, in milliseconds — see `SMTP_TIMEOUT_MS_DEFAULT`. */
   SMTP_TIMEOUT_MS: z.coerce.number().int()
     .min(SMTP_TIMEOUT_MS_RANGE.MIN).max(SMTP_TIMEOUT_MS_RANGE.MAX)
     .default(SMTP_TIMEOUT_MS_DEFAULT),
-  /**
-   * How mail leaves: over SMTP, or into the log.
-   *
-   * `log` exists so a developer with no local mail catcher can still read the link and
-   * finish a registration. **It is refused in production** (ADR-0019): an API that accepts
-   * a registration and writes the verification link to stdout is the defect this key was
-   * added to make impossible, not a fallback. The refusal is below, in `superRefine`.
-   */
-  MAIL_TRANSPORT: z.enum(['smtp', 'log']).default('smtp'),
 
-  APP_BASE_URL: z.string().url(),
+  /**
+   * **Read by nothing** (P18.99-T18): every link an email carries is built from `APP_ORIGIN`. Optional since
+   * 2026-11-01 and still checked as a URL when written, so an env file that has it boots as it did.
+   */
+  APP_BASE_URL: z.preprocess(blankIsUnset, z.string().url().optional()),
   CORS_ORIGINS: z.string().default(''),
   /**
    * Whether the browser treats a call to this API as cross-site.
@@ -84,6 +110,36 @@ export const envSchema = z.object({
   RATE_LIMIT_LOGIN_PER_15M: z.coerce.number().int().positive().default(5),
 
   /**
+   * **How many proxies stand between the client and this process** (P18.7-T1, ADR-0152), handed to
+   * Express as `trust proxy`. `false` believes the socket: right when nothing is in front, as in
+   * local development. Unset is `false` there, and **refused in staging and production** (below):
+   * forgetting the key on a VM brought back the lockout described next, silently.
+   *
+   * Behind Caddy on the VM the socket is always Caddy, so `req.ip` is one address for everybody.
+   * The login limiter keys on it, which meant five wrong passwords from anyone locked everyone out
+   * for fifteen minutes, and every session row recorded the proxy's address instead of the
+   * client's. `1` takes the last hop of `X-Forwarded-For`: the one Caddy wrote.
+   *
+   * A count rather than `true`. `true` trusts every hop, so the left-most entry, which is whatever
+   * the client chose to send, becomes its IP and the limiter can be dodged by changing a header.
+   * `0` is the same as `false`.
+   */
+  TRUST_PROXY: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => v === undefined || v === 'false' || /^\d+$/.test(v), {
+      message:
+        'must be "false" or the number of proxies in front of the API (1 behind Caddy). '
+        + '"true" is refused: it trusts every hop, so a client could set its own IP with a header.',
+    })
+    // `undefined` stays `undefined`, so the refinement below can tell "unset" from a written `false`.
+    .transform((v): false | number | undefined => {
+      if (v === undefined) return undefined;
+      return v === 'false' || Number(v) === 0 ? false : Number(v);
+    }),
+
+  /**
    * Only the default applied when a Super Admin creates a tenant without specifying
    * one. Runtime code reads kpm.timezone — never this value.
    */
@@ -100,14 +156,70 @@ export const envSchema = z.object({
     });
   }
 
-  if (env.NODE_ENV === 'production' && env.MAIL_TRANSPORT === 'log') {
+  /*
+   * Mail (P18.99-T18, ADR-0182): the provider either key chose, and the rules that join two keys — `SMTP_HOST` for a
+   * plain relay, the credentials for a preset, SendGrid's `apikey` — written once, in `mail-provider.ts`, which the
+   * adapter and the test command read too. Each is reported against its key.
+   */
+  const mail = { get: (key: string) => (env as Record<string, unknown>)[key] };
+  const chosen = resolveMailProvider(mail);
+  if (env.NODE_ENV === 'production' && chosen.provider === 'log') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ['MAIL_TRANSPORT'],
+      path: [chosen.key ?? 'MAIL_PROVIDER'],
+      message: chosen.key === 'MAIL_TRANSPORT'
+        ? 'must be "smtp" in production. A production API that logs verification links '
+          + 'instead of sending them accepts registrations it can never complete '
+          + '(ADR-0019).'
+        : 'may not be "log" in production. A production API that logs verification links instead of sending '
+          + 'them accepts registrations it can never complete (ADR-0019). Name the provider that sends.',
+    });
+  }
+  for (const problem of mailConfigProblems(mail)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [problem.key], message: problem.message });
+  }
+
+  /*
+   * P18.7-T1 (the review's L2): a VM sits behind Caddy, so a missing `TRUST_PROXY` puts every client on
+   * Caddy's address and one person's wrong passwords lock everybody out. Written as `false` is a decision
+   * somebody took and is accepted; left out is refused.
+   */
+  if ((env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') && env.TRUST_PROXY === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['TRUST_PROXY'],
       message:
-        'must be "smtp" in production. A production API that logs verification links '
-        + 'instead of sending them accepts registrations it can never complete '
-        + '(ADR-0019).',
+        `must be set when NODE_ENV is ${env.NODE_ENV}: 1 behind Caddy, or "false" if nothing stands in `
+        + 'front. Left unset, every client would share the proxy\'s IP, and its login limit.',
+    });
+  }
+
+  // P18.7-T2 (ADR-0153, D12): storage may be absent only where nobody depends on it.
+  if ((env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') && !env.GCS_BUCKET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['GCS_BUCKET'],
+      message:
+        `is required when NODE_ENV is ${env.NODE_ENV}. Without a bucket every upload and file `
+        + 'link is refused (STORAGE_NOT_CONFIGURED), which only development and test accept.',
+    });
+  }
+
+  if (env.NODE_ENV === 'production' && env.STORAGE_KEY_PREFIX !== 'prod') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['STORAGE_KEY_PREFIX'],
+      message: `must be "prod" in production, not "${env.STORAGE_KEY_PREFIX}": production's keys say so.`,
+    });
+  }
+
+  if (env.NODE_ENV !== 'production' && env.STORAGE_KEY_PREFIX === 'prod') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['STORAGE_KEY_PREFIX'],
+      message:
+        `may be "prod" only in production, and NODE_ENV is ${env.NODE_ENV}: nothing else may `
+        + 'write keys that read as production\'s.',
     });
   }
 });

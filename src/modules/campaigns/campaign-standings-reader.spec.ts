@@ -58,7 +58,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
       'windowKey', 'windowLabel',
     ]);
     expect(read.campaigns[0]).toMatchObject({
-      code: 'AUGUST_PUSH', phase: 'ended', final: true, windowKey: '2026-08..2026-08', windowLabel: 'Aug 2026',
+      code: 'AUGUST_PUSH', phase: 'ended', final: true, windowKey: '2026-08..2026-08', windowLabel: 'Agu 2026',
       appliesToOrgLevelCodes: ['AGENT'],
     });
     const active = await mongoose.connection.db!.collection('memberships').countDocuments({ kpmId: KPM_A, status: 'active' });

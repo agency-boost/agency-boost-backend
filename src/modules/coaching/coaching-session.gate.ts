@@ -5,12 +5,13 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import { coalesceKeyOf } from './coaching-session.rules';
+import { COACHING_REFUSALS } from './coaching.messages';
 
 /** The refusal of a write to a finalized session, wherever it is made (`functional/coaching.md`, *Errors*). */
 export function sessionFinalized(sessionId: string): DomainException {
   return new DomainException(
     ErrorCode.COACHING_SESSION_FINALIZED,
-    'This session is finalized and locked to view-only. Reopen it to change what was agreed.',
+    COACHING_REFUSALS.COACHING_SESSION_FINALIZED.locked,
     HttpStatus.CONFLICT,
     { sessionId },
   );

@@ -25,13 +25,13 @@ export class PitchConfirmation {
 export const PitchConfirmationSchema = SchemaFactory.createForClass(PitchConfirmation);
 
 /**
- * **One of an office's four recruitment pitch documents** (D-model, D-slots; collection
- * `kpmRecruitmentPitchDocuments`): the file the office uploaded to a slot, and the confirmations it ticked
- * against that file.
+ * **One of an office's six recruitment pitch documents** (D-model, D-slots; collection
+ * `kpmRecruitmentPitchDocuments`): the file the office uploaded to a slot — one of the four required, or
+ * *Company Profile* or *Agency Profile*, optional (ADR-0177) — and the confirmations it ticked against that file.
  *
  * **The office's own** (ADR-0032): its `kpmId` leads every index, every read and write goes through
  * `RecruitmentPitchRepository`, and its file is an office asset in the office's `recruitment-pitch` folder.
- * A row exists only once a file is attached — a slot with no row is *Missing* — so **no row ever points at
+ * A row exists only once a file is attached — a slot with no row is *missing* — so **no row ever points at
  * a file storage does not hold** (D-seed).
  *
  * **`version` tracks the file** (D-replace): every attach moves it by one and clears every confirmation in

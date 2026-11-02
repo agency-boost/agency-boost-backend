@@ -16,6 +16,7 @@ import { NamedTemplateController } from './named-template.controller';
 import { NamedTemplateService } from './named-template.service';
 import { OfficeTemplateController } from './office-template.controller';
 import { TemplateCopyService } from './template-copy.service';
+import { TemplateService } from './template.service';
 
 const NOW = new Date('2026-10-07T03:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -48,6 +49,8 @@ describe('template copies over HTTP (P13.2-T7)', () => {
       providers: [
         { provide: NamedTemplateService, useValue: wired.namedTemplates },
         { provide: TemplateCopyService, useValue: wired.templateCopies },
+        // ADR-0185: the controller publishes a template's kinds together.
+        { provide: TemplateService, useValue: wired.templateService },
       ],
     }).compile();
     app = moduleRef.createNestApplication();

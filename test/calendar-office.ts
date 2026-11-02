@@ -10,6 +10,10 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { CalendarController } from '@/modules/calendar/calendar.controller';
 import { CalendarService } from '@/modules/calendar/calendar.service';
 import { CalendarPeopleService } from '@/modules/calendar/calendar-people.service';
+import { CoachingActionDone } from '@/modules/coaching/coaching-action-done.service';
+import { CoachingActionDoneController } from '@/modules/coaching/coaching-action-done.controller';
+import { LeadController } from '@/modules/leads/lead.controller';
+import { LeadService } from '@/modules/leads/lead.service';
 import {
   Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
 } from '@/modules/notifications/notification.schema';
@@ -20,7 +24,7 @@ import {
 } from '@/modules/notifications/notification.types';
 import { configModule } from './config-module';
 import { buildCoachingOffice, ROSTER_NOW, type CoachingOffice, type Who } from './coaching-office';
-import { productionPipe, session, StubAuth } from './http-permissions';
+import { NO_CLASS, productionPipe, session, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
 import { clearCollections, startMongo, stopMongo } from './mongo';
 
@@ -115,10 +119,13 @@ export async function startCalendar(options: { realNotifications?: boolean } = {
   await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CalendarController],
+    // UI V1 (UI-104): the two writes a calendar's *Tugas* makes at their sources — a lead's next action, a coaching item.
+    controllers: [CalendarController, LeadController, CoachingActionDoneController],
     providers: [
       { provide: CalendarService, useValue: wired.calendar },
       { provide: CalendarPeopleService, useValue: wired.calendarPeople },
+      { provide: LeadService, useValue: wired.leadRecords },
+      { provide: CoachingActionDone, useValue: new CoachingActionDone(wired.coachingSessions, wired.audit, wired.clock) },
     ],
   }).compile();
   const app = moduleRef.createNestApplication();
@@ -138,7 +145,8 @@ export async function startCalendar(options: { realNotifications?: boolean } = {
     col,
     officeOnly: (who) => {
       const base = office.as(who);
-      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG' });
+      // No rung, and so no class (ADR-0156): a grant reads the class, and `NO_CLASS` matches none.
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS });
     },
     supporting: (who, readOnly = true) => {
       const base = office.as(who);

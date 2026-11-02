@@ -3,7 +3,9 @@ import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import type { DomainException } from '@/common/errors/domain.exception';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { readerIn } from '@/common/i18n/reader';
 import * as metricsModule from '@/domain/constants/metrics';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -16,6 +18,7 @@ import { CampaignService } from './campaign.service';
 import { CampaignStandingOverrides } from './campaign-standing-overrides';
 import { MetricRegistryController } from './metric-registry.controller';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -265,6 +268,59 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
         requirements: [{ metricKey: 'TRAINING_COMPLETION_PCT', comparator: 'gte', value: 80 }],
       })).expect(400);
       expect(res.body.error.message).toMatch(/Training completion is not something a campaign can measure/);
+    });
+  });
+
+  /**
+   * **The Owner's campaign refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): a code taken, a company-wide campaign and
+   * a requirement no campaign measures — the same code and details' shape as in English, the words the reader's.
+   */
+  describe('P18.98-T5 AC-7 the Owner’s campaign refusals in Indonesian', () => {
+    const post = (body: Record<string, unknown>) =>
+      request(app.getHttpServer()).post(url).set(...IN_INDONESIAN).send(body);
+
+    it('P18.98-T5 AC-7 a code taken and a company-wide campaign: 400 VALIDATION_FAILED, field and violations in Indonesian', async () => {
+      session.current = OWNER;
+      await request(app.getHttpServer()).post(url).send(aCampaign()).expect(201);
+      const taken = await post(aCampaign()).expect(400);
+      expect(taken.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'Campaign dengan kode YEAR_END_DRIVE sudah ada. Pilih kode lain.',
+        details: { field: 'code', violations: ['Campaign dengan kode YEAR_END_DRIVE sudah ada.'] },
+      });
+      // `scope` is no field of the DTO, so the pipe refuses it first — in Indonesian too; the service's own refusal
+      // (`refuseCompanyScope`) holds the same sentence for a caller that reaches it.
+      const companyWide = await post(aCampaign({ code: 'COMPANY_DRIVE', scope: 'company' })).expect(400);
+      expect(companyWide.body.error.details.violations).toEqual(['properti scope tidak dikenal']);
+      let refused: DomainException | null = null;
+      try {
+        wired.campaigns.refuseCompanyScope('company');
+      } catch (err) {
+        refused = err as DomainException;
+      }
+      const said = 'Campaign untuk seluruh perusahaan tidak tersedia. Setiap campaign di sini adalah milik KPM Anda sendiri.';
+      expect([refused!.messageFor(readerIn('id')), refused!.detailsFor(readerIn('id'))])
+        .toEqual([said, { field: 'scope', violations: [said] }]);
+      // The English, as before.
+      expect((await request(app.getHttpServer()).post(url).send(aCampaign()).expect(400)).body.error.message)
+        .toBe('A campaign with the code YEAR_END_DRIVE already exists. Choose another code.');
+    });
+
+    it('P18.98-T5 AC-7 a requirement no campaign measures, and part of a month, named in Indonesian', async () => {
+      session.current = OWNER;
+      const res = await post(aCampaign({
+        code: 'TRAINING_DRIVE', requirements: [{ metricKey: 'TRAINING_COMPLETION_PCT', comparator: 'gte', value: 80 }],
+      })).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.details.violations).toEqual([
+        `Syarat 1: Training completion bukan sesuatu yang dapat diukur campaign. Salah satu dari: ${
+          metricsModule.CAMPAIGN_METRICS.map((m) => m.name).join(', ')}.`,
+      ]);
+      const partial = await post(aCampaign({ code: 'MID_MONTH', startsAt: '2026-10-14T17:00:00Z' })).expect(400);
+      expect(partial.body.error.details.violations).toEqual([
+        'Campaign yang meminta angka dari file produksi bulanan berjalan dalam bulan penuh: mulai pada tanggal 1 dan akhiri pada hari '
+          + 'terakhir suatu bulan.',
+      ]);
     });
   });
 });

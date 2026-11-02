@@ -12,6 +12,7 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { requireMonth } from './production-guards';
 import { ProductionMonthRepository } from './production-month.repository';
+import { PRODUCTION_REFUSALS } from './production.messages';
 
 /**
  * Why a month is open or locked (ADR-0050).
@@ -33,13 +34,6 @@ export interface MonthState {
   changedAt: string | null;
   changedBy: string | null;
 }
-
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
-  'September', 'October', 'November', 'December'];
-const monthLabel = (month: string) => {
-  const [y, m] = month.split('-');
-  return `${MONTH_NAMES[Number(m) - 1]} ${y}`;
-};
 
 /**
  * A month of production as a thing with a state: its lock, and its revision (P9-T4, ADR-0050).
@@ -94,16 +88,17 @@ export class ProductionMonths {
     };
   }
 
-  /** `UPLOAD_MONTH_LOCKED`, saying why and what to do — enforced by the writes, never only by the screen. */
+  /**
+   * `UPLOAD_MONTH_LOCKED`, saying why and what to do — enforced by the writes, never only by the screen. The month and
+   * the day are written as ADR-0167 §1 writes them, *Sep 2026*, in the reader's figures (P18.98-T5).
+   */
   refuseIfLocked(state: MonthState): void {
     if (!state.locked) return;
-    const label = monthLabel(state.month);
-    const why = state.reason === 'locked_by_hand'
-      ? `${label} was locked${state.changedBy ? ` by ${state.changedBy}` : ''}.`
-      : `${label} locked after ${state.editableUntil}, when its window closed.`;
     throw new DomainException(
       ErrorCode.UPLOAD_MONTH_LOCKED,
-      `${why} Reopen the month to change its figures.`,
+      state.reason === 'locked_by_hand'
+        ? PRODUCTION_REFUSALS.UPLOAD_MONTH_LOCKED.lockedByHand({ month: state.month, by: state.changedBy })
+        : PRODUCTION_REFUSALS.UPLOAD_MONTH_LOCKED.lockedOnSchedule({ month: state.month, until: state.editableUntil }),
       HttpStatus.CONFLICT,
       { month: state.month, reason: state.reason, editableUntil: state.editableUntil },
     );
@@ -175,7 +170,7 @@ export class ProductionMonths {
     const actual = (await this.months.findOne(ctx, { month }))?.revision ?? 0;
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,
-      `${monthLabel(month)} has changed since you looked at it. Load it again, and upload the file again if you were importing one.`,
+      PRODUCTION_REFUSALS.VERSION_CONFLICT.monthChanged({ month }),
       HttpStatus.CONFLICT,
       { month, expectedVersion: expected, actualVersion: actual },
     );

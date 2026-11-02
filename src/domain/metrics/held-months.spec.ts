@@ -1,18 +1,12 @@
-import {
-  averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg, newActiveAgentsMonthlyAvg,
-} from './held-months';
+import * as heldMonths from './held-months';
+import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg } from './held-months';
 
 const M = 1_000_000 * 100;
 
 describe('the forum’s figures over the months held (P18.1-T1 AC-3, AC-4; OD-144)', () => {
-  it('P18.1-T1 AC-3 New AA (avg. monthly): the file’s NEW_ACTIVE_AGENTS over the months held ÷ the months held, exact', () => {
-    expect(newActiveAgentsMonthlyAvg([2, null, 3, 0])).toBe(5 / 3);
-    expect(newActiveAgentsMonthlyAvg([4])).toBe(4);
-  });
-
-  it('P18.1-T1 AC-3 New AA (avg. monthly) is pending with no month held — never 0', () => {
-    expect(newActiveAgentsMonthlyAvg([null, null])).toBeNull();
-    expect(newActiveAgentsMonthlyAvg([])).toBeNull();
+  it('P18.97-T1 AC-6 New AA (avg. monthly) is retired: nothing here computes it any more (ADR-0175 §2)', () => {
+    // Its scorecards keep the figures they froze (ADR-0129 §7); no function can recompute one.
+    expect(Object.keys(heldMonths).sort()).toEqual(['averageCaseSizeRealised', 'caseSubmissions', 'maaMonthlyAvg']);
   });
 
   it('P18.1-T1 AC-4 Avg. Monthly AA: MAA_COUNT_IN_UNIT of each month held, averaged; a month not held leaves it', () => {

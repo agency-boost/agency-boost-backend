@@ -8,7 +8,8 @@ export type AuthTokenKind =
   | 'refresh'
   | 'email_verification'
   | 'password_reset'
-  | 'impersonation';
+  | 'impersonation'
+  | 'email_change';
 
 /**
  * Credentials live apart from identity, so rotating one never touches the other.
@@ -31,9 +32,17 @@ export class AuthToken {
   @Prop({
     type: String,
     required: true,
-    enum: ['refresh', 'email_verification', 'password_reset', 'impersonation'],
+    enum: ['refresh', 'email_verification', 'password_reset', 'impersonation', 'email_change'],
   })
   kind!: AuthTokenKind;
+
+  /**
+   * **The address an `email_change` token moves the account to** (UI V1, UI-111; ADR-0181), and `null` on every
+   * other kind. The pending change is this row: the new address, the token's hash and its expiry, one live row per
+   * person — a newer request revokes the one before it. `users.email` is not touched until the link is opened.
+   */
+  @Prop({ type: String, default: null })
+  newEmail!: string | null;
 
   /** SHA-256 of the token. The raw value exists only in the response that issued it. */
   @Prop({ type: String, required: true, unique: true, index: true })

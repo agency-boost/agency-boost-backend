@@ -1,0 +1,15 @@
+# Nightly, at 01:30 in Jakarta, when the offices are closed (P18.7-T3, plan decision D4).
+#
+# Persistent: a night the VM was down is caught up at the next boot rather than skipped.
+# `systemctl list-timers agencyboost-backup.timer` shows when it last ran and runs next.
+
+[Unit]
+Description=Nightly AgencyBoost backup
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 Asia/Jakarta
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -43,7 +43,8 @@ describe('P17-T2 AC-7, P17-T4 AC-9 recruitment tools import no leads, training, 
       'recruitment-pitch.repository.ts', 'recruitment-pitch.schema.ts', 'recruitment-pitch.service.ts',
       'recruitment-plan.service.ts', 'recruitment-plan.ts', 'recruitment-playbook-defaults.ts',
       'recruitment-playbook-input.ts', 'recruitment-playbook.schema.ts', 'recruitment-playbook.service.ts',
-      'recruitment.controller.ts', 'recruitment.dto.ts', 'recruitment.response.dto.ts',
+      'recruitment-words.ts', 'recruitment.controller.ts', 'recruitment.dto.ts', 'recruitment.messages.ts',
+      'recruitment.response.dto.ts',
     ]);
   });
 

@@ -173,6 +173,10 @@ describe('the Owner’s reporting, measured at 500 members (P18-T7)', () => {
     await Promise.all(['Membership', 'Goal', 'MonthlyAgentData', 'ActivityLog', 'CoachingSession', 'User', 'Lead', 'AuditLog', 'KpmRecruitTarget']
       .filter((name) => mongoose.modelNames().includes(name))
       .map((name) => mongoose.model(name).syncIndexes()));
+    // And every model's own index build settled (`init()`), as the compliance tree's spec does: `syncIndexes` does
+    // not wait for the autoIndex build a model starts when it compiles, and under a full suite's load that build
+    // landed inside the overview's capture as two `memberships.createIndex` — an index build, not a read's query.
+    await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
   }, 600_000);
 
   afterAll(async () => {

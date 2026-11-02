@@ -92,6 +92,15 @@ describe('CalendarPeopleService', () => {
     expect((await service.people(as('me'), {})).items.map((p) => p.membershipId)).toEqual(['a0', 'z9']);
   });
 
+  it('P12-T4 AC-1 the picker orders three of one name by id, in whatever order the read returns them', async () => {
+    const namesakes = [m('z9', 'me', ['me']), m('a0', 'me', ['me']), m('m5', 'me', ['me'])];
+    const names = { z9: 'Ani', a0: 'Ani', m5: 'Ani' };
+    for (const order of [namesakes, [...namesakes].reverse()]) {
+      const service = build({ members: [m('me', null, [], 'AB', 'ab'), ...order], names });
+      expect((await service.people(as('me'), {})).items.map((p) => p.membershipId)).toEqual(['a0', 'm5', 'z9']);
+    }
+  });
+
   it('a leader who coaches nobody is answered nobody, and an Agent is not asked', async () => {
     expect(await build({ members: [] }).downline(as('me'))).toEqual({ people: [] });
     expect(await build({ members: [], coachees: [{ membershipId: 'x', depth: 1, membership: m('x', 'me', ['me']) }] })

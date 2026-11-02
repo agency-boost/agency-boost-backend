@@ -96,6 +96,23 @@ export class KpmOverviewController {
   }
 }
 
+/**
+ * Who reads KPM analytics (ADR-0159 §2): the Owner, the Admins and the office's **Core Leaders**. A leader who is not
+ * one holds the grant and is answered 404, so nothing tells them there is a reading behind it.
+ */
+const ANALYTICS_REFUSALS = [
+  refusal(
+    403,
+    '`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — '
+    + 'a role without the permission: an Agent.',
+  ),
+  refusal(
+    404,
+    '`NOT_FOUND` — an AB or an AAB who is not a Core Leader (tagged, on a leader rung; ADR-0159 §2), read on every '
+    + 'request: the forum’s rule. Indistinguishable from another office’s.',
+  ),
+] as const;
+
 /** **KPM analytics** (`functional/kpm-analytics.md`, the Data contract): the unit comparison by AB agency. */
 @ApiTags('kpm-reporting')
 @ApiBearerAuth()
@@ -115,10 +132,12 @@ export class KpmAnalyticsController {
       + 'manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, '
       + 'criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s '
       + 'production club. The total row, and the agency’s production for the six months before this one. '
-      + 'Computed on the read, not paginated; nothing is recorded.',
+      + 'Computed on the read, not paginated; nothing is recorded. Read by the Owner, an Admin and a Core Leader '
+      + '(ADR-0159 §2), the whole office, read-only.',
   })
   @ApiResponse({ status: 200, type: KpmAnalyticsDto })
-  @ApiResponse(NO_OFFICE)
+  @ApiResponse(ANALYTICS_REFUSALS[0])
+  @ApiResponse(ANALYTICS_REFUSALS[1])
   async read(@Ctx() ctx: RequestContext, @Query() query: KpmAnalyticsQueryDto) {
     return this.analytics.read(ctx, query);
   }

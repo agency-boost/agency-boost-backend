@@ -37,11 +37,19 @@ export interface CastPerson {
   /** `agus` is the demo AB; `arief` is the AAB this cast adds. */
   leader: 'agus' | 'arief';
   /**
-   * The insurer's producer id, in the seed's `PRU-8xxxx` shape. **Given, not counted**: `user()`
+   * The insurer's producer id, in the seed's `8xxxx` shape — digits only, as every new code is (ADR-0158 §4).
+   * **Given, not counted**: `user()`
    * numbers the accounts it creates, so an account added to a database that already holds the rest
    * would be numbered from one again and collide with an existing code.
    */
   agentCode: string;
+  /**
+   * **Their WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, D-22), on their account (`users.phone`), as
+   * *Isi nomor WhatsApp* stores one: `+62` and its digits. **Some have one and some do not**, so both of the WhatsApp
+   * button's paths can be walked in a browser as Agus: Indah, Siti, Arief and Wahyu open WhatsApp at once; Dimas and
+   * Novi open the sheet. Given once, to an account that has none — a number somebody saved in a walk is kept.
+   */
+  phone?: string;
   /**
    * **When they joined, in days before the run**: after their leader could lead them — Agus joined, or
    * Arief became an AAB — and before their first activity day (41 back), their goal (60 back at most)
@@ -65,15 +73,15 @@ export interface CastPerson {
  * nobody (`role-change.service.ts`).
  */
 export const COACHING_CAST: readonly CastPerson[] = [
-  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: 'PRU-80101', joinedDaysAgo: 97 },
-  { key: 'dimas', email: 'dimas@kpm0417.test', fullName: 'Dimas Pratama', pronoun: 'he', role: 'agent', leader: 'agus', agentCode: 'PRU-80102', joinedDaysAgo: 94 },
-  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: 'PRU-80103', joinedDaysAgo: 101 },
+  { key: 'indah', email: 'indah@kpm0417.test', fullName: 'Indah Permatasari', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80101', joinedDaysAgo: 97, phone: '+6281211002201' },
+  { key: 'dimas', email: 'dimas@kpm0417.test', fullName: 'Dimas Pratama', pronoun: 'he', role: 'agent', leader: 'agus', agentCode: '80102', joinedDaysAgo: 94 },
+  { key: 'siti', email: 'siti@kpm0417.test', fullName: 'Siti Rahmawati', pronoun: 'she', role: 'agent', leader: 'agus', agentCode: '80103', joinedDaysAgo: 101, phone: '+6281311002203' },
   {
-    key: 'arief', email: 'arief@kpm0417.test', fullName: 'Arief Hidayat', pronoun: 'he', role: 'aab', leader: 'agus', agentCode: 'PRU-80104',
-    joinedDaysAgo: 104, promoted: { daysAgo: 90, reason: 'Ready to lead a unit of his own' },
+    key: 'arief', email: 'arief@kpm0417.test', fullName: 'Arief Hidayat', pronoun: 'he', role: 'aab', leader: 'agus', agentCode: '80104',
+    joinedDaysAgo: 104, phone: '+6281511002204', promoted: { daysAgo: 90, reason: 'Siap memimpin unit sendiri' },
   },
-  { key: 'novi', email: 'novi@kpm0417.test', fullName: 'Novi Andriani', pronoun: 'she', role: 'agent', leader: 'arief', agentCode: 'PRU-80105', joinedDaysAgo: 84 },
-  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: 'PRU-80106', joinedDaysAgo: 79 },
+  { key: 'novi', email: 'novi@kpm0417.test', fullName: 'Novi Andriani', pronoun: 'she', role: 'agent', leader: 'arief', agentCode: '80105', joinedDaysAgo: 84 },
+  { key: 'wahyu', email: 'wahyu@kpm0417.test', fullName: 'Wahyu Saputra', pronoun: 'he', role: 'agent', leader: 'arief', agentCode: '80106', joinedDaysAgo: 79, phone: '+6285711002206' },
 ];
 
 /*
@@ -313,27 +321,27 @@ export interface CoachingLeadPlan {
  * starts with her refuses to finalize until the lead has a date, which is the fifth check, on purpose.
  */
 export const COACHING_LEADS: readonly CoachingLeadPlan[] = [
-  { owner: 'indah', name: 'Ibu Melati Kusumawardani', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], nextActionIn: 2, nextActionNote: 'Collect the signed SPAJ.', thisMonth: true, source: 'Referral — Pak Gilang' },
-  { owner: 'indah', name: 'Pak Gilang Ramadhan', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 5, nextActionNote: 'Second meeting, with his wife.', thisMonth: false },
-  { owner: 'indah', name: 'Ibu Shinta Maharani', type: 'sales', path: ['NOT_YET_APPROACHED'], thisMonth: false, remarks: 'Asked about a plan for her parents.' },
-  { owner: 'dimas', name: 'Pak Bayu Firmansyah', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 3, nextActionNote: 'Present the education plan.', thisMonth: true },
-  { owner: 'dimas', name: 'Ibu Ayu Pertiwi', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 9, nextActionNote: 'First call, after payday.', thisMonth: false },
+  { owner: 'indah', name: 'Ibu Melati Kusumawardani', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], nextActionIn: 2, nextActionNote: 'Ambil SPAJ yang sudah ditandatangani.', thisMonth: true, source: 'Referral — Pak Gilang' },
+  { owner: 'indah', name: 'Pak Gilang Ramadhan', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 5, nextActionNote: 'Pertemuan kedua, bersama istrinya.', thisMonth: false },
+  { owner: 'indah', name: 'Ibu Shinta Maharani', type: 'sales', path: ['NOT_YET_APPROACHED'], thisMonth: false, remarks: 'Tanya soal produk untuk orang tuanya.' },
+  { owner: 'dimas', name: 'Pak Bayu Firmansyah', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 3, nextActionNote: 'Presentasikan produk dana pendidikan.', thisMonth: true },
+  { owner: 'dimas', name: 'Ibu Ayu Pertiwi', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 9, nextActionNote: 'Telepon pertama, setelah gajian.', thisMonth: false },
   { owner: 'dimas', name: 'Pak Teddy Kurniadi', type: 'sales', path: ['NOT_YET_APPROACHED'], thisMonth: false },
-  { owner: 'siti', name: 'Ibu Ratih Purnamasari', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 4, nextActionNote: 'Call back about the health rider.', thisMonth: true },
-  { owner: 'siti', name: 'Pak Fauzan Akbar', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], thisMonth: true, remarks: 'Promised for this month; no meeting booked yet.' },
-  { owner: 'siti', name: 'Ibu Nurul Aini', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 12, nextActionNote: 'Send the brochure.', thisMonth: false },
-  { owner: 'arief', name: 'Pak Irwan Setiadi', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], nextActionIn: 1, nextActionNote: 'Confirm the medical check.', thisMonth: true },
-  { owner: 'arief', name: 'Sdri. Kadek Widiastuti', type: 'recruitment', path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], nextActionIn: 6, nextActionNote: 'Recruitment presentation at the branch.', thisMonth: false },
+  { owner: 'siti', name: 'Ibu Ratih Purnamasari', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 4, nextActionNote: 'Telepon lagi soal rider kesehatan.', thisMonth: true },
+  { owner: 'siti', name: 'Pak Fauzan Akbar', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], thisMonth: true, remarks: 'Dijanjikan bulan ini; belum ada jadwal ketemu.' },
+  { owner: 'siti', name: 'Ibu Nurul Aini', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 12, nextActionNote: 'Kirim brosurnya.', thisMonth: false },
+  { owner: 'arief', name: 'Pak Irwan Setiadi', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP', 'POLICY_SUBMITTED'], nextActionIn: 1, nextActionNote: 'Konfirmasi jadwal pemeriksaan medis.', thisMonth: true },
+  { owner: 'arief', name: 'Sdri. Kadek Widiastuti', type: 'recruitment', path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], nextActionIn: 6, nextActionNote: 'Presentasi recruitment di kantor cabang.', thisMonth: false },
   { owner: 'arief', name: 'Ibu Yuliana Tanjung', type: 'sales', path: ['NOT_YET_APPROACHED'], thisMonth: false },
-  { owner: 'novi', name: 'Pak Agung Wicaksono', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 2, nextActionNote: 'Walk through the illustration again.', thisMonth: true },
+  { owner: 'novi', name: 'Pak Agung Wicaksono', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 2, nextActionNote: 'Jelaskan ulang ilustrasinya.', thisMonth: true },
   { owner: 'novi', name: 'Ibu Citra Ananda', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 8, thisMonth: false },
-  { owner: 'wahyu', name: 'Pak Dedi Supriadi', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 6, nextActionNote: 'Ask for the decision.', thisMonth: true },
-  { owner: 'wahyu', name: 'Ibu Eka Wulandari', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: -3, nextActionNote: 'Call back — she asked for Monday.', thisMonth: false },
-  { owner: 'sari', name: 'Pak Hasan Basri', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 3, nextActionNote: 'Bring the family-protection illustration.', thisMonth: true },
-  { owner: 'sari', name: 'Sdri. Anisa Rahma', type: 'recruitment', path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], nextActionIn: 7, nextActionNote: "Invite her to Thursday's BOP.", thisMonth: false },
-  { owner: 'dewi', name: 'Ibu Sekar Arum', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 5, nextActionNote: 'Meet at her shop after closing.', thisMonth: true },
-  { owner: 'yanti', name: 'Pak Rahmat Sulistyo', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 2, nextActionNote: 'Bring the revised premium.', thisMonth: true },
+  { owner: 'wahyu', name: 'Pak Dedi Supriadi', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 6, nextActionNote: 'Minta keputusannya.', thisMonth: true },
+  { owner: 'wahyu', name: 'Ibu Eka Wulandari', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: -3, nextActionNote: 'Telepon lagi — dia minta hari Senin.', thisMonth: false },
+  { owner: 'sari', name: 'Pak Hasan Basri', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 3, nextActionNote: 'Bawa ilustrasi proteksi keluarga.', thisMonth: true },
+  { owner: 'sari', name: 'Sdri. Anisa Rahma', type: 'recruitment', path: ['NOT_APPROACHED', 'MEETING_SCHEDULED'], nextActionIn: 7, nextActionNote: 'Undang ke BOP hari Kamis.', thisMonth: false },
+  { owner: 'dewi', name: 'Ibu Sekar Arum', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 5, nextActionNote: 'Ketemu di tokonya setelah tutup.', thisMonth: true },
+  { owner: 'yanti', name: 'Pak Rahmat Sulistyo', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 2, nextActionNote: 'Bawa hitungan premi yang sudah direvisi.', thisMonth: true },
   { owner: 'yanti', name: 'Ibu Tari Anjani', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 10, thisMonth: false },
-  { owner: 'rina', name: 'Ibu Kartika Dewanti', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 6, nextActionNote: 'Coffee after her shift.', thisMonth: 'unless-held' },
-  { owner: 'budi', name: 'Pak Galih Prakoso', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 5, nextActionNote: 'First call.', thisMonth: 'unless-held' },
+  { owner: 'rina', name: 'Ibu Kartika Dewanti', type: 'sales', path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'], nextActionIn: 6, nextActionNote: 'Ngopi setelah jam kerjanya selesai.', thisMonth: 'unless-held' },
+  { owner: 'budi', name: 'Pak Galih Prakoso', type: 'sales', path: ['NOT_YET_APPROACHED'], nextActionIn: 5, nextActionNote: 'Telepon pertama.', thisMonth: 'unless-held' },
 ];

@@ -22,6 +22,10 @@ const ROUTES: Record<string, string> = {
   list: 'lead:read',
   read: 'lead:read',
   create: 'lead:create',
+  // P18.8-T7: the owner's own order. `lead-order.int.spec.ts` asks whose list it writes.
+  reorder: 'lead:update',
+  // UI V1 (UI-104): the owner's tick on a next action, from Calendar.
+  setNextActionDone: 'lead:update',
   update: 'lead:update',
   setStatus: 'lead:update',
   setOutcome: 'lead:mark_outcome',
@@ -156,6 +160,28 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       expect(res.body.statusCode).toBe('PAID_AND_ISSUED');
     });
 
+    it('UI-105 answers one lead with its moves, oldest first, and the list without them', async () => {
+      const id = await staged('FOLLOW_UP');
+      await http().patch(`${url}/${id}/status`).send({ statusCode: 'POLICY_SUBMITTED' }).expect(200);
+      // A reopen moves nothing, so it adds nothing to the history.
+      await http().patch(`${url}/${id}/outcome`).send({ outcome: 'lost' }).expect(200);
+      await http().patch(`${url}/${id}/outcome`).send({ outcome: null }).expect(200);
+
+      const one = await http().get(`${url}/${id}`).expect(200);
+      expect(one.body.history).toEqual([
+        { at: NOW.toISOString(), fromStatusCode: null, toStatusCode: 'FOLLOW_UP' },
+        { at: NOW.toISOString(), fromStatusCode: 'FOLLOW_UP', toStatusCode: 'POLICY_SUBMITTED' },
+      ]);
+      const list = await http().get(url).expect(200);
+      expect(list.body.rows[0]).not.toHaveProperty('history');
+    });
+
+    it('UI-105 answers a lead that has never moved with an empty history', async () => {
+      const { body } = await add({ type: 'sales' }).expect(201);
+      const one = await http().get(`${url}/${body.id}`).expect(200);
+      expect(one.body.history).toEqual([]);
+    });
+
     it('refuses the other ladder’s stage with its own code', async () => {
       const { body } = await add({ type: 'sales' }).expect(201);
       const res = await http().patch(`${url}/${body.id}/status`)
@@ -184,6 +210,72 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       const reopened = await http().patch(`${url}/${id}/outcome`)
         .send({ outcome: null }).expect(200);
       expect(reopened.body).toMatchObject({ outcome: null, statusCode: 'FOLLOW_UP' });
+    });
+  });
+
+  /*
+   * **The same refusals in Indonesian** (P18.98-T5 AC-7): the words follow the request's `Accept-Language`; the
+   * code, the status and every detail that is no sentence are the same in both. A field is named as the API names it.
+   */
+  describe('P18.98-T5 AC-7 in Indonesian', () => {
+    const inIndonesian = () => request(app.getHttpServer());
+
+    it('P18.98-T5 AC-7 refuses a lead field by field, every violation in Indonesian, joined as the message', async () => {
+      const res = await inIndonesian().post(url).set('Accept-Language', 'id')
+        .send({ name: 'B', thisMonth: 'yes', contact: { email: 'nope', whatsapp: '0812' } }).expect(400);
+
+      const violations = [
+        'name harus 2–120 karakter.',
+        'thisMonth harus true atau false.',
+        'properti contact.whatsapp tidak dikenal',
+        'contact.email harus berupa alamat email.',
+      ];
+      expect(res.body.error).toEqual({
+        code: 'VALIDATION_FAILED', message: violations.join('; '), details: { violations }, requestId: expect.any(String),
+      });
+
+      // The same request in English reads as it always has.
+      const english = await http().post(url)
+        .send({ name: 'B', thisMonth: 'yes', contact: { email: 'nope', whatsapp: '0812' } }).expect(400);
+      expect(english.body.error.details.violations).toEqual([
+        'name must be 2–120 characters.',
+        'thisMonth must be true or false.',
+        'property contact.whatsapp should not exist',
+        'contact.email must be an email address.',
+      ]);
+    });
+
+    it('P18.98-T5 AC-7 refuses a second outcome, and the other ladder’s stage, in Indonesian', async () => {
+      const { body } = await add({ type: 'sales' }).expect(201);
+      await http().patch(`${url}/${body.id}/status`).send({ statusCode: 'FOLLOW_UP' }).expect(200);
+      await http().patch(`${url}/${body.id}/outcome`).send({ outcome: 'lost' }).expect(200);
+
+      const again = await inIndonesian().patch(`${url}/${body.id}/outcome`).set('Accept-Language', 'id')
+        .send({ outcome: 'won' }).expect(409);
+      expect(again.body.error).toMatchObject({
+        code: 'LEAD_ALREADY_CLOSED',
+        message: 'Lead ini sudah ditandai tidak berhasil. Buka kembali sebelum menutupnya lagi.',
+        details: { outcome: 'lost' },
+      });
+
+      // Won, the other outcome, in both languages.
+      const { body: won } = await add({ type: 'sales' }).expect(201);
+      await http().patch(`${url}/${won.id}/status`).send({ statusCode: 'PAID_AND_ISSUED' }).expect(200);
+      await http().patch(`${url}/${won.id}/outcome`).send({ outcome: 'won' }).expect(200);
+      const wonAgain = await inIndonesian().patch(`${url}/${won.id}/outcome`).set('Accept-Language', 'id')
+        .send({ outcome: 'lost' }).expect(409);
+      expect(wonAgain.body.error.message).toBe('Lead ini sudah ditandai berhasil. Buka kembali sebelum menutupnya lagi.');
+      expect((await http().patch(`${url}/${won.id}/outcome`).send({ outcome: 'lost' }).expect(409)).body.error.message)
+        .toBe('This lead is already won. Reopen it before closing it again.');
+
+      const { body: fresh } = await add({ type: 'sales' }).expect(201);
+      const wrong = await inIndonesian().patch(`${url}/${fresh.id}/status`).set('Accept-Language', 'id')
+        .send({ statusCode: 'AAJI_LICENSED' }).expect(422);
+      expect(wrong.body.error).toMatchObject({
+        code: 'LEAD_STATUS_WRONG_PIPELINE',
+        message: 'AAJI_LICENSED termasuk pipeline recruitment; ini lead sales.',
+        details: { code: 'AAJI_LICENSED', pipeline: 'recruitment', leadType: 'sales' },
+      });
     });
   });
 

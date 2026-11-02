@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { SOURCE_READER } from '@/common/i18n/reader';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { buildCoachingOffice, KPM_A, ROSTER_NOW, type CoachingOffice, type Who } from '../../../test/coaching-office';
@@ -18,7 +19,8 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   const db = () => mongoose.connection.db!;
-  const read = (who: Who, query: { for?: string } = {}) => wired.unitDashboard.read(office.as(who), query);
+  /** Read in the API's English, as asserted below: nobody's choice is Bahasa Indonesia since P18.98-T4's exit. */
+  const read = (who: Who, query: { for?: string } = {}) => wired.unitDashboard.read(office.as(who).withReader(SOURCE_READER), query);
   const row = (v: UnitDashboardView, who: Who) => everyRow(v).find((r) => r.membershipId === office.id[who])!;
   const chase = (who: Who, code: string) => db().collection('campaignChases').insertOne({
     kpmId: KPM_A, membershipId: office.id[who], campaignCode: code, chasing: true, deletedAt: null,
@@ -59,6 +61,21 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     expect(row(v, 'SARI')).toMatchObject({ chasingMdrt: false, campaigns: [] });
   });
 
+  it('P18.5-T7 AC-7 two chips of one title are ordered by code, so two reads never shuffle them', async () => {
+    const owner = office.as('OWNER');
+    for (const code of ['ZETA_PUSH', 'ALPHA_PUSH']) {
+      await wired.campaigns.create(owner, {
+        code, title: 'Q3 Push', startsAt: wib('2026-09-01T00:00:00'), endsAt: wib('2026-09-30T23:59:00'), requirements: [],
+      });
+      await chase('DIMAS', code);
+    }
+    expect(row(await read('AGUS'), 'DIMAS').campaigns).toEqual([
+      { code: 'MDRT_QUALIFICATION', title: 'MDRT Qualification' },
+      { code: 'ALPHA_PUSH', title: 'Q3 Push' },
+      { code: 'ZETA_PUSH', title: 'Q3 Push' },
+    ]);
+  });
+
   it('P18.5-T7 AC-7 Agus’s roster: his own ✓, Dimas ✓, Rina ✓ in Sari’s unit, the rest —', async () => {
     const v = await read('AGUS');
     expect(Object.fromEntries(everyRow(v).map((r) => [r.name, r.chasingMdrt]))).toMatchObject({
@@ -68,7 +85,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
 
   it('P18.5-T7 AC-7 the header tooltip is composed from the office’s MDRT campaign (ADR-0142 §3)', async () => {
     expect((await read('AGUS')).mdrt).toEqual({
-      running: true, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2.400.000.000 or more.',
+      running: true, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2,4 M or more.',
     });
     // A member leading nobody is answered an empty unit, the header's words all the same.
     expect((await read('RINA')).mdrt.running).toBe(true);

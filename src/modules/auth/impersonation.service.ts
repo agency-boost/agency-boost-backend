@@ -5,12 +5,13 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { AUTH_REFUSALS } from './auth.messages';
 import { AuditService } from '@/modules/audit/audit.service';
-import { can } from '@/modules/rbac/permissions';
+import { can, SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import {
-  ImpersonationSession, ImpersonationSessionDocument,
+  ImpersonationPurpose, ImpersonationSession, ImpersonationSessionDocument,
 } from './impersonation-session.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -47,7 +48,12 @@ export class ImpersonationService {
     targetUserId: string,
     reason: string,
     durationMinutes = IMPERSONATION_MAX_MINUTES,
-  ): Promise<{ accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean }> {
+    /** `setup` may write the office's setup and nothing else (ADR-0162); `support` only looks. */
+    purpose: ImpersonationPurpose = 'support',
+  ): Promise<{
+    accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean;
+    purpose: ImpersonationPurpose; writeScope: string[];
+  }> {
     /*
      * **This one first, and the order is the point.**
      *
@@ -60,14 +66,14 @@ export class ImpersonationService {
     if (ctx.isImpersonating) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You are already impersonating. End that session first.',
+        AUTH_REFUSALS.PERM_DENIED.alreadyImpersonating,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!can(ctx, 'impersonation:start')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Only a Super Admin can impersonate a user.',
+        AUTH_REFUSALS.PERM_DENIED.superAdminOnly,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:start' },
       );
@@ -75,7 +81,7 @@ export class ImpersonationService {
     if (!reason?.trim()) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'A reason is required to impersonate a user.',
+        AUTH_REFUSALS.VALIDATION_FAILED.impersonationReason,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -93,7 +99,7 @@ export class ImpersonationService {
       // Granted to nobody, deliberately — see the denial row in the permission matrix.
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'A Super Admin cannot be impersonated.',
+        AUTH_REFUSALS.PERM_DENIED.targetSuperAdmin,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:target_super_admin' },
       );
@@ -101,7 +107,7 @@ export class ImpersonationService {
     if (String(target._id) === ctx.userId) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You cannot impersonate yourself.',
+        AUTH_REFUSALS.PERM_DENIED.yourself,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -122,7 +128,7 @@ export class ImpersonationService {
     if (targetIsAdmin && !can(ctx, 'impersonation:target_kpm_admin_or_owner')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Impersonating an office\'s Owner or Admin needs its own grant.',
+        AUTH_REFUSALS.PERM_DENIED.ownerOrAdminGrant,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:target_kpm_admin_or_owner' },
       );
@@ -168,25 +174,37 @@ export class ImpersonationService {
         const reason = unavailable.status === 'archived' ? 'archived' : 'suspended';
         throw new DomainException(
           ErrorCode.IMPERSONATION_OFFICE_UNAVAILABLE,
-          `KPM ${unavailable.code} · ${unavailable.branchName} is ${reason}, so nobody can act as `
-            + 'its members until it is reactivated.',
+          AUTH_REFUSALS.IMPERSONATION_OFFICE_UNAVAILABLE.unavailable({
+            code: unavailable.code, branch: unavailable.branchName, reason,
+          }),
           HttpStatus.CONFLICT,
           { kpmCode: unavailable.code, branch: unavailable.branchName, reason },
         );
       }
     }
 
+    /*
+     * **A setup session acts as somebody who configures an office** (ADR-0162 §1): its Owner, or one of its
+     * Admins, in an office the loop above has found active. Anybody else has no settings to change, so the
+     * session would be a support session that says otherwise. Refused before anything is written.
+     */
+    const setsUpTheOffice = Boolean(ownedByTarget)
+      || (membership?.status === 'active' && Boolean(membership.adminAccess?.isKpmAdmin));
+    if (purpose === 'setup' && !setsUpTheOffice) {
+      throw new DomainException(
+        ErrorCode.IMPERSONATION_SETUP_TARGET,
+        AUTH_REFUSALS.IMPERSONATION_SETUP_TARGET.notOwnerOrAdmin,
+        HttpStatus.CONFLICT,
+        { purpose },
+      );
+    }
+    const writeScope = purpose === 'setup' ? [...SETUP_SESSION_WRITE_SCOPE] : [];
+
     const minutes = Math.min(Math.max(1, Math.floor(durationMinutes)), IMPERSONATION_MAX_MINUTES);
     const ttlSeconds = minutes * 60;
     const inTenant = kpmId
       ? RequestContext.superAdminInTenant(ctx.userId, kpmId)
       : ctx;
-    await this.audit.record(inTenant, {
-      action: 'impersonation.started',
-      targetCollection: 'users',
-      targetId: targetUserId,
-      after: { reason: reason.trim(), minutes, readOnly: true },
-    });
 
     // `sid` records who is really acting, so the resolved context can carry both.
     const accessToken = this.signer.sign({ sub: targetUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
@@ -204,27 +222,61 @@ export class ImpersonationService {
      * guard can ask one indexed question and only for the rare request that carries an
      * `imp:` session.
      */
-    const session = await this.sessions.create({
-      realActorUserId: ctx.userId,
-      effectiveUserId: targetUserId,
-      kpmId,
-      tokenHash: this.passwords.hashToken(accessToken),
-      // Read-only until a *second* Super Admin says otherwise. The operator who wants to
-      // write is not the one who decides they may.
-      readOnly: true,
-      elevatedByUserId: null,
-      elevatedAt: null,
-      reason: reason.trim(),
-      elevationReason: null,
-      startedAt: this.clock.now(),
-      expiresAt,
-      endedAt: null,
-      deletedAt: null,
+    /*
+     * **A double start is refused, not crashed** (ADR-0168 §4). Two starts by one Super Admin as the same person
+     * within one second sign the same token (`iat` is in seconds), so this row's `tokenHash` meets the first's
+     * unique index. Only that collision is answered `409`; anything else is still thrown as it was. The row comes
+     * before the audit entry and the notices, so a refused start has written nothing.
+     */
+    let session: ImpersonationSessionDocument;
+    try {
+      session = await this.sessions.create({
+        realActorUserId: ctx.userId,
+        effectiveUserId: targetUserId,
+        kpmId,
+        tokenHash: this.passwords.hashToken(accessToken),
+        // Read-only until a *second* Super Admin says otherwise. The operator who wants to
+        // write is not the one who decides they may — except the setup screens' own
+        // permissions, which a setup session names here (ADR-0162 §2).
+        readOnly: true,
+        purpose,
+        writeScope,
+        elevatedByUserId: null,
+        elevatedAt: null,
+        reason: reason.trim(),
+        elevationReason: null,
+        startedAt: this.clock.now(),
+        expiresAt,
+        endedAt: null,
+        deletedAt: null,
+      });
+    } catch (err) {
+      if (isDuplicateTokenHash(err)) {
+        throw new DomainException(
+          ErrorCode.IMPERSONATION_JUST_STARTED,
+          AUTH_REFUSALS.IMPERSONATION_JUST_STARTED.aMomentAgo,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
+
+    const sessionId = String(session._id);
+    /*
+     * **After the row, so the entry names it** (ADR-0162 §3): the Owner's log can then tie the start to the
+     * session's elevation and its end. The purpose and the scope are the trust extended, recorded where an
+     * Owner reads them.
+     */
+    await this.audit.record(inTenant, {
+      action: 'impersonation.started',
+      targetCollection: 'users',
+      targetId: targetUserId,
+      after: { reason: reason.trim(), minutes, readOnly: true, purpose, sessionId, writeScope },
     });
 
-    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim());
+    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim(), purpose);
 
-    return { accessToken, expiresAt, sessionId: String(session._id), readOnly: true };
+    return { accessToken, expiresAt, sessionId, readOnly: true, purpose, writeScope };
   }
 
   /**
@@ -281,7 +333,7 @@ export class ImpersonationService {
     if (!can(ctx, 'impersonation:elevate_to_write')) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'Only a Super Admin can approve writing in a support session.',
+        AUTH_REFUSALS.PERM_DENIED.approveSuperAdminOnly,
         HttpStatus.FORBIDDEN,
         { permission: 'impersonation:elevate_to_write' },
       );
@@ -292,14 +344,14 @@ export class ImpersonationService {
       // costs one line here and the alternative is a hole nobody can see from one file.
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'End your own support session before approving one.',
+        AUTH_REFUSALS.PERM_DENIED.endYourOwn,
         HttpStatus.FORBIDDEN,
       );
     }
     if (!reason?.trim()) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,
-        'Say why this session needs to write. The office\'s Owner reads it.',
+        AUTH_REFUSALS.VALIDATION_FAILED.elevationReason,
         HttpStatus.BAD_REQUEST,
         { field: 'reason' },
       );
@@ -316,7 +368,7 @@ export class ImpersonationService {
     if (session.realActorUserId === ctx.userId) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'A second Super Admin has to approve this — not the one running the session.',
+        AUTH_REFUSALS.PERM_DENIED.secondSuperAdmin,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -366,6 +418,7 @@ export class ImpersonationService {
     kpmId: string | null,
     ownerUserId: string | null,
     reason: string,
+    purpose: ImpersonationPurpose,
   ): Promise<void> {
     const told = new Set<string>();
     for (const userId of [targetUserId, ownerUserId]) {
@@ -375,8 +428,19 @@ export class ImpersonationService {
         userId,
         kpmId,
         templateId: NotificationTemplate.IMPERSONATION_STARTED,
-        payload: { reason, isSubject: userId === targetUserId },
+        // The notice says which kind of session it is (ADR-0162 §3): a setup one changes things.
+        payload: { reason, isSubject: userId === targetUserId, purpose },
       });
     }
   }
+}
+
+/**
+ * Mongo's duplicate-key error (`E11000`) on the session's `tokenHash` index, and nothing else: another index, or any
+ * other failure, is not a start that collided with one a moment ago.
+ */
+function isDuplicateTokenHash(err: unknown): boolean {
+  const e = err as { code?: number; keyPattern?: Record<string, unknown>; keyValue?: Record<string, unknown> } | null;
+  if (e?.code !== 11000) return false;
+  return Boolean(e.keyPattern && 'tokenHash' in e.keyPattern) || Boolean(e.keyValue && 'tokenHash' in e.keyValue);
 }

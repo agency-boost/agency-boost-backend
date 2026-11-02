@@ -1,6 +1,8 @@
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { COACHING } from '@/domain/constants';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import {
-  carryForward, coalesceKeyOf, FINALIZE_RULES, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
+  actionDefaultDueDate, carryForward, coalesceKeyOf, FINALIZE_RULES, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
   leadActionText, reopenableUntil, reopenWindowOpen, reviewedItems, type SessionLead,
 } from './coaching-session.rules';
 
@@ -51,7 +53,7 @@ describe('the coaching session’s rules (P11-T5)', () => {
         lead({ id: 'undated' }),
         lead({ id: 'a', nextActionDate: '2026-09-20', registeredAt: 1, nextActionNote: '  Bring the SPAJ.  ' }),
         lead({ id: 'c', nextActionDate: '2026-09-15', registeredAt: 9 }),
-      ]);
+      ], SOURCE_READER);
       expect(actions).toEqual([
         { leadId: 'c', leadName: 'Lead c', dueDate: '2026-09-15', text: 'Follow up with Lead c' },
         { leadId: 'a', leadName: 'Lead a', dueDate: '2026-09-20', text: 'Bring the SPAJ.' },
@@ -60,8 +62,15 @@ describe('the coaching session’s rules (P11-T5)', () => {
     });
 
     it('P11-T8 AC-9 a blank note reads the prototype’s *Follow up with {name}*', () => {
-      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: '   ' })).toBe('Follow up with Pak Hendro');
-      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null })).toBe('Follow up with Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: '   ' }, SOURCE_READER)).toBe('Follow up with Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, SOURCE_READER)).toBe('Follow up with Pak Hendro');
+    });
+
+    it('P18.98-T5 AC-4 writes the line for its reader, the lead’s name and a note as typed', () => {
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, readerIn('id'))).toBe('Follow up dengan Pak Hendro');
+      expect(leadActionText({ name: 'Pak Hendro', nextActionNote: ' Bawa SPAJ. ' }, readerIn('id'))).toBe('Bawa SPAJ.');
+      expect(leadActionsOf([lead({ id: 'c', name: 'Ibu Rina', nextActionDate: '2026-09-15' })], readerIn('id')))
+        .toEqual([{ leadId: 'c', leadName: 'Ibu Rina', dueDate: '2026-09-15', text: 'Follow up dengan Ibu Rina' }]);
     });
   });
 
@@ -84,7 +93,7 @@ describe('the coaching session’s rules (P11-T5)', () => {
       ]);
     });
 
-    it('P11-T5 AC-1 carries every item not done with its date cleared, except one whose lead has a date now; and every tip', () => {
+    it('UI-060 carries every item not done dated a week ahead, except one whose lead has a date now; and every tip', () => {
       let n = 0;
       const items = reviewedItems(version);
       items.push({ itemId: 'done-1', text: 'Already done', dueDate: null, leadId: null, leadName: null, done: true });
@@ -93,18 +102,28 @@ describe('the coaching session’s rules (P11-T5)', () => {
         [{ tipId: 't1', text: 'Slow down on the opening line.', carriedFromTipId: null }],
         [lead({ id: 'L-dated', nextActionDate: '2026-09-18' }), lead({ id: 'L-undated' })],
         () => `new-${(n += 1)}`,
+        actionDefaultDueDate('2026-10-30'),
       );
 
+      // Every action always has a date (the owner, UI-060): next Friday for a Friday's Start — never blank.
       expect(carried.actionItems).toEqual([
-        { itemId: 'new-1', text: 'Book two presentations', dueDate: null, carriedFromItemId: 'typed-1' },
+        { itemId: 'new-1', text: 'Book two presentations', dueDate: '2026-11-06', carriedFromItemId: 'typed-1' },
         // Its lead lost its date, so *From leads* no longer lists it: it carries like a typed one.
-        { itemId: 'new-2', text: 'Send the brochure', dueDate: null, carriedFromItemId: 'lead-L-undated' },
+        { itemId: 'new-2', text: 'Send the brochure', dueDate: '2026-11-06', carriedFromItemId: 'lead-L-undated' },
       ]);
       expect(carried.tips).toEqual([{ tipId: 'new-3', text: 'Slow down on the opening line.', carriedFromTipId: 't1' }]);
     });
 
+    it('UI-104 a typed item the coachee ticked done from Calendar comes into the review ticked, and is not carried', () => {
+      const items = reviewedItems(version, new Set(['typed-1']));
+      expect(items[0]).toEqual({ itemId: 'typed-1', text: 'Book two presentations', dueDate: '2026-09-12', leadId: null, leadName: null, done: true });
+      expect(items.slice(1).every((item) => !item.done)).toBe(true);
+      const carried = carryForward(items, [], [], () => 'x', '2026-11-06');
+      expect(carried.actionItems.map((i) => i.carriedFromItemId)).toEqual(['lead-L-dated', 'lead-L-undated']);
+    });
+
     it('P11-T5 AC-1 a lead item whose lead is gone carries forward too', () => {
-      const carried = carryForward(reviewedItems(version), [], [], () => 'x');
+      const carried = carryForward(reviewedItems(version), [], [], () => 'x', '2026-11-06');
       expect(carried.actionItems.map((i) => i.carriedFromItemId)).toEqual(['typed-1', 'lead-L-dated', 'lead-L-undated']);
     });
   });
@@ -143,8 +162,22 @@ describe('the coaching session’s rules (P11-T5)', () => {
         .toEqual({ rule: 'EMPTY_ACTION_ITEM' });
     });
 
-    it('P11-T5 AC-4 UNDATED_ACTION_ITEM', () => {
-      expect(finalizeRefusal({ ...ok, actionItems: [{ text: 'x', dueDate: null }] })).toEqual({ rule: 'UNDATED_ACTION_ITEM' });
+    it('UI-060 UNDATED_ACTION_ITEM names how many items have no date, and which, in the session’s order', () => {
+      expect(finalizeRefusal({ ...ok, actionItems: [{ itemId: 'a', text: 'x', dueDate: null }] }))
+        .toEqual({ rule: 'UNDATED_ACTION_ITEM', count: 1, itemIds: ['a'] });
+      expect(finalizeRefusal({
+        ...ok,
+        actionItems: [
+          { itemId: 'a', text: 'x', dueDate: null }, { itemId: 'b', text: 'y', dueDate: '2026-11-06' },
+          { itemId: 'c', text: 'z', dueDate: null }, { itemId: 'd', text: 'w', dueDate: null },
+        ],
+      })).toEqual({ rule: 'UNDATED_ACTION_ITEM', count: 3, itemIds: ['a', 'c', 'd'] });
+    });
+
+    it('UI-060 the default date is a week from the office’s today — the same weekday — across a month', () => {
+      expect(actionDefaultDueDate('2026-10-30')).toBe('2026-11-06');
+      expect(actionDefaultDueDate('2026-12-28')).toBe('2027-01-04');
+      expect(COACHING.ACTION_DEFAULT_DUE_DAYS).toBe(7);
     });
 
     it('P11-T5 AC-4 LEAD_THIS_MONTH_UNDATED names the first such lead in the order they were registered', () => {
@@ -160,12 +193,22 @@ describe('the coaching session’s rules (P11-T5)', () => {
     });
 
     it('P11-T5 AC-4 carries the prototype’s sentence for each rule', () => {
-      expect(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' }))).toEqual([
+      expect(englishAll(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' })))).toEqual([
         'Add at least one action item before finalizing.',
         'Fill in or remove the empty coaching tip before finalizing.',
         'Fill in or remove the empty action item before finalizing.',
         'Every action item needs a date before finalizing.',
         'Pak Fauzan Akbar is tagged "this month" but has no next action date set — add one before finalizing.',
+      ]);
+    });
+
+    it('P18.98-T5 AC-2 says each rule in Indonesian too, the lead’s name as typed', () => {
+      expect(indonesianAll(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' })))).toEqual([
+        'Tambahkan paling tidak satu action item sebelum memfinalkan.',
+        'Isi atau hapus coaching tip yang kosong sebelum memfinalkan.',
+        'Isi atau hapus action item yang kosong sebelum memfinalkan.',
+        'Setiap action item harus diberi tanggal sebelum memfinalkan.',
+        'Pak Fauzan Akbar di-tag "bulan ini" tetapi belum memiliki tanggal tindakan berikutnya — tambahkan sebelum memfinalkan.',
       ]);
     });
   });

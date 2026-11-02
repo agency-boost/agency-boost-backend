@@ -1,5 +1,6 @@
-import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
-import { DomainException } from '@/common/errors/domain.exception';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { prefixed } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -12,6 +13,11 @@ import {
 } from '@/domain/constants';
 import { RatioComparison, RatioDefinitionDocument, RatioOrigin } from './ratio-definition.schema';
 import { checkRatioCreate, checkRatioUpdate } from './config-input';
+import { CONFIG_REFUSALS } from './config.messages';
+import { diverges } from './ratio-diverges';
+
+/** The ratios' own refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 export interface RatioDefinitionView {
   id: string;
@@ -46,21 +52,8 @@ export interface RatioDefinitionView {
   appliesToOrgLevelCodes: string[];
 }
 
-/** Two formula sides are the same set of codes. Order is display, never meaning. */
-const sameCodes = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && [...a].sort().join() === [...b].sort().join();
-
-/**
- * The row's formula against the one its office was provisioned with (ADR-0024).
- *
- * `false` for a ratio the office created: there is no standard it could have moved away
- * from, which is not the same as agreeing with one.
- */
-export function diverges(doc: RatioDefinitionDocument): boolean {
-  if (!doc.standardNumerator || !doc.standardDenominator) return false;
-  return !sameCodes(doc.numerator, doc.standardNumerator)
-    || !sameCodes(doc.denominator, doc.standardDenominator);
-}
+/** Whether a row's formula has moved from its standard (ADR-0024): its own file since UI V1 (Phase 18.99 T4). */
+export { diverges } from './ratio-diverges';
 
 /**
  * The office's ratio definitions (P4-T2).
@@ -104,7 +97,7 @@ export class RatioService {
     const { code } = input;
     const displayUnit = this.resolvedUnit(code, input.comparison, input.displayUnit);
     if (await this.ratios.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has a ratio called ${code}.`);
+      throw new InvalidRequestException(SAY.ratioTaken({ code }));
     }
     const numerator = await this.checkedCodes(ctx, input.numerator, 'numerator');
     const denominator = await this.checkedCodes(ctx, input.denominator, 'denominator');
@@ -188,7 +181,7 @@ export class RatioService {
     if (input.denominator !== undefined) {
       set.denominator = await this.checkedCodes(ctx, input.denominator, 'denominator');
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.ratios.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Ratio');
@@ -242,25 +235,20 @@ export class RatioService {
    * it first, on every path a write takes (ADR-0030).
    */
   private async checkedCodes(
-    ctx: RequestContext, codes: string[], side: string,
+    ctx: RequestContext, codes: string[], side: 'numerator' | 'denominator',
   ): Promise<string[]> {
     const normalised = codes.map((c) => c.trim().toUpperCase());
     const duplicates = normalised.filter((c, i) => normalised.indexOf(c) !== i);
     if (duplicates.length) {
       // Counting one type twice is almost always a mis-click, and it silently doubles
       // that type's weight in the result.
-      throw new BadRequestException(
-        `${duplicates[0]} appears twice in the ${side}. Each activity type counts once.`,
-      );
+      throw new InvalidRequestException(SAY.codeTwiceInSide({ code: duplicates[0], side }));
     }
 
     const active = new Set(await this.activity.activeTypeCodes(ctx));
     const unknown = normalised.filter((c) => !active.has(c));
     if (unknown.length) {
-      throw new BadRequestException(
-        `The ${side} names ${unknown.join(', ')}, which this office has no active activity `
-          + 'type for. Check the code, or add the type first.',
-      );
+      throw new InvalidRequestException(SAY.unknownTypesInSide({ side, codes: unknown }));
     }
     return normalised;
   }
@@ -279,7 +267,8 @@ export class RatioService {
     if (resolved.refusal !== undefined) {
       throw new DomainException(
         ErrorCode.CONFIG_RATIO_UNIT_MISMATCH,
-        `${code}: ${resolved.refusal}`,
+        // The rule's own words (`resolveDisplayUnit`), after the ratio's code: `REFERRAL_RATE: …`.
+        prefixed(`${code}: `, resolved.refusal),
         HttpStatus.BAD_REQUEST,
         { code },
       );

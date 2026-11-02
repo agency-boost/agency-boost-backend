@@ -1,5 +1,5 @@
 import {
-  CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
+  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
   SEED_RATIO_DEFINITIONS, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import { defaultTrainingTaxonomy } from '@/modules/training/training-payload';
@@ -8,6 +8,7 @@ import { defaultCapabilityLadder } from '@/modules/capability/capability-payload
 import { defaultEventTypes } from '@/modules/events/event-types-payload';
 import { defaultCampaignKinds } from '@/modules/campaigns/campaign-kinds-payload';
 import type { TemplateKind } from './company-template.schema';
+import { boundCodes, defaultBinding, type CascadeBinding } from './activity-binding';
 
 /**
  * **The seven kinds a named template holds** (ADR-0115 §3): what is copied into an office.
@@ -46,6 +47,8 @@ export function platformDefaultPayload(kind: TemplateKind): Record<string, unkno
       return {
         categories: SEED_ACTIVITY_CATEGORIES.map((c) => ({ ...c })),
         types: SEED_ACTIVITY_TYPES.map((t) => ({ ...t })),
+        // Which types each cascade role counts (ADR-0163 §1): the platform's three, one per role.
+        bindings: defaultBinding(),
       };
     case 'lead_pipeline':
       return { statuses: SEED_LEAD_STATUSES.map((s) => ({ ...s })) };
@@ -68,33 +71,35 @@ export function platformDefaultPayload(kind: TemplateKind): Record<string, unkno
   }
 }
 
-/** The three codes the goal cascade and the summary count (ADR-0115 §2, `CASCADE_ACTIVITY_CODES`). */
-export const RESERVED_ACTIVITY_CODES: readonly string[] = Object.values(CASCADE_ACTIVITY_CODES);
-
 /**
- * **A taxonomy with the three cascade types in it, active** (ADR-0115 §2).
+ * **A taxonomy with every type its binding names in it** (ADR-0115 §2, amended by ADR-0163 §5).
  *
- * The goal cascade and the summary count `LEADS_CONTACTED`, `SELL_PRESENTATION` and
- * `SELL_SUBMISSION` by code, and an Owner has no way to give a type a chosen code — so an office
- * without them would have a goal page and a summary that count nothing, for good. Each one the source
- * lacks is added with its platform label and description, in its platform category; that category is
- * added with its platform label when the source has none. A type the source already holds keeps the
- * source's label and category: renaming and moving are the source's to decide.
+ * The goal cascade and the summary count the codes the office's activity binding names, and an Owner has no way
+ * to give a type a chosen code — so an office without a bound type would have a goal page and a summary that
+ * count nothing for that role. Each bound code the source lacks is added, active, **when it is one of the
+ * platform's types**, with its platform label and description, in its platform category; that category is added
+ * with its platform label when the source has none. A bound code that is neither the source's nor the platform's
+ * cannot be added, and the template's publish and provisioning's whole-source check refuse it before this runs. A
+ * type the source already holds keeps the source's label and category: renaming and moving are the source's.
  *
- * Added last in display order — after what the source orders, so the source's own order stands. For
- * an empty source that is the platform's own order: *Leads Generation* then *Selling*.
+ * `binding` is the source's own, or the default binding when it holds none — the platform's three, which is what
+ * this added before there were bindings. Added last in display order, after what the source orders, so the
+ * source's own order stands. For an empty source that is the platform's own order: *Leads Generation* then
+ * *Selling*.
  */
 export function withCascadeTypes(
   categories: readonly SeedActivityCategory[],
   types: readonly SeedActivityType[],
+  binding: CascadeBinding = defaultBinding(),
 ): { categories: SeedActivityCategory[]; types: SeedActivityType[]; added: string[] } {
   const outCategories = [...categories];
   const outTypes = [...types];
   const added: string[] = [];
 
-  for (const code of RESERVED_ACTIVITY_CODES) {
+  for (const code of boundCodes(binding)) {
     if (outTypes.some((t) => t.code === code)) continue;
-    const platform = SEED_ACTIVITY_TYPES.find((t) => t.code === code)!;
+    const platform = SEED_ACTIVITY_TYPES.find((t) => t.code === code);
+    if (!platform) continue;
 
     if (!outCategories.some((c) => c.code === platform.categoryCode)) {
       const category = SEED_ACTIVITY_CATEGORIES.find((c) => c.code === platform.categoryCode)!;

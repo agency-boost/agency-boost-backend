@@ -70,8 +70,8 @@ export class CampaignCardDto implements CampaignCardView {
 
   @ApiProperty({
     type: String,
-    description: 'Composed in the office’s calendar — *Jul 1 – Sep 30, 2026* — or the window’s own words: *Rolling '
-      + '12-month window*, *Standing — evaluated per calendar year (Jan 1 – Dec 31)*.',
+    description: 'Composed in the office’s calendar — *1 Jul – 30 Sep 2026* — or the window’s own words: *Rolling '
+      + '12-month window*, *Standing — evaluated per calendar year (1 Jan – 31 Des)*.',
   })
   duration!: string;
 
@@ -148,7 +148,7 @@ export class CampaignProgressRowDto implements ProgressRowView {
 }
 
 export class CampaignProgressDto {
-  @ApiProperty({ type: String, description: 'The months or days read: *Jul – Sep 2026*, *Oct 2025 – Sep 2026*.' })
+  @ApiProperty({ type: String, description: 'The months or days read: *Jul – Sep 2026*, *Okt 2025 – Sep 2026*.' })
   windowLabel!: string;
 
   @ApiProperty({ type: Boolean, description: 'The result is final: the last month it reads has locked, and it no longer moves.' })
@@ -191,6 +191,15 @@ export class ChasedCampaignDto implements ChasedCampaignView {
 
   @ApiProperty({ type: String })
   duration!: string;
+
+  @ApiProperty({
+    type: String,
+    example: 'Runs Jan – Des',
+    description: 'The months it runs, composed in the office’s calendar — the Personal Summary row’s line: *Runs Jan – '
+      + 'Des* for a calendar year, *Runs Agu – Okt 2026* for its own dates (*Runs from Okt 2026* with no end), *Runs over '
+      + 'the last 12 months* for the rolling window.',
+  })
+  runs!: string;
 
   @ApiProperty({ type: AgentCampaignPosterDto })
   poster!: AgentCampaignPosterDto;

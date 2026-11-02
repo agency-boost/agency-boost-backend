@@ -1,17 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import type { Sentence } from '@/common/i18n/sentence';
+import { PASSWORD } from '@/domain/constants';
+import { AUTH_REFUSALS } from './auth.messages';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
  * Argon2id, with parameters chosen for an interactive login rather than defaults.
  *
- * Minimum length 10 and nothing else: composition rules ("one symbol, one digit")
- * reliably produce worse passwords than length does, and push people to reuse.
+ * Length and nothing else — `PASSWORD.MIN_LENGTH` to `PASSWORD.MAX_LENGTH` characters
+ * (`domain/constants/password.ts`, metrics §B.30): composition rules ("one symbol, one
+ * digit") reliably produce worse passwords than length does, and push people to reuse.
  */
 @Injectable()
 export class PasswordService {
-  static readonly MIN_LENGTH = 10;
-
   // `raw: false` is explicit so the string overload is selected: argon2.hash returns a
   // Buffer when raw is true, and an encoded string otherwise.
   private readonly options = {
@@ -38,18 +40,18 @@ export class PasswordService {
 
   /**
    * Validation returns every failure at once. Telling someone their password is too
-   * short, then that it is breached, is two round trips for one decision.
+   * short, then that it ends in a space, is two round trips for one decision.
    */
-  validate(plain: string): string[] {
-    const problems: string[] = [];
-    if (plain.length < PasswordService.MIN_LENGTH) {
-      problems.push(`Password must be at least ${PasswordService.MIN_LENGTH} characters.`);
+  validate(plain: string): Sentence<'VALIDATION_FAILED'>[] {
+    const problems: Sentence<'VALIDATION_FAILED'>[] = [];
+    if (plain.length < PASSWORD.MIN_LENGTH) {
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordTooShort({ min: PASSWORD.MIN_LENGTH }));
     }
-    if (plain.length > 200) {
-      problems.push('Password must be 200 characters or fewer.');
+    if (plain.length > PASSWORD.MAX_LENGTH) {
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordTooLong({ max: PASSWORD.MAX_LENGTH }));
     }
     if (/^\s|\s$/.test(plain)) {
-      problems.push('Password must not begin or end with a space.');
+      problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordSpaces);
     }
     return problems;
   }

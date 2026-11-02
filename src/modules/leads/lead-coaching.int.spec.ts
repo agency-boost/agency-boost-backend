@@ -289,6 +289,46 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
       }
     });
 
+    /*
+     * **S3 (the T17–T20 permission review): clearing a next action is an edit under `lead:update`.** The calendar's
+     * *Hapus tugas* sends exactly this body on the reader's own lead; a coach clears a coachee's by editing it on the
+     * coachee's Leads tab — the reach SR-08 already gives them, pinned like every other leader's write. The tick goes
+     * with the task: `update` clears `nextActionDone`, because there is no longer an action to have done.
+     */
+    describe('S3 clearing a coachee’s next action — Hapus tugas’s body, as a coach’s edit', () => {
+      const CLEAR = { nextActionDate: null, nextActionNote: null };
+      const withTask = () => leadOf('RINA', 'Pak Budi', { nextActionDate: '2026-09-20', nextActionNote: 'Kirim proposal' });
+
+      it.each([['an AB two levels up', 'AGUS'], ['the AAB they report to', 'SARI']] as const)(
+        'S3 lets %s clear it, pinned, and the tick goes with it',
+        async (_who, coach) => {
+          const lead = await withTask();
+          await db().collection('leads').updateOne(
+            { _id: new mongoose.Types.ObjectId(lead.id) },
+            { $set: { nextActionDone: { date: '2026-09-13', note: 'Telepon', at: new Date(), byMembershipId: office.id.RINA } } },
+          );
+          as(coach);
+          const res = await http().patch(`/leads/${lead.id}`).send({ ...CLEAR, version: lead.version }).expect(200);
+          expect(res.body).toMatchObject({ nextActionDate: null, nextActionNote: null, lastEditedBy: { membershipId: office.id[coach] } });
+          expect(await stored(lead.id)).toMatchObject({ nextActionDate: null, nextActionNote: null, nextActionDone: null });
+        },
+      );
+
+      it('S3 answers a peer AAB 404, and the task stays', async () => {
+        const lead = await withTask();
+        as('PEER_AAB');
+        await http().patch(`/leads/${lead.id}`).send({ ...CLEAR, version: lead.version }).expect(404);
+        expect(await stored(lead.id)).toMatchObject({ nextActionDate: '2026-09-20', nextActionNote: 'Kirim proposal', version: lead.version });
+      });
+
+      it('S3 refuses a coach’s unpinned clear, as every leader’s write is', async () => {
+        const lead = await withTask();
+        as('SARI');
+        await http().patch(`/leads/${lead.id}`).send(CLEAR).expect(400);
+        expect(await stored(lead.id)).toMatchObject({ nextActionDate: '2026-09-20' });
+      });
+    });
+
     describe('the check and the write are one operation', () => {
       const repository = () => (wired.leadRecords as unknown as { leads: LeadRepository }).leads;
 
@@ -353,6 +393,44 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
       as('SARI');
       const res = await http().post('/leads').query({ owner: office.id.RINA }).send({ name: 'Ibu Ratna' }).expect(201);
       expect(res.body.ownerMembershipId).toBe(office.id.RINA);
+    });
+
+    /*
+     * The staging review of 2026-10-31 (the coachee's Leads tab writes: add and edit, never delete). The route the tab
+     * calls, end to end for an AAB in their own unit: the add, then an edit pinned to the version it answered, which the
+     * agent reads as the leader's — and no delete.
+     */
+    it('staging review 2026-10-31: an AAB adds to their own agent’s pipeline, edits it pinned, and the agent reads both; no delete', async () => {
+      as('SARI');
+      const added = (await http().post('/leads').query({ owner: office.id.RINA })
+        .send({ name: 'Ibu Ratna', type: 'sales', nextActionDate: '2026-09-20', nextActionNote: 'Call back' }).expect(201)).body;
+      const edited = (await http().patch(`/leads/${added.id}`)
+        .send({ remarks: 'Two kids.', nextActionNote: 'Bring the brochure', version: added.version }).expect(200)).body;
+      expect(edited).toMatchObject({
+        ownerMembershipId: office.id.RINA, remarks: 'Two kids.', nextActionNote: 'Bring the brochure', version: added.version + 1,
+        lastEditedBy: { membershipId: office.id.SARI },
+      });
+
+      as('RINA');
+      expect((await http().get(`/leads/${added.id}`).expect(200)).body)
+        .toMatchObject({ remarks: 'Two kids.', lastEditedBy: { membershipId: office.id.SARI } });
+
+      // `lead:delete` is the owner's alone (§3.7): the leader's delete is a 404, and the lead stays.
+      as('SARI');
+      await http().delete(`/leads/${added.id}`).expect(404);
+      expect(await stored(added.id)).toMatchObject({ deletedAt: null });
+    });
+
+    it.each([
+      ['a peer AAB, an agent of another unit', 'PEER_AAB'],
+      ['an Agent, a colleague', 'INDAH'],
+      ['office B’s AB (cross-tenant)', 'B_AB'],
+    ] as [string, Who][])('staging review 2026-10-31: %s cannot edit a lead an AAB added for their agent — 404, unchanged', async (_name, caller) => {
+      as('SARI');
+      const added = (await http().post('/leads').query({ owner: office.id.RINA }).send({ name: 'Ibu Ratna' }).expect(201)).body;
+      as(caller);
+      await http().patch(`/leads/${added.id}`).send({ remarks: 'Not mine.', version: added.version }).expect(404);
+      expect(await stored(added.id)).toMatchObject({ remarks: null, version: added.version });
     });
 
     it.each([

@@ -48,7 +48,8 @@ describe('P18-T1 AC-12, P18-T2 AC-5 the reporting module reads no training, even
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
       'agency-partition.ts', 'directory-columns.ts', 'kpm-analytics.service.ts', 'kpm-overview.service.ts',
       'kpm-recruit-target.repository.ts', 'kpm-recruit-target.schema.ts', 'office-figures.ts', 'office-people.ts',
-      'platform-analytics.service.ts', 'reporting.controller.ts', 'reporting.dto.ts', 'reporting.response.dto.ts',
+      'platform-analytics.service.ts', 'reporting.controller.ts', 'reporting.dto.ts', 'reporting.messages.ts',
+      'reporting.response.dto.ts',
     ]);
   });
 

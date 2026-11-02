@@ -1,4 +1,5 @@
 import { SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS } from '@/domain/constants';
+import { englishAll, indonesianAll } from '../../../test/i18n';
 import {
   defaultTrainingTaxonomy, trainingSeedDocuments, trainingTaxonomyProblems,
 } from './training-payload';
@@ -18,7 +19,7 @@ describe('the training taxonomy payload', () => {
   });
 
   it('names every problem: a missing list, a row its checker refuses, a code twice, a reference to nothing', () => {
-    expect(trainingTaxonomyProblems(undefined)).toEqual([
+    expect(englishAll(trainingTaxonomyProblems(undefined))).toEqual([
       'categories must be a list.', 'skills must be a list.', 'modules must be a list.',
     ]);
 
@@ -27,12 +28,30 @@ describe('the training taxonomy payload', () => {
       skills: [{ code: 'LOST', categoryCode: 'NOWHERE', label: 'Lost' }],
       modules: [{ code: 'ORPHAN', skillCode: 'MISSING', title: 'Orphan' }, { code: 'EMPTY', skillCode: 'LOST', title: '' }],
     });
-    expect(problems).toEqual([
+    expect(englishAll(problems)).toEqual([
       'The category code SALES is used twice.',
       expect.stringContaining('Category 3: code: A code is'),
       'Module 2: title must be 1–200 characters.',
       'The skill LOST names NOWHERE, which no category in this taxonomy is.',
       'The module ORPHAN names MISSING, which no skill in this taxonomy is.',
+    ]);
+    // P18.98-T5 AC-3: each in Bahasa Indonesia — a refused row keeps its checker's own sentence, after its place.
+    expect(indonesianAll(problems)).toEqual([
+      'Kode kategori SALES dipakai dua kali.',
+      'Kategori 3: code: Kode terdiri dari 3–40 karakter A–Z, 0–9 dan garis bawah, diawali huruf.',
+      'Modul 2: title harus 1–200 karakter.',
+      'Skill LOST menyebut NOWHERE, yang bukan kategori di taksonomi ini.',
+      'Modul ORPHAN menyebut MISSING, yang bukan skill di taksonomi ini.',
+    ]);
+    expect(indonesianAll(trainingTaxonomyProblems({
+      categories: [],
+      skills: [{ code: 'SKILL_ONE', categoryCode: 'CAT', label: 'S' }, { code: 'skill_one', categoryCode: 'CAT', label: 'Again' }],
+      modules: 'none',
+    }))).toEqual([
+      'modules harus berupa daftar.',
+      'Kode skill SKILL_ONE dipakai dua kali.',
+      'Skill SKILL_ONE menyebut CAT, yang bukan kategori di taksonomi ini.',
+      'Skill SKILL_ONE menyebut CAT, yang bukan kategori di taksonomi ini.',
     ]);
   });
 

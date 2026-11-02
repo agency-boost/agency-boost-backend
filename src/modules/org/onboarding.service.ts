@@ -5,6 +5,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { readerOf, type Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -16,6 +18,10 @@ import { HierarchyService } from './hierarchy.service';
 import { JoinRequestRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
+import { ONBOARDING_REFUSALS } from './onboarding.messages';
+import { ORG_MESSAGES } from './org.messages';
+
+const SAY = ONBOARDING_REFUSALS;
 
 /** How many offices one directory search answers. */
 const DIRECTORY_PAGE = 50;
@@ -92,8 +98,10 @@ export class OnboardingService {
    * with no office can call this, because otherwise nobody could ever join one, so it
    * must reveal nothing an outsider should not see: no member counts, no production,
    * no owner name.
+   *
+   * `reader`: the request's, for the word written in place of a company with no name (P18.98-T5 AC-4).
    */
-  async searchKpms(q?: string): Promise<KpmDirectoryEntry[]> {
+  async searchKpms(q?: string, reader: Reader = readerOf()): Promise<KpmDirectoryEntry[]> {
     const term = q?.trim();
     const filter: Record<string, unknown> = { deletedAt: null, status: 'active' };
     if (term) {
@@ -138,7 +146,7 @@ export class OnboardingService {
       code: o.code,
       branchName: o.branchName,
       companyId: o.companyId,
-      companyName: nameOf.get(o.companyId) ?? 'Unknown',
+      companyName: nameOf.get(o.companyId) ?? render(ORG_MESSAGES.unknownName, reader),
       city: o.address,
     }));
   }
@@ -166,7 +174,9 @@ export class OnboardingService {
 
     return {
       kpmId: membership.kpmId,
-      kpmLabel: kpm ? `${company?.name ?? 'Unknown'} — KPM ${kpm.code} · ${kpm.branchName}` : null,
+      kpmLabel: kpm
+        ? `${company?.name ?? render(ORG_MESSAGES.unknownName, ctx.reader)} — KPM ${kpm.code} · ${kpm.branchName}`
+        : null,
       registeredAt: membership.get('createdAt')?.toISOString() ?? null,
       leaderMembershipId: membership.leaderId,
       leaderName: membership.leaderId ? await this.nameOfMembership(ctx, membership.leaderId) : null,
@@ -198,7 +208,7 @@ export class OnboardingService {
     if (ctx.membership) {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'You are already registered to an office.',
+        SAY.ORG_AGENT_ALREADY_TAGGED.alreadyRegistered,
         HttpStatus.CONFLICT,
         { kpmId: ctx.kpmId },
       );
@@ -212,7 +222,8 @@ export class OnboardingService {
     const scoped = RequestContext.joiningTenant(ctx, kpmId);
     const membership = await this.hierarchy.create(scoped, {
       userId: ctx.userId,
-      role: 'agent',
+      // The ladder's lowest rung that leads nobody: `AGENT` on the default ladder (ADR-0156).
+      role: await this.hierarchy.entryRungCode(kpmId, 'joiner'),
       leaderId: null,
       status: 'pending',
     });
@@ -225,11 +236,11 @@ export class OnboardingService {
     });
 
     // Resolve against the membership just made, so the caller sees their new state
-    // rather than the one their token was issued under.
-    return this.myState(await this.contextFor(membership));
+    // rather than the one their token was issued under — written for the same reader.
+    return this.myState(await this.contextFor(membership, ctx.reader));
   }
 
-  private async contextFor(membership: MembershipDocument): Promise<RequestContext> {
+  private async contextFor(membership: MembershipDocument, reader: Reader): Promise<RequestContext> {
     return new RequestContext(membership.userId, 'none', {
       membershipId: String(membership._id),
       kpmId: membership.kpmId,
@@ -239,7 +250,7 @@ export class OnboardingService {
       isKpmOwner: false,
       isKpmAdmin: false,
       directCount: membership.directCounts?.total ?? 0,
-    });
+    }).withReader(reader);
   }
 
   /**
@@ -254,14 +265,24 @@ export class OnboardingService {
     if (!ctx.kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'Register an office before looking for a leader.',
+        SAY.TENANT_NO_MEMBERSHIP.registerBeforeLooking,
         HttpStatus.FORBIDDEN,
       );
     }
 
+    /*
+     * **Never the reader, and never anybody below them** (ADR-0170 §6, P18.96-T3 AC-6; UI-006). Somebody in the
+     * reader's downline carries the reader's membership in `ancestorIds`, and asking one of them to lead you is a loop
+     * — refused when it was approved, and since T3 when it is sent; offering it was the defect. `$ne` on an array is
+     * *no element equals*, so this is one indexed read, as the rest of the hierarchy's are.
+     */
     const rows = await this.members.find(
       ctx,
-      { role: { $in: ['ab', 'aab'] }, status: 'active' },
+      {
+        role: { $in: ['ab', 'aab'] },
+        status: 'active',
+        ...(ctx.membershipId ? { ancestorIds: { $ne: ctx.membershipId } } : {}),
+      },
       { sort: { agentSeq: 1 } },
     );
     const users = await this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec();
@@ -273,10 +294,11 @@ export class OnboardingService {
     const self = ctx.membershipId ? await this.members.findById(ctx, ctx.membershipId) : null;
 
     const term = q?.trim().toLowerCase();
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     return rows
       .map((r) => ({
         membershipId: String(r._id),
-        fullName: byUser.get(r.userId)?.fullName ?? 'Unknown',
+        fullName: byUser.get(r.userId)?.fullName ?? unknown,
         role: r.role as 'ab' | 'aab',
         unitSize: r.subtreeCount ?? 0,
         isCurrentLeader: self?.leaderId === String(r._id),
@@ -293,7 +315,7 @@ export class OnboardingService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'Register an office before asking for a leader.',
+        SAY.TENANT_NO_MEMBERSHIP.registerBeforeAsking,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -313,7 +335,7 @@ export class OnboardingService {
     if (mine?.leaderId) {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
-        'You already report to somebody. Moving to another leader is not something you can ask for here.',
+        SAY.ORG_AGENT_ALREADY_TAGGED.youReport,
         HttpStatus.CONFLICT,
         { leaderId: mine.leaderId },
       );
@@ -325,7 +347,7 @@ export class OnboardingService {
     if (leaderMembershipId === ctx.membershipId) {
       throw new DomainException(
         ErrorCode.ORG_CYCLE_DETECTED,
-        'You cannot ask to report to yourself.',
+        SAY.ORG_CYCLE_DETECTED.askYourself,
         HttpStatus.CONFLICT,
       );
     }
@@ -334,8 +356,22 @@ export class OnboardingService {
     if (!leader || leader.status !== 'active' || !['ab', 'aab'].includes(leader.role)) {
       throw new DomainException(
         ErrorCode.ORG_LEADER_NOT_IN_KPM,
-        'That leader is not available in this office.',
+        SAY.ORG_LEADER_NOT_IN_KPM.notAvailable,
         HttpStatus.UNPROCESSABLE_ENTITY,
+        { leaderMembershipId },
+      );
+    }
+
+    /*
+     * **A loop is refused when it is asked, not only when it is approved** (ADR-0170 §6, P18.96-T3 AC-6). An orphan
+     * who still leads a unit has no leader, so the check above lets them ask somebody in that unit; approving it was
+     * refused by `assertCanMoveUnder`, after the leader had been notified of a request nobody could approve.
+     */
+    if (leader.ancestorIds.includes(ctx.membershipId)) {
+      throw new DomainException(
+        ErrorCode.ORG_CYCLE_DETECTED,
+        SAY.ORG_CYCLE_DETECTED.theyReportToYou,
+        HttpStatus.CONFLICT,
         { leaderMembershipId },
       );
     }
@@ -361,7 +397,8 @@ export class OnboardingService {
       kpmId: ctx.kpmId,
       templateId: NotificationTemplate.JOIN_REQUEST_RECEIVED,
       payload: {
-        askerName: asker?.fullName ?? 'Somebody',
+        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.98-T5 AC-4).
+        askerName: asker?.fullName ?? null,
         membershipId: ctx.membershipId,
       },
     });
@@ -381,7 +418,7 @@ export class OnboardingService {
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You have no request to withdraw.',
+        SAY.TENANT_NO_MEMBERSHIP.noRequestToWithdraw,
         HttpStatus.FORBIDDEN,
       );
     }

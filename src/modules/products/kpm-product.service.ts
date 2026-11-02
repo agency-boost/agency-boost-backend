@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import {
   APPROVED_PRODUCT_FIELDS, DOCUMENT_MIME_TYPES, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_FOLDER,
   PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_DOCUMENT_SLOTS,
@@ -16,6 +19,7 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
 import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
+import { documentSlotLabel, PRODUCTS_REFUSALS } from './products.messages';
 
 /** One value an office reads, and whether the office is the one who chose it. */
 export interface EffectiveField<T> {
@@ -125,6 +129,9 @@ export function effectiveWordsOf(
 
 const SLOT_KEYS = PRODUCT_DOCUMENT_SLOTS.map((s) => s.key) as readonly string[];
 
+/** The office's settings, refused in both languages (P18.98-T5 AC-3). */
+const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
+
 /**
  * What an office sells, and the words it sells it with (P5-T5, ADR-0033, ADR-0037).
  *
@@ -175,7 +182,7 @@ export class KpmProductService {
         const row = byProduct.get(String(product._id)) ?? null;
         return {
           product,
-          view: this.view(product, row),
+          view: this.view(ctx.reader, product, row),
           approved: (row?.approvedOverrides ?? undefined) as Record<string, unknown> | undefined,
         };
       }),
@@ -196,15 +203,12 @@ export class KpmProductService {
     // A withdrawn product is one the company has taken off the market. An office turning it back
     // on would be selling something its insurer no longer issues.
     if (active === true && product.lifecycle === 'withdrawn') {
-      throw new BadRequestException(
-        `${product.name} has been withdrawn by your company, so it cannot be activated. `
-        + 'Your company decides what is on the shelf; your office decides which of it you sell.',
-      );
+      throw new InvalidRequestException(SAY.withdrawn({ name: product.name }));
     }
 
     const row = await this.configs.upsert(ctx, productId, { $set: { active } });
     await this.record(ctx, 'kpm_product.activation_set', row, { code: product.code, active });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -240,12 +244,9 @@ export class KpmProductService {
     if (unknown.length > 0) {
       // Named, rather than quietly dropped: somebody whose edit half-saved has no way to find out
       // which half, and the fields an office may not change are a rule worth stating out loud.
-      throw new BadRequestException(
-        `Your office cannot change ${unknown.join(', ')} on a product — those belong to your `
-        + `company. You may change: ${OVERRIDABLE_PRODUCT_FIELDS.join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.companysFields({ fields: unknown, allowed: OVERRIDABLE_PRODUCT_FIELDS }));
     }
-    if (Object.keys(input).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(input).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const set: Record<string, unknown> = {};
     const unset: Record<string, ''> = {};
@@ -288,7 +289,7 @@ export class KpmProductService {
       code: product.code, fields: Object.keys(input), reviewState: row.reviewState,
       ...(Object.keys(unset).length > 0 ? { givenBack: ['description'] } : {}),
     });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -303,7 +304,7 @@ export class KpmProductService {
   ): Promise<KpmProductView> {
     const product = await this.requireProduct(ctx, productId);
     if (!(OVERRIDABLE_PRODUCT_FIELDS as readonly string[]).includes(field)) {
-      throw new BadRequestException(`${field} is not a field your office can change.`);
+      throw new InvalidRequestException(SAY.notOverridable({ field }));
     }
 
     /*
@@ -318,7 +319,7 @@ export class KpmProductService {
       $inc: { version: 1 },
     });
     await this.record(ctx, 'kpm_product.override_reset', row, { code: product.code, field });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -375,7 +376,7 @@ export class KpmProductService {
     }
 
     await this.record(ctx, 'kpm_product.document_set', row, { code: product.code, slot });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /** Fall back to the company's document for one slot, leaving every other slot alone (AC-7). */
@@ -395,7 +396,7 @@ export class KpmProductService {
     if (existing) await this.assets.release(ctx, existing.storageKey);
 
     await this.record(ctx, 'kpm_product.document_reset', row, { code: product.code, slot });
-    return this.view(product, row);
+    return this.view(ctx.reader, product, row);
   }
 
   /**
@@ -411,7 +412,7 @@ export class KpmProductService {
     this.requireSlot(slot);
 
     const row = await this.configs.findOne(ctx, { productId });
-    const url = await this.signedUrl(ctx, companyId, this.view(product, row), slot);
+    const url = await this.signedUrl(ctx, companyId, this.view(ctx.reader, product, row), slot);
     if (url === null) throw new NotFoundException('Document');
     return url;
   }
@@ -474,7 +475,7 @@ export class KpmProductService {
     await this.record(ctx, 'sales_script.approved', approved, {
       code: product.code, version: row.version,
     });
-    return this.view(product, approved);
+    return this.view(ctx.reader, product, approved);
   }
 
   /**
@@ -491,10 +492,7 @@ export class KpmProductService {
 
     const trimmed = reason.trim();
     if (!trimmed) {
-      throw new BadRequestException(
-        'Say why you are sending it back. Somebody has to act on it, and "no" on its own is not '
-        + 'something anybody can act on.',
-      );
+      throw new InvalidRequestException(SAY.rejectionReason);
     }
 
     const rejected = await this.configs.upsert(ctx, productId, {
@@ -509,7 +507,7 @@ export class KpmProductService {
     await this.record(ctx, 'sales_script.rejected', rejected, {
       code: product.code, reason: trimmed,
     });
-    return this.view(product, rejected);
+    return this.view(ctx.reader, product, rejected);
   }
 
   /**
@@ -548,10 +546,7 @@ export class KpmProductService {
   ): Promise<KpmProductConfigDocument> {
     const row = await this.configs.findOne(ctx, { productId });
     if (!row || row.reviewState !== 'pending') {
-      throw new BadRequestException(
-        'There is nothing waiting on you for this product. A decision is made on a script that has '
-        + 'been written and not yet approved.',
-      );
+      throw new InvalidRequestException(SAY.nothingPending);
     }
     return row;
   }
@@ -613,9 +608,7 @@ export class KpmProductService {
 
   private requireSlot(slot: string): void {
     if (!SLOT_KEYS.includes(slot)) {
-      throw new BadRequestException(
-        `${slot} is not a document slot. A product has: ${SLOT_KEYS.join(', ')}.`,
-      );
+      throw new InvalidRequestException(SAY.notASlot({ slot, slots: SLOT_KEYS }));
     }
   }
 
@@ -639,9 +632,12 @@ export class KpmProductService {
     });
   }
 
-  /** The company's product with the office's decisions laid over it, field by field. */
+  /**
+   * The company's product with the office's decisions laid over it, field by field — **each document slot named in
+   * the reader's language** (P18.98-T7), its file's own name as typed.
+   */
   private view(
-    product: ProductDocument, row: KpmProductConfigDocument | null,
+    reader: Reader, product: ProductDocument, row: KpmProductConfigDocument | null,
   ): KpmProductView {
     const overrides = (row?.overrides ?? {}) as Record<string, unknown>;
     const has = (field: string) => Object.prototype.hasOwnProperty.call(overrides, field);
@@ -677,7 +673,8 @@ export class KpmProductService {
       script,
       reviewState: row?.reviewState ?? 'none',
       rejectionReason: row?.rejectionReason ?? null,
-      documents: PRODUCT_DOCUMENT_SLOTS.map(({ key, label }) => {
+      documents: PRODUCT_DOCUMENT_SLOTS.map(({ key }) => {
+        const label = render(documentSlotLabel(key), reader);
         const own = row?.documents?.get(key);
         const theirs = product.defaultDocuments?.get(key) as
           { storageKey?: string; label?: string } | undefined;

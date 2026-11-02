@@ -79,8 +79,8 @@ export class TrainingCategoryDto implements TrainingCategoryView {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'Structured modules — tracked here.',
-    description: 'The subtitle an agent\'s category page shows.',
+    example: 'Find prospects, uncover their needs, answer objections and close.',
+    description: 'The subtitle an agent\'s category page shows: one line saying what the category teaches.',
   })
   description!: string | null;
 

@@ -56,33 +56,40 @@ export interface SeedActivityType {
  * ADR-0064 has it): its tile's label *is* the section's, so renaming *Selling* renames its tile,
  * with no second field for the Owner to remember. Only a tile of two or more sections carries a
  * code and a label.
+ *
+ * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5): the platform's Default template is
+ * written in the client's default language, so a new office starts in it. The prototype's English section names
+ * are `SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238`'s, which migration `0046` recognises in the Template company's
+ * Default template. *Recruitment* stays, kept English by the approved glossary (§A.6).
  */
 export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
   {
-    code: 'LEADS_GENERATION', label: 'Leads Generation', displayOrder: 1,
+    code: 'LEADS_GENERATION', label: 'Pencarian leads', displayOrder: 1,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
-    code: 'SELLING', label: 'Selling', displayOrder: 2,
+    code: 'SELLING', label: 'Penjualan', displayOrder: 2,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
+    // *Recruitment* is kept English in both languages (the approved glossary, §A.6).
     code: 'RECRUITMENT', label: 'Recruitment', displayOrder: 3,
     summaryGroupCode: null, summaryGroupLabel: null,
   },
   {
-    code: 'PERSONAL_DEVELOPMENT', label: 'Personal Development', displayOrder: 4,
-    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+    code: 'PERSONAL_DEVELOPMENT', label: 'Pengembangan diri', displayOrder: 4,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan',
   },
   {
-    code: 'TEAM_DEVELOPMENT', label: 'Team Development', displayOrder: 5,
-    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Development',
+    code: 'TEAM_DEVELOPMENT', label: 'Pengembangan tim', displayOrder: 5,
+    summaryGroupCode: 'DEVELOPMENT', summaryGroupLabel: 'Pengembangan',
   },
 ];
 
 /**
  * The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them — but
- * for item 7's label, renamed at the client's request (below; `prototype-parity.md`).
+ * for items 3, 7 and 8, renamed at the client's request (below; `prototype-parity.md`), and item 7's
+ * description, dropped with its rename (ADR-0160 §1).
  */
 export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
@@ -102,7 +109,12 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'LEADS_CONTACTED',
     categoryCode: 'LEADS_GENERATION',
-    label: 'Menghubungi prospek yang sudah ada',
+    /*
+     * **The client's words, not the prototype's** (ADR-0160 §1, 2026-10-26): `KPM_Owner.html` reads
+     * *"Menghubungi prospek yang sudah ada"*. The cascade's first stage on `/goals` is *Set appointment*,
+     * and the item it counts now says so. The description stays the prototype's.
+     */
+    label: 'Set Appointment',
     description: 'telepon, WhatsApp, tatap muka, dll',
     displayOrder: 3,
   },
@@ -131,22 +143,23 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'RECRUIT_PRESENTATION',
     categoryCode: 'RECRUITMENT',
     /*
-     * **The one label that is not the prototype's** (P13.1-T3, 2026-10-07). `KPM_Owner.html:1396`
-     * reads *"Presentasi NBO ke calon agen"*; the client asked for this wording on `/summary`'s
-     * *Recruitment activities*, and the product owner confirmed it is item 7 that changes, not item 9
-     * (*Proses NPA*), whose meaning it resembles (K3). The description stays the prototype's.
+     * **Renamed twice at the client's request.** `KPM_Owner.html:1396` reads *"Presentasi NBO ke calon
+     * agen"*; P13.1-T3 (2026-10-07) made it *"Proses pendaftaran kode agen"* (K3: item 7, not item 9),
+     * and ADR-0160 §1 (2026-10-26) makes it the presentation it counts. The prototype's note, *"secara
+     * mandiri atau melalui BOP"*, went with the second rename: it described registering an agent code.
      *
-     * A default, like every label here: an office provisioned before the change keeps the label it
-     * holds, and an Owner may rename it either way. The code does not move (invariant §3).
+     * A default, like every label here. Migration `0032` gives the words to an office still holding
+     * either seeded wording, and leaves an Owner's own; the code does not move (invariant §3).
      */
-    label: 'Proses pendaftaran kode agen',
-    description: 'secara mandiri atau melalui BOP',
+    label: 'Melakukan presentasi recruitment',
+    description: null,
     displayOrder: 7,
   },
   {
     code: 'RECRUIT_FOLLOWUP',
     categoryCode: 'RECRUITMENT',
-    label: 'Melakukan diskusi follow up dari presentasi NBO sebelumnya',
+    // `KPM_Owner.html` reads *"… dari presentasi NBO sebelumnya"*; the client's word since ADR-0160 §1.
+    label: 'Melakukan diskusi follow up dari presentasi recruitment sebelumnya',
     description: null,
     displayOrder: 8,
   },
@@ -160,7 +173,12 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'DEV_TRAINING_ATTEND',
     categoryCode: 'PERSONAL_DEVELOPMENT',
-    label: 'Menghadiri meeting atau training dari KPM atau Prudential',
+    /*
+     * **Our own words name no company** (the approved glossary's §C1, OD-237; P18.98-T7): `KPM_Owner.html:1422`
+     * reads *"… dari KPM atau Prudential"*, and the platform's default is every company's starting point. The
+     * company's name stays where it is data — `companies.name`, and the demo company.
+     */
+    label: 'Menghadiri meeting atau training dari KPM atau perusahaan',
     description: null,
     displayOrder: 10,
   },
@@ -182,6 +200,48 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     displayOrder: 12,
   },
 ];
+
+/**
+ * **The wordings the seed gave before ADR-0160** (2026-10-26), per code — kept only so migration `0032`
+ * and the prototype spec can recognise the words an office never changed. No office is given them any more.
+ *
+ * Item 7 has two: the prototype's, which every office provisioned before P13.1-T3 holds, and P13.1-T3's.
+ * Its description is the one both carried; it is dropped only where it is still that one.
+ */
+export const SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160: Readonly<Record<
+  'LEADS_CONTACTED' | 'RECRUIT_PRESENTATION' | 'RECRUIT_FOLLOWUP',
+  { readonly labels: readonly string[]; readonly description?: string }
+>> = {
+  LEADS_CONTACTED: { labels: ['Menghubungi prospek yang sudah ada'] },
+  RECRUIT_PRESENTATION: {
+    labels: ['Presentasi NBO ke calon agen', 'Proses pendaftaran kode agen'],
+    description: 'secara mandiri atau melalui BOP',
+  },
+  RECRUIT_FOLLOWUP: { labels: ['Melakukan diskusi follow up dari presentasi NBO sebelumnya'] },
+};
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1; the approved glossary's §C1), per code — kept only
+ * so migration `0046` and the prototype spec can recognise the Template company's Default template where it still
+ * holds them. No office and no template is given them any more.
+ *
+ * The five sections' English names and the *Development* tile, which are the prototype's (`KPM_Owner.html:1340-1440`,
+ * `Overall.html:2720-2726`), and item 10, which named the company. *Recruitment* is kept English, so it is not here.
+ */
+export const SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238: {
+  readonly categories: Readonly<Record<string, { readonly label: string; readonly summaryGroupLabel?: string }>>;
+  readonly types: Readonly<Record<string, { readonly label: string }>>;
+} = {
+  categories: {
+    LEADS_GENERATION: { label: 'Leads Generation' },
+    SELLING: { label: 'Selling' },
+    PERSONAL_DEVELOPMENT: { label: 'Personal Development', summaryGroupLabel: 'Development' },
+    TEAM_DEVELOPMENT: { label: 'Team Development', summaryGroupLabel: 'Development' },
+  },
+  types: {
+    DEV_TRAINING_ATTEND: { label: 'Menghadiri meeting atau training dari KPM atau Prudential' },
+  },
+};
 
 /**
  * The two lead pipelines a new office starts with (P4-T3).
@@ -222,22 +282,72 @@ export interface SeedLeadStatus {
  * exist in neither ladder (`metrics-and-definitions.md:302`).
  *
  * The office owns these flags from provisioning onward, like every other field here.
+ *
+ * **Both first statuses say the same words** (ADR-0167 §10, OD-205; P18.95-T9 AC-6): the prototype's
+ * recruitment ladder says *Not approached*, and the client asked for one wording. The code stays
+ * `NOT_APPROACHED`, because a lead holds it.
+ *
+ * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5), in the approved glossary's words:
+ * *Follow-up* and *AAJI* are kept English (§A.6, §C11), *Dibayar dan diterbitkan* is §B.10's *paid and issued*,
+ * *Agen aktif baru* its *new active agent*. The English is `SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238`'s.
  */
 export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
-  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Not yet approached', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'sales', code: 'NOT_YET_APPROACHED', label: 'Belum didekati', rank: 1, isTerminal: false, isLateStage: false },
   { pipeline: 'sales', code: 'FOLLOW_UP', label: 'Follow-up', rank: 2, isTerminal: false, isLateStage: false },
-  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Policy submitted', rank: 3, isTerminal: false, isLateStage: true },
-  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Approved, not paid', rank: 4, isTerminal: false, isLateStage: true },
-  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Paid and issued', rank: 5, isTerminal: true, isLateStage: false },
+  { pipeline: 'sales', code: 'POLICY_SUBMITTED', label: 'Polis diajukan', rank: 3, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'APPROVED_NOT_PAID', label: 'Disetujui, belum dibayar', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'sales', code: 'PAID_AND_ISSUED', label: 'Dibayar dan diterbitkan', rank: 5, isTerminal: true, isLateStage: false },
 
-  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Not approached', rank: 1, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Meeting scheduled', rank: 2, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Recruitment presentation', rank: 3, isTerminal: false, isLateStage: false },
-  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Agent code created', rank: 4, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'AAJI licensed', rank: 5, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work planned', rank: 6, isTerminal: false, isLateStage: true },
-  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'New active agent', rank: 7, isTerminal: true, isLateStage: false },
+  { pipeline: 'recruitment', code: 'NOT_APPROACHED', label: 'Belum didekati', rank: 1, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'MEETING_SCHEDULED', label: 'Pertemuan dijadwalkan', rank: 2, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'RECRUITMENT_PRESENTATION', label: 'Presentasi recruitment', rank: 3, isTerminal: false, isLateStage: false },
+  { pipeline: 'recruitment', code: 'AGENT_CODE_CREATED', label: 'Kode agen dibuat', rank: 4, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'AAJI_LICENSED', label: 'Berlisensi AAJI', rank: 5, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'JOINT_FIELD_WORK_PLANNED', label: 'Joint field work direncanakan', rank: 6, isTerminal: false, isLateStage: true },
+  { pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', label: 'Agen aktif baru', rank: 7, isTerminal: true, isLateStage: false },
 ];
+
+/**
+ * **The wording the seed gave before ADR-0167 §10** (2026-10-26; OD-205; the client's UI review, UI-027;
+ * P18.95-T9 AC-6), per code — kept only so migration `0038` and the prototype spec can recognise the words an
+ * office never changed. No office is given them any more.
+ *
+ * The recruitment pipeline's first status said the prototype's *Not approached*, where the sales pipeline's says
+ * *Not yet approached*. Only that status of that pipeline: another code holding the same words is not it.
+ */
+export const SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167: Readonly<Record<
+  'NOT_APPROACHED',
+  { readonly pipeline: SeedLeadStatus['pipeline']; readonly labels: readonly string[] }
+>> = {
+  NOT_APPROACHED: { pipeline: 'recruitment', labels: ['Not approached'] },
+};
+
+/**
+ * **The words the seed gave before P18.98-T7** (OD-238, option 1), per pipeline and code — the prototype's English
+ * (`Overall.html:5366-5367`), but for the recruitment pipeline's first status, which said the sales pipeline's words
+ * since ADR-0167 §10. Kept only so migration `0046` can recognise the Template company's Default template where it
+ * still holds them, so `0038` still writes the words it was written for, and for the prototype spec. *Follow-up* is
+ * kept English, so it is not here.
+ */
+export const SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238: Readonly<Record<
+  SeedLeadStatus['pipeline'], Readonly<Record<string, string>>
+>> = {
+  sales: {
+    NOT_YET_APPROACHED: 'Not yet approached',
+    POLICY_SUBMITTED: 'Policy submitted',
+    APPROVED_NOT_PAID: 'Approved, not paid',
+    PAID_AND_ISSUED: 'Paid and issued',
+  },
+  recruitment: {
+    NOT_APPROACHED: 'Not yet approached',
+    MEETING_SCHEDULED: 'Meeting scheduled',
+    RECRUITMENT_PRESENTATION: 'Recruitment presentation',
+    AGENT_CODE_CREATED: 'Agent code created',
+    AAJI_LICENSED: 'AAJI licensed',
+    JOINT_FIELD_WORK_PLANNED: 'Joint field work planned',
+    NEW_ACTIVE_AGENT: 'New active agent',
+  },
+};
 
 /**
  * The five ratios a new office starts with (P4-T2).
@@ -266,7 +376,7 @@ export interface SeedRatioDefinition {
   /**
    * How the benchmark is written (P4-T25) — the unit `metrics-and-definitions.md` states for
    * each of the five. The stored `benchmark` is a proportion either way; this is what turns
-   * `0.15` into `15.0%` on screen and leaves `0.30` as `0.30`.
+   * `0.30` into `30.0%` on screen and leaves `1.00` as `1.00`.
    */
   readonly displayUnit: RatioDisplayUnit;
   readonly displayOrder: number;
@@ -333,18 +443,40 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
   },
   {
     code: 'MEETING_PER_APPROACH',
-    label: 'Meeting per approach',
+    /*
+     * **The client's name, and a percent** (ADR-0160 §2, 2026-10-26). `KPM_Owner.html:1479` reads
+     * *"Meeting per approach"*, written as the number `1.50`; item 3 is *Set Appointment* now, and the
+     * share of appointments that become a meeting is a percentage. The formula is unchanged.
+     */
+    label: 'Set appointment to meeting',
     numerator: ['SELL_PRESENTATION', 'RECRUIT_PRESENTATION'],
     denominator: ['LEADS_CONTACTED'],
     benchmark: RATIO_BENCHMARKS.MEETING_PER_APPROACH,
     comparison: 'gte',
-    displayUnit: 'decimal',
+    displayUnit: 'percent',
     displayOrder: 5,
   },
 ];
 
 /**
- * What each platform ratio measures, in the prototype's own words (`Overall.html:5215-5268`).
+ * **What the seed gave before ADR-0160** (2026-10-26), per code — the benchmarks `RATIO_BENCHMARKS` held,
+ * and *Meeting per approach*'s label and unit. Kept only so migration `0033` and the prototype spec can
+ * recognise the values an office never changed: each is moved only where it is still this one.
+ */
+export const SEEDED_RATIO_VALUES_BEFORE_ADR_0160: Readonly<Record<
+  'SELLING_SUCCESS_RATE' | 'RECRUITMENT_SUCCESS_RATE' | 'LEADS_PER_ACTIVITY' | 'MEETING_PER_APPROACH',
+  { readonly benchmark: number; readonly label?: string; readonly displayUnit?: RatioDisplayUnit }
+>> = {
+  SELLING_SUCCESS_RATE: { benchmark: 0.15 },
+  RECRUITMENT_SUCCESS_RATE: { benchmark: 0.15 },
+  LEADS_PER_ACTIVITY: { benchmark: 0.3 },
+  MEETING_PER_APPROACH: { benchmark: 1.5, label: 'Meeting per approach', displayUnit: 'decimal' },
+};
+
+/**
+ * What each platform ratio measures, in the prototype's own words (`Overall.html:5215-5268`) — but for
+ * *Set appointment to meeting*'s, which says *set appointment* where the prototype says *pendekatan
+ * prospek*, with its name (ADR-0160 §2).
  *
  * Keyed by code and **shown only for a platform ratio whose formula the office has not changed**: an
  * office that moves `SELLING_SUCCESS_RATE` to count something else has a ratio this sentence no longer
@@ -355,6 +487,6 @@ export const SEED_RATIO_PURPOSES: Readonly<Record<string, string>> = {
   SELLING_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas selling menjadi submission',
   RECRUITMENT_SUCCESS_RATE: 'Mengukur tingkat konversi aktivitas recruitment menjadi agen baru',
   LEADS_PER_ACTIVITY: 'Mengukur efektivitas aktivitas pencarian prospek dalam menghasilkan prospek baru',
-  MEETING_PER_APPROACH: 'Mengukur efektivitas pendekatan prospek dalam menghasilkan pertemuan',
+  MEETING_PER_APPROACH: 'Mengukur efektivitas set appointment dalam menghasilkan pertemuan',
 };
 

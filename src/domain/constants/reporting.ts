@@ -23,6 +23,12 @@ export const KPM_REPORTING = {
    */
   STATUS_SPLIT_PCT: 70,
   /**
+   * **The compliance tiles' and rows' bars on a phone** (UI V1, UI-109; `kpm-mobile` 3): red below 50% done, green
+   * from 80%, the accent between. Served on the compliance read as `thresholds`, so no screen re-declares them.
+   */
+  COMPLIANCE_LOW_BELOW_PCT: 50,
+  COMPLIANCE_HIGH_FROM_PCT: 80,
+  /**
    * *View who hasn't logged →* lists the first three and counts the rest (`KPM_Owner.html:988-1001`: three
    * rows, then *"+ 66 more — full list on the People screen"*). `GET /kpm/overview/not-logged` serves those
    * three and the total, and records a §3.5 entry for the three it discloses — never for the rest.

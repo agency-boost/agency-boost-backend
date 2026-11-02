@@ -17,7 +17,7 @@ export interface RatioFormula {
 
 export interface RatioOutcome {
   /**
-   * `gte`: the proportion — `0.15`, written `15.0%` or `0.15` by the screen's formatter.
+   * `gte`: the proportion — `0.15`, written `15,0%` (its tenth, ADR-0174 §2) or `0,15` by the screen's formatter.
    * `band`: the lean in percentage points, **positive toward the numerator's side** — `+30` is thirty
    * points toward Selling on the seeded balance.
    */

@@ -1,5 +1,6 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
+import { recipientReader, type Reader } from '@/common/i18n/reader';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
@@ -10,6 +11,8 @@ import { Clock } from '@/common/clock/clock.port';
 import { INBOX_PAGE } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationRepository } from './notification.repository';
+import { NOTIFICATION_REFUSALS } from './notification.messages';
+import { RecipientLanguages } from './recipient-languages';
 import {
   Notification, NotificationDocument,
   NotificationPreferences, NotificationPreferencesDocument,
@@ -37,6 +40,25 @@ const INLINE_CHANNELS: readonly NotificationChannel[] = ['in_app'];
 interface Dispatch {
   channel: NotificationChannel;
   outcome: Promise<Delivery>;
+}
+
+/**
+ * **How long a shutdown waits for the deliveries still in flight** (P18.7-T1, ADR-0152), in
+ * milliseconds. A deploy stops the old container with SIGTERM and gives it 30 s before SIGKILL
+ * (`stop_grace_period` in `deploy/compose.yml`). An SMTP send is bounded by `SMTP_TIMEOUT_MS`
+ * (5 s by default) per dial and per greeting, so ten seconds covers a slow relay and leaves the
+ * rest of the grace period for the HTTP server and the database to close. It is an operational
+ * bound, not a business number, so it lives here beside the code that waits.
+ */
+export const NOTIFICATION_DRAIN_TIMEOUT_MS = 10_000;
+
+/** A delivery started and not awaited, while it is in flight: what a shutdown waits for, and names if it cannot. */
+export interface InFlightDelivery {
+  templateId: string;
+  channel: NotificationChannel;
+  /** The row it will be recorded on, when that is known as it starts: a held email learns its row by claiming it. */
+  notificationId?: string;
+  coalesceKey?: string;
 }
 
 /** What `deliver` decided: the delivery map to write, and the deliveries still in flight. */
@@ -76,9 +98,12 @@ function officeOf(kpmId: string): RequestContext {
   return RequestContext.forJob(kpmId, 'coalesced-notice');
 }
 
-/** Renders a template id + payload into a subject and body. */
+/**
+ * Renders a template id + payload into a subject and body, **for a reader** (P18.98-T5 AC-5): the recipient's language,
+ * words and figures. A renderer that writes one language may ignore it.
+ */
 export abstract class TemplateRenderer {
-  abstract render(templateId: string, payload: Record<string, unknown>): RenderedMessage;
+  abstract render(templateId: string, payload: Record<string, unknown>, reader?: Reader): RenderedMessage;
 }
 
 /**
@@ -142,6 +167,11 @@ const MAX_SKIP = 2_147_483_647;
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private readonly adapters = new Map<NotificationChannel, NotificationChannelAdapter>();
+  /**
+   * Every delivery started and not awaited, until it settles (P18.7-T1). Keyed by a promise that never
+   * rejects, so waiting on them all cannot fail, and removed by that same promise once it settles.
+   */
+  private readonly inFlight = new Map<Promise<void>, InFlightDelivery>();
 
   constructor(
     @InjectModel(Notification.name)
@@ -158,6 +188,12 @@ export class NotificationService {
     private readonly clock: Clock,
     private readonly audit: AuditService,
     @Inject(NOTIFICATION_ADAPTERS) adapters: NotificationChannelAdapter[] = [],
+    /**
+     * **Whose language an email is written in** (P18.98-T5 AC-5): the recipient's `users.locale`, read when the email
+     * is rendered, off the request. Absent where a spec builds the service by hand: every recipient then reads as one
+     * who has chosen nothing, or as the request that caused the email.
+     */
+    @Optional() private readonly languages?: RecipientLanguages,
   ) {
     for (const adapter of adapters) this.adapters.set(adapter.channel, adapter);
   }
@@ -214,7 +250,7 @@ export class NotificationService {
       readAt: null,
     });
 
-    this.settle(dispatched, request.templateId, (channel, outcome) => this.notifications
+    this.settle(dispatched, request.templateId, String(created._id), (channel, outcome) => this.notifications
       .updateOne(
         // Only over the `pending` this call wrote: an outcome never overwrites one recorded since.
         { _id: created._id, [`delivery.${channel}.status`]: 'pending' },
@@ -262,7 +298,7 @@ export class NotificationService {
         delivery,
         readAt: null,
       } as Partial<NotificationDocument>);
-      this.settle(dispatched, request.templateId, (channel, outcome) =>
+      this.settle(dispatched, request.templateId, String(created._id), (channel, outcome) =>
         this.coalesced.recordDelivery(office, String(created._id), channel, outcome));
     } catch (err) {
       if ((err as { code?: unknown }).code !== DUPLICATE_KEY) throw err;
@@ -291,7 +327,45 @@ export class NotificationService {
     return this.coalesced.markEntryNoticesRead(ctx, userId, templateId, entryId, this.clock.now());
   }
 
-  async releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
+  releaseHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
+    // Its callers never await it (the finalize has answered), so it is tracked here, where it starts.
+    const release = this.sendHeld(kpmId, coalesceKey, templateId);
+    this.track(release, { templateId, channel: HELD_CHANNEL, coalesceKey });
+    return release;
+  }
+
+  /**
+   * **Every delivery in flight, awaited, for at most `timeoutMs`** (P18.7-T1): what a shutdown calls
+   * once the HTTP server has stopped and its last requests have finished (`GracefulShutdown`, in
+   * `src/graceful-shutdown.ts`), before the database connection closes, so each outcome is recorded. A delivery that starts while it waits (a
+   * request the server was still finishing) is waited for too. Whatever is still in flight when the time is
+   * up is logged at warn level, by template, channel and row, and answered: its row stays `pending`, which
+   * is where somebody looking for it will find it.
+   */
+  async drain(timeoutMs: number = NOTIFICATION_DRAIN_TIMEOUT_MS, signal?: string): Promise<InFlightDelivery[]> {
+    if (this.inFlight.size === 0) return [];
+    this.logger.log({ inFlight: this.inFlight.size, signal }, 'waiting for deliveries in flight before shutting down');
+
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<'expired'>((resolve) => { timer = setTimeout(() => resolve('expired'), timeoutMs); });
+    try {
+      while (this.inFlight.size > 0) {
+        const drained = Promise.all(this.inFlight.keys()).then(() => 'drained' as const);
+        if (await Promise.race([drained, expired]) === 'expired') break;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const pending = [...this.inFlight.values()];
+    if (pending.length > 0) {
+      this.logger.warn({ pending, timeoutMs }, 'shutting down with deliveries still in flight; their rows stay pending');
+    }
+    return pending;
+  }
+
+  /** `releaseHeld`'s work: claim the held email, send it, record the outcome. */
+  private async sendHeld(kpmId: string, coalesceKey: string, templateId: NotificationTemplateId): Promise<void> {
     const office = officeOf(kpmId);
     const claimed = await this.coalesced.claimHeld(office, { coalesceKey, templateId }, HELD_CHANNEL, this.clock.now());
     if (!claimed) return;
@@ -305,7 +379,7 @@ export class NotificationService {
     };
     const outcome = prefs?.mutedTemplates?.includes(templateId)
       ? { status: 'suppressed' as const, at: this.clock.now() }
-      : await this.deliverOne(HELD_CHANNEL, request, prefs, this.renderer.render(templateId, claimed.payload));
+      : await this.deliverOne(HELD_CHANNEL, request, prefs, () => this.renderFor(request));
     await this.coalesced.recordDelivery(office, String(claimed._id), HELD_CHANNEL, outcome);
   }
 
@@ -318,6 +392,16 @@ export class NotificationService {
   }
 
   /**
+   * **The message, for its recipient** (P18.98-T5 AC-5): their saved language, else the request that caused it where
+   * that was theirs (`SendRequest.reader`), else a reader who has chosen nothing (`recipientReader`). Read when an
+   * external channel delivers — off the request, which is not kept waiting for it.
+   */
+  private async renderFor(request: SendRequest): Promise<RenderedMessage> {
+    const stored = request.userId && this.languages ? await this.languages.languageOf(request.userId) : null;
+    return this.renderer.render(request.templateId, request.payload, recipientReader(stored, request.reader));
+  }
+
+  /**
    * Every channel the template declares, delivered or recorded as not: opted out is `suppressed`, the
    * `held` channel is kept back for `releaseHeld`, a channel with no adapter is `failed`, the in-app
    * channel is delivered now, and every other channel is **started now and not awaited** — `pending` on
@@ -326,7 +410,8 @@ export class NotificationService {
   private async deliver(
     request: SendRequest, prefs: Preferences, held: NotificationChannel | null,
   ): Promise<Delivered> {
-    const rendered = this.renderer.render(request.templateId, request.payload);
+    // The in-app channel's delivery is the row, whose words the inbox composes when it is read: nobody's language here.
+    const inline = this.renderer.render(request.templateId, request.payload, recipientReader(null, request.reader));
     const delivery: Record<string, Delivery> = {};
     const dispatched: Dispatch[] = [];
     for (const channel of TEMPLATE_CHANNELS[request.templateId] ?? []) {
@@ -337,10 +422,10 @@ export class NotificationService {
       if (settled) {
         delivery[channel] = settled;
       } else if (INLINE_CHANNELS.includes(channel)) {
-        delivery[channel] = await this.deliverOne(channel, request, prefs, rendered);
+        delivery[channel] = await this.deliverOne(channel, request, prefs, inline);
       } else {
         delivery[channel] = { status: 'pending', at: this.clock.now() };
-        dispatched.push({ channel, outcome: this.deliverOne(channel, request, prefs, rendered) });
+        dispatched.push({ channel, outcome: this.deliverOne(channel, request, prefs, () => this.renderFor(request)) });
       }
     }
     return { delivery, dispatched };
@@ -356,13 +441,29 @@ export class NotificationService {
   private settle(
     dispatched: readonly Dispatch[],
     templateId: string,
+    notificationId: string,
     record: (channel: NotificationChannel, outcome: Delivery) => Promise<unknown>,
   ): void {
     for (const { channel, outcome } of dispatched) {
-      void outcome
+      const recorded = outcome
         .then((settled) => record(channel, settled))
         .catch((err: unknown) => this.logger.error({ err, channel, templateId }, 'failed to record a delivery'));
+      // Tracked until it is recorded, not only sent: a shutdown that waited for the send alone could close
+      // the database under the write that records it.
+      this.track(recorded, { templateId, channel, notificationId });
     }
+  }
+
+  /**
+   * Hold `work` in the in-flight set until it settles, whichever way (P18.7-T1). The key is a promise that
+   * never rejects, so `drain` can wait on all of them without one failure ending the wait. `work` itself is
+   * left as it is: whoever started it still sees its rejection.
+   */
+  private track(work: Promise<unknown>, about: InFlightDelivery): void {
+    const settled: Promise<void> = work
+      .then(() => undefined, () => undefined)
+      .then(() => { this.inFlight.delete(settled); });
+    this.inFlight.set(settled, about);
   }
 
   /** A channel settled without asking its adapter: opted out is `suppressed`, no adapter is `failed`. */
@@ -374,16 +475,20 @@ export class NotificationService {
 
   /**
    * One channel, through its adapter. A failing adapter — a rejection or a synchronous throw — is recorded
-   * and logged at error level, and never thrown.
+   * and logged at error level, and never thrown. An external channel's message is rendered here, for its recipient
+   * (`renderFor`), so a failure to render it is recorded as its delivery's, too.
    */
   private async deliverOne(
-    channel: NotificationChannel, request: SendRequest, prefs: Preferences, rendered: RenderedMessage,
+    channel: NotificationChannel,
+    request: SendRequest,
+    prefs: Preferences,
+    rendered: RenderedMessage | (() => Promise<RenderedMessage>),
   ): Promise<Delivery> {
     const settled = this.undeliverable(channel, prefs);
     if (settled) return settled;
     const adapter = this.adapters.get(channel) as NotificationChannelAdapter;
     try {
-      await adapter.send(request, rendered);
+      await adapter.send(request, typeof rendered === 'function' ? await rendered() : rendered);
       return { status: 'sent', at: this.clock.now() };
     } catch (err) {
       this.logger.error({ err, channel, templateId: request.templateId }, 'delivery failed');
@@ -432,7 +537,8 @@ export class NotificationService {
       items: items.map((n) => ({
         notificationId: String(n._id),
         templateId: n.templateId,
-        ...describeNotification(n.templateId, n.payload),
+        // In the reader's language, when it is read (P18.98-T5 AC-4): a notice stored before reads in it too.
+        ...describeNotification(n.templateId, n.payload, ctx.reader),
         href: inboxAddress(n.templateId, n.payload),
         kpmId: n.kpmId,
         createdAt: n.get('createdAt')?.toISOString() ?? '',
@@ -553,12 +659,9 @@ export class NotificationService {
 
   private require(ctx: RequestContext, permission: Parameters<typeof can>[1]): void {
     if (!can(ctx, permission)) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        'You cannot do that.',
-        HttpStatus.FORBIDDEN,
-        { permission },
-      );
+      throw new DomainException(ErrorCode.PERM_DENIED, NOTIFICATION_REFUSALS.PERM_DENIED.cannot, HttpStatus.FORBIDDEN, {
+        permission,
+      });
     }
   }
 

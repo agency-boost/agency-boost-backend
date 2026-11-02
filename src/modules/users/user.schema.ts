@@ -1,6 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
+import {
+  GENDERS, LANGUAGES, WORK_STATUSES, type Gender, type Language, type WorkStatus,
+} from '@/domain/constants';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -40,6 +43,10 @@ export class User {
    * Immutable once set: it is the join key the monthly production import matches on, so
    * changing one silently breaks the attribution of every row already imported under the
    * old value.
+   *
+   * **Digits only on every new write since ADR-0158 §4** (`AGENT_CODE_PATTERN`, 3 to 32 of
+   * them): registration and the roster import refuse anything else. A code written before
+   * keeps its letters — nothing here checks the shape, so nothing old is refused.
    */
   @Prop({ type: String, default: null, uppercase: true, trim: true })
   agentCode!: string | null;
@@ -61,11 +68,58 @@ export class User {
   @Prop({ type: String, enum: ['she', 'he', 'they'], default: 'they' })
   pronoun!: 'she' | 'he' | 'they';
 
+  /*
+   * **What a person records about themselves** (ADR-0158, P18.8-T4): the three facts that are theirs
+   * and the same in every office, beside the agent code. Required by the roster import and by
+   * registration; **optional here**, because everybody who arrived before them has none, and is not
+   * refused anything for it — they complete them on `/profile`. A screen reads a missing one as
+   * *Not recorded*.
+   *
+   * Personal data under UU 27/2022 (`security-and-privacy.md`): shown to the person, the Owner and the
+   * Admins, and nobody else; carried by the export and the erasure cascade (P19-T1).
+   */
+
+  /** `YYYY-MM-DD`, a calendar day — never an instant, so no timezone moves it. At least 18 years ago. */
+  @Prop({ type: String, default: null })
+  dateOfBirth!: string | null;
+
+  @Prop({ type: String, enum: [...GENDERS, null], default: null })
+  gender!: Gender | null;
+
+  /** `YYYY-MM`: the month they joined their **insurer** (*Joined Prudential*), not an office. */
+  @Prop({ type: String, default: null })
+  companyJoinMonth!: string | null;
+
+  /**
+   * **Full-time or part-time, as they said at registration**, before any office has them.
+   *
+   * Work status lives on the membership (`memberships.workStatus`, ADR-0158 §1) — it is how somebody
+   * works *in an office*. A person who registers has no membership yet, so their answer waits here and
+   * `HierarchyService` copies it onto the membership they are given, whichever way they join. Read by
+   * nothing else once they belong somewhere.
+   */
+  @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
+  registeredWorkStatus!: WorkStatus | null;
+
+  /**
+   * **Their profile photo: the stored object's key, never a link** (UI V1, UI-111). The name is older than the
+   * decision: the bucket is private (ADR-0153) and every link expires, so `PUT /auth/me/avatar` writes the key of the
+   * 256px JPEG under `<env>/user/<userId>/avatar/`, and **every read that draws the photo signs a link to it**
+   * (`AvatarLinks`) — `GET /auth/me`, the group tree, the forum. `null`: initials. Never sent to a client as it is.
+   */
   @Prop({ type: String, default: null })
   avatarUrl!: string | null;
 
-  @Prop({ type: String, default: null })
-  locale!: string | null;
+  /**
+   * **The language this person chose to read AgencyBoost in** (ADR-0179 §2; P18.98-T2): `'id'` or `'en'`, set by the
+   * *ID | EN* switch and by *Language* on *Your account*, through `PATCH /auth/me`. It follows them to every device.
+   *
+   * **`null` is a person who has chosen nothing, and reads Bahasa Indonesia** (`languageOf`, `DEFAULT_LANGUAGE`).
+   * Every account made before the switch holds `null` — nothing wrote the field until then (ADR-0016) — so there is no
+   * migration. The reader's language, never the office's: `kpms.locale` stays `id-ID`.
+   */
+  @Prop({ type: String, enum: [...LANGUAGES, null], default: null })
+  locale!: Language | null;
 
   @Prop({ type: String, default: null })
   timezone!: string | null;

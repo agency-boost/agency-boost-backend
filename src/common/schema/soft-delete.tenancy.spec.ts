@@ -12,6 +12,9 @@ import { KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
+import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
+import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from './registered-schemas';
@@ -22,6 +25,7 @@ import { ActivityTypeSchema } from '@/modules/config/activity-type.schema';
 import { LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { RatioDefinitionSchema } from '@/modules/config/ratio-definition.schema';
 import { ConfigSnapshotSchema } from '@/modules/config/config-snapshot.schema';
+import { ActivityBindingSchema } from '@/modules/config/activity-binding.schema';
 import {
   ImpersonationSessionSchema,
 } from '@/modules/auth/impersonation-session.schema';
@@ -53,7 +57,7 @@ import {
   ActivityLogCorrectionSchema, ActivityLogEntrySchema, ActivityLogSchema,
 } from '@/modules/activity/activity-log.schema';
 import {
-  LeadCommitmentSchema, LeadContactSchema, LeadSchema, LeadTransitionSchema,
+  LeadCommitmentSchema, LeadContactSchema, LeadNextActionDoneSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
   GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
@@ -75,7 +79,7 @@ import {
   CapabilityStageRowSchema,
 } from '@/modules/capability/capability.schema';
 import {
-  CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
+  CoachingActionItemDoneSchema, CoachingActionItemSchema, CoachingLastWeekItemSchema, CoachingLastWeekSchema, CoachingLeadActionSchema,
   CoachingSessionCorrectionSchema, CoachingSessionSchema, CoachingSnapshotSchema, CoachingTipSchema,
 } from '@/modules/coaching/coaching-session.schema';
 import { CoachingProfileRevisionSchema, CoachingProfileSchema } from '@/modules/coaching/coaching-profile.schema';
@@ -113,12 +117,19 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['memberships', MembershipSchema],
   ['membershipHistory', MembershipHistorySchema],
   ['joinRequests', JoinRequestSchema],
+  // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
+  ['leaderLimitRequests', LeaderLimitRequestSchema],
+  // P18.96-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
+  ['memberInvites', MemberInviteSchema],
+  ['transferRequests', TransferRequestSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
   ['leadStatuses', LeadStatusSchema],
   ['ratioDefinitions', RatioDefinitionSchema],
   ['configSnapshots', ConfigSnapshotSchema],
+  // ADR-0163: an office's activity binding, one row per office, `kpmId`-led.
+  ['activityBindings', ActivityBindingSchema],
   ['impersonationSessions', ImpersonationSessionSchema],
   ['companyTemplates', CompanyTemplateSchema],
   ['templates', NamedTemplateSchema],
@@ -243,6 +254,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'them is a write rather than a delete',
   ],
   [
+    'leadNextActionDone (subdocument)',
+    LeadNextActionDoneSchema,
+    'the latest ticked next action inside a lead (UI-104): *Urungkan* clears it, and the lead holds it, so it '
+      + 'goes with the lead',
+  ],
+  [
     'leadTransition (subdocument)',
     LeadTransitionSchema,
     'one move along a ladder. **Append-only and never removed** — it is what makes a jump '
@@ -314,6 +331,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     CoachingLastWeekItemSchema,
     'a copy of last week\'s item inside the session reviewing it: the draft\'s whole editable state is '
       + 'saved at once, and a finalized session keeps it in corrections[] when it is reopened (ADR-0042)',
+  ],
+  [
+    'coachingActionItemDone (subdocument)',
+    CoachingActionItemDoneSchema,
+    'a coachee\'s tick on one action item, kept beside the session\'s lists (UI-104): *Urungkan* removes it, and it '
+      + 'goes with the session that holds it',
   ],
   [
     'coachingActionItem (subdocument)',
@@ -417,6 +440,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadStatusSchema, 'LeadStatusSchema'],
   [RatioDefinitionSchema, 'RatioDefinitionSchema'],
   [ConfigSnapshotSchema, 'ConfigSnapshotSchema'],
+  [ActivityBindingSchema, 'ActivityBindingSchema'],
   [ImpersonationSessionSchema, 'ImpersonationSessionSchema'],
   [CompanyTemplateSchema, 'CompanyTemplateSchema'],
   [NamedTemplateSchema, 'NamedTemplateSchema'],
@@ -440,6 +464,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeadSchema, 'LeadSchema'],
   [LeadContactSchema, 'LeadContactSchema'],
   [LeadTransitionSchema, 'LeadTransitionSchema'],
+  [LeadNextActionDoneSchema, 'LeadNextActionDoneSchema'],
   [LeadCommitmentSchema, 'LeadCommitmentSchema'],
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
@@ -469,6 +494,9 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
+  [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
+  [MemberInviteSchema, 'MemberInviteSchema'],
+  [TransferRequestSchema, 'TransferRequestSchema'],
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
@@ -476,6 +504,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
   [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
   [CoachingActionItemSchema, 'CoachingActionItemSchema'],
+  [CoachingActionItemDoneSchema, 'CoachingActionItemDoneSchema'],
   [CoachingTipSchema, 'CoachingTipSchema'],
   [CoachingLeadActionSchema, 'CoachingLeadActionSchema'],
   [CoachingSessionCorrectionSchema, 'CoachingSessionCorrectionSchema'],

@@ -51,7 +51,8 @@ export const CalendarAttendeeSchema = SchemaFactory.createForClass(CalendarAtten
  * **Times are instants, days are the office's** (invariant §9): `startsAt` and `endsAt` are UTC instants
  * converted from the office's wall-clock through `kpms.timezone`; a timed entry ends no later than
  * midnight at the end of its date. Travel also keeps its two office dates, `startsOn` and `endsOn`, and
- * its instants are the office's midnights around them, so one range query reads every type.
+ * its instants are the office's midnights around them — or, for a trip with times (`allDay: false`, UI V1),
+ * the wall clock on each of them — so one range query reads every type.
  *
  * **No correction shape** (ADR-0042): nothing relies on an entry, so an edit replaces it and `version`
  * is a concurrency pin, not a history. An answer moves no `version`. A deleted entry keeps its row.
@@ -96,6 +97,15 @@ export class CalendarEvent {
   /** Travel's *Return date*, inclusive; `null` on every other type. */
   @Prop({ type: String, default: null })
   endsOn!: string | null;
+
+  /**
+   * **A trip's *Sepanjang hari*** (UI V1, 2026-10-30, UI-104 point 8; ADR-0180 §11): `true`, its two office dates and
+   * the office's midnights around them; `false`, a start date and time and an end date and time, `startsAt` and
+   * `endsAt` the instants they name. `false` on every other type. **`null` on a row older than the field** reads as its
+   * type does — a trip all-day — and migration 0048 writes it on every row.
+   */
+  @Prop({ type: Boolean, default: null })
+  allDay!: boolean | null;
 
   @Prop({ type: [CalendarAttendeeSchema], default: [] })
   attendees!: CalendarAttendee[];

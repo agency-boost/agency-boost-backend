@@ -10,6 +10,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import type { LocalDate } from '@/common/time/local-day';
 import { ActivationProgressController } from '@/modules/activation/activation-progress.controller';
 import { ActivationProgressService } from '@/modules/activation/activation-progress.service';
+import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
 import type { ActivationProgressDocument } from '@/modules/activation/activation-progress.schema';
 import { freshItemState } from '@/modules/activation/activation-rules';
 import { NewHiresController } from '@/modules/activation/new-hires.controller';
@@ -22,7 +23,7 @@ import { configModule, provisionOffice } from './config-module';
 import {
   buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from './coaching-office';
-import { productionPipe, session, StubAuth } from './http-permissions';
+import { NO_CLASS, productionPipe, session, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
 import { clearCollections, startMongo, stopMongo } from './mongo';
 
@@ -93,6 +94,7 @@ export async function startTrainingHarness(): Promise<TrainingHarness> {
       { provide: TrainingService, useValue: wired.training },
       { provide: ActivationProgressService, useValue: wired.activationProgress },
       { provide: NewHiresService, useValue: wired.newHires },
+      { provide: ActivationItemRecords, useValue: wired.activationRecords },
     ],
   }).compile();
   const app = moduleRef.createNestApplication();
@@ -159,7 +161,8 @@ export async function startTrainingHarness(): Promise<TrainingHarness> {
     col,
     officeOnly: (who) => {
       const base = office.as(who);
-      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG' });
+      // No rung, and so no class (ADR-0156): a grant reads the class, and `NO_CLASS` matches none.
+      return new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS });
     },
     supporting: (who, readOnly = true) => {
       const base = office.as(who);

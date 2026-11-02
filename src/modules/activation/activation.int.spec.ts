@@ -11,12 +11,20 @@ const VIEW_KEYS = [
   'aspects', 'day', 'done', 'endsOn', 'firstCaseClosed', 'graduatedAt', 'graduatedBy', 'hire', 'note', 'overdue',
   'pct', 'startCorrected', 'startDate', 'state', 'today', 'total', 'window',
 ];
-const ITEM_KEYS = ['code', 'date', 'done', 'doneAt', 'doneBy', 'label', 'link', 'note', 'source'];
+const ITEM_KEYS = ['code', 'date', 'done', 'doneAt', 'doneBy', 'label', 'link', 'note', 'record', 'source', 'waiting'];
 const MANUAL = [
   'INSURANCE_BASICS', 'CAREER_MINDSET', 'COMPANY_PROFILE', 'KPM_INTRO_SESSION', 'CRM_SETUP', 'CHECK_CONTEST',
-  'MANDATORY_TRAINING', 'CERTIFY_PRODUCTS', 'ROLE_PLAY', 'JOINT_FIELD_WORK', 'FIRST_CASE_CLOSED', 'WEEKLY_CHECK_IN',
-  'INDEPENDENT_AGENT_MILESTONE',
+  'MANDATORY_TRAINING', 'CERTIFY_PRODUCTS', 'ROLE_PLAY', 'JOINT_FIELD_WORK',
 ];
+/**
+ * P18.96-T4 AC-3: the three data-backed items, each ticked by hand with its record — a closing logged in the hire's
+ * leads, or the hire's own 1:1 — and so *waiting for data*, done all the same.
+ */
+const DATA_TICKS: Record<string, Record<string, unknown>> = {
+  FIRST_CASE_CLOSED: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' },
+  WEEKLY_CHECK_IN: { kind: 'one_on_one', date: '2026-09-10', note: 'Weekly check-in with Sari.' },
+  INDEPENDENT_AGENT_MILESTONE: { kind: 'closing', name: 'Pak Yusuf', date: '2026-09-11' },
+};
 
 type Item = { code: string; done: boolean; source: string | null; doneBy: { membershipId: string; name: string } | null; note: string | null; date: string | null; link: { live: boolean } | null };
 const items = (view: { aspects: { items: Item[] }[] }) => view.aspects.flatMap((a) => a.items);
@@ -39,10 +47,13 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
   it('P13-T7 AC-5 declares a permission on every route, and the right one', () => {
     expect(declaredPermissions(ActivationProgressController)).toEqual({
       mine: 'activation:read', tick: 'activation:update_manual_item', graduate: 'activation:graduate',
+      // P18.96-T4 AC-3: the closings *Which case?* names.
+      closings: 'activation:read',
     });
     expect(declaredPermissions(NewHiresController)).toEqual({
       roster: 'new_hires:read_roster', detail: 'activation:read', tick: 'activation:update_manual_item',
-      correctStart: 'activation:set_start_date', saveNote: 'activation_note:write',
+      correctStart: 'activation:set_start_date', saveNote: 'activation_note:write', closings: 'activation:read',
+      // UI-025: *Mark left* is retired with its grant (ADR-0180 §6).
     });
   });
 
@@ -59,8 +70,8 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
         total: 16, graduatedAt: null, graduatedBy: null, note: null, firstCaseClosed: false,
       });
       expect(view.aspects.map((a: { label: string; total: number }) => [a.label, a.total])).toEqual([
-        ['1. Introduction', 4], ['2. Initial Setup', 4], ['3. Training & Certification', 3], ['4. First Sale', 2],
-        ['5. Ongoing Habits', 3],
+        ['1. Pengenalan', 4], ['2. Persiapan awal', 4], ['3. Pelatihan & sertifikasi', 3], ['4. Penjualan pertama', 2],
+        ['5. Kebiasaan rutin', 3],
       ]);
       expect(Object.keys(items(view)[0]).sort()).toEqual(ITEM_KEYS);
     });
@@ -186,6 +197,46 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect(await audit()).toEqual([]);
     });
 
+    it('P18.98-T5 AC-7 refuses a hand tick of a linked item in Indonesian, saying in the reader’s words what completes it', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('BUDI');
+      const english = await h.http().put('/activation/me/items/GOAL_SETTING').send({ done: true }).expect(409);
+      expect(english.body.error).toMatchObject({
+        code: 'ACTIVATION_ITEM_AUTOMATIC', details: { code: 'GOAL_SETTING' },
+        message: 'This item completes on its own, when the hire has saved any goal since joining. Nobody ticks it by hand.',
+      });
+      const indonesian = await h.http().put('/activation/me/items/ACTIVITY_TRACKER_WEEKLY').set('Accept-Language', 'id')
+        .send({ done: true }).expect(409);
+      expect(indonesian.body.error).toMatchObject({
+        code: 'ACTIVATION_ITEM_AUTOMATIC', details: { code: 'ACTIVITY_TRACKER_WEEKLY' },
+        message: 'Item ini selesai dengan sendirinya, saat rekrut telah mencatat aktivitas selama empat minggu berturut-turut. '
+          + 'Tidak ada yang mencentangnya secara manual.',
+      });
+      // The pipe's own sentence for a date that is no day, the field named as the API names it.
+      const day = await h.http().put('/activation/me/items/CRM_SETUP').set('Accept-Language', 'id')
+        .send({ done: true, date: '1 Aug' }).expect(400);
+      expect(day.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        message: 'date harus berupa tanggal dengan format YYYY-MM-DD.',
+        details: { violations: ['date harus berupa tanggal dengan format YYYY-MM-DD.'] },
+      });
+      expect((await h.http().put('/activation/me/items/CRM_SETUP').send({ done: true, date: '1 Aug' }).expect(400)).body.error)
+        .toMatchObject({ details: { violations: ['date must be a day, written YYYY-MM-DD.'] } });
+    });
+
+    it('P18.98-T5 AC-4 reads the hire’s activation in Indonesian: each link’s words, a data item’s source label', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('BUDI');
+      const view = (await h.http().get('/activation/me').set('Accept-Language', 'id').expect(200)).body;
+      const link = (code: string) => (item(view, code) as unknown as { link: Record<string, unknown> }).link;
+      expect(link('GOAL_SETTING')).toMatchObject({ label: 'Goal Settings', completesWhen: 'rekrut telah menyimpan goal apa pun sejak bergabung' });
+      expect(link('FIRST_CASE_CLOSED')).toMatchObject({ label: 'Data penjualan', form: 'closing' });
+      expect(link('WEEKLY_CHECK_IN')).toMatchObject({ label: 'Sesi coaching', form: 'one_on_one' });
+      // What the hire's office typed stays as typed, in both languages.
+      expect(item(view, 'GOAL_SETTING')).toMatchObject({ code: 'GOAL_SETTING' });
+      expect(view.aspects[0].label).toBe('1. Pengenalan');
+    });
+
     /*
      * P18.5-T3 AC-3: this asserted the opposite until 2026-10-10 — *"stays tickable by hand until its evaluator
      * exists"*. The evaluator exists: a module the office offers is done when the hire marks it *Done*, and nobody
@@ -243,6 +294,9 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       })));
       for (const code of MANUAL.filter((c) => !leave.includes(c))) {
         await h.http().put(`/activation/me/items/${code}`).send({ done: true }).expect(200);
+      }
+      for (const [code, record] of Object.entries(DATA_TICKS).filter(([c]) => !leave.includes(c))) {
+        await h.http().put(`/activation/me/items/${code}`).send({ done: true, record }).expect(200);
       }
     }
 
@@ -324,14 +378,21 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       }
     });
 
-    it('P13-T7 AC-4 graduated or expired, the section goes and the roster with it', async () => {
+    it('P13-T7 AC-4 graduated or expired, the section goes; P18.96-T6 AC-3 New hires stays for the year’s new hires', async () => {
       await h.start('RINA', '2026-07-18', { graduatedAt: new Date('2026-09-10T02:00:00Z'), graduatedByMembershipId: id('RINA') });
       await h.start('BUDI', '2026-03-01');
       h.as('RINA');
       expect((await facts()).activation).toEqual({ open: false, complete: false });
       h.as('BUDI');
       expect((await facts()).activation).toEqual({ open: false, complete: false });
+      // ADR-0173 §1: the page lists new hires who joined in the last twelve months, whatever their checklist's state.
       h.as('SARI');
+      expect((await facts()).newHires).toBe(true);
+      await h.http().get('/new-hires').expect(200);
+      // Past the year, nobody is listed, and the nav says so.
+      await h.col('memberships').updateMany(
+        { _id: { $in: [id('RINA'), id('BUDI')].map((x) => new mongoose.Types.ObjectId(x)) } }, { $set: { joinDate: '2025-09-14' } },
+      );
       expect((await facts()).newHires).toBe(false);
       expect((await h.http().get('/new-hires').expect(404)).body.error.code).toBe('NOT_FOUND');
     });
@@ -412,9 +473,18 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
     });
 
     /** Budi as joined on 1 August, with the history `edges` writes: the shape of how he was placed. */
-    async function joinedOnTheFirst(edges: (userId: string) => Record<string, unknown>[], run: () => Promise<void>) {
+    /**
+     * Budi placed on 1 August, as a placement writes him since ADR-0169: joined that day, a new hire — or, given
+     * `joinedAs`, an existing agent, whose join date was set more than 90 days back.
+     */
+    async function joinedOnTheFirst(
+      edges: (userId: string) => Record<string, unknown>[], run: () => Promise<void>,
+      joinedAs: 'new_hire' | 'existing_agent' = 'new_hire',
+    ) {
       const budi = (await h.col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id('BUDI')) }))!;
-      await h.col('memberships').updateOne({ _id: budi._id }, { $set: { joinedAt: new Date('2026-07-31T18:00:00Z') } });
+      await h.col('memberships').updateOne(
+        { _id: budi._id }, { $set: { joinedAt: new Date('2026-07-31T18:00:00Z'), joinDate: '2026-08-01', joinedAs } },
+      );
       try {
         const rows = edges(String(budi.userId)).map((edge, i) => ({
           kpmId: budi.kpmId, membershipId: id('BUDI'), eventType: 'joined', toRole: 'agent', fromLeaderId: null,
@@ -424,10 +494,28 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
         h.as('BUDI');
         await run();
       } finally {
-        await h.col('memberships').updateOne({ _id: budi._id }, { $set: { joinedAt: new Date('2026-01-02T02:00:00Z') } });
+        await h.col('memberships').updateOne(
+          { _id: budi._id }, { $set: { joinedAt: new Date('2026-01-02T02:00:00Z') }, $unset: { joinDate: '', joinedAs: '' } },
+        );
         await h.col('membershipHistory').deleteMany({ membershipId: id('BUDI') });
       }
     }
+
+    it('P18.96-T2 AC-1 the read heals no existing agent, however a leader placed him: an activation is a new hire’s alone', async () => {
+      await joinedOnTheFirst((userId) => [{ toLeaderId: null, actorUserId: userId }, { toLeaderId: id('SARI'), actorUserId: 'u-sari' }], async () => {
+        expect((await facts()).activation).toBeNull();
+        await h.http().get('/activation/me').expect(404);
+        expect(await h.col('activationProgress').countDocuments({})).toBe(0);
+      }, 'existing_agent');
+    });
+
+    it('P18.96-T2 AC-3 the heal starts a new hire’s activation on his join date, not on the instant he was made active', async () => {
+      await joinedOnTheFirst((userId) => [{ toLeaderId: id('SARI'), actorUserId: userId }], async () => {
+        // His leader gave 20 July as the day he joined: that is day 1, though the system stamped him on 1 August.
+        await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('BUDI')) }, { $set: { joinDate: '2026-07-20' } });
+        expect((await h.http().get('/activation/me').expect(200)).body).toMatchObject({ startDate: '2026-07-20', day: 57 });
+      });
+    });
 
     it.each([
       ['an approved request or a tag: a registration, then a joined edge naming his leader', (userId: string) => [

@@ -4,7 +4,7 @@ import type { Clock } from '@/common/clock/clock.port';
 import { RECRUITMENT, RECRUITMENT_PITCH_SLOTS, type RecruitmentPitchSlotCode } from '@/domain/constants';
 import { up as recruitmentPlaybook, type RecruitmentPlaybookResult } from '@/migrations/0025-recruitment-playbook';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
-import { CloudinaryAdapter, vendorRefusal } from '@/modules/assets/cloudinary.adapter';
+import { GcsAdapter, storageRefusal } from '@/modules/assets/gcs.adapter';
 import { StoragePort } from '@/modules/assets/storage.port';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { KpmProductConfig, KpmProductConfigSchema } from '@/modules/products/kpm-product-config.schema';
@@ -23,19 +23,19 @@ import { seedObjectId } from './coaching-fixture';
  * | **Prudential's playbook** | the AgencyBoost words — the prototype's, verbatim — version 1, as a company started from the defaults is given them | `rina@kpm0417.test` (Agent), `sari@` (AAB), `agus@` (AB) at `/recruitment/attack-plan`: the four briefs below; `superadmin@agencyboost.test` at `/admin/companies` → *Prudential* → *Template* → *Recruitment*: the words, to edit |
  * | **Allianz Life's playbook** | the same words, version 1; Allianz has no office | the Super Admin's *Recruitment* tab for Allianz Life. The cross-company test rewords one in a fixture, not here |
  * | **Sejahtera Baru Life** (`template-fixture.ts`, created blank) | **no playbook** | `owner@kpm0701.test` (Hadi Gunawan) and `agent@kpm0701.test` (Nadia Putri): the playbook-empty state on *Attack Plan*; the Super Admin's tab: *Start from the AgencyBoost words* or *Start from nothing* |
- * | **0417 BSD City's pitch** — the prototype's own (`:626-661`) | *Opportunity Overview*: `Opportunity_Overview_v3.pdf`, *Career Path Ladder* ticked by the Owner and *Support provided* by the Admin — *2/4 confirmed*; *Proof & Credibility*: `Proof_and_Credibility_2026.pdf`, *Uploaded*; *FAQ* and *How to Join* *Missing* | `owner@kpm0417.test` and `admin@kpm0417.test` (Maya Halim) at `/kpm/settings/recruitment-pitch`: the ring *1/4*, *"Recruitment Pitch is incomplete"*, *"2 not uploaded, 1 uploaded but not fully confirmed — not yet ready to rely on for candidates."*; *Replace* clears the two ticks. Rina, Sari and Agus at `/recruitment/pitch-materials`: two *Uploaded* cards with *View PDF*, two *Missing* |
- * | **0555 Kelapa Gading's pitch** | all four uploaded, *Opportunity Overview*'s four items ticked by its Owner | `owner@kpm0555.test`, `agent@kpm0555.test`: *4/4*, *"Recruitment Pitch is complete"* |
- * | **0701 Cempaka Putih** | no pitch document | Hadi and Nadia: *0/4*, *"4 not uploaded — not yet ready to rely on for candidates."* |
- * | **0417's own PRUMapan brochure** (P17-T9) | `Brosur_PRUMapan_BSD.pdf` in *PRUMapan (nama kami)*'s *Brochure* slot, the office's own file | `rina@kpm0417.test` at `/product-catalog/PRUMAPAN` → *Documents*: the brochure opens; the Owner at `/kpm/settings/products`: the row reads as the office's, with *Replace* and *Use Prudential's* |
+ * | **0417 BSD City's pitch** — the prototype's own (`:626-661`), and one optional document (P18.97-T5 AC-5) | *Opportunity Overview*: `Opportunity_Overview_v3.pdf`, *Career Path Ladder* ticked by the Owner and *Support provided* by the Admin — *Uploaded · needs confirmation*; *Proof & Credibility*: `Proof_and_Credibility_2026.pdf`, *Uploaded*; *FAQ* and *How to Join* *Missing*; ***Company Profile***: `Company_Profile_2026.pdf`, *Uploaded*; ***Agency Profile*** empty, *Not uploaded yet* — both tagged *Optional* | `owner@kpm0417.test` and `admin@kpm0417.test` (Maya Halim) at `/kpm/settings/recruitment-pitch`: the ring *1/4*, *"Recruitment Pitch is incomplete"*, *"2 missing, 1 needs checking."* — the optional two counted in neither; *Replace* clears the two ticks. Rina, Sari and Agus at `/recruitment/pitch-materials`: the same six cards, read-only — *View PDF* on the three uploaded, every file *< 1 KB* (the one-page demonstration PDFs) |
+ * | **0555 Kelapa Gading's pitch** | all four uploaded, *Opportunity Overview*'s four items ticked by its Owner; ***Company Profile*** and ***Agency Profile*** both uploaded (P18.97-T5 AC-5) | `owner@kpm0555.test`, `agent@kpm0555.test`: *4/4*, *"Recruitment Pitch is complete"*, six uploaded cards |
+ * | **0701 Cempaka Putih** | no pitch document | Hadi and Nadia: *0/4*, *"4 missing."*; the two optional cards *Not uploaded yet*, never *Missing* |
+ * | **0417's own PRUMapan brochure** (P17-T9) | `Brosur_PRUMapan_BSD.pdf` in *PRUMapan*'s *Brochure* slot, the office's own file | `rina@kpm0417.test` at `/product-catalog/PRUMAPAN` → *Documents*: the brochure opens; the Owner at `/kpm/settings/products`: the row reads as the office's, with *Replace* and *Use Prudential's* |
  *
  * **The briefs the walk uses**, each computed over the seed's words (`recruitment-plan.spec.ts` pins them):
  *
  * | Brief (`/recruitment/attack-plan?…`) | What the plan shows |
  * |---|---|
- * | *Business owner* · *Extra income on the side* · *Already has a stable job* (`type=business-owner&motivation=side-income&hesitation=stable-job`) | one opening, untagged; the business owner's own objection, *"I already have my own thing running — why add this?"* (`:497`) |
- * | *Retiree* · *Flexibility / time freedom*, *Building a team / leadership* · *No network to sell to*, *Worried about time commitment* (`type=retiree&motivation=flexibility,leadership&hesitation=no-network,time`) | *Opening lines*, two tags in the chips' order; the base *no network* objection, and the retiree's own *time* one (`:501`) |
+ * | *Business owner* · *Side income* · *Already has a stable job* (`type=business-owner&motivation=side-income&hesitation=stable-job`) | one opening, untagged; the business owner's own objection, *"I already have my own thing running — why add this?"* (`:497`) |
+ * | *Retiree* · *Flexibility*, *Lead a team* · *No network*, *Worried about time commitment* (`type=retiree&motivation=flexibility,leadership&hesitation=no-network,time`) | *Opening lines*, two tags in the chips' order; the base *no network* objection, and the retiree's own *time* one (`:501`) |
  * | *Fresh grad*, every motivation, every hesitation | four openings, five objections, the summary's *Type* reading *Fresh graduate* |
- * | *Agent (other insurer)* · *Full career change* · *Already has a stable job* | the other insurer's own reply (`:505`) |
+ * | *Agent (other insurer)* · *Career change* · *Already has a stable job* | the other insurer's own reply (`:505`) |
  *
  * **The files are real, and only where storage is** (D-seed). Each is a one-page PDF this file writes, naming
  * its slot and saying it is a demonstration, stored **through the real storage adapter** in the office's own
@@ -65,7 +65,10 @@ interface SeededSlot {
   ticks: { item: string; by: 'owner' | 'admin' }[];
 }
 
-/** What each office's pitch holds (*Seed*): 0417 the prototype's, 0555 complete, 0701 nothing. */
+/**
+ * What each office's pitch holds (*Seed*): 0417 the prototype's and its *Company Profile*, its *Agency Profile*
+ * left empty; 0555 complete, with both optional documents; 0701 nothing (P18.97-T5 AC-5, ADR-0177 §2).
+ */
 export const RECRUITMENT_SEED_PITCH: Readonly<Record<'0417' | '0555', readonly SeededSlot[]>> = {
   '0417': [
     {
@@ -73,6 +76,7 @@ export const RECRUITMENT_SEED_PITCH: Readonly<Record<'0417' | '0555', readonly S
       ticks: [{ item: 'career-path', by: 'owner' }, { item: 'support', by: 'admin' }],
     },
     { slot: 'proof', fileName: 'Proof_and_Credibility_2026.pdf', uploadedDaysAgo: 40, ticks: [] },
+    { slot: 'company', fileName: 'Company_Profile_2026.pdf', uploadedDaysAgo: 33, ticks: [] },
   ],
   '0555': [
     {
@@ -82,6 +86,8 @@ export const RECRUITMENT_SEED_PITCH: Readonly<Record<'0417' | '0555', readonly S
     { slot: 'proof', fileName: 'Kelapa_Gading_Proof_and_Credibility.pdf', uploadedDaysAgo: 20, ticks: [] },
     { slot: 'faq', fileName: 'Kelapa_Gading_FAQ.pdf', uploadedDaysAgo: 19, ticks: [] },
     { slot: 'howtojoin', fileName: 'Kelapa_Gading_How_to_Join.pdf', uploadedDaysAgo: 19, ticks: [] },
+    { slot: 'company', fileName: 'Kelapa_Gading_Company_Profile.pdf', uploadedDaysAgo: 18, ticks: [] },
+    { slot: 'agency', fileName: 'Kelapa_Gading_Agency_Profile.pdf', uploadedDaysAgo: 18, ticks: [] },
   ],
 };
 
@@ -127,27 +133,31 @@ export function demonstrationPdf(lines: readonly string[]): Buffer {
 }
 
 /**
- * **The storage the seed writes through, where one is configured** (D-seed) — detected the way the asset
- * module needs it: the three Cloudinary settings `CloudinaryAdapter` reads with `getOrThrow`, each set, and
- * the folder prefix defaulting to `dev` as `env.validation.ts` defaults it. `null` otherwise, and the run
- * says so. Reads the process's environment, which the command loaded; nothing here opens a file.
+ * **The storage the seed writes through, where one is configured** (D-seed; P18.7-T2, ADR-0153) — detected
+ * the way the API detects it: a `GCS_BUCKET` that names a bucket, the key prefix defaulting to `dev` as
+ * `env.validation.ts` defaults it, and `GCS_PROJECT_ID` only if set. `null` otherwise — the API's
+ * `UnconfiguredStorage` case — and the run says so. Credentials are Application Default Credentials, as the
+ * API's are. Reads the process's environment, which the command loaded; nothing here opens a file.
  */
 export function storageFromEnvironment(env: NodeJS.ProcessEnv, clock: Clock): StoragePort | null {
-  const keys = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'] as const;
-  if (keys.some((key) => !env[key]?.trim())) return null;
+  const bucket = env.GCS_BUCKET?.trim();
+  if (!bucket) return null;
+  const projectId = env.GCS_PROJECT_ID?.trim();
   const values: Record<string, string> = {
-    ...Object.fromEntries(keys.map((key) => [key, env[key]!.trim()])),
-    CLOUDINARY_FOLDER_PREFIX: env.CLOUDINARY_FOLDER_PREFIX?.trim() || 'dev',
+    GCS_BUCKET: bucket,
+    STORAGE_KEY_PREFIX: env.STORAGE_KEY_PREFIX?.trim() || 'dev',
+    ...(projectId ? { GCS_PROJECT_ID: projectId } : {}),
   };
   // Only what the adapter asks for, from the environment given — not a whole `ConfigService`, which would
   // read `process.env` whatever it was handed.
   const config = {
+    get: (key: string) => values[key],
     getOrThrow: (key: string) => {
       if (!(key in values)) throw new Error(`${key} is not set.`);
       return values[key];
     },
   } as unknown as ConfigService;
-  return new CloudinaryAdapter(config, clock);
+  return new GcsAdapter(config, clock);
 }
 
 export interface RecruitmentFixtureDeps {
@@ -214,9 +224,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
     const stored = await deps.storage!.putObject({
       owner: { kind: 'kpm', kpmId }, folder, name, mimeType: 'application/pdf', body: demonstrationPdf(lines),
     }).catch((err: unknown) => {
-      // The vendor's message, from whichever shape it threw — never the whole object, which can carry the
-      // request's credentials.
-      throw new StorageRefused(vendorRefusal(err).message);
+      // The vendor's message alone — never the whole object, which can carry the request's credentials.
+      throw new StorageRefused(storageRefusal(err).message);
     });
     if (stored.sent) sent += 1;
     if (!(await Assets.exists({ storageKey: stored.storageKey }))) {
@@ -243,8 +252,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
           const uploadedAt = daysAgo(seeded.uploadedDaysAgo);
           const stored = await store(
             office.kpmId, RECRUITMENT.PITCH_UPLOAD_FOLDER, `${seeded.slot}-demonstration`, seeded.fileName,
-            ['AgencyBoost - demonstration document', definition.title, seeded.fileName,
-              'A one-page PDF the demo seed wrote, so this slot can be opened.', 'It is not a real pitch document.'],
+            ['AgencyBoost - dokumen demonstrasi', definition.title, seeded.fileName,
+              'PDF satu halaman yang ditulis seed demo, agar slot ini bisa dibuka.', 'Ini bukan dokumen pitch sungguhan.'],
             office.owner, uploadedAt,
           );
           const confirmations = seeded.ticks.map((t, i) => ({
@@ -298,8 +307,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
         const uploadedAt = daysAgo(brochure.uploadedDaysAgo);
         const stored = await store(
           office.kpmId, 'products', `${brochure.code}-${brochure.slot}-demonstration`, brochure.fileName,
-          ['AgencyBoost - demonstration document', 'PRUMapan - Brochure', brochure.fileName,
-            'A one-page PDF the demo seed wrote, as office 0417 BSD City\'s own brochure.', 'It is not Prudential\'s brochure.'],
+          ['AgencyBoost - dokumen demonstrasi', 'PRUMapan - Brosur', brochure.fileName,
+            'PDF satu halaman yang ditulis seed demo, sebagai brosur milik kantor 0417 BSD City.', 'Ini bukan brosur Prudential.'],
           office.owner, uploadedAt,
         );
         await Configs.updateOne({ _id: row._id }, {
@@ -340,12 +349,14 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
     Playbooks                    Prudential and Allianz Life: the AgencyBoost words, version 1. Sejahtera Baru
                                  Life: none — 0701's agents meet the playbook-empty state
     KPM 0417 · BSD City          rina@ (Agent), sari@ (AAB), agus@ (AB): both tabs, the pitch read-only.
-                                 Opportunity Overview 2/4 confirmed (Career Path by the Owner, Support by the
-                                 Admin, Maya Halim), Proof & Credibility uploaded, FAQ and How to Join missing:
-                                 the ring 1/4. owner@ / admin@ upload, replace and confirm at Settings →
-                                 Recruitment pitch; Replace clears the ticks. PRUMapan's own brochure at
-                                 /product-catalog/PRUMAPAN → Documents
-    KPM 0555 · Kelapa Gading     owner@kpm0555.test, agent@kpm0555.test: all four, 4/4, complete
+                                 Opportunity Overview "Uploaded · needs confirmation" (Career Path by the Owner,
+                                 Support by the Admin, Maya Halim), Proof & Credibility uploaded, FAQ and How to
+                                 Join missing: the ring 1/4. Company Profile uploaded and Agency Profile "Not
+                                 uploaded yet", both Optional and counted in neither. owner@ / admin@ upload,
+                                 replace and confirm at Settings → Recruitment pitch; Replace clears the ticks.
+                                 PRUMapan's own brochure at /product-catalog/PRUMAPAN → Documents
+    KPM 0555 · Kelapa Gading     owner@kpm0555.test, agent@kpm0555.test: all four, 4/4, complete, and both
+                                 optional documents uploaded
     KPM 0701 · Cempaka Putih     owner@kpm0701.test (Hadi Gunawan), agent@kpm0701.test (Nadia Putri): 0/4 and
                                  no playbook
     Briefs to try                ?type=business-owner&motivation=side-income&hesitation=stable-job

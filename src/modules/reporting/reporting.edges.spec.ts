@@ -1,8 +1,16 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
+import { officeHeadcount } from '@/domain/metrics/office-headcount';
+import { rateOver } from '@/domain/metrics/rate';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { MembershipRepository } from '@/modules/org/membership.repository';
+import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import { OfficePeople } from './office-people';
 
 const M = 1_000_000 * 100;
 const COMPANY = '66f0000000000000000000c9';
@@ -12,6 +20,10 @@ const JAN = '66f0000000000000000000e3';
 const NEW = '66f0000000000000000000e4';
 const NOBODY = '66f0000000000000000000e5';
 const NAMELESS = '66f0000000000000000000e6';
+/** P18.96-T5: an office of a company that is gone, so the platform's company count below is untouched. */
+const JOINING = '66f0000000000000000000e7';
+/** P18.97-T3 AC-10: an agency of 40, 23 of them producing this month — exactly 57,5%. */
+const HALF = '66f0000000000000000000e8';
 
 /**
  * **The states the prototype lacks, and the edges of the calendar** (P18-T1 AC-9, P18-T2 AC-9): an office with
@@ -26,16 +38,19 @@ describe('the Owner’s reporting at its edges', () => {
   const place = async (kpmId: string, over: Record<string, unknown> = {}) => {
     const userId = new mongoose.Types.ObjectId();
     const id = new mongoose.Types.ObjectId();
+    // Leader codes are unique, so they come from the id's counter (its last digits), never its head: an ObjectId
+    // opens with the second it was made, so seven of its first digits name a sixteen-second window, and two
+    // memberships placed inside one collided on the CI runner.
     await db().collection('users').insertOne({ _id: userId, email: `${id}@edge.test`, passwordHash: 'x', fullName: 'Hadi Gunawan', status: 'active', deletedAt: null });
     await db().collection('memberships').insertOne({
-      _id: id, kpmId, userId: String(userId), agentCode: `E${id}`, agentSeq: 1, leaderCode: `L${id}`.slice(0, 8), orgLevelId: 'x',
+      _id: id, kpmId, userId: String(userId), agentCode: `E${id}`, agentSeq: 1, leaderCode: `L${String(id).slice(-7)}`, orgLevelId: 'x',
       orgLevelCode: 'AB', role: 'ab', leaderId: null, ancestorIds: [], depth: 0, status: 'active',
       joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null, ...over,
     });
     return new RequestContext(String(userId), 'none', {
       membershipId: String(id), kpmId, orgLevelCode: String(over.orgLevelCode ?? 'AB'), hierarchyRole: 'ab', status: 'active',
       isKpmOwner: true, isKpmAdmin: false, directCount: 0,
-    } as never);
+    } as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
   };
 
   beforeAll(async () => {
@@ -63,7 +78,10 @@ describe('the Owner’s reporting at its edges', () => {
     const overview = await wired.kpmOverview.read(owner);
     expect(overview.composition).toMatchObject({ total: 1, newThisMonth: 0 });
     expect(overview.engagement.loggedThisMonth).toEqual({ count: 0, of: 1, pct: 0, lastMonthToDate: 0 });
-    expect(overview.coaching.leaderboard).toEqual([]);
+    // P18.97-T3 AC-5 (UI-017): the Owner, an AB who leads nobody, is on the board with no rate — never left out, never 0%.
+    expect(overview.coaching.leaderboard).toEqual([
+      { membershipId: owner.membershipId, name: 'Hadi Gunawan', teamSize: 0, coached: 0, pct: null, leads: false },
+    ]);
     expect(overview.recruitment).toEqual({ expectedToClose: 0, pipelineNow: 0, closedLastMonth: 0, target: null, targetMonth: '2026-10' });
     expect(overview.production).toMatchObject({
       ytd: { achievedMinor: null, targetMinor: null, pct: null, membersWithoutGoal: 1 }, projectionMinor: null,
@@ -83,6 +101,11 @@ describe('the Owner’s reporting at its edges', () => {
     expect(moc.criteria.find((c) => c.code === 'MONTHLY2_AA_DU')).toMatchObject({ current: null, met: null, period: 'Not uploaded yet' });
     expect(moc.criteria.find((c) => c.code === 'MOC_PERSISTENCY')).toMatchObject({ current: null, period: 'Not uploaded yet' });
     expect(moc.criteria.find((c) => c.code === 'NET_APE')).toMatchObject({ current: null, period: '2026' });
+    // P18.98-T5 AC-4: what is missing, and each period, in the reader's language.
+    expect(moc.missing).toBe('Not uploaded yet: Net APE, Monthly2 AA — DU, Monthly2 AA — DG, Rolling Persistency — DU/DG.');
+    const inIndonesian = (await wired.kpmAnalytics.read(owner.withReader(readerIn('id')), { period: 'previous_month' })).agencies[0].moc!;
+    expect(inIndonesian.missing).toBe('Belum diunggah: Net APE, Monthly2 AA — DU, Monthly2 AA — DG, Rolling Persistency — DU/DG.');
+    expect(inIndonesian.criteria.map((c) => c.period)).toEqual(['2026', 'Belum diunggah', 'Belum diunggah', 'Belum diunggah', 'Per 9 Okt 2026']);
     expect(analytics.agencies[0].club).toBeNull();
     expect((await wired.kpmOverview.notLogged(owner)).total).toBe(1);
   });
@@ -125,7 +148,7 @@ describe('the Owner’s reporting at its edges', () => {
       // This year has nothing held yet, so the year to date is nobody's.
       expect(december.total.apeAnnual.achievedMinor).toBeNull();
       const moc = december.agencies[0].moc!;
-      expect(moc.criteria.find((c) => c.code === 'MONTHLY2_AA_DU')).toMatchObject({ period: 'Nov and Dec 2026', current: 1 });
+      expect(moc.criteria.find((c) => c.code === 'MONTHLY2_AA_DU')).toMatchObject({ period: 'Nov and Des 2026', current: 1 });
       expect(moc.criteria.find((c) => c.code === 'NET_APE')).toMatchObject({ period: '2027', current: null });
       // A member with no goal for the year is measured against no target, whatever the month.
       const lone = await wired.kpmAnalytics.read(owner, { period: 'this_month' });
@@ -181,7 +204,7 @@ describe('the Owner’s reporting at its edges', () => {
     const ab = new mongoose.Types.ObjectId();
     const aab = new mongoose.Types.ObjectId();
     const ghost = (id: mongoose.Types.ObjectId, over: Record<string, unknown>) => db().collection('memberships').insertOne({
-      _id: id, kpmId: NAMELESS, userId: String(new mongoose.Types.ObjectId()), agentCode: `G${id}`, leaderCode: `G${id}`.slice(0, 8),
+      _id: id, kpmId: NAMELESS, userId: String(new mongoose.Types.ObjectId()), agentCode: `G${id}`, leaderCode: `G${String(id).slice(-7)}`,
       orgLevelId: 'x', status: 'active', joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null, ...over,
     });
     await ghost(ab, { agentSeq: 2, orgLevelCode: 'AB', role: 'ab', leaderId: owner.membershipId, ancestorIds: [owner.membershipId], depth: 1 });
@@ -196,6 +219,176 @@ describe('the Owner’s reporting at its edges', () => {
     const analytics = await wired.kpmAnalytics.read(owner);
     const agency = analytics.agencies.find((a) => a.head.membershipId === String(ab))!;
     expect([agency.head.name, agency.aabUnits[0].head.name, agency.head.leads]).toEqual(['', '', true]);
+  });
+
+  it('P18.97-T3 AC-10 the active share is the server’s, rateOver’s whole percent: 23 producing of 40 is 58%, never 57', async () => {
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+      // A company that is gone, as JOINING's is, so the platform's count of Prudential's offices below is untouched.
+      { _id: HALF, companyId: '66f0000000000000000000fd', code: '0708', branchName: 'Half', timezone: 'Asia/Jakarta' },
+    ]);
+    const owner = await place(HALF, { leaderCode: 'HALF0001', agentSeq: 1 });
+    const agents = Array.from({ length: 39 }, () => new mongoose.Types.ObjectId());
+    await db().collection('memberships').insertMany(agents.map((id, i) => ({
+      _id: id, kpmId: HALF, userId: String(new mongoose.Types.ObjectId()), agentCode: `H${id}`, agentSeq: 2 + i,
+      leaderCode: `H${String(id).slice(-7)}`, orgLevelId: 'x', orgLevelCode: 'AGENT', role: 'agent', leaderId: owner.membershipId,
+      ancestorIds: [owner.membershipId], depth: 1, status: 'active', joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null,
+    })));
+    const cell = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
+    // October's file for all forty: the Owner and twenty-two agents with production, the other seventeen with none.
+    await db().collection('monthlyAgentData').insertMany([owner.membershipId, ...agents.map(String)].map((id, i) => ({
+      kpmId: HALF, membershipId: id, month: '2026-10', agentCode: 'H', deletedAt: null,
+      apeMonthly: cell(i < 23 ? 5 * M : 0), apeYtd: cell(i < 23 ? 50 * M : 0), policyCountMonthly: cell(i < 23 ? 1 : 0),
+    })));
+
+    const analytics = await wired.kpmAnalytics.read(owner, { period: 'this_month' });
+    expect(Math.round((23 / 40) * 100)).toBe(57);
+    expect(analytics.total).toMatchObject({ activeAgents: 23, activePct: 58, manpower: { total: 40 } });
+    expect(analytics.agencies[0]).toMatchObject({ activeAgents: 23, activePct: 58, manpower: { total: 40 } });
+    // The (Direct) row is the same forty here; September holds no file: no count, and no share of it.
+    expect(analytics.agencies[0].direct).toMatchObject({ activeAgents: 23, activePct: 58 });
+    const september = await wired.kpmAnalytics.read(owner, { period: 'previous_month' });
+    expect(september.total).toMatchObject({ activeAgents: null, activePct: null });
+  });
+
+  /*
+   * **OD-235 → option 1** (the product owner, 2026-10-28; ADR-0176 §12's dated note): a past month's *Producing* share is
+   * over **that month's members** — the ones its count reads, a leaver since included and a joiner since not — so it
+   * never passes 100%; *This month*'s is over today's manpower, as it was. The manpower drawn beside it stays today's.
+   *
+   * 0709 on 9 October: the Owner and A1 in the Owner's agency; AB2's agency today is AB2, A2 and J1, who joined on
+   * 2 October. On September's last day it was AB2, A2 and three who left in October — two of whom produced.
+   */
+  describe('OD-235 the Producing share over the members it counts', () => {
+    const PRODUCED = '66f0000000000000000000e9';
+    let owner: RequestContext;
+    let ab2: string;
+    type Row = { activeAgents: number | null; activePct: number | null; manpower: { total: number } };
+    const rowsOf = (view: { total: Row; agencies: (Row & { direct: Row; aabUnits: Row[] })[] }) =>
+      [view.total, ...view.agencies.flatMap((a) => [a, a.direct, ...a.aabUnits])];
+
+    beforeAll(async () => {
+      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
+        // A company that is gone, as HALF's is, so the platform's count of Prudential's offices below is untouched.
+        { _id: PRODUCED, companyId: '66f0000000000000000000fc', code: '0709', branchName: 'Produced', timezone: 'Asia/Jakarta' },
+      ]);
+      owner = await place(PRODUCED);
+      const o = owner.membershipId!;
+      const a1 = (await place(PRODUCED, { orgLevelCode: 'AGENT', role: 'agent', leaderId: o, ancestorIds: [o], depth: 1 })).membershipId!;
+      ab2 = (await place(PRODUCED, { orgLevelCode: 'AB', role: 'ab', leaderId: o, ancestorIds: [o], depth: 1 })).membershipId!;
+      const inAb2 = async (over: Record<string, unknown> = {}) => (await place(PRODUCED, {
+        orgLevelCode: 'AGENT', role: 'agent', leaderId: ab2, ancestorIds: [o, ab2], depth: 2, ...over,
+      })).membershipId!;
+      const a2 = await inAb2();
+      const left: string[] = [];
+      for (const day of ['2026-10-03', '2026-10-05', '2026-10-06']) {
+        left.push(await inAb2({ status: 'removed', removedAt: new Date(`${day}T03:00:00Z`) }));
+      }
+      const j1 = await inAb2({ joinDate: '2026-10-02', joinedAt: new Date('2026-10-02T03:00:00Z') });
+      const cell = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
+      const filed = (membershipId: string, month: string, apeM: number, policies: number) => ({
+        kpmId: PRODUCED, membershipId, month, agentCode: 'P', deletedAt: null,
+        apeMonthly: cell(apeM * M), apeYtd: cell(apeM * M), policyCountMonthly: cell(policies),
+      });
+      await db().collection('monthlyAgentData').insertMany([
+        // September: everybody here then produced but the third leaver; J1 was not here yet.
+        filed(o, '2026-09', 10, 1), filed(a1, '2026-09', 5, 1), filed(ab2, '2026-09', 8, 1), filed(a2, '2026-09', 4, 1),
+        filed(left[0], '2026-09', 6, 1), filed(left[1], '2026-09', 0, 1), filed(left[2], '2026-09', 0, 0),
+        // October: the Owner, AB2 and J1; a leaver's own October row is no member's this month.
+        filed(o, '2026-10', 3, 1), filed(a1, '2026-10', 0, 0), filed(ab2, '2026-10', 2, 1), filed(a2, '2026-10', 0, 0),
+        filed(j1, '2026-10', 1, 1), filed(left[0], '2026-10', 9, 1),
+      ]);
+    });
+
+    it('OD-235 a past month’s share is over that month’s members — a leaver who produced in it counted, never past 100% — on the total and an agency row', async () => {
+      const september = await wired.kpmAnalytics.read(owner, { period: 'previous_month' });
+      expect(september.month).toBe('2026-09');
+      const agency = september.agencies.find((a) => a.head.membershipId === ab2)!;
+      // Four producing of September's five — AB2, A2 and the three who left in October — and today's three beside it.
+      expect(agency).toMatchObject({ activeAgents: 4, activePct: 80, manpower: { total: 3 } });
+      expect(agency.activePct).toBe(rateOver(4, 5).pct);
+      // Over today's three, as the prototype divided, it read 133%.
+      expect(rateOver(4, 3).pct).toBe(133);
+      expect(agency.direct).toMatchObject({ activeAgents: 4, activePct: 80 });
+      // The total: six producing of September's seven, today's five beside it — 86%, where today's base read 120%.
+      expect(september.total).toMatchObject({ activeAgents: 6, activePct: 86, manpower: { total: 5 } });
+      expect(september.total.activePct).toBe(rateOver(6, 7).pct);
+      // The Owner's agency lost nobody and gained nobody: the same two either way.
+      expect(september.agencies.find((a) => a.head.membershipId === owner.membershipId))
+        .toMatchObject({ activeAgents: 2, activePct: 100, manpower: { total: 2 } });
+      for (const row of rowsOf(september)) expect(row.activePct!).toBeLessThanOrEqual(100);
+    });
+
+    it('OD-235 this month’s share is unchanged: over today’s manpower, the members this month counts', async () => {
+      const october = await wired.kpmAnalytics.read(owner, { period: 'this_month' });
+      // AB2 and J1 producing of AB2, A2 and J1; the leaver's October figure is nobody's here.
+      expect(october.agencies.find((a) => a.head.membershipId === ab2)).toMatchObject({ activeAgents: 2, activePct: 67, manpower: { total: 3 } });
+      expect(october.total).toMatchObject({ activeAgents: 3, activePct: 60, manpower: { total: 5 } });
+      for (const row of rowsOf(october)) {
+        expect(row.activePct).toBe(row.activeAgents === null ? null : rateOver(row.activeAgents, row.manpower.total).pct);
+      }
+    });
+
+    /*
+     * **OD-235, clarified 2026-10-29**: the cell writes its count over the same members as its percent — *4 / 5 · 80%*,
+     * never *4 / 3 · 80%* — so the share's base is served beside it (`activeOf`); the *Manpower* column stays today's.
+     */
+    type Based = Row & { activeOf: number };
+    const basedRowsOf = (view: { total: Based; agencies: (Based & { direct: Based; aabUnits: Based[] })[] }) =>
+      [view.total, ...view.agencies.flatMap((a) => [a, a.direct, ...a.aabUnits])];
+
+    it('OD-235 serves a past month’s base beside its share: 4 / 5 · 80% over September’s five, Manpower today’s three', async () => {
+      const september = await wired.kpmAnalytics.read(owner, { period: 'previous_month' });
+      const agency = september.agencies.find((a) => a.head.membershipId === ab2)!;
+      expect(agency).toMatchObject({ activeAgents: 4, activePct: 80, activeOf: 5, manpower: { total: 3 } });
+      expect(agency.direct).toMatchObject({ activeAgents: 4, activePct: 80, activeOf: 5 });
+      // The total: six of September's seven, today's five in Manpower.
+      expect(september.total).toMatchObject({ activeAgents: 6, activePct: 86, activeOf: 7, manpower: { total: 5 } });
+      // Nobody left the Owner's agency and nobody joined it: its base is its manpower either way.
+      expect(september.agencies.find((a) => a.head.membershipId === owner.membershipId))
+        .toMatchObject({ activeAgents: 2, activePct: 100, activeOf: 2, manpower: { total: 2 } });
+      // Every row's percent is its count over the base it serves, so the two can never disagree.
+      for (const row of basedRowsOf(september)) {
+        expect(row.activePct).toBe(row.activeAgents === null ? null : rateOver(row.activeAgents, row.activeOf).pct);
+      }
+    });
+
+    it('OD-235 serves this month’s base as today’s manpower, on every row', async () => {
+      const october = await wired.kpmAnalytics.read(owner, { period: 'this_month' });
+      expect(october.agencies.find((a) => a.head.membershipId === ab2)).toMatchObject({ activeAgents: 2, activeOf: 3, manpower: { total: 3 } });
+      expect(october.total).toMatchObject({ activeAgents: 3, activeOf: 5, manpower: { total: 5 } });
+      for (const row of basedRowsOf(october)) {
+        expect(row.activeOf).toBe(row.manpower.total);
+        expect(row.activePct).toBe(row.activeAgents === null ? null : rateOver(row.activeAgents, row.activeOf).pct);
+      }
+    });
+  });
+
+  it('P18.97-T3 AC-5 every AB on the board: the leaders lowest first, then each who leads nobody A to Z, a gone account’s name empty', async () => {
+    const owner = await place(NAMELESS, { leaderCode: 'NOTEAM01', agentSeq: 10 });
+    // Two ABs under the Owner who lead nobody — Zul and one whose account has gone — and an agent under the Owner.
+    const zul = await place(NAMELESS, {
+      leaderCode: 'NOTEAM02', agentSeq: 11, leaderId: owner.membershipId, ancestorIds: [owner.membershipId], depth: 1,
+    });
+    await db().collection('users').updateOne({ _id: new mongoose.Types.ObjectId(zul.userId) }, { $set: { fullName: 'Zul Anwar' } });
+    const gone = new mongoose.Types.ObjectId();
+    await db().collection('memberships').insertOne({
+      _id: gone, kpmId: NAMELESS, userId: String(new mongoose.Types.ObjectId()), agentCode: `G${gone}`, agentSeq: 12,
+      leaderCode: 'NOTEAM03', orgLevelId: 'x', orgLevelCode: 'AB', role: 'ab', leaderId: owner.membershipId,
+      ancestorIds: [owner.membershipId], depth: 1, status: 'active', joinedAt: new Date('2025-01-02T02:00:00Z'), deletedAt: null,
+    });
+    await place(NAMELESS, {
+      leaderCode: 'NOTEAM04', agentSeq: 13, orgLevelCode: 'AGENT', role: 'agent', leaderId: owner.membershipId,
+      ancestorIds: [owner.membershipId], depth: 1,
+    });
+
+    const board = (await wired.kpmOverview.read(owner)).coaching.leaderboard;
+    const mine = board.filter((row) => [owner.membershipId, zul.membershipId, String(gone)].includes(row.membershipId));
+    expect(mine.map((row) => [row.name, row.leads, row.teamSize, row.pct])).toEqual([
+      ['Hadi Gunawan', true, 3, 0], ['', false, 0, null], ['Zul Anwar', false, 0, null],
+    ]);
+    // The leaders first, every one: no row that leads nobody sorts above one that leads somebody.
+    const firstNoTeam = board.findIndex((row) => !row.leads);
+    expect(board.slice(firstNoTeam).every((row) => !row.leads)).toBe(true);
   });
 
   it('P18-T1 AC-6 a save that races another to the month’s unique index is retried once as an update; another failure is not swallowed', async () => {
@@ -235,6 +428,45 @@ describe('the Owner’s reporting at its edges', () => {
       await db().collection('memberships').deleteMany({ kpmId: NOBODY });
       await db().collection('kpmRecruitTargets').deleteMany({ kpmId: NOBODY });
     }
+  });
+
+  it('P18.96-T5 AC-1 manpower counts each member from their join date, not the day the system let them in (ADR-0172 §1)', async () => {
+    await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create(
+      { _id: JOINING, companyId: '66f0000000000000000000fe', code: '0707', branchName: 'Join dates', timezone: 'Asia/Jakarta' },
+    );
+    const owner = await place(JOINING, { joinDate: '2020-01-02', joinedAs: 'existing_agent', leaderCode: 'JOIN0001' });
+    const today = new Date('2026-10-09T03:00:00Z');
+    const agent = (seq: number, over: Record<string, unknown>) => place(JOINING, {
+      orgLevelCode: 'AGENT', role: 'agent', leaderId: owner.membershipId, ancestorIds: [owner.membershipId], depth: 1,
+      agentSeq: seq, leaderCode: `JOIN000${seq}`, joinedAt: today, ...over,
+    });
+    // All three let in today: an existing agent of eleven years, a hire who started in September, one who started on 5 October.
+    await agent(2, { joinDate: '2015-03-02', joinedAs: 'existing_agent' });
+    const september = await agent(3, { joinDate: '2026-09-20', joinedAs: 'new_hire' });
+    await agent(4, { joinDate: '2026-10-05', joinedAs: 'new_hire' });
+
+    // *Total members* is everybody; *new this month* only the one whose join date is in October.
+    expect((await wired.kpmOverview.read(owner)).composition).toMatchObject({ total: 4, newThisMonth: 1 });
+
+    // A reader that does not pass the office's zone reads it (the forum's scorecard): September's last day held three.
+    const memberships = new MembershipRepository(mongoose.model(Membership.name, MembershipSchema, undefined, { overwriteModels: true }) as never);
+    const people = new OfficePeople(
+      memberships, new MemberNames(memberships, mongoose.model(User.name, UserSchema, undefined, { overwriteModels: true }) as never),
+      wired.kpms as never, {} as never, {} as never, new FixedClock(today),
+    );
+    const { everyone } = await people.read(owner, null);
+    expect(everyone.find((p) => p.membershipId === september.membershipId))
+      .toMatchObject({ joinDate: '2026-09-20', joinDateStart: new Date('2026-09-19T17:00:00Z') });
+    expect(officeHeadcount(everyone, new Date('2026-09-30T17:00:00Z'))).toBe(3);
+    expect(officeHeadcount(everyone, new Date('2026-09-19T17:00:00Z'))).toBe(2);
+    // The same with the zone given: one answer.
+    expect((await people.read(owner, null, 'Asia/Jakarta')).everyone).toEqual(everyone);
+    // The forum's reader, `everyone`: `read`'s people from the same one read, without the names.
+    expect(await people.everyone(owner, null)).toEqual(everyone);
+
+    // The platform's adoption is when people started on AgencyBoost: all three joined it this month (kept on `joinedAt`).
+    const platform = await wired.platformAnalytics.read(RequestContext.platform('root'));
+    expect(platform.offices.find((o) => o.code === '0707')).toMatchObject({ members: 4, joinedThisMonth: 3 });
   });
 
   it('P18-T8 AC-2 the platform with an office of a company that is gone, and a company with no office', async () => {

@@ -1,4 +1,7 @@
-import { checkGoal, GOAL_BOUNDS } from './goal-input';
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
+import { indonesianAll } from '../../../test/i18n';
+import { checkGoal, GOAL_BOUNDS, typedApeOf, typedByAfter } from './goal-input';
 
 /**
  * What a goal's fields may hold (P8-T1).
@@ -23,6 +26,14 @@ describe('a goal’s fields', () => {
 
   it('takes a complete plan unchanged', () => {
     expect(checkGoal(ok)).toEqual(ok);
+  });
+
+  it('S1 takes a plan that leaves the APE produced out — the stored figure is kept — and refuses any other money field left out', () => {
+    const { apeAchievedMinor, ...rest } = ok;
+    expect(apeAchievedMinor).toBe(0);
+    expect(checkGoal(rest)).toEqual(rest);
+    const { caseSizeMinor: _case, ...noCase } = ok;
+    expect(() => checkGoal(noCase)).toThrow(/caseSizeMinor is required/);
   });
 
   describe('the period is a year, not a code', () => {
@@ -128,5 +139,74 @@ describe('a goal’s fields', () => {
     } catch (err) {
       expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);
     }
+  });
+
+  it('P18.98-T5 AC-3 says every violation in Indonesian too, a decimal written the Indonesian way', () => {
+    try {
+      const { period: _period, ...rest } = ok;
+      checkGoal({ ...rest, caseSizeMinor: 1_000.5, closingRatePct: 'thirty' });
+      throw new Error('should have refused');
+    } catch (err) {
+      expect(indonesianAll((err as DomainException).givenDetails!.violations as Sentence[])).toEqual([
+        'period wajib diisi.',
+        'caseSizeMinor dalam satuan sen IDR dan harus berupa bilangan bulat.',
+        'closingRatePct harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.',
+      ]);
+    }
+    try {
+      checkGoal({ ...ok, period: '26' });
+      throw new Error('should have refused');
+    } catch (err) {
+      expect(indonesianAll((err as DomainException).givenDetails!.violations as Sentence[]))
+        .toEqual(['period harus berupa tahun kalender, dengan format YYYY.']);
+    }
+  });
+});
+
+/**
+ * **Whose typed APE produced a save keeps** (ADR-0075, partly reversed by ADR-0183): the member's own, always; a coach's
+ * — anybody `goal:update` lets save the plan — while the office holds no figure; nobody else's once it does.
+ */
+describe('typedApeOf — the APE produced a save keeps (ADR-0183)', () => {
+  const M = 1_000_000 * 100;
+  const HELD = { minor: 240 * M, provenance: 'imported', month: '2026-09' };
+
+  it('ADR-0075 keeps the member’s own typing on their own plan, with or without an office figure', () => {
+    expect(typedApeOf({ own: true, held: null, asked: 130 * M, stored: 120 * M })).toBe(130 * M);
+    expect(typedApeOf({ own: true, held: HELD, asked: 130 * M, stored: 120 * M })).toBe(130 * M);
+  });
+
+  it('ADR-0183 keeps a coach’s typing on somebody else’s plan while the office holds no figure', () => {
+    expect(typedApeOf({ own: false, held: null, asked: 75 * M, stored: 120 * M })).toBe(75 * M);
+    // Zero is a figure, typed: a leader clearing a wrong one.
+    expect(typedApeOf({ own: false, held: null, asked: 0, stored: 120 * M })).toBe(0);
+  });
+
+  it('ADR-0183 ignores a coach’s typing once the office holds a figure, uploaded or corrected: the stored one is kept', () => {
+    expect(typedApeOf({ own: false, held: HELD, asked: 999 * M, stored: 120 * M })).toBe(120 * M);
+    expect(typedApeOf({ own: false, held: { ...HELD, provenance: 'corrected' }, asked: 999 * M, stored: 0 })).toBe(0);
+  });
+
+  it('S1 keeps the stored figure when the body leaves it out — the coach’s save, the member’s, with or without a figure held', () => {
+    for (const own of [true, false]) {
+      for (const held of [null, HELD]) {
+        expect(typedApeOf({ own, held, asked: undefined, stored: 120 * M })).toBe(120 * M);
+      }
+    }
+    // A plan nobody has saved stores nothing: the default 0.
+    expect(typedApeOf({ own: false, held: null, asked: undefined, stored: 0 })).toBe(0);
+  });
+});
+
+describe('typedByAfter — who typed the figure a plan stores (S2)', () => {
+  it('S2 names the saver when the save changed the figure, the member or a coach alike', () => {
+    expect(typedByAfter({ before: 100, after: 150, savedBy: 'coach', typedBefore: null })).toBe('coach');
+    expect(typedByAfter({ before: 100, after: 150, savedBy: 'member', typedBefore: 'coach' })).toBe('member');
+  });
+
+  it('S2 keeps whoever typed it when the save left the figure as it was', () => {
+    expect(typedByAfter({ before: 150, after: 150, savedBy: 'member', typedBefore: 'coach' })).toBe('coach');
+    // A row from before the field: nobody recorded, which reads as the member.
+    expect(typedByAfter({ before: 150, after: 150, savedBy: 'coach', typedBefore: undefined })).toBeNull();
   });
 });

@@ -1,16 +1,23 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { FieldSentence } from '@/common/validation/fields';
 import {
   RECRUITMENT, RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS, RECRUITMENT_MOTIVATIONS,
   type RecruitmentHesitationCode, type RecruitmentMotivationCode, type RecruitmentPlaybookBody,
   type RecruitmentProfileWords, type RecruitmentTypeCode, type RecruitmentWords,
 } from '@/domain/constants';
+import { RECRUITMENT_REFUSALS } from './recruitment.messages';
 
-/** One field a save got wrong, by its path in the request (`body.profiles.retiree.tagline`). */
+const SAY = RECRUITMENT_REFUSALS.VALIDATION_FAILED;
+
+/**
+ * One field a save got wrong, by its path in the request (`body.profiles.retiree.tagline`), and what is wrong with it
+ * — a sentence in both languages (P18.98-T5 AC-3), written for the reader in `details.violations`.
+ */
 export interface PlaybookViolation {
   field: string;
-  message: string;
+  message: FieldSentence;
 }
 
 const TYPES = RECRUITMENT_CANDIDATE_TYPES.map((c) => c.code) as readonly RecruitmentTypeCode[];
@@ -37,26 +44,26 @@ export function checkPlaybookBody(raw: unknown): RecruitmentPlaybookBody {
   const violations: PlaybookViolation[] = [];
   /** Off while a missing entry is read for its shape, so it is reported once — as missing — not field by field. */
   let quiet = 0;
-  const fail = (field: string, message: string) => {
+  const fail = (field: string, message: FieldSentence) => {
     if (quiet === 0) violations.push({ field, message });
   };
 
   const object = (value: unknown, field: string): Fields | null => {
     if (isFields(value)) return value;
-    fail(field, 'Must be an object of fields.');
+    fail(field, SAY.notAnObject);
     return null;
   };
   const only = (fields: Fields, allowed: readonly string[], field: string) => {
     for (const key of Object.keys(fields)) {
-      if (!allowed.includes(key)) fail(`${field}.${key}`, 'Is not part of a recruitment playbook.');
+      if (!allowed.includes(key)) fail(`${field}.${key}`, SAY.notPartOfPlaybook);
     }
   };
   const text = (value: unknown, field: string): string => {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     if (typeof value !== 'string' || trimmed.length < RECRUITMENT.TEXT_MIN_LENGTH) {
-      fail(field, 'Must not be empty.');
+      fail(field, SAY.empty);
     } else if (trimmed.length > RECRUITMENT.TEXT_MAX_LENGTH) {
-      fail(field, `Must be ${RECRUITMENT.TEXT_MAX_LENGTH} characters or fewer.`);
+      fail(field, SAY.tooLong({ max: RECRUITMENT.TEXT_MAX_LENGTH }));
     }
     return trimmed;
   };
@@ -71,7 +78,7 @@ export function checkPlaybookBody(raw: unknown): RecruitmentPlaybookBody {
     only(fields, codes, field);
     return Object.fromEntries(codes.map((code) => {
       if (code in fields) return [code, read(fields[code], `${field}.${code}`)];
-      fail(`${field}.${code}`, 'Is missing: every one must be answered.');
+      fail(`${field}.${code}`, SAY.missing);
       quiet += 1;
       const shape = read(undefined, `${field}.${code}`);
       quiet -= 1;
@@ -84,10 +91,10 @@ export function checkPlaybookBody(raw: unknown): RecruitmentPlaybookBody {
     only(fields, ['label', 'tagline', 'goodFitFor', 'benefits', 'openings'], field);
     let benefits: string[] = [];
     if (!Array.isArray(fields.benefits)) {
-      fail(`${field}.benefits`, 'Must be a list.');
+      fail(`${field}.benefits`, SAY.notAList);
     } else {
       if (fields.benefits.length < RECRUITMENT.BENEFITS_MIN || fields.benefits.length > RECRUITMENT.BENEFITS_MAX) {
-        fail(`${field}.benefits`, `Must hold ${RECRUITMENT.BENEFITS_MIN} to ${RECRUITMENT.BENEFITS_MAX} benefits.`);
+        fail(`${field}.benefits`, SAY.benefitsCount({ min: RECRUITMENT.BENEFITS_MIN, max: RECRUITMENT.BENEFITS_MAX }));
       }
       benefits = fields.benefits.map((b, i) => text(b, `${field}.benefits[${i}]`));
     }
@@ -122,12 +129,7 @@ export function checkPlaybookBody(raw: unknown): RecruitmentPlaybookBody {
   const nextAction = text(body.nextAction, 'body.nextAction');
 
   if (violations.length > 0) {
-    throw new DomainException(
-      ErrorCode.VALIDATION_FAILED,
-      `This playbook cannot be saved: ${violations.map((v) => `${v.field} — ${v.message}`).join('; ')}`,
-      HttpStatus.BAD_REQUEST,
-      { violations },
-    );
+    throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.cannotSave({ violations }), HttpStatus.BAD_REQUEST, { violations });
   }
   return { profiles, objections, profileObjections, nextAction };
 }

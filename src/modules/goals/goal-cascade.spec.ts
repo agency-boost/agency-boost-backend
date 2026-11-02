@@ -1,7 +1,10 @@
-import { GOAL_DEFAULTS, TIME } from '@/domain/constants';
+import type { DomainException } from '@/common/errors/domain.exception';
+import type { Sentence } from '@/common/i18n/sentence';
+import { GOAL_DEFAULTS, RATIO_BENCHMARKS, SEED_RATIO_DEFINITIONS, TIME } from '@/domain/constants';
+import { english, indonesian, indonesianAll } from '../../../test/i18n';
 import {
-  annualTargetOf, cascadeCounts, clampMonths, computeCascade, defaultMonthsLeft, weeklyOf,
-  type CascadeInputs,
+  annualTargetOf, cascadeCounts, clampMonths, computeCascade, defaultMonthsLeft, defaultRates, policiesPerWeekOf,
+  weeklyOf, type CascadeInputs,
 } from './goal-cascade';
 
 const JAKARTA = 'Asia/Jakarta';
@@ -85,11 +88,29 @@ describe('the goal cascade', () => {
       expect(out.monthlyApeTargetMinor).toBe(50_000_000_00);
     });
 
-    it('divides the weekly sub-lines by 4.33 and ceils, like every other step', () => {
-      // `:5818`, `:5827`, `:5831`.
-      expect(weeklyOf(6)).toBe(2);
+    it('divides the appointments’ and leads’ weekly sub-lines by 4.33 and ceils, like every other step', () => {
+      // `:5827`, `:5831`. Counts to do, so whole and rounded up (ADR-0160 §5).
       expect(weeklyOf(20)).toBe(5);
       expect(weeklyOf(67)).toBe(16);
+    });
+
+    it('P18.8-T10 AC-2 writes policies per week to one decimal: six a month is 1.4, not ≈ 2', () => {
+      // ADR-0160 §5: the monthly policies ÷ 4.33, to a tenth — the same 4.33 as every weekly figure.
+      expect(policiesPerWeekOf(6)).toBe(1.4);
+      expect(policiesPerWeekOf(7)).toBe(1.6);
+      expect(policiesPerWeekOf(20)).toBe(4.6);
+      // A whole figure comes back whole: the screen drops nothing, because there is no `.0` to drop.
+      expect(policiesPerWeekOf(0)).toBe(0);
+      expect(String(policiesPerWeekOf(13))).toBe('3');
+      expect(policiesPerWeekOf(6)).toBe(Math.round((6 / TIME.WEEKS_PER_MONTH) * 10) / 10);
+    });
+
+    it('P18.8-T10 AC-2 gives step 3 and step 5 the one policies-per-week figure, the other two whole', () => {
+      const out = computeCascade(defaults);
+
+      expect(out.policiesPerWeek).toBe(1.4);
+      expect(out.appointmentsPerWeek).toBe(5);
+      expect(out.leadsPerWeek).toBe(16);
     });
 
     it('lets the ceils compound, which over-states slightly and is the safe direction', () => {
@@ -278,6 +299,32 @@ describe('the goal cascade', () => {
         expect((err as { details: { violations: string[] } }).details.violations).toHaveLength(3);
       }
     });
+
+    it('P18.98-T5 AC-2 says each in both languages, one after another, Goal Settings’ labels kept English', () => {
+      try {
+        computeCascade({ ...defaults, caseSizeMinor: 0, closingRatePct: 0 });
+        throw new Error('should have refused');
+      } catch (err) {
+        const refusal = err as DomainException;
+        expect(english(refusal.sentence)).toBe(
+          'Average case size must be above zero: it is what a policy is worth. Closing rate must be above 0 and at most 100 per cent.',
+        );
+        expect(indonesian(refusal.sentence)).toBe(
+          'Average case size harus di atas nol: itulah nilai satu polis. Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+        );
+        expect(indonesianAll(refusal.givenDetails!.violations as Sentence[])).toEqual([
+          'Average case size harus di atas nol: itulah nilai satu polis.',
+          'Closing rate harus di atas 0 dan paling tinggi 100 persen.',
+        ]);
+      }
+      try {
+        annualTargetOf({ ...defaults, mode: 'from_savings', commissionRatePct: 0 });
+        throw new Error('should have refused');
+      } catch (err) {
+        expect(indonesian((err as DomainException).sentence))
+          .toBe('Target tabungan memerlukan commission rate di atas nol untuk menjadi target APE.');
+      }
+    });
   });
 
   describe('cascadeCounts — steps 3 to 5, one definition for every reader (P10-T5)', () => {
@@ -292,6 +339,53 @@ describe('the goal cascade', () => {
       const rates = { caseSizeMinor: 18_000_000_00, closingRatePct: 30, leadsToApptPct: 30 };
       expect(cascadeCounts(500_000_000_00, rates)).toEqual({ policies: 28, appointments: 94, leads: 314 });
       expect(cascadeCounts(0, rates)).toEqual({ policies: 0, appointments: 0, leads: 0 });
+    });
+  });
+
+  describe('P18.8-T10 AC-1 — the two percentages open on the office’s benchmarks (ADR-0160 §3)', () => {
+    /** The office's two ratios as the seed gives them. */
+    const seeded = SEED_RATIO_DEFINITIONS.filter((r) => ['SELLING_SUCCESS_RATE', 'MEETING_PER_APPROACH'].includes(r.code));
+
+    it('reads Closing rate from Selling success rate and Appointment to Sales meeting from Set appointment to meeting', () => {
+      // 30% and 50% with the seeded benchmarks, written as percentages.
+      expect(defaultRates(seeded)).toEqual({
+        closingRatePct: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE * 100,
+        leadsToApptPct: RATIO_BENCHMARKS.MEETING_PER_APPROACH * 100,
+      });
+      expect(defaultRates(seeded)).toEqual({ closingRatePct: 30, leadsToApptPct: 50 });
+    });
+
+    it('reads an office’s own benchmark, to one decimal', () => {
+      expect(defaultRates([
+        { code: 'SELLING_SUCCESS_RATE', benchmark: 0.155, comparison: 'gte' },
+        { code: 'MEETING_PER_APPROACH', benchmark: 0.4, comparison: 'gte' },
+      ])).toEqual({ closingRatePct: 15.5, leadsToApptPct: 40 });
+    });
+
+    it('falls back to GOAL_DEFAULTS for an office without the ratio', () => {
+      expect(defaultRates([])).toEqual({
+        closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT, leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT,
+      });
+      expect(defaultRates([{ code: 'SELLING_SUCCESS_RATE', benchmark: 0.2, comparison: 'gte' }]))
+        .toEqual({ closingRatePct: 20, leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT });
+    });
+
+    it('falls back for a benchmark that is no percentage a plan can use', () => {
+      // An Owner's 1.50 meetings per appointment is 150%, which the cascade refuses; a balance is in points.
+      expect(defaultRates([
+        { code: 'MEETING_PER_APPROACH', benchmark: 1.5, comparison: 'gte' },
+        { code: 'SELLING_SUCCESS_RATE', benchmark: 30, comparison: 'band' },
+      ])).toEqual({ closingRatePct: GOAL_DEFAULTS.CLOSING_RATE_PCT, leadsToApptPct: GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT });
+      expect(defaultRates([{ code: 'SELLING_SUCCESS_RATE', benchmark: 0, comparison: 'gte' }]).closingRatePct)
+        .toBe(GOAL_DEFAULTS.CLOSING_RATE_PCT);
+      // Exactly 100% is a plan.
+      expect(defaultRates([{ code: 'MEETING_PER_APPROACH', benchmark: 1, comparison: 'gte' }]).leadsToApptPct).toBe(100);
+    });
+
+    it('opens a plan the cascade can run', () => {
+      const out = computeCascade({ ...defaults, ...defaultRates(seeded) });
+      // 6 policies at 30% is 20 sales meetings; 20 at 50% is 40 appointments to set.
+      expect(out).toMatchObject({ policiesPerMonth: 6, appointmentsPerMonth: 20, leadsPerMonth: 40 });
     });
   });
 });

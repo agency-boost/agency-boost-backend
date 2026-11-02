@@ -1,0 +1,22 @@
+# One logical backup of each deployed environment's database, agencyboost (production) and
+# agencyboost_staging, each to its own prefix of the backups bucket (P18.7-T3, ADR-0155, plan decision D4).
+# Started by agencyboost-backup.timer; `systemctl start agencyboost-backup` runs one now.
+
+[Unit]
+Description=AgencyBoost mongodump of each environment's database to the backups bucket
+Requires=docker.service
+After=docker.service agencyboost.service
+RequiresMountsFor=/mnt/mongo-data
+# A failed backup is otherwise silent until the day it is needed (P18.7 review, M1).
+OnFailure=agencyboost-backup-failed.service
+# Nothing to back up before the first deploy has created the database.
+ConditionPathExistsGlob=/opt/agencyboost/state/*/current
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agencyboost/bin/backup.sh
+# Below the API in the queue for CPU and disk: the dump is in no hurry, the requests are.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=3600

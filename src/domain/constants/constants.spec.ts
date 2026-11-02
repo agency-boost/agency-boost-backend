@@ -3,10 +3,12 @@ import {
   COACHING,
   CASCADE_ACTIVITY_CODES,
   ASSET_LIMITS,
+  BINDING_CODES_MAX,
   PRODUCTION,
   PRODUCTION_UPLOAD,
   ACTIVITY,
   GOAL_DEFAULTS,
+  GOAL_DEFAULT_RATIOS,
   PERFORMANCE,
   PERIOD,
   RATIO_BENCHMARKS,
@@ -26,18 +28,23 @@ import {
  * without changing the documentation should break the build.
  */
 describe('domain constants', () => {
-  describe('ratio benchmarks (Overall.html:5208-5273)', () => {
-    it('pins the selling success rate at 15%', () => {
-      expect(RATIO_BENCHMARKS.SELLING_SUCCESS_RATE).toBe(0.15);
+  /*
+   * **The client's benchmarks, not the prototype's** (ADR-0160 §2, P18.8-T9 AC-3): `Overall.html` reads
+   * 15%, 15%, 0.30 and 1.50. `activity-taxonomy.spec.ts` pins the prototype's against these as named
+   * exceptions; the band is the prototype's.
+   */
+  describe('ratio benchmarks (Overall.html:5208-5273, raised by ADR-0160)', () => {
+    it('P18.8-T9 AC-1 pins the selling success rate at 30%', () => {
+      expect(RATIO_BENCHMARKS.SELLING_SUCCESS_RATE).toBe(0.3);
     });
-    it('pins the recruitment success rate at 15%', () => {
-      expect(RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE).toBe(0.15);
+    it('P18.8-T9 AC-1 pins the recruitment success rate at 30%', () => {
+      expect(RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE).toBe(0.3);
     });
-    it('pins leads per activity at 0.30', () => {
-      expect(RATIO_BENCHMARKS.LEADS_PER_ACTIVITY).toBe(0.3);
+    it('P18.8-T9 AC-1 pins leads per activity at 1.00', () => {
+      expect(RATIO_BENCHMARKS.LEADS_PER_ACTIVITY).toBe(1);
     });
-    it('pins meeting per approach at 1.50', () => {
-      expect(RATIO_BENCHMARKS.MEETING_PER_APPROACH).toBe(1.5);
+    it('P18.8-T9 AC-1 pins set appointment to meeting at 50%', () => {
+      expect(RATIO_BENCHMARKS.MEETING_PER_APPROACH).toBe(0.5);
     });
     it('pins the selling/recruitment balance band at ±30 points', () => {
       expect(RATIO_BENCHMARKS.BALANCE_BAND_PP).toBe(30);
@@ -48,9 +55,16 @@ describe('domain constants', () => {
     it('pins the default case size at Rp 18,000,000 expressed in minor units', () => {
       expect(GOAL_DEFAULTS.CASE_SIZE_MINOR).toBe(18_000_000 * MINOR_UNITS_PER_MAJOR);
     });
-    it('pins both conversion assumptions at 30%', () => {
+    it('pins both conversion assumptions’ fallback at 30%', () => {
       expect(GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT).toBe(30);
       expect(GOAL_DEFAULTS.CLOSING_RATE_PCT).toBe(30);
+    });
+    it('P18.8-T10 AC-1 defaults the two from the office’s selling success and set-appointment-to-meeting ratios', () => {
+      // By ratio code (invariant §4), the client's pairing (ADR-0160 §3).
+      expect(GOAL_DEFAULT_RATIOS).toEqual({
+        closingRatePct: 'SELLING_SUCCESS_RATE',
+        leadsToApptPct: 'MEETING_PER_APPROACH',
+      });
     });
     it('pins the commission rate at 10%, which yields the prototype 500M from 50M savings', () => {
       expect(GOAL_DEFAULTS.COMMISSION_RATE_PCT).toBe(10);
@@ -79,6 +93,9 @@ describe('domain constants', () => {
     });
     it('pins the closings stage to SELL_SUBMISSION', () => {
       expect(CASCADE_ACTIVITY_CODES.closingsCode).toBe('SELL_SUBMISSION');
+    });
+    it('a stage binds at most 10 codes (ADR-0163 §1)', () => {
+      expect(BINDING_CODES_MAX).toBe(10);
     });
   });
 
@@ -168,6 +185,9 @@ describe('domain constants', () => {
       expect(COACHING.COVERAGE_WINDOWS).toEqual([7, 30]);
       // `COACHED_7D`'s and `COACHED_30D`'s windows: the named periods, never a second copy of them.
       expect(COACHING.COVERAGE_WINDOWS).toEqual([PERIOD.ROLLING_7D_DAYS, PERIOD.ROLLING_30D_DAYS]);
+    });
+    it('UI-060 pins COACHING_ACTION_DEFAULT_DUE_DAYS at 7: an action item is dated a week ahead (§B.8, Fixed)', () => {
+      expect(COACHING.ACTION_DEFAULT_DUE_DAYS).toBe(7);
     });
     it('pins the ratio window at 30 days', () => {
       expect(PERFORMANCE.RATIO_WINDOW_DAYS).toBe(30);

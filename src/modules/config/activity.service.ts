@@ -1,5 +1,5 @@
-import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
-import { DomainException } from '@/common/errors/domain.exception';
+import { HttpStatus, Injectable, Optional, Inject } from '@nestjs/common';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -14,41 +14,45 @@ import {
   checkCategoryCreate, checkCategoryUpdate, checkTypeCreate, checkTypeUpdate,
 } from './config-input';
 import { refuseSummaryGroupConflict } from './summary-group';
-import { CASCADE_ACTIVITY_CODES } from '@/domain/constants';
+import { BINDING_ROLE_LABEL, defaultBinding, roleOfCode, type CascadeBinding } from './activity-binding';
+import { ActivityBindingService } from './activity-binding.service';
+import { CONFIG_REFUSALS } from './config.messages';
+
+/** The taxonomy's own refusals, in both languages (P18.98-T5 AC-3). */
+const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**
- * **The three activity types no office may archive** (ADR-0115 §2): the goal cascade and the summary
- * count them by code, and an Owner has no way to give a type a chosen code — so one archived is a goal
- * page and a summary that count nothing, with no way back. Renaming, describing, reordering and moving
- * them are the office's, as for any other type.
+ * **The bound types, by the role each counts in** (ADR-0163 §5): every code the office's activity binding names.
+ * The goal cascade, the summary and the pace count them, so one archived would leave a role counting history only
+ * — the binding is changed first, by the Super Admin. *"Reserved" became "bound"*: the three platform codes are
+ * no longer special in themselves (ADR-0115 §2, amended); they are what the default binding names.
  */
-export const RESERVED_TYPE_CODES: readonly string[] = Object.values(CASCADE_ACTIVITY_CODES);
+export function boundRoles(binding: CascadeBinding): Map<string, string> {
+  return new Map([...roleOfCode(binding)].map(([code, role]) => [code, BINDING_ROLE_LABEL[role]]));
+}
 
 /**
- * The refusal for archiving one of the three, by its label — one wording for the single route and the
- * staged batch's projection (`changes.service.ts`), which refuses it before anything of the batch is
- * written.
+ * The refusal for archiving a bound type, by its label — one wording for the single route and the staged batch's
+ * projection (`changes.service.ts`), which refuses it before anything of the batch is written.
  */
-export function reservedTypeRefusal(type: { code: string; label: string }): DomainException {
+export function boundTypeRefusal(type: { code: string; label: string }, role: string): DomainException {
   return new DomainException(
-    ErrorCode.ACTIVITY_TYPE_RESERVED,
-    `“${type.label}” cannot be archived: the goal plan and the summary count it. You can `
-      + 'rename it, describe it, reorder it or move it to another section.',
+    ErrorCode.ACTIVITY_TYPE_BOUND,
+    CONFIG_REFUSALS.ACTIVITY_TYPE_BOUND.typeBound({ label: type.label, role }),
     HttpStatus.CONFLICT,
-    { codes: [type.code] },
+    { codes: [type.code], roles: [role] },
   );
 }
 
-/** The refusal for archiving a section while it holds one of the three, active. */
-export function reservedSectionRefusal(
-  section: { label: string }, held: readonly { code: string; label: string }[],
+/** The refusal for archiving a section while it holds a bound type, active. */
+export function boundSectionRefusal(
+  section: { label: string }, held: readonly { code: string; label: string; role: string }[],
 ): DomainException {
   return new DomainException(
-    ErrorCode.ACTIVITY_TYPE_RESERVED,
-    `${section.label} cannot be archived while it holds ${held.map((t) => `“${t.label}”`).join(', ')}, `
-      + 'which the goal plan and the summary count. Move them to another section first.',
+    ErrorCode.ACTIVITY_TYPE_BOUND,
+    CONFIG_REFUSALS.ACTIVITY_TYPE_BOUND.sectionBound({ section: section.label, labels: held.map((t) => t.label) }),
     HttpStatus.CONFLICT,
-    { codes: held.map((t) => t.code) },
+    { codes: held.map((t) => t.code), roles: held.map((t) => t.role) },
   );
 }
 
@@ -132,7 +136,17 @@ export class ActivityConfigService {
     private readonly orgLevels: OrgLevelService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /*
+     * ADR-0163 §5: which types the office's activity binding names, which no archive may reach. The application
+     * always provides it; optional so a hand-built instance need not, and without it the default binding is read.
+     */
+    @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
   ) {}
+
+  /** The bound codes, each with the role it counts in (ADR-0163 §5). */
+  async boundRolesOf(ctx: RequestContext): Promise<Map<string, string>> {
+    return boundRoles(this.bindings ? await this.bindings.resolveCascadeBinding(ctx) : defaultBinding());
+  }
 
   // ------------------------------------------------------------------ reads
 
@@ -248,7 +262,7 @@ export class ActivityConfigService {
       if (!options.summaryGroupsChecked) await this.refuseSummaryGroupConflict(ctx, id, group);
       Object.assign(set, group);
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.categories.updateById(ctx, id, {
       $set: set, $inc: { version: 1 },
@@ -273,15 +287,18 @@ export class ActivityConfigService {
    */
   async archiveCategory(ctx: RequestContext, id: string): Promise<ActivityCategoryView> {
     /*
-     * **Not while it holds a cascade type** (ADR-0115 §2): archiving the section archives the types
-     * in it. The type is moved to another section first, which the Owner may do.
+     * **Not while it holds a bound type** (ADR-0163 §5): archiving the section archives the types in it. The type
+     * is moved to another section first, which the Owner may do, or unbound by the Super Admin.
      */
     const category = await this.categories.findById(ctx, id);
     if (!category) throw new NotFoundException('Activity category');
+    const bound = await this.boundRolesOf(ctx);
     const held = await this.types.find(ctx, {
-      categoryCode: category.code, status: 'active', code: { $in: [...RESERVED_TYPE_CODES] },
+      categoryCode: category.code, status: 'active', code: { $in: [...bound.keys()] },
     });
-    if (held.length) throw reservedSectionRefusal(category, held);
+    if (held.length) {
+      throw boundSectionRefusal(category, held.map((t) => ({ code: t.code, label: t.label, role: bound.get(t.code)! })));
+    }
 
     const at = this.clock.now();
     const updated = await this.categories.updateById(ctx, id, {
@@ -321,7 +338,7 @@ export class ActivityConfigService {
     const live = await this.categories.find(ctx, {});
     const known = new Set(live.map((c) => String(c._id)));
     if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException('Send every section, once each, in the order you want them.');
+      throw new InvalidRequestException(SAY.sendEverySection);
     }
 
     await Promise.all(
@@ -380,7 +397,7 @@ export class ActivityConfigService {
       await this.requireLiveCategory(ctx, input.categoryCode);
       set.categoryCode = input.categoryCode;
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('Nothing to change.');
+    if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     const updated = await this.types.updateById(ctx, id, { $set: set, $inc: { version: 1 } });
     if (!updated) throw new NotFoundException('Activity type');
@@ -400,9 +417,7 @@ export class ActivityConfigService {
     const live = await this.types.find(ctx, {});
     const known = new Set(live.map((t) => String(t._id)));
     if (ids.length !== known.size || ids.some((id) => !known.has(id))) {
-      throw new BadRequestException(
-        'Send every activity type, once each, in the order you want them.',
-      );
+      throw new InvalidRequestException(SAY.sendEveryType);
     }
 
     // Position is presentation. Nothing references it, so no version is bumped: an office
@@ -418,13 +433,15 @@ export class ActivityConfigService {
   }
 
   /**
-   * Archive, which is what this product means by delete (invariant §3) — refused for the three cascade
-   * types (ADR-0115 §2, `ACTIVITY_TYPE_RESERVED`), for every role that may archive at all.
+   * Archive, which is what this product means by delete (invariant §3) — refused for a type the office's activity
+   * binding names (ADR-0163 §5, `ACTIVITY_TYPE_BOUND`), for every role that may archive at all. Unbound first, by
+   * the Super Admin, it archives as any other type does, and its history still counts where it was bound.
    */
   async archiveType(ctx: RequestContext, id: string): Promise<ActivityTypeView> {
     const type = await this.types.findById(ctx, id);
     if (!type) throw new NotFoundException('Activity type');
-    if (RESERVED_TYPE_CODES.includes(type.code)) throw reservedTypeRefusal(type);
+    const role = (await this.boundRolesOf(ctx)).get(type.code);
+    if (role) throw boundTypeRefusal(type, role);
 
     const updated = await this.types.updateById(ctx, id, {
       $set: { status: 'archived', archivedAt: this.clock.now() },
@@ -451,19 +468,19 @@ export class ActivityConfigService {
     // Archived rows count. A retired code that came back as something else would change
     // the meaning of every archived type still pointing at it.
     if (await this.categories.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has a category called ${code}.`);
+      throw new InvalidRequestException(SAY.categoryTaken({ code }));
     }
   }
 
   private async refuseDuplicateType(ctx: RequestContext, code: string): Promise<void> {
     if (await this.types.exists(ctx, { code })) {
-      throw new BadRequestException(`This office already has an activity type called ${code}.`);
+      throw new InvalidRequestException(SAY.typeTaken({ code }));
     }
   }
 
   private async requireLiveCategory(ctx: RequestContext, code: string): Promise<void> {
     if (!(await this.categories.exists(ctx, { code, status: 'active' }))) {
-      throw new BadRequestException(`No active category called ${code} in this office.`);
+      throw new InvalidRequestException(SAY.noActiveCategory({ code }));
     }
   }
 
@@ -547,9 +564,7 @@ export class ActivityConfigService {
     if (broken.length) {
       throw new DomainException(
         ErrorCode.CONFIG_RATIO_UNREACHABLE_INPUT,
-        `${broken.join(', ')} counts activity in this section, and applies to rungs the `
-          + 'section would no longer be shown to. Those agents would be measured on '
-          + 'something they cannot log. Narrow the ratio first, or widen the section.',
+        CONFIG_REFUSALS.CONFIG_RATIO_UNREACHABLE_INPUT.narrowFirst({ ratios: broken }),
         HttpStatus.BAD_REQUEST,
         { ratios: broken },
       );

@@ -1,9 +1,11 @@
 import { Logger } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { UNIT_DASHBOARD_CORRECTION_REASON } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { NO_CLASS } from '../../../test/http-permissions';
 import {
   buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from '../../../test/coaching-office';
@@ -46,7 +48,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
   const reads = () => db().collection('auditLog').countDocuments({ action: 'activity_log.read_raw', 'after.surface': 'unit_dashboard' });
   const state = () => wired.productionMonths.state(office.as('OWNER'), UNIT_MONTH);
   const save = async (who: Who, rows: { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[], revision?: number) =>
-    wired.unitDashboard.updateProduction(office.as(who), {
+    // Saved by a leader reading the API's English — the reason is stored in the saver's language, and nobody's choice
+    // is Bahasa Indonesia since P18.98-T4's exit (AC-6 below pins both).
+    wired.unitDashboard.updateProduction(office.as(who).withReader(SOURCE_READER), {
       month: UNIT_MONTH, revision: revision ?? (await state()).revision, rows,
     });
   const cell = async (who: Who, field: 'apeMonthly' | 'apeYtd') =>
@@ -113,9 +117,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
         expect({ who, empty: view.empty, rows: view.yourUnit.rows, units: view.units }).toEqual({ who, empty: true, rows: [], units: [] });
         expect(view.head).toEqual({ membershipId: office.id[who], name: office.name[who], isReader: true });
         expect(view.tiles).toEqual({
-          team: { total: 0, direct: 0, units: 0, underUnits: 0 },
-          directGroupProduction: { targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, period: 'month' },
-          potentialActive: { count: 0, of: 0 },
+          team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
+          directGroupProduction: {
+            targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
+          },
+          potentialActive: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 } },
           potentialRecruits: { yourUnit: 0, aabs: 0 },
         });
         expect(view.production.canUpdate).toBe(false);
@@ -175,7 +181,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect((await read('ADMIN', { for: office.id.AGUS })).head).toMatchObject({ name: 'Agus Salim', isReader: false });
       expect((await read('OWNER', { for: office.id.PEER_AAB })).yourUnit.rows.map((r) => r.name)).toEqual(['Putu Ayu', 'Yusuf Ramadhan']);
       // An Owner or an Admin with no rung at all holds `own-kpm` alone.
-      const ownerOnly = new RequestContext('u-o', 'none', { ...office.as('ADMIN').membership!, orgLevelCode: 'NO_RUNG' });
+      const ownerOnly = new RequestContext('u-o', 'none', {
+        ...office.as('ADMIN').membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS,
+      });
       expect((await wired.unitDashboard.read(ownerOnly, { for: office.id.NINA })).head.name).toBe('Nina Lestari');
     });
 
@@ -346,26 +354,38 @@ describe('the Unit Dashboard (Phase 15)', () => {
     it.each(['7d', 'month', 'year'] as const)('P15-T1 AC-4 every unit, every tile, %s', async (period) => {
       for (const who of ['AGUS', 'SARI', 'OWNER'] as const) {
         const view = await read(who, { period });
-        const check = (rows: UnitRow[], total: UnitDashboardView['yourUnit']['total']) => {
+        const check = (everybody: UnitRow[], total: UnitDashboardView['yourUnit']['total']) => {
           const held = (values: (number | null)[]) => {
             const kept = values.filter((v): v is number => v !== null);
             return kept.length ? kept.reduce((a, b) => a + b, 0) : null;
           };
-          const target = held(rows.map((r) => r.goal.targetMinor));
+          // The goal and *on pace* over the people who count for production (ADR-0172 §2, P18.96-T5 AC-2).
+          const rows = everybody.filter((r) => !r.newHireBeforeFirstSale);
+          expect(total.newHires).toBe(everybody.length - rows.length);
           const actual = held(rows.map((r) => r.goal.actualMinor));
+          // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when
+          // nobody's is, so the total reads *Not uploaded yet* beside them as a row does.
+          const counted = actual === null ? rows : rows.filter((r) => r.goal.actualMinor !== null);
+          const target = held(counted.map((r) => r.goal.targetMinor));
+          const both = target !== null && actual !== null;
           expect(total.goal).toEqual({
             targetMinor: target, actualMinor: actual,
             attainmentPct: target && actual !== null ? Math.min(999, Math.round((actual / target) * 100)) : null,
             missing: rows.filter((r) => r.goal.actualMinor === null).length,
+            gapMinor: both ? Math.max(0, target - actual) : null,
+            overMinor: both ? Math.max(0, actual - target) : null,
           });
           for (const key of ['salesOpen', 'salesClosing', 'recruitOpen', 'recruitNominated'] as const) {
-            expect(total.leadsCounts[key]).toBe(rows.reduce((s, r) => s + r.leadsCounts[key], 0));
+            expect(total.leadsCounts[key]).toBe(everybody.reduce((s, r) => s + r.leadsCounts[key], 0));
           }
+          // UI-028: a total's *Closing* is its rows'.
+          expect(total.closings).toBe(everybody.reduce((s, r) => s + r.closings, 0));
           expect(total.touches).toEqual({
-            logged: rows.reduce((s, r) => s + r.activity.touches.logged, 0),
-            target: held(rows.map((r) => r.activity.touches.target)),
+            logged: everybody.reduce((s, r) => s + r.activity.touches.logged, 0),
+            target: held(everybody.map((r) => r.activity.touches.target)),
           });
-          expect(total.potentialActive).toEqual({ count: rows.filter((r) => r.pacingToMaa === true).length, of: rows.length });
+          // UI-013: the count over the people who count for production, out of everybody — manpower.
+          expect(total.potentialActive).toMatchObject({ count: rows.filter((r) => r.pacingToMaa === true).length, of: everybody.length });
         };
         check(view.yourUnit.rows, view.yourUnit.total);
         const groups = (g: UnitGroup): UnitGroup[] => [g, ...g.units.flatMap(groups)];
@@ -375,10 +395,20 @@ describe('the Unit Dashboard (Phase 15)', () => {
         const all = everyRow(view);
         const { period: tilePeriod, ...production } = view.tiles.directGroupProduction;
         expect(tilePeriod).toBe(period === 'year' ? 'year' : 'month');
-        check(all, { goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive });
+        check(all, {
+          goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive,
+          newHires: view.tiles.team.newHires, closings: all.reduce((s, r) => s + r.closings, 0),
+        });
+        // UI-013: Active Agent's of is Your team's number, and its Unit / AAB split adds up to it — Unit is Your Unit.
+        const { unit, aab, of } = view.tiles.potentialActive;
+        expect(of).toBe(view.tiles.team.total);
+        expect(unit).toEqual(view.yourUnit.total.potentialActive);
+        expect([unit.count + aab.count, unit.of + aab.of]).toEqual([view.tiles.potentialActive.count, of]);
+        expect(aab.of).toBe(view.units.reduce((n, g) => n + rowsOf(g).length, 0));
         expect(view.tiles.team).toEqual({
           total: all.length, direct: view.yourUnit.rows.length, units: view.units.length,
           underUnits: all.length - view.yourUnit.rows.length - view.units.length,
+          newHires: all.filter((r) => r.newHireBeforeFirstSale).length,
         });
         expect(view.tiles.potentialRecruits).toEqual({
           yourUnit: view.yourUnit.rows.reduce((s, r) => s + r.leadsCounts.recruitNominated, 0),
@@ -389,10 +419,22 @@ describe('the Unit Dashboard (Phase 15)', () => {
 
     it('P15-T1 AC-4 Agus’s tiles, worked: eleven people; Indah’s nomination in his unit, Rina’s in Sari’s', async () => {
       const view = await read('AGUS');
-      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5 });
+      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, newHires: 0 });
       expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1 });
       // Four rows hold this month's APE — Indah, Dimas, Rina and Sari — and seven hold none.
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
+    });
+
+    it('P18.8-T15 AC-6 Agus’s Direct Group production pairs: the seven with no production are out of the target too', async () => {
+      const view = await read('AGUS');
+      const all = everyRow(view);
+      const held = all.filter((r) => r.goal.actualMinor !== null);
+      expect(held.map((r) => r.name).sort()).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Rina Wijaya', 'Sari Puspita'].sort());
+      const pairedTarget = held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0);
+      expect(view.tiles.directGroupProduction).toMatchObject({
+        targetMinor: pairedTarget, actualMinor: 270 * M, missing: 7,
+        gapMinor: Math.max(0, pairedTarget - 270 * M), overMinor: Math.max(0, 270 * M - pairedTarget),
+      });
     });
 
     it('P15-T1 AC-4 the nested unit, two deep, has its own total inside its parent’s', async () => {
@@ -402,6 +444,92 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(nina.total.potentialActive.of).toBe(2);
       expect(sari.total.potentialActive.of).toBe(5);
       expect(sari.total.leadsCounts).toEqual({ salesOpen: 3, salesClosing: 1, recruitOpen: 3, recruitNominated: 1 });
+    });
+  });
+
+  /**
+   * **ADR-0172, P18.96-T5** — a new hire counts in the team from their join date, and in production and *on pace* from
+   * their first sale's day. Dimas holds this month's production and a target, and is pacing: the case the client saw.
+   */
+  describe('P18.96-T5 — who counts where (ADR-0172)', () => {
+    const memberships = () => db().collection('memberships');
+    const mark = (who: Who, set: Record<string, unknown>) =>
+      memberships().updateOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: set });
+    afterEach(async () => {
+      await memberships().updateMany({ kpmId: KPM_A }, { $unset: { joinedAs: '', firstSaleDate: '' } });
+    });
+
+    it('UI-013 a new hire with no first sale is in the team, tagged, out of production and on pace’s count — in its of', async () => {
+      const before = await read('AGUS');
+      const dimas = rowFor(before, 'DIMAS');
+      expect([dimas.goal.actualMinor !== null, dimas.goal.targetMinor !== null, dimas.newHireBeforeFirstSale]).toEqual([true, true, false]);
+
+      await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate: null });
+      const view = await read('AGUS');
+      expect(rowFor(view, 'DIMAS').newHireBeforeFirstSale).toBe(true);
+      // AC-1: the team still counts him.
+      expect(view.tiles.team).toEqual({ ...before.tiles.team, newHires: 1 });
+      expect(view.yourUnit.rows.map((r) => r.name)).toEqual(before.yourUnit.rows.map((r) => r.name));
+      // AC-2: his target and his production leave Your Unit's total and the tile; he is not missing either.
+      const others = before.yourUnit.rows.filter((r) => r.membershipId !== office.id.DIMAS);
+      const actual = others.map((r) => r.goal.actualMinor).filter((v): v is number => v !== null).reduce((a, b) => a + b, 0);
+      expect(view.yourUnit.total).toMatchObject({ newHires: 1, goal: { actualMinor: actual, missing: before.yourUnit.total.goal.missing } });
+      expect(view.tiles.directGroupProduction.actualMinor).toBe(before.tiles.directGroupProduction.actualMinor! - dimas.goal.actualMinor!);
+      expect(view.tiles.directGroupProduction.targetMinor).toBe(before.tiles.directGroupProduction.targetMinor! - dimas.goal.targetMinor!);
+      // UI-013 Active Agent: out of the count, never out of `of` — manpower, the same number as Your team.
+      const pacing = dimas.pacingToMaa === true ? 1 : 0;
+      expect(view.tiles.potentialActive).toMatchObject({
+        count: before.tiles.potentialActive.count - pacing, of: before.tiles.potentialActive.of,
+        unit: { count: before.tiles.potentialActive.unit.count - pacing, of: before.tiles.potentialActive.unit.of },
+      });
+      expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
+      expect(view.yourUnit.total.potentialActive.of).toBe(before.yourUnit.total.potentialActive.of);
+      // The leads and the goal activities are still everybody's.
+      expect(view.yourUnit.total.leadsCounts).toEqual(before.yourUnit.total.leadsCounts);
+      expect(view.yourUnit.total.touches).toEqual(before.yourUnit.total.touches);
+    });
+
+    it('P18.96-T5 AC-2, AC-3 from the first sale’s day: not the day after today, but today and before', async () => {
+      const counted = async (firstSaleDate: string) => {
+        await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate });
+        const view = await read('AGUS');
+        return { tag: rowFor(view, 'DIMAS').newHireBeforeFirstSale, newHires: view.tiles.team.newHires, of: view.tiles.potentialActive.of };
+      };
+      const all = everyRow(await read('AGUS')).length;
+      // UI-013: `of` is manpower whatever the first sale — the tag and the production's left-out count move.
+      expect(await counted('2026-09-15')).toEqual({ tag: true, newHires: 1, of: all });
+      expect(await counted(ROSTER_TODAY)).toEqual({ tag: false, newHires: 0, of: all });
+      expect(await counted('2026-08-20')).toEqual({ tag: false, newHires: 0, of: all });
+    });
+
+    it('P18.96-T5 AC-2 an existing agent with no first sale counts, as today (ADR-0172 §4)', async () => {
+      const before = await read('AGUS');
+      await mark('DIMAS', { joinedAs: 'existing_agent', firstSaleDate: null });
+      const view = await read('AGUS');
+      expect(rowFor(view, 'DIMAS').newHireBeforeFirstSale).toBe(false);
+      expect([view.tiles.directGroupProduction, view.tiles.potentialActive, view.yourUnit.total])
+        .toEqual([before.tiles.directGroupProduction, before.tiles.potentialActive, before.yourUnit.total]);
+    });
+
+    it('UI-013 every total above a new hire leaves them out of production, never of on pace’s of — Rina in Sari’s unit', async () => {
+      await mark('RINA', { joinedAs: 'new_hire', firstSaleDate: null });
+      const agus = await read('AGUS');
+      const sari = agus.units[2];
+      expect(sari.total.newHires).toBe(1);
+      expect(sari.total.potentialActive.of).toBe(rowsOf(sari).length);
+      expect(sari.units[0].total.newHires).toBe(0);
+      const own = await read('SARI');
+      expect(own.yourUnit.total.newHires).toBe(1);
+      expect(own.tiles.team.newHires).toBe(1);
+      expect(own.tiles.potentialActive.of).toBe(everyRow(own).length);
+    });
+
+    it('P18.96-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {
+      await mark('SARI', { joinedAs: 'new_hire', firstSaleDate: null });
+      const own = await read('SARI');
+      expect(own.yourUnit.rows[0]).toMatchObject({ isReader: true, newHireBeforeFirstSale: true });
+      expect((await read('AGUS')).units[2].head.newHireBeforeFirstSale).toBe(true);
+      expect((await read('AGUS', { for: office.id.SARI })).yourUnit.rows[0].newHireBeforeFirstSale).toBe(true);
     });
   });
 
@@ -628,7 +756,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const ctx = office.as('SARI');
       const revision = (await state()).revision;
       await expect(wired.unitDashboard.updateProduction(ctx, { month: '2026-08', revision, rows: [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }] }))
-        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'month', month: UNIT_MONTH } });
+        .rejects.toMatchObject({
+          code: 'VALIDATION_FAILED', details: { field: 'month', month: UNIT_MONTH },
+          // The sentence names the month as ADR-0167 §1 writes one; `details` keeps it `YYYY-MM`.
+          message: 'Production can only be updated here for Sep 2026, the agency\'s current month.',
+        });
       await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }, { membershipId: office.id.RINA, apeYtdMinor: 300 * M }]))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'rows[1].membershipId' } });
       await expect(save('SARI', [{ membershipId: office.id.RINA }]))
@@ -646,6 +778,26 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const flagged = preview.rows.flatMap((r) => r.cells).filter((c) => c.correction);
       expect(flagged.map((c) => [c.metric, c.cadence, c.correction!.by, c.correction!.reason]))
         .toContainEqual(['ape', 'monthly', 'Sari Puspita', UNIT_DASHBOARD_CORRECTION_REASON]);
+    });
+    it('P18.98-T5 AC-6 stores the fixed reason in the saving reader’s language, and shows it as stored', async () => {
+      // An English reader's save first, then the Owner's, reading Indonesian: each reason is written once, in its
+      // writer's language, and kept as text.
+      await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('en')), {
+        month: UNIT_MONTH, revision: (await state()).revision,
+        rows: [{ membershipId: office.id.PEER_AGENT, apeYtdMinor: 9 * M }],
+      });
+      await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('id')), {
+        month: UNIT_MONTH, revision: (await state()).revision,
+        rows: [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 7 * M }],
+      });
+      expect(await cell('PEER_AGENT', 'apeMonthly')).toMatchObject({
+        value: 7 * M, provenance: 'corrected', reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.',
+      });
+      // A cell an English reader saved keeps the English beside it; neither is translated afterwards.
+      expect((await cell('PEER_AGENT', 'apeYtd'))?.reason).toBe(UNIT_DASHBOARD_CORRECTION_REASON);
+      const table = await wired.production.readMonth(office.as('OWNER').withReader(readerIn('en')), UNIT_MONTH);
+      expect(table.rows.find((r) => r.membershipId === office.id.PEER_AGENT)!.metrics.ape.monthly)
+        .toMatchObject({ correction: { reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.' } });
     });
   });
 

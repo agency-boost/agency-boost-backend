@@ -1,5 +1,14 @@
-import { describeNotification, IN_APP_TEMPLATES, inboxAddress } from './inbox-copy';
+import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import { describeNotification as composeNotice, IN_APP_TEMPLATES, inboxAddress, JOIN_REQUEST_INBOX } from './inbox-copy';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
+
+/**
+ * **The notices' English, as the API wrote it** (`SOURCE_READER`: English words, Indonesian figures) unless a test names
+ * another reader. A reader who has chosen nothing reads Bahasa Indonesia since the default went live (P18.98-T4's exit),
+ * so the copy pinned below names its reader rather than leaning on the default; nobody's choice is pinned at the end.
+ */
+const describeNotification = (templateId: string, payload: Record<string, unknown>, reader: Reader = SOURCE_READER) =>
+  composeNotice(templateId, payload, reader);
 
 /**
  * What a notification says.
@@ -36,12 +45,73 @@ describe('inbox copy', () => {
       .toBe('Somebody asked to join your unit');
   });
 
+  /*
+   * **P18.96-T1 AC-3: the name the sender writes.** `requestLeader` stores `askerName`; the template read `fullName`
+   * alone, so every request a real person sent read *"Somebody asked to join your unit"*. The seed and older rows
+   * carry `fullName`, and still read.
+   */
+  it('P18.96-T1 AC-3 a join request names who asked, from askerName as the sender writes it, else fullName', () => {
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', membershipId: 'm1' }))
+      .toEqual({ title: 'Rina Wijaya asked to join your unit', detail: 'Approve or decline it under Review requests on New hires.' });
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', fullName: 'Old' }).title)
+      .toBe('Rina Wijaya asked to join your unit');
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: '  ', fullName: 'Putri' }).title)
+      .toBe('Putri asked to join your unit');
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 42 }).title)
+      .toBe('Somebody asked to join your unit');
+  });
+
+  it('P18.96-T1 AC-3 a member tagged reads that a leader added them; a leader whose code was used reads who joined', () => {
+    expect(describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { leaderMembershipId: 'm1', via: 'tagged' }))
+      .toEqual({
+        title: 'A leader added you to their unit',
+        detail: 'You did not have to ask — they picked you up from the unassigned list.',
+      });
+    // `LeaderCodeService.redeem` sends this template to the code's owner: never the member's sentence.
+    const leader = describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, {
+      joinerName: 'Dimas Saputra', via: 'leader-code', code: 'JOR417',
+    });
+    expect(leader).toEqual({
+      title: 'Dimas Saputra joined your unit with your leader code',
+      detail: 'A leader code needs no approval, so they are in your unit already.',
+    });
+    expect(leader.title).not.toMatch(/added you/);
+    expect(describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { via: 'leader-code' }).title)
+      .toBe('Somebody joined your unit with your leader code');
+  });
+
   it('prefers the reason somebody wrote over the general sentence', () => {
     // The reason is the only thing a refusal gives somebody to act on.
     expect(describeNotification(NotificationTemplate.JOIN_REQUEST_DECLINED, { reason: 'Wrong branch.' }).detail)
       .toBe('Wrong branch.');
     expect(describeNotification(NotificationTemplate.JOIN_REQUEST_DECLINED, {}).detail)
       .toBe('You can search for another leader and ask again.');
+  });
+
+  it('ADR-0162 §3: a setup session says so, and what it may change, to the person and to the Owner', () => {
+    const subject = describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Setting up the activity types.', isSubject: true, purpose: 'setup',
+    });
+    expect(subject).toEqual({
+      title: 'Somebody from AgencyBoost is setting up your office as you',
+      detail: 'Setting up the activity types. They can change the office\'s settings, import people and upload '
+        + 'production files, and nothing else.',
+    });
+    const owner = describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Setting up the activity types.', isSubject: false, purpose: 'setup',
+    });
+    expect(owner.title).toBe('A setup session started in your office');
+    expect(owner.detail).toContain('import people and upload production files, and nothing else.');
+    // Without a reason, the general sentence — never an empty one.
+    expect(describeNotification(NotificationTemplate.IMPERSONATION_STARTED, { isSubject: true, purpose: 'setup' }).detail)
+      .toMatch(/^A setup session has started\. They can change/);
+    // A support session is unchanged: it only looks.
+    expect(describeNotification(NotificationTemplate.IMPERSONATION_STARTED, {
+      reason: 'Ticket 42.', isSubject: true, purpose: 'support',
+    })).toEqual({
+      title: 'Somebody from AgencyBoost is looking at your screens',
+      detail: 'Ticket 42. They can only look, unless a second person approves otherwise.',
+    });
   });
 
   it('reads admin access both ways round', () => {
@@ -56,6 +126,18 @@ describe('inbox copy', () => {
     expect(describeNotification('something.new', {})).toEqual({
       title: 'Something happened',
       detail: null,
+    });
+  });
+
+  it('P18.8-T2 AC-5 tells whoever asked how AgencyBoost decided a leader past the limit (ADR-0157 §3)', () => {
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED, { subjectName: 'Budi' })).toEqual({
+      title: 'AgencyBoost approved your request for Budi',
+      detail: 'The change is made: they are a leader now, past your office’s limit.',
+    });
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED, { subjectName: 'Budi', reason: 'Not now.' }))
+      .toEqual({ title: 'AgencyBoost declined your request for Budi', detail: 'Not now.' });
+    expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED, {})).toEqual({
+      title: 'AgencyBoost declined your request for a new leader', detail: 'Nothing about them changed.',
     });
   });
 
@@ -91,6 +173,47 @@ describe('inbox copy', () => {
   });
 
   /*
+   * **An event's reminder names its time and place** (P18.95-T7 AC-4; the client's UI review, UI-030). It read *"Check
+   * the time and where it is."* — the two things the reader opened it for, left for them to find.
+   */
+  describe('P18.95-T7 AC-4 an event reminder names its time and place', () => {
+    const kickoff = {
+      eventId: '66f0000000000000000000e1', title: 'Kickoff 2026',
+      startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
+    };
+
+    it('P18.95-T7 AC-4 its start on the office’s clock and where it is, through the shared formatter', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
+        title: 'Kickoff 2026 is coming up', detail: '9 Nov 2026, 09.00 · Kantor KPM',
+      });
+    });
+
+    it('P18.95-T7 AC-4 the office’s zone decides the day: 18:30 UTC is the next morning in Jakarta', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: '2026-11-08T18:30:00.000Z' }).detail)
+        .toBe('9 Nov 2026, 01.30 · Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 either half alone, when the payload holds only one', () => {
+      const { location: _place, ...timed } = kickoff;
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, timed).detail).toBe('9 Nov 2026, 09.00');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, location: '   ' }).detail).toBe('9 Nov 2026, 09.00');
+      const { startsAt: _at, ...placed } = kickoff;
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, placed).detail).toBe('Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 a time it cannot read is left out, never written in the server’s zone or as Invalid', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: 'Not/AZone' }).detail).toBe('Kantor KPM');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: 'soon' }).detail).toBe('Kantor KPM');
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: undefined }).detail).toBe('Kantor KPM');
+    });
+
+    it('P18.95-T7 AC-4 a reminder written with its title alone keeps the words it had', () => {
+      expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).detail)
+        .toBe('Check the time and where it is.');
+    });
+  });
+
+  /*
    * **ADR-0078, P11-T10 AC-8: the finalize notice opens the session.** Composed here, beside the words,
    * so the inbox and the manual books read one address. No other item has one.
    */
@@ -108,10 +231,21 @@ describe('inbox copy', () => {
       }
     });
 
-    it('P11-T10 AC-8 no other inbox item changes: every template but the session’s and the calendar’s opens nowhere', () => {
+    it('P18.96-T1 AC-3 a join request opens the leader’s request inbox, whatever its payload holds', () => {
+      // P18.96-T3 AC-5: the inbox moved to New hires' Review requests, as ADR-0170 §5 places it.
+      expect(JOIN_REQUEST_INBOX).toBe('/new-hires?review=requests');
+      for (const payload of [{}, { askerName: 'Rina Wijaya', membershipId: SESSION }, { fullName: 'Putri' }]) {
+        expect(inboxAddress(NotificationTemplate.JOIN_REQUEST_RECEIVED, payload)).toBe('/new-hires?review=requests');
+      }
+    });
+
+    it('P11-T10 AC-8 no other inbox item changes: every template but the session’s, the calendar’s and the join request’s opens nowhere', () => {
       const ADDRESSED: string[] = [
         NotificationTemplate.COACHING_SESSION_FINALIZED, NotificationTemplate.CALENDAR_INVITATION,
         NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
+        NotificationTemplate.JOIN_REQUEST_RECEIVED,
+        // P18.96-T3: a transfer waits on All Members; an accepted invite is on New hires.
+        NotificationTemplate.TRANSFER_REQUEST_RECEIVED, NotificationTemplate.MEMBER_INVITE_ACCEPTED,
       ];
       for (const id of IN_APP_TEMPLATES.filter((t) => !ADDRESSED.includes(t))) {
         expect([id, inboxAddress(id, { sessionId: SESSION, entryId: SESSION, date: '2026-10-05' })]).toEqual([id, null]);
@@ -186,5 +320,168 @@ describe('inbox copy', () => {
         expect(IN_APP_TEMPLATES).toContain(id);
       }
     });
+  });
+});
+
+describe('P18.96-T3 the notices of joining by invite and of a transfer (ADR-0170)', () => {
+  it('P18.96-T3 AC-4 an accepted invite tells the leader who joined, and opens New hires', () => {
+    expect(describeNotification(NotificationTemplate.MEMBER_INVITE_ACCEPTED, { joinerName: 'Hendra Wijaya' })).toEqual({
+      title: 'Hendra Wijaya accepted your invite and joined your unit', detail: 'They are in your unit now, with the join date you gave.',
+    });
+    expect(describeNotification(NotificationTemplate.MEMBER_INVITE_ACCEPTED, {}).title).toBe('Somebody accepted your invite and joined your unit');
+    expect(inboxAddress(NotificationTemplate.MEMBER_INVITE_ACCEPTED, {})).toBe('/new-hires');
+  });
+
+  it('P18.96-T3 AC-3 a transfer request names who asked and who would move, and opens All Members on Pending', () => {
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, { requesterName: 'Agus Prasetyo', memberName: 'Lina Marlina' }))
+      .toEqual({ title: 'Agus Prasetyo asked to move Lina Marlina into their unit', detail: 'Approve or decline it on All Members, under Pending.' });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {}).title).toBe('A leader asked to move a member into their unit');
+    expect(inboxAddress(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {})).toBe('/people/members?tab=pending');
+  });
+
+  it('P18.96-T3 AC-3 a decision reads by whom it is for: whoever asked, the member who moved, the leader they left', () => {
+    const base = { memberName: 'Lina Marlina', toLeaderName: 'Agus Prasetyo' };
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'requester' }).title)
+      .toBe('Your request to move Lina Marlina was approved');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'declined', audience: 'requester', reason: 'Not now.' }))
+      .toEqual({ title: 'Your request to move Lina Marlina was declined', detail: 'Not now.' });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'declined', audience: 'requester' }).detail)
+      .toBe('They stay where they are.');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'member' }).title)
+      .toBe('You now report to Agus Prasetyo');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'from_leader' }).title)
+      .toBe('Lina Marlina moved to Agus Prasetyo’s unit');
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { audience: 'member' }).title).toBe('You now report to another leader');
+    expect(inboxAddress(NotificationTemplate.TRANSFER_REQUEST_DECIDED, base)).toBeNull();
+    for (const id of [NotificationTemplate.MEMBER_INVITE_ACCEPTED, NotificationTemplate.TRANSFER_REQUEST_RECEIVED, NotificationTemplate.TRANSFER_REQUEST_DECIDED]) {
+      expect([id, TEMPLATE_CHANNELS[id]]).toEqual([id, ['in_app', 'email']]);
+    }
+  });
+});
+
+/**
+ * **P18.98-T5 AC-4 — the inbox in the reader's language** (ADR-0179 §7): every row composed when it is read, in the
+ * reader's language, so a notice stored before the phase reads in it too. A name and a reason in the payload are shown
+ * as typed; the words around them, and the fallbacks for a payload that holds none, are ours.
+ */
+describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
+  const ID = readerIn('id');
+  const say = (templateId: string, payload: Record<string, unknown> = {}) => describeNotification(templateId, payload, ID);
+
+  it('AC-4 writes every in-app template in Indonesian, with the payload’s names as typed', () => {
+    expect(say(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina' })).toEqual({
+      title: 'Rina meminta bergabung ke unit Anda',
+      detail: 'Setujui atau tolak lewat Tinjau permintaan di New hires.',
+    });
+    expect(say(NotificationTemplate.JOIN_REQUEST_APPROVED)).toEqual({
+      title: 'Anda sudah bergabung', detail: 'Permintaan Anda disetujui. Sekarang Anda memiliki leader.',
+    });
+    expect(say(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { via: 'leader-code', joinerName: 'Budi' })).toEqual({
+      title: 'Budi bergabung ke unit Anda dengan kode leader Anda',
+      detail: 'Kode leader tidak memerlukan persetujuan, jadi dia sudah ada di unit Anda.',
+    });
+    expect(say(NotificationTemplate.MEMBER_TAGGED_BY_LEADER)).toEqual({
+      title: 'Seorang leader menambahkan Anda ke unitnya',
+      detail: 'Anda tidak perlu meminta — dia memilih Anda dari daftar anggota tanpa tim.',
+    });
+    expect(say(NotificationTemplate.MEMBER_INVITE_ACCEPTED, { joinerName: 'Dewi' })).toEqual({
+      title: 'Dewi menerima undangan Anda dan bergabung ke unit Anda',
+      detail: 'Dia sudah ada di unit Anda, dengan tanggal bergabung yang Anda berikan.',
+    });
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, { requesterName: 'Agus', memberName: 'Sari' })).toEqual({
+      title: 'Agus meminta Sari dipindahkan ke unitnya',
+      detail: 'Setujui atau tolak di All Members, pada tab Pending.',
+    });
+    expect(say(NotificationTemplate.MEMBER_REMOVED).title).toBe('Anda dikeluarkan dari unit Anda');
+    expect(say(NotificationTemplate.ROLE_CHANGED)).toEqual({
+      title: 'Peran Anda berubah', detail: 'Leader Anda mengubah peran Anda. Anda tetap melapor kepadanya.',
+    });
+    expect(say(NotificationTemplate.ADMIN_ACCESS_CHANGED, { granted: true })).toEqual({
+      title: 'Sekarang Anda dapat mengelola KPM ini', detail: 'Owner memberi Anda akses KPM Admin.',
+    });
+    expect(say(NotificationTemplate.ADMIN_ACCESS_CHANGED, { granted: false }).title).toBe('Akses admin Anda dicabut');
+    expect(say(NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED, { subjectName: 'Sari' }).title)
+      .toBe('AgencyBoost menyetujui permintaan Anda untuk Sari');
+    expect(say(NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED).detail).toBe('Tidak ada yang berubah pada dirinya.');
+    expect(say(NotificationTemplate.GOAL_SET_BY_LEADER, { byName: 'Agus' })).toEqual({
+      title: 'Agus mengatur goal Anda',
+      detail: 'Buka Goal settings untuk melihatnya — Anda dapat mengubahnya, ini rencana Anda.',
+    });
+    expect(say(NotificationTemplate.COACHING_SESSION_FINALIZED).title).toBe('Sesi coaching telah difinalkan');
+    expect(say(NotificationTemplate.CALENDAR_INVITATION).title).toBe('Anda mendapat undangan baru');
+    expect(say(NotificationTemplate.CALENDAR_BLOCK_PLACED).title).toBe('Ada waktu yang diblok di kalender Anda');
+    expect(say(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { change: 'cancelled' }).title).toBe('Entri di kalender Anda dibatalkan');
+    expect(say(NotificationTemplate.CALENDAR_ENTRY_CHANGED, { change: 'moved' }).title).toBe('Entri di kalender Anda dipindahkan');
+    expect(say(NotificationTemplate.IMPERSONATION_ELEVATED).title).toBe('Sesi dukungan itu kini dapat mengubah data');
+    expect(say('something.new')).toEqual({ title: 'Ada sesuatu yang terjadi', detail: null });
+  });
+
+  it('AC-4 shows a typed reason as typed, in either language, and translates only the sentence for none', () => {
+    expect(say(NotificationTemplate.JOIN_REQUEST_DECLINED, { reason: 'Tim sudah penuh' })).toEqual({
+      title: 'Permintaan Anda ditolak', detail: 'Tim sudah penuh',
+    });
+    expect(describeNotification(NotificationTemplate.JOIN_REQUEST_DECLINED, { reason: 'Team is full' }, ID).detail)
+      .toBe('Team is full');
+    expect(say(NotificationTemplate.JOIN_REQUEST_DECLINED).detail)
+      .toBe('Anda dapat mencari leader lain dan mengajukan permintaan lagi.');
+  });
+
+  it('AC-4 translates the names it falls back on, and nothing it was given', () => {
+    expect(say(NotificationTemplate.JOIN_REQUEST_RECEIVED).title).toBe('Seseorang meminta bergabung ke unit Anda');
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_RECEIVED).title).toBe('Seorang leader meminta seorang anggota dipindahkan ke unitnya');
+    expect(say(NotificationTemplate.GOAL_SET_BY_LEADER).title).toBe('Leader Anda mengatur goal Anda');
+    expect(say(NotificationTemplate.EVENT_REMINDER).title).toBe('Sebuah event akan segera berlangsung');
+    expect(say(NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED).title).toBe('AgencyBoost menyetujui permintaan Anda untuk leader baru');
+  });
+
+  it('AC-4 a transfer’s decision reads by whom it is for, in Indonesian', () => {
+    const decided = { memberName: 'Sari', toLeaderName: 'Agus' };
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, audience: 'member' })).toEqual({
+      title: 'Sekarang Anda melapor ke Agus',
+      detail: 'KPM Anda memindahkan Anda ke unitnya. Riwayat Anda tetap bersama Anda.',
+    });
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, audience: 'from_leader' }).title)
+      .toBe('Sari pindah ke unit Agus');
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, decision: 'approved' }).title)
+      .toBe('Permintaan Anda untuk memindahkan Sari disetujui');
+    expect(say(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, decision: 'declined' })).toEqual({
+      title: 'Permintaan Anda untuk memindahkan Sari ditolak', detail: 'Dia tetap di unitnya sekarang.',
+    });
+  });
+
+  it('AC-4 a support or setup session says so in Indonesian, the reason as typed', () => {
+    expect(say(NotificationTemplate.IMPERSONATION_STARTED, { purpose: 'setup', isSubject: true })).toEqual({
+      title: 'Seseorang dari AgencyBoost sedang menyiapkan KPM Anda sebagai Anda',
+      detail: 'Sesi penyiapan telah dimulai. Dia hanya dapat mengubah pengaturan KPM, mengimpor anggota, dan mengunggah file produksi.',
+    });
+    expect(say(NotificationTemplate.IMPERSONATION_STARTED, { purpose: 'setup', reason: 'Impor roster' }).detail)
+      .toBe('Impor roster Dia hanya dapat mengubah pengaturan KPM, mengimpor anggota, dan mengunggah file produksi.');
+    expect(say(NotificationTemplate.IMPERSONATION_STARTED, { isSubject: true })).toEqual({
+      title: 'Seseorang dari AgencyBoost sedang melihat layar Anda',
+      detail: 'Sesi dukungan telah dimulai. Dia hanya dapat melihat, kecuali orang kedua menyetujui sebaliknya.',
+    });
+    expect(say(NotificationTemplate.IMPERSONATION_STARTED)).toEqual({
+      title: 'Sesi dukungan dimulai di KPM Anda', detail: 'Seseorang dari AgencyBoost sedang membantu seorang anggota.',
+    });
+  });
+
+  it('AC-4 writes an event’s time in the reader’s figures: Indonesian, English for an English reader, and Indonesian for nobody’s choice', () => {
+    const kickoff = { title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM' };
+    expect(say(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
+      title: 'Kickoff 2026 akan segera berlangsung', detail: '9 Nov 2026, 09.00 · Kantor KPM',
+    });
+    expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff, readerIn('en')).detail)
+      .toBe('9 Nov 2026, 09:00 · Kantor KPM');
+    // A reader who has chosen nothing reads Bahasa Indonesia, words and figures, as the default is live.
+    expect(composeNotice(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual(say(NotificationTemplate.EVENT_REMINDER, kickoff));
+    expect(say(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).detail).toBe('Periksa waktu dan tempatnya.');
+  });
+
+  it('AC-4 every in-app template reads differently in the two languages', () => {
+    for (const templateId of IN_APP_TEMPLATES) {
+      const en = describeNotification(templateId, {}, readerIn('en'));
+      const id = describeNotification(templateId, {}, ID);
+      expect({ templateId, same: en.title === id.title }).toEqual({ templateId, same: false });
+    }
   });
 });

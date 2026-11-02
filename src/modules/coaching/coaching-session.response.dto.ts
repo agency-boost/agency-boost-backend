@@ -108,7 +108,11 @@ export class SnapshotPeriodDto {
 }
 
 export class SnapshotSourceDto {
-  @ApiProperty({ enum: ['imported', 'corrected', 'self_reported'], description: 'Whose APE figure it was.' })
+  @ApiProperty({
+    enum: ['imported', 'corrected', 'self_reported'],
+    description: 'Whose APE figure it was: the carrier’s file, a correction by hand, or a figure typed in the app, not '
+      + 'uploaded — by the member or by whoever coaches them (ADR-0183).',
+  })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
   @ApiProperty({ type: String, nullable: true, example: '2026-08', description: 'Whose year to date it was; `null` for the member’s own.' })
@@ -272,6 +276,15 @@ export class CoachingSessionDto implements CoachingSessionView {
       + 'screen can say until when — else `null`.',
   })
   reopenableUntil!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-11-06',
+    description:
+      'The date a new action item starts with (UI-060): the office’s today plus seven days — the same weekday next '
+      + 'week. *+* fills it in; *Start* gave it to every carried item. The leader may change it. `null` where no row '
+      + 'can be added: a finalized session, or a reader who is not its writing coach.',
+  })
+  defaultDueDate!: string | null;
 
   @ApiProperty({ type: LastWeekRefDto, nullable: true, description: 'The finalized session *last week* is; `null` for a first session.' })
   lastWeek!: { sessionId: string; date: string } | null;

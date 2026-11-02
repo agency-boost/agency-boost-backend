@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { CASCADE_ACTIVITY_CODES } from '@/domain/constants';
 import { OFFICE_TEMPLATE_KINDS, platformDefaultPayload } from '@/modules/config/template-defaults';
+import { emptyIfMissing } from './missing-collection';
 
 /** What one run did. Printed by `run.ts`, so the deploy log is the record of it. */
 export interface NamedTemplatesResult {
@@ -75,7 +76,8 @@ export async function up(db: mongoose.mongo.Db, now: Date): Promise<NamedTemplat
    * a kind the first template has, and this run's own version 1s would collide with nothing — but the
    * next `New template` would.
    */
-  const indexes = await rows.indexes().catch(() => [] as { name?: string }[]);
+  // A fresh database has no such collection yet: no index to drop. Any other failure is thrown (P18.7-T1).
+  const indexes: { name?: string }[] = await emptyIfMissing(rows.indexes());
   if (indexes.some((i) => i.name === 'companyId_1_kind_1_version_1')) {
     await rows.dropIndex('companyId_1_kind_1_version_1');
     result.oldIndexDropped = true;

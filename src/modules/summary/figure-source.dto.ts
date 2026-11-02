@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { FigureSource } from './summary-figures';
 
 /**
@@ -12,8 +12,19 @@ export class FigureCorrectorDto {
   @ApiProperty({ example: 'Sari Puspita' }) name!: string;
 }
 
+/** Who typed a member's figure for them (S2): the membership, and the name, `null` when they can no longer be named. */
+export class FigureTypistDto {
+  @ApiProperty({ description: 'The membership: the person in this agency, never their account.' }) membershipId!: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Sari Puspita' }) name!: string | null;
+}
+
 export class FigureSourceDto implements FigureSource {
-  @ApiProperty({ enum: ['imported', 'corrected', 'self_reported'] }) provenance!: 'imported' | 'corrected' | 'self_reported';
+  @ApiProperty({
+    enum: ['imported', 'corrected', 'self_reported'],
+    description: 'The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, '
+      + 'or by whoever coaches them (`typedBy`).',
+  })
+  provenance!: 'imported' | 'corrected' | 'self_reported';
   @ApiProperty({ type: String, nullable: true, example: '2026-09' }) month!: string | null;
 
   @ApiProperty({
@@ -26,4 +37,11 @@ export class FigureSourceDto implements FigureSource {
 
   @ApiProperty({ type: String, nullable: true, description: 'When, for a correction by hand. ISO.' })
   correctedAt!: string | null;
+
+  @ApiPropertyOptional({
+    type: FigureTypistDto,
+    description: 'Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the '
+      + 'member typed it, and on every other source.',
+  })
+  typedBy?: { membershipId: string; name: string | null };
 }

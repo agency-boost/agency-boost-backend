@@ -12,9 +12,12 @@ import {
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { listenOnLoopback } from '../../../test/listen';
+import { IN_INDONESIAN } from '../../../test/i18n';
 import { NamedTemplateController } from './named-template.controller';
 import { NamedTemplateService } from './named-template.service';
 import { TemplateCopyService } from './template-copy.service';
+import { TemplateService } from './template.service';
+import { platformDefaultPayload } from './template-defaults';
 import { ActivityConfigService } from './activity.service';
 import { ConfigChangeService } from './changes.service';
 import { LeadStatusService } from './lead-status.service';
@@ -49,6 +52,7 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       providers: [
         { provide: NamedTemplateService, useValue: wired.namedTemplates },
         { provide: TemplateCopyService, useValue: wired.templateCopies },
+        { provide: TemplateService, useValue: wired.templateService },
         { provide: ActivityConfigService, useValue: wired.activity },
         { provide: LeadStatusService, useValue: wired.leads },
         { provide: RatioService, useValue: wired.ratios },
@@ -87,6 +91,9 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       // P13.2-T7: *Import from another company*.
       importFrom: 'company_template:write',
       update: 'company_template:write',
+      // ADR-0185: *Terbitkan semua*, and the offices behind the checklist's count.
+      publishAll: 'company_template:write',
+      offices: 'company_template:read',
       archive: 'company_template:write',
     });
   });
@@ -106,6 +113,9 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
         http().post(base).send({ name: 'Mine', from: 'empty' }),
         http().patch(`${base}/${defaultId}`).send({ name: 'Renamed' }),
         http().post(`${base}/${defaultId}/archive`),
+        // ADR-0185.
+        http().post(`${base}/${defaultId}/publish`),
+        http().get(`${base}/${defaultId}/offices`),
       ]) {
         const res = await call;
         expect([res.status, res.body.error?.code]).toEqual([403, 'PERM_DENIED']);
@@ -138,6 +148,29 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       expect(res.body.error).toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', details: { name: 'prudential TEMPLATE' } });
     });
 
+    it('P18.98-T5 AC-7 refuses a taken name, archiving the default and a start it cannot read, in Indonesian', async () => {
+      const taken = await http().post(base).set(...IN_INDONESIAN).send({ name: 'prudential TEMPLATE', from: 'empty' }).expect(409);
+      expect(taken.body.error).toMatchObject({
+        code: 'TEMPLATE_NAME_TAKEN',
+        message: 'Perusahaan ini sudah memiliki template bernama prudential TEMPLATE. Pilih nama lain.',
+        details: { name: 'prudential TEMPLATE' },
+      });
+
+      const defaultId = String((await wired.namedTemplates.resolve(COMPANY))._id);
+      const archive = await http().post(`${base}/${defaultId}/archive`).set(...IN_INDONESIAN).expect(409);
+      expect(archive.body.error).toMatchObject({
+        code: 'TEMPLATE_IS_DEFAULT',
+        message: 'Prudential template adalah template default perusahaan ini, jadi tidak dapat diarsipkan. Jadikan '
+          + 'template lain sebagai default terlebih dahulu, lalu arsipkan template ini.',
+      });
+
+      // The DTO's own decorator sentence (`field`), in `details.violations` and the message alike.
+      const start = await http().post(base).set(...IN_INDONESIAN).send({ name: 'x', from: 'somewhere' }).expect(400);
+      expect(start.body.error.details.violations).toEqual([
+        'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu template perusahaan',
+      ]);
+    });
+
     it('validates the body: a name, and one of the two starts', async () => {
       await http().post(base).send({ name: '', from: 'empty' }).expect(400);
       await http().post(base).send({ name: 'x', from: 'somewhere' }).expect(400);
@@ -163,6 +196,126 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
     });
   });
 
+  /**
+   * **ADR-0185: a template as a checklist of its sections** — what each kind holds and whether a draft waits, every
+   * kind with a draft published at once, and the offices the template answers for with what each is behind on.
+   */
+  describe('ADR-0185: sections, Terbitkan semua and the offices behind', () => {
+    const save = (templateId: string, kind: Parameters<TemplateService['saveDraft']>[2], payload: Record<string, unknown>) =>
+      wired.templateService.saveDraft(SUPER_ADMIN, COMPANY, kind, payload, templateId);
+
+    it('lists each kind’s newest published version and whether a draft waits', async () => {
+      const made = (await http().post(base).send({ name: 'Jakarta branches', from: 'defaults' }).expect(201)).body;
+      const empty = (await http().post(base).send({ name: 'Nothing yet', from: 'empty' }).expect(201)).body;
+      await save(made.id, 'lead_pipeline', platformDefaultPayload('lead_pipeline'));
+
+      const list = (await http().get(base).expect(200)).body as {
+        id: string; sections: Record<string, { publishedVersion: number | null; hasDraft: boolean }>;
+      }[];
+      const jakarta = list.find((t) => t.id === made.id)!;
+      expect(jakarta.sections.lead_pipeline).toEqual({ publishedVersion: 1, hasDraft: true });
+      expect(jakarta.sections.activity_taxonomy).toEqual({ publishedVersion: 1, hasDraft: false });
+      expect(Object.keys(jakarta.sections)).toHaveLength(7);
+
+      // A template made empty: every kind *Kosong*.
+      const nothing = list.find((t) => t.id === empty.id)!;
+      expect(Object.values(nothing.sections)).toEqual(Array(7).fill({ publishedVersion: null, hasDraft: false }));
+    });
+
+    it('publishes every kind with a draft, the taxonomy before the ratios built on it, and reports a refusal without stopping the rest', async () => {
+      const made = (await http().post(base).send({ name: 'From scratch', from: 'empty' }).expect(201)).body;
+      // The ratios name types only the draft taxonomy declares: published in that order, both go out.
+      await save(made.id, 'ratio_set', platformDefaultPayload('ratio_set'));
+      await save(made.id, 'activity_taxonomy', platformDefaultPayload('activity_taxonomy'));
+      // An empty ladder is refused, as its own publish refuses it.
+      await save(made.id, 'lead_pipeline', { statuses: [] });
+
+      const res = await http().post(`${base}/${made.id}/publish`).expect(200);
+      expect(res.body.results).toEqual([
+        { kind: 'activity_taxonomy', outcome: 'published', version: 1 },
+        { kind: 'ratio_set', outcome: 'published', version: 1 },
+        {
+          kind: 'lead_pipeline', outcome: 'refused',
+          error: { code: 'VALIDATION_FAILED', message: 'The sales pipeline has no stages.' },
+        },
+        { kind: 'training_taxonomy', outcome: 'skipped', reason: 'no_changes' },
+        { kind: 'activation_checklist', outcome: 'skipped', reason: 'no_changes' },
+        { kind: 'capability_ladder', outcome: 'skipped', reason: 'no_changes' },
+        { kind: 'event_types', outcome: 'skipped', reason: 'no_changes' },
+      ]);
+      expect(res.body.template).toMatchObject({ id: made.id, name: 'From scratch' });
+      expect(res.body.template.sections.activity_taxonomy).toEqual({ publishedVersion: 1, hasDraft: false });
+      // Refused, it is still a draft, waiting to be fixed.
+      expect(res.body.template.sections.lead_pipeline).toEqual({ publishedVersion: null, hasDraft: true });
+
+      // Nothing waits but the refused one: a second press publishes nothing new.
+      const again = await http().post(`${base}/${made.id}/publish`).expect(200);
+      expect(again.body.results.filter((r: { outcome: string }) => r.outcome === 'published')).toEqual([]);
+    });
+
+    it('P18.98-T5 says a refused kind in the reader’s language', async () => {
+      const made = (await http().post(base).send({ name: 'Kosong', from: 'empty' }).expect(201)).body;
+      await save(made.id, 'lead_pipeline', { statuses: [] });
+      const res = await http().post(`${base}/${made.id}/publish`).set(...IN_INDONESIAN).expect(200);
+      expect(res.body.results.find((r: { kind: string }) => r.kind === 'lead_pipeline')).toEqual({
+        kind: 'lead_pipeline', outcome: 'refused',
+        error: { code: 'VALIDATION_FAILED', message: 'Pipeline sales tidak memiliki tahap.' },
+      });
+    });
+
+    it('refuses an archived template 400 and another company’s template 404, writing nothing', async () => {
+      const made = (await http().post(base).send({ name: 'Old', from: 'empty' }).expect(201)).body;
+      await save(made.id, 'event_types', platformDefaultPayload('event_types'));
+      await http().post(`${base}/${made.id}/archive`).expect(200);
+      const archived = await http().post(`${base}/${made.id}/publish`).expect(400);
+      expect(archived.body.error.code).toBe('VALIDATION_FAILED');
+
+      const theirs = String((await wired.namedTemplates.resolve(OTHER_COMPANY))._id);
+      await http().post(`${base}/${theirs}/publish`).expect(404);
+      await http().get(`${base}/${theirs}/offices`).expect(404);
+      await http().post(`${base}/not-an-id/publish`).expect(404);
+      await http().post(`/admin/companies/66f0000000000000000000ff/templates/${made.id}/publish`).expect(404);
+
+      const rows = wired.templates as unknown as mongoose.Model<{ templateId: string; status: string }>;
+      expect(await rows.countDocuments({ templateId: made.id, status: 'published' })).toBe(0);
+    });
+
+    it('lists the offices a template answers for, by code, with the kinds each is behind on and has no record of', async () => {
+      const made = (await http().post(base).send({ name: 'Branches', from: 'defaults' }).expect(201)).body;
+      const other = (await http().post(base).send({ name: 'Elsewhere', from: 'defaults' }).expect(201)).body;
+      const kpms = wired.kpms as unknown as mongoose.Model<Record<string, unknown>>;
+      const office = (code: string, templateId: string, seededFrom: Record<string, unknown>, deletedAt: Date | null = null) =>
+        kpms.create({
+          companyId: COMPANY, code, branchName: `Branch ${code}`, timezone: 'Asia/Jakarta', deletedAt,
+          startedFrom: { source: 'template', templateId, templateName: 'x' }, seededFrom,
+        });
+      const v1 = { templateId: made.id, version: 1 };
+      const all = Object.fromEntries(Object.keys(made.sections).map((kind) => [kind, v1]));
+      await office('0902', made.id, all);
+      // Built when the template held no event types, and before its checklist was recorded.
+      const { activation_checklist: _unrecorded, ...rest } = all;
+      await office('0901', made.id, { ...rest, event_types: { templateId: made.id, version: null } });
+      await office('0903', other.id, all);
+      await office('0904', made.id, all, NOW);
+
+      // A newer taxonomy: both of the template's live offices are behind on it.
+      await save(made.id, 'activity_taxonomy', platformDefaultPayload('activity_taxonomy'));
+      await http().post(`${base}/${made.id}/publish`).expect(200);
+
+      const res = await http().get(`${base}/${made.id}/offices`).expect(200);
+      expect(res.body.map((o: { code: string }) => o.code)).toEqual(['0901', '0902']);
+      expect(res.body[0]).toMatchObject({
+        code: '0901', branchName: 'Branch 0901',
+        behind: ['activity_taxonomy', 'event_types'], unrecorded: ['activation_checklist'],
+      });
+      expect(res.body[1]).toMatchObject({ code: '0902', behind: ['activity_taxonomy'], unrecorded: [] });
+
+      // Nothing changed in any office: information only.
+      const untouched = await kpms.findOne({ code: '0902' }).lean().exec();
+      expect((untouched!.seededFrom as Record<string, { version: number }>).activity_taxonomy.version).toBe(1);
+    });
+  });
+
   describe('AC-3: archiving a cascade type, or its section, is 409 for every role that may archive', () => {
     beforeEach(async () => { await provisionOffice(wired, FIXTURE_KPM, COMPANY); });
 
@@ -179,7 +332,7 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       for (const code of ['SELL_PRESENTATION', 'SELL_SUBMISSION']) {
         const type = selling.types.find((t) => t.code === code)!;
         const res = await http().delete(`/kpm/settings/activity-types/${type.id}`).expect(409);
-        expect(res.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_RESERVED', details: { codes: [code] } });
+        expect(res.body.error).toMatchObject({ code: 'ACTIVITY_TYPE_BOUND', details: { codes: [code] } });
       }
       const contacted = leads.types.find((t) => t.code === 'LEADS_CONTACTED')!;
       await http().delete(`/kpm/settings/activity-types/${contacted.id}`).expect(409);

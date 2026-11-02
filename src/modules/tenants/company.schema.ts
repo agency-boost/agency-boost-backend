@@ -5,6 +5,14 @@ import { DEFAULT_CURRENCY, DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 
 export type CompanyDocument = HydratedDocument<Company>;
 
+/**
+ * **What a company is** (ADR-0164 §1): an `insurer`, which people register under and offices belong to,
+ * or the one `template` company, the *Template library*, which holds the platform's templates and nothing
+ * else.
+ */
+export const COMPANY_KINDS = ['insurer', 'template'] as const;
+export type CompanyKind = (typeof COMPANY_KINDS)[number];
+
 /** The principal insurer a KPM operates under — Prudential in the prototypes. */
 @Schema({ ...baseSchemaOptions, collection: 'companies' })
 export class Company {
@@ -41,6 +49,17 @@ export class Company {
    */
   @Prop({ type: Boolean, required: true, default: true })
   usesPlatformDefaults!: boolean;
+
+  /**
+   * **An insurer, or the Template library** (ADR-0164 §1). Every company `POST /admin/companies` makes is
+   * an insurer; the one `template` company is made by migration `0037` and by nothing else. Migration
+   * `0036` writes `insurer` on every company that predates the field, so a raw read never meets it absent.
+   *
+   * A `template` company is not an insurer anybody works for: registration and KPM creation refuse it, and
+   * the lists that mean *the insurers* leave it out (`INSURERS_ONLY`, `template-library.ts`).
+   */
+  @Prop({ type: String, enum: COMPANY_KINDS, required: true, default: 'insurer' })
+  kind!: CompanyKind;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

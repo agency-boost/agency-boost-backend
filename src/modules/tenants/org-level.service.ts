@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -6,11 +6,15 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
-import { DEFAULT_ORG_LADDER } from '@/domain/constants';
+import {
+  DEFAULT_ORG_LADDER, roleClassOf, tierOfRung, type LeaderTier, type RoleClass,
+} from '@/domain/constants';
+import { MembershipRepository } from '@/modules/org/membership.repository';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from './company.schema';
 import { Kpm, KpmDocument } from './kpm.schema';
 import { CompanyOrgLevel, CompanyOrgLevelDocument } from './company-org-level.schema';
+import { TENANTS_REFUSALS } from './tenants.messages';
 
 /** One rung, as the console reads it. */
 export interface OrgLevelRow {
@@ -19,6 +23,8 @@ export interface OrgLevelRow {
   code: string;
   label: string;
   displayOrder: number;
+  /** *Senior Leader*, *Associate Leader* or `null` — *Not a leader* (ADR-0156). */
+  leaderTier: LeaderTier | null;
   status: 'active' | 'archived';
   archivedAt: string | null;
 }
@@ -28,12 +34,16 @@ export interface CreateOrgLevelInput {
   code: string;
   label: string;
   displayOrder: number;
+  /** Absent is *Not a leader*: a new rung leads only when the Super Admin says so. */
+  leaderTier?: LeaderTier | null;
 }
 
-/** A rename or a reorder. The code is absent on purpose — see `update`. */
+/** A rename, a reorder, an archive or a tier. The code is absent on purpose — see `update`. */
 export interface UpdateOrgLevelInput {
   label?: string;
   displayOrder?: number;
+  /** `null` is *Not a leader*; absent leaves the tier as it is. */
+  leaderTier?: LeaderTier | null;
   status?: 'active' | 'archived';
 }
 
@@ -52,6 +62,13 @@ export class OrgLevelService {
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /**
+     * Who stands on a rung, for the refusal of a tier change while anybody does (ADR-0156 §5) — and for nothing
+     * else. `@Optional` only because fifteen specs build this service by hand for the ladder reads and never
+     * change a tier; the one write that needs it refuses as a server fault without it, rather than re-classing
+     * people unchecked (`requireHolders`). The application module always provides it.
+     */
+    @Optional() private readonly members?: MembershipRepository,
   ) {}
 
   /**
@@ -83,7 +100,7 @@ export class OrgLevelService {
    * `subject` names what is being scoped, because the same refusal has to read sensibly
    * for a ratio and for an activity category.
    */
-  async checkedRungs(ctx: RequestContext, codes: string[], subject: string): Promise<string[]> {
+  async checkedRungs(ctx: RequestContext, codes: string[], subject: 'ratio' | 'section'): Promise<string[]> {
     if (codes.length === 0) return [];
     const normalised = [...new Set(codes.map((c) => c.trim().toUpperCase()))];
     const ladder = await this.ladderForOffice(ctx);
@@ -92,9 +109,7 @@ export class OrgLevelService {
     if (unknown.length) {
       throw new DomainException(
         ErrorCode.CONFIG_RUNG_UNKNOWN,
-        `${unknown.join(', ')} is not an active rung on your company\u2019s ladder. A `
-          + `${subject} applies to rungs the company promotes people along; the platform `
-          + 'defines those, not the office.',
+        TENANTS_REFUSALS.CONFIG_RUNG_UNKNOWN.notOnTheLadder({ codes: unknown, subject }),
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -113,7 +128,7 @@ export class OrgLevelService {
     if (!can(ctx, permission)) {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
-        'You do not have permission to do that.',
+        TENANTS_REFUSALS.PERM_DENIED.noPermissionForThat,
         HttpStatus.FORBIDDEN,
         { permission },
       );
@@ -127,6 +142,8 @@ export class OrgLevelService {
       code: level.code,
       label: level.label,
       displayOrder: level.displayOrder,
+      // As stored, or — for a row written before the field — as migration 0030 writes it.
+      leaderTier: tierOfRung(level),
       status: level.status,
       archivedAt: level.archivedAt ? level.archivedAt.toISOString() : null,
     };
@@ -161,6 +178,46 @@ export class OrgLevelService {
     return rows.map((r) => r.code);
   }
 
+  /**
+   * **The class each active rung of one company gives its members, by code** (ADR-0156): `senior` → `ab`,
+   * `associate` → `aab`, none → `agent`.
+   *
+   * Unpermissioned for the reason `activeCodesFor` is: the company's own vocabulary, read by the roster import
+   * to count the leaders a file would add before any row is written, without a seat taken on a guess at the
+   * code. A code that is not here is no active rung, and the write that names it is refused on its own.
+   */
+  async classesByCode(companyId: string): Promise<Map<string, RoleClass>> {
+    const rows = await this.levels.find({ companyId, status: 'active', deletedAt: null }).exec();
+    return new Map(rows.map((r) => [r.code, roleClassOf(tierOfRung(r))]));
+  }
+
+  /**
+   * **The rung a placement with no choice of rung lands on** (ADR-0156): an office's Owner on the company's
+   * **Senior Leader** rung — the highest by display order, should there be several — and anybody joining by request,
+   * invite or leader code on its lowest rung that leads nobody. The default ladder answers `AB` and `AGENT`, as the
+   * placements always wrote; a custom ladder answers its own codes, where naming `AB` or `AGENT` would find no rung.
+   * A ladder with no such rung refuses `409 ORG_LEVEL_NOT_ON_LADDER`, naming what is missing.
+   */
+  async entryRungCode(companyId: string, purpose: 'owner' | 'joiner'): Promise<string> {
+    const rows = await this.levels
+      .find({ companyId, status: 'active', deletedAt: null })
+      .sort({ displayOrder: purpose === 'owner' ? -1 : 1 })
+      .exec();
+    const wanted = purpose === 'owner' ? 'senior' : null;
+    const rung = rows.find((r) => tierOfRung(r) === wanted);
+    if (!rung) {
+      throw new DomainException(
+        ErrorCode.ORG_LEVEL_NOT_ON_LADDER,
+        purpose === 'owner'
+          ? TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noOwnerRung
+          : TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noJoinerRung,
+        HttpStatus.CONFLICT,
+        { companyId, purpose },
+      );
+    }
+    return rung.code;
+  }
+
   /** Every company's ladder as one map, for the callers that render several at once. */
   async laddersByCompany(companyIds: string[]): Promise<Map<string, OrgLevelRow[]>> {
     if (companyIds.length === 0) return new Map();
@@ -186,14 +243,46 @@ export class OrgLevelService {
    * demo seed neither duplicates nor throws.
    */
   async seedDefaultLadder(companyId: string): Promise<void> {
-    for (const { code, label, displayOrder } of DEFAULT_ORG_LADDER) {
+    for (const { code, label, displayOrder, leaderTier } of DEFAULT_ORG_LADDER) {
       const existing = await this.levels.findOne({ companyId, code, deletedAt: null }).exec();
       if (existing) continue;
       await this.levels.create({
-        companyId, code, label, displayOrder,
+        companyId, code, label, displayOrder, leaderTier,
         status: 'active', archivedAt: null, deletedAt: null,
       });
     }
+  }
+
+  /**
+   * **A new company's ladder, copied from another company's** (ADR-0164 §4): the Template library's active
+   * rungs, each with its code, label, order and leader tier, written as the new company's own. A copy, never a
+   * link: a later change to either ladder is that company's alone.
+   *
+   * A source with no active rung gives the default ladder instead, because a company without a ladder is one
+   * nobody can join (ADR-0012 §3). No permission check and no audit row, for `seedDefaultLadder`'s reason: it is
+   * part of creating the company, which is audited as one event. Idempotent, a rung already there kept.
+   */
+  async copyLadderFrom(sourceCompanyId: string, companyId: string): Promise<number> {
+    const source = await this.levels
+      .find({ companyId: sourceCompanyId, status: 'active', deletedAt: null })
+      .sort({ displayOrder: 1 })
+      .exec();
+    if (source.length === 0) {
+      await this.seedDefaultLadder(companyId);
+      return 0;
+    }
+    let copied = 0;
+    for (const rung of source) {
+      if (await this.levels.exists({ companyId, code: rung.code, deletedAt: null }).exec()) continue;
+      await this.levels.create({
+        companyId, code: rung.code, label: rung.label, displayOrder: rung.displayOrder,
+        // Written explicitly: a source rung that predates the field reads its tier as migration 0030 gives it.
+        leaderTier: tierOfRung(rung),
+        status: 'active', archivedAt: null, deletedAt: null,
+      });
+      copied += 1;
+    }
+    return copied;
   }
 
   /**
@@ -212,7 +301,7 @@ export class OrgLevelService {
     if (!level) {
       throw new DomainException(
         ErrorCode.ORG_LEVEL_NOT_ON_LADDER,
-        `No active level with the code ${code.toUpperCase()} on this company's ladder.`,
+        TENANTS_REFUSALS.ORG_LEVEL_NOT_ON_LADDER.noLevel({ code: code.toUpperCase() }),
         HttpStatus.CONFLICT,
         { companyId, code: code.toUpperCase() },
       );
@@ -237,8 +326,7 @@ export class OrgLevelService {
     if (clash) {
       throw new DomainException(
         ErrorCode.ORG_LEVEL_CODE_TAKEN,
-        `${company.name} already has a level with the code ${code}` +
-          (clash.status === 'archived' ? ', archived. An archived code is never reused.' : '.'),
+        TENANTS_REFUSALS.ORG_LEVEL_CODE_TAKEN.taken({ company: company.name, code, archived: clash.status === 'archived' }),
         HttpStatus.CONFLICT,
         { companyId: input.companyId, code, status: clash.status },
       );
@@ -249,6 +337,9 @@ export class OrgLevelService {
       code,
       label: input.label.trim(),
       displayOrder: input.displayOrder,
+      // Stored explicitly, `null` included: an absent tier reads as the default ladder's (`tierOfRung`), and a
+      // new rung coded `AB` that the Super Admin did not mark is *Not a leader*, not a guess from its code.
+      leaderTier: input.leaderTier ?? null,
       status: 'active',
       archivedAt: null,
       deletedAt: null,
@@ -258,18 +349,26 @@ export class OrgLevelService {
       action: 'org_level.created',
       targetCollection: 'companyOrgLevels',
       targetId: String(level._id),
-      after: { companyId: level.companyId, code: level.code, label: level.label, displayOrder: level.displayOrder },
+      after: {
+        companyId: level.companyId, code: level.code, label: level.label, displayOrder: level.displayOrder,
+        leaderTier: level.leaderTier ?? null,
+      },
     });
 
     return this.list(ctx, input.companyId);
   }
 
   /**
-   * Rename, reorder, or archive.
+   * Rename, reorder, archive, or set the leader tier.
    *
    * **The code is not updatable, at all.** It is the identity every membership and every
    * history row holds, and invariant 3 says it never changes once published. Renaming is
    * what `label` is for; a genuinely different rung is a new level.
+   *
+   * **The tier is refused while anybody holds the rung** (ADR-0156 §5): `409 ORG_LEVEL_TIER_IN_USE` with the
+   * count, before anything is written. Each member's class was derived from the tier when they were placed, so a
+   * change would leave them holding rights their rung no longer gives — or re-class all of them at once, which
+   * nobody asked for. Move them first, or add a new rung. Setting the tier it already has is no change.
    */
   async update(
     ctx: RequestContext,
@@ -286,8 +385,21 @@ export class OrgLevelService {
       .catch(() => null);
     if (!level) throw new NotFoundException('Org level');
 
-    const before = { label: level.label, displayOrder: level.displayOrder, status: level.status };
+    const tier = tierOfRung(level);
+    const before = { label: level.label, displayOrder: level.displayOrder, leaderTier: tier, status: level.status };
 
+    if (input.leaderTier !== undefined && input.leaderTier !== tier) {
+      const members = await this.requireHolders().countHoldingRungAcrossTenants(ctx, String(level._id));
+      if (members > 0) {
+        throw new DomainException(
+          ErrorCode.ORG_LEVEL_TIER_IN_USE,
+          TENANTS_REFUSALS.ORG_LEVEL_TIER_IN_USE.held({ members, label: level.label }),
+          HttpStatus.CONFLICT,
+          { orgLevelId: String(level._id), code: level.code, members },
+        );
+      }
+      level.leaderTier = input.leaderTier;
+    }
     if (input.label !== undefined) level.label = input.label.trim();
     if (input.displayOrder !== undefined) level.displayOrder = input.displayOrder;
     if (input.status !== undefined && input.status !== level.status) {
@@ -303,9 +415,23 @@ export class OrgLevelService {
       targetCollection: 'companyOrgLevels',
       targetId: String(level._id),
       before,
-      after: { label: level.label, displayOrder: level.displayOrder, status: level.status },
+      after: {
+        label: level.label, displayOrder: level.displayOrder, leaderTier: tierOfRung(level), status: level.status,
+      },
     });
 
     return this.list(ctx, level.companyId);
+  }
+
+  /** The membership repository, or a server fault: never a tier changed without asking who holds the rung. */
+  private requireHolders(): MembershipRepository {
+    if (!this.members) {
+      throw new DomainException(
+        ErrorCode.INTERNAL_ERROR,
+        TENANTS_REFUSALS.INTERNAL_ERROR.ladderCannotCount,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    return this.members;
   }
 }

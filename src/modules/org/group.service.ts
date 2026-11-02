@@ -3,13 +3,20 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import { render } from '@/common/i18n/sentence';
+import { isLeaderClass } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
+import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { GroupDocument } from './group.schema';
+import type { MembershipDocument } from './membership.schema';
 import { GroupRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
+import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+
+const SAY = ORG_REFUSALS;
 
 export interface GroupSummary {
   groupId: string;
@@ -32,17 +39,25 @@ export interface MemberTags {
   membershipId: string;
   fullName: string;
   groupIds: string[];
+  /** The tag as stored. Effective only while `canBeCoreLeader` (ADR-0159 §1). */
   isCoreLeader: boolean;
+  /**
+   * **Their rung is a leader rung** (ADR-0159 §1, ADR-0156): the tag may be set, and has effect. False for an Agent,
+   * whose tag is refused `CORE_LEADER_NOT_A_LEADER` — and for a member tagged and since moved off a leader rung,
+   * whose tag stays and does nothing until they lead again. Sent so the person page offers the box only where the
+   * write would be taken.
+   */
+  canBeCoreLeader: boolean;
 }
 
 /**
  * Groups and the Core Leader tag.
  *
- * **Neither is hierarchy, and neither is access.** A group is a label an office puts on
- * people it wants to organise — a mentoring circle, a task force. Core Leader is a
- * separate label with exactly one consequence, and it arrives in Phase 18: who may
- * co-edit a Strategic Leader Forum minute (`KPM_Owner.html:2842`). Until then it is
- * stored and shown and does nothing, which is the honest state to be in.
+ * **Neither is hierarchy.** A group is a label an office puts on people it wants to organise — a mentoring
+ * circle, a task force — and grants nothing. Core Leader is a separate label, **a leader's** (ADR-0159 §1): set
+ * only on a member whose rung is a leader rung, under `member:tag_core_leader`, and it opens two readings — the
+ * Strategic Leader Forum (Phase 18.1, D-coeditors) and the office's KPM analytics, read-only (ADR-0159 §2). It
+ * widens no scope of the hierarchy: what a Core Leader sees of their own unit is what they saw before.
  *
  * P3-T9 AC-1 is the load-bearing one: **a group never participates in scope
  * resolution.** `visibleTo` reads the graph and nothing else, and there is a test that
@@ -63,7 +78,7 @@ export class GroupService {
     if (!ctx.kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
-        'You are not in an office.',
+        SAY.TENANT_NO_MEMBERSHIP.notInOffice,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -92,10 +107,12 @@ export class GroupService {
       _id: { $in: [...new Set(rows.map((g) => g.ownerMembershipId))] },
     });
     const named = await this.namesFor(owners.map((o) => o.userId));
+    // An owner whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     const byMembership = new Map(
       owners.map((o) => [
         String(o._id),
-        { name: named.get(o.userId) ?? 'Unknown', hasLeft: o.status === 'removed' },
+        { name: named.get(o.userId) ?? unknown, hasLeft: o.status === 'removed' },
       ]),
     );
 
@@ -103,7 +120,7 @@ export class GroupService {
       groupId: String(g._id),
       name: g.name,
       ownerMembershipId: g.ownerMembershipId,
-      ownerName: byMembership.get(g.ownerMembershipId)?.name ?? 'Unknown',
+      ownerName: byMembership.get(g.ownerMembershipId)?.name ?? unknown,
       ownerHasLeft: byMembership.get(g.ownerMembershipId)?.hasLeft ?? true,
       memberCount: counts.get(String(g._id)) ?? 0,
     }));
@@ -199,11 +216,12 @@ export class GroupService {
     const named = await this.namesFor([member.userId]);
     return {
       membershipId,
-      fullName: named.get(member.userId) ?? 'Unknown',
+      fullName: named.get(member.userId) ?? render(ORG_MESSAGES.unknownName, ctx.reader),
       // Only groups that still exist: an archived one stays on the row but is not offered
       // back, so re-saving the panel does not silently re-add it.
       groupIds: member.groupIds ?? [],
       isCoreLeader: member.isCoreLeader ?? false,
+      canBeCoreLeader: isLeaderClass(member.role),
     };
   }
 
@@ -215,6 +233,7 @@ export class GroupService {
     this.requireTenantAdmin(ctx);
     const member = await this.members.findById(ctx, membershipId);
     if (!member) throw new NotFoundException('Membership');
+    this.requireCoreLeaderChange(ctx, member, input.isCoreLeader);
 
     // Every id has to be a live group in **this** office. Without the check, a group id
     // from another tenant would sit on the row unnoticed and count nowhere.
@@ -224,7 +243,7 @@ export class GroupService {
       if (found.length !== wanted.length) {
         throw new DomainException(
           ErrorCode.ORG_GROUP_NOT_FOUND,
-          'One of those groups is not in this office, or has been retired.',
+          SAY.ORG_GROUP_NOT_FOUND.notHere,
           HttpStatus.NOT_FOUND,
           { membershipId },
         );
@@ -257,6 +276,54 @@ export class GroupService {
   }
 
   /**
+   * **Tag or untag one member *Core Leader*, and nothing else** (ADR-0159 §1, P18.8-T5 AC-2, AC-3): the directory
+   * row's control. Their groups are untouched, so the row needs no copy of them to send back. The same refusals as
+   * `tag`, and the same audit entry, with both halves of the tags before and after. Setting what is already set
+   * writes nothing.
+   */
+  async setCoreLeader(ctx: RequestContext, membershipId: string, isCoreLeader: boolean): Promise<MemberTags> {
+    this.requireTenantAdmin(ctx);
+    const member = await this.members.findById(ctx, membershipId);
+    if (!member) throw new NotFoundException('Membership');
+    this.requireCoreLeaderChange(ctx, member, isCoreLeader);
+
+    const before = member.isCoreLeader ?? false;
+    if (before !== isCoreLeader) {
+      const groupIds = member.groupIds ?? [];
+      await this.members.updateById(ctx, membershipId, { $set: { isCoreLeader } });
+      await this.audit.record(ctx, {
+        action: 'member.tagged',
+        targetCollection: 'memberships',
+        targetId: membershipId,
+        targetMembershipId: membershipId,
+        before: { groupIds, isCoreLeader: before },
+        after: { groupIds, isCoreLeader },
+      });
+    }
+    return this.tagsFor(ctx, membershipId);
+  }
+
+  /**
+   * **A change to the Core Leader tag** (ADR-0159 §1): checked against `member:tag_core_leader` — the permission the
+   * matrix names for it, which `member:tag_group` on the route does not imply — and **set only on a leader**:
+   * `400 CORE_LEADER_NOT_A_LEADER` for a member whose rung is not a leader rung. Nothing is asked when the tag is
+   * not changing, so a member tagged and since moved to an Agent's rung can still have their groups saved, the tag
+   * kept and without effect; and untagging them is always taken.
+   */
+  private requireCoreLeaderChange(ctx: RequestContext, member: MembershipDocument, wanted: boolean): void {
+    if (wanted === (member.isCoreLeader ?? false)) return;
+    if (!can(ctx, 'member:tag_core_leader')) throw new PermissionDeniedException('member:tag_core_leader');
+    if (wanted && !isLeaderClass(member.role)) {
+      throw new DomainException(
+        ErrorCode.CORE_LEADER_NOT_A_LEADER,
+        SAY.CORE_LEADER_NOT_A_LEADER.leadersOnly,
+        HttpStatus.BAD_REQUEST,
+        { membershipId: String(member._id), role: member.role },
+      );
+    }
+  }
+
+  /**
    * One live group of this office.
    *
    * A malformed id is "not here", not a 500 — the repository already answers `null` for an
@@ -273,7 +340,7 @@ export class GroupService {
     if (!owner || owner.status === 'removed') {
       throw new DomainException(
         ErrorCode.ORG_GROUP_OWNER_NOT_IN_KPM,
-        'Give the group an owner who is in this office.',
+        SAY.ORG_GROUP_OWNER_NOT_IN_KPM.ownerInOffice,
         HttpStatus.UNPROCESSABLE_ENTITY,
         { ownerMembershipId: membershipId },
       );
@@ -289,7 +356,7 @@ export class GroupService {
     if (clash && String(clash._id) !== exceptId) {
       throw new DomainException(
         ErrorCode.ORG_GROUP_NAME_TAKEN,
-        `This office already has a group called “${name}”.`,
+        SAY.ORG_GROUP_NAME_TAKEN.taken({ name }),
         HttpStatus.CONFLICT,
         { name },
       );

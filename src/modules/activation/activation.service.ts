@@ -1,11 +1,14 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { InvalidRequestException } from '@/common/errors/domain.exception';
+import type { Reader } from '@/common/i18n/reader';
+import { joinSentences, render } from '@/common/i18n/sentence';
 import {
-  ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK, ACTIVATION_TRAINING_LINK_PREFIX,
-  type ActivationFeatureLink,
+  ACTIVATION_DATA_LINK_KINDS, ACTIVATION_LINK_KINDS, ACTIVATION_TRAINING_LINK, ACTIVATION_TRAINING_LINK_PREFIX,
+  effectiveAutoLink, isActivationDataLink, type ActivationFeatureLink, type ActivationRecordForm,
 } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -19,6 +22,9 @@ import {
   activationSeedAspects, activationTrainingLinks, defaultActivationChecklist,
 } from './activation-payload';
 import { ActivationTemplateRepository } from './activation.repository';
+import { ACTIVATION_REFUSALS, completesWhenOf, dataLinkLabelOf } from './activation.messages';
+
+const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
 /** A module a training link names: its title, the category its page is under, and whether that page answers. */
 interface LinkedModule {
@@ -60,6 +66,11 @@ export interface ActivationLinkView {
    * never when**: the phase that makes it live is not served (P10.1-T2 AC-13, ADR-0062 §3).
    */
   live: boolean;
+  /**
+   * **The form a hand tick opens** (P18.96-T4 AC-3): `closing` — *Which case?* — or `one_on_one` — *Log 1:1* — for
+   * a data-backed item, which is ticked by hand only with its record; `null` for every other link.
+   */
+  form: ActivationRecordForm | null;
 }
 
 export interface ActivationItemView {
@@ -144,7 +155,7 @@ export class ActivationService {
      * would be the fallback the client reported. Its Owner authors the first aspect from nothing.
      */
     if (!published && !draft) {
-      return { published: null, draft: office.startedFrom ? null : this.startingPoint(), windowDays };
+      return { published: null, draft: office.startedFrom ? null : this.startingPoint(ctx.reader), windowDays };
     }
 
     return {
@@ -165,7 +176,7 @@ export class ActivationService {
   }
 
   /** The seed, as an unsaved draft. Not written: saving it is the Owner's act, not a read's. */
-  private startingPoint(): ActivationVersionView {
+  private startingPoint(reader: Reader): ActivationVersionView {
     return {
       id: '',
       version: 1,
@@ -181,7 +192,7 @@ export class ActivationService {
           displayOrder: item.displayOrder,
           autoLink: item.autoLink,
           // The seed carries no training link, so no module title has to be resolved.
-          link: this.linkView(item.autoLink, new Map()),
+          link: this.linkView(item.autoLink, new Map(), reader),
         })),
       })),
     };
@@ -248,12 +259,7 @@ export class ActivationService {
    */
   async publish(ctx: RequestContext): Promise<ActivationChecklistView> {
     const draft = await this.draftOf(ctx);
-    if (!draft) {
-      throw new BadRequestException(
-        'There is nothing to publish. Change something first — a published version is immutable, '
-          + 'because every hire records which one they started on.',
-      );
-    }
+    if (!draft) throw new InvalidRequestException(SAY.nothingToPublish);
 
     /*
      * **An unchanged draft is refused** (P13-T1 AC-2; `functional/activation.md`, *Publishing*): a version
@@ -262,10 +268,7 @@ export class ActivationService {
      */
     const current = await this.newestPublished(ctx);
     if (current && sameChecklist(current.aspects, draft.aspects)) {
-      throw new BadRequestException(
-        `The draft is the same as version ${current.version}, so there is nothing to publish. Change `
-          + 'something first — every hire records the version they started on.',
-      );
+      throw new InvalidRequestException(SAY.sameAsPublished({ version: current.version }));
     }
 
     // Again at publish, not only at save: a module can be archived or unpublished between the two,
@@ -323,18 +326,14 @@ export class ActivationService {
 
     const problems = wanted.map((code) => {
       const module = modules.get(code);
-      if (!module) return `${code} is not a training module in this office.`;
-      if (module.status === 'archived') return `${code} is archived, so no agent is offered it.`;
-      if (module.publishState !== 'published') {
-        return `${code} is a draft, so no agent is offered it. Publish the module first.`;
-      }
+      if (!module) return SAY.moduleMissing({ code });
+      if (module.status === 'archived') return SAY.moduleArchived({ code });
+      if (module.publishState !== 'published') return SAY.moduleDraft({ code });
       return null;
-    }).filter((problem): problem is string => problem !== null);
+    }).filter((problem) => problem !== null);
 
     if (problems.length > 0) {
-      throw new BadRequestException(
-        `A checklist item is linked to a training module it cannot wait for. ${problems.join(' ')}`,
-      );
+      throw new InvalidRequestException(joinSentences([SAY.unwaitableModule, ...problems], ' '));
     }
   }
 
@@ -357,13 +356,26 @@ export class ActivationService {
           displayOrder: aspect.displayOrder,
           items: [...aspect.items]
             .sort((a, b) => a.displayOrder - b.displayOrder)
-            .map((item) => ({
-              code: item.code,
-              label: item.label,
-              displayOrder: item.displayOrder,
-              autoLink: item.autoLink,
-              link: this.linkView(item.autoLink, titles),
-            })),
+            .map((item) => {
+              /*
+               * P18.96-T4 AC-2 (ADR-0171 §3): a field reader's item reads the kind its code is bound to where it
+               * stores none — *Close first case independently* and its two siblings complete from the office's
+               * sales and coaching records, and no published version is edited for it. The settings read keeps
+               * what is stored in `autoLink`: it is what the Owner edits and saves back.
+               *
+               * P18.96-T7 G2: **its `link` is what completes the item, in every read** — the settings' too, so the
+               * Owner's screen draws the three as data-backed (*From Sales data*) rather than *No link (manual)*,
+               * while the stored `autoLink` it saves back stays `null`.
+               */
+              const bound = effectiveAutoLink(item.code, item.autoLink);
+              return {
+                code: item.code,
+                label: item.label,
+                displayOrder: item.displayOrder,
+                autoLink: source === 'settings' ? item.autoLink : bound,
+                link: this.linkView(bound, titles, ctx.reader),
+              };
+            }),
         })),
     };
   }
@@ -398,7 +410,12 @@ export class ActivationService {
     return offered;
   }
 
-  private linkView(link: string | null, titles: Map<string, LinkedModule>): ActivationLinkView | null {
+  /**
+   * A link, resolved — **its words written for the reader** (P18.98-T5 AC-4): what completes it, and a data kind's
+   * source-line label. A feature link's label is a page's name and a training link's the module's own title, the same
+   * in both languages.
+   */
+  private linkView(link: string | null, titles: Map<string, LinkedModule>, reader: Reader): ActivationLinkView | null {
     if (link === null) return null;
 
     const moduleCode = trainingLinkModuleCode(link);
@@ -406,6 +423,8 @@ export class ActivationService {
       const module = titles.get(moduleCode);
       return {
         ...ACTIVATION_TRAINING_LINK,
+        completesWhen: render(completesWhenOf(link), reader),
+        form: null,
         kind: link,
         // The module's own title, or its code where the module has since been removed from view.
         label: module?.title ?? moduleCode,
@@ -416,8 +435,17 @@ export class ActivationService {
       };
     }
 
+    // P18.96-T4: a data kind resolves from its own registry, with no route — its way in is its own form.
+    if (isActivationDataLink(link)) {
+      return {
+        ...ACTIVATION_DATA_LINK_KINDS[link],
+        label: render(dataLinkLabelOf(link), reader),
+        completesWhen: render(completesWhenOf(link), reader),
+        kind: link,
+      };
+    }
     const kind = ACTIVATION_LINK_KINDS[link as ActivationFeatureLink];
-    return kind ? { ...kind, kind: link } : null;
+    return kind ? { ...kind, completesWhen: render(completesWhenOf(link), reader), form: null, kind: link } : null;
   }
 }
 

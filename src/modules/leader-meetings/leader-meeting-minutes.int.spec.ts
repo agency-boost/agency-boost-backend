@@ -9,7 +9,9 @@ import { configModule } from '../../../test/config-module';
 import { session } from '../../../test/http-permissions';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_B, type ForumOffice } from '../../../test/forum-office';
+import { IN_INDONESIAN, indonesian, indonesianAll } from '../../../test/i18n';
 import { LeaderMeetingSchema } from './leader-meeting.schema';
+import { LEADER_MEETINGS_MESSAGES as SAY } from './leader-meetings.messages';
 
 /**
  * **The minutes, written field by field** (P18.1-T2 AC-5 to AC-8, P18.1-T3 AC-5): the agenda, the tracker and the
@@ -48,18 +50,20 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
   afterEach(() => (wired.clock as FixedClock).set(ROSTER_NOW));
 
   describe('P18.1-T2 AC-5, ADR-0130 §3 the agenda a new meeting starts from', () => {
-    it('P18.1-T2 AC-5 an office’s first: the prototype’s ten, PICs empty, the month before the meeting’s; no rows, nothing written', async () => {
+    it('P18.1-T2 AC-5, P18.97-T2 AC-4 an office’s first: the prototype’s ten, PICs empty, the meeting’s own month; no rows, nothing written', async () => {
+      // Made by a context with no reader: nobody's choice, so the stored words are Bahasa Indonesia since the default
+      // went live (P18.98-T4's exit; P18.98-T5 AC-6) — the catalogue's, in the prototype's order.
       const first = await office.forum.create(office.ownerOfB(), { title: 'Strategic Check-in — #1', date: '2026-10-13' });
       expect(first.number).toBe(1);
       const view = await office.forum.read(office.ownerOfB(), first.id);
-      expect(view.agenda.preparation.map((i) => i.text)).toEqual([
-        'Compile follow-ups & commitments from prior session', 'Prepare September performance data', 'Review scorecard, draft talking points',
-      ]);
-      expect(view.agenda.during.map((i) => i.text)).toEqual([
-        'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
-        'Strategic priorities (Agency)', 'Summarize next steps & assign owners',
-      ]);
-      expect(view.agenda.post.map((i) => i.text)).toEqual(['Document outcomes into template', 'Note feedback for RBDO/BDO']);
+      expect(view.agenda.preparation.map((i) => i.text)).toEqual(indonesianAll([
+        SAY.compileFollowUps, SAY.preparePerformanceData({ month: 10 }), SAY.reviewScorecard,
+      ]));
+      expect(view.agenda.preparation[1].text).toBe('Siapkan data kinerja Oktober');
+      expect(view.agenda.during.map((i) => i.text)).toEqual(indonesianAll([
+        SAY.processUpdate, SAY.performanceReview, SAY.prioritiesCorporate, SAY.prioritiesAgency, SAY.summarizeNextSteps,
+      ]));
+      expect(view.agenda.post.map((i) => i.text)).toEqual(indonesianAll([SAY.documentOutcomes, SAY.noteFeedback]));
       const all = [...view.agenda.preparation, ...view.agenda.during, ...view.agenda.post];
       expect(all).toHaveLength(10);
       expect(all.every((i) => i.pic === '' && i.done === false && i.version === 1)).toBe(true);
@@ -80,6 +84,27 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       expect(copied.agenda.during[0]).toMatchObject({ text: during.text, pic: 'Wilson', done: false, version: 1 });
       expect(copied.agenda.during[0].id).not.toBe(during.id);
       expect([copied.actionItems, copied.writtenIn]).toEqual([[], false]);
+    });
+
+    it('P18.97-T2 AC-4 every new meeting re-dates the month item, a copied agenda included — across a year’s edge — and copies the rest as typed', async () => {
+      as('OWNER');
+      const december = (await http().post('/leader-meetings').send({ title: 'December', date: '2026-12-29' }).expect(201)).body;
+      const decemberAgenda = (await read(december.id)).agenda;
+      // The agenda it copies was first made with no reader, so it is stored in Bahasa Indonesia (the default is live),
+      // and the month item is re-dated in the language it was written in.
+      expect(decemberAgenda.preparation[1].text).toBe(indonesian(SAY.preparePerformanceData({ month: 12 })));
+      // A leader's own wording of another item travels as typed.
+      const review = decemberAgenda.preparation[2];
+      await http().patch(`/leader-meetings/${december.id}/agenda-items/${review.id}`).send({ text: 'Review the December scorecard', version: review.version }).expect(200);
+      const january = (await http().post('/leader-meetings').send({ title: 'January', date: '2027-01-12' }).expect(201)).body;
+      const copied = (await read(january.id)).agenda;
+      expect(copied.preparation.map((i: { text: string }) => i.text)).toEqual([
+        decemberAgenda.preparation[0].text, indonesian(SAY.preparePerformanceData({ month: 1 })), 'Review the December scorecard',
+      ]);
+      expect(copied.during.map((i: { text: string }) => i.text)).toEqual(decemberAgenda.during.map((i: { text: string }) => i.text));
+      await db().collection('leaderMeetings').updateMany(
+        { _id: { $in: [december.id, january.id].map((id) => new mongoose.Types.ObjectId(id)) } }, { $set: { deletedAt: new Date() } },
+      );
     });
   });
 
@@ -115,13 +140,25 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       });
     });
 
-    it('P18.1-T2 AC-5, AC-9 refused 400: done outside During, two fields, none, an unknown field, a text or PIC too long, a null', async () => {
+    it('UI-110 every agenda item can be ticked, in Persiapan and Setelah rapat as in Saat rapat, audited as any field', async () => {
       as('OWNER');
       const view = await read(id);
       const prep = view.agenda.preparation[0];
+      const post = view.agenda.post[0];
+      expect((await http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ done: true, version: prep.version }).expect(200)).body)
+        .toMatchObject({ id: prep.id, done: true, version: prep.version + 1 });
+      expect((await http().patch(`/leader-meetings/${id}/agenda-items/${post.id}`).send({ done: true, version: post.version }).expect(200)).body)
+        .toMatchObject({ id: post.id, done: true });
+      const after = await read(id);
+      expect(after.agenda.preparation[0].done).toBe(true);
+      expect(after.agenda.post[0].done).toBe(true);
+    });
+
+    it('P18.1-T2 AC-5, AC-9 refused 400: two fields, none, an unknown field, a text or PIC too long, a null', async () => {
+      as('OWNER');
+      const view = await read(id);
       const during = view.agenda.during[1];
       for (const [itemId, body] of [
-        [prep.id, { done: true, version: prep.version }],
         [during.id, { text: 'a', pic: 'b', version: during.version }],
         [during.id, { version: during.version }],
         [during.id, { owner: 'x', version: during.version }],
@@ -266,28 +303,83 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
     });
   });
 
-  describe('P18.1-T2 AC-4 the Monthly Target cells', () => {
-    it('P18.1-T2 AC-4 a cell never typed is version 0; a write lands at 1; a stale one is 409; blocked and unknown rows 400', async () => {
+  describe('P18.97-T1 AC-10 the Monthly Target cells, typed as a rate per unit (ADR-0175 §4)', () => {
+    /** Rp 1 *miliar* in sen: *APE (Rp M)*'s rate, typed in the row's unit, travels in minor units. */
+    const MILIAR = 1_000_000_000 * 100;
+
+    it('P18.97-T1 AC-10 a rate × the meeting’s # of units; never typed is version 0; a stale write 409; cleared with null; audited', async () => {
       const { id } = await make('Targets', '2026-10-05');
       as('ADMIN');
-      const saved = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: ' 22 (3 @ unit) ', version: 0 }).expect(200)).body;
-      expect(saved).toEqual({ value: '22 (3 @ unit)', version: 1 });
+      const units = (await read(id)).scorecard.chips.units;
+      expect(units).toBeGreaterThan(0);
+      const saved = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: 3, version: 0 }).expect(200)).body;
+      expect(saved).toEqual({ rate: 3, value: 3 * units, typed: null, version: 1 });
       const row = (await read(id)).scorecard.rows.find((r: { key: string }) => r.key === 'avg_monthly_aa');
-      expect(row.monthlyTarget).toEqual({ value: '22 (3 @ unit)', version: 1 });
-      expect((await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: 'TBD', version: 0 }).expect(409)).body.error)
+      expect(row.monthlyTarget).toEqual(saved);
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: 1, version: 0 }).expect(409)).body.error)
         .toMatchObject({ code: 'VERSION_CONFLICT', details: { expectedVersion: 0, actualVersion: 1 } });
-      await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ value: 'TBD', version: 1 }).expect(200);
-      for (const [row, value] of [
-        ['producing_agents', '9'], ['average_case_size', '9'], ['new_agent_3m', '9'], ['agents', '9'], ['ape', 'x'.repeat(LEADER_MEETING_LIMITS.targetMax + 1)],
+      // A count's rate to two places; APE's in whole sen — Rp 0,15 M a unit.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 1.25, version: 0 }).expect(200)).body.value)
+        .toBe(Math.round(1.25 * units * 100) / 100);
+      const ape = (await http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 0.15 * 1e9 * 100, version: 0 }).expect(200)).body;
+      expect(ape).toEqual({ rate: 15 * MILIAR / 100, value: (15 * MILIAR / 100) * units, typed: null, version: 1 });
+      // Cleared: no rate — *APE* reads *TBD* and every other row is blank on the screen.
+      const cleared = (await http().put(`/leader-meetings/${id}/monthly-targets/avg_monthly_aa`).send({ rate: null, version: 1 }).expect(200)).body;
+      expect(cleared).toEqual({ rate: null, value: null, typed: null, version: 2 });
+      const entries = await auditOf(id, 'leader_meeting.monthly_target_saved');
+      expect(entries.filter((e) => e.after.row === 'avg_monthly_aa').map((e) => [e.before, e.after])).toEqual([
+        [{ row: 'avg_monthly_aa', rate: null, typed: null, version: 0 }, { row: 'avg_monthly_aa', rate: 3, typed: null, version: 1 }],
+        [{ row: 'avg_monthly_aa', rate: 3, typed: null, version: 1 }, { row: 'avg_monthly_aa', rate: null, typed: null, version: 2 }],
+      ]);
+    });
+
+    it('P18.97-T1 AC-10 a rate that is not a number is refused 400 VALIDATION_FAILED — a text, the old free text included — and nothing is written', async () => {
+      const { id } = await make('Refused targets', '2026-10-06');
+      as('OWNER');
+      const before = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) });
+      for (const body of [
+        { rate: 'abc', version: 0 }, { rate: '5', version: 0 }, { rate: '1,5', version: 0 }, { rate: true, version: 0 }, { rate: {}, version: 0 },
+        { rate: [1], version: 0 }, { version: 0 }, { value: '8 (1 @ unit)', version: 0 }, { rate: 1, value: 'TBD', version: 0 },
+        // From 0, to two places.
+        { rate: -1, version: 0 }, { rate: 1.234, version: 0 },
       ]) {
-        const res = await http().put(`/leader-meetings/${id}/monthly-targets/${row}`).send({ value, version: 0 });
+        const res = await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send(body);
+        expect([JSON.stringify(body), res.status, res.body.error.code]).toEqual([JSON.stringify(body), 400, 'VALIDATION_FAILED']);
+      }
+      // APE's is whole sen: a fraction of one is refused.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 1.5, version: 0 }).expect(400)).body.error.code)
+        .toBe('VALIDATION_FAILED');
+      // A row that takes no target — New AA's among them since it left the table (AC-6) — or does not exist.
+      for (const row of ['new_aa', 'producing_agents', 'new_agent_3m', 'cases_per_producing_agent', 'average_case_size', 'agents']) {
+        const res = await http().put(`/leader-meetings/${id}/monthly-targets/${row}`).send({ rate: 1, version: 0 });
         expect([row, res.status, res.body.error.code]).toEqual([row, 400, 'VALIDATION_FAILED']);
       }
-      const entries = await auditOf(id, 'leader_meeting.monthly_target_saved');
-      expect(entries.map((e) => [e.before, e.after])).toEqual([
-        [{ row: 'avg_monthly_aa', value: '', version: 0 }, { row: 'avg_monthly_aa', value: '22 (3 @ unit)', version: 1 }],
-        [{ row: 'avg_monthly_aa', value: '22 (3 @ unit)', version: 1 }, { row: 'avg_monthly_aa', value: 'TBD', version: 2 }],
-      ]);
+      expect(await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) })).toEqual(before);
+      expect(await auditOf(id, 'leader_meeting.monthly_target_saved')).toEqual([]);
+    });
+
+    it('P18.97-T1 AC-10 an editor alone types one: the Owner, an Admin and a Core Leader yes; an untagged member 404, a read-only session 403, another office 404', async () => {
+      const { id } = await make('Who types targets', '2026-10-07');
+      const write = async (version: number) => http().put(`/leader-meetings/${id}/monthly-targets/case_submission`).send({ rate: 2, version });
+      let version = 0;
+      for (const who of ['OWNER', 'ADMIN', 'AGUS', 'SARI'] as const) {
+        as(who);
+        const res = await write(version);
+        expect([who, res.status, res.body.version]).toEqual([who, 200, version + 1]);
+        version += 1;
+      }
+      const stored = async () => (await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) }))!.monthlyTargets;
+      const kept = await stored();
+      for (const who of ['RINA', 'DEWI', 'PEER_AB'] as const) {
+        as(who);
+        const res = await write(version);
+        expect([who, res.status, res.body.error.code]).toEqual([who, 404, 'NOT_FOUND']);
+      }
+      session.current = office.supported('OWNER');
+      expect([(await write(version)).status]).toEqual([403]);
+      session.current = office.ownerOfB();
+      expect((await write(version)).body.error.code).toBe('NOT_FOUND');
+      expect(await stored()).toEqual(kept);
     });
   });
 
@@ -304,14 +396,16 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       await http().patch(`/leader-meetings/${meeting.id}/agenda-items/${item.id}`).send({ pic: bold, version: 2 }).expect(200);
       const row = (await http().post(`/leader-meetings/${meeting.id}/action-items`).expect(201)).body;
       await http().patch(`/leader-meetings/${meeting.id}/action-items/${row.id}`).send({ action: script, version: 1 }).expect(200);
-      await http().put(`/leader-meetings/${meeting.id}/monthly-targets/ape`).send({ value: bold, version: 0 }).expect(200);
+      // A target is a number since P18.97-T1 (AC-10): markup is refused as any text is, and nothing is stored.
+      expect((await http().put(`/leader-meetings/${meeting.id}/monthly-targets/ape`).send({ rate: bold, version: 0 }).expect(400)).body.error.code)
+        .toBe('VALIDATION_FAILED');
       const after = await read(meeting.id);
       expect(after.title).toBe(`${bold} ${script}`);
       expect(after.agenda.during[0]).toMatchObject({ text: script, pic: bold });
       expect(after.actionItems[0].action).toBe(script);
-      expect(after.scorecard.rows[0].monthlyTarget.value).toBe(bold);
+      expect(after.scorecard.rows[0].monthlyTarget).toEqual({ rate: null, value: null, typed: null, version: 0 });
       const stored = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(meeting.id) });
-      expect([stored!.title, stored!.agenda.during[0].text, stored!.monthlyTargets.ape.value]).toEqual([`${bold} ${script}`, script, bold]);
+      expect([stored!.title, stored!.agenda.during[0].text, stored!.monthlyTargets ?? {}]).toEqual([`${bold} ${script}`, script, {}]);
     });
   });
 
@@ -325,13 +419,54 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       as('SARI');
       const saved = (await http().patch(`/leader-meetings/${past.id}/action-items/${row.id}`).send({ status: 'implemented', version: 1 }).expect(200)).body;
       expect(saved.status).toBe('implemented');
-      await http().put(`/leader-meetings/${past.id}/monthly-targets/flc`).send({ value: '8 (1 @ unit)', version: 0 }).expect(200);
+      await http().put(`/leader-meetings/${past.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
       const [entry] = await auditOf(past.id, 'leader_meeting.action_item_saved');
       expect(entry).toMatchObject({ before: { item: { status: 'not_planned' } }, after: { item: { status: 'implemented' } }, actorMembershipId: office.id.SARI });
       expect(LeaderMeetingSchema.path('lockedAt')).toBeUndefined();
       const stored = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(past.id) });
       expect(Object.keys(stored!)).not.toEqual(expect.arrayContaining(['lockedAt']));
       for (const struck of ['attendees', 'notes', 'coeditorIds', 'lockedAt']) expect(LeaderMeetingSchema.path(struck)).toBeUndefined();
+    });
+  });
+
+  /** **The minutes' refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
+  describe('P18.98-T5 AC-7 the minutes’ refusals in Indonesian', () => {
+    it('P18.98-T5 AC-7 one field per write, a row with no target, ape in sen, a rate that is no number', async () => {
+      const { id } = await make('Refused in Indonesian', '2026-10-06');
+      as('OWNER');
+      const view = await read(id);
+      const [prep] = view.agenda.preparation;
+      const say = async (call: request.Test, status: number) => (await call.set(...IN_INDONESIAN).expect(status)).body.error;
+
+      expect(await say(http().patch(`/leader-meetings/${id}/agenda-items/${prep.id}`).send({ text: 'a', pic: 'b', version: 1 }), 400))
+        .toMatchObject({ code: 'VALIDATION_FAILED', message: 'Kirim tepat satu dari text, pic, done, beserta versi yang Anda baca.' });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/new_aa`).send({ rate: 1, version: 0 }), 400))
+        .toMatchObject({ message: expect.stringMatching(/^row harus salah satu dari ape, .+: baris lain tidak memiliki Monthly Target\.$/) });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 1.5, version: 0 }), 400))
+        .toMatchObject({ message: 'rate untuk ape harus berupa sen IDR yang bulat.' });
+      expect(await say(http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 'TBD', version: 0 }), 400))
+        .toMatchObject({ details: { violations: expect.arrayContaining(['rate harus berupa angka, atau null untuk mengosongkannya']) } });
+      // The English, as before.
+      expect((await http().put(`/leader-meetings/${id}/monthly-targets/flc`).send({ rate: 'TBD', version: 0 }).expect(400)).body.error.details.violations)
+        .toEqual(expect.arrayContaining(['rate must be a number, or null to clear it']));
+    });
+
+    it('P18.98-T5 AC-7 the tracker’s rows changed since, and an item no longer in the meeting: 409, in Indonesian', async () => {
+      const { id } = await make('Conflicts in Indonesian', '2026-10-07');
+      as('OWNER');
+      const row = (await http().post(`/leader-meetings/${id}/action-items`).expect(201)).body;
+      const moved = await http().put(`/leader-meetings/${id}/action-items/order`).set(...IN_INDONESIAN).send({ itemIds: [] }).expect(409);
+      expect(moved.body.error).toMatchObject({
+        code: 'VERSION_CONFLICT', message: 'Baris di Pelacak tindakan berubah sejak Anda membukanya. Muat ulang, lalu coba lagi.',
+        details: { itemIds: [row.id] },
+      });
+      await http().delete(`/leader-meetings/${id}/action-items/${row.id}`).query({ version: row.version }).expect(204);
+      const gone = await http().patch(`/leader-meetings/${id}/action-items/${row.id}`).set(...IN_INDONESIAN)
+        .send({ pic: 'Sari', version: row.version }).expect(409);
+      expect(gone.body.error).toMatchObject({
+        code: 'VERSION_CONFLICT', message: 'Item ini sudah tidak ada di rapat. Muat ulang untuk melihat isinya sekarang.',
+        details: { expectedVersion: row.version, actualVersion: null },
+      });
     });
   });
 

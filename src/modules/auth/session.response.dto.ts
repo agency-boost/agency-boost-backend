@@ -1,5 +1,6 @@
 import type { SessionView } from './auth.service';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LANGUAGES, type Language } from '@/domain/constants';
 
 /**
  * The shapes `AuthController` builds itself rather than handing back from a service, and
@@ -33,6 +34,24 @@ export class ImpersonationSessionDto {
 
   @ApiProperty({ type: String, format: 'date-time', description: 'Time-boxed. The session cannot outlive this.' })
   expiresAt!: Date;
+
+  @ApiProperty({ type: String, description: 'What a second Super Admin approves writing for.' })
+  sessionId!: string;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'Always `true` at the start. A setup session writes only what `writeScope` lists.',
+  })
+  readOnly!: boolean;
+
+  @ApiProperty({ type: String, enum: ['support', 'setup'] })
+  purpose!: 'support' | 'setup';
+
+  @ApiProperty({
+    type: String, isArray: true,
+    description: 'The permissions this session may write besides reading. Empty for a support session.',
+  })
+  writeScope!: string[];
 }
 
 /**
@@ -47,6 +66,15 @@ export class StatusAckDto {
     enum: ['verification_sent', 'verified', 'accepted', 'reset', 'changed', 'ended'],
   })
   status!: string;
+}
+
+/** `POST /auth/verify-email-change` (UI V1, UI-111; ADR-0181): the change applied, and the address it moved to. */
+export class EmailChangedDto {
+  @ApiProperty({ type: String, enum: ['changed'] })
+  status!: string;
+
+  @ApiProperty({ type: String, example: 'agus.baru@kpm0417.test' })
+  email!: string;
 }
 
 /** The identity half of `GET /auth/me`. */
@@ -66,11 +94,64 @@ export class MeUserDto {
   @ApiProperty({ type: String, nullable: true })
   pronoun!: string | null;
 
+  /* UI V1 (2026-10-30; UI-081, D-22): the WhatsApp number the person saved, or one an invite or their leader gave them. */
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281211002200',
+    description: 'Your WhatsApp number, or `null`. Saved as `+62…` since UI V1; one recorded before then reads as it was '
+      + 'typed. Set with `PATCH /auth/me`.',
+  })
+  phone!: string | null;
+
+  /* UI V1 (2026-10-30; UI-111): the photo *Profil saya* saved, as a link every avatar of theirs draws. */
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Your profile photo, as a signed link valid 12 hours (`AVATAR.URL_TTL_SECONDS`; the bucket is private), '
+      + 'or `null` for none — the avatar then draws `initials`. Set with `PUT /auth/me/avatar`, cleared with `DELETE`.',
+  })
+  avatarUrl!: string | null;
+
   @ApiProperty({ type: String, description: 'Derived server-side, so every avatar agrees.' })
   initials!: string;
 
   @ApiProperty({ type: String, enum: ['super_admin', 'none'] })
   platformRole!: string;
+
+  /*
+   * What a person records (ADR-0158, P18.8-T4): `null` for anybody who has not, which the screens read as
+   * *Not recorded*. Theirs to set on `PATCH /auth/me`.
+   */
+  @ApiProperty({ type: String, nullable: true, example: '1990-03-15', description: '`YYYY-MM-DD`.' })
+  dateOfBirth!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, enum: ['male', 'female'] })
+  gender!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: '2021-07', description: '`YYYY-MM`: the month they joined their insurer.' })
+  companyJoinMonth!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, enum: ['full_time', 'part_time'],
+    description: 'Their membership\'s, in the office this session is in; until they have one, what they registered with.',
+  })
+  workStatus!: string | null;
+
+  /*
+   * The language they read AgencyBoost in (ADR-0179 §2, P18.98-T2): set with `PATCH /auth/me`. Never `null` here —
+   * `users.locale` is, for somebody who has chosen nothing, and that reads Bahasa Indonesia.
+   */
+  @ApiProperty({
+    type: String, enum: LANGUAGES, example: 'id',
+    description: 'The language in force: the one this account chose, or `id`, Bahasa Indonesia, for one that has '
+      + 'chosen none (`localeChosen` false). `id` or `en`; set with `PATCH /auth/me`.',
+  })
+  locale!: Language;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'Whether this account has chosen a language. A browser follows `locale` only when it has: an account '
+      + 'with none keeps the language the browser already reads in (the `ab_lang` cookie) and saves nothing.',
+  })
+  localeChosen!: boolean;
 }
 
 /** The participation half. Null for somebody who has signed in but joined no office yet. */
@@ -110,6 +191,35 @@ export class MeMembershipDto {
 
   @ApiProperty({ type: Number, description: 'What makes somebody a leader (OD-23) — the rung does not.' })
   directCount!: number;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'A Core Leader now (ADR-0159 §4): tagged *Core Leader* **and** on a leader rung, read on every request. The '
+      + 'field shell\'s *Core leader* menu and the profile line read it; the forum and KPM analytics refuse regardless.',
+  })
+  isCoreLeader!: boolean;
+
+  @ApiProperty({
+    type: String, isArray: true, example: ['Top Producers 2026'],
+    description: 'The live groups this member is tagged with, A to Z — the profile line\'s (ADR-0159 §5). Empty for none.',
+  })
+  groups!: string[];
+
+  @ApiProperty({
+    type: () => MeOfficeDto, nullable: true,
+    description: 'The office, as the profile line names it: *0417 · Cempaka Putih* (ADR-0159 §5).',
+  })
+  office!: MeOfficeDto | null;
+}
+
+/** The office on the profile line (ADR-0159 §5): its code and its branch. */
+export class MeOfficeDto {
+  @ApiProperty({ type: String, example: '0417' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'Cempaka Putih' })
+  branch!: string;
 }
 
 /** The reader's own activation, as the *New agent* section needs it. */
@@ -142,9 +252,26 @@ export class MeDto {
     type: Boolean,
     description:
       'A support session that may look and not touch (§3.13). False outside a session, '
-      + 'and false inside one a second Super Admin has approved to write.',
+      + 'and false inside one a second Super Admin has approved to write. True in a setup '
+      + 'session, which writes only what `impersonationWriteScope` lists.',
   })
   impersonationReadOnly!: boolean;
+
+  @ApiProperty({
+    type: String, enum: ['support', 'setup'], nullable: true,
+    description:
+      'Why the session was started: `support` to look, `setup` to configure the office as its Owner or '
+      + 'Admin would. `null` outside a session.',
+  })
+  impersonationPurpose!: 'support' | 'setup' | null;
+
+  @ApiProperty({
+    type: String, isArray: true,
+    description:
+      'The permissions a setup session may write besides reading: the office\'s settings, its people import '
+      + 'and its production file. Empty outside a session and in a support session.',
+  })
+  impersonationWriteScope!: string[];
 
   @ApiProperty({ type: String, nullable: true, description: 'The real Super Admin, when this is a support session.' })
   impersonatedBy!: string | null;
@@ -167,7 +294,7 @@ export class MeDto {
 
   @ApiProperty({
     type: Boolean,
-    description: 'You coach somebody whose activation is open: the *New hires* menu item.',
+    description: 'You coach a new hire who joined in the last twelve months: the *New hires* menu item.',
   })
   newHires!: boolean;
 }

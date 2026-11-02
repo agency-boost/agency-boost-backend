@@ -6,6 +6,7 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { rateOver } from '@/domain/metrics/rate';
 import { SUBJECT_READ_ACTION } from '@/modules/audit/subject-read-audit';
 import { OrgController } from '@/modules/org/org.controller';
 import { DirectoryService } from '@/modules/org/directory.service';
@@ -14,6 +15,7 @@ import { RemovalService } from '@/modules/org/removal.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { GroupService } from '@/modules/org/group.service';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
+import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
@@ -80,7 +82,8 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
           provide: DirectoryService,
           useValue: new DirectoryService(wired.memberships, wired.users as never, wired.kpms as never),
         },
-        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService]
+        // Routes this spec never calls; a bare object keeps Nest from building their graphs.
+        ...[RoleChangeService, RemovalService, OrgTreeService, GroupService, AdminDelegationService, LeaderLimitRequestService]
           .map((provide) => ({ provide, useValue: {} })),
       ],
     }).compile();
@@ -155,20 +158,43 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       });
     });
 
-    it('P18-T1 AC-5 coaching coverage over the office, and every AB who leads somebody on the leaderboard, lowest first', async () => {
+    it('P18-T1 AC-5, P18.97-T3 AC-5 coaching coverage over the office, and every AB on the leaderboard: leaders lowest first, then No team', async () => {
       as('ADMIN');
       const before = await reads('kpm_overview');
-      const { coaching } = (await http().get('/kpm/overview').expect(200)).body;
+      const { coaching, composition } = (await http().get('/kpm/overview').expect(200)).body;
       // 7 days: Indah (4 days ago), Rina (today), Budi (2 days ago); 30 days adds Sari (12 days ago).
       expect(coaching.coverage7d).toEqual({ count: 3, of: 16, pct: 19 });
       expect(coaching.coverage30d).toEqual({ count: 4, of: 16, pct: 25 });
       expect(coaching.leaderboard).toEqual([
-        { membershipId: office.id.PEER_AB, name: 'Hendra Gunawan', teamSize: 2, coached: 0, pct: 0 },
-        { membershipId: office.id.OWNER, name: 'Wilson Tanoto', teamSize: 15, coached: 0, pct: 0 },
-        { membershipId: office.id.AGUS, name: 'Agus Salim', teamSize: 10, coached: 1, pct: 10 },
+        { membershipId: office.id.PEER_AB, name: 'Hendra Gunawan', teamSize: 2, coached: 0, pct: 0, leads: true },
+        { membershipId: office.id.OWNER, name: 'Wilson Tanoto', teamSize: 15, coached: 0, pct: 0, leads: true },
+        { membershipId: office.id.AGUS, name: 'Agus Salim', teamSize: 10, coached: 1, pct: 10, leads: true },
+        // UI-017: the Admin, on the AB rung, leads nobody — listed last, no rate, never left out and never 0%.
+        { membershipId: office.id.ADMIN, name: 'Maya Kusuma', teamSize: 0, coached: 0, pct: null, leads: false },
       ]);
-      // D-audit: one entry per leader on the board, in one insert; the card's figures write none.
+      // Every member of the `ab` class is on the board: the composition's AB tile counts the same four.
+      expect(coaching.leaderboard).toHaveLength(composition.rungs.find((r: { code: string }) => r.code === 'AB').count);
+      // D-audit: one entry per leader on the board, in one insert; the card's figures — and a row of nobody's coaching —
+      // write none.
       expect(await reads('kpm_overview')).toBe(before + 3);
+    });
+
+    it('P18.97-T3 AC-5 positive: the Owner and the Admin read the same board, every AB on it; negative: a field member is refused it', async () => {
+      const boards: unknown[] = [];
+      for (const who of ['OWNER', 'ADMIN'] as const) {
+        as(who);
+        boards.push((await http().get('/kpm/overview').expect(200)).body.coaching.leaderboard);
+      }
+      expect(boards[1]).toEqual(boards[0]);
+      expect((boards[0] as { membershipId: string; leads: boolean }[]).map((row) => [row.membershipId, row.leads])).toEqual([
+        [office.id.PEER_AB, true], [office.id.OWNER, true], [office.id.AGUS, true], [office.id.ADMIN, false],
+      ]);
+      for (const who of ['AGUS', 'SARI', 'INDAH', 'LUKAS'] as const) {
+        as(who);
+        const res = await http().get('/kpm/overview').expect(403);
+        expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_overview:read' } });
+        expect(JSON.stringify(res.body)).not.toContain('leaderboard');
+      }
     });
 
     it('P18-T1 AC-5 S2 the leaderboard’s entries field by field: each leader, the reader as actor, ROLLING_7D as the range', async () => {
@@ -178,6 +204,16 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       const by = { membershipId: office.id.ADMIN, actorUserId: 'u-ADMIN' };
       expectEntries(await entriesSince(since), (['PEER_AB', 'OWNER', 'AGUS'] as const)
         .map((who) => entry(office.id[who], 'kpm_overview', { from: '2026-09-08', to: TODAY }, by)));
+    });
+
+    it('P18.97-T3 AC-5 a No team row writes no entry: read by the Owner, the Admin who leads nobody is on the board and in no entry', async () => {
+      // Read as the Admin, her row is left out as the reader's own either way; read as the Owner, only `leads` leaves it out.
+      as('OWNER');
+      const since = await mark();
+      const { leaderboard } = (await http().get('/kpm/overview').expect(200)).body.coaching;
+      expect(leaderboard).toContainEqual(expect.objectContaining({ membershipId: office.id.ADMIN, leads: false }));
+      expectEntries(await entriesSince(since), (['PEER_AB', 'AGUS'] as const)
+        .map((who) => entry(office.id[who], 'kpm_overview', { from: '2026-09-08', to: TODAY }, asOwnerIn('OWNER'))));
     });
 
     it('P18-T1 AC-6 recruitment: counts, never leads; no target until one is set', async () => {
@@ -311,6 +347,48 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         expect(await db().collection('kpmRecruitTargets').find({}).toArray()).toEqual(before);
       });
 
+      it('P18.95-T1 AC-4 another month is refused in a sentence naming the current one as ADR-0167 §1 writes a month', async () => {
+        as('OWNER');
+        expect((await put({ month: '2026-08', target: 3 }).expect(400)).body.error).toMatchObject({
+          message: 'A recruitment target is set for Sep 2026, the agency\'s current month.',
+          details: { field: 'month', month: '2026-09' },
+        });
+      });
+
+      it('P18.98-T5 AC-7 refuses another month, and a month not written as one, in Indonesian', async () => {
+        as('OWNER');
+        expect((await put({ month: '2026-08', target: 3 }).set('Accept-Language', 'id').expect(400)).body.error).toMatchObject({
+          code: 'VALIDATION_FAILED', message: 'Target recruitment ditetapkan untuk Sep 2026, bulan berjalan KPM.',
+          details: { field: 'month', month: '2026-09' },
+        });
+        expect((await put({ month: 'September', target: 3 }).set('Accept-Language', 'id').expect(400)).body.error).toMatchObject({
+          code: 'VALIDATION_FAILED', details: { violations: ['month harus dengan format YYYY-MM'] },
+        });
+        expect((await put({ month: 'September', target: 3 }).expect(400)).body.error.details.violations)
+          .toEqual(['month must be YYYY-MM']);
+      });
+
+      it.each(['AGUS', 'SARI', 'INDAH', 'LUKAS'] as const)(
+        'P18.97-T3 AC-7 negative: %s holds no kpm_overview:set_recruit_target, is refused 403, and nothing is written',
+        async (who) => {
+          const targets = await db().collection('kpmRecruitTargets').find({}).toArray();
+          const entries = await db().collection('auditLog').countDocuments({ action: 'kpm_overview.recruit_target_set' });
+          as(who);
+          expect((await put({ month: '2026-09', target: 40 }).expect(403)).body.error)
+            .toMatchObject({ code: 'PERM_DENIED', details: { permission: 'kpm_overview:set_recruit_target' } });
+          expect(await db().collection('kpmRecruitTargets').find({}).toArray()).toEqual(targets);
+          expect(await db().collection('auditLog').countDocuments({ action: 'kpm_overview.recruit_target_set' })).toBe(entries);
+        },
+      );
+
+      it('P18.97-T3 AC-7 positive: the write is unchanged — the Owner and an Admin each save one, answered with what is kept', async () => {
+        for (const [who, target] of [['OWNER', 14], ['ADMIN', 16]] as const) {
+          as(who);
+          expect((await put({ month: '2026-09', target }).expect(200)).body).toEqual({ month: '2026-09', target });
+          expect((await http().get('/kpm/overview').expect(200)).body.recruitment.target).toBe(target);
+        }
+      });
+
       it('P18-T1 AC-1 a read-only support session reads the Overview and is refused the target; an elevated one writes as the member', async () => {
         const owner = office.as('OWNER');
         session.current = new RequestContext(owner.userId, 'none', owner.membership, 'u-support', null, false, true);
@@ -442,17 +520,78 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
     type Head = { name: string; isReader: boolean; leads: boolean };
     type Agency = Figures & { head: Head; direct: Figures & { head: Head }; aabUnits: (Figures & { head: Head })[] };
 
-    it('P18-T2 AC-10 positive: the Owner and the Admin; negative: every field role, and a Super Admin outside a session', async () => {
+    it('P18-T2 AC-10 positive: the Owner and the Admin; negative: every field member who is no Core Leader, and a Super Admin outside a session', async () => {
       for (const who of ['OWNER', 'ADMIN'] as const) {
         as(who);
         expect((await http().get('/kpm/analytics').expect(200)).body).toMatchObject({ period: 'this_month', month: '2026-09' });
       }
-      for (const who of ['AGUS', 'SARI', 'INDAH'] as const) {
+      // An AB and an AAB hold the grant since ADR-0159 (P18.8-T5 AC-4), and untagged are answered 404 by the service.
+      for (const who of ['AGUS', 'SARI'] as const) {
         as(who);
-        expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
+        expect((await http().get('/kpm/analytics').expect(404)).body.error.code).toBe('NOT_FOUND');
       }
+      // An Agent holds no grant: the guard.
+      as('INDAH');
+      expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
       session.current = SUPER_ADMIN;
       expect((await http().get('/kpm/analytics').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    describe('P18.8-T5 AC-4, AC-6 — a Core Leader reads the office’s analytics (ADR-0159 §2)', () => {
+      /** `who` as `ContextResolver` resolves them once tagged: the effective flag on the membership. */
+      const tagged = (who: Who): RequestContext => {
+        const base = office.as(who);
+        return new RequestContext(base.userId, 'none', { ...base.membership!, isCoreLeader: true });
+      };
+      const owners = async () => {
+        as('OWNER');
+        return (await http().get('/kpm/analytics').expect(200)).body as { agencies: Agency[]; total: Figures & { abCount: number } };
+      };
+
+      it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-4 positive: %s, tagged, reads the whole office — the Owner’s figures, nothing recorded', async (who) => {
+        const theirs = await owners();
+        session.current = tagged(who);
+        const since = await mark();
+        const read = (await http().get('/kpm/analytics').expect(200)).body as typeof theirs;
+        // The office's every agency and total, not their own unit: only who is the reader differs.
+        const heads = (v: typeof theirs) => v.agencies.map((a) => [a.head.name, a.manpower.total]);
+        expect(heads(read)).toEqual(heads(theirs));
+        expect(read.total).toEqual(theirs.total);
+        expect(read.agencies.find((a) => a.head.name === 'Agus Salim')!.head.isReader).toBe(who === 'AGUS');
+        expect(await entriesSince(since)).toEqual([]);
+        // And the period, as the Owner's.
+        expect((await http().get('/kpm/analytics').query({ period: 'previous_month' }).expect(200)).body.period).toBe('previous_month');
+      });
+
+      it.each(['PEER_AB', 'DEWI'] as const)('P18.8-T5 AC-6 negative: %s, a leader not tagged, is answered 404 — the forum’s rule', async (who) => {
+        as(who);
+        const res = await http().get('/kpm/analytics').expect(404);
+        expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'KPM analytics not found.' });
+      });
+
+      it('P18.8-T5 AC-6 negative: a tagged Agent cannot exist, and a context claiming one holds no grant', async () => {
+        session.current = tagged('INDAH');
+        expect(session.current.isCoreLeader).toBe(false);
+        expect((await http().get('/kpm/analytics').expect(403)).body.error.details).toEqual({ permission: 'kpm_analytics:read' });
+      });
+
+      it('P18.8-T5 AC-6 a support session reads as its member: a tagged AB’s reads, an untagged AAB’s is 404, and nothing is written', async () => {
+        const supported = (base: RequestContext) => new RequestContext(base.userId, 'none', base.membership, 'u-support', null, false, true);
+        session.current = supported(tagged('AGUS'));
+        const before = await db().collection('auditLog').countDocuments();
+        expect((await http().get('/kpm/analytics').expect(200)).body.total.abCount).toBe(4);
+        session.current = supported(office.as('SARI'));
+        expect((await http().get('/kpm/analytics').expect(404)).body.error.code).toBe('NOT_FOUND');
+        expect(await db().collection('auditLog').countDocuments()).toBe(before);
+      });
+
+      it('P18.8-T5 AC-4 cross-tenant: a Core Leader of 0417 reads 0417 alone — no member of 0555 in any row', async () => {
+        session.current = tagged('AGUS');
+        const read = (await http().get('/kpm/analytics').expect(200)).body as { agencies: Agency[] };
+        const names = read.agencies.flatMap((a) => [a.head.name, a.direct.head.name, ...a.aabUnits.map((u) => u.head.name)]);
+        expect(names).not.toContain('Lina Marlina');
+        expect(names).not.toContain('Bayu Saputra');
+      });
     });
 
     it.each([
@@ -496,6 +635,14 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       expect(now.total.apeMonth.achievedMinor).toBe(300 * M);
       expect(then.total.apeMonth.achievedMinor).toBe(110 * M);
       expect(now.total.activeAgents).toBe(5);
+      // P18.97-T3 AC-10: the share is served — 5 of 16, 31% — on the total and on every row, each over its own manpower.
+      expect(now.total.activePct).toBe(31);
+      type Row = { activeAgents: number | null; activePct: number | null; manpower: { total: number } };
+      const rows = (view: { total: Row; agencies: (Row & { direct: Row; aabUnits: Row[] })[] }) =>
+        [view.total, ...view.agencies.flatMap((a) => [a, a.direct, ...a.aabUnits])];
+      for (const row of [...rows(now), ...rows(then)]) {
+        expect(row.activePct).toBe(row.activeAgents === null ? null : rateOver(row.activeAgents, row.manpower.total).pct);
+      }
       // Rina's lead moved to AAJI licensed on 20 August: it was open then. Indah's, won on 25 August, was not.
       expect(then.total.leads.recruit).toBeGreaterThanOrEqual(1);
     });
@@ -509,7 +656,7 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY', 'DIRECT_AB_COUNT']);
       const net = agus.moc.criteria[0];
       // Agus and his Direct Group: Indah, Dimas (and Lukas, Tari: nothing held), Sari, Dewi, with their Direct Units.
-      expect(net).toMatchObject({ label: 'Net APE', required: 600_000_000 * 100, period: 'Jan–Sep 2026' });
+      expect(net).toMatchObject({ label: 'Net APE', required: 600_000_000 * 100, period: 'Jan – Sep 2026' });
       expect(agus.moc.criteria[3]).toMatchObject({ current: 91, required: 75, met: true, period: 'Sep 2026' });
       expect(agus.moc.criteria[4]).toMatchObject({ label: '— OR — Direct AB (AB on AB)', current: 0, met: false, period: 'As of 14 Sep 2026' });
       const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
@@ -518,12 +665,42 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       expect(agencies.find((a: { head: { isReader: boolean } }) => a.head.isReader).moc).not.toBeNull();
     });
 
+    it('P18.98-T5 AC-4 MOC in Indonesian: each criterion’s period, the path, the OR — the criteria by their names', async () => {
+      as('OWNER');
+      const english = (await http().get('/kpm/analytics').expect(200)).body;
+      const { agencies, mocRulesText } = (await http().get('/kpm/analytics').set('Accept-Language', 'id').expect(200)).body;
+      const agus = agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
+      expect(agus.moc.criteria.map((c: { label: string; period: string }) => [c.label, c.period])).toEqual([
+        ['Net APE', 'Jan – Sep 2026'],
+        ['Monthly2 AA — DU', 'Agu dan Sep 2026'],
+        ['Monthly2 AA — DG', 'Agu dan Sep 2026'],
+        ['Rolling Persistency — DU/DG', 'Sep 2026'],
+        ['— ATAU — Direct AB (AB on AB)', 'Per 14 Sep 2026'],
+      ]);
+      expect(agus.moc).toMatchObject({
+        status: 'not_met', missing: null, path: 'Perlu memenuhi ketiga kriteria standar sekaligus, atau mencapai 5 Direct ABs.',
+      });
+      const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
+      expect(sari.moc.path).toBe('Syarat AAB tidak memiliki jalur alternatif — ketiganya harus terpenuhi.');
+      expect(mocRulesText).toBe(
+        'AAB: Net APE ≥ Rp 200 jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
+        + 'AB: (Net APE ≥ Rp 600 jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
+      );
+      // English, as it always read; every figure the same in both.
+      const englishAgus = english.agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
+      expect(englishAgus.moc.path).toBe('Needs to clear either the three standard criteria together, or reach 5 Direct ABs.');
+      expect(englishAgus.moc.criteria.map((c: { current: number | null }) => c.current))
+        .toEqual(agus.moc.criteria.map((c: { current: number | null }) => c.current));
+    });
+
     it('P18-T2 AC-4 item 8 the MOC column’s tooltip is the company’s rules in the prototype’s words, the AAB’s first', async () => {
       as('OWNER');
       const { mocRulesText } = (await http().get('/kpm/analytics').expect(200)).body;
+      // The suite reads in English (`test/setup.ts`); since the default went live an English reader's sums are English
+      // too (P18.98-T5 AC-1) — IDR 200M where nobody's choice read Rp 200 jt before.
       expect(mocRulesText).toBe(
-        'AAB: Net APE ≥ Rp200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-        + 'AB: (Net APE ≥ Rp600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+        'AAB: Net APE ≥ IDR 200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+        + 'AB: (Net APE ≥ IDR 600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
       );
     });
 
@@ -533,7 +710,7 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       const agus = agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
       // Agus's Direct Unit: Indah and Dimas active in August and September; Lukas and Tari — nothing on file — are not.
       expect(agus.moc.criteria.find((c: { code: string }) => c.code === 'MONTHLY2_AA_DU'))
-        .toMatchObject({ current: 2, required: 4, met: false, period: 'Aug and Sep 2026' });
+        .toMatchObject({ current: 2, required: 4, met: false, period: 'Aug and Sep 2026' }); // an English reader's months
       // Sari's Direct Unit: Rina active in both; Budi has no row in either held month — a count, not *perhaps*.
       const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
       expect(sari.moc.criteria.find((c: { code: string }) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 1, met: false });
@@ -565,6 +742,11 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         as(who);
         expect((await http().get('/admin/analytics').expect(403)).body.error.details).toEqual({ permission: 'platform_analytics:read' });
       }
+      // P18.98-T5 AC-7: the same refusal in Indonesian.
+      expect((await http().get('/admin/analytics').set('Accept-Language', 'id').expect(403)).body.error).toMatchObject({
+        code: 'PERM_DENIED', message: 'Anda tidak memiliki izin untuk melakukan tindakan ini.',
+        details: { permission: 'platform_analytics:read' },
+      });
       const owner = office.as('OWNER');
       for (const readOnly of [true, false]) {
         session.current = new RequestContext(owner.userId, 'none', owner.membership, 'u-support', null, false, readOnly);

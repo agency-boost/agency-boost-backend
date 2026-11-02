@@ -22,6 +22,8 @@ export interface CoacheeView {
   today: LocalDate;
   membershipId: string;
   name: string;
+  /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the header draws initials. */
+  photoUrl: string | null;
   /** The coachee's own, so the copy about them reads *Leads that need her*. */
   pronoun: NamedPerson['pronoun'];
   rung: { code: string; label: string };
@@ -75,7 +77,8 @@ export class CoacheeService {
     const leaderId = member.leaderId as string;
     const [below, people, { today, ladder }] = await Promise.all([
       this.coach.coacheesOf(ctx, membershipId),
-      this.names.people(ctx, [membershipId, leaderId]),
+      // The coachee's photo signed for the header's avatar (UI V1, UI-111); their leader is only named.
+      this.names.pictured(ctx, [membershipId, leaderId], [membershipId]),
       // The office's day, from the tenant's zone (invariant §9), and the ladder the roster labels a rung
       // from: the company's, which the office belongs to. One read of the office serves both.
       this.days.office(ctx).then(async (office) => ({
@@ -94,6 +97,7 @@ export class CoacheeService {
       today,
       membershipId,
       name: person?.name ?? '',
+      photoUrl: person?.photoUrl ?? null,
       pronoun: person?.pronoun ?? 'they',
       rung: { code, label: ladder.find((level) => level.code === code)?.label ?? code },
       leader: leaderName === undefined ? null : { membershipId: leaderId, name: leaderName },

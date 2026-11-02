@@ -11,8 +11,8 @@ import {
   SaveCalendarSettingsDto, UpdateCalendarEntryDto,
 } from './calendar.dto';
 import {
-  CalendarBusyBlockDto, CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarPeriodDto,
-  CalendarSettingsDto,
+  CalendarBusyBlockDto, CalendarDeletedDto, CalendarDownlineDto, CalendarEntryDto, CalendarHiddenTaskDto,
+  CalendarJoinedEventDto, CalendarPeriodDto, CalendarSettingsDto, CalendarTaskDto,
 } from './calendar.response.dto';
 import { CalendarService } from './calendar.service';
 import { CalendarPeopleService } from './calendar-people.service';
@@ -33,7 +33,7 @@ const NOT_FOUND_ANOTHER_OFFICE =
  */
 @ApiTags('calendar')
 @ApiBearerAuth()
-@ApiExtraModels(CalendarBusyBlockDto)
+@ApiExtraModels(CalendarBusyBlockDto, CalendarTaskDto, CalendarHiddenTaskDto, CalendarJoinedEventDto)
 @Controller('calendar')
 export class CalendarController {
   constructor(
@@ -44,13 +44,17 @@ export class CalendarController {
   @Get('entries')
   @RequirePermission('calendar_entry:read')
   @ApiOperation({
-    summary: 'A week or a month of a calendar',
+    summary: 'A week, a month, an Agenda or 3 Hari of a calendar',
     description:
       'Your own calendar — every entry you organise, and every one you are on and have not declined — for '
-      + 'the week or the month holding `date`, with the period’s days, the dates ‹ and › ask for, and the '
-      + 'office’s today and now: nothing is worked out in the browser. Weeks run Monday to Sunday in the '
-      + 'office’s zone; a month is padded to whole weeks, and its padding days carry their entries too.\n\n'
-      + 'With `for`, the week of somebody you coach, beside your own: everything they organised in full, and '
+      + 'the week or the month holding `date`, or the Agenda’s or *3 Hari*’s days from it, with the period’s days, '
+      + 'the dates ‹ and › ask for, and the office’s today and now: nothing is worked out in the browser. Weeks run '
+      + 'Monday to Sunday in the office’s zone; a month is padded to whole weeks, and its padding days carry their '
+      + 'entries too.\n\n'
+      + 'Beside the entries, **what other features put on it** (UI V1): `tasks` — lead next actions and open coaching '
+      + 'action items, dated with no time — and `events`, the events you said you are going to. Read from their '
+      + 'sources each time, so a change there shows here at once; none can be edited here.\n\n'
+      + 'With `for`, the week or the month of somebody you coach, beside your own: everything they organised in full, and '
       + 'an entry they only attend in full only when you could read it yourself — otherwise as a busy block. '
       + 'An entry organised by somebody who hides their details is a busy block too, unless you are on it. '
       + 'Each such read is recorded.',

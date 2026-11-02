@@ -1,5 +1,9 @@
 import { Fields, refuseWith } from '@/common/validation/fields';
 import { LEAD_TYPES, type LeadType } from './lead.schema';
+import { LEAD_REFUSALS } from './leads.messages';
+
+/** A lead's own field sentences, in both languages (P18.98-T5 AC-3). */
+const SAY = LEAD_REFUSALS.VALIDATION_FAILED;
 
 /** What a lead's own fields may be. Bounds in one place, so a screen and a service agree. */
 export const LEAD_BOUNDS = {
@@ -75,20 +79,20 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   if (day === null) out.nextActionDate = null;
   else if (day !== undefined) {
     if (typeof day !== 'string' || !ISO_DAY.test(day)) {
-      f.violations.push('nextActionDate must be a day, written YYYY-MM-DD.');
+      f.violations.push(SAY.nextActionDateShape);
     } else out.nextActionDate = day;
   }
 
   const committed = raw(body, 'thisMonth');
   if (committed !== undefined) {
-    if (typeof committed !== 'boolean') f.violations.push('thisMonth must be true or false.');
+    if (typeof committed !== 'boolean') f.violations.push(SAY.thisMonthShape);
     else out.thisMonth = committed;
   }
 
   const pinned = raw(body, 'version');
   if (pinned !== undefined) {
     if (typeof pinned !== 'number' || !Number.isInteger(pinned) || pinned < 1) {
-      f.violations.push('version must be the whole number the record was read at.');
+      f.violations.push(SAY.versionShape);
     } else out.version = pinned;
   }
 
@@ -103,28 +107,28 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
 function readContact(value: unknown, f: Fields): { phone: string | null; email: string | null } {
   if (value === null) return { phone: null, email: null };
   if (typeof value !== 'object' || Array.isArray(value)) {
-    f.violations.push('contact must be an object of phone and email.');
+    f.violations.push(SAY.contactShape);
     return { phone: null, email: null };
   }
   const source = value as Record<string, unknown>;
   for (const key of Object.keys(source)) {
-    if (!['phone', 'email'].includes(key)) f.violations.push(`property contact.${key} should not exist`);
+    if (!['phone', 'email'].includes(key)) f.violations.push(SAY.contactUnknownField({ key }));
   }
 
   const read = (key: 'phone' | 'email'): string | null => {
     const held = source[key];
     if (held === undefined || held === null) return null;
     if (typeof held !== 'string') {
-      f.violations.push(`contact.${key} must be text.`);
+      f.violations.push(SAY.contactNotText({ key }));
       return null;
     }
     const trimmed = key === 'email' ? held.trim().toLowerCase() : held.trim();
     if (!trimmed) return null;
     if (trimmed.length > LEAD_BOUNDS[key].max) {
-      f.violations.push(`contact.${key} must be at most ${LEAD_BOUNDS[key].max} characters.`);
+      f.violations.push(SAY.contactTooLong({ key, max: LEAD_BOUNDS[key].max }));
     }
     if (key === 'email' && !trimmed.includes('@')) {
-      f.violations.push('contact.email must be an email address.');
+      f.violations.push(SAY.contactEmail);
     }
     return trimmed;
   };

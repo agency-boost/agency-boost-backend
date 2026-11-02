@@ -79,6 +79,18 @@ describe('0022 — the activation backfill (OD-119)', () => {
       expect((await col('activationProgress').find({}).toArray()).map((r) => [r.membershipId, r.origin])).toEqual([[placed, 'backfill']]);
     });
 
+    it('P18.96-T2 AC-1 passes over an existing agent on every run, and starts a new hire on their join date, not their stamp', async () => {
+      const kpmId = await office();
+      await checklist(kpmId, 1, ['ONE']);
+      // Classified by 0040, or written so by an import: an existing agent is never given an activation.
+      await member(kpmId, { joinedAs: 'existing_agent', joinDate: '2026-08-01' });
+      // A new hire whose creation failed open: the leader gave 20 July, though the system stamped 1 August.
+      const hire = await member(kpmId, { joinedAs: 'new_hire', joinDate: '2026-07-20' });
+      expect(await up(db(), NOW)).toEqual({ created: 1, alreadyHad: 0, ended: 0, noChecklist: 0 });
+      expect((await col('activationProgress').find({}).toArray()).map((r) => [r.membershipId, r.startDate])).toEqual([[hire, '2026-07-20']]);
+      expect(await up(db(), NOW)).toEqual({ created: 0, alreadyHad: 1, ended: 0, noChecklist: 0 });
+    });
+
     it('P13-T1 AC-6 counts an office with no published checklist, and writes nothing there', async () => {
       const kpmId = await office();
       await checklist(kpmId, 1, ['ONE'], { status: 'draft' });
@@ -118,7 +130,7 @@ describe('0022 — the activation backfill (OD-119)', () => {
       await seedDemo({ clock: new FixedClock(NOW), log: () => undefined });
     }, 240_000);
 
-    it('P13-T1 AC-6 over the seed with its activations taken away: one for each active Agent within six months, and nobody else; then none', async () => {
+    it('P13-T1 AC-6 over the seed with its activations taken away: one for each new hire within six months, and nobody else; then none', async () => {
       await col('activationProgress').deleteMany({});
       const first = await up(db(), NOW);
       const made = await col('activationProgress').find({}).toArray();
@@ -126,17 +138,20 @@ describe('0022 — the activation backfill (OD-119)', () => {
       const emails = (await col('users').find({ _id: { $in: holders.map((m) => new mongoose.Types.ObjectId(m.userId as string)) } }).toArray())
         .map((u) => u.email).sort();
       expect(emails).toEqual([
-        'agent@kpm0555.test', 'budi@kpm0417.test', 'dimas@kpm0417.test', 'indah@kpm0417.test', 'novi@kpm0417.test',
+        'agent@kpm0555.test', 'budi@kpm0417.test', 'dimas@kpm0417.test', 'indah@kpm0417.test',
+        // P18.96-T6's Lukman (`activation-3m-fixture.ts`); Tari, marked left and so removed, has none here.
+        'lukman@kpm0417.test', 'novi@kpm0417.test',
         // Yanti's second membership: her first, removed, has none.
         'removed@kpm0417.test', 'rina@kpm0417.test', 'siti@kpm0417.test', 'wahyu@kpm0417.test',
       ]);
       // Sari, Dewi and Arief joined as Agents and were promoted: the backfill reads the current rung.
       expect(holders.every((m) => m.role === 'agent' && m.status === 'active')).toBe(true);
-      // P13.2-T6: office 0701 started Empty, so its Agent, a week in, has no checklist to be pinned to.
-      expect(first).toMatchObject({ created: 9, alreadyHad: 0, noChecklist: 1 });
+      // P13.2-T6: office 0701 started Empty, so its Agent, a week in — a new hire by her leader's code — has no
+      // checklist to be pinned to.
+      expect(first).toMatchObject({ created: 10, alreadyHad: 0, noChecklist: 1 });
 
-      expect(await up(db(), NOW)).toMatchObject({ created: 0, alreadyHad: 9 });
-      expect(await col('activationProgress').countDocuments({})).toBe(9);
+      expect(await up(db(), NOW)).toMatchObject({ created: 0, alreadyHad: 10 });
+      expect(await col('activationProgress').countDocuments({})).toBe(10);
     });
   });
 });

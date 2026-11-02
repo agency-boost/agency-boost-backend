@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -6,8 +6,10 @@ import {
   DomainException, NoMembershipException, NotFoundException, VersionConflictException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
+import type { Sentence } from '@/common/i18n/sentence';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { COACHING } from '@/domain/constants';
+import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { AuditService } from '@/modules/audit/audit.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { LeadRepository } from '@/modules/leads/lead.repository';
@@ -16,12 +18,13 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { MemberNames } from '@/modules/org/member-names.service';
-import { scopeFor, type Permission } from '@/modules/rbac/permissions';
+import { can, scopeFor, type Permission } from '@/modules/rbac/permissions';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { sessionFinalized } from './coaching-session.gate';
+import { SESSION_LIMITS } from './coaching-session.dto';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import {
-  carryForward, coalesceKeyOf, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
+  actionDefaultDueDate, carryForward, coalesceKeyOf, finalizeRefusal, finalizeSentence, latestFinalized, leadActionsOf,
   reopenableUntil, reopenWindowOpen, reviewedItems, type FinalizedVersion, type SessionLead,
 } from './coaching-session.rules';
 import type {
@@ -29,6 +32,7 @@ import type {
   CoachingSessionDocument, CoachingSessionStatus, CoachingSnapshot, CoachingTip,
 } from './coaching-session.schema';
 import { CoachingSnapshotBuilder } from './coaching-snapshot';
+import { COACHING_REFUSALS } from './coaching.messages';
 import { knowsTheLeads, leadsReached, shownActionItems, shownLastWeekItems } from './lead-visibility';
 
 // Where every coaching reader found them before Phase 15 moved them to a module of their own.
@@ -92,6 +96,12 @@ export interface CoachingSessionView {
   finalizedAt: string | null;
   finalizedBy: SessionPerson | null;
   reopenableUntil: string | null;
+  /**
+   * **The date a new action item starts with** (UI-060): the office's today plus `COACHING_ACTION_DEFAULT_DUE_DAYS` —
+   * what *+* fills in, and what *Start* gave every carried item. The leader may change it. `null` where no row can be
+   * added: a finalized session, or a reader who is not its writing coach.
+   */
+  defaultDueDate: LocalDate | null;
   lastWeek: { sessionId: string; date: string } | null;
   lastWeekItems: LastWeekItemView[];
   leadActions: LeadActionView[];
@@ -283,6 +293,11 @@ export class CoachingSessionService {
     private readonly subjectReads: SubjectReadAudit,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /*
+     * P18.96-T4 AC-2: a 1:1 finalized or logged with a new hire counts toward their checklist's *Weekly 1-on-1
+     * check-in*. A port the activation module answers, so coaching does not depend on it; optional, failing open.
+     */
+    @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
   ) {}
 
   // ------------------------------------------------------------------ reading
@@ -358,8 +373,8 @@ export class CoachingSessionService {
    * **`POST /coaching/coachees/:membershipId/sessions` — *Start*** (ADR-0081, P11-T5 AC-1). The pair's
    * open draft when there is one — a second *Start* resumes it, from any device — else a new draft that
    * fixes *last week*, copies its items untouched into *Last week's action items*, and carries forward
-   * every item not done with its date cleared, except one whose lead has a next action date now, and
-   * every tip. Two racing *Start*s write one draft: the partial unique index refuses the second, which
+   * every item not done **dated a week from the office's today** (UI-060, `actionDefaultDueDate`), except one whose
+   * lead has a next action date now, and every tip. Two racing *Start*s write one draft: the partial unique index refuses the second, which
    * resumes the first.
    */
   async start(ctx: RequestContext, coacheeId: string): Promise<{ created: boolean; session: CoachingSessionView }> {
@@ -379,8 +394,10 @@ export class CoachingSessionService {
     );
     const carried = last ? latestFinalized(last)! : null;
     const leads = await this.leadsOf(ctx, coacheeId, day);
-    const lastWeekItems = carried ? reviewedItems(carried) : [];
-    const forward = carryForward(lastWeekItems, carried?.tips ?? [], leads, newId);
+    // An item the coachee ticked from Calendar comes in ticked, and is not carried (UI-104 point 4).
+    const ticked = new Set((last?.actionItemsDone ?? []).map((d) => d.itemId));
+    const lastWeekItems = carried ? reviewedItems(carried, ticked) : [];
+    const forward = carryForward(lastWeekItems, carried?.tips ?? [], leads, newId, actionDefaultDueDate(day.today));
 
     let created: CoachingSessionDocument;
     try {
@@ -424,13 +441,17 @@ export class CoachingSessionService {
    */
   async save(ctx: RequestContext, sessionId: string, input: SaveSessionInput): Promise<SessionDraftSaved> {
     const { session } = await this.writable(ctx, sessionId);
+    // UI-060: a new row sent with no `dueDate` at all is dated a week ahead; `null` is a date cleared by hand, and kept.
+    const fresh = input.actionItems.some((row) => row.itemId === undefined && row.dueDate === undefined);
+    const defaultDue = fresh ? actionDefaultDueDate((await this.days.for(ctx)).today) : null;
 
     const lastWeekItems = applyTicks(session.lastWeekItems.map(plainLastWeekItem), input.lastWeekItems);
     const actionItems = replaceRows(
       session.actionItems.map(plainActionItem), (item) => item.itemId, input.actionItems, (row) => row.itemId,
       'actionItems',
       (row, prior): CoachingActionItem => ({
-        itemId: prior?.itemId ?? newId(), text: row.text, dueDate: checkDate(row.dueDate ?? null, 'actionItems'),
+        itemId: prior?.itemId ?? newId(), text: row.text,
+        dueDate: !prior && row.dueDate === undefined ? defaultDue : checkDate(row.dueDate ?? null, 'actionItems'),
         carriedFromItemId: prior?.carriedFromItemId ?? null,
       }),
     );
@@ -462,6 +483,11 @@ export class CoachingSessionService {
    * the audit entry, the coachee's notice (`{ sessionId }` and nothing a leader typed), and the round's
    * held goal email, released without being awaited (`announceFinalized`). Neither notice ever fails the
    * finalize, and the email never delays it.
+   *
+   * **A session reopened with *Ubah lagi* and finalized again is one coaching** (ADR-0079; UI V1, UI-060): its `date`
+   * and its snapshot never move, it is one document, and every coaching reader — *Last 1:1*, `COACHED_7D`,
+   * `COACHING_COVERAGE`, the leader's frequency — counts sessions by their `date`, finalized at least once. An action
+   * item without a date is refused `UNDATED_ACTION_ITEM` with `details.count` and `details.itemIds` (UI-060).
    */
   async finalize(ctx: RequestContext, sessionId: string, version: number): Promise<CoachingSessionView> {
     const { session, standing, coachee } = await this.writable(ctx, sessionId);
@@ -469,7 +495,8 @@ export class CoachingSessionService {
 
     const day = await this.days.for(ctx);
     const leads = await this.leadsOf(ctx, session.coacheeMembershipId, day);
-    const leadActions = leadActionsOf(leads);
+    // Stored with the session: the lines a lead with no note reads are written for the leader finalizing (AC-6).
+    const leadActions = leadActionsOf(leads, ctx.reader);
     const refusal = finalizeRefusal({ leadActions, actionItems: session.actionItems, tips: session.tips, leads });
     if (refusal) {
       throw new DomainException(
@@ -501,7 +528,87 @@ export class CoachingSessionService {
       after: { version: saved.version, date: saved.date, correction: saved.corrections.length > 0 },
     });
     await this.announceFinalized(ctx, saved, coachee);
+    // P18.96-T4 AC-2: a first finalize is a 1:1 that counts from its `date`; a new hire's checklist may tick from it.
+    if (first) await signalActivation(this.activation, ctx, saved.coacheeMembershipId, 'coaching');
     return this.answer(ctx, saved, standing, day, leads);
+  }
+
+  /**
+   * **A 1:1 logged after it was held** (P18.96-T4 AC-3; ADR-0171 §3): the checklist's *Log 1:1*, a date and a note, by
+   * a leader who coaches the coachee now (`COACH`, else 404) and holds the grants a session needs —
+   * `coaching_session:create` and `:finalize`, an AB's or an AAB's (an Agent who leads holds neither, and is
+   * refused `403 FORBIDDEN`).
+   *
+   * **The session model, kept whole**: one record, its coach the caller, **finalized as it is written** — a 1:1 that
+   * happened has nothing left to draft — so it counts in every coaching metric from its `date`, as any finalized one
+   * does, and reads as any other on the coachee's history, the archive and `/coaching/me`. Three things differ, each
+   * because nothing else is true of a logged 1:1:
+   *
+   * - **`date` is the day the leader says it was held** — the office's today at the latest — where a session
+   *   finalized in the workspace takes the day of its first finalize. It is still the day the 1:1 happened, which is
+   *   what every metric counts; nothing moves it after (ADR-0079).
+   * - **The note is its one tip**, the session's own free text, carried forward to the pair's next *Start* as every
+   *   tip is (ADR-0081). There are no action items: none was agreed here, and finalize's five checks are the
+   *   workspace's, for a 1:1 run in it.
+   * - **No snapshot** (`null`): the snapshot is what the 1:1 was held *over*, taken at its finalize, and today's figures
+   *   are not what a 1:1 held last week looked at. Every reader already draws a session without one.
+   *
+   * Audited `coaching_session.logged` with its date; the coachee is told as for any finalize, and the activation
+   * signalled (`coaching`). Answers the session's id and date.
+   */
+  async logOneOnOne(
+    ctx: RequestContext, coacheeId: string, input: { date: string; note: string },
+  ): Promise<{ sessionId: string; date: LocalDate }> {
+    const me = requireMe(ctx);
+    const coachee = await this.coach.coachee(ctx, me, coacheeId);
+    if (!coachee) throw new NotFoundException('Membership');
+    if (!can(ctx, 'coaching_session:create') || !can(ctx, 'coaching_session:finalize')) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        COACHING_REFUSALS.PERM_DENIED.logOneOnOne,
+        HttpStatus.FORBIDDEN,
+        { permission: 'coaching_session:create' },
+      );
+    }
+    const day = await this.days.for(ctx);
+    const note = input.note.trim();
+    if (!isLocalDate(input.date) || input.date > day.today) {
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.logDate, { field: 'date' });
+    }
+    if (note.length === 0 || note.length > SESSION_LIMITS.TEXT_MAX) {
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.logNote({ max: SESSION_LIMITS.TEXT_MAX }), { field: 'note' });
+    }
+
+    const now = this.clock.now();
+    const created = await this.sessions.create(ctx, {
+      coachMembershipId: me,
+      coacheeMembershipId: coacheeId,
+      status: 'finalized',
+      date: input.date,
+      lastWeek: null,
+      lastWeekItems: [],
+      actionItems: [],
+      tips: [{ tipId: newId(), text: note, carriedFromTipId: null }],
+      leadActions: [],
+      snapshot: null,
+      finalizedAt: now,
+      finalizedByMembershipId: me,
+      version: 1,
+      frozenAt: now,
+      corrections: [],
+    } as never);
+    const sessionId = String(created._id);
+
+    await this.audit.record(ctx, {
+      action: 'coaching_session.logged',
+      targetCollection: 'coachingSessions',
+      targetId: sessionId,
+      targetMembershipId: coacheeId,
+      after: { version: 1, date: input.date },
+    });
+    await this.announceFinalized(ctx, created, coachee);
+    await signalActivation(this.activation, ctx, coacheeId, 'coaching');
+    return { sessionId, date: input.date };
   }
 
   /**
@@ -525,7 +632,7 @@ export class CoachingSessionService {
     if (session.status !== 'finalized') {
       throw new DomainException(
         ErrorCode.COACHING_SESSION_NOT_FINALIZED,
-        'Only a finalized session can be reopened.',
+        COACHING_REFUSALS.COACHING_SESSION_NOT_FINALIZED.reopenFinalizedOnly,
         HttpStatus.CONFLICT,
         { status: session.status },
       );
@@ -535,7 +642,9 @@ export class CoachingSessionService {
     if (!reopenWindowOpen(date, day.today)) {
       throw new DomainException(
         ErrorCode.COACHING_REOPEN_WINDOW_CLOSED,
-        `This session could be reopened until ${reopenableUntil(date)}, ${COACHING.REOPEN_WINDOW_DAYS} days after it was held.`,
+        COACHING_REFUSALS.COACHING_REOPEN_WINDOW_CLOSED.windowEnded({
+          until: reopenableUntil(date), days: COACHING.REOPEN_WINDOW_DAYS,
+        }),
         HttpStatus.CONFLICT,
         { date, reopenableUntil: reopenableUntil(date), windowDays: COACHING.REOPEN_WINDOW_DAYS },
       );
@@ -543,7 +652,7 @@ export class CoachingSessionService {
     if (!standing.live && !(await this.coach.coaches(ctx, session.coachMembershipId, session.coacheeMembershipId))) {
       throw new DomainException(
         ErrorCode.COACHING_REOPEN_COACH_NOT_CURRENT,
-        'Only the session’s coach can finalize a correction, and they no longer coach this person.',
+        COACHING_REFUSALS.COACHING_REOPEN_COACH_NOT_CURRENT.coachMovedOn,
         HttpStatus.CONFLICT,
       );
     }
@@ -666,7 +775,7 @@ export class CoachingSessionService {
     let leadActions: CoachingLeadAction[] = [];
     if (leadsShown) {
       leadActions = open
-        ? leadActionsOf(leads ?? await this.leadsOf(ctx, session.coacheeMembershipId, day))
+        ? leadActionsOf(leads ?? await this.leadsOf(ctx, session.coacheeMembershipId, day), ctx.reader)
         : (shown ?? session).leadActions;
     }
     const finalizedAt = shown ? shown.finalizedAt : session.finalizedAt;
@@ -691,6 +800,8 @@ export class CoachingSessionService {
       finalizedAt: finalizedAt ? finalizedAt.toISOString() : null,
       finalizedBy: finalizedBy ? person(finalizedBy) : null,
       reopenableUntil: await this.reopenableFor(ctx, session, standing),
+      // Only where a row can be added: an open session, to its coach. A finalized one reads as it was agreed.
+      defaultDueDate: open ? actionDefaultDueDate(day.today) : null,
       lastWeek: session.lastWeek ? { sessionId: session.lastWeek.sessionId, date: session.lastWeek.date } : null,
       lastWeekItems: lastWeekItems.map(lastWeekItemView),
       leadActions: leadActions.map(leadActionView),
@@ -799,14 +910,14 @@ function newId(): string {
   return new Types.ObjectId().toHexString();
 }
 
-function invalid(message: string, details: Record<string, unknown>): DomainException {
+function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {
   return new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }
 
 /** A date the body sent: `YYYY-MM-DD` that is a day, or `null`. `2026-02-31` is refused. */
 function checkDate(value: string | null, field: string): string | null {
   if (value === null) return null;
-  if (!isLocalDate(value)) throw invalid(`${value} is not a date. Dates are written YYYY-MM-DD.`, { field, value });
+  if (!isLocalDate(value)) throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.notADate({ value }), { field, value });
   return value;
 }
 
@@ -817,7 +928,9 @@ function applyTicks(
   const byId = new Map(items.map((item) => [item.itemId, item]));
   for (const change of changes) {
     const item = byId.get(change.itemId);
-    if (!item) throw invalid('One of last week’s items is not on this session.', { field: 'lastWeekItems', itemId: change.itemId });
+    if (!item) {
+      throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.lastWeekItemUnknown, { field: 'lastWeekItems', itemId: change.itemId });
+    }
     item.done = change.done;
     if (change.dueDate !== undefined) item.dueDate = checkDate(change.dueDate, 'lastWeekItems');
   }
@@ -840,7 +953,7 @@ function replaceRows<Row, Kept>(
     const id = sentId(row);
     if (id === undefined) return build(row, undefined);
     const prior = byId.get(id);
-    if (!prior || seen.has(id)) throw invalid(`An id in ${field} is not on this session, or is sent twice.`, { field, id });
+    if (!prior || seen.has(id)) throw invalid(COACHING_REFUSALS.VALIDATION_FAILED.rowIdUnknown({ field }), { field, id });
     seen.add(id);
     return build(row, prior);
   });
