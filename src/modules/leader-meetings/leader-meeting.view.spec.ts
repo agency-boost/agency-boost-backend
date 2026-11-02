@@ -236,7 +236,7 @@ describe('the forum’s rules, unit by unit (P18.1-T2)', () => {
           'Prioritas strategis (Agency)',
           'Rangkum langkah berikutnya & tetapkan penanggung jawab',
         ],
-        post: ['Catat hasil ke dalam templat', 'Catat masukan untuk RBDO/BDO'],
+        post: ['Catat hasil ke dalam template', 'Catat masukan untuk RBDO/BDO'],
       });
       const english = {
         preparation: [

@@ -521,7 +521,7 @@ describe('AuthService', () => {
       await expect(service.resetPassword(token, ' short ')).rejects.toMatchObject({
         code: 'VALIDATION_FAILED',
       });
-      await expect(service.resetPassword(token, ' short ')).rejects.toThrow(/at least 10/);
+      await expect(service.resetPassword(token, ' short ')).rejects.toThrow(/at least 8/);
     });
 
     it('refuses a change to a password the rules reject', async () => {

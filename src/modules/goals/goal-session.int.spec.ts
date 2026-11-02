@@ -438,11 +438,12 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
   });
 
   /*
-   * Phase 11 exit review, B2 (ADR-0075, ADR-0058): the APE achieved so far is the carrier's figure or the
-   * member's own, never somebody else's typing. Lukas has no production on file, so the figure his goal
-   * and his Summary are measured against is the one he typed.
+   * Phase 11 exit review, B2 (ADR-0075, ADR-0058), **partly reversed by ADR-0183** (OD-242; the owner's staging review
+   * SR-07, P18.99-T17): the APE achieved so far is the carrier's figure where the office holds one, and otherwise the
+   * figure typed — by the member, **or by anybody who may save their plan** (a leader who coaches them, the Owner, the
+   * Admin). Lukas, Tari and Budi have no production on file; Indah has August and September.
    */
-  describe('B2 a leader’s save keeps the member’s own APE achieved (ADR-0075, ADR-0058)', () => {
+  describe('ADR-0183 a coach types the member’s APE produced while the office has not uploaded it', () => {
     const body = (annual: number, apeAchievedMinor: number) => ({ ...plan(annual), apeAchievedMinor });
     const stored = async (who: Who) => (await col('goals').findOne({ membershipId: id(who) }))?.apeAchievedMinor;
     const ownSave = async (who: Who, apeAchievedMinor: number) => {
@@ -453,41 +454,220 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
     it.each([
       ['from Goal Settings, without session=', async () => `for=${id('LUKAS')}`],
       ['through a coaching session, with session=', async () => `for=${id('LUKAS')}&session=${(await started('AGUS', 'LUKAS')).sessionId}`],
-    ] as [string, () => Promise<string>][])('B2 a leader’s save %s keeps the stored figure and ignores the body’s', async (_how, query) => {
+    ] as [string, () => Promise<string>][])('ADR-0183 a leader’s save %s stores the figure they typed, and the member reads it', async (_how, query) => {
       await ownSave('LUKAS', 120 * M);
       const q = await query();
       as('AGUS');
 
-      const res = await http().put(`/goals/2026?${q}`).send(body(600 * M, 999 * M)).expect(200);
+      const res = await http().put(`/goals/2026?${q}`).send(body(600 * M, 150 * M)).expect(200);
 
-      // The target is the leader's to set; the figure achieved is still Lukas's own.
       expect(res.body).toMatchObject({
-        annualApeTargetMinor: 600 * M, apeAchievedMinor: 120 * M, savedByMembershipId: id('AGUS'),
-        achieved: { minor: 120 * M, provenance: 'self_reported' },
+        annualApeTargetMinor: 600 * M, apeAchievedMinor: 150 * M, savedByMembershipId: id('AGUS'),
+        achieved: { minor: 150 * M, provenance: 'self_reported' },
       });
-      expect(await stored('LUKAS')).toBe(120 * M);
-      // His Summary, and his leader's copy of it, read the figure he typed.
+      expect(await stored('LUKAS')).toBe(150 * M);
+      // Lukas's own Goal Settings and Summary read it, and so does his leader's copy.
       as('LUKAS');
+      expect((await http().get('/goals/2026').expect(200)).body)
+        .toMatchObject({ apeAchievedMinor: 150 * M, achieved: { minor: 150 * M, provenance: 'self_reported' } });
       expect((await http().get('/summary').expect(200)).body.yearly)
-        .toMatchObject({ actualMinor: 120 * M, source: { provenance: 'self_reported' } });
+        .toMatchObject({ actualMinor: 150 * M, source: { provenance: 'self_reported' } });
       as('AGUS');
-      expect((await http().get('/summary').query({ for: id('LUKAS') }).expect(200)).body.yearly.actualMinor).toBe(120 * M);
+      expect((await http().get('/summary').query({ for: id('LUKAS') }).expect(200)).body.yearly.actualMinor).toBe(150 * M);
     });
 
-    it('B2 a leader’s first save for somebody with no plan stores 0, never the body’s figure', async () => {
+    it('ADR-0183 records who typed it: the saver on the plan, the figure replaced in its revision, and the audit entry', async () => {
+      await ownSave('LUKAS', 120 * M);
+      as('AGUS');
+      await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(600 * M, 150 * M)).expect(200);
+
+      const goal = (await col('goals').findOne({ membershipId: id('LUKAS') }))!;
+      expect(goal).toMatchObject({ apeAchievedMinor: 150 * M, savedByMembershipId: id('AGUS') });
+      expect((goal.revisions as Doc[]).at(-1)).toMatchObject({ apeAchievedMinor: 120 * M, byMembershipId: id('LUKAS') });
+      const entry = await col('auditLog').findOne({ action: 'goal.updated', targetId: String(goal._id) }, { sort: { _id: -1 } });
+      expect(entry?.after).toMatchObject({ savedByMembershipId: id('AGUS'), apeAchievedChanged: true });
+      // No figure in the audit entry: the plan holds it.
+      expect(JSON.stringify(entry?.after)).not.toMatch(/15000000000/);
+
+      // A later save that leaves the figure alone does not claim to have typed it.
+      await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(650 * M, 150 * M)).expect(200);
+      const next = await col('auditLog').findOne({ action: 'goal.updated', targetId: String(goal._id) }, { sort: { _id: -1 } });
+      expect(next?.after).not.toHaveProperty('apeAchievedChanged');
+    });
+
+    it('ADR-0183 a leader’s first save for somebody with no plan stores the figure they typed', async () => {
       as('AGUS');
       const res = await http().put(`/goals/2026?for=${id('TARI')}`).send(body(600 * M, 250 * M)).expect(200);
-      expect(res.body).toMatchObject({ apeAchievedMinor: 0, achieved: { minor: 0, provenance: 'self_reported' } });
+      expect(res.body).toMatchObject({ apeAchievedMinor: 250 * M, achieved: { minor: 250 * M, provenance: 'self_reported' } });
+      expect(await stored('TARI')).toBe(250 * M);
+    });
+
+    it.each([
+      ['an AAB, their own unit’s agent', 'SARI', 'BUDI'],
+      ['an AAB, a nested unit’s agent', 'SARI', 'DODI'],
+      ['the Owner, own-kpm', 'OWNER', 'LUKAS'],
+      ['the Admin, own-kpm', 'ADMIN', 'LUKAS'],
+    ] as [string, Who, Who][])('ADR-0183 %s types it too', async (_name, caller, member) => {
+      as(caller);
+      await http().put(`/goals/2026?for=${id(member)}`).send(body(700 * M, 42 * M)).expect(200);
+      expect(await stored(member)).toBe(42 * M);
+    });
+
+    it('ADR-0183 an office figure stays locked: a leader’s typing is ignored, the stored figure kept, the plan still saved', async () => {
+      await ownSave('INDAH', 120 * M);
+      for (const who of ['AGUS', 'OWNER'] as Who[]) {
+        as(who);
+        const res = await http().put(`/goals/2026?for=${id('INDAH')}`).send(body(600 * M, 999 * M)).expect(200);
+        // Ignored, not refused: the target is saved, the figure is Indah's, and the plan is measured against the file's.
+        expect([who, res.body.annualApeTargetMinor, res.body.apeAchievedMinor]).toEqual([who, 600 * M, 120 * M]);
+        expect(res.body.achieved).toEqual({ minor: 240 * M, provenance: 'imported', month: '2026-09' });
+        expect(await stored('INDAH')).toBe(120 * M);
+      }
+    });
+
+    it.each([
+      ['an Agent who leads, for their own downline (own only)', 'LUKAS', 'TARI'],
+      ['an Agent, for a colleague', 'INDAH', 'DIMAS'],
+      ['a peer AAB, for an agent of another unit', 'PEER_AAB', 'BUDI'],
+      ['a peer AB, for somebody beside their line', 'PEER_AB', 'LUKAS'],
+      ['an AAB, for their own leader’s direct agent', 'SARI', 'LUKAS'],
+      ['office B’s AB, for a member of office A (cross-tenant)', 'B_AB', 'LUKAS'],
+    ] as [string, Who, Who][])('ADR-0183 %s is 404, and nothing is typed', async (_name, caller, member) => {
+      await ownSave(member, 120 * M);
+      as(caller);
+      const res = await http().put(`/goals/2026?for=${id(member)}`).send(body(700 * M, 999 * M)).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      expect(await stored(member)).toBe(120 * M);
+    });
+
+    it('ADR-0183 the preview works the plan out against what the leader types, and against the file once it is held', async () => {
+      as('AGUS');
+      const typed = (await http().post('/goals/2026/preview').query({ for: id('LUKAS') }).send(body(500 * M, 100 * M)).expect(200)).body;
+      // The figure the leader typed would be theirs (S2), and the preview says so as a save would record it.
+      expect(typed.achieved).toEqual({
+        minor: 100 * M, provenance: 'self_reported', month: null, typedBy: { membershipId: id('AGUS'), name: 'Agus Salim' },
+      });
+      const held = (await http().post('/goals/2026/preview').query({ for: id('INDAH') }).send(body(500 * M, 999 * M)).expect(200)).body;
+      expect(held.achieved).toEqual({ minor: 240 * M, provenance: 'imported', month: '2026-09' });
+    });
+
+    /*
+     * **S1 (the T17–T20 permission review): a coach's save never reverts the member's newer figure.** The screens send
+     * the figure only when the reader changed it in this edit; a body that leaves it out keeps the stored one. One that
+     * carries it is an edit, and the last write wins.
+     */
+    const withoutApe = (annual: number) => {
+      const { apeAchievedMinor, ...rest } = plan(annual);
+      expect(apeAchievedMinor).toBe(0);
+      return rest;
+    };
+
+    it.each([
+      ['from the Goal Setting tab', async () => `for=${id('LUKAS')}`],
+      ['through the session’s Goal card', async () => `for=${id('LUKAS')}&session=${(await started('AGUS', 'LUKAS')).sessionId}`],
+    ] as [string, () => Promise<string>][])(
+      'S1 the member types a newer figure, then the coach saves the target %s without touching it: the member’s figure stays',
+      async (_how, query) => {
+        await ownSave('LUKAS', 120 * M);
+        // The coach's screen read 120; Lukas has since typed 130 on his phone.
+        await ownSave('LUKAS', 130 * M);
+        const q = await query();
+        as('AGUS');
+        const res = await http().put(`/goals/2026?${q}`).send(withoutApe(700 * M)).expect(200);
+        expect(res.body).toMatchObject({
+          annualApeTargetMinor: 700 * M, apeAchievedMinor: 130 * M, achieved: { minor: 130 * M, provenance: 'self_reported' },
+        });
+        // Still Lukas's own figure: the coach typed nothing.
+        expect(res.body.achieved).not.toHaveProperty('typedBy');
+        expect(await stored('LUKAS')).toBe(130 * M);
+        expect((await col('goals').findOne({ membershipId: id('LUKAS') }))!.apeAchievedTypedBy).toBe(id('LUKAS'));
+      },
+    );
+
+    it('S1 a coach’s explicit edit is still taken: the last write wins', async () => {
+      await ownSave('LUKAS', 130 * M);
+      as('AGUS');
+      const res = await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(700 * M, 150 * M)).expect(200);
+      expect(res.body.apeAchievedMinor).toBe(150 * M);
+      expect(await stored('LUKAS')).toBe(150 * M);
+    });
+
+    it('S1 the member’s own save that leaves it out keeps it too, and a first save that leaves it out stores 0', async () => {
+      await ownSave('LUKAS', 130 * M);
+      as('LUKAS');
+      await http().put('/goals/2026').send(withoutApe(800 * M)).expect(200);
+      expect(await stored('LUKAS')).toBe(130 * M);
+      as('AGUS');
+      await http().put(`/goals/2026?for=${id('TARI')}`).send(withoutApe(800 * M)).expect(200);
       expect(await stored('TARI')).toBe(0);
     });
 
-    it('B2 the Owner and the Admin, own-kpm, keep it too', async () => {
+    /*
+     * **S2 (the T17–T20 permission review): a figure a coach typed is never called the member's own.** The plan records
+     * who typed it (`apeAchievedTypedBy`), and every read of the typed figure names the coach while it stands.
+     */
+    it('S2 records who typed it, and the member’s goal, their Summary and the coach’s copy name the coach', async () => {
       await ownSave('LUKAS', 120 * M);
-      for (const who of ['OWNER', 'ADMIN'] as Who[]) {
-        as(who);
-        await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(700 * M, 1 * M)).expect(200);
-        expect([who, await stored('LUKAS')]).toEqual([who, 120 * M]);
-      }
+      as('AGUS');
+      await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(600 * M, 150 * M)).expect(200);
+      expect((await col('goals').findOne({ membershipId: id('LUKAS') }))!.apeAchievedTypedBy).toBe(id('AGUS'));
+
+      const coach = { membershipId: id('AGUS'), name: 'Agus Salim' };
+      as('LUKAS');
+      expect((await http().get('/goals/2026').expect(200)).body.achieved)
+        .toEqual({ minor: 150 * M, provenance: 'self_reported', month: null, typedBy: coach });
+      expect((await http().get('/summary').expect(200)).body.yearly.source)
+        .toMatchObject({ provenance: 'self_reported', typedBy: coach });
+      as('OWNER');
+      expect((await http().get('/summary').query({ for: id('LUKAS') }).expect(200)).body.yearly.source.typedBy).toEqual(coach);
+      // The Unit Dashboard's bulk read names them the same way.
+      const plans = await wired.goals.plansOf(office.as('AGUS'), '2026', [id('LUKAS')], new Map());
+      expect(plans.get(id('LUKAS'))!.achieved.typedBy).toEqual(coach);
+    });
+
+    it('S2 once the member types their own again, it is theirs: nobody is named', async () => {
+      as('AGUS');
+      await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(600 * M, 150 * M)).expect(200);
+      const mine = await ownSave('LUKAS', 160 * M);
+      expect(mine.achieved).toEqual({ minor: 160 * M, provenance: 'self_reported', month: null });
+      expect((await col('goals').findOne({ membershipId: id('LUKAS') }))!.apeAchievedTypedBy).toBe(id('LUKAS'));
+    });
+
+    it('S2 a plan saved before the field reads as the member’s own figure', async () => {
+      await ownSave('LUKAS', 120 * M);
+      await col('goals').updateOne({ membershipId: id('LUKAS') }, { $unset: { apeAchievedTypedBy: '' } });
+      as('LUKAS');
+      expect((await http().get('/goals/2026').expect(200)).body.achieved).not.toHaveProperty('typedBy');
+      expect((await http().get('/summary').expect(200)).body.yearly.source).not.toHaveProperty('typedBy');
+    });
+
+    it('S2 a coach who can no longer be named is still not the member: typedBy with no name', async () => {
+      await ownSave('LUKAS', 120 * M);
+      await col('goals').updateOne({ membershipId: id('LUKAS') }, { $set: { apeAchievedTypedBy: '66f0000000000000000000ff' } });
+      as('LUKAS');
+      expect((await http().get('/goals/2026').expect(200)).body.achieved.typedBy)
+        .toEqual({ membershipId: '66f0000000000000000000ff', name: null });
+      // The Unit Dashboard's bulk read says the same, and an office figure held says nothing of who typed.
+      const plans = await wired.goals.plansOf(office.as('AGUS'), '2026', [id('LUKAS')], new Map());
+      expect(plans.get(id('LUKAS'))!.achieved.typedBy).toEqual({ membershipId: '66f0000000000000000000ff', name: null });
+      const held = await wired.goals.plansOf(office.as('AGUS'), '2026', [id('LUKAS')], new Map([
+        [id('LUKAS'), { minor: 240 * M, provenance: 'imported' as const, month: '2026-08' }],
+      ]));
+      expect(held.get(id('LUKAS'))!.achieved).toEqual({ minor: 240 * M, provenance: 'imported', month: '2026-08' });
+    });
+
+    it('S2 the member’s own preview of a figure they type names nobody: it would be theirs', async () => {
+      as('AGUS');
+      await http().put(`/goals/2026?for=${id('LUKAS')}`).send(body(600 * M, 150 * M)).expect(200);
+      as('LUKAS');
+      const mine = (await http().post('/goals/2026/preview').send(body(600 * M, 170 * M)).expect(200)).body;
+      expect(mine.achieved).toEqual({ minor: 170 * M, provenance: 'self_reported', month: null });
+      // Leaving it out previews the stored figure, still the coach's.
+      const { apeAchievedMinor: _left, ...rest } = body(600 * M, 0);
+      const kept = (await http().post('/goals/2026/preview').send(rest).expect(200)).body;
+      expect(kept.achieved).toEqual({
+        minor: 150 * M, provenance: 'self_reported', month: null, typedBy: { membershipId: id('AGUS'), name: 'Agus Salim' },
+      });
     });
 
     it('B2 the member’s own save is unchanged: the figure they type is stored and measured against', async () => {

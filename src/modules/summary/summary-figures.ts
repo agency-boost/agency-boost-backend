@@ -103,8 +103,14 @@ export interface PlannedGoal {
   savedAt: string | null;
   /** The cascade's resolved plan, or `null` when the goal's stored assumptions cannot make one. */
   projected: { annualApeTargetMinor: number } | null;
-  /** The year to date the goal reads, and whose figure it is (P9-T6). */
-  achieved: { minor: number; month: string | null; provenance: string };
+  /**
+   * The year to date the goal reads, and whose figure it is (P9-T6) — and, for one typed in the app by somebody other
+   * than the member, who (S2).
+   */
+  achieved: {
+    minor: number; month: string | null; provenance: string;
+    typedBy?: { membershipId: string; name: string | null };
+  };
   caseSizeMinor: number;
   leadsToApptPct: number;
   closingRatePct: number;
@@ -185,6 +191,10 @@ function yearlyCountsOf(
 
 /** Where a production figure came from, said with it (ADR-0008, P9-T6). */
 export interface FigureSource {
+  /**
+   * `self_reported` is **typed in the app, not uploaded** (ADR-0183): by the member, or by whoever coaches them — then
+   * `typedBy` names them (S2). Kept as the code, and documented as that, in `metrics-and-definitions.md`.
+   */
   provenance: 'imported' | 'corrected' | 'self_reported';
   /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
   month: string | null;
@@ -196,6 +206,12 @@ export interface FigureSource {
   correctedBy: { membershipId: string; name: string } | null;
   /** When, for a correction; `null` otherwise. ISO. */
   correctedAt: string | null;
+  /**
+   * **Who typed a `self_reported` figure, when it was not the member** (S2 of the T17–T20 permission review): a coach,
+   * by membership and name (`null` when they can no longer be named), so no screen calls it the member's own. Absent
+   * when the member typed it, and on every other source.
+   */
+  typedBy?: { membershipId: string; name: string | null };
 }
 
 /** A figure the office holds, as `ProductionReadings` answers it, with who corrected it. */
@@ -284,6 +300,8 @@ export function goalFigures(input: {
         month: goal.achieved.month,
         // The agent's own figure is nobody's correction, whatever the office holds beside it.
         ...correctionOf(goal.achieved.provenance === 'corrected' ? input.yearToDate : null, names),
+        // A typed figure a coach typed says who (S2); the member's own says nothing more.
+        ...(goal.achieved.provenance === 'self_reported' && goal.achieved.typedBy ? { typedBy: goal.achieved.typedBy } : {}),
       },
     },
   };

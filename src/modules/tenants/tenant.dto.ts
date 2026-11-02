@@ -5,7 +5,9 @@ import {
   IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, SUBSCRIPTION, type LeaderTier } from '@/domain/constants';
+import {
+  DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, ROSTER_UPLOAD, SUBSCRIPTION, type LeaderTier,
+} from '@/domain/constants';
 import { field } from '@/common/validation/violations';
 import { TENANTS_REFUSALS } from './tenants.messages';
 
@@ -398,29 +400,45 @@ export class CreateKpmRequestDto {
 }
 
 /**
- * The roster, as text.
+ * The roster, as text: **the paste**.
  *
- * Named `rows` rather than `csv` because it is not always CSV: the screen sends a
- * downloaded file's contents, or the **tab-separated** text a spreadsheet puts on the
- * clipboard when somebody copies cells. One field, because the parser decides the
- * delimiter from the first line and neither the caller nor the reader gains from saying
- * which it is.
+ * Named `rows` rather than `csv` because it is not always CSV: it is the **tab-separated**
+ * text a spreadsheet puts on the clipboard when somebody copies cells, or a CSV's. One
+ * field, because the parser decides the delimiter from the first line and neither the
+ * caller nor the reader gains from saying which it is.
  *
- * Sent as JSON rather than `multipart/form-data`: the payload is a few kilobytes, the
- * screen has already read it to show a preview, and multipart would mean a second parser,
- * a size limit of its own, and a different shape for preview and commit — and no shape at
- * all for a paste, which is not a file. The cap is 512 KB, which is a roster of tens of
- * thousands and far past the 500-member office ceiling `performance-and-scale.md` sets.
+ * Sent as JSON, because a paste is not a file. **A file is sent as one since ADR-0184** —
+ * `roster/file/preview` and `roster/file`, `multipart/form-data`, a workbook or a CSV read
+ * on the server — and reaches the same parser as this text. The cap is
+ * `ROSTER_UPLOAD.MAX_TEXT_LENGTH`, 512,000 characters: a roster of tens of thousands and
+ * far past the 500-member office ceiling `performance-and-scale.md` sets.
  */
+/**
+ * **`GET /admin/tenants/roster-template`'s query** (S4 of the T17–T20 permission review). `kpmId` reaches a lookup by
+ * id, so it is an ObjectId or nothing — `?kpmId[$ne]=…` is a 400, never an operator handed to the database — and
+ * `format` is one of the two files the template comes in, or absent for the JSON.
+ */
+export class RosterTemplateQueryDto {
+  @ApiPropertyOptional({ enum: ['xlsx', 'csv'], description: 'Absent: the JSON. `xlsx` or `csv`: the template as that file.' })
+  @IsOptional()
+  @IsIn(['xlsx', 'csv'], { message: field(SAY.unknownTemplateFormat) })
+  format?: 'xlsx' | 'csv';
+
+  @ApiPropertyOptional({ description: 'The office whose ladder fills the `role` dropdown (xlsx only). Another office’s is 404.' })
+  @IsOptional()
+  @IsMongoId()
+  kpmId?: string;
+}
+
 export class RosterRowsDto {
   @ApiProperty({
     description:
-      'The rows, as text. Comma-separated from a file, tab-separated from a spreadsheet '
-      + 'paste. The header row is optional.',
-    maxLength: 512_000,
+      'The rows, as text. Tab-separated from a spreadsheet paste, or comma-separated. '
+      + 'The header row is optional. A file is sent to `roster/file/preview` and `roster/file`.',
+    maxLength: ROSTER_UPLOAD.MAX_TEXT_LENGTH,
   })
   @IsString()
-  @MaxLength(512_000)
+  @MaxLength(ROSTER_UPLOAD.MAX_TEXT_LENGTH)
   rows!: string;
 }
 

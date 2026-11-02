@@ -11,7 +11,10 @@ import {
   ADMIN, declaredPermissions, FIXTURE_KPM, NOT_ADMINISTRATORS, OWNER, productionPipe, session,
   StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
-import { PRODUCTION_UPLOAD } from '@/domain/constants';
+import { createHash } from 'node:crypto';
+import { Workbook } from 'exceljs';
+import { zipSync } from 'fflate';
+import { PRODUCTION_UPLOAD, XLSX_MIME_TYPE } from '@/domain/constants';
 import { ProductionController } from './production.controller';
 import { TEMPLATE_HEADER_V1 } from './production-template';
 import { ProductionService } from './production.service';
@@ -22,6 +25,14 @@ import { ProductionCorrections } from './production-correction.service';
 import { listenOnLoopback } from '../../../test/listen';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
+
+/** A binary answer, kept as bytes. */
+const binary = (res: request.Response, done: (err: Error | null, body: Buffer) => void) => {
+  const stream = res as unknown as NodeJS.ReadableStream;
+  const chunks: Buffer[] = [];
+  stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+  stream.on('end', () => done(null, Buffer.concat(chunks)));
+};
 const COMPANY = '66f0000000000000000000c1';
 const RINA = '66f000000000000000000101';
 
@@ -192,6 +203,66 @@ describe('production over HTTP (P9-T1)', () => {
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
       }
     });
+
+    it('ADR-0184: answers format=xlsx with the month’s template as a workbook, named as the CSV is, its guide the reader’s', async () => {
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09&format=xlsx')
+        .set('Accept-Language', 'id').buffer(true).parse(binary).expect(200);
+      expect(res.headers['content-type']).toBe(XLSX_MIME_TYPE);
+      expect(res.headers['content-disposition']).toBe('attachment; filename="KPM0417-agent-data-Sep-2026.xlsx"');
+      const workbook = new Workbook();
+      await workbook.xlsx.load(res.body as unknown as Parameters<Workbook['xlsx']['load']>[0]);
+      expect(workbook.worksheets.map((w) => w.name)).toEqual(['Petunjuk', 'Data']);
+      expect((workbook.getWorksheet('Data')!.getRow(2).values as unknown[]).slice(1)).toEqual(['PRU-001', 'Rina Wijaya']);
+    });
+
+    it('ADR-0184: refuses a format the template does not come in, and a bad month in the workbook’s too', async () => {
+      const csv = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09&format=csv').expect(400);
+      expect(csv.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: ['That is not a format the template comes in. Ask for format=xlsx, or for no format to have the CSV.'] },
+      });
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=Sep-2026&format=xlsx').expect(400);
+      expect(month.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    /*
+     * **S4 (the T17–T20 permission review): the query is a DTO** — a format that is no file, an operator object in
+     * place of a string, and a field nobody declared are each a 400 before the office is read.
+     */
+    it.each([
+      ['format=pdf', '?month=2026-09&format=pdf'],
+      ['format as an operator object', '?month=2026-09&format[$ne]=csv'],
+      ['month as an operator object', '?month[$ne]=2026-09'],
+      ['an undeclared field', '?month=2026-09&office=0417'],
+    ])('S4 refuses %s with 400 VALIDATION_FAILED', async (_what, query) => {
+      const res = await request(app.getHttpServer()).get(`/kpm/data-upload/template${query}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    /* S5: every role below the office's administrators, not only the first, and the Super Admin by name. */
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))(
+      'ADR-0184: refuses %s the workbook',
+      async (_who, ctx) => {
+        session.current = ctx;
+        const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09&format=xlsx');
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('PERM_DENIED');
+      },
+    );
+
+    it('ADR-0184: refuses a Super Admin the workbook by name — they are in no office to name it for', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09&format=xlsx');
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+
+    it('ADR-0184: answers the Admin the workbook too — §3.9 grants both', async () => {
+      session.current = ADMIN;
+      await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09&format=xlsx')
+        .buffer(true).parse(binary).expect(200);
+    });
   });
 
   describe('the preview (P9-T3)', () => {
@@ -247,10 +318,54 @@ describe('production over HTTP (P9-T1)', () => {
       expect(res.body.error).toMatchObject({ code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5 } });
     });
 
-    it('AC-3: refuses a workbook, whole, with 422', async () => {
+    it('AC-3: refuses, whole, with 422, a file that starts as a workbook and will not open as one', async () => {
       const res = await send(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x01]));
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe('UPLOAD_MALFORMED_CSV');
+    });
+
+    describe('ADR-0184 — a filled Excel template', () => {
+      /** The month's template as the Owner downloads it, its Data sheet's row 2 given figures. */
+      const filled = async (header: readonly string[] = TEMPLATE_HEADER_V1) => {
+        const workbook = new Workbook();
+        const data = workbook.addWorksheet('Data');
+        data.addRow([...header]);
+        data.addRow(['PRU-001', 'Rina Wijaya', 1.5]);
+        return Buffer.from(await workbook.xlsx.writeBuffer());
+      };
+
+      it('previews it as it previews the CSV, saying it was a workbook', async () => {
+        const res = await send(await filled()).expect(200);
+        expect(res.body).toMatchObject({
+          format: 'xlsx', templateVersion: 1, summary: { rows: 1, ready: 1, newCells: 1, notProvidedCells: 11 },
+        });
+        expect(res.body.rows[0]).toMatchObject({ line: 2, agentCode: 'PRU-001' });
+        expect(res.body.rows[0].cells[0]).toMatchObject({ metric: 'ape', cadence: 'monthly', status: 'new', after: 150_000_000 });
+      });
+
+      it('refuses a Data sheet with the wrong header as UPLOAD_TEMPLATE_MISMATCH, naming the column', async () => {
+        const res = await send(await filled(TEMPLATE_HEADER_V1.map((h) => (h === 'Recruitment — This Month' ? 'Recruits' : h))));
+        expect(res.status).toBe(422);
+        expect(res.body.error).toMatchObject({ code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5 } });
+      });
+
+      it('refuses a zip bomb, before opening it, as ASSET_TOO_LARGE', async () => {
+        const bomb = Buffer.from(zipSync({ 'xl/worksheets/sheet1.xml': new Uint8Array(30 * 1024 * 1024) }, { level: 9 }));
+        const res = await send(bomb).expect(413);
+        expect(res.body.error).toMatchObject({ code: 'ASSET_TOO_LARGE', details: { maxUncompressedBytes: 26_214_400 } });
+      });
+
+      it('confirms it, the batch recording a workbook, its hash the uploaded bytes’', async () => {
+        const bytes = await filled();
+        const res = await request(app.getHttpServer()).post('/kpm/data-upload/commit')
+          .field('month', '2026-09').field('revision', '0').attach('file', bytes, 'filled.xlsx').expect(201);
+        expect(res.body.batch).toMatchObject({ filename: 'filled.xlsx', status: 'committed', cellCount: 1 });
+        const batch = await mongoose.connection.db!.collection('dataUploadBatches').findOne({});
+        expect(batch).toMatchObject({
+          format: 'xlsx', encoding: 'utf-8', delimiter: ',',
+          fileSha256: createHash('sha256').update(bytes).digest('hex'),
+        });
+      });
     });
 
     it('refuses a file over the ceiling as ASSET_TOO_LARGE, not as a fault', async () => {
@@ -297,18 +412,18 @@ describe('production over HTTP (P9-T1)', () => {
       const header = await send(FILLED.replace('Recruitment — This Month', 'Recruits')).set('Accept-Language', 'id').expect(422);
       expect(header.body.error).toMatchObject({
         code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5 },
-        message: 'Kolom 5 di header berisi “Recruits”; di templat berisi “Recruitment — This Month”. Unduh templat untuk bulan '
-          + 'ini dan isi templat itu — belum ada yang dibaca.',
+        message: 'Kolom 5 di header berisi “Recruits”; di template berisi “Recruitment — This Month”. Unduh template untuk bulan '
+          + 'ini dan isi template itu — belum ada yang dibaca.',
       });
       const big = await send(Buffer.alloc(PRODUCTION_UPLOAD.MAX_BYTES + 1, 0x41)).set('Accept-Language', 'id').expect(413);
       expect(big.body.error).toMatchObject({
         code: 'ASSET_TOO_LARGE', details: { maxBytes: 1_048_576 },
-        message: 'File ini lebih besar dari 1 MB. Templat untuk satu KPM hanya beberapa kilobyte — periksa apakah ini file yang benar.',
+        message: 'File ini lebih besar dari 1 MB. Template untuk satu KPM hanya beberapa kilobyte — periksa apakah ini file yang benar.',
       });
       const noFile = await request(app.getHttpServer()).post('/kpm/data-upload/preview').set('Accept-Language', 'id')
         .field('month', '2026-09').expect(400);
       expect(noFile.body.error).toMatchObject({
-        code: 'VALIDATION_FAILED', details: { field: 'file' }, message: 'Lampirkan templat yang sudah diisi sebagai kolom `file`.',
+        code: 'VALIDATION_FAILED', details: { field: 'file' }, message: 'Lampirkan template yang sudah diisi sebagai kolom `file`.',
       });
       const notAMonth = await send(FILLED, 'Sep-2026').set('Accept-Language', 'id').expect(400);
       expect(notAMonth.body.error).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Sep-2026 bukan bulan. Gunakan format YYYY-MM.' });

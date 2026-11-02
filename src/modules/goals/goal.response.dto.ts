@@ -1,7 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalMeasured, GoalPreview, GoalSnapshotView, GoalView } from './goal.service';
+import type { GoalAchieved, GoalMeasured, GoalPreview, GoalSnapshotView, GoalTypist, GoalView } from './goal.service';
 
 export class GoalMeasuredDto implements GoalMeasured {
   @ApiProperty({ example: '2026-08-30' }) from!: string;
@@ -22,18 +22,31 @@ export class GoalMeasuredDto implements GoalMeasured {
   closingRate!: number | null;
 }
 
+/** Somebody who typed a member's figure for them (S2). */
+export class GoalTypistDto implements GoalTypist {
+  @ApiProperty({ description: 'The membership: the person in this office, never their account.' }) membershipId!: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Sari Puspita', description: '`null` when they can no longer be named.' })
+  name!: string | null;
+}
+
 export class GoalAchievedDto implements GoalAchieved {
   @ApiProperty({ type: Number, description: 'The APE `projected` is computed from, in IDR minor units.' })
   minor!: number;
 
   @ApiProperty({
     enum: ['imported', 'corrected', 'self_reported'],
-    description: 'The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year.',
+    description: 'The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`) — the last only while the office holds no year-to-date figure for the year.',
   })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
   @ApiProperty({ type: String, nullable: true, example: '2026-08', description: 'The month whose year-to-date figure it is; `null` for the agent’s own.' })
   month!: string | null;
+
+  @ApiPropertyOptional({
+    type: GoalTypistDto,
+    description: 'Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the member typed it, and on the office’s own figure.',
+  })
+  typedBy?: GoalTypistDto;
 }
 
 export class GoalSnapshotDto implements GoalSnapshotView {
@@ -149,7 +162,7 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   monthsLeftIsOverride!: boolean;
 
-  @ApiProperty({ type: Number, description: 'The agent’s own typed figure — kept, and used only until production arrives.' })
+  @ApiProperty({ type: Number, description: 'The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used only until production arrives.' })
   apeAchievedMinor!: number;
 
   @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is.' })

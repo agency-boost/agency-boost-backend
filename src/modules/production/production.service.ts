@@ -15,13 +15,15 @@ import {
   MetricValue, MonthlyAgentDataDocument, PRODUCTION_METRICS, type ProductionMetric, type Provenance,
 } from './monthly-agent-data.schema';
 import {
-  buildPreview, type PreviewCell, type PreviewRow, type PreviewSummary, readUpload, type StoredFigures,
+  buildPreview, type PreviewCell, type PreviewRow, type PreviewSummary, readFileUpload, type StoredFigures,
+  type UploadFormat,
 } from './production-preview';
 import type { UploadDelimiter, UploadEncoding } from './production-csv';
 import {
   TEMPLATE_HEADER_V1, TEMPLATE_VERSION, templateBody, templateFilename,
 } from './production-template';
-import type { UploadedCsv } from './production-upload.interceptor';
+import { templateWorkbook } from './production-workbook';
+import type { FileUpload } from './production-upload.interceptor';
 import { type MonthState, ProductionMonths } from './production-months.service';
 import type { ReadUpload } from './production-preview';
 import { requireMonth, requireOffice } from './production-guards';
@@ -83,6 +85,8 @@ export interface UploadPreview {
   /** The name the file had on the reader's machine — for them to recognise, never trusted. */
   filename: string;
   templateVersion: number;
+  /** A CSV, or an Excel workbook (ADR-0184). */
+  format: UploadFormat;
   encoding: UploadEncoding;
   delimiter: UploadDelimiter;
   /** The month's revision the preview was taken against. Confirm import sends it back (P9-T4). */
@@ -183,6 +187,28 @@ export class ProductionService {
    * the same list the table shows, for the same reason (I-125), and in the same order (P13.1-T7).
    */
   async template(ctx: RequestContext, month: string): Promise<TemplateFile> {
+    const { code, roster } = await this.templateRows(ctx, month);
+    return {
+      month,
+      version: TEMPLATE_VERSION,
+      filename: templateFilename(code, month),
+      header: [...TEMPLATE_HEADER_V1],
+      file: templateBody(roster),
+      rowCount: roster.length,
+    };
+  }
+
+  /**
+   * **The same file as an Excel workbook** (ADR-0184): the same header and the same rows on its *Data* sheet, and the
+   * guide on its own sheet, in the reader's language. Named as the CSV is, with `.xlsx`.
+   */
+  async workbook(ctx: RequestContext, month: string): Promise<{ filename: string; bytes: Buffer }> {
+    const { code, roster } = await this.templateRows(ctx, month);
+    return { filename: templateFilename(code, month, 'xlsx'), bytes: await templateWorkbook(roster, month, ctx.reader) };
+  }
+
+  /** The office's code, which names the file, and the people it lists. */
+  private async templateRows(ctx: RequestContext, month: string): Promise<{ code: string; roster: RosterEntry[] }> {
     requireOffice(ctx);
     requireMonth(month);
 
@@ -191,15 +217,7 @@ export class ProductionService {
       this.roster(ctx),
     ]);
     if (!office) throw new NotFoundException('Kpm');
-
-    return {
-      month,
-      version: TEMPLATE_VERSION,
-      filename: templateFilename((office as { code: string }).code, month),
-      header: [...TEMPLATE_HEADER_V1],
-      file: templateBody(roster),
-      rowCount: roster.length,
-    };
+    return { code: (office as { code: string }).code, roster };
   }
 
   /**
@@ -212,7 +230,7 @@ export class ProductionService {
    * File-level refusals throw — an unreadable file, a header nobody issued. Everything about one row
    * or one cell is reported inside the preview, and the rest of the file still previews.
    */
-  async preview(ctx: RequestContext, month: string, upload: UploadedCsv | undefined): Promise<UploadPreview> {
+  async preview(ctx: RequestContext, month: string, upload: FileUpload | undefined): Promise<UploadPreview> {
     requireOffice(ctx);
     requireMonth(month);
     // The revision first, the figures second: a write between the two leaves the preview carrying
@@ -223,6 +241,7 @@ export class ProductionService {
       month,
       filename: upload!.originalname,
       templateVersion: a.read.templateVersion,
+      format: a.read.format,
       encoding: a.read.encoding,
       delimiter: a.read.delimiter,
       revision,
@@ -235,7 +254,7 @@ export class ProductionService {
    * The file against the roster and what is stored: the preview's substance, and what a commit
    * writes (P9-T4 reads it again rather than trusting the browser's copy of the preview).
    */
-  async analyse(ctx: RequestContext, month: string, upload: UploadedCsv | undefined): Promise<Analysis> {
+  async analyse(ctx: RequestContext, month: string, upload: FileUpload | undefined): Promise<Analysis> {
     requireOffice(ctx);
     requireMonth(month);
     if (!upload) {
@@ -247,7 +266,7 @@ export class ProductionService {
       );
     }
 
-    const read = readUpload(upload.buffer);
+    const read = await readFileUpload(upload.buffer);
     const roster = await this.roster(ctx);
     const rows = await this.data.find(ctx, { month, membershipId: { $in: roster.map((r) => r.membershipId) } });
     const stored = new Map(rows.map((r) => [r.membershipId, r]));

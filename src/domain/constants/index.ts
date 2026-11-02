@@ -398,6 +398,8 @@ export {
 
 export { ASSET_LIMITS, AVATAR, DOCUMENT_MIME_TYPES } from './assets';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
+// ADR-0184: a workbook's bounds, and the roster file's (§B.31).
+export { ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './spreadsheet';
 
 // Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
 export {
@@ -583,6 +585,9 @@ export {
 
 // UI V1 (2026-10-30; UI-081, D-22): a person's WhatsApp number, as *Isi nomor WhatsApp* saves it.
 export { PHONE_NATIONAL_DIGITS, PHONE_COUNTRY_PREFIX, normalisePhone } from './phone';
+
+// The product owner, 2026-11-01: a password's bounds, 8 to 200 characters (§B.30).
+export { PASSWORD } from './password';
 
 // Phase 18.98: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
 export {

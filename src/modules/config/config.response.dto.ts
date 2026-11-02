@@ -8,8 +8,8 @@ import type { RatioDefinitionView } from './ratio.service';
 import type {
   PublishState, SnapshotEventTypeView, TenantConfigView,
 } from './tenant-config.service';
-import type { TemplateView } from './template.service';
-import type { NamedTemplateView } from './named-template.service';
+import type { PublishAllOutcome, PublishAllView, TemplateView } from './template.service';
+import type { NamedTemplateView, TemplateOfficeView, TemplateSectionState } from './named-template.service';
 import type { DroppedSettingView } from './office-template';
 import type {
   ActivityBindingView, BindableType, OfficeActivityBindingView,
@@ -552,6 +552,15 @@ export class TemplateOriginDto implements TemplateOrigin {
   companyId?: string | null;
 }
 
+/** Where one kind of a template stands (ADR-0185 §3). */
+export class TemplateSectionStateDto implements TemplateSectionState {
+  @ApiProperty({ type: Number, nullable: true, description: 'The newest published version; null where none is.' })
+  publishedVersion!: number | null;
+
+  @ApiProperty({ type: Boolean, description: 'A draft is saved and not published.' })
+  hasDraft!: boolean;
+}
+
 /** One of a company's named templates (ADR-0115 §3). */
 export class NamedTemplateDto implements NamedTemplateView {
   @ApiProperty({ type: String })
@@ -582,6 +591,20 @@ export class NamedTemplateDto implements NamedTemplateView {
       + 'published, which an office made from this template gets empty.',
   })
   publishedVersions!: Record<OfficeTemplateKind, number | null>;
+
+  @ApiProperty({
+    type: Object,
+    description:
+      'Each of the seven kinds, keyed by kind: `publishedVersion` (null where none is) and `hasDraft`, a draft '
+      + 'saved and not published (ADR-0185 §3) — the template card\u2019s sections published and changes waiting, '
+      + 'and the checklist\u2019s *Terbit vN*, *Draf* or *Kosong*.',
+    example: {
+      activity_taxonomy: { publishedVersion: 3, hasDraft: false },
+      lead_pipeline: { publishedVersion: 1, hasDraft: true },
+      activation_checklist: { publishedVersion: null, hasDraft: false },
+    },
+  })
+  sections!: Record<OfficeTemplateKind, TemplateSectionStateDto>;
 
   @ApiProperty({
     type: Number,
@@ -638,4 +661,63 @@ export class SavedOfficeTemplateDto extends NamedTemplateDto implements SavedOff
       + 'Recorded in the `template.created` audit row as well.',
   })
   dropped!: DroppedSettingDto[];
+}
+
+/** What *Terbitkan semua* did with one kind (ADR-0185 §3). */
+export class PublishAllOutcomeDto {
+  @ApiProperty({ enum: OFFICE_TEMPLATE_KINDS })
+  kind!: OfficeTemplateKind;
+
+  @ApiProperty({
+    enum: ['published', 'skipped', 'refused'],
+    description: '`published`: its draft is `version` now. `skipped`: nothing waited (`reason: no_changes`). '
+      + '`refused`: its draft was refused as its own publish would refuse it, and is still a draft (`error`).',
+  })
+  outcome!: PublishAllOutcome['outcome'];
+
+  @ApiPropertyOptional({ type: Number, description: '`published` only: the version it now is.' })
+  version?: number;
+
+  @ApiPropertyOptional({ enum: ['no_changes'], description: '`skipped` only.' })
+  reason?: 'no_changes';
+
+  @ApiPropertyOptional({
+    type: Object,
+    description: '`refused` only: the refusal\u2019s `code` and `message`, in the reader\u2019s language.',
+    example: { code: 'VALIDATION_FAILED', message: 'Add at least one activity type before publishing.' },
+  })
+  error?: { code: string; message: string };
+}
+
+/** *Terbitkan semua*'s answer (ADR-0185 §3). */
+export class PublishAllDto implements PublishAllView {
+  @ApiProperty({ type: () => NamedTemplateDto, description: 'The template as it now stands.' })
+  template!: NamedTemplateDto;
+
+  @ApiProperty({ type: () => PublishAllOutcomeDto, isArray: true, description: 'Every kind, in publishing order.' })
+  results!: PublishAllOutcome[];
+}
+
+/** One office a template answers for, and the kinds it is behind on (ADR-0185 §4). */
+export class TemplateOfficeDto implements TemplateOfficeView {
+  @ApiProperty({ type: String, description: 'The office (`kpms._id`).' })
+  id!: string;
+
+  @ApiProperty({ type: String, example: '0417' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'BSD City Branch' })
+  branchName!: string;
+
+  @ApiProperty({
+    enum: OFFICE_TEMPLATE_KINDS, isArray: true,
+    description: 'Kinds the template has published a newer version of than the office was built from, or held none of then.',
+  })
+  behind!: OfficeTemplateKind[];
+
+  @ApiProperty({
+    enum: OFFICE_TEMPLATE_KINDS, isArray: true,
+    description: 'Kinds the office has no record of: created before provisioning recorded them, so not known.',
+  })
+  unrecorded!: OfficeTemplateKind[];
 }

@@ -23,8 +23,8 @@ export const METRIC_FILE_LABEL: Record<ProductionMetric, string> = {
  * upload"*). The separator is the prototype's em dash (`:4687-4688`), so a file produced by either
  * side carries the same fourteen cells.
  *
- * **There is no version line in the file.** One would be possible — the roster template carries
- * comment lines and its importer skips them — but a line is something an operator deletes and a
+ * **There is no version line in the file.** One would be possible — the roster template carried
+ * comment lines until ADR-0184, and its importer still skips them — but a line is something an operator deletes and a
  * spreadsheet moves, and what an importer needs to know is whether the columns are the ones it
  * expects. The header says that by itself. So a file is identified by its **header cells, compared
  * one by one after the file has been decoded and parsed**, and a header nobody issued is
@@ -95,9 +95,9 @@ const MONTH_ABBREV = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
  * **Not the version.** A filename is the first thing an operator changes, and a check that trusted
  * it would refuse a good file for being renamed.
  */
-export function templateFilename(officeCode: string, month: string): string {
+export function templateFilename(officeCode: string, month: string, extension: 'csv' | 'xlsx' = 'csv'): string {
   const [year, mm] = month.split('-');
-  return `KPM${officeCode}-agent-data-${MONTH_ABBREV[Number(mm) - 1]}-${year}.csv`;
+  return `KPM${officeCode}-agent-data-${MONTH_ABBREV[Number(mm) - 1]}-${year}.${extension}`;
 }
 
 /** One row per agent: the code as stored, the name as text, and twelve empty fields. */

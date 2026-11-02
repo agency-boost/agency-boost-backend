@@ -6,6 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render } from '@/common/i18n/sentence';
+import type { FileUpload } from '@/common/spreadsheet/file-upload.interceptor';
 import { localDayOf } from '@/common/time/local-day';
 import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -24,6 +25,7 @@ import {
   type RosterIssue,
   type RosterRow,
 } from './roster-csv';
+import { rosterTextOf, rosterWorkbook } from './roster-file';
 import { TENANTS_REFUSALS } from './tenants.messages';
 
 /** The import's refusals and each row's issue, in both languages (P18.98-T5 AC-3). */
@@ -139,6 +141,7 @@ export class RosterImportService {
    * is what the company and the office already contain, which is all of this.
    */
   private async issuesAgainstTheOffice(
+    ctx: RequestContext,
     kpm: KpmDocument,
     rows: RosterRow[],
   ): Promise<RosterIssue[]> {
@@ -158,6 +161,11 @@ export class RosterImportService {
         });
       }
       if (row.email) {
+        /*
+         * **That an address has an account, and nothing else**: no name, no office. The same fact `POST /auth/me/email`
+         * already answers any signed-in person (`409 AUTH_EMAIL_TAKEN`), and the row cannot be created without it. Public
+         * registration stays silent (`AuthService.registerAccount`), which is where an anonymous caller would ask.
+         */
         const existing = await this.users.findOne({ email: row.email, deletedAt: null }).exec();
         if (existing) {
           issues.push({
@@ -178,7 +186,9 @@ export class RosterImportService {
           issues.push({
             line: row.line,
             column: 'agentCode',
-            message: SAY.agentCodeHeld({ email: held.email }),
+            message: await this.mayNameTheHolder(ctx, kpm, String(held._id))
+              ? SAY.agentCodeHeld({ email: held.email })
+              : SAY.agentCodeHeldElsewhere,
           });
         }
       }
@@ -209,6 +219,22 @@ export class RosterImportService {
     }
 
     return issues;
+  }
+
+  /**
+   * **Whether the issue may name who holds a code** (B1 of the T17–T20 permission review). The holder can be anybody
+   * at the insurer — a member of another office of the same company — and an Owner or an Admin who could read their
+   * address here could collect another office's people by uploading a file of sequential codes. So the address is shown
+   * only to a Super Admin, who holds every office's directory already (as `pastLimitForSuperAdmin` speaks to them), or
+   * when the holder holds a live membership in this very office, whom the importer can see on *Anggota* anyway. Anybody
+   * else is told the code is taken at the insurer, and nothing about whom.
+   */
+  private async mayNameTheHolder(ctx: RequestContext, kpm: KpmDocument, userId: string): Promise<boolean> {
+    if (ctx.isSuperAdmin) return true;
+    return this.members.exists(
+      RequestContext.tenantRead(String(kpm._id), 'roster-import'),
+      { userId, status: { $ne: 'removed' } },
+    );
   }
 
   /**
@@ -264,14 +290,60 @@ export class RosterImportService {
     return issues;
   }
 
+  /**
+   * **The roster template as an Excel workbook** (ADR-0184), for the office named — or, for an Owner or an Admin who
+   * names none, their own. The office decides one thing in it: `role` is a dropdown of its company ladder's rung codes.
+   * With no office (a Super Admin naming none) the column is free text. Another office's id is 404, as everywhere here.
+   */
+  async workbook(ctx: RequestContext, kpmId: string | null): Promise<Buffer> {
+    this.require(ctx);
+    const named = kpmId ?? ctx.kpmId;
+    const rungs = named
+      ? [...(await this.hierarchy.rungClassesOf(String((await this.office(ctx, named))._id))).keys()].sort()
+      : null;
+    return rosterWorkbook(ctx.reader, rungs);
+  }
+
+  /** The rows as text, pasted (`RosterRowsDto`): what a check reads. */
   async preview(ctx: RequestContext, kpmId: string, text: string): Promise<RosterPreview> {
     this.require(ctx);
-    const kpm = await this.office(ctx, kpmId);
+    return this.previewOf(ctx, await this.office(ctx, kpmId), text);
+  }
 
+  /**
+   * **The rows as a file — an Excel workbook or a CSV** (ADR-0184), read to the same text a paste is and checked by the
+   * same parser: one set of issues, whichever way the rows came. The office is checked before the file is read.
+   */
+  async previewFile(ctx: RequestContext, kpmId: string, file: FileUpload | undefined): Promise<RosterPreview> {
+    this.require(ctx);
+    const kpm = await this.office(ctx, kpmId);
+    return this.previewOf(ctx, kpm, await this.textOf(file));
+  }
+
+  async commit(ctx: RequestContext, kpmId: string, text: string): Promise<RosterCommitResult> {
+    this.require(ctx);
+    return this.commitOf(ctx, await this.office(ctx, kpmId), text);
+  }
+
+  /** The file's rows, all or nothing, as `commit` writes a paste's. */
+  async commitFile(ctx: RequestContext, kpmId: string, file: FileUpload | undefined): Promise<RosterCommitResult> {
+    this.require(ctx);
+    const kpm = await this.office(ctx, kpmId);
+    return this.commitOf(ctx, kpm, await this.textOf(file));
+  }
+
+  private async textOf(file: FileUpload | undefined): Promise<string> {
+    if (!file) {
+      throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.attachRosterFile, HttpStatus.BAD_REQUEST, { field: 'file' });
+    }
+    return rosterTextOf(file.buffer);
+  }
+
+  private async previewOf(ctx: RequestContext, kpm: KpmDocument, text: string): Promise<RosterPreview> {
     const { rows, issues } = parseRoster(text, this.todayIn(kpm));
     const all = [
       ...issues,
-      ...(await this.issuesAgainstTheOffice(kpm, rows)),
+      ...(await this.issuesAgainstTheOffice(ctx, kpm, rows)),
       ...(await this.issuesAgainstTheLimit(ctx, kpm, rows)),
     ]
       .sort((a, b) => a.line - b.line || a.column.localeCompare(b.column));
@@ -286,12 +358,9 @@ export class RosterImportService {
     };
   }
 
-  async commit(ctx: RequestContext, kpmId: string, text: string): Promise<RosterCommitResult> {
-    this.require(ctx);
-    const kpm = await this.office(ctx, kpmId);
-
+  private async commitOf(ctx: RequestContext, kpm: KpmDocument, text: string): Promise<RosterCommitResult> {
     const { rows, issues } = parseRoster(text, this.todayIn(kpm));
-    const all = [...issues, ...(await this.issuesAgainstTheOffice(kpm, rows))];
+    const all = [...issues, ...(await this.issuesAgainstTheOffice(ctx, kpm, rows))];
     if (all.length > 0) {
       throw new DomainException(
         ErrorCode.VALIDATION_FAILED,

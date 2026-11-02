@@ -27,6 +27,33 @@ export interface TemplateScope {
 }
 
 /**
+ * **One office a template answers for, and what it was built from** (ADR-0185 §4): what the checklist's *N KPM memakai
+ * versi lama* lists. `seededFrom` is the office's own record, kind by kind, as `kpms.seededFrom` holds it.
+ */
+export interface OfficeSeeds {
+  id: string;
+  code: string;
+  branchName: string;
+  seededFrom: Partial<Record<TemplateKind, { version: number | null }>>;
+}
+
+/**
+ * **Where one office stands against one published version of one kind** — the rule `KpmOfficeCounter.standing` counts
+ * with, written once for a reader that has the office in hand rather than a count to make (ADR-0185 §4).
+ *
+ * - no record of the kind → `unrecorded`: created before provisioning recorded it, and possibly current (P5-T12);
+ * - a record with no version, or an older one → `behind`: built from nothing of the kind, or from an earlier version;
+ * - otherwise `current`.
+ */
+export function standingOf(
+  record: { version: number | null } | undefined, publishedVersion: number,
+): 'current' | 'behind' | 'unrecorded' {
+  if (!record) return 'unrecorded';
+  if (record.version === null || record.version === undefined || record.version < publishedVersion) return 'behind';
+  return 'current';
+}
+
+/**
  * How a company's offices stand against a template.
  *
  * A port rather than a direct `kpms` read, because `TemplateService` lives in the config
@@ -34,6 +61,12 @@ export interface TemplateScope {
  * (`TenantService` calls `ProvisioningService`). One direction only.
  */
 export abstract class OfficeCounter {
+  /**
+   * **The live offices one template answers for**, each with its seed record (ADR-0185 §4), by code. The offices
+   * {@link standing} counts, named — for the dialog behind the checklist's count.
+   */
+  abstract officesOf(companyId: string, scope: TemplateScope): Promise<OfficeSeeds[]>;
+
   /** Counted per template since 13.2: an office started from another template is not this one's. */
   abstract standing(
     companyId: string, kind: TemplateKind, version: number, scope: TemplateScope,

@@ -171,6 +171,17 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       expect(Object.values(saved.publishedVersions)).toEqual(Array(7).fill(1));
     });
 
+    it('ADR-0185: holds one change waiting — its lead stages a draft version 2, the rest as published', async () => {
+      const saved = (await wired.namedTemplates.list(prudentialId)).find((t) => t.id === BSD_CITY_SETTINGS._id)!;
+      expect(saved.sections.lead_pipeline).toEqual({ publishedVersion: 1, hasDraft: true });
+      expect(Object.values(saved.sections).filter((s) => s.hasDraft)).toHaveLength(1);
+      const draft = await wired.templateService.read(prudentialId, 'lead_pipeline', BSD_CITY_SETTINGS._id);
+      expect(draft).toMatchObject({ status: 'draft', version: 2, publishedVersion: 1 });
+      // The default stays as published: one template of each kind for the walk to compare.
+      const prudential = (await wired.namedTemplates.list(prudentialId)).find((t) => t.isDefault)!;
+      expect(Object.values(prudential.sections).some((s) => s.hasDraft)).toBe(false);
+    });
+
     it('holds what 0417\u2019s agents read: its published activity types, by code', async () => {
       const snapshot = (await col('configSnapshots').find({ kpmId: await kpm0417() }).sort({ version: -1 }).limit(1).toArray())[0];
       const published = (snapshot.payload.activity as { types: { code: string }[] }[]).flatMap((c) => c.types.map((t) => t.code));

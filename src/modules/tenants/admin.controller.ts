@@ -1,8 +1,10 @@
 import {
   Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
-  Query,
+  Query, StreamableFile, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProduces, ApiTags,
+} from '@nestjs/swagger';
 import {
   AllowWhileOfficeUnavailable, AllowWhileReadOnly, Ctx, RequirePermission,
 } from '@/common/auth/auth.decorators';
@@ -23,6 +25,7 @@ import {
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
   RosterRowsDto,
+  RosterTemplateQueryDto,
   SetStatusDto,
   UpdateOrgLevelDto,
   UpdateSubscriptionDto,
@@ -42,6 +45,9 @@ import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
 import { TemplateQueryDto } from '@/modules/config/named-template.dto';
 import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-template.schema';
 import { TENANTS_REFUSALS } from './tenants.messages';
+import { RosterUploadInterceptor } from './roster-upload.interceptor';
+import type { FileUpload } from '@/common/spreadsheet/file-upload.interceptor';
+import { ROSTER_UPLOAD, XLSX_MIME_TYPE } from '@/domain/constants';
 
 /**
  * The Super Admin console.
@@ -299,14 +305,30 @@ export class AdminController {
   @ApiOperation({
     summary: 'The roster template',
     description:
-      'The file to download: the header, plus worked examples **commented out**, so they '
-      + 'can be read and copied without ever importing. `examples` carries the same three '
-      + 'rows as cells, which is what the paste box shows — a screen splitting the CSV '
-      + 'itself would be a second parser, disagreeing with this one over the quoted row. '
-      + 'Declared above the routes that take an `:id`, because Nest would otherwise read '
-      + '"roster-template" as one.',
+      'Absent `format`: the JSON below — the header, the columns, `template` (the CSV: **the header and nothing '
+      + 'else**, ADR-0184) and `examples`, three worked rows as cells, which is what the paste box shows; a screen '
+      + 'splitting a CSV itself would be a second parser. `format=csv`: that CSV as the file itself, '
+      + '`roster-template.csv`. `format=xlsx`: the template as an Excel workbook, `roster-template.xlsx` — a guide sheet '
+      + 'in the reader’s language (*Petunjuk*, *Guide*: the steps, each column, the rules, the examples) apart from the '
+      + '*Data* sheet, which holds the header alone, its code and date columns as text and its fixed choices as '
+      + 'dropdowns. With `kpmId` (or, for an Owner or an Admin, their own office) `role` is a dropdown of the company '
+      + 'ladder\'s rung codes; another office\'s id is 404. Any other `format`, a `kpmId` that is not an id, or any '
+      + 'other query field is `400 VALIDATION_FAILED`. Declared above the routes that take an `:id`, because Nest would '
+      + 'otherwise read "roster-template" as one.',
   })
-  async rosterTemplate() {
+  @ApiProduces('application/json', 'text/csv', XLSX_MIME_TYPE)
+  async rosterTemplate(@Ctx() ctx: RequestContext, @Query() query: RosterTemplateQueryDto) {
+    const { format, kpmId } = query;
+    if (format === 'xlsx') {
+      return new StreamableFile(await this.roster.workbook(ctx, kpmId || null), {
+        type: XLSX_MIME_TYPE, disposition: 'attachment; filename="roster-template.xlsx"',
+      });
+    }
+    if (format === 'csv') {
+      return new StreamableFile(Buffer.from(ROSTER_TEMPLATE, 'utf8'), {
+        type: 'text/csv; charset=utf-8', disposition: 'attachment; filename="roster-template.csv"',
+      });
+    }
     return {
       header: ROSTER_TEMPLATE_HEADER,
       columns: ROSTER_COLUMNS,
@@ -533,6 +555,66 @@ export class AdminController {
     @Body() dto: RosterRowsDto,
   ) {
     return this.roster.commit(ctx, id, dto.rows);
+  }
+
+  /** The file's form, for the two routes that take one. */
+  private static readonly ROSTER_FILE_BODY = {
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string', format: 'binary',
+          description: `The filled template — an Excel workbook (.xlsx) or a CSV. At most ${ROSTER_UPLOAD.MAX_BYTES / 1024 / 1024} MiB.`,
+        },
+      },
+    },
+  };
+
+  @Post('tenants/:id/roster/file/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm:import_roster')
+  @UseInterceptors(RosterUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(AdminController.ROSTER_FILE_BODY)
+  @ApiOperation({
+    summary: 'What an uploaded roster file would do',
+    description:
+      'The same check as the pasted rows\' (`roster/preview`), for a file sent as `multipart/form-data` (ADR-0184). '
+      + '**An Excel workbook** is opened only after its parts, as its own directory declares them, are checked to unpack '
+      + 'to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413), and its *Data* sheet is read — or the sheet '
+      + 'that starts with the header — at most 10,000 rows, each line numbered as the sheet numbers its row. **A CSV** '
+      + 'is read as UTF-8, or Windows-1252 when it is not valid UTF-8. Either way the rows meet the same parser and the '
+      + 'same issues. Writes nothing. `413 ASSET_TOO_LARGE` over 1 MiB; `422 UPLOAD_MALFORMED_CSV` for a file that is '
+      + 'neither text nor a workbook that opens, or a workbook with no sheet to read; `400 VALIDATION_FAILED` with no '
+      + 'file; 404 for an office not the caller\'s.',
+  })
+  async previewRosterFile(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @UploadedFile() file?: FileUpload,
+  ) {
+    return this.roster.previewFile(ctx, id, file);
+  }
+
+  @Post('tenants/:id/roster/file')
+  @RequirePermission('kpm:import_roster')
+  @UseInterceptors(RosterUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(AdminController.ROSTER_FILE_BODY)
+  @ApiOperation({
+    summary: 'Create everybody in a roster file',
+    description:
+      'The same import as the pasted rows\' (`roster`), for the file the preview read (ADR-0184): read again, checked '
+      + 'again, and **all or nothing**. Returns each account with the password it starts on — the only place those '
+      + 'exist. The file\'s own refusals are the preview\'s.',
+  })
+  async importRosterFile(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @UploadedFile() file?: FileUpload,
+  ) {
+    return this.roster.commitFile(ctx, id, file);
   }
 
   @Get('audit')

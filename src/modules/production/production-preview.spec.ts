@@ -1,9 +1,10 @@
+import { Workbook } from 'exceljs';
 import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
 import { english, indonesian } from '../../../test/i18n';
 import { PRODUCTION_METRICS } from './monthly-agent-data.schema';
 import {
-  buildPreview, headerKey, matchCode, readCell, readNumber, readUpload, type RosterMember,
+  buildPreview, headerKey, matchCode, readCell, readFileUpload, readNumber, readUpload, type RosterMember,
   type PreviewCell, type PreviewRow, type StoredFigures, templateVersionOf, VALUE_COLUMNS,
 } from './production-preview';
 import { TEMPLATE_HEADER_V1 } from './production-template';
@@ -113,18 +114,18 @@ describe('the preview (P9-T3)', () => {
       const differs = refusalOf(() => templateVersionOf(renamed)).sentence;
       expect(english(differs)).toBe('Column 5 of the header reads “Recruits — This Month”; the template’s reads '
         + '“Recruitment — This Month”. Download the template for this month and fill that in — nothing has been read.');
-      expect(indonesian(differs)).toBe('Kolom 5 di header berisi “Recruits — This Month”; di templat berisi '
-        + '“Recruitment — This Month”. Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+      expect(indonesian(differs)).toBe('Kolom 5 di header berisi “Recruits — This Month”; di template berisi '
+        + '“Recruitment — This Month”. Unduh template untuk bulan ini dan isi template itu — belum ada yang dibaca.');
       const stops = refusalOf(() => templateVersionOf(TEMPLATE_HEADER_V1.slice(0, 13))).sentence;
       expect(english(stops)).toBe('The header stops at column 13; the template’s column 14 reads “# of Policy — YTD”. '
         + 'Download the template for this month and fill that in — nothing has been read.');
-      expect(indonesian(stops)).toBe('Header berhenti di kolom 13; kolom 14 di templat berisi “# of Policy — YTD”. '
-        + 'Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+      expect(indonesian(stops)).toBe('Header berhenti di kolom 13; kolom 14 di template berisi “# of Policy — YTD”. '
+        + 'Unduh template untuk bulan ini dan isi template itu — belum ada yang dibaca.');
       const extra = refusalOf(() => templateVersionOf([...TEMPLATE_HEADER_V1, 'Notes'])).sentence;
       expect(english(extra)).toBe('The header has a column the template does not: “Notes”, column 15. '
         + 'Download the template for this month and fill that in — nothing has been read.');
-      expect(indonesian(extra)).toBe('Header memiliki kolom yang tidak ada di templat: “Notes”, kolom 15. '
-        + 'Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.');
+      expect(indonesian(extra)).toBe('Header memiliki kolom yang tidak ada di template: “Notes”, kolom 15. '
+        + 'Unduh template untuk bulan ini dan isi template itu — belum ada yang dibaca.');
     });
   });
 
@@ -320,8 +321,8 @@ describe('the preview (P9-T3)', () => {
         [['UPLOAD_VALUE_OUT_OF_RANGE', 'APE (Rp M) — This Month: “2” lebih besar dari YTD yang sudah tersimpan, 1.5. Isi juga kolom YTD.']],
         [['UPLOAD_UNKNOWN_AGENT_CODE', 'Tidak ada anggota aktif KPM ini yang memiliki kode ini.']],
         [['UPLOAD_UNKNOWN_AGENT_CODE', 'Tidak ada anggota aktif dengan kode ini, dan kode ini terbaca seperti angka dalam notasi '
-          + 'ilmiah. Spreadsheet mungkin telah mengubahnya: format kolom Agent Code sebagai teks, lalu salin kode dari templat.']],
-        [['UPLOAD_MALFORMED_CSV', 'Baris ini memiliki 15 sel; templat memiliki 14. Nilai yang berisi koma atau titik koma '
+          + 'ilmiah. Spreadsheet mungkin telah mengubahnya: format kolom Agent Code sebagai teks, lalu salin kode dari template.']],
+        [['UPLOAD_MALFORMED_CSV', 'Baris ini memiliki 15 sel; template memiliki 14. Nilai yang berisi koma atau titik koma '
           + 'harus diapit tanda kutip.']],
       ]);
       const twice = preview([row('PRU-001', 'Rina'), row('pru-001', 'Rina')], { reader: readerIn('id') });
@@ -395,6 +396,77 @@ describe('the preview (P9-T3)', () => {
       expect(() => readUpload(utf8('\n\n  \n'))).toThrow(expect.objectContaining({ code: 'UPLOAD_MALFORMED_CSV' }));
       const empty = refusalOf(() => readUpload(utf8('\n\n  \n')));
       expect([empty.message, empty.messageFor(readerIn('id'))]).toEqual(['The file is empty.', 'File ini kosong.']);
+    });
+  });
+
+  /**
+   * **ADR-0184: an Excel workbook, read through the same checks.** The Data sheet's rows become the records a CSV's
+   * lines would have been, numbered as the sheet numbers them; the header is matched exactly as a CSV's.
+   */
+  describe('ADR-0184 — a filled Excel template', () => {
+    /** The template as a workbook, its Data sheet filled with `rows` under the header. */
+    const workbook = async (rows: (string | number)[][], header: readonly string[] = TEMPLATE_HEADER_V1) => {
+      const book = new Workbook();
+      const data = book.addWorksheet('Data');
+      data.getColumn(1).numFmt = '@';
+      data.addRow([...header]);
+      rows.forEach((cells, i) => { data.getRow(i + 2).values = cells; });
+      return new Uint8Array(await book.xlsx.writeBuffer());
+    };
+
+    it('reads the Data sheet through the same preview: numbers as numbers, a percentage as shown, a code’s zeros kept', async () => {
+      const read = await readFileUpload(await workbook([
+        ['00088213', 'Sari Dewi', 1.5, 0.925, 1, 0, 0.75, 3, 4.5, 0.9, 2, 1, 2.25, 9],
+      ]));
+      expect(read).toMatchObject({ format: 'xlsx', encoding: 'utf-8', delimiter: ',', templateVersion: 1 });
+      expect(read.records).toEqual([{ line: 2, cells: ['00088213', 'Sari Dewi', '1.5', '0.925', '1', '0', '0.75', '3', '4.5', '0.9', '2', '1', '2.25', '9'] }]);
+    });
+
+    it('reads a persistency formatted as a percentage as the percentage it shows', async () => {
+      const book = new Workbook();
+      const data = book.addWorksheet('Data');
+      data.addRow([...TEMPLATE_HEADER_V1]);
+      data.addRow(['PRU-001', 'Rina Wijaya', 1.5, 0.85]);
+      data.getCell('D2').numFmt = '0%';
+      const read = await readFileUpload(new Uint8Array(await book.xlsx.writeBuffer()));
+      const { rows } = buildPreview(
+        { records: read.records, delimiter: read.delimiter, roster: ROSTER, stored: nothing }, SOURCE_READER,
+      );
+      expect(cell(rows[0], 'ape.monthly').after).toBe(150_000_000);
+      expect(cell(rows[0], 'persistency.monthly')).toMatchObject({ status: 'new', after: 85, raw: '85%' });
+    });
+
+    it('numbers each record as the sheet numbers its row, blank rows counted', async () => {
+      const read = await readFileUpload(await workbook([[], ['PRU-001', 'Rina Wijaya', 2]]));
+      expect(read.records.map((r) => r.line)).toEqual([2, 3]);
+    });
+
+    it('refuses a Data sheet whose header is wrong, UPLOAD_TEMPLATE_MISMATCH naming the column, as a CSV’s', async () => {
+      const header = TEMPLATE_HEADER_V1.map((h) => (h === 'Recruitment — This Month' ? 'Recruits' : h));
+      const bytes = await workbook([['PRU-001', 'Rina Wijaya', 1.5]], header);
+      await expect(readFileUpload(bytes)).rejects.toMatchObject({
+        code: 'UPLOAD_TEMPLATE_MISMATCH', details: { column: 5, expected: 'Recruitment — This Month', found: 'Recruits' },
+      });
+    });
+
+    it('finds the template’s sheet by its header when the tab was renamed', async () => {
+      const book = new Workbook();
+      book.addWorksheet('Catatan').addRow(['my notes']);
+      book.addWorksheet('Agustus').addRow([...TEMPLATE_HEADER_V1]);
+      const read = await readFileUpload(new Uint8Array(await book.xlsx.writeBuffer()));
+      expect(read).toMatchObject({ format: 'xlsx', templateVersion: 1, records: [] });
+    });
+
+    it('refuses a workbook with nothing in its Data sheet as empty', async () => {
+      const book = new Workbook();
+      book.addWorksheet('Data');
+      await expect(readFileUpload(new Uint8Array(await book.xlsx.writeBuffer())))
+        .rejects.toMatchObject({ code: 'UPLOAD_MALFORMED_CSV', message: 'The file is empty.' });
+    });
+
+    it('reads anything that is not a ZIP as a CSV, as before', async () => {
+      await expect(readFileUpload(utf8(`${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5`)))
+        .resolves.toMatchObject({ format: 'csv', encoding: 'utf-8', delimiter: ',', templateVersion: 1 });
     });
   });
 });

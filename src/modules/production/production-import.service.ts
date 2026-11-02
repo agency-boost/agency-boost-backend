@@ -16,7 +16,7 @@ import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
 import type { MetricValue, MonthlyAgentDataDocument } from './monthly-agent-data.schema';
 import type { Cadence, PreviewCell, PreviewRow } from './production-preview';
 import { type MonthState, ProductionMonths } from './production-months.service';
-import type { UploadedCsv } from './production-upload.interceptor';
+import type { FileUpload } from './production-upload.interceptor';
 import { ProductionService, requireMonth, requireOffice } from './production.service';
 import { PRODUCTION_REFUSALS } from './production.messages';
 
@@ -118,7 +118,7 @@ export class ProductionImportService {
     ctx: RequestContext,
     month: string,
     revision: string | undefined,
-    upload: UploadedCsv | undefined,
+    upload: FileUpload | undefined,
     replace?: string,
   ): Promise<ImportResult> {
     requireOffice(ctx);
@@ -184,6 +184,7 @@ export class ProductionImportService {
       filename: upload!.originalname,
       fileSha256: sha,
       templateVersion: a.read.templateVersion,
+      format: a.read.format,
       encoding: a.read.encoding,
       delimiter: a.read.delimiter,
       basedOnRevision: basedOn,

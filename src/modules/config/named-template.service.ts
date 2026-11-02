@@ -15,7 +15,7 @@ import { CompanyTemplate, CompanyTemplateDocument } from './company-template.sch
 import {
   NamedTemplate, NamedTemplateDocument, type TemplateOrigin,
 } from './named-template.schema';
-import { OfficeCounter, type TemplateScope } from './office-counter.port';
+import { OfficeCounter, standingOf, type TemplateScope } from './office-counter.port';
 import type { TemplateKinds } from './office-template';
 import {
   OFFICE_TEMPLATE_KINDS, platformDefaultPayload, type OfficeTemplateKind,
@@ -34,6 +34,31 @@ export interface PublishedKinds {
   versions: Partial<Record<OfficeTemplateKind, number>>;
 }
 
+/**
+ * **Where one kind of a template stands** (ADR-0185 §3): what the template card's *x/6 bagian terbit* and *n perubahan
+ * belum terbit*, and the checklist's *Terbit vN · Draf · Kosong*, are read from.
+ */
+export interface TemplateSectionState {
+  /** The newest published version, `null` where none is — which an office made from the template gets empty. */
+  publishedVersion: number | null;
+  /** A draft is waiting: saved, not published. */
+  hasDraft: boolean;
+}
+
+/**
+ * **One office the template answers for, and the kinds it is behind on** (ADR-0185 §4): the list behind the checklist's
+ * *N KPM memakai versi lama*. `behind` and `unrecorded` are counted apart, as `standing` counts them (P5-T12).
+ */
+export interface TemplateOfficeView {
+  id: string;
+  code: string;
+  branchName: string;
+  /** Kinds this template has published a newer version of than the office was built from, or held none of then. */
+  behind: OfficeTemplateKind[];
+  /** Kinds the office has no record of — created before provisioning recorded them, so not known. */
+  unrecorded: OfficeTemplateKind[];
+}
+
 /** One named template as the console reads it. */
 export interface NamedTemplateView {
   id: string;
@@ -48,6 +73,11 @@ export interface NamedTemplateView {
    * which an office made from it gets **empty** (ADR-0115 §3).
    */
   publishedVersions: Record<OfficeTemplateKind, number | null>;
+  /**
+   * **Each of its seven kinds: its newest published version and whether a draft waits** (ADR-0185 §3), for the
+   * template's card and its checklist — one read for the list, never one per kind.
+   */
+  sections: Record<OfficeTemplateKind, TemplateSectionState>;
   /** The live offices it answers for: started from it, and for the migration's, those before 13.2. */
   officeCount: number;
   createdAt: string;
@@ -274,6 +304,40 @@ export class NamedTemplateService {
   /** What `OfficeCounter` needs to count one template's offices. */
   scopeOf(template: NamedTemplateDocument): TemplateScope {
     return { templateId: String(template._id), holdsLegacyOffices: template.origin?.kind === 'migration' };
+  }
+
+  /**
+   * **The live offices one template answers for, each with the kinds it is behind on** (ADR-0185 §4): what the
+   * checklist's *N KPM memakai versi lama* opens. Information only — copy, never link (ADR-0115 §6): nothing here
+   * changes an office. Every office the template answers for, by code; an archived template's too, as it stays
+   * readable. `404` for a company or a template that is not the company's.
+   *
+   * **`company_template:read`, asked here as well as on the route** (S6 of the T17–T20 permission review): this lists
+   * offices across the company, so it is refused before anything is read to a caller without it, whoever calls it —
+   * as `publishAll` asks `company_template:write`.
+   */
+  async offices(ctx: RequestContext, companyId: string, templateId: string): Promise<TemplateOfficeView[]> {
+    if (!can(ctx, 'company_template:read')) throw new PermissionDeniedException('company_template:read');
+    await this.requireCompany(companyId);
+    const template = await this.find(companyId, templateId);
+    const [states, offices] = await Promise.all([
+      this.sectionsOf(companyId, [String(template._id)]),
+      this.officesOf.officesOf(companyId, this.scopeOf(template)),
+    ]);
+    const sections = states.get(String(template._id))!;
+    return offices.map((office) => {
+      const behind: OfficeTemplateKind[] = [];
+      const unrecorded: OfficeTemplateKind[] = [];
+      for (const kind of OFFICE_TEMPLATE_KINDS) {
+        const published = sections[kind].publishedVersion;
+        // Nothing published of the kind: there is no version to be behind, or unrecorded against.
+        if (published === null) continue;
+        const standing = standingOf(office.seededFrom[kind], published);
+        if (standing === 'behind') behind.push(kind);
+        if (standing === 'unrecorded') unrecorded.push(kind);
+      }
+      return { id: office.id, code: office.code, branchName: office.branchName, behind, unrecorded };
+    });
   }
 
   // ------------------------------------------------- what the copies share (P13.2-T7)
@@ -551,26 +615,16 @@ export class NamedTemplateService {
     if (templates.length === 0) return [];
     const legacy = await this.named
       .findOne({ companyId, 'origin.kind': 'migration', deletedAt: null }, { _id: 1 }).exec();
-    const [counts, published] = await Promise.all([
+    const [counts, states] = await Promise.all([
       this.officesOf.countsByTemplate(companyId, legacy ? String(legacy._id) : null),
-      this.rows
-        .aggregate<{ _id: { templateId: string; kind: OfficeTemplateKind }; version: number }>([
-          {
-            $match: {
-              companyId, status: 'published', deletedAt: null,
-              templateId: { $in: templates.map((t) => String(t._id)) },
-            },
-          },
-          { $group: { _id: { templateId: '$templateId', kind: '$kind' }, version: { $max: '$version' } } },
-        ])
-        .exec(),
+      this.sectionsOf(companyId, templates.map((t) => String(t._id))),
     ]);
 
     return templates.map((t) => {
       const id = String(t._id);
+      const sections = states.get(id)!;
       const publishedVersions = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [
-        kind,
-        published.find((p) => p._id.templateId === id && p._id.kind === kind)?.version ?? null,
+        kind, sections[kind].publishedVersion,
       ])) as Record<OfficeTemplateKind, number | null>;
       const stamps = t as unknown as { createdAt?: Date; updatedAt?: Date };
       return {
@@ -582,11 +636,46 @@ export class NamedTemplateService {
         archivedAt: t.archivedAt ? t.archivedAt.toISOString() : null,
         origin: t.origin,
         publishedVersions,
+        sections,
         officeCount: counts.get(id) ?? 0,
         createdAt: (stamps.createdAt ?? this.clock.now()).toISOString(),
         updatedAt: (stamps.updatedAt ?? this.clock.now()).toISOString(),
       };
     });
+  }
+
+  /**
+   * **Each template's seven kinds: the newest published version and whether a draft waits** (ADR-0185 §3) — one
+   * aggregate over `companyTemplates` for every template asked about, filtered by the company and the ids. A kind with
+   * no row at all is `{ publishedVersion: null, hasDraft: false }`: *Kosong*.
+   */
+  private async sectionsOf(
+    companyId: string, templateIds: string[],
+  ): Promise<Map<string, Record<OfficeTemplateKind, TemplateSectionState>>> {
+    const rows = await this.rows
+      .aggregate<{ _id: { templateId: string; kind: OfficeTemplateKind; status: 'draft' | 'published' }; version: number }>([
+        {
+          $match: {
+            companyId, status: { $in: ['draft', 'published'] }, deletedAt: null,
+            templateId: { $in: templateIds },
+          },
+        },
+        {
+          $group: {
+            _id: { templateId: '$templateId', kind: '$kind', status: '$status' }, version: { $max: '$version' },
+          },
+        },
+      ])
+      .exec();
+
+    return new Map(templateIds.map((id) => {
+      const mine = rows.filter((r) => r._id.templateId === id);
+      const sections = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, {
+        publishedVersion: mine.find((r) => r._id.kind === kind && r._id.status === 'published')?.version ?? null,
+        hasDraft: mine.some((r) => r._id.kind === kind && r._id.status === 'draft'),
+      }])) as Record<OfficeTemplateKind, TemplateSectionState>;
+      return [id, sections];
+    }));
   }
 }
 

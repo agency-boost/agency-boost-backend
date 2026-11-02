@@ -20,7 +20,8 @@ import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
  * - **The password comes from standard input**, never from an argument, which would sit in the shell's
  *   history and in `ps`. At a terminal it is asked twice and not echoed; piped in, the first line is it.
  *   It is never printed or logged.
- * - **The app's own rules and hashing**: `PasswordService.validate` and its Argon2id `hash`, and the
+ * - **The app's own rules and hashing**: `PasswordService.validate` — `PASSWORD`'s bounds
+ *   (`domain/constants/password.ts`), the same as every form's — and its Argon2id `hash`, and the
  *   users schema itself, so the account is the one the seed and the API make. Plain mongoose rather than
  *   a Nest application context: these two are all it needs, and booting the API's module would ask for
  *   its whole configuration (JWT secrets, SMTP, storage) to create one row.

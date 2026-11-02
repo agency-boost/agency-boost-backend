@@ -5,12 +5,11 @@ import {
   MinLength, ValidateIf,
 } from 'class-validator';
 import {
-  AGENT_CODE_PATTERN, GENDERS, LANGUAGES, WORK_STATUSES, type Gender, type Language, type WorkStatus,
+  AGENT_CODE_PATTERN, GENDERS, LANGUAGES, PASSWORD, WORK_STATUSES, type Gender, type Language, type WorkStatus,
 } from '@/domain/constants';
 import { PHONE_FIELD_SHAPE, phoneFromBody } from '@/modules/users/phone-input';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { field } from '@/common/validation/violations';
-import { PasswordService } from './password.service';
 import { AUTH_REFUSALS } from './auth.messages';
 import { IMPERSONATION_PURPOSES, type ImpersonationPurpose } from './impersonation-session.schema';
 
@@ -30,9 +29,9 @@ export class RegisterDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: 'correct horse battery', minLength: PasswordService.MIN_LENGTH })
+  @ApiProperty({ example: 'correct horse battery', minLength: PASSWORD.MIN_LENGTH })
   @IsString()
-  @MinLength(PasswordService.MIN_LENGTH)
+  @MinLength(PASSWORD.MIN_LENGTH)
   password!: string;
 
   @ApiProperty({ example: 'Rina Wijaya' })
@@ -144,9 +143,9 @@ export class ResetPasswordDto {
   @IsString()
   token!: string;
 
-  @ApiProperty({ minLength: PasswordService.MIN_LENGTH })
+  @ApiProperty({ minLength: PASSWORD.MIN_LENGTH })
   @IsString()
-  @MinLength(PasswordService.MIN_LENGTH)
+  @MinLength(PASSWORD.MIN_LENGTH)
   newPassword!: string;
 }
 
@@ -155,9 +154,9 @@ export class ChangePasswordDto {
   @IsString()
   currentPassword!: string;
 
-  @ApiProperty({ minLength: PasswordService.MIN_LENGTH })
+  @ApiProperty({ minLength: PASSWORD.MIN_LENGTH })
   @IsString()
-  @MinLength(PasswordService.MIN_LENGTH)
+  @MinLength(PASSWORD.MIN_LENGTH)
   newPassword!: string;
 }
 

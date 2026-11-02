@@ -13,7 +13,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | What | Its state | Who to sign in as, and what they see |
  * |---|---|---|
- * | **BSD City settings**, Prudential | saved from **KPM 0417**'s published settings — what its agents read: the snapshot's activity types, ratios, both pipelines, training, event types and capability ladder, and the published checklist — each kind a published version 1; origin *office*, 0417 | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}/template`: the picker holds *Prudential template · Default* and *BSD City settings*, no office yet; at `/admin/tenants/new`, *Start from* offers it second. *Save as template* on `/admin/tenants/{0417}` and *Import from another company* on Sejahtera Baru Life's template screen are the walk's to press |
+ * | **BSD City settings**, Prudential | saved from **KPM 0417**'s published settings — what its agents read: the snapshot's activity types, ratios, both pipelines, training, event types and capability ladder, and the published checklist — each kind a published version 1; origin *office*, 0417. **Its lead stages hold a draft** (ADR-0185): version 2, *Belum dihubungi* renamed and not published | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}` (*Template KPM*): two cards, *Prudential template ★ Default* and *BSD City settings* with *1 perubahan belum terbit*, no office yet; opened, its checklist shows *Pipeline lead* as *Draf* and *Terbitkan semua (1)*; at `/admin/tenants/new`, *Mulai dari* offers it second. *Save as template* on `/admin/tenants/{0417}` and *Salin dari…* on Sejahtera Baru Life's *Template baru* are the walk's to press |
  *
  * **Made by the function the console's *Save as template* uses** (`templateKindsFromOffice`), over 0417's
  * rows read as `OfficeSettingsSource` reads them, so the seeded template is what pressing the button would
@@ -55,7 +55,9 @@ export async function seedTemplateCopyFixture(deps: TemplateCopyFixtureDeps): Pr
   const Rows = mongoose.model(CompanyTemplate.name, CompanyTemplateSchema, undefined, RECOMPILE);
   const guide = `
     Prudential                   "BSD City settings", saved from KPM 0417's published settings — every
-                                 kind a published version 1, no office yet (from src/seed/template-copy-fixture.ts)
+                                 kind a published version 1, no office yet, and its lead stages a draft
+                                 version 2 not published: "1 perubahan belum terbit" on its card, "Draf"
+                                 on its checklist (from src/seed/template-copy-fixture.ts)
 `;
 
   // A template of that name made in a walk is the walk's: this one is not made beside it.
@@ -92,7 +94,31 @@ export async function seedTemplateCopyFixture(deps: TemplateCopyFixtureDeps): Pr
     });
     written += 1;
   }
+  written += await seedPipelineDraft(Rows, companyId, templateId);
   return { templateId, written, guide };
+}
+
+/**
+ * **A change waiting on the template** (ADR-0185): its lead stages' version 2 as a draft, the first stage renamed, so
+ * the card says *1 perubahan belum terbit* and the checklist *Pipeline lead · Draf* and *Terbitkan semua (1)*. Made
+ * from the published version 1, where nothing beyond it exists — a re-seed writes nothing, and a draft a walk
+ * published or changed is kept. `1` when it wrote.
+ */
+async function seedPipelineDraft(
+  Rows: mongoose.Model<CompanyTemplate>, companyId: string, templateId: string,
+): Promise<number> {
+  const kind = 'lead_pipeline';
+  const published = await Rows.findOne({ companyId, templateId, kind, version: 1, status: 'published', deletedAt: null })
+    .lean().exec() as unknown as { payload: { statuses?: { label: string }[] } } | null;
+  if (!published || (await Rows.exists({ companyId, templateId, kind, version: { $gte: 2 } }))) return 0;
+  const payload = structuredClone(published.payload);
+  const first = payload.statuses?.[0];
+  if (first) first.label = `${first.label} (prospek baru)`;
+  await Rows.create({
+    companyId, templateId, kind, version: 2, status: 'draft', payload, publishedAt: null,
+    deletedAt: null, createdBy: null, updatedBy: null,
+  });
+  return 1;
 }
 
 /**

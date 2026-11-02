@@ -46,7 +46,7 @@ const list = (codes: readonly string[]) => codes.join(', ');
 /**
  * **The Super Admin's templates, and the offices made from them, refused in both languages** (P18.98-T5 AC-2, AC-3):
  * a kind's publish, the named templates, copying one across companies, and provisioning's whole-source check. A
- * template is a *templat*, its kinds' settings keep their names (`TEMPLATE_SECTIONS`), and a template's name, as the
+ * template is a *template*, its kinds' settings keep their names (`TEMPLATE_SECTIONS`), and a template's name, as the
  * Super Admin typed it, stays as typed.
  */
 export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
@@ -60,7 +60,7 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
     },
     editArchived: ({ name }: { name: string }) => ({
       en: `${name} is archived, so it is kept as it is. Edit an active template instead.`,
-      id: `${name} sudah diarsipkan, jadi disimpan apa adanya. Ubah templat yang aktif saja.`,
+      id: `${name} sudah diarsipkan, jadi disimpan apa adanya. Ubah template yang aktif saja.`,
     }),
     noRatios: {
       en: 'A ratio set with no ratios gives every new office nothing to measure.',
@@ -71,7 +71,7 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
         + `template’s published taxonomy${version !== null ? ` (version ${version})` : ''}. `
         + 'Publish the taxonomy first, or point the ratio at a code it has.',
       id: `${list(codes)} disebut oleh ratio, tetapi tidak dideklarasikan oleh jenis aktivitas mana pun di taksonomi `
-        + `templat ini yang sudah diterbitkan${version !== null ? ` (versi ${version})` : ''}. Terbitkan taksonominya `
+        + `template ini yang sudah diterbitkan${version !== null ? ` (versi ${version})` : ''}. Terbitkan taksonominya `
         + 'terlebih dahulu, atau arahkan ratio ke kode yang ada.',
     }),
     noDenominator: ({ code }: { code: string }) => ({
@@ -118,11 +118,11 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
     /* An office's source, checked whole before it is made (`ProvisioningService`). */
     chooseTemplate: {
       en: 'Choose the template the office starts from.',
-      id: 'Pilih templat yang menjadi awal KPM ini.',
+      id: 'Pilih template yang menjadi awal KPM ini.',
     },
     startFromArchived: ({ name }: { name: string }) => ({
       en: `${name} is archived and is not offered. Start the office from an active template.`,
-      id: `${name} sudah diarsipkan dan tidak ditawarkan. Mulai KPM dari templat yang aktif.`,
+      id: `${name} sudah diarsipkan dan tidak ditawarkan. Mulai KPM dari template yang aktif.`,
     }),
     tileLabelled: ({ code, labels }: { code: string; labels: readonly string[] }) => ({
       en: `the summary tile ${code} is labelled `
@@ -154,48 +154,48 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
     /* The named templates (`NamedTemplateService`, `TemplateCopyService`). */
     templateNeedsName: {
       en: 'A template needs a name.',
-      id: 'Templat memerlukan nama.',
+      id: 'Template memerlukan nama.',
     },
     archivedCannotBeDefault: {
       en: 'An archived template cannot be the default. Use an active one.',
-      id: 'Templat yang diarsipkan tidak dapat menjadi default. Gunakan templat yang aktif.',
+      id: 'Template yang diarsipkan tidak dapat menjadi default. Gunakan template yang aktif.',
     },
     alreadyThisCompanys: {
       en: 'That template is already this company’s. Use New template and copy it instead.',
-      id: 'Templat itu sudah milik perusahaan ini. Gunakan Templat baru dan salin templat itu saja.',
+      id: 'Template itu sudah milik perusahaan ini. Gunakan Template baru dan salin template itu saja.',
     },
     /** The DTO's own sentence (`field`), its values as the API takes them. */
     fromShape: {
       en: 'from must be "empty", "defaults", or { templateId } naming one of the company’s templates',
-      id: 'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu templat perusahaan',
+      id: 'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu template perusahaan',
     },
   },
   VERSION_CONFLICT: {
     defaultMoved: {
       en: 'This company’s default template changed while this was being saved, and nothing was changed. '
         + 'Reload the templates and try again.',
-      id: 'Templat default perusahaan ini berubah saat perubahan ini sedang disimpan, dan tidak ada yang diubah. '
-        + 'Muat ulang daftar templat, lalu coba lagi.',
+      id: 'Template default perusahaan ini berubah saat perubahan ini sedang disimpan, dan tidak ada yang diubah. '
+        + 'Muat ulang daftar template, lalu coba lagi.',
     },
   },
   TEMPLATE_IS_DEFAULT: {
     cannotStopBeingDefault: ({ name }: { name: string }) => ({
       en: `${name} is this company’s default template, so it `
         + 'cannot stop being the default on its own. Make another template the default instead.',
-      id: `${name} adalah templat default perusahaan ini, jadi tidak dapat berhenti menjadi default dengan sendirinya. `
-        + 'Jadikan templat lain sebagai default saja.',
+      id: `${name} adalah template default perusahaan ini, jadi tidak dapat berhenti menjadi default dengan sendirinya. `
+        + 'Jadikan template lain sebagai default saja.',
     }),
     cannotArchive: ({ name }: { name: string }) => ({
       en: `${name} is this company’s default template, so it `
         + 'cannot be archived. Make another template the default first, then archive this one.',
-      id: `${name} adalah templat default perusahaan ini, jadi tidak dapat diarsipkan. Jadikan templat lain sebagai `
-        + 'default terlebih dahulu, lalu arsipkan templat ini.',
+      id: `${name} adalah template default perusahaan ini, jadi tidak dapat diarsipkan. Jadikan template lain sebagai `
+        + 'default terlebih dahulu, lalu arsipkan template ini.',
     }),
   },
   TEMPLATE_NAME_TAKEN: {
     taken: ({ name }: { name: string }) => ({
       en: `This company already has a template called ${name}. Choose another name.`,
-      id: `Perusahaan ini sudah memiliki templat bernama ${name}. Pilih nama lain.`,
+      id: `Perusahaan ini sudah memiliki template bernama ${name}. Pilih nama lain.`,
     }),
   },
   TEMPLATE_RUNG_UNKNOWN: {
@@ -247,7 +247,7 @@ export const TEMPLATE_MESSAGES = messages('modules/config/templates', {
       + (gone.length
         ? `hanya akan menghitung ${notActiveTypesId(gone)} di KPM ini.`
         : 'tidak akan menghitung apa pun di KPM ini.')
-      + ' KPM yang dibuat dari templat ini menghitung pengaitan default.',
+      + ' KPM yang dibuat dari template ini menghitung pengaitan default.',
   }),
   bindingNoLonger: ({ gone }: { gone: readonly string[] }) => ({
     en: `The activity binding no longer counts ${notActiveTypes(gone)} in this office.`,
@@ -271,7 +271,7 @@ export const TEMPLATE_MESSAGES = messages('modules/config/templates', {
     en: `Stage ${code} was left out: every milestone it requires (${list(gone)}) is archived in `
       + 'this office, so an office made from the template would put everybody on it.',
     id: `Tahap ${code} tidak disertakan: setiap milestone yang disyaratkannya (${list(gone)}) sudah diarsipkan di KPM `
-      + 'ini, jadi KPM yang dibuat dari templat ini akan menempatkan semua orang di tahap itu.',
+      + 'ini, jadi KPM yang dibuat dari template ini akan menempatkan semua orang di tahap itu.',
   }),
   stageNoLonger: ({ code, gone }: { code: string; gone: readonly string[] }) => ({
     en: `Stage ${code} no longer requires ${list(gone)}, ${gone.length === 1 ? 'which is' : 'which are'} archived in `
@@ -287,7 +287,7 @@ export const TEMPLATE_MESSAGES = messages('modules/config/templates', {
       + 'left, so it could place nobody. An office made from the template starts with AgencyBoost’s standard '
       + 'capability ladder instead.',
     id: `Ladder capability tidak disertakan: tidak ada lagi ${missing === 'stage' ? 'tahap' : 'milestone'} aktif, jadi `
-      + 'ladder ini tidak dapat menempatkan siapa pun. KPM yang dibuat dari templat ini akan dimulai dengan ladder '
+      + 'ladder ini tidak dapat menempatkan siapa pun. KPM yang dibuat dari template ini akan dimulai dengan ladder '
       + 'capability standar AgencyBoost.',
   }),
 });

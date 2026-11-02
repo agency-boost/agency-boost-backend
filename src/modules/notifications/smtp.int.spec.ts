@@ -73,11 +73,11 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  function adapter(address: string | null = 'rina@kpm.test') {
+  function adapter(address: string | null = 'rina@kpm.test', extra: Record<string, unknown> = {}) {
     const values: Record<string, unknown> = {
       SMTP_HOST: '127.0.0.1', SMTP_PORT: port, SMTP_USER: '', SMTP_PASSWORD: '',
       MAIL_FROM: 'AgencyBoost <no-reply@agencyboost.test>', MAIL_TRANSPORT: 'smtp',
-      APP_ORIGIN: 'https://app.agencyboost.test',
+      APP_ORIGIN: 'https://app.agencyboost.test', ...extra,
     };
     const config = {
       get: (k: string) => values[k], getOrThrow: (k: string) => values[k],
@@ -113,6 +113,44 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
     expect(body).toContain('no-reply@agencyboost.test');
     // The em dash in the sign-off is where a charset mistake would show up first.
     expect(body).toContain('— AgencyBoost');
+  });
+
+  it('P18.99-T18 sends multipart text and HTML, the HTML\'s link an anchor, with Reply-To when configured (ADR-0182)', async () => {
+    /*
+     * Against the server, because what a mail client sees is the MIME it receives: one `multipart/alternative` with the
+     * text first and the HTML second, and the Reply-To header. A mocked `sendMail` would prove only that the options
+     * were passed.
+     */
+    const { adapter: smtp, config } = adapter('rina@kpm.test', {
+      MAIL_PROVIDER: 'smtp', MAIL_TRANSPORT: undefined, MAIL_REPLY_TO: 'AgencyBoost Support <support@agencyboost.test>',
+    });
+    const rendered = new EmailTemplateRenderer(config)
+      .render(NotificationTemplate.PASSWORD_RESET, { token: 'multipart-token', fullName: 'Rina <b>Wijaya</b>' }, readerIn('en'));
+
+    await smtp.send({ userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} }, rendered);
+
+    const { raw } = delivered.at(-1)!;
+    const headers = raw.slice(0, raw.search(/\r?\n\r?\n/));
+    expect(headers).toMatch(/^Reply-To: AgencyBoost Support <support@agencyboost\.test>$/m);
+    expect(headers).toMatch(/^Content-Type: multipart\/alternative;/m);
+    const text = raw.indexOf('Content-Type: text/plain');
+    const html = raw.indexOf('Content-Type: text/html');
+    expect(text).toBeGreaterThan(-1);
+    expect(html).toBeGreaterThan(text);
+
+    const body = decodeQuotedPrintable(raw);
+    expect(body).toContain('<a href="https://app.agencyboost.test/reset-password/multipart-token"');
+    // A name somebody typed is text in the HTML part, never markup.
+    expect(body).toContain('Hello Rina &lt;b&gt;Wijaya&lt;/b&gt;,');
+    expect(body).not.toContain('<b>Wijaya</b></p>');
+  });
+
+  it('P18.99-T18 sends no Reply-To when none is configured', async () => {
+    await adapter().adapter.send(
+      { userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} },
+      { subject: 'S', body: 'B' },
+    );
+    expect(delivered.at(-1)!.raw).not.toMatch(/^Reply-To:/m);
   });
 
   it('carries a token from NotificationService to the delivered mail, and not to the row', async () => {

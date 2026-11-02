@@ -143,7 +143,7 @@ const agenda13 = (date: string): Agenda => {
       [`Pembaruan proses — follow-up ${month} sudah ditinjau`, '', true], ['Tinjauan kinerja terhadap ambang batas', '', true],
       ['Prioritas strategis (Agency) — fokus recruitment', '', true], ['Langkah berikutnya dirangkum, penanggung jawab ditetapkan', '', true],
     ],
-    post: [['Hasil dicatat ke dalam templat', 'Wilson', false], ['Follow-up dari sisi HO Prudential sudah dijalankan', '', false]],
+    post: [['Hasil dicatat ke dalam template', 'Wilson', false], ['Follow-up dari sisi HO Prudential sudah dijalankan', '', false]],
   };
 };
 
@@ -151,7 +151,7 @@ const agenda13 = (date: string): Agenda => {
 const AGENDA_12: Agenda = {
   preparation: [['Kumpulkan follow-up dari sesi sebelumnya', 'Wilson', false]],
   during: [['Tinjauan kinerja terhadap ambang batas', '', true], ['Prioritas strategis (Korporat)', '', true]],
-  post: [['Hasil dicatat ke dalam templat', 'Wilson', false]],
+  post: [['Hasil dicatat ke dalam template', 'Wilson', false]],
 };
 
 /** The prototype's ten, PICs empty, as an office's first meeting starts (ADR-0130 §3). */

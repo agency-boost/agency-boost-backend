@@ -2,6 +2,10 @@ import {
   csvField, csvName, TEMPLATE_HEADER_V1, TEMPLATE_HEADERS, TEMPLATE_VERSION, templateBody,
   templateFilename,
 } from './production-template';
+import { templateWorkbook } from './production-workbook';
+import { Workbook } from 'exceljs';
+import { readerIn } from '@/common/i18n/reader';
+import { readFileUpload } from './production-preview';
 
 /**
  * P9-T2 AC-1, AC-2, AC-3, AC-5 — the file's contract, pinned to the prototype line it came from.
@@ -134,6 +138,65 @@ describe('the template (P9-T2)', () => {
       expect(templateFilename('0417', '2026-09')).toBe('KPM0417-agent-data-Sep-2026.csv');
       expect(templateFilename('0417', '2026-01')).toBe('KPM0417-agent-data-Jan-2026.csv');
       expect(templateFilename('0417', '2025-12')).toBe('KPM0417-agent-data-Dec-2025.csv');
+    });
+  });
+
+  /**
+   * **ADR-0184: the same file as an Excel workbook** — the guide on its own sheet, and the Data sheet holding exactly
+   * the CSV's header and rows. Read back through the same reader an upload goes through: the round trip.
+   */
+  describe('ADR-0184 — the template as a workbook', () => {
+    const ROWS = [
+      { agentCode: '00088213', name: 'Sari Dewi' },
+      { agentCode: 'PRU-001', name: '=HYPERLINK("x")\nWijaya' },
+    ];
+    const open = async (bytes: Buffer) => {
+      const workbook = new Workbook();
+      await workbook.xlsx.load(bytes as unknown as Parameters<Workbook['xlsx']['load']>[0]);
+      return workbook;
+    };
+
+    it('is named as the CSV is, with .xlsx', () => {
+      expect(templateFilename('0417', '2026-09', 'xlsx')).toBe('KPM0417-agent-data-Sep-2026.xlsx');
+    });
+
+    it('holds the guide in the reader’s language, then a Data sheet with the CSV’s header and one row per agent', async () => {
+      const workbook = await open(await templateWorkbook(ROWS, '2026-09', readerIn('id')));
+      expect(workbook.worksheets.map((s) => s.name)).toEqual(['Petunjuk', 'Data']);
+      const data = workbook.getWorksheet('Data')!;
+      expect((data.getRow(1).values as unknown[]).slice(1)).toEqual([...TEMPLATE_HEADER_V1]);
+      expect(data.getColumn(1).numFmt).toBe('@');
+      expect(data.actualRowCount).toBe(3);
+    });
+
+    it('writes a name as one line of text — a string is never a formula in a workbook, so it needs no apostrophe', async () => {
+      const data = (await open(await templateWorkbook(ROWS, '2026-09', readerIn('en')))).getWorksheet('Data')!;
+      expect(data.getCell('B3').value).toBe('=HYPERLINK("x") Wijaya');
+      expect(data.getCell('B3').formula).toBeUndefined();
+    });
+
+    it('explains each column, This Month against YTD, the decimal mark and a partial file, in the reader’s words', async () => {
+      const guide = (await open(await templateWorkbook(ROWS, '2026-09', readerIn('id')))).getWorksheet('Petunjuk')!;
+      const words: string[] = [];
+      guide.eachRow((row) => row.eachCell((c) => { if (typeof c.value === 'string') words.push(c.value); }));
+      expect(words).toEqual(expect.arrayContaining([
+        'AgencyBoost — template produksi bulanan, Sep 2026',
+        'APE (Rp M) — This Month',
+        'APE, dalam juta rupiah: 1,5 berarti Rp 1.500.000. Bulan ini saja.',
+        'Rolling persistency, persentase dari 0 sampai 100: 85, atau 85%. Dari Januari sampai bulan ini.',
+        '1,5',
+      ]));
+      expect(words.join(' ')).toContain('File sebagian tidak masalah');
+      expect(words.join(' ')).toContain('Jangan mengubah kolom Agent Code');
+    });
+
+    it('reads back as the template it is: the round trip a filled file makes', async () => {
+      const bytes = await templateWorkbook(ROWS, '2026-09', readerIn('en'));
+      const read = await readFileUpload(new Uint8Array(bytes));
+      expect(read).toMatchObject({ format: 'xlsx', templateVersion: TEMPLATE_VERSION });
+      expect(read.records.map((r) => r.cells.slice(0, 2))).toEqual([
+        ['00088213', 'Sari Dewi'], ['PRU-001', '=HYPERLINK("x") Wijaya'],
+      ]);
     });
   });
 });

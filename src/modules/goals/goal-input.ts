@@ -94,7 +94,12 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
    * rounding question but a unit error — somebody handed major units to a field that stores sen.
    */
   for (const field of MONEY) {
-    const value = f.number(field, GOAL_BOUNDS.money, required);
+    /*
+     * **The APE produced is the one money field a save may leave out** (S1 of the T17–T20 permission review): a screen
+     * sends it only when the reader changed it in this edit, and absent means *keep the stored figure* (`typedApeOf`) —
+     * so a coach saving the target never writes back, over the member's newer figure, the one they read.
+     */
+    const value = f.number(field, GOAL_BOUNDS.money, required && field !== 'apeAchievedMinor');
     if (value === undefined) continue;
     if (!Number.isInteger(value)) {
       f.violations.push(SAY.wholeSen({ field }));
@@ -139,6 +144,58 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
   }
 
   return f.done(out);
+}
+
+/**
+ * **Which typed *APE yang sudah dicapai tahun ini* a save or a preview keeps** (ADR-0075, partly reversed by
+ * ADR-0183).
+ *
+ * - **A body that leaves it out keeps the stored figure**, whoever saves (S1 of the T17–T20 permission review): the
+ *   screens send it only when the reader changed it in this edit, so a coach saving the target does not write back the
+ *   figure they read over the member's newer one. A body that carries it is an edit, and the last write wins.
+ *
+ * - **The member's own plan**: what they typed, always — measured against only while the office holds no figure, and
+ *   stored as theirs either way (P9-T6).
+ * - **Somebody else's plan** — a leader who coaches them, or the office's Owner or Admin, the reach `goal:update`
+ *   already gives a save (§3.6) — **what they typed, when the office holds no year-to-date figure for the year**
+ *   (ADR-0183: the member's figure is often nobody's until a leader types it in a 1:1).
+ * - **An office figure — uploaded or corrected — locks it for everybody but the member**: somebody else's typing is
+ *   *ignored*, not refused, and the member's stored figure is kept. Ignored because the plan around it is still theirs
+ *   to save, and the screen never offers the field in that state (`PillReadOnly`).
+ *
+ * Pure, so the rule is pinned without a database.
+ */
+export function typedApeOf({ own, held, asked, stored }: {
+  /** The caller's own plan. */
+  own: boolean;
+  /** The office's year-to-date figure for the year, or `null` when it holds none. */
+  held: unknown;
+  /** The figure the body carries, or `undefined` when it leaves it out. */
+  asked: number | undefined;
+  /** The figure the plan already stores (0 where there is no plan). */
+  stored: number;
+}): number {
+  if (asked === undefined) return stored;
+  if (own) return asked;
+  return held === null || held === undefined ? asked : stored;
+}
+
+/**
+ * **Who typed the figure a plan now stores** (S2 of the T17–T20 permission review): the saver when this save changed
+ * it, else whoever typed it before — `null` on a row from before the field, which reads as the member. Pure, beside
+ * `typedApeOf`, so the two rules are pinned together.
+ */
+export function typedByAfter({ before, after, savedBy, typedBefore }: {
+  /** The figure the plan stored before the save (0 where there was none). */
+  before: number;
+  /** The figure the save stores. */
+  after: number;
+  /** The membership saving. */
+  savedBy: string;
+  /** Who typed the figure before, as stored; `null` or absent for the member. */
+  typedBefore: string | null | undefined;
+}): string | null {
+  return after !== before ? savedBy : (typedBefore ?? null);
 }
 
 /** `Fields` collects its own; this reaches the raw value for the cases it does not cover. */

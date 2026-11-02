@@ -7,6 +7,7 @@ import {
   type PreviewRow, type PreviewSummary,
 } from './production-preview';
 import type { UploadDelimiter, UploadEncoding } from './production-csv';
+import type { UploadFormat } from './production-preview';
 import type {
   MetricCell, MonthRow, MonthView, TemplateFile, UploadPreview,
 } from './production.service';
@@ -283,8 +284,9 @@ export class UploadPreviewDto implements UploadPreview {
   @ApiProperty({ type: String, example: '2026-09' }) month!: string;
   @ApiProperty({ type: String }) filename!: string;
   @ApiProperty({ type: Number, example: 1 }) templateVersion!: number;
-  @ApiProperty({ enum: ['utf-8', 'windows-1252'] }) encoding!: UploadEncoding;
-  @ApiProperty({ enum: [',', ';', '\t'] }) delimiter!: UploadDelimiter;
+  @ApiProperty({ enum: ['csv', 'xlsx'], description: 'A CSV, or an Excel workbook whose Data sheet was read (ADR-0184).' }) format!: UploadFormat;
+  @ApiProperty({ enum: ['utf-8', 'windows-1252'], description: 'How a CSV’s bytes were read; `utf-8` for a workbook.' }) encoding!: UploadEncoding;
+  @ApiProperty({ enum: [',', ';', '\t'], description: 'A CSV’s delimiter; `,` for a workbook, whose numbers carry the point as their decimal mark.' }) delimiter!: UploadDelimiter;
   @ApiProperty({ type: Number, description: 'The month’s revision the preview was taken against. Confirm import sends it back.' }) revision!: number;
   @ApiProperty({ type: PreviewSummaryDto }) summary!: PreviewSummaryDto;
   @ApiProperty({ type: [PreviewRowDto] }) rows!: PreviewRowDto[];

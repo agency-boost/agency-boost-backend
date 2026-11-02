@@ -90,7 +90,7 @@ describe('P18.98-T5 AC-2 the templates’ sentences', () => {
     for (const section of Object.keys(TEMPLATE_SECTIONS) as (keyof typeof TEMPLATE_SECTIONS)[]) {
       const said = V.inSection({ section, inner: V.chooseTemplate });
       expect(english(said)).toBe(`${TEMPLATE_SECTIONS[section].en}: Choose the template the office starts from.`);
-      expect(indonesian(said)).toBe(`${TEMPLATE_SECTIONS[section].id}: Pilih templat yang menjadi awal KPM ini.`);
+      expect(indonesian(said)).toBe(`${TEMPLATE_SECTIONS[section].id}: Pilih template yang menjadi awal KPM ini.`);
     }
     expect(TEMPLATE_SECTIONS.activityBinding.id).toBe('Pengaitan aktivitas');
     expect(TEMPLATE_SECTIONS.leadStatuses.id).toBe('Lead statuses');
@@ -105,7 +105,7 @@ describe('P18.98-T5 AC-2 the templates’ sentences', () => {
     expect(indonesian(V.brokenOffice({ source: { kind: 'defaults' }, problems }))).toBe(
       'Pengaturan default AgencyBoost akan menghasilkan KPM yang rusak, jadi tidak ada yang dibuat. '
         + 'Kumpulan ratio tanpa ratio membuat setiap KPM baru tidak memiliki apa pun untuk diukur. '
-        + 'Pilih templat yang menjadi awal KPM ini.',
+        + 'Pilih template yang menjadi awal KPM ini.',
     );
     expect(english(V.brokenOffice({ source: { kind: 'source' }, problems: V.noRatios }))).toMatch(/^The source would produce/);
     expect(indonesian(V.brokenOffice({ source: { kind: 'source' }, problems: V.noRatios }))).toMatch(/^Sumber ini akan/);
@@ -118,7 +118,7 @@ describe('P18.98-T5 AC-2 the templates’ sentences', () => {
     );
     expect(indonesian(M.bindingLeftOut({ roles: ['Sales meeting'], gone: ['OLD_VISIT'] }))).toBe(
       'Pengaitan aktivitas tidak disertakan: Sales meeting hanya akan menghitung OLD_VISIT, yang bukan jenis aktivitas '
-        + 'aktif di KPM ini. KPM yang dibuat dari templat ini menghitung pengaitan default.',
+        + 'aktif di KPM ini. KPM yang dibuat dari template ini menghitung pengaitan default.',
     );
     expect(english(M.ratioLeftOut({ code: 'R', side: 'both', gone: ['A', 'B'] })))
       .toBe('Ratio R was left out: its numerator and its denominator count only A, B, which are not active activity types in this office.');

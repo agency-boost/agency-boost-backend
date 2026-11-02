@@ -24,7 +24,7 @@ import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
-import { checkGoal } from './goal-input';
+import { checkGoal, typedApeOf, typedByAfter } from './goal-input';
 import { GOAL_REFUSALS } from './goals.messages';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -57,10 +57,20 @@ function projectionOf(inputs: Record<string, unknown>): CascadeResult | null {
  */
 function achievedOf(
   held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null, typed: number,
+  typedBy: GoalTypist | null = null,
 ): GoalAchieved {
-  return held
-    ? { minor: held.minor, provenance: held.provenance, month: held.month }
-    : { minor: typed, provenance: 'self_reported', month: null };
+  if (held) return { minor: held.minor, provenance: held.provenance, month: held.month };
+  // Who typed it, only when it was not the member (S2): the member's own figure says nothing more than it did.
+  return { minor: typed, provenance: 'self_reported', month: null, ...(typedBy ? { typedBy } : {}) };
+}
+
+/**
+ * **Who typed a plan's figure, when it was not the member** (S2 of the T17–T20 permission review): `null` for the
+ * member — `apeAchievedTypedBy` empty, as on every row from before the field, or their own membership.
+ */
+function typistIdOf(goal: Pick<GoalDocument, 'membershipId' | 'apeAchievedTypedBy'> | null): string | null {
+  const by = goal?.apeAchievedTypedBy ?? null;
+  return by === null || by === goal!.membershipId ? null : by;
 }
 
 /**
@@ -135,9 +145,24 @@ export interface GoalRevisionInputs {
  */
 export interface GoalAchieved {
   minor: number;
+  /**
+   * `self_reported` is **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183); which
+   * of the two is `typedBy`.
+   */
   provenance: 'imported' | 'corrected' | 'self_reported';
   /** The month whose year-to-date figure it is; `null` for the agent's own. */
   month: string | null;
+  /**
+   * **Who typed a `self_reported` figure, when it was not the member** (S2): a coach, by membership and by name — `name`
+   * `null` when they can no longer be named. Absent when the member typed it, and on the office's own figure.
+   */
+  typedBy?: GoalTypist;
+}
+
+/** Somebody who typed a member's figure for them (S2): the membership, and the name the office knows them by. */
+export interface GoalTypist {
+  membershipId: string;
+  name: string | null;
 }
 
 /**
@@ -342,9 +367,18 @@ export class GoalService {
    * the screen says which. Nothing is overwritten: the typed figure is still the agent's, stored.
    */
   private async achievedFor(
-    ctx: RequestContext, membershipId: string, period: string, typed: number,
+    ctx: RequestContext, membershipId: string, period: string, goal: GoalDocument | null,
   ): Promise<GoalAchieved> {
-    return achievedOf(await this.production.apeYearToDate(ctx, membershipId, period), typed);
+    const held = await this.production.apeYearToDate(ctx, membershipId, period);
+    // Who typed it is asked only where the typed figure is the answer.
+    return achievedOf(held, goal?.apeAchievedMinor ?? 0, held ? null : await this.typistOf(ctx, typistIdOf(goal)));
+  }
+
+  /** A coach who typed the figure, named (S2) — `null` for the member, and a name `null` for nobody the office holds. */
+  private async typistOf(ctx: RequestContext, membershipId: string | null): Promise<GoalTypist | null> {
+    if (membershipId === null) return null;
+    const names = await this.names.byMembershipId(ctx, [membershipId]);
+    return { membershipId, name: names.get(membershipId) ?? null };
   }
 
   /**
@@ -412,15 +446,31 @@ export class GoalService {
      */
     const previous = await this.goals.findOne(ctx, { membershipId, period: input.period! });
     /*
-     * **The APE achieved so far is the member's own figure, and only theirs to type** (ADR-0075,
-     * ADR-0058). A leader's save — through a session or from Goal Settings — keeps the figure the
-     * member stored, and whatever the body says is ignored: the carrier's file, or the member, says
-     * what they produced, never somebody saving a plan for them. The member's own save is unchanged.
+     * **The APE achieved so far** (ADR-0075, partly reversed by ADR-0183; `typedApeOf`). The member types
+     * their own, always. Somebody else saving the plan — a leader who coaches them, through a session or
+     * from Goal Settings, or the office's Owner or Admin — **types it too while the office holds no figure
+     * for the year**; once the carrier's file (or a correction) is held, their typing is ignored and the
+     * member's stored figure kept. A body that leaves the figure out keeps the stored one, whoever saves (S1). The
+     * save names who typed it: `apeAchievedTypedBy` (S2), `savedByMembershipId`, the revision it replaces, and the
+     * audit entry's `apeAchievedChanged`.
      */
-    const typed = membershipId === savedBy ? input.apeAchievedMinor! : (previous?.apeAchievedMinor ?? 0);
+    const held = await this.production.apeYearToDate(ctx, membershipId, input.period!);
+    const typed = typedApeOf({
+      own: membershipId === savedBy, held, asked: input.apeAchievedMinor, stored: previous?.apeAchievedMinor ?? 0,
+    });
+    /*
+     * **Who typed the figure the plan now stores** (S2): the saver when this save changed it, else whoever did before.
+     * A screen leaves the figure out unless its reader changed it (S1), so a coach saving the target leaves the
+     * member's own figure — and its attribution — as they were.
+     */
+    const typedBy = typedByAfter({
+      before: previous?.apeAchievedMinor ?? 0, after: typed, savedBy, typedBefore: previous?.apeAchievedTypedBy,
+    });
     // What is agreed is measured against the figure the screen showed — the carrier's, once there is
-    // one — and the typed figure is stored as the agent's own either way (P9-T6).
-    const achieved = await this.achievedFor(ctx, membershipId, input.period!, typed);
+    // one — and the typed figure is stored either way (P9-T6).
+    const achieved = achievedOf(
+      held, typed, held ? null : await this.typistOf(ctx, typedBy === membershipId ? null : typedBy),
+    );
     // Refuses an unusable assumption before anything is written (AC-7).
     const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
     const binding = await this.binding(ctx);
@@ -438,6 +488,7 @@ export class GoalService {
           // agent typed over the figure.
           monthsLeftOverride: input.monthsLeft ?? null,
           apeAchievedMinor: typed,
+          apeAchievedTypedBy: typedBy,
           caseSizeMinor: input.caseSizeMinor!,
           leadsToApptPct: input.leadsToApptPct!,
           closingRatePct: input.closingRatePct!,
@@ -477,7 +528,11 @@ export class GoalService {
       ctx,
       saved.version === 1 ? 'goal.created' : 'goal.updated',
       String(saved._id),
-      { period: saved.period, version: saved.version, savedByMembershipId: savedBy },
+      {
+        period: saved.period, version: saved.version, savedByMembershipId: savedBy,
+        // Who typed the APE produced, when this save changed it (ADR-0183): the saver, named above. No figure.
+        ...(typed !== (previous?.apeAchievedMinor ?? 0) ? { apeAchievedChanged: true } : {}),
+      },
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
     if (membershipId !== savedBy) {
@@ -510,8 +565,8 @@ export class GoalService {
    * here instead, and a save then stores exactly what the reader watched.
    *
    * **The same figures a save would store**, by the same rules: the months left from the office's calendar unless
-   * typed over; the APE produced the office's year to date where it holds one, and **only the member's own typed
-   * figure on their own plan** — on anybody else's, the figure they stored, as a leader's save keeps it (ADR-0075).
+   * typed over; the APE produced the office's year to date where it holds one, else the typed figure — the member's on
+   * their own plan, and on anybody else's the reader's while the office holds none (`typedApeOf`, ADR-0183).
    * Whose plan is `goal:read`'s reach, 404 beyond it, never 403. **An assumption that cannot make a plan is
    * `projected: null`**, as a read answers one, not the save's 422: the screen is mid-edit, and the save still refuses
    * it by name. A field that is not a number at all is the save's own 400 (`checkGoal`).
@@ -523,10 +578,19 @@ export class GoalService {
     const input = checkGoal(body);
     const day = await this.days.for(ctx);
     const monthsLeft = input.monthsLeft ?? defaultMonthsLeft(period, this.clock.now(), day.timezone);
-    const typed = membershipId === ctx.membershipId
-      ? input.apeAchievedMinor!
-      : ((await this.goals.findOne(ctx, { membershipId, period }))?.apeAchievedMinor ?? 0);
-    const achieved = await this.achievedFor(ctx, membershipId, period, typed);
+    const own = membershipId === ctx.membershipId;
+    const held = await this.production.apeYearToDate(ctx, membershipId, period);
+    // The stored plan is read only where it can decide the answer: the member typing their own needs none.
+    const stored = own && input.apeAchievedMinor !== undefined
+      ? null
+      : await this.goals.findOne(ctx, { membershipId, period });
+    const before = stored?.apeAchievedMinor ?? 0;
+    const typed = typedApeOf({ own, held, asked: input.apeAchievedMinor, stored: before });
+    // Who typed it, as a save would record it (S2): the reader when the figure moved, else whoever typed it.
+    const typedBy = typedByAfter({ before, after: typed, savedBy: this.me(ctx), typedBefore: stored?.apeAchievedTypedBy });
+    const achieved = achievedOf(
+      held, typed, held ? null : await this.typistOf(ctx, typedBy === membershipId ? null : typedBy),
+    );
     return {
       period,
       monthsLeft,
@@ -550,7 +614,7 @@ export class GoalService {
     if (!goal) return this.defaults(ctx, period, membershipId);
     const day = await this.days.for(ctx);
     return this.view(
-      goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
+      goal, day, await this.achievedFor(ctx, membershipId, period, goal),
       await this.measuring(ctx, membershipId, day), await this.binding(ctx),
     );
   }
@@ -583,11 +647,21 @@ export class GoalService {
       this.officeRates(ctx),
     ]);
     const byMember = new Map(goals.map((goal) => [goal.membershipId, goal]));
+    // Who typed each figure a coach typed (S2), named in one read — only where the typed figure is the answer.
+    const typists = [...new Set(goals
+      .filter((goal) => !yearToDate.get(goal.membershipId))
+      .map(typistIdOf)
+      .filter((id): id is string => id !== null))];
+    const named = typists.length ? await this.names.byMembershipId(ctx, typists) : new Map<string, string>();
+    const typistOfGoal = (goal: GoalDocument): GoalTypist | null => {
+      const by = typistIdOf(goal);
+      return by === null ? null : { membershipId: by, name: named.get(by) ?? null };
+    };
     return new Map(ids.map((id) => {
       const goal = byMember.get(id);
       const held = yearToDate.get(id) ?? null;
       return [id, goal
-        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor), null, binding)
+        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor, held ? null : typistOfGoal(goal)), null, binding)
         : this.defaultsView(period, day, achievedOf(held, 0), null, rates, binding)];
     }));
   }
@@ -599,7 +673,7 @@ export class GoalService {
     if (!goal) throw new NotFoundException('Goal');
     const day = await this.days.for(ctx);
     return this.view(
-      goal, day, await this.achievedFor(ctx, membershipId, period, goal.apeAchievedMinor),
+      goal, day, await this.achievedFor(ctx, membershipId, period, goal),
       await this.measuring(ctx, membershipId, day), await this.binding(ctx),
     );
   }
@@ -636,7 +710,7 @@ export class GoalService {
     const rows = await this.goals.find(ctx, { membershipId }, { sort: { period: -1 } });
     const [activity, binding] = await Promise.all([this.activityFor(ctx, membershipId, day), this.binding(ctx)]);
     return Promise.all(rows.map(async (row) => this.view(
-      row, day, await this.achievedFor(ctx, membershipId, row.period, row.apeAchievedMinor), activity, binding,
+      row, day, await this.achievedFor(ctx, membershipId, row.period, row), activity, binding,
     )));
   }
 
@@ -654,7 +728,7 @@ export class GoalService {
     const day = await this.days.for(ctx);
     // Nobody has typed anything yet, so the carrier's figure, if there is one, is the whole answer.
     const [achieved, rates, activity, binding] = await Promise.all([
-      this.achievedFor(ctx, membershipId, period, 0),
+      this.achievedFor(ctx, membershipId, period, null),
       this.officeRates(ctx),
       this.measuring(ctx, membershipId, day),
       this.binding(ctx),

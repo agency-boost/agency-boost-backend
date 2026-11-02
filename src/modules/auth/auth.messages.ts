@@ -96,10 +96,10 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: `Password must be at least ${min} characters.`,
       id: `Kata sandi minimal ${min} karakter.`,
     }),
-    passwordTooLong: {
-      en: 'Password must be 200 characters or fewer.',
-      id: 'Kata sandi paling banyak 200 karakter.',
-    },
+    passwordTooLong: ({ max }: { max: number }) => ({
+      en: `Password must be ${max} characters or fewer.`,
+      id: `Kata sandi paling banyak ${max} karakter.`,
+    }),
     passwordSpaces: {
       en: 'Password must not begin or end with a space.',
       id: 'Kata sandi tidak boleh diawali atau diakhiri spasi.',

@@ -1,5 +1,9 @@
 import { validateEnv } from './env.validation';
 import { MONGODB_DB_NAME_DEFAULT } from './mongo-target';
+import { MAIL_PROVIDERS, resolveMailProvider } from '@/modules/notifications/mail-provider';
+
+/** Which provider a validated configuration sends through, as `app.module.ts` reads it. */
+const providerOf = (env: Record<string, unknown>) => resolveMailProvider({ get: (key) => env[key] }).provider;
 
 const valid = {
   MONGODB_URI: 'mongodb://localhost:27017',
@@ -27,7 +31,8 @@ describe('environment validation', () => {
 
   describe('mail transport (P4-T14, ADR-0019)', () => {
     it('defaults to SMTP, so the safe thing is what you get by not deciding', () => {
-      expect(validateEnv(valid).MAIL_TRANSPORT).toBe('smtp');
+      // P18.99-T18: neither MAIL_PROVIDER nor MAIL_TRANSPORT written is a plain relay, as MAIL_TRANSPORT's default was.
+      expect(providerOf(validateEnv(valid))).toBe('smtp');
     });
 
     it('allows the log transport outside production, for a developer with no catcher', () => {
@@ -53,7 +58,85 @@ describe('environment validation', () => {
       const production = {
         ...valid, NODE_ENV: 'production', GCS_BUCKET: 'agencyboost-prod-assets', STORAGE_KEY_PREFIX: 'prod', TRUST_PROXY: '1',
       };
-      expect(validateEnv(production).MAIL_TRANSPORT).toBe('smtp');
+      expect(providerOf(validateEnv(production))).toBe('smtp');
+    });
+  });
+
+  describe('the mail provider (P18.99-T18, ADR-0182)', () => {
+    const preset = (provider: string, extra: Record<string, string> = {}) => {
+      const { SMTP_HOST: _none, ...withoutHost } = valid;
+      return {
+        ...withoutHost, MAIL_PROVIDER: provider, SMTP_USER: provider === 'sendgrid' ? 'apikey' : 'u', SMTP_PASSWORD: 'p', ...extra,
+      };
+    };
+
+    it.each(['gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses'])('P18.99-T18 boots %s with its credentials and no SMTP_HOST', (provider) => {
+      const env = validateEnv(preset(provider));
+      expect(env.MAIL_PROVIDER).toBe(provider);
+      expect(env.SMTP_HOST).toBeUndefined();
+      expect(providerOf(env)).toBe(provider);
+    });
+
+    it('P18.99-T18 accepts every provider the module knows, and refuses one it does not, by name', () => {
+      expect(MAIL_PROVIDERS).toEqual(['gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp', 'log']);
+      expect(() => validateEnv({ ...valid, MAIL_PROVIDER: 'postmark' })).toThrow(/MAIL_PROVIDER/);
+      expect(() => validateEnv({ ...valid, MAIL_PROVIDER: 'Gmail' })).toThrow(/MAIL_PROVIDER/);
+    });
+
+    it('P18.99-T18 requires SMTP_HOST for a plain relay alone, by name', () => {
+      const { SMTP_HOST: _none, ...withoutHost } = valid;
+      expect(() => validateEnv(withoutHost)).toThrow(/SMTP_HOST: is required when the mail provider is smtp/);
+      expect(() => validateEnv({ ...withoutHost, MAIL_PROVIDER: 'smtp' })).toThrow(/SMTP_HOST/);
+      expect(() => validateEnv({ ...withoutHost, MAIL_TRANSPORT: 'smtp', SMTP_HOST: ' ' })).toThrow(/SMTP_HOST/);
+    });
+
+    it('P18.99-T18 boots log with no SMTP_HOST at all — the container smoke\'s shape, less its fake host', () => {
+      const { SMTP_HOST: _none, ...withoutHost } = valid;
+      expect(providerOf(validateEnv({ ...withoutHost, MAIL_PROVIDER: 'log' }))).toBe('log');
+      expect(providerOf(validateEnv({ ...withoutHost, MAIL_TRANSPORT: 'log' }))).toBe('log');
+    });
+
+    it('P18.99-T18 refuses a preset without its credentials, naming both keys', () => {
+      expect(() => validateEnv(preset('gmail', { SMTP_USER: '', SMTP_PASSWORD: '' })))
+        .toThrow(/SMTP_USER: is required when MAIL_PROVIDER is gmail[\s\S]*SMTP_PASSWORD: is required when MAIL_PROVIDER is gmail/);
+    });
+
+    it('P18.99-T18 refuses SendGrid with any user but the literal apikey', () => {
+      expect(() => validateEnv(preset('sendgrid', { SMTP_USER: 'agencyboostid@gmail.com' })))
+        .toThrow(/SMTP_USER: must be the literal word apikey when MAIL_PROVIDER is sendgrid/);
+    });
+
+    it('P18.99-T18 refuses MAIL_PROVIDER=log in production, by name', () => {
+      const production = {
+        ...valid, NODE_ENV: 'production', GCS_BUCKET: 'b', STORAGE_KEY_PREFIX: 'prod', TRUST_PROXY: '1', MAIL_PROVIDER: 'log',
+      };
+      expect(() => validateEnv(production)).toThrow(/MAIL_PROVIDER: may not be "log" in production/);
+      // MAIL_PROVIDER decides, so a stale MAIL_TRANSPORT=smtp beside it does not let log through.
+      expect(() => validateEnv({ ...production, MAIL_TRANSPORT: 'smtp' })).toThrow(/MAIL_PROVIDER/);
+      expect(providerOf(validateEnv({ ...production, MAIL_PROVIDER: 'ses', SMTP_USER: 'u', SMTP_PASSWORD: 'p' }))).toBe('ses');
+    });
+
+    it('P18.99-T18 the env file staging ran before the key existed still boots, as the plain relay it named', () => {
+      // `api-env-staging` as it stood on 2026-11-01: SES's host, written out, and MAIL_TRANSPORT=smtp.
+      const staging = {
+        ...valid, NODE_ENV: 'staging', GCS_BUCKET: 'agencyboost-staging-assets', STORAGE_KEY_PREFIX: 'staging', TRUST_PROXY: '1',
+        SMTP_HOST: 'email-smtp.ap-southeast-3.amazonaws.com', SMTP_PORT: '587', SMTP_USER: 'AKIA', SMTP_PASSWORD: 'p',
+        MAIL_TRANSPORT: 'smtp', APP_BASE_URL: 'https://staging.agencyboost.id',
+      };
+      const env = validateEnv(staging);
+      expect(providerOf(env)).toBe('smtp');
+      expect(env).toMatchObject({ SMTP_HOST: 'email-smtp.ap-southeast-3.amazonaws.com', SMTP_PORT: 587 });
+      expect(env.MAIL_PROVIDER).toBeUndefined();
+    });
+
+    it('P18.99-T18 reads an empty optional mail key as unset, as `.env.example` writes it', () => {
+      const env = validateEnv({ ...valid, MAIL_PROVIDER: '', MAIL_TRANSPORT: '', SMTP_PORT: '', MAIL_REPLY_TO: ' ' });
+      expect(env).toMatchObject({ MAIL_PROVIDER: undefined, MAIL_TRANSPORT: undefined, SMTP_PORT: undefined, MAIL_REPLY_TO: undefined });
+      expect(providerOf(env)).toBe('smtp');
+    });
+
+    it('P18.99-T18 keeps MAIL_REPLY_TO, trimmed', () => {
+      expect(validateEnv({ ...valid, MAIL_REPLY_TO: ' support@agencyboost.id ' }).MAIL_REPLY_TO).toBe('support@agencyboost.id');
     });
   });
 
@@ -211,7 +294,13 @@ describe('environment validation', () => {
     expect(validateEnv({ ...valid, PORT: '8080' }).PORT).toBe(8080);
   });
 
-  it('rejects a malformed base URL, which would break verification links', () => {
-    expect(() => validateEnv({ ...valid, APP_BASE_URL: 'not-a-url' })).toThrow();
+  it('rejects a malformed APP_BASE_URL when one is written', () => {
+    expect(() => validateEnv({ ...valid, APP_BASE_URL: 'not-a-url' })).toThrow(/APP_BASE_URL/);
+  });
+
+  it('P18.99-T18 boots without APP_BASE_URL, which nothing reads: links are built from APP_ORIGIN', () => {
+    const { APP_BASE_URL: _unused, ...withoutBase } = valid;
+    expect(validateEnv(withoutBase).APP_BASE_URL).toBeUndefined();
+    expect(validateEnv({ ...valid, APP_BASE_URL: '' }).APP_BASE_URL).toBeUndefined();
   });
 });

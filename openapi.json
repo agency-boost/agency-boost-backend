@@ -1409,6 +1409,18 @@
         "operationId": "ProductionController_template_v1",
         "parameters": [
           {
+            "name": "format",
+            "required": false,
+            "in": "query",
+            "description": "Absent: the JSON below, whose `file` is the CSV. `xlsx`: the same header and rows as an Excel workbook (ADR-0184) — its *Data* sheet, with the guide on a sheet of its own in the reader’s language — answered as the file itself, `attachment; filename=\"KPM0417-agent-data-Sep-2026.xlsx\"`. Anything else is `400 VALIDATION_FAILED`.",
+            "schema": {
+              "enum": [
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "name": "month",
             "required": true,
             "in": "query",
@@ -1426,6 +1438,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TemplateFileDto"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -1485,7 +1503,7 @@
     },
     "/api/v1/kpm/data-upload/preview": {
       "post": {
-        "description": "Reads the file as bytes — UTF-8, or Windows-1252 when it is not valid UTF-8 — with a comma, semicolon or tab delimiter, and checks its header cell by cell against every template ever issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). `UPLOAD_TEMPLATE_MISMATCH` and `UPLOAD_MALFORMED_CSV` (422) refuse the whole file; `ASSET_TOO_LARGE` (413) above 1 MiB.\n\n**Requires `data_upload:upload_and_preview`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Reads the file as bytes. **An Excel workbook** (ADR-0184) is opened only after its parts, as its own directory declares them, are checked to unpack to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413, otherwise), and its *Data* sheet is read, at most 10,000 rows (`format: 'xlsx'`). **A CSV** is read as UTF-8, or Windows-1252 when it is not valid UTF-8, with a comma, semicolon or tab delimiter. Either way the header is checked cell by cell against every template ever issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). `UPLOAD_TEMPLATE_MISMATCH` and `UPLOAD_MALFORMED_CSV` (422) refuse the whole file; `ASSET_TOO_LARGE` (413) above 1 MiB.\n\n**Requires `data_upload:upload_and_preview`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ProductionController_preview_v1",
         "parameters": [],
         "requestBody": {
@@ -1507,7 +1525,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "The filled template, as it was saved. At most 1 MiB."
+                    "description": "The filled template, as it was saved — an Excel workbook (.xlsx) or a CSV. At most 1 MiB."
                   }
                 }
               }
@@ -4503,9 +4521,32 @@
     },
     "/api/v1/admin/tenants/roster-template": {
       "get": {
-        "description": "The file to download: the header, plus worked examples **commented out**, so they can be read and copied without ever importing. `examples` carries the same three rows as cells, which is what the paste box shows — a screen splitting the CSV itself would be a second parser, disagreeing with this one over the quoted row. Declared above the routes that take an `:id`, because Nest would otherwise read \"roster-template\" as one.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Absent `format`: the JSON below — the header, the columns, `template` (the CSV: **the header and nothing else**, ADR-0184) and `examples`, three worked rows as cells, which is what the paste box shows; a screen splitting a CSV itself would be a second parser. `format=csv`: that CSV as the file itself, `roster-template.csv`. `format=xlsx`: the template as an Excel workbook, `roster-template.xlsx` — a guide sheet in the reader’s language (*Petunjuk*, *Guide*: the steps, each column, the rules, the examples) apart from the *Data* sheet, which holds the header alone, its code and date columns as text and its fixed choices as dropdowns. With `kpmId` (or, for an Owner or an Admin, their own office) `role` is a dropdown of the company ladder's rung codes; another office's id is 404. Any other `format`, a `kpmId` that is not an id, or any other query field is `400 VALIDATION_FAILED`. Declared above the routes that take an `:id`, because Nest would otherwise read \"roster-template\" as one.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_rosterTemplate_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "format",
+            "required": false,
+            "in": "query",
+            "description": "Absent: the JSON. `xlsx` or `csv`: the template as that file.",
+            "schema": {
+              "enum": [
+                "xlsx",
+                "csv"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "kpmId",
+            "required": false,
+            "in": "query",
+            "description": "The office whose ladder fills the `role` dropdown (xlsx only). Another office’s is 404.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -4513,6 +4554,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RosterTemplateDto"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -5650,6 +5713,222 @@
         "x-required-permission": "kpm:import_roster"
       }
     },
+    "/api/v1/admin/tenants/{id}/roster/file/preview": {
+      "post": {
+        "description": "The same check as the pasted rows' (`roster/preview`), for a file sent as `multipart/form-data` (ADR-0184). **An Excel workbook** is opened only after its parts, as its own directory declares them, are checked to unpack to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413), and its *Data* sheet is read — or the sheet that starts with the header — at most 10,000 rows, each line numbered as the sheet numbers its row. **A CSV** is read as UTF-8, or Windows-1252 when it is not valid UTF-8. Either way the rows meet the same parser and the same issues. Writes nothing. `413 ASSET_TOO_LARGE` over 1 MiB; `422 UPLOAD_MALFORMED_CSV` for a file that is neither text nor a workbook that opens, or a workbook with no sheet to read; `400 VALIDATION_FAILED` with no file; 404 for an office not the caller's.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_previewRosterFile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The filled template — an Excel workbook (.xlsx) or a CSV. At most 1 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:import_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What an uploaded roster file would do",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:import_roster"
+      }
+    },
+    "/api/v1/admin/tenants/{id}/roster/file": {
+      "post": {
+        "description": "The same import as the pasted rows' (`roster`), for the file the preview read (ADR-0184): read again, checked again, and **all or nothing**. Returns each account with the password it starts on — the only place those exist. The file's own refusals are the preview's.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AdminController_importRosterFile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The filled template — an Excel workbook (.xlsx) or a CSV. At most 1 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterCommitDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `kpm:import_roster`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create everybody in a roster file",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "kpm:import_roster"
+      }
+    },
     "/api/v1/admin/audit": {
       "get": {
         "description": "Defaults to the caller's own tenant. A Super Admin has no tenant, so their default is the platform-level log — provisioning, company creation, impersonation — and `kpmId` narrows it to one office. Anyone else is pinned to their own office whatever they pass.\n\n**Requires `audit_log:read`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -5880,7 +6159,7 @@
     },
     "/api/v1/admin/companies/{companyId}/templates": {
       "get": {
-        "description": "Every named template of the company, the default first: its name, whether it is the default, active or archived, where it came from, the newest published version of each of its seven kinds (null where none is, which an office made from it gets empty), and how many live offices it answers for. Archived templates are listed — offices record that they started from one — and are not offered as *Start from*. 404 for a company that does not exist.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every named template of the company, the default first: its name, whether it is the default, active or archived, where it came from, the newest published version of each of its seven kinds (null where none is, which an office made from it gets empty), `sections` — each kind’s newest published version and whether a draft waits (ADR-0185 §3), for the template’s card and its checklist — and how many live offices it answers for. Archived templates are listed — offices record that they started from one — and are not offered as *Start from*. 404 for a company that does not exist.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NamedTemplateController_list_v1",
         "parameters": [
           {
@@ -6257,6 +6536,181 @@
           "admin (Super Admin)"
         ],
         "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates/{templateId}/publish": {
+      "post": {
+        "description": "*Terbitkan semua* (ADR-0185 §3): every kind of the template holding a draft is published, in the order `activity_taxonomy`, `ratio_set`, `lead_pipeline`, `training_taxonomy`, `activation_checklist`, `capability_ladder`, `event_types` — each exactly as `POST …/template/:kind/publish` would, the same checks and the same audit row. A refusal stops only its own kind: `results` says, per kind, `published` (with the new `version`), `skipped` (`reason: no_changes`, nothing waited) or `refused` (`error.code` and `error.message`, in the reader’s language; still a draft). `template` is the template as it now stands. **Reaches no office that already exists.** 400 for an archived template; 404 for a template that is not the company’s.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_publishAll_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "templateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishAllDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:write`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish every section of a template that has changes",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:write"
+      }
+    },
+    "/api/v1/admin/companies/{companyId}/templates/{templateId}/offices": {
+      "get": {
+        "description": "Every live office started from the template — and, for the template each company was given when templates were named, the offices created before then — by code, with `behind`, the kinds the template has since published a newer version of than the office was built from, and `unrecorded`, the kinds the office has no record of (ADR-0185 §4). What the checklist’s *N KPM memakai versi lama* lists. Information only: nothing reaches an office (ADR-0115 §6). 404 for a template that is not the company’s.\n\n**Requires `company_template:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "NamedTemplateController_offices_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "templateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateOfficeDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `company_template:read`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The offices a template answers for, and what each is behind on",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "company_template:read"
       }
     },
     "/api/v1/admin/companies/{companyId}/templates/{templateId}/archive": {
@@ -27504,6 +27958,24 @@
           "name"
         ]
       },
+      "FigureTypistDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this agency, never their account."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sari Puspita"
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
       "FigureSourceDto": {
         "type": "object",
         "properties": {
@@ -27513,7 +27985,8 @@
               "imported",
               "corrected",
               "self_reported"
-            ]
+            ],
+            "description": "The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (`typedBy`)."
           },
           "month": {
             "type": "string",
@@ -27533,6 +28006,14 @@
             "type": "string",
             "nullable": true,
             "description": "When, for a correction by hand. ISO."
+          },
+          "typedBy": {
+            "description": "Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the member typed it, and on every other source.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FigureTypistDto"
+              }
+            ]
           }
         },
         "required": [
@@ -28778,6 +29259,25 @@
           "id"
         ]
       },
+      "GoalTypistDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership: the person in this office, never their account."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Sari Puspita",
+            "description": "`null` when they can no longer be named."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
       "GoalAchievedDto": {
         "type": "object",
         "properties": {
@@ -28792,13 +29292,21 @@
               "corrected",
               "self_reported"
             ],
-            "description": "The carrier’s file, a correction by hand, or the agent’s own typed figure — the last only while the office holds no year-to-date figure for the year."
+            "description": "The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`) — the last only while the office holds no year-to-date figure for the year."
           },
           "month": {
             "type": "string",
             "nullable": true,
             "example": "2026-08",
             "description": "The month whose year-to-date figure it is; `null` for the agent’s own."
+          },
+          "typedBy": {
+            "description": "Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the member typed it, and on the office’s own figure.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalTypistDto"
+              }
+            ]
           }
         },
         "required": [
@@ -29018,7 +29526,7 @@
           },
           "apeAchievedMinor": {
             "type": "number",
-            "description": "The agent’s own typed figure — kept, and used only until production arrives."
+            "description": "The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used only until production arrives."
           },
           "achieved": {
             "description": "The figure the plan is measured against, and whose it is.",
@@ -29148,7 +29656,7 @@
           "apeAchievedMinor": {
             "type": "number",
             "example": 0,
-            "description": "IDR sen. The agent’s own typed figure, the answer only while the office holds no year-to-date figure for the year. Ignored on a save of somebody else’s plan (`for`): their stored figure is kept (ADR-0075)."
+            "description": "IDR sen. The typed figure, the answer only while the office holds no year-to-date figure for the year. On a save of somebody else’s plan (`for`) it is stored while the office holds no figure for them, and ignored — their stored figure kept — once it holds one (ADR-0183, partly reversing ADR-0075). **Optional, and absent means keep the stored figure** (S1): the screens send it only when the reader changed it in this edit, so a coach saving the target never writes back over the member’s newer figure the one they read. The save records who typed it (`apeAchievedTypedBy`)."
           },
           "caseSizeMinor": {
             "type": "number",
@@ -29177,7 +29685,6 @@
           "savingsTargetMinor",
           "commissionRatePct",
           "monthsLeft",
-          "apeAchievedMinor",
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct"
@@ -29536,12 +30043,21 @@
             "type": "number",
             "example": 1
           },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "xlsx"
+            ],
+            "description": "A CSV, or an Excel workbook whose Data sheet was read (ADR-0184)."
+          },
           "encoding": {
             "type": "string",
             "enum": [
               "utf-8",
               "windows-1252"
-            ]
+            ],
+            "description": "How a CSV’s bytes were read; `utf-8` for a workbook."
           },
           "delimiter": {
             "type": "string",
@@ -29549,7 +30065,8 @@
               ",",
               ";",
               "\t"
-            ]
+            ],
+            "description": "A CSV’s delimiter; `,` for a workbook, whose numbers carry the point as their decimal mark."
           },
           "revision": {
             "type": "number",
@@ -29569,6 +30086,7 @@
           "month",
           "filename",
           "templateVersion",
+          "format",
           "encoding",
           "delimiter",
           "revision",
@@ -30052,7 +30570,7 @@
           "password": {
             "type": "string",
             "example": "correct horse battery",
-            "minLength": 10
+            "minLength": 8
           },
           "fullName": {
             "type": "string",
@@ -30188,7 +30706,7 @@
           },
           "newPassword": {
             "type": "string",
-            "minLength": 10
+            "minLength": 8
           }
         },
         "required": [
@@ -30204,7 +30722,7 @@
           },
           "newPassword": {
             "type": "string",
-            "minLength": 10
+            "minLength": 8
           }
         },
         "required": [
@@ -30663,7 +31181,7 @@
         "properties": {
           "rows": {
             "type": "string",
-            "description": "The rows, as text. Comma-separated from a file, tab-separated from a spreadsheet paste. The header row is optional.",
+            "description": "The rows, as text. Tab-separated from a spreadsheet paste, or comma-separated. The header row is optional. A file is sent to `roster/file/preview` and `roster/file`.",
             "maxLength": 512000
           }
         },
@@ -36860,7 +37378,7 @@
               "corrected",
               "self_reported"
             ],
-            "description": "Whose APE figure it was."
+            "description": "Whose APE figure it was: the carrier’s file, a correction by hand, or a figure typed in the app, not uploaded — by the member or by whoever coaches them (ADR-0183)."
           },
           "month": {
             "type": "string",
@@ -48357,6 +48875,24 @@
             "type": "object",
             "description": "The newest published version of each of the seven kinds, keyed by kind; null where none is published, which an office made from this template gets empty."
           },
+          "sections": {
+            "type": "object",
+            "description": "Each of the seven kinds, keyed by kind: `publishedVersion` (null where none is) and `hasDraft`, a draft saved and not published (ADR-0185 §3) — the template card’s sections published and changes waiting, and the checklist’s *Terbit vN*, *Draf* or *Kosong*.",
+            "example": {
+              "activity_taxonomy": {
+                "publishedVersion": 3,
+                "hasDraft": false
+              },
+              "lead_pipeline": {
+                "publishedVersion": 1,
+                "hasDraft": true
+              },
+              "activation_checklist": {
+                "publishedVersion": null,
+                "hasDraft": false
+              }
+            }
+          },
           "officeCount": {
             "type": "number",
             "description": "Live offices started from this template — and, for the template each existing company was given when templates were named, the offices created before then."
@@ -48377,9 +48913,139 @@
           "archivedAt",
           "origin",
           "publishedVersions",
+          "sections",
           "officeCount",
           "createdAt",
           "updatedAt"
+        ]
+      },
+      "PublishAllOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "activity_taxonomy",
+              "lead_pipeline",
+              "ratio_set",
+              "activation_checklist",
+              "training_taxonomy",
+              "capability_ladder",
+              "event_types"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "published",
+              "skipped",
+              "refused"
+            ],
+            "description": "`published`: its draft is `version` now. `skipped`: nothing waited (`reason: no_changes`). `refused`: its draft was refused as its own publish would refuse it, and is still a draft (`error`)."
+          },
+          "version": {
+            "type": "number",
+            "description": "`published` only: the version it now is."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_changes"
+            ],
+            "description": "`skipped` only."
+          },
+          "error": {
+            "type": "object",
+            "description": "`refused` only: the refusal’s `code` and `message`, in the reader’s language.",
+            "example": {
+              "code": "VALIDATION_FAILED",
+              "message": "Add at least one activity type before publishing."
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "outcome"
+        ]
+      },
+      "PublishAllDto": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "description": "The template as it now stands.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NamedTemplateDto"
+              }
+            ]
+          },
+          "results": {
+            "description": "Every kind, in publishing order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublishAllOutcomeDto"
+            }
+          }
+        },
+        "required": [
+          "template",
+          "results"
+        ]
+      },
+      "TemplateOfficeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The office (`kpms._id`)."
+          },
+          "code": {
+            "type": "string",
+            "example": "0417"
+          },
+          "branchName": {
+            "type": "string",
+            "example": "BSD City Branch"
+          },
+          "behind": {
+            "type": "array",
+            "description": "Kinds the template has published a newer version of than the office was built from, or held none of then.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "activity_taxonomy",
+                "lead_pipeline",
+                "ratio_set",
+                "activation_checklist",
+                "training_taxonomy",
+                "capability_ladder",
+                "event_types"
+              ]
+            }
+          },
+          "unrecorded": {
+            "type": "array",
+            "description": "Kinds the office has no record of: created before provisioning recorded them, so not known.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "activity_taxonomy",
+                "lead_pipeline",
+                "ratio_set",
+                "activation_checklist",
+                "training_taxonomy",
+                "capability_ladder",
+                "event_types"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "branchName",
+          "behind",
+          "unrecorded"
         ]
       },
       "DroppedSettingDto": {
@@ -48450,6 +49116,24 @@
             "type": "object",
             "description": "The newest published version of each of the seven kinds, keyed by kind; null where none is published, which an office made from this template gets empty."
           },
+          "sections": {
+            "type": "object",
+            "description": "Each of the seven kinds, keyed by kind: `publishedVersion` (null where none is) and `hasDraft`, a draft saved and not published (ADR-0185 §3) — the template card’s sections published and changes waiting, and the checklist’s *Terbit vN*, *Draf* or *Kosong*.",
+            "example": {
+              "activity_taxonomy": {
+                "publishedVersion": 3,
+                "hasDraft": false
+              },
+              "lead_pipeline": {
+                "publishedVersion": 1,
+                "hasDraft": true
+              },
+              "activation_checklist": {
+                "publishedVersion": null,
+                "hasDraft": false
+              }
+            }
+          },
           "officeCount": {
             "type": "number",
             "description": "Live offices started from this template — and, for the template each existing company was given when templates were named, the offices created before then."
@@ -48477,6 +49161,7 @@
           "archivedAt",
           "origin",
           "publishedVersions",
+          "sections",
           "officeCount",
           "createdAt",
           "updatedAt",
@@ -50028,13 +50713,24 @@
             }
           },
           "template": {
-            "type": "string"
+            "type": "string",
+            "example": "fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender\n"
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
           "header",
           "columns",
-          "template"
+          "template",
+          "examples"
         ]
       },
       "RosterIssueDto": {

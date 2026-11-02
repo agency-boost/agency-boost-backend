@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { EmailTemplateRenderer } from './email-renderer';
+import { escapeHtml, toHtml } from './email-html';
 import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 const config = { getOrThrow: () => 'https://app.agencyboost.test' } as unknown as ConfigService;
@@ -214,5 +215,61 @@ describe('UI-111 the email change’s emails (ADR-0181)', () => {
     expect(notice.subject).toBe('[AgencyBoost] Alamat email Anda sedang diubah');
     expect(notice.body).toContain('meminta email akun ini diubah menjadi a@b.test.');
     expect(notice.body).toContain('Jika ini bukan Anda, segera ubah kata sandi Anda');
+  });
+});
+
+/**
+ * **P18.99-T18 — the HTML alternative** (ADR-0182): every email is multipart, its HTML derived from the rendered text,
+ * so the text stays the one source of the words. Escaped before it is shaped, so nothing a person typed becomes markup.
+ */
+describe('P18.99-T18 the HTML alternative, derived from the text', () => {
+  it('P18.99-T18 escapes every character that could open markup or close an attribute', () => {
+    expect(escapeHtml(`Tom & Jerry <b>"hi"</b> it's`)).toBe('Tom &amp; Jerry &lt;b&gt;&quot;hi&quot;&lt;/b&gt; it&#39;s');
+  });
+
+  it('P18.99-T18 a <script> somebody typed arrives as text, never as a tag', () => {
+    const html = toHtml('Hello <script>alert("x")</script>,\n\n<img src=x onerror=alert(1)>');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  it('P18.99-T18 a link becomes an anchor to itself, its text the URL, with the sentence\'s full stop left outside', () => {
+    const html = toHtml('Open https://app.agencyboost.test/verify-email/tok-1. Or https://app.test/a?x=1&y=2');
+    expect(html).toContain(
+      '<a href="https://app.agencyboost.test/verify-email/tok-1" style="word-break:break-all">https://app.agencyboost.test/verify-email/tok-1</a>.',
+    );
+    // The query's ampersand escaped in the attribute and the text alike.
+    expect(html).toContain('<a href="https://app.test/a?x=1&amp;y=2" style="word-break:break-all">https://app.test/a?x=1&amp;y=2</a>');
+  });
+
+  it('P18.99-T18 only http and https are links: a javascript: URL somebody typed stays text', () => {
+    const html = toHtml('javascript:alert(1) and ftp://files.test/x');
+    expect(html).not.toContain('<a ');
+  });
+
+  it('P18.99-T18 a blank line starts a paragraph, a single newline is a line break, and Windows line ends read the same', () => {
+    const html = toHtml('Hello Rina,\r\n\r\nLine one\nline two\n\n\n\n— AgencyBoost\n');
+    const paragraphs = html.match(/<p style="[^"]*">[\s\S]*?<\/p>/g) ?? [];
+    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs[0]).toContain('>Hello Rina,</p>');
+    expect(paragraphs[1]).toContain('>Line one<br>\nline two</p>');
+    expect(paragraphs[2]).toContain('>— AgencyBoost</p>');
+  });
+
+  it('P18.99-T18 is a small, whole document: UTF-8, no image, nothing that tracks an open', () => {
+    const html = toHtml('Hi');
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).not.toMatch(/<img|<script|<link|url\(/i);
+  });
+
+  it('P18.99-T18 the verification email\'s HTML says what its text says, its link an anchor', () => {
+    const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 'tok-123', fullName: 'Rina Wijaya' }, SOURCE_READER);
+    const html = toHtml(body);
+    expect(html).toContain('>Hello Rina Wijaya,</p>');
+    expect(html).toContain('<a href="https://app.agencyboost.test/verify-email/tok-123"');
+    expect(html).toContain('— AgencyBoost');
   });
 });

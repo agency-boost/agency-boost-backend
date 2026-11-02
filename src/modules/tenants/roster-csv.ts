@@ -56,13 +56,13 @@ export function isRungCode(value: string): boolean {
 /**
  * A line the importer ignores entirely.
  *
- * This exists so the template can carry **worked examples** without them becoming people.
- * A template with live example rows is a trap: somebody types under them, uploads, and
- * imports Rina Wijaya along with their actual roster — or, if the examples happen to be
- * invalid, gets four issues about rows they did not write and cannot see the point of.
+ * This existed so the CSV template could carry **worked examples** and a column guide without them becoming people
+ * — a template with live example rows is a trap: somebody types under them, uploads, and imports Rina Wijaya along
+ * with their actual roster.
  *
- * Commented out, they can be read, copied over, or left alone, and none of those creates
- * anybody.
+ * **Since ADR-0184 the template carries neither**: the guide and the examples are the Excel template's *Petunjuk*
+ * sheet and the import page's, and the CSV is the header alone. The importer still skips these lines, so a template
+ * downloaded before — seventeen `#` lines, the header, three commented examples — reads as it always did.
  */
 export const COMMENT_PREFIX = '#';
 
@@ -74,11 +74,10 @@ export const COMMENT_PREFIX = '#';
  * a chain of three reads. A blank template answers none of them, and the issue list is a
  * worse place to learn than the example itself.
  *
- * Cells, because two places need them in two shapes — the downloaded template writes them
- * as commented CSV, and the paste box shows them tab-separated, the way a clipboard
- * carries them. Deriving the second from the first would put a CSV splitter in the
- * frontend: a second parser, disagreeing with this one over precisely the row that is
- * here to demonstrate quoting.
+ * Cells, because two places need them — the Excel template's guide sheet lists them under
+ * the header (ADR-0184), and the paste box shows them tab-separated, the way a clipboard
+ * carries them. Splitting a CSV line in the frontend would be a second parser, disagreeing
+ * with this one over precisely the row that is here to demonstrate quoting.
  */
 export const ROSTER_EXAMPLES: readonly (readonly string[])[] = [
   ['Agus Prasetyo', 'agus@example.test', '88001', 'AB', '', '1984-05-12', '2012-03', 'full-time', 'male'],
@@ -86,35 +85,15 @@ export const ROSTER_EXAMPLES: readonly (readonly string[])[] = [
   ['Rina Wijaya', 'rina@example.test', '88003', 'Agent', '88002', '1998-07-21', '2024-01', 'part-time', 'female'],
 ];
 
-/** Quote a cell only where the delimiter would otherwise tear it in half. */
-const asCsvCell = (cell: string) => (cell.includes(',') ? `"${cell}"` : cell);
-
 /**
- * The template a person downloads: the header, then the three examples, commented out so
- * they cannot import.
+ * **The CSV template a person downloads: the header, and nothing else** (ADR-0184).
+ *
+ * It carried seventeen `#` lines of guidance and three commented examples until 2026-11-01. The product owner asked for
+ * the guideline apart from the fill-in data, so the file is tidy to fill: the guide is the Excel template's *Petunjuk*
+ * sheet (`rosterWorkbook`) and the import page's *Panduan pengisian*, and this is the data. A file of the old shape still
+ * imports (`COMMENT_PREFIX`).
  */
-export const ROSTER_TEMPLATE = [
-  `${COMMENT_PREFIX} AgencyBoost roster template.`,
-  `${COMMENT_PREFIX} Add one row per person below. Lines starting with ${COMMENT_PREFIX} are ignored,`,
-  `${COMMENT_PREFIX} so the examples never import — delete them or leave them, either is fine.`,
-  `${COMMENT_PREFIX}`,
-  `${COMMENT_PREFIX} fullName          the person's name. Quote it if it contains a comma.`,
-  `${COMMENT_PREFIX} email             their address. It must be one nobody has registered yet.`,
-  `${COMMENT_PREFIX}                   You send them their password yourself — nothing is emailed.`,
-  `${COMMENT_PREFIX} agentCode         the producer id their insurer issued: digits only, 3 to 32 of them.`,
-  `${COMMENT_PREFIX}                   Unique within the insurer.`,
-  `${COMMENT_PREFIX} role              the rung's code on your company's ladder: AB, AAB or Agent,`,
-  `${COMMENT_PREFIX}                   or a rung the company added.`,
-  `${COMMENT_PREFIX} leaderAgentCode   the agent code of whoever they report to.`,
-  `${COMMENT_PREFIX}                   LEAVE IT EMPTY for somebody who reports to nobody.`,
-  `${COMMENT_PREFIX} dateOfBirth       YYYY-MM-DD, like 1990-03-15. They must be at least 18.`,
-  `${COMMENT_PREFIX} companyJoinMonth  YYYY-MM, like 2021-07: the month they joined the insurer.`,
-  `${COMMENT_PREFIX} workStatus        full-time or part-time.`,
-  `${COMMENT_PREFIX} gender            male or female.`,
-  ROSTER_TEMPLATE_HEADER,
-  ...ROSTER_EXAMPLES.map((cells) => `${COMMENT_PREFIX} ${cells.map(asCsvCell).join(',')}`),
-  '',
-].join('\n');
+export const ROSTER_TEMPLATE = `${ROSTER_TEMPLATE_HEADER}\n`;
 
 export interface RosterRow {
   /** 1-based, and counting the header — so it is the line number a spreadsheet shows. */
@@ -171,8 +150,8 @@ export function generateTemporaryPassword(): string {
     }
     groups.push(group);
   }
-  // 16 characters of alphabet-32 is ~80 bits, and comfortably over the 10-character
-  // minimum `PasswordService` enforces — which matters, because the account has to be
+  // 16 characters of alphabet-32 is ~80 bits, and comfortably over `PASSWORD.MIN_LENGTH`,
+  // the minimum `PasswordService` enforces — which matters, because the account has to be
   // able to sign in with it before it can replace it.
   return groups.join('-');
 }
@@ -253,8 +232,9 @@ export function parseRoster(text: string, today: LocalDate): { rows: RosterRow[]
    *
    * Blank lines and commented ones are dropped, but each surviving line keeps the number
    * it had in the file. Filtering first and numbering afterwards was the first version of
-   * this, and the template ships with eleven comment lines — so every issue would have
-   * been reported eleven lines off, pointing the reader at somebody else's row.
+   * this, and the template shipped with eleven comment lines then (seventeen later, and none
+   * since ADR-0184) — so every issue would have been reported eleven lines off, pointing the
+   * reader at somebody else's row. A workbook's rows arrive numbered as its sheet numbers them.
    */
   const lines = text
     .split(/\r?\n/)

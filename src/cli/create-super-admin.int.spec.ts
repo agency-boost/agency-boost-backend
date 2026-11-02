@@ -122,10 +122,11 @@ describe('create-super-admin (P18.7-T1)', () => {
   });
 
   it('P18.7-T1 applies the app\'s password rules, without printing the password', async () => {
-    const call = io(Readable.from(['too short\n']));
+    // Seven characters: one under `PASSWORD.MIN_LENGTH`.
+    const call = io(Readable.from(['tooshrt\n']));
     expect(await run(['ops@agencyboost.id'], call)).toBe(1);
-    expect(call.err.text()).toContain('Password must be at least 10 characters.');
-    expect(call.err.text()).not.toContain('too short');
+    expect(call.err.text()).toContain('Password must be at least 8 characters.');
+    expect(call.err.text()).not.toContain('tooshrt');
     expect(await users().countDocuments({})).toBe(0);
   });
 

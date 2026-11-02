@@ -47,7 +47,7 @@ export const RESOURCE_NAMES = {
   Session: 'Sesi',
   Standing: 'Hasil campaign',
   'Support session': 'Sesi dukungan',
-  Template: 'Templat',
+  Template: 'Template',
   'Template library': 'Template library',
   'That row': 'Baris itu',
   'Training category': 'Kategori training',

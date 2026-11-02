@@ -108,7 +108,11 @@ export class SnapshotPeriodDto {
 }
 
 export class SnapshotSourceDto {
-  @ApiProperty({ enum: ['imported', 'corrected', 'self_reported'], description: 'Whose APE figure it was.' })
+  @ApiProperty({
+    enum: ['imported', 'corrected', 'self_reported'],
+    description: 'Whose APE figure it was: the carrier’s file, a correction by hand, or a figure typed in the app, not '
+      + 'uploaded — by the member or by whoever coaches them (ADR-0183).',
+  })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
   @ApiProperty({ type: String, nullable: true, example: '2026-08', description: 'Whose year to date it was; `null` for the member’s own.' })

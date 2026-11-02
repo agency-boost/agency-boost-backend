@@ -263,8 +263,11 @@ describe('goals over HTTP (P8-T3)', () => {
       session.current = AB;
       const res = await http().post(preview).query({ for: SUBJECT }).send(plan({ apeAchievedMinor: 400_000_000_00 }))
         .expect(200);
-      // A leader's typed figure is not the member's: their stored one (none) is what the plan is measured against.
-      expect(res.body.achieved.minor).toBe(0);
+      // ADR-0183: with no figure held for the member, the leader's typed one is what the plan is measured against —
+      // and it would be theirs (S2): `mem-a`, whom this spec's office holds no membership row to name.
+      expect(res.body.achieved).toEqual({
+        minor: 400_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: 'mem-a', name: null },
+      });
       await http().post(preview).query({ membershipId: SUBJECT }).send(plan()).expect(400);
     });
 

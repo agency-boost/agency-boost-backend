@@ -345,13 +345,55 @@ describe('who may set whose goal (P8-T4)', () => {
       expect(wired.sentNotifications).toHaveLength(0);
     });
 
-    it('P18.99-T5 UI-014 measures a downline’s plan against what they stored, never the leader’s typed figure', async () => {
+    /*
+     * ADR-0183 (partly reversing ADR-0075): while the office holds no figure, the leader types the downline's APE
+     * produced, and the preview works the plan out against what they type; once it holds one, the file's.
+     */
+    it('ADR-0183 measures a downline’s plan against the leader’s typed figure while the office holds none', async () => {
       await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
 
       const worked = await preview(aab(), AGENT, { apeAchievedMinor: 400_000_000_00 });
 
-      expect(worked.achieved).toEqual({ minor: 100_000_000_00, provenance: 'self_reported', month: null });
-      expect(worked.projected!.remainingApeMinor).toBe(400_000_000_00);
+      // The leader's typed figure, said to be theirs (S2).
+      expect(worked.achieved).toEqual({
+        minor: 400_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: AAB, name: 'Ibu Sari' },
+      });
+      expect(worked.projected!.remainingApeMinor).toBe(100_000_000_00);
+      expect(await goals()).toBe(1);
+    });
+
+    it('ADR-0183 measures it against the office’s figure once one is held, whatever the leader types', async () => {
+      await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+      } as never);
+
+      const worked = await preview(aab(), AGENT, { apeAchievedMinor: 400_000_000_00 });
+
+      expect(worked.achieved).toEqual({ minor: 200_000_000_00, provenance: 'imported', month: '2026-08' });
+    });
+
+    it('ADR-0183 a leader’s save stores the figure they typed while the office holds none; an office figure keeps the member’s', async () => {
+      await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+      expect((await save(aab(), AGENT, { apeAchievedMinor: 300_000_000_00 })).apeAchievedMinor).toBe(300_000_000_00);
+
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'corrected', sourceBatchId: null },
+      } as never);
+      const locked = await save(ab(), AGENT, { apeAchievedMinor: 900_000_000_00 });
+      expect(locked.apeAchievedMinor).toBe(300_000_000_00);
+      expect(locked.achieved).toEqual({ minor: 200_000_000_00, provenance: 'corrected', month: '2026-08' });
+    });
+
+    it('ADR-0183 another office’s production never unlocks or locks this office’s figure (invariant §1)', async () => {
+      await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
+        kpmId: '66f0000000000000000009ff', membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
+        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+      } as never);
+      expect((await save(aab(), AGENT, { apeAchievedMinor: 300_000_000_00 })).achieved)
+        .toEqual({ minor: 300_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: AAB, name: 'Ibu Sari' } });
     });
 
     it('P18.99-T5 UI-014 takes the member’s own typed figure on their own plan', async () => {

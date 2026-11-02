@@ -3,6 +3,8 @@ import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import type { Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
+import { readXlsx } from '@/common/spreadsheet/read-xlsx';
+import { looksLikeZip } from '@/common/spreadsheet/zip-guard';
 import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
 import {
   type CsvRecord, decodeUpload, delimiterOf, parseCsv, type UploadDelimiter, type UploadEncoding,
@@ -107,8 +109,17 @@ export interface RosterMember {
 /** What is stored for one member this month, per metric and cadence. */
 export type StoredFigures = Record<ProductionMetric, Record<Cadence, number | null>>;
 
+/** What the file was (ADR-0184): text read as CSV, or an Excel workbook whose Data sheet was read. */
+export type UploadFormat = 'csv' | 'xlsx';
+
 export interface ReadUpload {
+  format: UploadFormat;
+  /** How a CSV's bytes were read. A workbook's text is UTF-8 by its own format, and reads `utf-8`. */
   encoding: UploadEncoding;
+  /**
+   * A CSV's delimiter. **A workbook has none, and reads `,`**: what the delimiter decides is the decimal mark
+   * (`buildPreview`), and a workbook's numbers reach the preview written with the point (`cellText`).
+   */
   delimiter: UploadDelimiter;
   templateVersion: number;
   /** Every record after the header, blank ones included; `buildPreview` skips those. */
@@ -191,19 +202,51 @@ function trimTrailingEmpty(cells: readonly string[]): string[] {
 
 const isBlank = (r: CsvRecord) => r.cells.every((c) => c.trim() === '');
 
-/** Bytes → a known template, its records, and how the file was written. File-level refusals throw. */
+/** Bytes of a CSV → a known template, its records, and how the file was written. File-level refusals throw. */
 export function readUpload(bytes: Uint8Array): ReadUpload {
   const { text, encoding } = decodeUpload(bytes);
   const delimiter = delimiterOf(text.replace(/^[\r\n]+/, ''));
-  const records = parseCsv(text, delimiter);
+  return { format: 'csv', encoding, delimiter, ...templateOf(parseCsv(text, delimiter)) };
+}
+
+/**
+ * **Any filled template, a CSV or an Excel workbook** (ADR-0184): what the service reads an upload with.
+ *
+ * A workbook — bytes that start as a ZIP — is opened by `readXlsx`, within the bounds a workbook is held to, and its
+ * Data sheet's rows become the records a CSV's lines would have been, each numbered as the sheet numbers its row. From
+ * there it is the same file: **the header matched exactly as a CSV's**, `UPLOAD_TEMPLATE_MISMATCH` naming the first
+ * column that differs, and the same preview. Anything else is read as a CSV.
+ */
+export async function readFileUpload(bytes: Uint8Array): Promise<ReadUpload> {
+  if (!looksLikeZip(bytes)) return readUpload(bytes);
+  const { rows } = await readXlsx(bytes, { isHeader: isTemplateHeader });
+  return {
+    format: 'xlsx',
+    encoding: 'utf-8',
+    delimiter: ',',
+    ...templateOf(rows.map((cells, i): CsvRecord => ({ line: i + 1, cells }))),
+  };
+}
+
+/** Whether a row is a header this product issued — how a workbook's data sheet is found when it is not called Data. */
+function isTemplateHeader(cells: readonly string[]): boolean {
+  try {
+    templateVersionOf(cells);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first row with anything in it is the header; the rest are the records. A file of nothing is refused. */
+function templateOf(records: CsvRecord[]): Pick<ReadUpload, 'templateVersion' | 'records'> {
   const headerAt = records.findIndex((r) => !isBlank(r));
   if (headerAt === -1) {
     throw new DomainException(
       ErrorCode.UPLOAD_MALFORMED_CSV, SAY.UPLOAD_MALFORMED_CSV.empty, HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
-  const templateVersion = templateVersionOf(records[headerAt].cells);
-  return { encoding, delimiter, templateVersion, records: records.slice(headerAt + 1) };
+  return { templateVersion: templateVersionOf(records[headerAt].cells), records: records.slice(headerAt + 1) };
 }
 
 // ── one value ─────────────────────────────────────────────────────────────────────────────────

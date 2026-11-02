@@ -282,6 +282,18 @@ const config: Config = {
     './src/modules/assets/content-sniff.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/assets/unconfigured-storage.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/assets/storage.provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * Phase 18.99 T18 (ADR-0182): which provider sends the mail, and with what. Boot validation, the adapter and the
+     * test command all decide from it, so a branch wrong here is mail that silently stops, or a password sent before
+     * TLS; held whole, as the storage choice is. It measured 100 on every figure the day it landed.
+     */
+    './src/modules/notifications/mail-provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
+     * ADR-0184: the workbook reader and writer, the ZIP guard in front of them, and the upload interceptor both imports
+     * receive a file through. A branch wrong in the guard is a zip bomb unpacked; held whole, as the asset sniff is. It
+     * measured 100 on every figure the day it landed.
+     */
+    './src/common/spreadsheet/': { lines: 100, branches: 100, functions: 100, statements: 100 },
   },
   testEnvironment: 'node',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],

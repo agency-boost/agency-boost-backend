@@ -95,6 +95,8 @@ function describeFailuresAndPermissions(
             'application/json': {
               schema: shape.isArray ? { type: 'array', items: ref } : ref,
             },
+            // A template asked for as a file is answered as that file (ADR-0184).
+            ...Object.fromEntries((shape.files ?? []).map((type) => [type, { schema: { type: 'string', format: 'binary' } }])),
           },
         };
       }

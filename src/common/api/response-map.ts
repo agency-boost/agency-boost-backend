@@ -1,6 +1,7 @@
 import { AvatarDto, ProfileFactsDto } from '@/modules/users/profile.dto';
 import { SummaryDto } from '@/modules/summary/summary.response.dto';
 import { Type } from '@nestjs/common';
+import { XLSX_MIME_TYPE } from '@/domain/constants';
 import {
   AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
   RedeemedInviteDto, SessionDto, StatusAckDto,
@@ -29,8 +30,8 @@ import {
 } from '@/modules/tenants/platform.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
-  ActivityBindingDto, CompanyTemplateDto, NamedTemplateDto, OfficeActivityBindingDto, PublishStateDto,
-  SavedOfficeTemplateDto, TenantConfigDto,
+  ActivityBindingDto, CompanyTemplateDto, NamedTemplateDto, OfficeActivityBindingDto, PublishAllDto, PublishStateDto,
+  SavedOfficeTemplateDto, TemplateOfficeDto, TenantConfigDto,
 } from '@/modules/config/config.response.dto';
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
@@ -73,6 +74,11 @@ import {
 export interface ResponseShape {
   type: Type<unknown>;
   isArray?: true;
+  /**
+   * Media types the operation may answer **as a file** instead, by a query parameter: the two templates' `format`
+   * (ADR-0184). Documented beside the JSON body as binary.
+   */
+  files?: readonly string[];
 }
 
 /**
@@ -287,7 +293,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   GoalController_save: { type: GoalResponseDto },
   GoalController_preview: { type: GoalPreviewDto },
   ProductionController_readMonth: { type: MonthViewDto },
-  ProductionController_template: { type: TemplateFileDto },
+  // ADR-0184: `format=xlsx` answers the workbook itself.
+  ProductionController_template: { type: TemplateFileDto, files: [XLSX_MIME_TYPE] },
   ProductionController_preview: { type: UploadPreviewDto },
   ProductionController_commit: { type: ImportResultDto },
   ProductionController_revert: { type: ImportResultDto },
@@ -317,6 +324,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NamedTemplateController_create: { type: NamedTemplateDto },
   NamedTemplateController_update: { type: NamedTemplateDto },
   NamedTemplateController_archive: { type: NamedTemplateDto },
+  // ADR-0185: *Terbitkan semua*, and the offices behind the checklist's count.
+  NamedTemplateController_publishAll: { type: PublishAllDto },
+  NamedTemplateController_offices: { type: TemplateOfficeDto, isArray: true },
   // P13.2-T7: the copies across an owner boundary answer with the template they made.
   NamedTemplateController_importFrom: { type: NamedTemplateDto },
   // P13.2's exit review (finding 2): with what the office held that the template left out, and why.
@@ -497,9 +507,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_assignOwner: { type: KpmAdminViewDto },
   AdminController_setStatus: { type: KpmAdminViewDto },
   AdminController_updateSubscription: { type: KpmAdminViewDto },
-  AdminController_rosterTemplate: { type: RosterTemplateDto },
+  // ADR-0184: `format=csv` and `format=xlsx` answer the file itself.
+  AdminController_rosterTemplate: { type: RosterTemplateDto, files: ['text/csv', XLSX_MIME_TYPE] },
   AdminController_previewRoster: { type: RosterPreviewDto },
   AdminController_importRoster: { type: RosterCommitDto },
+  // ADR-0184: the roster as a file, a workbook or a CSV — the same answers as the paste's.
+  AdminController_previewRosterFile: { type: RosterPreviewDto },
+  AdminController_importRosterFile: { type: RosterCommitDto },
   AdminController_readAudit: { type: AuditEntryResponseDto, isArray: true },
   AdminController_impersonate: { type: ImpersonationSessionDto },
   AdminController_endImpersonation: { type: StatusAckDto },

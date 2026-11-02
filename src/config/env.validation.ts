@@ -1,15 +1,12 @@
 import { z } from 'zod';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import {
+  LEGACY_MAIL_TRANSPORTS, MAIL_PROVIDERS, mailConfigProblems, resolveMailProvider, SMTP_TIMEOUT_MS_DEFAULT,
+  SMTP_TIMEOUT_MS_RANGE,
+} from '@/modules/notifications/mail-provider';
 
-/**
- * **How long a mail relay may take to answer a dial, or to greet once dialled** (P12.1-T1), unless
- * `SMTP_TIMEOUT_MS` says otherwise. nodemailer's own default is two minutes. Email is no longer awaited
- * inside a request, so this bounds how long a delivery stays `pending` and how long a start-up check
- * waits, not how long anybody waits for a save.
- */
-export const SMTP_TIMEOUT_MS_DEFAULT = 5_000;
-/** The range `SMTP_TIMEOUT_MS` may take: long enough for a slow relay, never nodemailer's two minutes. */
-export const SMTP_TIMEOUT_MS_RANGE = { MIN: 1_000, MAX: 60_000 } as const;
+/** An empty or blank value is unset, as `.env.example` writes an optional key: `KEY=`. */
+const blankIsUnset = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
 
 /**
  * Configuration is validated at boot. A missing or malformed key stops the process
@@ -48,26 +45,41 @@ export const envSchema = z.object({
    */
   STORAGE_KEY_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
 
-  SMTP_HOST: z.string().min(1),
-  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  /**
+   * **Which provider sends the mail** (P18.99-T18, ADR-0182): `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`,
+   * `smtp` (any relay, named by `SMTP_HOST`) or `log`. A preset fills the host, the port and TLS
+   * (`mail-provider.ts`); `SMTP_HOST` and `SMTP_PORT`, when written, override it. Unset, `MAIL_TRANSPORT` decides,
+   * and with neither it is `smtp`, so an env file written before this key boots as it did.
+   *
+   * `log` writes each message to the log instead of sending it, so a developer with no local mail catcher can still
+   * read the link and finish a registration. **It is refused in production** (ADR-0019): an API that accepts a
+   * registration and writes the verification link to stdout is the defect this was added to make impossible, not a
+   * fallback. The refusal, and every rule that joins two keys, is below, in `superRefine`.
+   */
+  MAIL_PROVIDER: z.preprocess(blankIsUnset, z.enum(MAIL_PROVIDERS).optional()),
+  /** The key `MAIL_PROVIDER` replaces, read only when that is unset: `smtp` or `log`. */
+  MAIL_TRANSPORT: z.preprocess(blankIsUnset, z.enum(LEGACY_MAIL_TRANSPORTS).optional()),
+  /** Required for `smtp` alone (below); a preset has its own host. */
+  SMTP_HOST: z.preprocess(blankIsUnset, z.string().trim().optional()),
+  /** The preset's port unless written; 587 for a plain relay. 465 is implicit TLS, anything else STARTTLS. */
+  SMTP_PORT: z.preprocess(blankIsUnset, z.coerce.number().int().positive().optional()),
+  /** Required for every preset (below). SendGrid's is the literal `apikey`. */
   SMTP_USER: z.string().default(''),
+  /** Required for every preset. A Gmail App Password is read without the spaces Google shows it with. */
   SMTP_PASSWORD: z.string().default(''),
   MAIL_FROM: z.string().min(1),
+  /** Optional: where a reply goes, when not to `MAIL_FROM`. */
+  MAIL_REPLY_TO: z.preprocess(blankIsUnset, z.string().trim().optional()),
   /** Connection and greeting timeout for SMTP, in milliseconds — see `SMTP_TIMEOUT_MS_DEFAULT`. */
   SMTP_TIMEOUT_MS: z.coerce.number().int()
     .min(SMTP_TIMEOUT_MS_RANGE.MIN).max(SMTP_TIMEOUT_MS_RANGE.MAX)
     .default(SMTP_TIMEOUT_MS_DEFAULT),
-  /**
-   * How mail leaves: over SMTP, or into the log.
-   *
-   * `log` exists so a developer with no local mail catcher can still read the link and
-   * finish a registration. **It is refused in production** (ADR-0019): an API that accepts
-   * a registration and writes the verification link to stdout is the defect this key was
-   * added to make impossible, not a fallback. The refusal is below, in `superRefine`.
-   */
-  MAIL_TRANSPORT: z.enum(['smtp', 'log']).default('smtp'),
 
-  APP_BASE_URL: z.string().url(),
+  /**
+   * **Read by nothing** (P18.99-T18): every link an email carries is built from `APP_ORIGIN`. Optional since
+   * 2026-11-01 and still checked as a URL when written, so an env file that has it boots as it did.
+   */
+  APP_BASE_URL: z.preprocess(blankIsUnset, z.string().url().optional()),
   CORS_ORIGINS: z.string().default(''),
   /**
    * Whether the browser treats a call to this API as cross-site.
@@ -144,15 +156,27 @@ export const envSchema = z.object({
     });
   }
 
-  if (env.NODE_ENV === 'production' && env.MAIL_TRANSPORT === 'log') {
+  /*
+   * Mail (P18.99-T18, ADR-0182): the provider either key chose, and the rules that join two keys — `SMTP_HOST` for a
+   * plain relay, the credentials for a preset, SendGrid's `apikey` — written once, in `mail-provider.ts`, which the
+   * adapter and the test command read too. Each is reported against its key.
+   */
+  const mail = { get: (key: string) => (env as Record<string, unknown>)[key] };
+  const chosen = resolveMailProvider(mail);
+  if (env.NODE_ENV === 'production' && chosen.provider === 'log') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ['MAIL_TRANSPORT'],
-      message:
-        'must be "smtp" in production. A production API that logs verification links '
-        + 'instead of sending them accepts registrations it can never complete '
-        + '(ADR-0019).',
+      path: [chosen.key ?? 'MAIL_PROVIDER'],
+      message: chosen.key === 'MAIL_TRANSPORT'
+        ? 'must be "smtp" in production. A production API that logs verification links '
+          + 'instead of sending them accepts registrations it can never complete '
+          + '(ADR-0019).'
+        : 'may not be "log" in production. A production API that logs verification links instead of sending '
+          + 'them accepts registrations it can never complete (ADR-0019). Name the provider that sends.',
     });
+  }
+  for (const problem of mailConfigProblems(mail)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [problem.key], message: problem.message });
   }
 
   /*

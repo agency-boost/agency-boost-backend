@@ -225,6 +225,26 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       expect(audit.map((r) => r.action)).toEqual(expect.arrayContaining(['lead.next_action_done', 'lead.next_action_undone']));
     });
 
+    /*
+     * The staging review of 2026-10-31 (*di calendar tidak bisa hapus*): the lead sheet's *Hapus tugas* clears the
+     * owner's next action through the lead's own `PATCH /leads/:id` — no new route. The task leaves the calendar and
+     * Home's count, the lead stays, and nothing records it done: it was removed, not completed.
+     */
+    it('staging review 2026-10-31: Hapus tugas clears the next action through PATCH /leads/:id; the task leaves the calendar and Home, the lead stays', async () => {
+      const wiwik = await lead('INDAH', { name: 'Ibu Wiwik', nextActionDate: ROSTER_TODAY, nextActionNote: 'Invite BOP' });
+      expect(await h.wired.calendar.today(h.office.as('INDAH'))).toMatchObject({ tasks: 1 });
+      h.as('INDAH');
+      const cleared = (await h.http().patch(`/leads/${wiwik.id}`)
+        .send({ nextActionDate: null, nextActionNote: null, version: wiwik.version }).expect(200)).body;
+      expect(cleared).toMatchObject({ nextActionDate: null, nextActionNote: null, outcome: null, version: wiwik.version + 1 });
+      expect(tasksOf(await read('INDAH'))).toEqual([]);
+      expect(await h.wired.calendar.today(h.office.as('INDAH'))).toMatchObject({ tasks: 0, taskItems: [] });
+      const stored = await h.col('leads').findOne({ _id: new mongoose.Types.ObjectId(wiwik.id) });
+      expect(stored).toMatchObject({ deletedAt: null, nextActionDate: null, nextActionNote: null, nextActionDone: null });
+      // A stale clear is VERSION_CONFLICT, and leaves the lead as it is.
+      await h.http().patch(`/leads/${wiwik.id}`).send({ nextActionDate: null, nextActionNote: null, version: wiwik.version }).expect(409);
+    });
+
     it('UI-104 a stale tick is VERSION_CONFLICT; a new next action written since leaves nothing for Urungkan', async () => {
       const wiwik = await lead('INDAH', { name: 'Ibu Wiwik', nextActionDate: '2026-09-15' });
       h.as('INDAH');

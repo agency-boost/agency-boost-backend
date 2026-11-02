@@ -15,13 +15,13 @@ const CADENCE: Readonly<Record<Language, Readonly<Record<'monthly' | 'ytd', stri
 /** What every header refusal ends with: nothing of the file was read. */
 const TEMPLATE_TAIL = {
   en: 'Download the template for this month and fill that in — nothing has been read.',
-  id: 'Unduh templat untuk bulan ini dan isi templat itu — belum ada yang dibaca.',
+  id: 'Unduh template untuk bulan ini dan isi template itu — belum ada yang dibaca.',
 } as const;
 
 /** What a refusal of an agent code a spreadsheet may have rewritten adds. */
 const SPREADSHEET = {
   en: ' A spreadsheet may have rewritten it: format the Agent Code column as text, and copy the codes from the template.',
-  id: ' Spreadsheet mungkin telah mengubahnya: format kolom Agent Code sebagai teks, lalu salin kode dari templat.',
+  id: ' Spreadsheet mungkin telah mengubahnya: format kolom Agent Code sebagai teks, lalu salin kode dari template.',
 } as const;
 
 /** The same thing to do, after a locked month's reason. */
@@ -54,11 +54,16 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
     },
     attachFile: {
       en: 'Attach the filled template as the `file` field.',
-      id: 'Lampirkan templat yang sudah diisi sebagai kolom `file`.',
+      id: 'Lampirkan template yang sudah diisi sebagai kolom `file`.',
+    },
+    /** ADR-0184: the template is a workbook with `format=xlsx`, and the CSV without a format. */
+    unknownFormat: {
+      en: 'That is not a format the template comes in. Ask for format=xlsx, or for no format to have the CSV.',
+      id: 'Itu bukan format template. Minta format=xlsx, atau tanpa format untuk CSV.',
     },
     notAForm: {
       en: 'The upload could not be read as a form. Send the filled template as the `file` field, and the month as `month`.',
-      id: 'Unggahan tidak dapat dibaca sebagai formulir. Kirim templat yang sudah diisi sebagai kolom `file`, dan bulannya '
+      id: 'Unggahan tidak dapat dibaca sebagai formulir. Kirim template yang sudah diisi sebagai kolom `file`, dan bulannya '
         + 'sebagai `month`.',
     },
     revisionRequired: {
@@ -85,7 +90,7 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
   ASSET_TOO_LARGE: {
     fileTooLarge: ({ mb }: { mb: number }) => ({
       en: `The file is larger than ${mb} MB. The template for a whole office is a few kilobytes — check this is the right file.`,
-      id: `File ini lebih besar dari ${n(mb)} MB. Templat untuk satu KPM hanya beberapa kilobyte — periksa apakah ini file `
+      id: `File ini lebih besar dari ${n(mb)} MB. Template untuk satu KPM hanya beberapa kilobyte — periksa apakah ini file `
         + 'yang benar.',
     }),
   },
@@ -94,14 +99,7 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
       en: 'The file is empty.',
       id: 'File ini kosong.',
     },
-    workbook: {
-      en: 'This is a spreadsheet workbook, not a CSV file. In the spreadsheet, save it as CSV and upload that.',
-      id: 'Ini adalah workbook spreadsheet, bukan file CSV. Di spreadsheet, simpan sebagai CSV lalu unggah file itu.',
-    },
-    notText: {
-      en: 'This is not a text file. Upload the filled template as a CSV file.',
-      id: 'Ini bukan file teks. Unggah templat yang sudah diisi sebagai file CSV.',
-    },
+    // A workbook is read since ADR-0184, and a file neither text nor a workbook is `common/spreadsheet`'s `notText`.
     unclosedQuote: ({ line }: { line: number }) => ({
       en: `A quote opened on line ${line} is never closed, so the rest of the file cannot be read.`,
       id: `Tanda kutip yang dibuka di baris ${line} tidak pernah ditutup, jadi sisa file tidak dapat dibaca.`,
@@ -109,22 +107,22 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
     /** A row of the preview (`buildPreview`): more cells than the template. */
     tooManyCells: ({ cells, template }: { cells: number; template: number }) => ({
       en: `This row has ${cells} cells; the template has ${template}. A value holding a comma or a semicolon must be in quotes.`,
-      id: `Baris ini memiliki ${n(cells)} sel; templat memiliki ${n(template)}. Nilai yang berisi koma atau titik koma harus `
+      id: `Baris ini memiliki ${n(cells)} sel; template memiliki ${n(template)}. Nilai yang berisi koma atau titik koma harus `
         + 'diapit tanda kutip.',
     }),
   },
   UPLOAD_TEMPLATE_MISMATCH: {
     extraColumn: ({ actual, column }: { actual: string | null; column: number }) => ({
       en: `The header has a column the template does not: “${actual}”, column ${column}. ${TEMPLATE_TAIL.en}`,
-      id: `Header memiliki kolom yang tidak ada di templat: “${actual}”, kolom ${column}. ${TEMPLATE_TAIL.id}`,
+      id: `Header memiliki kolom yang tidak ada di template: “${actual}”, kolom ${column}. ${TEMPLATE_TAIL.id}`,
     }),
     headerStops: ({ shown, column, expected }: { shown: number; column: number; expected: string }) => ({
       en: `The header stops at column ${shown}; the template’s column ${column} reads “${expected}”. ${TEMPLATE_TAIL.en}`,
-      id: `Header berhenti di kolom ${shown}; kolom ${column} di templat berisi “${expected}”. ${TEMPLATE_TAIL.id}`,
+      id: `Header berhenti di kolom ${shown}; kolom ${column} di template berisi “${expected}”. ${TEMPLATE_TAIL.id}`,
     }),
     columnDiffers: ({ column, actual, expected }: { column: number; actual: string; expected: string }) => ({
       en: `Column ${column} of the header reads “${actual}”; the template’s reads “${expected}”. ${TEMPLATE_TAIL.en}`,
-      id: `Kolom ${column} di header berisi “${actual}”; di templat berisi “${expected}”. ${TEMPLATE_TAIL.id}`,
+      id: `Kolom ${column} di header berisi “${actual}”; di template berisi “${expected}”. ${TEMPLATE_TAIL.id}`,
     }),
   },
   UPLOAD_UNKNOWN_AGENT_CODE: {

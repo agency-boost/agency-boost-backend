@@ -554,7 +554,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
             'Pembaruan proses — tinjau follow-up sebelumnya', 'Tinjauan kinerja terhadap ambang batas utama',
             'Prioritas strategis (Korporat)', 'Prioritas strategis (Agency)', 'Rangkum langkah berikutnya & tetapkan penanggung jawab',
           ],
-          ['Catat hasil ke dalam templat', 'Catat masukan untuk RBDO/BDO'],
+          ['Catat hasil ke dalam template', 'Catat masukan untuk RBDO/BDO'],
         ];
         expect(texts(await stored(id))).toEqual(indonesianAgenda);
         // Read as stored, in both languages: the office's text now, never translated.

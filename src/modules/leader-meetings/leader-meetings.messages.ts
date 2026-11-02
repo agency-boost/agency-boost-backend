@@ -130,7 +130,7 @@ export const LEADER_MEETINGS_MESSAGES = messages('modules/leader-meetings', {
   /* ---- *Post* ---- */
   documentOutcomes: {
     en: 'Document outcomes into template',
-    id: 'Catat hasil ke dalam templat',
+    id: 'Catat hasil ke dalam template',
   },
   /** The glossary's §C9, approved: the titles kept, the sentence around them translated. */
   noteFeedback: {

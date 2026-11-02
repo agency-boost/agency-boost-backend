@@ -12,7 +12,9 @@ import { KpmOfficeCounter } from './office-counter';
 import { NamedTemplate, NamedTemplateSchema } from './named-template.schema';
 import { NamedTemplateService } from './named-template.service';
 import { platformDefaultPayload } from './template-defaults';
+import { standingOf } from './office-counter.port';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { AGENT, OWNER } from '../../../test/http-permissions';
 
 const NOW = new Date('2026-09-11T02:00:00Z');
 
@@ -560,6 +562,69 @@ describe('a company’s KPM template (P4-T8, ADR-0018)', () => {
 
       await expect(service.publish(ctx(), companyId, 'activation_checklist'))
         .resolves.toMatchObject({ status: 'published', version: 1 });
+    });
+  });
+
+  /**
+   * **ADR-0185 §3–§4: Terbitkan semua, and the offices behind**, at the service: the permission refused before
+   * anything is read, a company's own template only, and the offices counted the way `standing` counts them.
+   */
+  describe('Terbitkan semua and the offices behind (ADR-0185)', () => {
+    it('refuses publishing every kind without company_template:write, before anything is read', async () => {
+      await service.saveDraft(ctx(), companyId, 'event_types', platformDefaultPayload('event_types'), defaultId);
+      for (const who of [OWNER, AGENT]) {
+        await expect(service.publishAll(who, companyId, defaultId)).rejects.toMatchObject({ code: 'PERM_DENIED' });
+      }
+      const rows = mongoose.model(CompanyTemplate.name, CompanyTemplateSchema);
+      expect(await rows.countDocuments({ templateId: defaultId, status: 'published' })).toBe(0);
+    });
+
+    it('S6 refuses the offices behind without company_template:read, before anything is read', async () => {
+      // An Owner, an Agent, and an Owner's own office among them: the list is the platform's, never an office's.
+      await kpms.create({
+        companyId, code: '0417', branchName: 'BSD City', timezone: 'Asia/Jakarta', startedFrom: null,
+        seededFrom: {},
+      } as never);
+      for (const who of [OWNER, AGENT]) {
+        await expect(named.offices(who, companyId, defaultId)).rejects.toMatchObject({
+          code: 'PERM_DENIED', details: { permission: 'company_template:read' },
+        });
+      }
+      // A company that does not exist is refused the same, by permission, not by a 404 that would say it does not.
+      await expect(named.offices(OWNER, String(new mongoose.Types.ObjectId()), defaultId))
+        .rejects.toMatchObject({ code: 'PERM_DENIED' });
+      await expect(named.offices(ctx(), companyId, defaultId)).resolves.toHaveLength(1);
+    });
+
+    it('publishes only the company’s own template — another company’s is not found', async () => {
+      const other = await companies.create({
+        name: 'Allianz', slug: 'allianz', defaultCurrency: 'IDR', defaultLocale: 'id-ID',
+        defaultTimezone: 'Asia/Jakarta', status: 'active',
+      } as never);
+      const theirs = await defaultTemplateFor(String((other as unknown as { _id: unknown })._id));
+      await expect(service.publishAll(ctx(), companyId, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(named.offices(ctx(), companyId, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('counts the offices created before templates were named against the migration’s template', async () => {
+      await service.saveDraft(ctx(), companyId, 'event_types', platformDefaultPayload('event_types'), defaultId);
+      await service.publishAll(ctx(), companyId, defaultId);
+      await kpms.create({
+        companyId, code: '0417', branchName: 'BSD City', timezone: 'Asia/Jakarta', startedFrom: null,
+        seededFrom: { event_types: { templateId: null, version: null } },
+      } as never);
+      const offices = await named.offices(ctx(), companyId, defaultId);
+      expect(offices).toEqual([
+        expect.objectContaining({ code: '0417', behind: ['event_types'], unrecorded: [] }),
+      ]);
+    });
+
+    it('stands an office against a version the way the counts do (P5-T12)', () => {
+      expect(standingOf(undefined, 2)).toBe('unrecorded');
+      expect(standingOf({ version: null }, 1)).toBe('behind');
+      expect(standingOf({ version: 1 }, 2)).toBe('behind');
+      expect(standingOf({ version: 2 }, 2)).toBe('current');
+      expect(standingOf({ version: 3 }, 2)).toBe('current');
     });
   });
 });

@@ -3,12 +3,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { readerOf, type Reader } from '@/common/i18n/reader';
 import { joinSentences, prefixed, refiled, render } from '@/common/i18n/sentence';
 import type { FieldSentence } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
+import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
   ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
@@ -17,10 +20,10 @@ import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
 } from './company-template.schema';
 import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office-counter.port';
-import { NamedTemplateService } from './named-template.service';
+import { NamedTemplateService, type NamedTemplateView } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import {
-  isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes,
+  isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes, type OfficeTemplateKind,
 } from './template-defaults';
 import {
   checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
@@ -82,6 +85,37 @@ export interface TemplateView {
    * every other kind.
    */
   linkKinds?: ReturnType<typeof activationLinkKinds>;
+}
+
+/**
+ * **The order *Terbitkan semua* publishes in** (ADR-0185 §3): the activity taxonomy before the ratio set, because a
+ * ratio is checked against the template's *published* taxonomy — so a draft type and the ratio built on it go out
+ * together, as a reader who edited both in one sitting expects; the training taxonomy before the checklist that links
+ * its modules. Every one of the seven kinds, once.
+ */
+export const PUBLISH_ORDER = [
+  'activity_taxonomy',
+  'ratio_set',
+  'lead_pipeline',
+  'training_taxonomy',
+  'activation_checklist',
+  'capability_ladder',
+  'event_types',
+] as const satisfies readonly OfficeTemplateKind[];
+
+/** What *Terbitkan semua* did with one kind (ADR-0185 §3). */
+export type PublishAllOutcome =
+  /** Its draft is now this version. */
+  | { kind: OfficeTemplateKind; outcome: 'published'; version: number }
+  /** No draft waited: nothing to publish. */
+  | { kind: OfficeTemplateKind; outcome: 'skipped'; reason: 'no_changes' }
+  /** Its draft was refused, as `…/template/:kind/publish` would refuse it — in the reader's language. Still a draft. */
+  | { kind: OfficeTemplateKind; outcome: 'refused'; error: { code: string; message: string } };
+
+/** *Terbitkan semua*'s answer: the template as it now stands, and what happened to each kind, in publishing order. */
+export interface PublishAllView {
+  template: NamedTemplateView;
+  results: PublishAllOutcome[];
 }
 
 /**
@@ -291,6 +325,43 @@ export class TemplateService {
     });
 
     return this.view(draft, draft.version, await this.standing(at, draft.version), ctx.reader);
+  }
+
+  /**
+   * **Terbitkan semua** (ADR-0185 §3): every kind of one template that holds a draft, published in
+   * {@link PUBLISH_ORDER}, each exactly as its own *Terbitkan* would publish it — the same checks, the same audit row.
+   *
+   * **A refusal stops only its own kind.** The others go out, and the answer says which were published, which had
+   * nothing waiting and which were refused, and why, in the reader's language: the reader fixes the one and publishes
+   * it, rather than finding that one empty list held back six good sections. **Reaches nothing that already exists**,
+   * as every publish (copy-on-provision). Refused whole before anything is written: `403` without
+   * `company_template:write`, `404` for a company or a template that is not the company's, `400` for an archived one.
+   */
+  async publishAll(ctx: RequestContext, companyId: string, templateId: string): Promise<PublishAllView> {
+    if (!can(ctx, 'company_template:write')) throw new PermissionDeniedException('company_template:write');
+    await this.requireCompany(companyId);
+    const template = await this.named.findOf(companyId, templateId);
+    if (template.status === 'archived') throw new InvalidRequestException(SAY.editArchived({ name: template.name }));
+    const id = String(template._id);
+
+    const results: PublishAllOutcome[] = [];
+    for (const kind of PUBLISH_ORDER) {
+      const waiting = await this.templates
+        .exists({ companyId, templateId: id, kind, status: 'draft', deletedAt: null }).exec();
+      if (!waiting) {
+        results.push({ kind, outcome: 'skipped', reason: 'no_changes' });
+        continue;
+      }
+      try {
+        const published = await this.publish(ctx, companyId, kind, id);
+        results.push({ kind, outcome: 'published', version: published.version });
+      } catch (err) {
+        // A refusal is the kind's, said; anything else is a fault, and stops the rest.
+        if (!(err instanceof DomainException)) throw err;
+        results.push({ kind, outcome: 'refused', error: { code: err.code, message: err.messageFor(ctx.reader) } });
+      }
+    }
+    return { template: await this.named.viewOf(companyId, template), results };
   }
 
   /** Every version of one kind of one template, newest first. The history panel. */

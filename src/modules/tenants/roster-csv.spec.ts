@@ -8,6 +8,7 @@ import {
   type RosterIssue,
 } from './roster-csv';
 import { english, indonesian } from '../../../test/i18n';
+import { PASSWORD } from '@/domain/constants';
 
 const H = ROSTER_TEMPLATE_HEADER;
 /** The office's calendar day the four personal columns are measured against (ADR-0158 §2). */
@@ -133,7 +134,7 @@ describe('the roster file (P3.6-T4)', () => {
     ]);
     expect(indonesian(parse('', TODAY).issues[0].message)).toBe('File ini kosong.');
     expect(indonesian(parse('name,email\nRina,r@k.test\n', TODAY).issues[0].message))
-      .toBe(`Header harus persis: ${H}. Unduh templat.`);
+      .toBe(`Header harus persis: ${H}. Unduh template.`);
   });
 
   describe('what a person records (P18.8-T4, ADR-0158)', () => {
@@ -265,76 +266,76 @@ describe('the roster file (P3.6-T4)', () => {
     });
   });
 
-  describe('the template', () => {
-    it('carries worked examples that cannot import', () => {
-      // A template with live examples is a trap: somebody types under them and imports
-      // Rina Wijaya along with their actual roster.
+  describe('the template (ADR-0184: the header, and nothing else)', () => {
+    /**
+     * **A CSV template downloaded before 2026-11-01**, as it was issued: seventeen `#` lines of guidance, the header,
+     * and three commented examples. The guide moved to the Excel template's *Petunjuk* sheet and the page; a file of
+     * this shape must still read exactly as it did.
+     */
+    const BEFORE = [
+      '# AgencyBoost roster template.',
+      '# Add one row per person below. Lines starting with # are ignored,',
+      '# so the examples never import — delete them or leave them, either is fine.',
+      '#',
+      "# fullName          the person's name. Quote it if it contains a comma.",
+      '# email             their address. It must be one nobody has registered yet.',
+      '#                   You send them their password yourself — nothing is emailed.',
+      '# agentCode         the producer id their insurer issued: digits only, 3 to 32 of them.',
+      '#                   Unique within the insurer.',
+      "# role              the rung's code on your company's ladder: AB, AAB or Agent,",
+      '#                   or a rung the company added.',
+      '# leaderAgentCode   the agent code of whoever they report to.',
+      '#                   LEAVE IT EMPTY for somebody who reports to nobody.',
+      '# dateOfBirth       YYYY-MM-DD, like 1990-03-15. They must be at least 18.',
+      '# companyJoinMonth  YYYY-MM, like 2021-07: the month they joined the insurer.',
+      '# workStatus        full-time or part-time.',
+      '# gender            male or female.',
+      H,
+      '# Agus Prasetyo,agus@example.test,88001,AB,,1984-05-12,2012-03,full-time,male',
+      '# "Puspita, Sari",sari@example.test,88002,AAB,88001,1990-11-02,2016-08,full-time,female',
+      '# Rina Wijaya,rina@example.test,88003,Agent,88002,1998-07-21,2024-01,part-time,female',
+      '',
+    ].join('\n');
+
+    it('is the header line alone: no guidance, no examples, no comment', () => {
+      expect(ROSTER_TEMPLATE).toBe(`${H}\n`);
+      expect(ROSTER_TEMPLATE).not.toContain('#');
+    });
+
+    it('reads as a header with nobody under it', () => {
       const { rows, issues } = parseRoster(ROSTER_TEMPLATE);
       expect(issues).toEqual([]);
       expect(rows).toEqual([]);
-      // And they are there to be read.
-      expect(ROSTER_TEMPLATE).toContain('Agus Prasetyo');
-      expect(ROSTER_TEMPLATE).toContain('"Puspita, Sari"');
     });
 
-    it('shows what each column takes, and the one that is left empty', () => {
-      // The leader column is the one people get wrong: it is an agent code, not a name,
-      // and somebody at the top of the office has none.
-      expect(ROSTER_TEMPLATE).toContain('LEAVE IT EMPTY');
-      expect(ROSTER_TEMPLATE).toContain('AB, AAB or Agent');
-      // And the four a person records, with the shape each takes (ADR-0158).
-      expect(ROSTER_TEMPLATE).toContain('dateOfBirth       YYYY-MM-DD');
-      expect(ROSTER_TEMPLATE).toContain('companyJoinMonth  YYYY-MM');
-      expect(ROSTER_TEMPLATE).toContain('full-time or part-time');
-      expect(ROSTER_TEMPLATE).toContain('male or female');
-      expect(ROSTER_TEMPLATE).toContain('digits only, 3 to 32');
+    it('imports what somebody adds under the header, on the line a spreadsheet shows', () => {
+      const { rows, issues } = parseRoster(`${ROSTER_TEMPLATE}Budi Santoso,budi@k.test,881,agent,${P}\n`);
+      expect(issues).toEqual([]);
+      expect(rows.map((r) => [r.line, r.fullName])).toEqual([[2, 'Budi Santoso']]);
     });
 
-    it('does not imply the password is emailed, because nothing emails it', () => {
-      // `NOTIFICATION_ADAPTERS` is empty: no mail has ever left this system (OD-45). The
-      // importing admin reads each password off the commit screen and passes it on, and
-      // a column comment saying "where their password is sent" read as if the product
-      // did it for them.
-      expect(ROSTER_TEMPLATE).toContain('You send them their password yourself');
-      expect(ROSTER_TEMPLATE).not.toContain('where their password is sent');
-    });
-
-    it('shows a chain, so the leader column is unambiguous', () => {
-      // Agus leads Sari leads Rina, by code — which is what the column takes.
-      expect(ROSTER_TEMPLATE).toContain('88002,AAB,88001');
-      expect(ROSTER_TEMPLATE).toContain('88003,Agent,88002');
-    });
-
-    it('quotes an example name with a comma, and leaves the others bare', () => {
-      // The template is a CSV, so the comma has to be escaped here — and only here.
-      expect(ROSTER_TEMPLATE).toContain('# "Puspita, Sari",sari@example.test');
-      expect(ROSTER_TEMPLATE).toContain('# Agus Prasetyo,agus@example.test');
-    });
-
-    it('imports what somebody adds under the examples, and nothing else', () => {
-      const filled = `${ROSTER_TEMPLATE}Budi Santoso,budi@k.test,881,agent,${P}\n`;
-      const { rows, issues } = parseRoster(filled);
+    it('still reads a template downloaded before: its comments and commented examples import nobody', () => {
+      // A template with live examples is a trap: somebody types under them and imports Rina Wijaya along with their
+      // actual roster. Commented out, they never could; the importer still skips them.
+      const { rows, issues } = parseRoster(`${BEFORE}Budi Santoso,budi@k.test,881,agent,${P}\n`);
       expect(issues).toEqual([]);
       expect(rows.map((r) => r.fullName)).toEqual(['Budi Santoso']);
     });
 
-    it('reports the line a spreadsheet shows, not the line after filtering', () => {
-      // The template is eleven lines of comment before the header. Numbering the survivors
-      // instead of carrying their real positions would point the reader at a row they
-      // cannot see.
-      const filled = `${ROSTER_TEMPLATE},not-an-email,,director,,,,,\n`;
-      const { issues } = parseRoster(filled);
-      const linesInFile = ROSTER_TEMPLATE.split('\n').length;
-      expect(new Set(issues.map((i) => i.line))).toEqual(new Set([linesInFile]));
+    it('reports the line a spreadsheet shows in one, not the line after filtering', () => {
+      // Seventeen lines of comment before the header. Numbering the survivors instead of carrying their real
+      // positions would point the reader at a row they cannot see.
+      const { issues } = parseRoster(`${BEFORE},not-an-email,,director,,,,,\n`);
+      expect(new Set(issues.map((i) => i.line))).toEqual(new Set([BEFORE.split('\n').length]));
     });
   });
 
   describe('the worked examples', () => {
     /*
-     * They are one list because two places show them: the downloaded template writes them
-     * as commented CSV, and the paste box shows them tab-separated. The guarantee worth
-     * pinning is that neither is a lie — an example a person copies must be one that
-     * would actually import.
+     * They are one list because two places show them: the Excel template's guide sheet lists
+     * them under the header (ADR-0184), and the paste box shows them tab-separated. The
+     * guarantee worth pinning is that neither is a lie — an example a person copies must be
+     * one that would actually import.
      */
     const asPaste = () => ROSTER_EXAMPLES.map((cells) => cells.join('\t')).join('\n');
 
@@ -357,8 +358,8 @@ describe('the roster file (P3.6-T4)', () => {
     });
 
     it('needs no quoting when pasted, because the delimiter is the tab', () => {
-      // The same name is quoted in the CSV template. Showing it bare in the paste box is
-      // not an inconsistency — it is the difference between the two formats.
+      // The same name would be quoted in a CSV. Showing it bare in the paste box is not an
+      // inconsistency — it is the difference between the two formats.
       const { rows } = parseRoster(asPaste());
       expect(rows[1].fullName).toBe('Puspita, Sari');
     });
@@ -401,10 +402,10 @@ describe('the roster file (P3.6-T4)', () => {
 
   describe('the temporary password', () => {
     it('is long enough to sign in with, which is the whole job', () => {
-      // It has to clear PasswordService's ten-character minimum, or the account cannot
-      // reach the screen that replaces it.
+      // It has to clear the password minimum `PasswordService` enforces, or the account
+      // cannot reach the screen that replaces it.
       const password = generateTemporaryPassword();
-      expect(password.length).toBeGreaterThanOrEqual(10);
+      expect(password.length).toBeGreaterThanOrEqual(PASSWORD.MIN_LENGTH);
     });
 
     it('leaves out the characters people misread when retyping', () => {

@@ -58,6 +58,7 @@ import { RecipientAddressBook, SmtpChannelAdapter } from '@/modules/notification
 import { UserAddressBook } from '@/modules/notifications/user-address-book';
 import { RecipientLanguages, UserLanguages } from '@/modules/notifications/recipient-languages';
 import { InAppChannelAdapter, LogEmailAdapter } from '@/modules/notifications/local-adapters';
+import { resolveMailProvider } from '@/modules/notifications/mail-provider';
 import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
@@ -549,10 +550,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      * adapter every in-app send recorded `failed: 'no adapter'` beside a row that had
      * been delivered.
      *
-     * Email over SMTP, or into the log for a developer with no mail catcher.
-     * `MAIL_TRANSPORT=log` is refused in production by `env.validation.ts`, so this
-     * factory cannot quietly choose the wrong one there: the process will not have
-     * started.
+     * Email over SMTP, through the provider `MAIL_PROVIDER` names (P18.99-T18, ADR-0182), or into the
+     * log for a developer with no mail catcher. `log`, by either key, is refused in production by
+     * `env.validation.ts`, so this factory cannot quietly choose the wrong one there: the process
+     * will not have started. An env file with `MAIL_TRANSPORT` alone still chooses as it did.
      */
     {
       provide: NOTIFICATION_ADAPTERS,
@@ -564,7 +565,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
         smtp: SmtpChannelAdapter,
       ) => [
         inApp,
-        config.get<string>('MAIL_TRANSPORT') === 'log' ? log : smtp,
+        resolveMailProvider(config).provider === 'log' ? log : smtp,
       ],
     },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },

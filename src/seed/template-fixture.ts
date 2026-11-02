@@ -21,10 +21,10 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | What | Its state | Who to sign in as, and what they see |
  * |---|---|---|
- * | **Prudential** | holds **Prudential template**, its default — the template migration `0023` gives every company, holding the event types the seed published and each other kind as a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}/template`: the picker, *Prudential template · Default*, its office count; at `/admin/tenants/new`, *Start from* offers it first, then *Template · Default template* and *Empty* — no *AgencyBoost defaults* since ADR-0168 §2 |
+ * | **Prudential** | holds **Prudential template**, its default — the template migration `0023` gives every company, holding the event types the seed published and each other kind as a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies/{Prudential}` (*Template KPM*, ADR-0185): its card, *★ Default*, its office count, its sections published; at `/admin/tenants/new`, *Mulai dari* offers it first, then *Template bawaan AgencyBoost* and *Kosong* — no *AgencyBoost defaults* since ADR-0168 §2 |
  * | **Allianz Life** | **Allianz Life template**, the same way, with its own two event types | the picker on Allianz's template screen |
  * | **Sejahtera Baru Life** (new) | a company created **without** the defaults — *Started blank* — whose default template, *Sejahtera Baru Life template*, holds nothing | its template screen: every tab empty |
- * | **Template** (P18.9-T3) | the *Template library* (ADR-0164): made by migration `0037`, as every environment's is — the default ladder with its tiers, the 31 products, the carrier rules, the playbook, and **Default template**, its default, every kind a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies`: the row badged *Template library*; its template screen; at `/admin/tenants/new`, *Start from* offers *Template · Default template* after the company's own; at `/admin/org-levels`, listed under *Company* and badged *Template library*, its ladder edited like any company's (ADR-0168 §3); not offered as a company at `/admin/tenants/new`, nor at registration, `/admin` or `/admin/analytics` |
+ * | **Template** (P18.9-T3) | the *Template library* (ADR-0164): made by migration `0037`, as every environment's is — the default ladder with its tiers, the 31 products, the carrier rules, the playbook, and **Default template**, its default, every kind a published version 1 of the AgencyBoost defaults | `superadmin@agencyboost.test` at `/admin/companies`: the card *Template bawaan AgencyBoost* above the table (ADR-0185), not a row; its company page; at `/admin/tenants/new`, *Mulai dari* offers it, under *Template bawaan AgencyBoost*, after the company's own; at `/admin/org-levels`, listed under *Company* and badged *Template library*, its ladder edited like any company's (ADR-0168 §3); not offered as a company at `/admin/tenants/new`, nor at registration, `/admin` or `/admin/analytics` |
  * | **0701** Cempaka Putih (new), Sejahtera Baru Life | started ***Empty***: the three cascade activity types in *Leads Generation* and *Selling*, the platform capability ladder (ADR-0116: four stages, five milestones, four grids), and nothing else — no lead stages, ratios, training, checklist or event types — so **no activation** | `owner@kpm0701.test`: every other settings screen opens empty and authors its first row, *Capability Mapping* shows the standard ladder; archiving one of the three is refused. `agent@kpm0701.test`: Log Activity with the three, the empty states elsewhere, no *New agent* section |
  *
  * A second Prudential template, *BSD City settings* saved from 0417, is the copies' fixture's (P13.2-T7,
@@ -244,11 +244,12 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
   );
 
   const guide = `
-  TEMPLATES at /admin/companies → Template  (Super Admin; from src/seed/template-fixture.ts)
-    Template                     the Template library: "Default template", every kind of the AgencyBoost
-                                 defaults; a new company copies it, and Start from offers it to a new office
+  KPM TEMPLATES at /admin/companies → a company → Template KPM  (Super Admin; from src/seed/template-fixture.ts)
+    Template bawaan AgencyBoost  the card above the companies (the Template library, ADR-0185): "Default
+                                 template", every kind of the AgencyBoost defaults; a new company copies it,
+                                 and Mulai dari offers it to a new office
     Prudential                   "Prudential template", its default — the migration's, holding every
-                                 kind; Start from at /admin/tenants/new offers it first
+                                 kind; Mulai dari at /admin/tenants/new offers it first
     Allianz Life                 "Allianz Life template", its default
     Sejahtera Baru Life          Started blank: "Sejahtera Baru Life template" holds nothing
     KPM 0701 · Cempaka Putih     Started Empty, Sejahtera Baru Life:

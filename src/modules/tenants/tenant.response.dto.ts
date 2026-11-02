@@ -319,11 +319,15 @@ export class RosterTemplateDto {
   columns!: string[];
 
   /**
-   * The whole file, examples included. Every example line is commented, so a person can
-   * copy one, edit it, or leave it alone — and none of those creates anybody.
+   * The CSV template: **the header and nothing else** since ADR-0184. Its guide and examples were `#` lines above the
+   * header until then; they are the Excel template's guide sheet (`format=xlsx`) and the page's now.
    */
-  @ApiProperty({ type: String })
+  @ApiProperty({ type: String, example: 'fullName,email,agentCode,role,leaderAgentCode,dateOfBirth,companyJoinMonth,workStatus,gender\n' })
   template!: string;
+
+  /** Three worked rows, as cells: what the paste box shows, tab-joined, and the workbook's guide lists. */
+  @ApiProperty({ type: 'array', items: { type: 'array', items: { type: 'string' } } })
+  examples!: string[][];
 }
 
 export class RosterIssueDto {

@@ -363,6 +363,25 @@ The password is asked for twice and never echoed. It runs in `api-prod`, so the 
 production's database. It refuses when a Super Admin already exists; after the first, make others from
 the console.
 
+### Mail
+
+**The provider is chosen by the environment alone**
+([ADR-0182](../docs/04-adr/0182-the-mail-provider-is-chosen-by-env-staging-sends-through-gmail.md)):
+`MAIL_PROVIDER` is `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`, `smtp` (any relay `SMTP_HOST` names) or
+`log`, and a preset fills the host, the port and TLS (`src/modules/notifications/mail-provider.ts`). Staging sends
+through the product's Gmail account; production is SES until go-live chooses. Every email is multipart, its HTML
+derived from the text, with `MAIL_REPLY_TO` when set. To switch, add a new version of `api-env-<env>` and redeploy the
+same image (runbook §13); then send one message with that environment's settings and look in the inbox and the spam
+folder:
+
+```bash
+sudo /opt/agencyboost/bin/send-test-mail.sh staging you@example.com    # node dist/cli/send-test-mail.js in api-staging
+```
+
+It prints the provider, the host, the port and the server's answer, never the password, and exits 0 when the
+server accepted the message. Each provider's recipe, and staying out of spam:
+[`../docs/03-engineering/email-delivery.md`](../docs/03-engineering/email-delivery.md).
+
 ### Backups
 
 - **Snapshots of the data disk `mongodb`**:

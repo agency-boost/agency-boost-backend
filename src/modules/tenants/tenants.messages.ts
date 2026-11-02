@@ -39,7 +39,7 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
     holdsNoOffice: ({ name }: { name: string }) => ({
       en: `${name} is the Template library: it holds the templates new companies and offices copy, and no `
         + 'office. Choose the insurer the office belongs to.',
-      id: `${name} adalah Template library: isinya templat yang disalin perusahaan dan KPM baru, dan tidak ada KPM `
+      id: `${name} adalah Template library: isinya template yang disalin perusahaan dan KPM baru, dan tidak ada KPM `
         + 'di dalamnya. Pilih perusahaan asuransi tempat KPM ini bernaung.',
     }),
   },
@@ -115,6 +115,14 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
         + 'atau tambahkan jenjang baru.',
     }),
   },
+  ASSET_TOO_LARGE: {
+    /** The roster's file over `ROSTER_UPLOAD.MAX_BYTES` (ADR-0184). */
+    rosterTooLarge: ({ mb }: { mb: number }) => ({
+      en: `The file is larger than ${mb} MB. A filled roster template is a few kilobytes — check this is the right file.`,
+      id: `File ini lebih besar dari ${idCount(mb)} MB. Template roster yang sudah diisi hanya beberapa kilobyte — periksa `
+        + 'apakah ini file yang benar.',
+    }),
+  },
   INTERNAL_ERROR: {
     ladderCannotCount: {
       en: 'The ladder cannot tell who stands on a rung, so it will not change a leader tier.',
@@ -137,11 +145,11 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
     },
     startFromDefaults: {
       en: 'Start from a template — the Template’s Default template holds the AgencyBoost defaults — or Empty.',
-      id: 'Mulai dari templat — Default template milik Template berisi pengaturan default AgencyBoost — atau Kosong.',
+      id: 'Mulai dari template — Default template milik Template berisi pengaturan default AgencyBoost — atau Kosong.',
     },
     unknownTemplateKind: ({ kind, kinds }: { kind: string; kinds: readonly string[] }) => ({
       en: `Unknown template kind "${kind}". One of: ${kinds.join(', ')}.`,
-      id: `Jenis templat "${kind}" tidak dikenal. Pilih salah satu: ${kinds.join(', ')}.`,
+      id: `Jenis template "${kind}" tidak dikenal. Pilih salah satu: ${kinds.join(', ')}.`,
     }),
 
     /* The DTOs' own sentences (`field`), each naming its field as the API names it. */
@@ -214,6 +222,23 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
         + 'fix the file and upload it again.',
       id: `${idCount(count)} baris tidak dapat diimpor. Tidak ada yang dibuat — perbaiki file, lalu unggah lagi.`,
     }),
+    /* The roster as a file (ADR-0184): the form it is sent in. */
+    attachRosterFile: {
+      en: 'Attach the roster as the `file` field: the filled template, as .xlsx or .csv.',
+      id: 'Lampirkan roster sebagai kolom `file`: template yang sudah diisi, sebagai .xlsx atau .csv.',
+    },
+    rosterNotAForm: {
+      en: 'The upload could not be read as a form. Send the filled template as the `file` field.',
+      id: 'Unggahan tidak dapat dibaca sebagai formulir. Kirim template yang sudah diisi sebagai kolom `file`.',
+    },
+    /**
+     * `GET /admin/tenants/roster-template?format=` naming no format it comes in (S4): the query DTO's own sentence. It
+     * does not repeat the value, which arrives from a URL and could be anything, an operator object included.
+     */
+    unknownTemplateFormat: {
+      en: 'That is not a format the roster template comes in. Ask for format=xlsx or format=csv.',
+      id: 'Itu bukan format template roster. Minta format=xlsx atau format=csv.',
+    },
     headerOnly: {
       en: 'That file has a header and no people in it.',
       id: 'File itu hanya berisi header, tanpa orang di dalamnya.',
@@ -224,7 +249,7 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
     },
     headerExactly: ({ header }: { header: string }) => ({
       en: `The header must read exactly: ${header}. Download the template.`,
-      id: `Header harus persis: ${header}. Unduh templat.`,
+      id: `Header harus persis: ${header}. Unduh template.`,
     }),
     columnCount: ({ expected, found }: { expected: number; found: number }) => ({
       en: `Expected ${expected} columns, found ${found}.`,
@@ -288,10 +313,16 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
       en: 'Already has an account. Import creates people; this one exists already.',
       id: 'Sudah memiliki akun. Impor membuat orang baru; orang ini sudah ada.',
     },
+    /** The holder named: told to a Super Admin, or about somebody of this same office (B1). */
     agentCodeHeld: ({ email }: { email: string }) => ({
       en: `Already registered at this insurer by ${email}.`,
       id: `Sudah didaftarkan di perusahaan asuransi ini oleh ${email}.`,
     }),
+    /** The same, about a holder the importer may not be told of — somebody of another office (B1): no identity. */
+    agentCodeHeldElsewhere: {
+      en: 'This agent code is already registered at this insurer.',
+      id: 'Kode agen ini sudah terdaftar di perusahaan asuransi ini.',
+    },
     leaderNotFound: ({ code }: { code: string }) => ({
       en: `No active member of this office has the code ${code}, and it is not in this file either.`,
       id: `Tidak ada anggota aktif KPM ini dengan kode ${code}, dan kode itu juga tidak ada di file ini.`,
