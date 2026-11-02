@@ -369,7 +369,9 @@ the console.
 ([ADR-0182](../docs/04-adr/0182-the-mail-provider-is-chosen-by-env-staging-sends-through-gmail.md)):
 `MAIL_PROVIDER` is `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`, `smtp` (any relay `SMTP_HOST` names) or
 `log`, and a preset fills the host, the port and TLS (`src/modules/notifications/mail-provider.ts`). Staging sends
-through the product's Gmail account; production is SES until go-live chooses. Every email is multipart, its HTML
+through the product's Gmail account, and so does production, each with its own App Password, until a provider on
+`agencyboost.id` is chosen ([ADR-0186](../docs/04-adr/0186-production-sends-through-gmail-until-a-provider-on-the-products-domain-is-chosen.md)).
+Every email is multipart, its HTML
 derived from the text, with `MAIL_REPLY_TO` when set. To switch, add a new version of `api-env-<env>` and redeploy the
 same image (runbook §13); then send one message with that environment's settings and look in the inbox and the spam
 folder:
