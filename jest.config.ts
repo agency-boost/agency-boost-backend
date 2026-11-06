@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import type { Config } from 'jest';
 
 // Coverage thresholds are the ratchet from docs/03-engineering/testing-strategy.md.
@@ -319,8 +320,19 @@ const config: Config = {
    * index builds behind the drops — a 42 s `syncIndexes`, one full run in three failed. A database
    * per worker, wiped rather than dropped (`test/mongo.ts`), ended it; `TEST_DB_TRACE=1` shows any
    * slow operation on the shared server if it comes back.
+   *
+   * **And never more workers than cores** (2026-11-06). GitHub's runner for this private repository has two vCPUs
+   * and 7 GB. Four workers there, beside `mongod` and the PDF and image specs, starved each other: suites ran four to
+   * ten times their local time, 30 s hooks timed out, and one run lost its runner (*"starves it for CPU/Memory"*). The
+   * database's ceiling stays 4; the machine's is its cores.
    */
-  maxWorkers: 4,
+  maxWorkers: Math.min(4, availableParallelism()),
+  /*
+   * **A worker that has grown past 1 GB is replaced after its suite** (2026-11-06): each integration suite boots a
+   * Nest application, and what a few hundred of them leave behind in one worker reached the runner's heap limit late
+   * in the run, where every hook slowed to a timeout. Jest restarts it between suites; nothing inside a suite changes.
+   */
+  workerIdleMemoryLimit: '1GB',
 };
 
 export default config;

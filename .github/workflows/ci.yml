@@ -59,8 +59,12 @@ jobs:
             }
           "; then echo "all overrides are scoped"; fi
 
+      # Type-aware lint over the whole tree peaks at ~3.2 GB (measured 2026-11-06), past the ~1.75 GB heap Node gives
+      # itself on the runner's 7 GB: the collector thrashed for ten minutes and the runner was shut down. 4 GB fits.
       - name: Lint
         run: pnpm lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Typecheck
         run: pnpm typecheck
