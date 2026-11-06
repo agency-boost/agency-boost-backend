@@ -169,11 +169,22 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       it('P19.3-T1 AC-1 logging changes nothing in Aktif bulan ini: everybody logs today, the figure stays 5 of 16', async () => {
         as('OWNER');
         const before = (await http().get('/kpm/overview').expect(200)).body.engagement;
-        await db().collection('activityLogs').insertMany(PEOPLE.map((who) => ({
-          kpmId: KPM_A, membershipId: office.id[who], localDate: TODAY, entries: [], totalCount: 0, source: 'self',
-          note: 'P19.3 everyone', enteredByMembershipId: office.id[who], version: 1, frozenAt: null, corrections: [], deletedAt: null,
-        })));
         try {
+          // One log a person a day (`kpmId_1_membershipId_1_localDate_1`, unique): the fixture already holds today's for
+          // some, so only the others get one, and only those are taken away after. An `insertMany` of all sixteen
+          // passed alone, before any suite on the worker had built the index, and failed on CI, where one had.
+          await db().collection('activityLogs').bulkWrite(PEOPLE.map((who) => ({
+            updateOne: {
+              filter: { kpmId: KPM_A, membershipId: office.id[who], localDate: TODAY },
+              update: {
+                $setOnInsert: {
+                  entries: [], totalCount: 0, source: 'self', note: 'P19.3 everyone', enteredByMembershipId: office.id[who],
+                  version: 1, frozenAt: null, corrections: [], deletedAt: null,
+                },
+              },
+              upsert: true,
+            },
+          })));
           const after = (await http().get('/kpm/overview').expect(200)).body.engagement;
           expect(after.activeThisMonth).toEqual(before.activeThisMonth);
           expect(after.activeThisMonth).toMatchObject({ count: 5, of: 16 });
@@ -401,12 +412,13 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
         kpmId: KPM_A, membershipId: office.id[who], localDate, entries: [], totalCount: 0, source: 'self', note: 'P18 order',
         enteredByMembershipId: office.id[who], version: 1, frozenAt: null, corrections: [], deletedAt: null,
       });
-      // Everybody silent logs today but Agus (never), Dewi (13 days ago), and Budi and Nina (9 days ago).
-      await db().collection('activityLogs').insertMany([
-        ...(['OWNER', 'ADMIN', 'SARI', 'DODI', 'LUKAS', 'TARI', 'PEER_AB', 'PEER_AAB', 'PEER_AGENT'] as const).map((who) => log(who, TODAY)),
-        log('DEWI', '2026-09-01'), log('BUDI', '2026-09-05'), log('NINA', '2026-09-05'),
-      ]);
       try {
+        // Everybody silent logs today but Agus (never), Dewi (13 days ago), and Budi and Nina (9 days ago). Inside the
+        // `try`, so a refused insert takes nothing of it into the next test.
+        await db().collection('activityLogs').insertMany([
+          ...(['OWNER', 'ADMIN', 'SARI', 'DODI', 'LUKAS', 'TARI', 'PEER_AB', 'PEER_AAB', 'PEER_AGENT'] as const).map((who) => log(who, TODAY)),
+          log('DEWI', '2026-09-01'), log('BUDI', '2026-09-05'), log('NINA', '2026-09-05'),
+        ]);
         as('OWNER');
         const res = (await http().get('/kpm/overview/not-logged').expect(200)).body;
         expect(res.total).toBe(4);
