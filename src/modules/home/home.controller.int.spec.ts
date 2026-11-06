@@ -29,7 +29,7 @@ const NOBODY = new RequestContext('u-none', 'none', {
 } as never);
 
 /**
- * **`GET /home` over HTTP** (Phase 18.99 T11; UI-100): who the API lets in, positive and negative. What it answers is
+ * **`GET /home` over HTTP** (Phase 18.11 T11; UI-100): who the API lets in, positive and negative. What it answers is
  * `home.tenancy.spec.ts`'s, on real rows.
  */
 describe('UI-100 GET /home — who may read it', () => {

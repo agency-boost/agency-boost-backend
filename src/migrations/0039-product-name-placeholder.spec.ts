@@ -8,12 +8,12 @@ const SEEDED = new Date('2026-09-18T02:00:00Z');
 const NOW = new Date('2026-10-26T02:00:00Z');
 
 /**
- * **P18.95-T6 AC-4 — the name fix and migration `0039`** (UI-023, ADR-0167; parity I-424). *PRUMapan (nama
+ * **P18.7-T6 AC-4 — the name fix and migration `0039`** (UI-023, ADR-0167; parity I-424). *PRUMapan (nama
  * kami)*, the demo seed's rename, is given back to the company's name in every office still holding it — and
  * nothing else is touched: not a name an Owner typed, not a row for another product, not a soft-deleted row,
  * not the rest of the row.
  */
-describe('P18.95-T6 AC-4 migration 0039 — a product’s name without the seed’s placeholder', () => {
+describe('P18.7-T6 AC-4 migration 0039 — a product’s name without the seed’s placeholder', () => {
   beforeAll(startMongo);
   afterAll(stopMongo);
 
@@ -45,13 +45,13 @@ describe('P18.95-T6 AC-4 migration 0039 — a product’s name without the seed�
     for (const name of ['companies', 'products', 'kpmProductConfigs']) await col(name).deleteMany({});
   });
 
-  it('P18.95-T6 AC-4 the name fix + migration: on an empty database it does nothing, and creates nothing', async () => {
+  it('P18.7-T6 AC-4 the name fix + migration: on an empty database it does nothing, and creates nothing', async () => {
     expect(await up(db(), NOW)).toEqual({ cleared: 0 });
     expect(await up(db(), NOW)).toEqual({ cleared: 0 });
     expect(await col('kpmProductConfigs').countDocuments({})).toBe(0);
   });
 
-  it('P18.95-T6 AC-4 the name fix + migration: gives the seeded rename back to the company’s name, in every company', async () => {
+  it('P18.7-T6 AC-4 the name fix + migration: gives the seeded rename back to the company’s name, in every company', async () => {
     const { prudential, allianz } = await catalogs();
     const description = 'Dana pensiun yang cair rutin dari usia 55.';
     await col('kpmProductConfigs').insertMany([
@@ -82,7 +82,7 @@ describe('P18.95-T6 AC-4 migration 0039 — a product’s name without the seed�
     expect(rows.find((r) => r.kpmId === 'kpm-0555')).toMatchObject({ overrides: {}, version: 2 });
   });
 
-  it('P18.95-T6 AC-4 the name fix + migration: touches only the seeded default — an Owner’s own name stays', async () => {
+  it('P18.7-T6 AC-4 the name fix + migration: touches only the seeded default — an Owner’s own name stays', async () => {
     const { prudential } = await catalogs();
     const mapan = await productId(prudential, 'PRUMAPAN');
     const future = await productId(prudential, 'PRUFUTURE');
@@ -109,7 +109,7 @@ describe('P18.95-T6 AC-4 migration 0039 — a product’s name without the seed�
     expect(await col('kpmProductConfigs').find({}).sort({ kpmId: 1 }).toArray()).toEqual(before);
   });
 
-  it('P18.95-T6 AC-4 the name fix + migration: run twice, the second run changes nothing', async () => {
+  it('P18.7-T6 AC-4 the name fix + migration: run twice, the second run changes nothing', async () => {
     const { prudential } = await catalogs();
     await col('kpmProductConfigs').insertMany([
       row('kpm-0417', await productId(prudential, 'PRUMAPAN'), { overrides: { displayName: 'PRUMapan (nama kami)' } }),

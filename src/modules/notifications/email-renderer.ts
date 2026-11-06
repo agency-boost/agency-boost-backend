@@ -2,8 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readerOf, type Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
+import { ROSTER_INVITATION } from '@/domain/constants';
 import { describeNotification, inboxAddress } from './inbox-copy';
+import { MEMBER_INVITATION_WORDS, OWNER_INVITATION_WORDS } from './member-invitation.messages';
 import { EMAIL_MESSAGES } from './notification.messages';
+import { quoteEmailLines, QUOTE_WORDS } from './billing-quote.messages';
 import { NotificationTemplate, RenderedMessage } from './notification.types';
 import { TemplateRenderer } from './notification.service';
 
@@ -30,7 +33,7 @@ function str(payload: Record<string, unknown>, key: string, fallback = ''): stri
  * Links are built from `APP_ORIGIN` — the app's origin, not this API's. A person opens a
  * page, not an endpoint, and the two differ in every environment.
  *
- * **In the recipient's language** (P18.98-T5 AC-5; ADR-0179 §7): the reader `NotificationService` hands it — the
+ * **In the recipient's language** (P18.10-T5 AC-5; ADR-0179 §7): the reader `NotificationService` hands it — the
  * recipient's saved `users.locale`, else the language of the request that caused the email where that was theirs (the
  * verification and reset emails), else a reader who has chosen nothing. The subject, the greeting and the sign-off
  * with it (`EMAIL_MESSAGES`).
@@ -89,6 +92,70 @@ export class EmailTemplateRenderer extends TemplateRenderer {
           '',
           say(EMAIL_MESSAGES.changeNoticeNotYou),
         ]);
+
+      // P19-T1 AC-5 (UI-163, ADR-0190 §5): no token in it — the link asks for a reset, for somebody who did not do this.
+      case NotificationTemplate.PASSWORD_CHANGED:
+        return compose(say(EMAIL_MESSAGES.passwordChangedSubject), [
+          say(EMAIL_MESSAGES.passwordChangedLine),
+          '',
+          say(EMAIL_MESSAGES.passwordChangedNotYou),
+          `${origin}/forgot-password`,
+        ]);
+
+      // UI-169 item 5 (ADR-0199 §2): the link goes to the other login's address; the two notices carry no link that applies.
+      case NotificationTemplate.ACCOUNT_LINK_REQUEST:
+        return compose(say(EMAIL_MESSAGES.linkRequestSubject), [
+          say(EMAIL_MESSAGES.linkRequestAsked({ name: str(payload, 'requesterName'), email: str(payload, 'requesterEmail') })),
+          '',
+          `${origin}/link-account/${str(payload, 'token')}`,
+          '',
+          say(EMAIL_MESSAGES.linkRequestIgnore),
+        ]);
+
+      case NotificationTemplate.ACCOUNT_LINK_REQUESTED:
+        return compose(say(EMAIL_MESSAGES.linkNoticeSubject), [
+          say(EMAIL_MESSAGES.linkNoticeAsked({ email: str(payload, 'linkEmail') })),
+          '',
+          say(EMAIL_MESSAGES.linkNoticeNotYou),
+        ]);
+
+      case NotificationTemplate.ACCOUNT_LINKED:
+        return compose(say(EMAIL_MESSAGES.linkedSubject), [
+          say(EMAIL_MESSAGES.linkedLine({ email: str(payload, 'otherEmail') })),
+          '',
+          say(EMAIL_MESSAGES.linkedNotYou),
+          `${origin}/profile`,
+        ]);
+
+      // P19.3-T4 (ADR-0205 §10): the member import's invitation — the reset page, which sets their first password.
+      case NotificationTemplate.MEMBER_INVITATION: {
+        const office = str(payload, 'office');
+        const days = typeof payload.days === 'number' ? payload.days : ROSTER_INVITATION.TTL_DAYS;
+        return compose(say(MEMBER_INVITATION_WORDS.subject({ office })), [
+          say(MEMBER_INVITATION_WORDS.open({ office })),
+          '',
+          `${origin}/reset-password/${str(payload, 'token')}`,
+          '',
+          say(MEMBER_INVITATION_WORDS.expires({ days })),
+        ]);
+      }
+
+      // P19.4-T3 (ADR-0212 §2): a new KPM's Owner — the same reset page, which sets their first password.
+      case NotificationTemplate.OWNER_INVITATION: {
+        const office = str(payload, 'office');
+        const days = typeof payload.days === 'number' ? payload.days : ROSTER_INVITATION.TTL_DAYS;
+        return compose(say(OWNER_INVITATION_WORDS.subject({ office })), [
+          say(OWNER_INVITATION_WORDS.open({ office })),
+          '',
+          `${origin}/reset-password/${str(payload, 'token')}`,
+          '',
+          say(MEMBER_INVITATION_WORDS.expires({ days })),
+        ]);
+      }
+
+      // P19.4-T3 (ADR-0211 §5): a KPM's quote, to its Owner — the printable quote's content, every figure the server's.
+      case NotificationTemplate.BILLING_QUOTE_RECEIVED:
+        return compose(say(QUOTE_WORDS.subject({ office: str(payload, 'office') })), quoteEmailLines(payload, say));
 
       default: {
         // Everything else already has words, written once for the inbox. Repeating them

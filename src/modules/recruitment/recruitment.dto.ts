@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import {
   RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS, RECRUITMENT_MOTIVATIONS,
 } from '@/domain/constants';
@@ -61,30 +61,4 @@ export class SetPitchConfirmationDto {
   })
   @IsInt() @Min(1)
   version!: number;
-}
-
-export class SaveRecruitmentPlaybookDto {
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    minimum: 1,
-    description:
-      'The version read. `null` only to create the company’s first playbook — `409` if it has one.',
-  })
-  // `null` is a value here — create — so only a present number is checked as one; absent fails `@IsInt`.
-  @ValidateIf((dto: SaveRecruitmentPlaybookDto) => dto.version !== null)
-  @IsInt() @Min(1)
-  version!: number | null;
-
-  @ApiProperty({
-    type: 'object',
-    additionalProperties: true,
-    description:
-      'The whole playbook: `profiles` (every candidate type: `label`, `tagline`, `goodFitFor`, 1 to 6 '
-      + '`benefits`, and `openings` with one per motivation), `objections` (one `{ theySay, youSay }` per '
-      + 'hesitation), `profileObjections` (a profile’s own, by type then hesitation, optional) and '
-      + '`nextAction`. Each text 1 to 600 characters once trimmed. Checked whole: every violation is named.',
-  })
-  @IsObject()
-  body!: Record<string, unknown>;
 }

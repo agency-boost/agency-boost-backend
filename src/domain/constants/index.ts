@@ -63,7 +63,7 @@ export const GOAL_DEFAULT_RATIOS = {
  * Here rather than in the goals module because two things will read them: the cascade, and whatever
  * measures an agent against it (Phase 10). One source, per invariant §7.
  *
- * **The default binding's codes, and no longer what anything counts** (ADR-0163, P18.9-T2). Each office binds
+ * **The default binding's codes, and no longer what anything counts** (ADR-0163, P18.6-T2). Each office binds
  * its own codes to the three roles (`activityBindings`), and every count reads them through
  * `ActivityBindingService.resolveCascadeBinding`. These are what `defaultBinding()` names: what a template
  * without a binding gives its offices, and what migration `0034` wrote into every office and template.
@@ -299,7 +299,7 @@ export {
   SEED_ACTIVITY_CATEGORIES,
   SEED_ACTIVITY_TYPES,
   SEED_LEAD_STATUSES,
-  // P18.95-T9 AC-6 (ADR-0167 §10): the recruitment first status's earlier words, for migration 0038 only.
+  // P18.7-T9 AC-6 (ADR-0167 §10): the recruitment first status's earlier words, for migration 0038 only.
   SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167,
   type SeedActivityCategory,
   type SeedActivityType,
@@ -311,6 +311,9 @@ export {
   type TrainingPublishState,
   TRAINING_STATUSES,
   type TrainingStatus,
+  TRAINING_TEXT,
+  splitTrainingTitle,
+  type TrainingTitleSplit,
   SEED_TRAINING_CATEGORIES,
   MOTIVATION_CATEGORY,
   SEED_TRAINING_SKILLS,
@@ -336,7 +339,7 @@ export {
   activationLinkKind,
   activationLinkKinds,
   mayTickByHand,
-  // P18.96-T4 (ADR-0171 §3): the data-backed items, bound by code.
+  // P18.8-T4 (ADR-0171 §3): the data-backed items, bound by code.
   ACTIVATION_DATA_LINKS,
   type ActivationDataLink,
   type ActivationNamedLink,
@@ -366,7 +369,7 @@ export {
   PRODUCT_BUDGET_BANDS,
   PRODUCT_AGE_BAND_LABELS,
   PRODUCT_BUDGET_BAND_LABELS,
-  // P18.95-T6 (UI-030): the band the brief asks as its own option, not a monthly one.
+  // P18.7-T6 (UI-030): the band the brief asks as its own option, not a monthly one.
   PRODUCT_LUMP_SUM_BUDGET_BAND,
   SEED_PRODUCTS,
   type SeedProduct,
@@ -383,8 +386,19 @@ export {
   SCRIPT_OVERRIDE_FIELDS,
   // Phase 14: the office's description held for approval (OD-136), and the seeded reply (D-reply).
   APPROVED_PRODUCT_FIELDS,
+  SCRIPT_WORD_FIELDS,
   PRODUCT_TAGLINE_MAX_LENGTH,
   SEED_REPLY_BY_NEED,
+  // P19.4-T4 (ADR-0209): a base or a rider, the currencies sold in, and the objection cards.
+  PRODUCT_KINDS,
+  type ProductKind,
+  PRODUCT_CURRENCIES,
+  type ProductCurrency,
+  PRODUCT_DEFAULT_CURRENCIES,
+  PRODUCT_OBJECTIONS_MAX,
+  PRODUCT_OBJECTION_TEXT_MAX_LENGTH,
+  type ObjectionCard,
+  seedObjectionsOf,
 } from './product-catalog';
 
 /** The Sales Attack Plan's scorer, and the words the two sales screens print (D-scoring, D-copy). */
@@ -396,10 +410,14 @@ export {
   PRODUCT_RUN_OFF_NOTE,
 } from './attack-plan';
 
-export { ASSET_LIMITS, AVATAR, DOCUMENT_MIME_TYPES } from './assets';
+export {
+  ASSET_LIMITS, AVATAR, DEFAULT_UPLOAD_MIME_TYPES, DOCUMENT_MIME_TYPES, HTML_MIME_TYPE, TRAINING_FILE_MIME_TYPES,
+} from './assets';
+// P19.6-T3: the owner's lessons in the template's modules, and the colours a lesson reads (ADR-0217 §5; §B.9).
+export { LESSONS, LESSON_COLOUR_VARIABLES, LESSON_COLOUR_VALUE, type LessonColourName } from './lessons';
 export { PRODUCTION, PRODUCTION_UPLOAD } from './production';
 // ADR-0184: a workbook's bounds, and the roster file's (§B.31).
-export { ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './spreadsheet';
+export { ROSTER_INVITATION, ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './spreadsheet';
 
 // Phase 15: the Unit Dashboard's periods, its save's bound, and the reason a leader's correction carries.
 export {
@@ -417,7 +435,7 @@ export {
   EVENT_PHASES,
   type EventPhase,
   SEED_EVENT_TYPES,
-  // P18.5-T5, T6: the attendance statuses (D-status), the NPS scale and the feedback text's limit.
+  // P18.2-T5, T6: the attendance statuses (D-status), the NPS scale and the feedback text's limit.
   EVENT_ATTENDANCE_STATUSES,
   type EventAttendanceStatus,
   NPS,
@@ -435,6 +453,7 @@ export {
   isCampaignMetric,
   type CampaignReading,
   CAMPAIGN_EVALUATION_PHASE,
+  comparePhases,
   REQUIREMENT_COMPARATORS,
   type RequirementComparator,
   QUALIFICATION_RULE_KINDS,
@@ -446,9 +465,12 @@ export {
   SEED_PRODUCTION_CLUB_TIERS,
   SEED_MOC_RULES,
   MOC_PERSISTENCY_MIN_PCT,
+  RENAMED_METRIC_KEYS,
+  currentMetricKey,
 } from './metrics';
+export type { Phase } from './metrics';
 
-// Phase 18.5: an office's campaigns as the agent reads them — kinds, windows, the poster palette, MDRT's code.
+// Phase 18.2: an office's campaigns as the agent reads them — kinds, windows, the poster palette, MDRT's code.
 export {
   CAMPAIGN_KINDS,
   type CampaignKind,
@@ -477,12 +499,14 @@ export {
 } from './reporting';
 
 // Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type; since
-// P18.97-T1, the places a Monthly Target's rate is typed and kept to.
+// P18.9-T1, the places a Monthly Target's rate is typed and kept to.
 export {
   LEADER_MEETING_SHARE_DAYS,
   LEADER_MEETING_SHARE_TOKEN_BYTES,
   LEADER_MEETING_LIMITS,
   LEADER_MEETING_TARGET_RATE_DECIMALS,
+  // P19.3-T1 (ADR-0202 §1): D7's window, the join month and this many calendar months after it.
+  NEW_AGENT_ACTIVATION_MONTHS_AFTER_JOIN,
 } from './leader-forum';
 
 export {
@@ -511,6 +535,10 @@ export {
   BILLING_ANNUAL_DISCOUNT_PCT,
   BILLING_PRICE_TIERS,
   type BillingTier,
+  // P19.4-T3 (ADR-0211 §1): a subscription's plan, and the months each runs.
+  SUBSCRIPTION_PLANS,
+  SUBSCRIPTION_PLAN_MONTHS,
+  type SubscriptionPlan,
 } from './billing';
 
 /** An office's subscription bounds (ADR-0112; P13.2-T3). */
@@ -531,13 +559,13 @@ export {
   type RoleClass,
 } from './leader-tier';
 
-/** A person's join date in an office and who it makes them, decided once (ADR-0169; P18.96-T2). */
+/** A person's join date in an office and who it makes them, decided once (ADR-0169; P18.8-T2). */
 export {
   JOINING,
   INVITES,
-  // The P18.96 exit review, L2: sign-ups from one address an hour.
+  // The P18.8 exit review, L2: sign-ups from one address an hour.
   REGISTRATION,
-  // P18.96-T6 (ADR-0171 §2, ADR-0173): the 90 days a first sale activates in, and the year `/new-hires` lists.
+  // P18.8-T6 (ADR-0171 §2, ADR-0173): the 90 days a first sale activates in, and the year `/new-hires` lists.
   ACTIVATION_3M,
   JOINED_AS,
   type JoinedAs,
@@ -548,7 +576,7 @@ export {
 /** A named template's name bounds (ADR-0115 §3; P13.2-T6, T7), which the frontend's constant is pinned to. */
 export { TEMPLATE } from './templates';
 
-// Phase 17: the candidate brief's vocabulary, the office's pitch slots — four required, and since Phase 18.97
+// Phase 17: the candidate brief's vocabulary, the office's pitch slots — four required, and since Phase 18.9
 // two optional (ADR-0177) — their completion rule and what the banner counts, and the playbook a company
 // started from the defaults is given (D-vocabulary, D-slots, OD-88).
 export {
@@ -573,7 +601,7 @@ export {
   type RecruitmentPitchState,
 } from './recruitment';
 
-// Phase 18.8: what a person records — the minimum age, gender and work status codes, the agent code's shape (ADR-0158).
+// Phase 18.5: what a person records — the minimum age, gender and work status codes, the agent code's shape (ADR-0158).
 export {
   PERSONAL_DATA,
   GENDERS,
@@ -589,8 +617,45 @@ export { PHONE_NATIONAL_DIGITS, PHONE_COUNTRY_PREFIX, normalisePhone } from './p
 // The product owner, 2026-11-01: a password's bounds, 8 to 200 characters (§B.30).
 export { PASSWORD } from './password';
 
-// Phase 18.98: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
+// Phase 18.10: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
 export {
   LANGUAGES, type Language, DEFAULT_LANGUAGE, isLanguage, languageOf,
   SOURCE_LANGUAGE, LANGUAGE_LIVE, unchosenLanguage, LANGUAGE_UNCHOSEN,
 } from './language';
+
+// Phase 19.2: the audit log's pages, 50 groups a read and a 10-minute group window (§B.32; UI-132).
+export { AUDIT_LOG } from './audit';
+
+// Phase 19.5: the template's *Advanced analytics* section — its bounds and its defaults (§B.33; ADR-0214 to ADR-0216).
+export {
+  ANALYTICS, ANALYTICS_SYSTEM_KODES, ANALYTICS_SYSTEM_UNITS, ANALYTICS_MAA_INPUTS, ANALYTICS_SECTION_KODES,
+  ANALYTICS_FIELD_READERS, QUANT, DEMOGRAPHICS, QUAL, SUBGROUP, SURVEY,
+  type AnalyticsSystemKode, type AnalyticsSectionKode, type FieldReader,
+  // P19.5-T4 (ADR-0216): the surveys' state words and the role classes a run invites.
+  SURVEY_STATES, SURVEY_ROLE_CLASSES, type SurveyState, type SurveyRoleClass,
+  // P19.5-T3 (ADR-0215 §1, §6): the ten Quant metrics, and each section's address on the KPM's page.
+  QUANT_METRICS, ANALYTICS_SECTION_SLUGS, type QuantMetric, type QuantCode,
+} from './advanced-analytics';
+
+// Phase 19.7: the client's age a lead may carry, and the bounds of a product's proposal fields (§B.34; ADR-0224, ADR-0225).
+export {
+  LEAD_AGE, LEAD_GENDERS, type LeadGender, PROPOSAL, PROPOSAL_TEXT_MAX, PROPOSAL_FIELD_TYPES, type ProposalFieldType,
+  PDF_DETAIL_BLOCKS, type PdfDetailBlockKind, PROPOSAL_DEFAULT_INSURED, type ProposalDefaultInsured,
+  PROPOSAL_FIELD_KEY_PATTERN, PROPOSAL_RESERVED_KEYS, PROPOSAL_TYPE_LABEL_BY_CATEGORY, defaultInsuredFor,
+  // P19.7-T2 (ADR-0221): the proposal's own words and bounds, and the age band its catalogue filters by.
+  PROPOSAL_CHANNELS, type ProposalChannel, PROPOSAL_PAY_FREQUENCIES, type ProposalPayFrequency,
+  PROPOSAL_STATUSES, type ProposalStatus, PROPOSAL_INSURED_RELATIONS, type ProposalInsuredRelation,
+  PROPOSAL_REFUSAL_REASONS, type ProposalRefusalReason, PRODUCT_AGE_BAND_FLOORS, ageBandOf,
+} from './proposal';
+
+// Phase 19.4: the Super Admin's reads across KPMs — the page, the purposes, the actions (§B.35; ADR-0207).
+export {
+  PLATFORM_READ, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES, KPM_COMPARISON_SORTS,
+  type PlatformMemberRole, type PlatformMemberStatus, type KpmComparisonSort,
+} from './platform-reads';
+
+// Phase 19.6: a KPM's branding — the contrast rule, the palette's shades, the pictures' bounds (§B.36; ADR-0218).
+export {
+  BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE, HEX_COLOUR,
+  type BrandingUploadKind, type MascotPose, type BrandingIconFile,
+} from './branding';

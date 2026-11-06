@@ -62,11 +62,11 @@ export class MetricValue {
 export const MetricValueSchema = SchemaFactory.createForClass(MetricValue);
 
 /**
- * **A cell read lean, as a hydrated row holds it** (the forum's scorecard at 500 members, 2026-10-28). A lean read skips
+ * **A cell read lean, as a hydrated row would hold it** (the forum's scorecard at 500 members, 2026-10-28). A lean read skips
  * Mongoose's hydration — and with it the defaults above, which this applies: a cell the row lacks is `cell()`'s `{}`
  * with every field `null`, a field the cell lacks is `null`, and a cell stored as `null` stays `null`, as hydration
- * leaves it. `MonthlyAgentDataRepository.findCells` reads through it; `monthly-agent-data.repository.tenancy.spec.ts`
- * pins it to hydration for every shape a row can hold, so a field added above and not here fails there.
+ * leaves it. Every reader of a row's `values` and `ytdValues` reads a cell through it (`ProductionReadings`, the month
+ * read), since a cell by kode is a plain object Mongoose applies no defaults to.
  */
 export function cellAsHydrated(stored: Partial<MetricValue> | null | undefined): MetricValue | null {
   if (stored === null) return null;
@@ -81,30 +81,41 @@ export function cellAsHydrated(stored: Partial<MetricValue> | null | undefined):
   };
 }
 
-/** The six metrics the carrier's file carries, in the file's own order. */
+/**
+ * **The six metrics' legacy names**, in the order the file carried them before P19.5-T2 — `ape` and so on, each a month
+ * and a year to date (`apeMonthly`, `apeYtd`). **No row is written or read by them any more** (ADR-0214 §9): each is a
+ * kode now (`KODE_OF_CELL`), and `upload-columns.ts`' `LEGACY_CELLS` maps the names. Kept for the seed's planned
+ * figures, which are written by name and stored by kode (`byKode`), and for migration `upload-values-by-kode`.
+ */
 export const PRODUCTION_METRICS = [
   'ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount',
 ] as const;
 export type ProductionMetric = (typeof PRODUCTION_METRICS)[number];
 
-/** Money among them, stored in minor units though the file says *Rp M*. */
-export const MONEY_METRICS: readonly ProductionMetric[] = ['ape', 'fyp'];
-
-/** The twelve cells a row holds, by name: each metric's month and its year to date. */
-export type MonthCellName = `${ProductionMetric}${'Monthly' | 'Ytd'}`;
-
-const cell = () => ({ type: MetricValueSchema, required: true, default: () => ({}) });
+/** One figure per kode: what `values` and `ytdValues` hold. An absent kode is `null`, *no figure held*. */
+export type CellsByKode = Record<string, MetricValue>;
 
 /**
- * One agent's production for one month, as the carrier reported it (P9-T1).
+ * One agent's production for one month, as the carrier reported it (P9-T1) — **by the kodes of the KPM's template**
+ * since P19.5-T2 (ADR-0214 §9; the Advanced analytics spec §4, *Stored row*).
  *
  * **The authoritative APE source.** Goal-versus-actual, unit rollups, MOC evaluation, production club
- * tiers and campaign qualification all read this row and nothing else — which is why the phase that
- * writes it comes before every phase that reads it.
+ * tiers and campaign qualification all read this row and nothing else — through `ProductionReadings` — which is why
+ * the phase that writes it comes before every phase that reads it.
  *
- * Six metrics, each **monthly** and **year-to-date**, twelve cells, one row per
- * `(membership, month)`. The file carries both cadences so one upload covers both, and the row keeps
- * them side by side for the same reason.
+ * - **`values`**: this month's figure per column, keyed by kode (`APE`, `POLICY_COUNT`, …), each a whole `MetricValue`
+ *   so a figure keeps its provenance (ADR-0008). The spec's `number | null` is the cell's `.value`.
+ * - **`ytdValues`**: the uploaded year to date of a `ytd: 'upload'` column, and — from migration `upload-values-by-kode`
+ *   — the year to date the file used to carry for every column, **kept as a check and read by no figure**: a `ytd:
+ *   'sum'` column's year to date is the sum of its months, computed on read and never stored (R4).
+ * - **`templateId`, `templateVersion`**: the configuration the row was last written against (R6). Version 1 for every
+ *   row the migration moved.
+ * - **`asOf`**: for a month uploaded while it runs (D8), the office day its figures stand at — `YYYY-MM-DD`; `null` for a
+ *   month's final upload.
+ *
+ * The cells it held before P19.5-T2 (`apeMonthly` … `unitPersistencyMonthly`) **stay on the document**, read by
+ * nothing, until a later migration removes them once T5 has checked production's figures; this schema no longer names
+ * them, so nothing can.
  *
  * **`agentCode` is a copy, `membershipId` is the key** (invariant §2). The code is what the file
  * carries and what the row was matched on; it is kept so the row still says what it was matched
@@ -125,18 +136,25 @@ export class MonthlyAgentData {
   @Prop({ type: String, required: true })
   month!: string;
 
-  @Prop(cell()) apeMonthly!: MetricValue;
-  @Prop(cell()) apeYtd!: MetricValue;
-  @Prop(cell()) persistencyMonthly!: MetricValue;
-  @Prop(cell()) persistencyYtd!: MetricValue;
-  @Prop(cell()) recruitmentMonthly!: MetricValue;
-  @Prop(cell()) recruitmentYtd!: MetricValue;
-  @Prop(cell()) newActiveAgentsMonthly!: MetricValue;
-  @Prop(cell()) newActiveAgentsYtd!: MetricValue;
-  @Prop(cell()) fypMonthly!: MetricValue;
-  @Prop(cell()) fypYtd!: MetricValue;
-  @Prop(cell()) policyCountMonthly!: MetricValue;
-  @Prop(cell()) policyCountYtd!: MetricValue;
+  /** This month's figure per kode (ADR-0214 §9). */
+  @Prop({ type: Object, default: () => ({}) })
+  values!: CellsByKode;
+
+  /** A `ytd: 'upload'` column's uploaded year to date, and the migrated year-to-date cells kept as a check (R4). */
+  @Prop({ type: Object, default: () => ({}) })
+  ytdValues!: CellsByKode;
+
+  /** The named template the row was last written against; `null` for the platform's own configuration. */
+  @Prop({ type: String, default: null })
+  templateId!: string | null;
+
+  /** Its published version (R6). */
+  @Prop({ type: Number, default: null })
+  templateVersion!: number | null;
+
+  /** D8: the office day a running month's upload stands at, `YYYY-MM-DD`; `null` once the month's upload is final. */
+  @Prop({ type: String, default: null })
+  asOf!: string | null;
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;

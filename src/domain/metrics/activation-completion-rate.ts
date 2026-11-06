@@ -3,7 +3,7 @@ import { activationCohort, type CohortActivation } from './activation-cohort';
 import { rateOver, type Rate } from './rate';
 
 /**
- * `ACTIVATION_COMPLETION_RATE` (Phase 18.6, P18.6-T1 AC-7; OD-159 → option 1) — **what share of a set's
+ * `ACTIVATION_COMPLETION_RATE` (Phase 18.3, P18.3-T1 AC-7; OD-159 → option 1) — **what share of a set's
  * activations graduated**, and the one reading of an activation the Owner's compliance tree draws.
  *
  * **Not `ACTIVATION_COMPLETION_PCT`**, which is one hire's items done over their checklist's (`activation-rules.ts`,

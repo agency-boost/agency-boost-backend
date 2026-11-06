@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Put one environment's API image on this VM, and put its previous one back if it does not come up
-# healthy (P18.7-T3, ADR-0152, ADR-0155). GitHub Actions runs it over IAP SSH after every push to
+# healthy (P18.4-T3, ADR-0152, ADR-0155). GitHub Actions runs it over IAP SSH after every push to
 # development (staging) or main (prod).
 #
 #   sudo /opt/agencyboost/bin/deploy.sh <staging|prod> [--bundle DIR] <registry>/agencyboost-<env>/api@sha256:<digest>
@@ -15,7 +15,7 @@
 #
 # **The work runs as a systemd unit of its own** (agencyboost-deploy-<time>-<pid>), and this command
 # follows its journal and returns its result. A dropped SSH session stops the following, never the
-# deploy (P18.7 review, M2). `sudo journalctl -u 'agencyboost-deploy-*'` shows every deploy since boot.
+# deploy (P18.4 review, M2). `sudo journalctl -u 'agencyboost-deploy-*'` shows every deploy since boot.
 #
 # The steps, in order, inside the unit:
 #   1. take the VM-wide lock: deploys of both environments, seeds and backups take turns
@@ -147,7 +147,7 @@ ensure_started() {
 }
 
 # A service whose definition in compose.yml is no longer the one its container was created from, so
-# that the next `up` of it would recreate it (P18.7 review, M4). For mongo that is a restart nobody
+# that the next `up` of it would recreate it (P18.4 review, M4). For mongo that is a restart nobody
 # chose, and on this VM it takes both environments down: a deploy never does it, and boot runs
 # `up --no-recreate`. This says, loudly, that one is pending, for a person to make at a quiet time.
 #
@@ -211,7 +211,7 @@ show_logs() {
 }
 
 # The Caddyfile this deploy replaced, back in place, when this deploy replaced one: never a stale copy
-# from an earlier deploy (P18.7 review, L1). Caddy keeps running whatever it last loaded; this is about
+# from an earlier deploy (P18.4 review, L1). Caddy keeps running whatever it last loaded; this is about
 # the file it would start from after a reboot.
 restore_caddyfile() {
   if [[ $caddyfile_changed == 1 && -f $AB_HOME/state/Caddyfile.previous ]]; then

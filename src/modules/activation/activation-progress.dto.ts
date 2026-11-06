@@ -17,7 +17,7 @@ import { ACTIVATION_REFUSALS } from './activation.messages';
 /** `YYYY-MM-DD`. */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /**
- * The day's shape, in both languages (P18.98-T5 AC-3): the service's own sentence, the field named by class-validator's
+ * The day's shape, in both languages (P18.10-T5 AC-3): the service's own sentence, the field named by class-validator's
  * `$property`, which it fills in for each field in either language.
  */
 const DATE_MESSAGE = field(ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ field: '$property' }));
@@ -26,7 +26,7 @@ const DATE_MESSAGE = field(ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ fiel
 const RECORD_TEXT_MAX = 500;
 
 /**
- * **The record a hand tick of a data-backed item is saved with** (P18.96-T4 AC-3; `functional/activation.md`,
+ * **The record a hand tick of a data-backed item is saved with** (P18.8-T4 AC-3; `functional/activation.md`,
  * *Data-backed items*). One of:
  *
  * - `closing` with `leadId` — *Which case?*, one of the member's existing closings (`GET …/closings`);

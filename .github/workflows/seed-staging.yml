@@ -1,6 +1,6 @@
 name: seed staging
 
-# Empties staging's demo data and seeds it again (P18.7-T4, ADR-0152). By hand only, from development,
+# Empties staging's demo data and seeds it again (P18.4-T4, ADR-0152). By hand only, from development,
 # with the words typed out. Production is never seeded (D11): this workflow has no production path, the
 # VM's sudoers rule allows bin/seed.sh on staging alone, and seed.sh and src/seed/demo.ts each refuse
 # production again.
@@ -15,7 +15,7 @@ name: seed staging
 #
 # Two identities, in order. gh-builder, as a bare access token with no file in the workspace, pushes
 # the image. Only after the build does gh-deployer sign in, with a credentials file, to reach the VM.
-# Nothing a credentials file holds can then be in the build context (P18.7 review, H1).
+# Nothing a credentials file holds can then be in the build context (P18.4 review, H1).
 #
 # Every action is pinned by commit, with its version beside it; .github/dependabot.yml proposes updates.
 on:

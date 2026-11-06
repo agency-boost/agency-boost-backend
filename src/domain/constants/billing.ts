@@ -77,3 +77,20 @@ export const BILLING_PRICE_TIERS: readonly BillingTier[] = [
     customPricing: true,
   },
 ];
+
+/**
+ * **A subscription's plan** (ADR-0211 §1; SA R6, OD-265's default): *6 bulan* or *Tahunan*, a label on
+ * `kpms.subscription.plan`, `null` for an office with none. The quote tool's two billing periods by the codes
+ * the API carries — the browser's toggle is `sixMonth` / `annual`.
+ */
+export const SUBSCRIPTION_PLANS = ['six_months', 'annual'] as const;
+export type SubscriptionPlan = (typeof SUBSCRIPTION_PLANS)[number];
+
+/**
+ * **The months a plan runs** — the quote's period (`:494`, `:513-517`) and what choosing a plan proposes for the end
+ * date: the start plus these months, less a day (ADR-0211 §1, as the calculator dates a quote, ADR-0111 §5).
+ */
+export const SUBSCRIPTION_PLAN_MONTHS: Readonly<Record<SubscriptionPlan, 6 | 12>> = {
+  six_months: 6,
+  annual: 12,
+};

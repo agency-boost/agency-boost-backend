@@ -9,14 +9,14 @@ import { COACHING_LEADS } from '../coaching-cast';
 import { ROSTER_PLAN } from '../coaching-fixture';
 
 /*
- * The words the seed typed, in Bahasa Indonesia since P18.98-T7 (OD-238): Indah's lead's next step from the cast, Rina's
+ * The words the seed typed, in Bahasa Indonesia since P18.10-T7 (OD-238): Indah's lead's next step from the cast, Rina's
  * Pak Hendro's from `demo.ts`, and the coaching items from `coaching-fixture.ts`.
  */
 const INDAH_NEXT = COACHING_LEADS.find((lead) => lead.name === 'Ibu Melati Kusumawardani')!.nextActionNote!;
 const HENDRO_NEXT = 'Follow up soal ilustrasinya.';
 import { seedDemo } from '../demo';
 import {
-  UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH, UNIT_DASHBOARD_INDAH_LEAD, unitDashboardLeadId,
+  UNIT_DASHBOARD_BUDI_THIS_MONTH, UNIT_DASHBOARD_INDAH_LEAD, unitDashboardLeadId,
 } from '../unit-dashboard-fixture';
 
 const RUN_MS = 240_000;
@@ -67,7 +67,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
 
   const row = (name: string, v = view) => everyRow(v).find((r) => first(r.name) === name)!;
 
-  it('P18.8-T11 0417 has been open since January last year, so the Summary offers every month since, read whole', async () => {
+  it('P18.5-T11 0417 has been open since January last year, so the Summary offers every month since, read whole', async () => {
     const august = await wired.summary.read(agus, undefined, { month: '2026-08' });
     expect(august).toMatchObject({
       month: '2026-08', pace: null,
@@ -78,7 +78,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     await expect(wired.summary.read(agus, undefined, { month: '2024-12' })).rejects.toMatchObject({ status: 400 });
   });
 
-  it('P18.8-T14 AC-1 the raised benchmarks still leave a strength to see: Sari’s, and Rina’s cut by the four-card limit', async () => {
+  it('P18.5-T14 AC-1 the raised benchmarks still leave a strength to see: Sari’s, and Rina’s cut by the four-card limit', async () => {
     const sari = await as('sari@kpm0417.test');
     const sariCards = (await wired.summary.read(sari, undefined, {})).insights;
     expect(sariCards.map((i) => i.rule)).toEqual(['RATIO_BELOW', 'RATIO_STRENGTH']);
@@ -93,7 +93,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
   });
 
   it('P15-T1 AC-12 Agus reads the roster the phase file draws: Your Unit · 4, then Arief’s, Dewi’s and Sari’s units', () => {
-    // P18.96-T6 adds Lukman, Agus's own new hire (`activation-3m-fixture.ts`); Tari, Arief's, was marked left — removed.
+    // P18.8-T6 adds Lukman, Agus's own new hire (`activation-3m-fixture.ts`); Tari, Arief's, was marked left — removed.
     expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dimas', 'Indah', 'Lukman', 'Siti']);
     expect(view.units.map((u) => [first(u.head.name), ...rowsOf(u).slice(1).map((r) => first(r.name))]))
       .toEqual([['Arief', 'Novi', 'Wahyu'], ['Dewi'], ['Sari', 'Budi', 'Rina', 'Yanti']]);
@@ -107,30 +107,30 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
       const key = first(r.name).toLowerCase() as keyof typeof ROSTER_PLAN;
       expect({ who: key, status: r.status, last: r.lastOneOnOne })
         .toEqual({ who: key, status: coached.find((c) => c.membershipId === r.membershipId)!.status, last: coached.find((c) => c.membershipId === r.membershipId)!.lastOneOnOne });
-      // P18.96-T6's two new hires are not the coaching fixture's: their status is read, not planned.
+      // P18.8-T6's two new hires are not the coaching fixture's: their status is read, not planned.
       if (key in ROSTER_PLAN && !ROSTER_PLAN[key].monthDependent) expect({ who: key, status: r.status }).toEqual({ who: key, status: ROSTER_PLAN[key].status });
     }
     expect(new Set(everyRow(view).map((r) => r.status))).toEqual(new Set(['on_track', 'watch_closely', 'needs_attention', 'no_goal_set']));
   });
 
-  it('P15-T3 AC-5 Budi and Yanti are not in this month’s file: their month reads Not uploaded yet, and their unit’s total counts them', () => {
-    for (const who of ['Budi', 'Yanti']) {
-      expect({ who, month: row(who).production.monthly.valueMinor, goal: row(who).goal.actualMinor }).toEqual({ who, month: null, goal: null });
-    }
+  it('P15-T3 AC-5 Budi and Yanti are not in this month’s file: Yanti’s month reads Not uploaded yet; Budi’s is Sari’s correction', () => {
+    expect({ month: row('Yanti').production.monthly.valueMinor, goal: row('Yanti').goal.actualMinor }).toEqual({ month: null, goal: null });
+    // P19.5-T2 (R4): Sari corrects Budi's month, not a year to date — so his month holds her figure.
+    expect(row('Budi').production.monthly.valueMinor).toBe(UNIT_DASHBOARD_BUDI_THIS_MONTH);
     const sari = view.units[2];
-    // *Changed 2026-10-27 (P18.96-T5, ADR-0172 §2):* 2 until then. Budi is missing; Yanti, a new hire with no first sale
-    // yet, is left out as one — counted in `newHires`, never as a figure not uploaded.
-    expect(sari.total.goal.missing).toBe(1);
+    // *Changed 2026-10-27 (P18.8-T5, ADR-0172 §2):* 2 until then. *Changed P19.5-T2:* Budi's month is held now, so none
+    // is missing; Yanti, a new hire with no first sale yet, is left out as one — counted in `newHires`.
+    expect(sari.total.goal.missing).toBe(0);
     expect(sari.total.newHires).toBe(1);
   });
 
   /**
-   * **P18.96-T5 — who counts where, on the seed** (ADR-0172; `functional/unit-dashboard.md`, *Seed*). Yanti rejoined 28
+   * **P18.8-T5 — who counts where, on the seed** (ADR-0172; `functional/unit-dashboard.md`, *Seed*). Yanti rejoined 28
    * days ago and has sold nothing: last month's file lists her with no policy and this month's leaves her out, so her
    * live membership has no first sale. Rina and Budi are new hires whose first sales (T4's leads) are behind them; Sari
    * is an existing agent with no first sale, who counts as she always did.
    */
-  it('P18.96-T5 AC-1 to AC-3 Yanti is in the team and tagged New hire; Rina and Budi are in from their first sales; Sari counts', async () => {
+  it('P18.8-T5 AC-1 to AC-3 Yanti is in the team and tagged New hire; Rina and Budi are in from their first sales; Sari counts', async () => {
     const membership = async (email: string) => {
       const account = await col('users').findOne({ email });
       return (await col('memberships').findOne({ userId: String(account!._id), status: 'active' }))!;
@@ -170,31 +170,30 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(view.tiles.directGroupProduction.targetMinor).toBe(held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0));
   });
 
-  it('P15-T3 AC-5 Sari’s correction of Budi’s year to date, through Update production’s own function, under her name', async () => {
+  it('P19.5-T2 AC-7 P15-T3 AC-5 Sari’s correction of Budi’s month, through Update production’s own function, under her name', async () => {
     const sari = await as('sari@kpm0417.test');
     const budi = row('Budi');
-    const last = await col('monthlyAgentData').findOne({ membershipId: budi.membershipId, month: '2026-09' });
-    expect(budi.production.ytd).toEqual({
-      valueMinor: last!.apeYtd.value + UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH, provenance: 'corrected',
-      correctedBy: { membershipId: sari.membershipId, name: 'Sari Puspita' }, correctedAt: clock.now().toISOString(),
+    const by = { membershipId: sari.membershipId, name: 'Sari Puspita' };
+    expect(budi.production.monthly).toEqual({
+      valueMinor: UNIT_DASHBOARD_BUDI_THIS_MONTH, provenance: 'corrected', correctedBy: by, correctedAt: clock.now().toISOString(),
     });
+    // The year is the months' sum (R4), corrected because this month was — and names her.
+    expect(budi.production.ytd).toMatchObject({ provenance: 'corrected', correctedBy: by });
     const stored = await col('monthlyAgentData').findOne({ membershipId: budi.membershipId, month: MONTH });
-    expect(stored!.apeYtd).toMatchObject({ provenance: 'corrected', correctedBy: sari.membershipId, reason: UNIT_DASHBOARD_CORRECTION_REASON });
+    expect(stored!.values.APE).toMatchObject({
+      value: UNIT_DASHBOARD_BUDI_THIS_MONTH, provenance: 'corrected', correctedBy: sari.membershipId, reason: UNIT_DASHBOARD_CORRECTION_REASON,
+    });
     expect(await col('auditLog').find({ action: 'upload.cell_corrected', 'after.surface': 'unit_dashboard' }).toArray())
       .toEqual([expect.objectContaining({
         actorMembershipId: sari.membershipId, targetMembershipId: budi.membershipId,
-        after: expect.objectContaining({ month: MONTH, field: 'apeYtd', reason: UNIT_DASHBOARD_CORRECTION_REASON }),
+        after: expect.objectContaining({ month: MONTH, field: 'APE', reason: UNIT_DASHBOARD_CORRECTION_REASON }),
       })]);
-    // Under This year the goal cell carries the mark, with her name; Budi stays Needs attention.
+    // Under This year the goal cell carries the mark, with her name.
     const year = await wired.unitDashboard.read(agus, { period: 'year' });
-    expect(row('Budi', year).goal.source).toEqual({
-      provenance: 'corrected', month: MONTH,
-      correctedBy: { membershipId: sari.membershipId, name: 'Sari Puspita' }, correctedAt: clock.now().toISOString(),
-    });
-    expect(budi.status).toBe('needs_attention');
-    // And Budi's own Summary says the same, his month still Not uploaded yet.
+    expect(row('Budi', year).goal.source).toMatchObject({ provenance: 'corrected', month: MONTH, correctedBy: by });
+    // And Budi's own Summary says the same.
     const summary = await wired.summary.read(await as('budi@kpm0417.test'));
-    expect(summary.monthly.actualMinor).toBeNull();
+    expect(summary.monthly.actualMinor).toBe(UNIT_DASHBOARD_BUDI_THIS_MONTH);
     expect(summary.yearly.source).toEqual(row('Budi', year).goal.source);
   });
 
@@ -241,7 +240,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
         expect(total.newHires).toBe(everybody.length - rows.length);
         expect(total.leadsCounts.salesOpen).toBe(everybody.reduce((s, r) => s + r.leadsCounts.salesOpen, 0));
         const actuals = rows.map((r) => r.goal.actualMinor).filter((a): a is number => a !== null);
-        // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when none is.
+        // Paired (ADR-0165 §1, P18.5-T15 AC-6): a target counts only beside production held — every target when none is.
         const counted = actuals.length ? rows.filter((r) => r.goal.actualMinor !== null) : rows;
         const targets = counted.map((r) => r.goal.targetMinor).filter((a): a is number => a !== null);
         expect(total.goal.actualMinor).toBe(actuals.length ? actuals.reduce((a, b) => a + b, 0) : null);
@@ -262,15 +261,23 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
       const coached = [...roster.directAgents, ...roster.units.flatMap((u) => [u.head, ...u.members])];
       for (const r of everyRow(month)) {
         const summary = await wired.summary.read(owner, r.membershipId === owner.membershipId ? undefined : r.membershipId);
-        expect({ email, who: r.name, target: r.goal.targetMinor, actual: r.goal.actualMinor, source: r.goal.source })
-          .toEqual({ email, who: r.name, target: summary.monthly.targetMinor, actual: summary.monthly.actualMinor, source: summary.monthly.source });
+        /*
+         * P19.1-T4 AC-12 (ADR-0195): a member's own estimate fixes their own month's target and nobody else's — so where the
+         * Summary's year is an estimate (Raka, seeded), the leader's target is the office's figures' and is not compared.
+         */
+        const estimate = summary.yearly.production === 'estimate';
+        expect({ email, who: r.name, target: estimate ? 'their estimate' : r.goal.targetMinor, actual: r.goal.actualMinor, source: r.goal.source })
+          .toEqual({
+            email, who: r.name, target: estimate ? 'their estimate' : summary.monthly.targetMinor,
+            actual: summary.monthly.actualMinor, source: summary.monthly.source,
+          });
         if (!r.isReader) {
           const c = coached.find((x) => x.membershipId === r.membershipId)!;
           expect({ email, who: r.name, status: r.status, last: r.lastOneOnOne }).toEqual({ email, who: r.name, status: c.status, last: c.lastOneOnOne });
         }
-        const cells = table.rows.find((x) => x.membershipId === r.membershipId)!.metrics.ape;
+        const mine = table.rows.find((x) => x.membershipId === r.membershipId)!;
         expect({ email, who: r.name, m: r.production.monthly.valueMinor, y: r.production.ytd.valueMinor })
-          .toEqual({ email, who: r.name, m: cells.monthly.value, y: cells.ytd.value });
+          .toEqual({ email, who: r.name, m: mine.values.APE.value, y: mine.ytd.APE.value });
       }
     }
   }, 60_000);

@@ -159,7 +159,7 @@ describe('compare and Block time (P12-T5)', () => {
       expect(await reads()).toEqual([]);
     });
 
-    it('P18.95-T8 AC-2 a compared month answers in the same projection, and writes one record with the month’s span', async () => {
+    it('P18.7-T8 AC-2 a compared month answers in the same projection, and writes one record with the month’s span', async () => {
       const visit = await create('SARI', timed(2, '10:00', '11:00', { type: 'client', title: 'Client visit — Kusuma', notes: 'Kusuma residence' }));
       await create('PEER_AB', timed(3, '13:00', '14:00', { title: 'Peer planning', inviteeIds: [h.id('SARI')] }));
       h.as('AGUS');
@@ -204,7 +204,7 @@ describe('compare and Block time (P12-T5)', () => {
       expect(await reads()).toEqual([]);
     });
 
-    it('P18.95-T8 AC-2, the permission review: a month answers every reader exactly as a week does, refusals writing nothing', async () => {
+    it('P18.7-T8 AC-2, the permission review: a month answers every reader exactly as a week does, refusals writing nothing', async () => {
       const readers: [Who, string][] = [
         ['AGUS', h.id('SARI')], ['SARI', h.id('DODI')], // within COACH
         ['OWNER', h.id('SARI')], ['ADMIN', h.id('SARI')], ['OWNER', h.id('B_AGENT')], ['ADMIN', h.id('B_AGENT')],

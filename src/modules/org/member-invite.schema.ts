@@ -12,7 +12,7 @@ export const MEMBER_INVITE_STATUSES = ['pending', 'accepted', 'cancelled', 'expi
 export type MemberInviteStatus = (typeof MEMBER_INVITE_STATUSES)[number];
 
 /**
- * **A leader's invite to somebody not in the office yet** (ADR-0170 §2, P18.96-T3 AC-2; `functional/org-hierarchy.md`,
+ * **A leader's invite to somebody not in the office yet** (ADR-0170 §2, P18.8-T3 AC-2; `functional/org-hierarchy.md`,
  * *Adding an agent*): what *+ Add agent* makes when no account holds the agent code, or one does and has no membership
  * in this office.
  *
@@ -81,6 +81,13 @@ export class MemberInvite {
 
   @Prop({ type: String, default: null })
   acceptedMembershipId!: string | null;
+
+  /**
+   * **The recruitment lead the form was opened from** (P19.1-T6 AC-7): *Tambahkan ke unit ›* on the *Potensi* tab. When
+   * the invite is accepted the lead is linked to the membership it made (`RecruitLeadLinks.link`). `null` otherwise.
+   */
+  @Prop({ type: String, default: null })
+  recruitLeadId!: string | null;
 
   @Prop({ type: Date, default: null })
   acceptedAt!: Date | null;

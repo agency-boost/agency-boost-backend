@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { FilterQuery, Model, Types } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditLog, AuditLogDocument } from './audit-log.schema';
 
@@ -50,6 +50,27 @@ export class AuditService {
     }
   }
 
+  /**
+   * **Entries in named scopes, in one insert, or the read fails** (ADR-0207 §5; P19.4-T3 AC-16): a Super Admin's
+   * platform read writes one entry in the platform's log (`kpmId: null`) and one in each KPM's whose data it returned,
+   * so that KPM's Owner reads the visit in their own log. Unlike `record` and `recordMany`, **a failure is thrown**,
+   * after it is logged: an unrecorded cross-KPM read is the one thing that decision forbids, so the caller answers
+   * `500` rather than the figures. Each row is otherwise exactly what `record` writes — the actor from the context — with
+   * the scope named per entry instead of read from it.
+   */
+  async recordInScopesOrFail(
+    ctx: RequestContext,
+    entries: readonly { kpmId: string | null; entry: AuditEntry }[],
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    try {
+      await this.model.insertMany(entries.map(({ kpmId, entry }) => ({ ...this.rowOf(ctx, entry), kpmId })));
+    } catch (err) {
+      this.logger.error({ err, action: entries[0].entry.action, count: entries.length }, 'failed to write audit entries');
+      throw err;
+    }
+  }
+
   /** The row an entry is written as: both actors under impersonation, and whether it was on somebody's behalf. */
   private rowOf(ctx: RequestContext, entry: AuditEntry): Record<string, unknown> {
     const { actorUserId, effectiveUserId } = ctx.auditActors;
@@ -73,5 +94,43 @@ export class AuditService {
    */
   async findForTenant(kpmId: string | null, limit = 100): Promise<AuditLogDocument[]> {
     return this.model.find({ kpmId }).sort({ createdAt: -1 }).limit(limit).exec();
+  }
+
+  /**
+   * **One batch of a scope's rows, newest first, after a row** (P19.2-T2 AC-6; §B.32): what the audit page folds into
+   * groups. The scope is a parameter of its own and leads the filter, as `findForTenant`'s does — `null` is the
+   * platform-level log, never *every office* — and `filter` only narrows within it.
+   *
+   * Ordered by time and then id, both descending, so two rows written in one millisecond still have one order, and
+   * `after` — the last row of the batch before — resumes exactly past it: rows written meanwhile are newer, and never
+   * move a batch nobody has read yet.
+   */
+  async findNewestFirst(
+    kpmId: string | null,
+    filter: FilterQuery<AuditLogDocument>,
+    after: { at: Date; id: string } | null,
+    limit: number,
+  ): Promise<AuditLogDocument[]> {
+    const past = after
+      ? [{ $or: [{ createdAt: { $lt: after.at } }, { createdAt: after.at, _id: { $lt: new Types.ObjectId(after.id) } }] }]
+      : [];
+    return this.model
+      .find({ kpmId, $and: [filter, ...past] })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /**
+   * **The different values of one field within a scope** (P19.2-T2 AC-6): what the audit page's *Tindakan* and *Pelaku*
+   * chips offer. The scope leads, as above; `filter` narrows within it.
+   */
+  async distinctWithin(
+    kpmId: string | null,
+    key: 'action' | 'actorUserId',
+    filter: FilterQuery<AuditLogDocument> = {},
+  ): Promise<string[]> {
+    const values = await this.model.distinct(key, { kpmId, ...filter }).exec();
+    return (values as unknown[]).filter((v): v is string => typeof v === 'string');
   }
 }

@@ -286,7 +286,7 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
     return new Date(Math.min(now.getTime(), Math.max(startOfToday.getTime(), wanted)));
   };
 
-  // A lead with no note: the line finalize stores, in the language its leader finalized in (P18.98-T5 AC-6) — Indonesian.
+  // A lead with no note: the line finalize stores, in the language its leader finalized in (P18.10-T5 AC-6) — Indonesian.
   const leadText = (lead: FixtureLead) =>
     lead.nextActionNote ?? render(COACHING_MESSAGES.followUpWith({ name: lead.name }), readerIn('id'));
 
@@ -400,7 +400,7 @@ export function buildCoachingFixture(input: CoachingFixtureInput): CoachingFixtu
         { text: 'Catat aktivitas setiap hari minggu ini, hari yang sepi juga', dueIn: 6 },
       ],
       newTips: [
-        // The prototype's own example tip (`Overall.html:10692-10699`), in Bahasa Indonesia since P18.98-T7.
+        // The prototype's own example tip (`Overall.html:10692-10699`), in Bahasa Indonesia since P18.10-T7.
         'Pelan-pelan di kalimat pembuka — biarkan klien selesai bicara sebelum mulai pitch.',
         'Minta referral sebelum pamit, jangan tunggu saat telepon follow up.',
       ],

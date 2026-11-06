@@ -11,7 +11,7 @@ import {
 import { HomeService, type HomeView } from './home.service';
 
 /**
- * **Home's read on real rows** (UI V1, Phase 18.99 T11; UI-100, UI-101; `functional/home.md`): office 0417 (KPM A) beside
+ * **Home's read on real rows** (UI V1, Phase 18.11 T11; UI-100, UI-101; `functional/home.md`): office 0417 (KPM A) beside
  * 0555 (KPM B), the coaching roster's office (`test/coaching-office.ts`) — *today* is Monday 14 September 2026, 10:00 in
  * Jakarta. Every figure is held against the screen it must equal: the Unit Dashboard's tile, the Calendar's today, the
  * activity log's saved totals.
@@ -24,7 +24,7 @@ import { HomeService, type HomeView } from './home.service';
  *                            └── NINA ── DODI
  * ```
  */
-describe('GET /home, on real rows (Phase 18.99 T11)', () => {
+describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   let home: HomeService;
@@ -44,6 +44,7 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
       wired.activityReadings,
       wired.memberships,
       new LeadRepository(mongoose.model(Lead.name, LeadSchema) as never),
+      wired.leadReadings,
       wired.calendar,
       wired.subjectReads,
       // UI-111: a stored photo is a key, signed into a link per read; here a link the test can read.
@@ -188,11 +189,65 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
     });
   });
 
+  /*
+   * **Tim saya, by role** (ADR-0189 §4, P19-T4 AC-2; UI-159 item 2): every leader gets the block, a leader with nobody
+   * yet at zero — an AAB who leads nobody was an agent here until Phase 19.
+   */
+  describe('P19-T4 Tim saya for every leader', () => {
+    /** Every row the Unit Dashboard draws: the reader's unit, and each unit below, its head and its members. */
+    const rowsOf = (units: { head: { membershipId: string; leadsCounts: { recruitOpen: number } }; members: { membershipId: string; leadsCounts: { recruitOpen: number } }[]; units: unknown[] }[]): { membershipId: string; leadsCounts: { recruitOpen: number } }[] =>
+      units.flatMap((u) => [u.head, ...u.members, ...rowsOf(u.units as never)]);
+
+    it('P19-T4 AC-2 an AAB who leads nobody gets the leader block at zero, not null, and nobody is recorded as read', async () => {
+      const before = await db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
+      const view = await read('DEWI');
+      const zero = { count: 0, of: 0 };
+      expect(view.leader).toEqual({
+        activeAgent: { ...zero, unit: zero, aab: zero },
+        coached7d: { ...zero, unit: zero, aab: zero },
+        team: [],
+        members: 0,
+        recruitmentPipeline: 0,
+        newHires: 0,
+      });
+      expect(await db().collection('auditLog').countDocuments({ 'after.surface': 'home' })).toBe(before);
+    });
+
+    it('P19-T4 AC-2 a leader with no team counts their own recruitment pipeline — never another office’s lead', async () => {
+      const recruit = (kpmId: string, name: string, over: Record<string, unknown> = {}) => ({
+        kpmId, ownerMembershipId: office.id.DEWI, type: 'recruitment', name, statusCode: null, outcome: null,
+        commitments: [], nextActionDate: null, nextActionNote: null, version: 1, deletedAt: null,
+        dateRegistered: new Date('2026-09-01T02:00:00Z'), contact: { phone: null, email: null }, transitions: [], ...over,
+      });
+      const { insertedIds } = await db().collection('leads').insertMany([
+        recruit(KPM_A, 'Calon satu'),
+        // Closed, deleted, or in KPM B under the same id: none of them is DEWI's pipeline.
+        recruit(KPM_A, 'Calon dua', { outcome: 'lost' }),
+        recruit(KPM_A, 'Calon tiga', { deletedAt: new Date('2026-09-02T02:00:00Z') }),
+        recruit(KPM_B, 'Calon kantor B'),
+      ]);
+      try {
+        expect((await read('DEWI')).leader!.recruitmentPipeline).toBe(1);
+      } finally {
+        await db().collection('leads').deleteMany({ _id: { $in: Object.values(insertedIds) } });
+      }
+    });
+
+    it('P19-T4 AC-2 with a team, Anggota tim is Laporan tim’s people and New hires the Unit Dashboard’s count', async () => {
+      const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
+      expect(view.leader!.members).toBe(view.leader!.team.length);
+      expect(view.leader!.members).toBe(dashboard.tiles.team.total - 1);
+      expect(view.leader!.newHires).toBe(dashboard.tiles.team.newHires);
+      // The Unit Dashboard's Leads column's recruitment count, summed over every row it draws.
+      const rows = [...dashboard.yourUnit.rows, ...rowsOf(dashboard.units as never)];
+      expect(view.leader!.recruitmentPipeline).toBe(rows.reduce((n, row) => n + row.leadsCounts.recruitOpen, 0));
+    });
+  });
+
   describe('UI-100 the reader’s own blocks', () => {
     it('UI-100 an agent sees no leader tiles and no Laporan tim', async () => {
       expect((await read('INDAH')).leader).toBeNull();
-      // An AAB who leads nobody is an agent here too.
-      expect((await read('DEWI')).leader).toBeNull();
+      expect((await read('RINA')).leader).toBeNull();
     });
 
     it('UI-100 Aktivitas saya and the chart are the seven office days ending today, from the saved totals', async () => {

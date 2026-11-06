@@ -2,11 +2,16 @@ import { ApiProperty } from '@nestjs/swagger';
 import { KPM_REPORTING, type KpmAnalyticsPeriod } from '@/domain/constants';
 import type { Moc, MocCriterion } from '@/domain/metrics/moc-status';
 import type { Rate } from '@/domain/metrics/rate';
-import type { AnalyticsAgency, AnalyticsRow, Figures, KpmAnalyticsView } from './kpm-analytics.service';
+import type { AnalyticsAgency, AnalyticsLeader, AnalyticsRow, Figures, KpmAnalyticsView } from './kpm-analytics.service';
 import type {
   KpmOverviewView, NotLoggedView, OverviewAgency, OverviewLeader, OverviewUnit, RecruitTargetView, RungCount,
 } from './kpm-overview.service';
+import { REVIEWED_PAGES, SETUP_MARK_VIAS, type ReviewedPage } from './kpm-setup-mark.schema';
+import {
+  SETUP_STEPS, type ReviewedView, type SettingsWaiting, type SetupStep, type SetupView,
+} from './kpm-setup.service';
 import type { Money, Person } from './office-figures';
+import type { OfficeGroup } from './office-groups';
 import type { OfficeHeader } from './office-people';
 import type { Adoption, OfficeState, PlatformAnalyticsView } from './platform-analytics.service';
 
@@ -75,13 +80,26 @@ class OverviewCompositionDto {
   rungs!: RungCount[];
 }
 
-class LoggedThisMonthDto extends RateDto {
+class ActiveThisMonthDto {
   @ApiProperty({
-    type: Number, nullable: true,
-    description: 'The same count for last month, from its first day to the same day of the month; `null` when '
-      + 'the agency had nobody then.',
+    type: Number, nullable: true, example: 18,
+    description: '`MAA_COUNT_IN_UNIT` over the agency for the current calendar month: members whose upload for the month shows '
+      + 'APE > 0 or # of policy > 0 (D1). `null` while the month is not uploaded — *–*, *Belum diunggah*, never 0. Logging '
+      + 'changes nothing in it.',
   })
-  lastMonthToDate!: number | null;
+  count!: number | null;
+
+  @ApiProperty({ example: 28, description: 'Today’s headcount (`OFFICE_HEADCOUNT`, D3): the members with status *Aktif*.' }) of!: number;
+  @ApiProperty({ type: Number, nullable: true, description: '`count` over `of`, a whole percent; `null` with `count`, or over nobody.' })
+  pct!: number | null;
+
+  @ApiProperty({ example: '2026-11', description: 'The month counted: the agency’s current calendar month, *bulan ini*.' }) month!: string;
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-11-03',
+    description: 'The agency’s day the month’s rows were last written, by an import or a correction (D8, *per 3 Nov*); '
+      + '`null` while the month is not uploaded.',
+  })
+  asOf!: string | null;
 }
 
 class LoggedThisWeekDto {
@@ -92,13 +110,18 @@ class LoggedThisWeekDto {
 
 class OverviewEngagementDto {
   @ApiProperty({
-    type: LoggedThisMonthDto,
-    description: '`ACTIVITY_LOGGED_THIS_MONTH` (*Agents who logged activity this month*): members who logged at least '
-      + 'one activity this calendar month, over the headcount.',
+    type: ActiveThisMonthDto,
+    description: '*Aktif bulan ini* (ADR-0200 §2): production in the agency’s file for the current month, over the '
+      + 'headcount — the Overview’s first tile.',
   })
-  loggedThisMonth!: KpmOverviewView['engagement']['loggedThisMonth'];
+  activeThisMonth!: KpmOverviewView['engagement']['activeThisMonth'];
 
-  @ApiProperty({ type: LoggedThisWeekDto }) loggedThisWeek!: KpmOverviewView['engagement']['loggedThisWeek'];
+  @ApiProperty({
+    type: LoggedThisWeekDto,
+    description: '*Pengguna aktif* over the rolling 7 days: the first tile’s *7 hari: n belum ›*, which opens *Belum mencatat · '
+      + '7 hari*. The only logging figure the Overview serves (ADR-0200 §3).',
+  })
+  loggedThisWeek!: KpmOverviewView['engagement']['loggedThisWeek'];
 }
 
 class LeaderboardRowDto extends PersonDto implements OverviewLeader {
@@ -133,7 +156,12 @@ class OverviewRecruitmentDto {
   expectedToClose!: number;
 
   @ApiProperty({ description: '`RECRUITMENT_PIPELINE_NOW`: open candidates not on a closing stage.' }) pipelineNow!: number;
-  @ApiProperty({ description: '`RECRUITMENT_CLOSED_LAST_MONTH`: candidates closed won last calendar month.' }) closedLastMonth!: number;
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: '`RECRUITMENT_CLOSED_LAST_MONTH`, *Recruitment last month* (D2): the upload’s `RECRUITMENT` for the previous '
+      + 'calendar month, summed over the agency’s rows, a leaver’s included; `null` (*–*) when not uploaded. Never a lead.',
+  })
+  closedLastMonth!: number | null;
   @ApiProperty({
     type: Number, nullable: true,
     description: 'The month’s target, or the latest earlier month’s carried forward; `null` when none was ever set — no pill then.',
@@ -145,12 +173,20 @@ class OverviewRecruitmentDto {
 
 class YearToDateDto extends MoneyDto {
   @ApiProperty({
-    type: [String], example: ['2026-08'],
-    description: 'The months the year to date is waiting on: this year’s months after the latest month the file holds, '
-      + 'before the current one — every month before this one while none is held. A gap before the latest held month is '
-      + 'not listed: that month’s year to date already covers it.',
+    type: [String], example: ['2026-10', '2026-11'],
+    description: 'The months the year to date is waiting on **that are still open for upload** (UI-150): from `from`, after '
+      + 'the latest month the file holds, the current month included while it is not uploaded, each still open (ADR-0050). '
+      + 'A gap before the latest held month is not listed — that month’s year to date already covers it — and neither is a '
+      + 'month locked or before the KPM’s first.',
   })
   missingMonths!: string[];
+
+  @ApiProperty({
+    example: '2026-01',
+    description: 'The first month *this year* counts: January, or the KPM’s first month when it began this year (UI-150, '
+      + 'Overview R3).',
+  })
+  from!: string;
 
   @ApiProperty({ description: 'Members with no goal saved for the year: in no target.' }) membersWithoutGoal!: number;
 }
@@ -172,16 +208,66 @@ class OverviewProductionDto {
 
   @ApiProperty({
     type: Number, nullable: true,
-    description: '`APE_YEAR_PROJECTION`, IDR minor units: the year to date as of the latest month held, over that month’s '
-      + 'number, run to twelve — a month with no file is still covered by the year to date; `null` until a month is held.',
+    description: '`APE_YEAR_PROJECTION`, IDR minor units: the year to date as of the latest month held **that has ended**, '
+      + 'over that month’s number, run to twelve — a month with no file is still covered by the year to date, and the '
+      + 'current month, uploaded mid-month, never enters it (D8); `null` until such a month is held.',
   })
   projectionMinor!: number | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-10',
+    description: 'The month the projection runs from: the latest month of the year held before the current one; `null` with the projection.',
+  })
+  projectionThrough!: string | null;
 
   @ApiProperty({
     type: [OverviewAgencyDto],
     description: 'Every AB agency (an AB under an AB is its own), lowest attainment first, a row with none last.',
   })
   agencies!: OverviewAgency[];
+}
+
+class SetupStepDto {
+  @ApiProperty({ enum: SETUP_STEPS, description: 'In the card’s order: the four settings pages, then *Impor anggota*, *Unggah produksi*, *Atur target rekrutmen*.' })
+  key!: SetupStep;
+
+  @ApiProperty({
+    description: 'Steps 1–4: the page was saved or marked *Sudah sesuai*. 5: a member besides the Owner. 6: any production '
+      + 'upload. 7: a recruitment target set.',
+  })
+  done!: boolean;
+}
+
+class OpenMonthDto {
+  @ApiProperty({ example: '2026-11' }) month!: string;
+  @ApiProperty({ example: '2026-12-07', description: 'The last day it may be uploaded, in the agency’s calendar (ADR-0050).' })
+  closesOn!: string;
+}
+
+class SetupDto implements SetupView {
+  @ApiProperty({ example: 3, description: '*n dari 7 selesai*.' }) done!: number;
+  @ApiProperty({ type: [SetupStepDto] }) steps!: SetupView['steps'];
+  @ApiProperty({ description: 'The agency’s address and contact phone are both filled: step 1’s meta.' }) branchFilled!: boolean;
+  @ApiProperty({ example: 1, description: 'Today’s headcount: step 5’s meta.' }) members!: number;
+  @ApiProperty({
+    type: OpenMonthDto, nullable: true,
+    description: 'Step 6: the earliest month still open and not uploaded, or this month while it is open; `null` with neither.',
+  })
+  openMonth!: SetupView['openMonth'];
+
+  @ApiProperty({ type: Number, nullable: true, description: 'The recruitment target standing for this month: step 7’s meta.' })
+  target!: number | null;
+}
+
+class SettingsWaitingDto implements SettingsWaiting {
+  @ApiProperty({ example: 2, description: 'Products whose own script or description waits for approval: *2 produk menunggu Anda*.' })
+  productsAwaiting!: number;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 2,
+    description: 'The version an unpublished activation checklist draft will be (*Draf versi 2*); `null` with no draft saved.',
+  })
+  checklistDraftVersion!: number | null;
 }
 
 export class KpmOverviewDto implements KpmOverviewView {
@@ -195,6 +281,15 @@ export class KpmOverviewDto implements KpmOverviewView {
   @ApiProperty({ type: OverviewCoachingDto }) coaching!: KpmOverviewView['coaching'];
   @ApiProperty({ type: OverviewRecruitmentDto }) recruitment!: KpmOverviewView['recruitment'];
   @ApiProperty({ type: OverviewProductionDto }) production!: KpmOverviewView['production'];
+  @ApiProperty({
+    type: SetupDto, nullable: true,
+    description: '*Siapkan KPM* (UI-149): the seven steps while any is open; `null` once all seven are done, stored, so the '
+      + 'card never comes back.',
+  })
+  setup!: SetupView | null;
+
+  @ApiProperty({ type: SettingsWaitingDto, description: 'What waits for the Owner on the settings pages: *Pengaturan KPM ›*’s line.' })
+  settings!: SettingsWaiting;
 }
 
 class NotLoggedMemberDto extends PersonDto {
@@ -204,16 +299,25 @@ class NotLoggedMemberDto extends PersonDto {
 
   @ApiProperty({ type: Number, nullable: true, example: 9, description: 'Whole days since, in the agency’s calendar.' })
   daysSince!: number | null;
+
+  @ApiProperty({ type: PersonDto, nullable: true, description: 'Their leader now (*Agent · ke Sari*); `null` at the top of the tree.' })
+  leader!: Person | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281234567890',
+    description: 'Their WhatsApp number, for the reminder (UI-101, D-22); `null` when none is on file.',
+  })
+  phone!: string | null;
 }
 
 export class NotLoggedDto implements NotLoggedView {
-  @ApiProperty({ example: 69, description: 'Everybody with no day logged in the last 7 days; the reveal’s *“+ {total − 3} more”*.' })
+  @ApiProperty({ example: 8, description: 'Everybody with no day logged in the last 7 days: *Belum mencatat · 7 hari*’s *n dari N*.' })
   total!: number;
 
   @ApiProperty({
     type: [NotLoggedMemberDto],
-    description: 'The first three of them (`KPM_REPORTING.NOT_LOGGED_SHOWN`): never logged first, then the longest silent. '
-      + 'The rest are the People screen’s.',
+    description: 'The first five of them (`KPM_REPORTING.NOT_LOGGED_SHOWN`): never logged first, then the longest silent, '
+      + 'each recorded as read. The rest are the People screen’s.',
   })
   members!: NotLoggedView['members'];
 }
@@ -221,6 +325,17 @@ export class NotLoggedDto implements NotLoggedView {
 export class RecruitTargetDto implements RecruitTargetView {
   @ApiProperty({ example: '2026-10' }) month!: string;
   @ApiProperty({ example: 15 }) target!: number;
+}
+
+/** `PUT /kpm/settings/:page/reviewed` (P19.3-T2): the page's step, ticked. */
+export class ReviewedDto implements ReviewedView {
+  @ApiProperty({ enum: REVIEWED_PAGES }) page!: ReviewedPage;
+  @ApiProperty({ enum: [true] }) reviewed!: true;
+  @ApiProperty({ example: '2026-11-03T02:15:00.000Z', description: 'When the step first ticked: this tap, an earlier one or a save.' })
+  at!: string;
+
+  @ApiProperty({ enum: SETUP_MARK_VIAS, description: 'How it first ticked: `reviewed` (*Sudah sesuai*), `saved`, or `migration`.' })
+  via!: ReviewedView['via'];
 }
 
 // ------------------------------------------------------------------ KPM analytics
@@ -233,6 +348,9 @@ class AnalyticsLeadsDto {
 }
 
 class ManpowerDto {
+  @ApiProperty({ description: 'Members of the `ab` class (D3): the split *x AB · y AAB · z Agents*, the AB counted once, as AB.' })
+  ab!: number;
+
   @ApiProperty() aab!: number;
   @ApiProperty() agents!: number;
   @ApiProperty({ description: 'Everybody in the row now, its head included (OD-24).' }) total!: number;
@@ -246,7 +364,11 @@ class AnalyticsFiguresDto implements Figures {
   })
   apeMonth!: Money;
 
-  @ApiProperty({ type: MoneyDto, description: 'The year to date against the annual goals — today’s members, whatever the period.' })
+  @ApiProperty({
+    type: MoneyDto,
+    description: '*APE YTD*: the year to date from the agency’s file against the annual goals — today’s members, whatever the '
+      + 'period. (The field keeps its name; the column is *APE YTD*, never *Annual*.)',
+  })
   apeAnnual!: Money;
 
   @ApiProperty({ type: RateDto, description: '`COACHED_7D` over the row’s members today, its head included.' }) coached7d!: Rate;
@@ -279,14 +401,27 @@ class AnalyticsFiguresDto implements Figures {
 }
 
 class MocCriterionDto implements MocCriterion {
-  @ApiProperty({ example: 'NET_APE', description: 'The metric the carrier’s rule names.' }) code!: string;
-  @ApiProperty({ example: 'Net APE' }) label!: string;
-  @ApiProperty({ type: Number, nullable: true, description: 'IDR minor units for Net APE, a percent for persistency, a count otherwise; `null` is not uploaded.' })
+  @ApiProperty({
+    example: 'MOC_APE',
+    description: 'The metric the carrier’s rule names — a stored `NET_APE` reads as `MOC_APE`, the metric that took its place.',
+  })
+  code!: string;
+
+  @ApiProperty({ example: 'APE' }) label!: string;
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: 'IDR minor units for APE, a percent for persistency (the leader’s uploaded unit persistency), a count — exact, '
+      + 'Monthly2 AA an average — otherwise; `null` is not uploaded.',
+  })
   current!: number | null;
 
   @ApiProperty({ description: 'The carrier rule’s threshold, in the same unit.' }) required!: number;
   @ApiProperty({ type: Boolean, nullable: true, description: '`null` while its input is not uploaded — never ✕.' }) met!: boolean | null;
-  @ApiProperty({ example: 'Jan – Sep 2026', description: 'What it was read over.' }) period!: string;
+  @ApiProperty({
+    example: 'Jan – Sep 2026',
+    description: 'What it was read over — for Direct AB, *based on today’s upline* (*berdasarkan upline saat ini*).',
+  })
+  period!: string;
 }
 
 class MocDto implements Moc {
@@ -335,15 +470,9 @@ class AnalyticsAgencyDto extends AnalyticsRowDto implements AnalyticsAgency {
 }
 
 class AnalyticsTotalDto extends AnalyticsFiguresDto {
-  @ApiProperty({ description: 'The rows: *"Total — all {n} ABs"*.' }) abCount!: number;
+  @ApiProperty({ description: 'The AB agencies (the MOC tile’s base).' }) abCount!: number;
   @ApiProperty({ description: 'ABs meeting MOC.' }) mocMet!: number;
   @ApiProperty({ description: 'ABs with a MOC evaluated.' }) mocOf!: number;
-  @ApiProperty({
-    type: Number, nullable: true,
-    description: 'IDR minor units: the year to date of members who left this year — the agency’s, in no row, so the '
-      + 'total’s *APE — Annual* is short of the Overview’s by it. `null` when no leaver holds a figure.',
-  })
-  leaversExcludedMinor!: number | null;
 }
 
 class MonthlyProductionDto {
@@ -352,12 +481,74 @@ class MonthlyProductionDto {
   apeMinor!: number | null;
 }
 
+class ActiveCountDto {
+  @ApiProperty({ type: Number, nullable: true, description: '`MAA_COUNT_IN_UNIT` over these members; `null` is *Not uploaded yet*.' })
+  count!: number | null;
+
+  @ApiProperty({ description: 'The members it is out of: today’s for `this_month`, the month’s on its last day otherwise.' })
+  of!: number;
+}
+
+class LeaderActiveDto extends ActiveCountDto {
+  @ApiProperty({ type: Number, nullable: true, description: 'A whole percent (`rateOver`); `null` not uploaded, or over nobody.' })
+  pct!: number | null;
+
+  @ApiProperty({ type: ActiveCountDto, description: '*Unit*: the leader and their direct agents who lead nobody.' })
+  unit!: { count: number | null; of: number };
+
+  @ApiProperty({ type: ActiveCountDto, description: '*AAB*: the rest of the Group — every AAB below and their people.' })
+  aab!: { count: number | null; of: number };
+}
+
+class AnalyticsLeaderDto implements AnalyticsLeader {
+  @ApiProperty({ type: RowHeadDto }) head!: AnalyticsLeader['head'];
+  @ApiProperty({ enum: ['ab', 'aab'], description: 'The class (ADR-0156): the row’s pill and the chips’ count.' }) role!: 'ab' | 'aab';
+  @ApiProperty({
+    description: 'The reader may open this leader’s Unit Dashboard and Group Tree: the Owner and an Admin any leader’s, a '
+      + 'Core Leader their own and those below them — the reach those reads answer, 404 outside it.',
+  })
+  opens!: boolean;
+  @ApiProperty({ type: PersonDto, nullable: true, description: '*Leader dari*: the leader’s upline today; `null` for a root.' })
+  above!: Person | null;
+
+  @ApiProperty({ example: 12, description: '*Group* (ADR-0204 §2): the leader and everybody below them today — the Unit Dashboard’s team.' })
+  group!: number;
+
+  @ApiProperty({ example: 4, description: '*Unit*: the leader and their direct agents who lead nobody.' }) unit!: number;
+  @ApiProperty({
+    type: ManpowerDto,
+    description: 'The Group by class, the leader included (`total` is `group`): the split *"3 AAB · 8 Agents"*, every AAB counted.',
+  })
+  manpower!: Figures['manpower'];
+  @ApiProperty({ type: MoneyDto, description: '*APE bulan ini* over the Group, against the members’ own monthly targets.' })
+  apeMonth!: Money;
+
+  @ApiProperty({ type: LeaderActiveDto, description: '*Active this month* (D1) over the Group, with its Unit and AAB halves.' })
+  active!: AnalyticsLeader['active'];
+
+  @ApiProperty({ type: RateDto, description: '`COACHED_7D` over the Group today, the leader included.' }) coached7d!: Rate;
+  @ApiProperty({ type: AnalyticsLeadsDto, description: 'The Group’s open leads, and those promised for the period’s month.' })
+  leads!: AnalyticsLeader['leads'];
+
+  @ApiProperty({ type: ClubDto, nullable: true, description: 'An AB’s club, over their agency’s year to date; `null` for an AAB.' })
+  club!: { code: string; label: string } | null;
+
+  @ApiProperty({ type: MocDto, nullable: true, description: '`MOC_STATUS` for the leader’s rung; `null` with no rule for it.' })
+  moc!: Moc | null;
+}
+
+export class OfficeGroupDto implements OfficeGroup {
+  @ApiProperty({ description: 'The custom group (*All members → Groups*).' }) groupId!: string;
+  @ApiProperty({ example: 'Core Leader' }) name!: string;
+  @ApiProperty({ example: 3, description: 'Its members today: tagged with it, status *Aktif*.' }) memberCount!: number;
+}
+
 export class KpmAnalyticsDto implements KpmAnalyticsView {
   @ApiProperty({ enum: KPM_REPORTING.ANALYTICS_PERIODS }) period!: KpmAnalyticsPeriod;
   @ApiProperty({ example: '2026-10', description: 'The period’s month.' }) month!: string;
   @ApiProperty({ type: ReportingThresholdsDto }) thresholds!: { statusSplitPct: number };
   @ApiProperty({
-    example: 'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (Net APE ≥ Rp 600 jt AND '
+    example: 'AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (APE ≥ Rp 600 jt AND '
       + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     description: 'The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung '
       + 'first, separated by `\\n`. Empty when the company has none.',
@@ -367,10 +558,29 @@ export class KpmAnalyticsDto implements KpmAnalyticsView {
   @ApiProperty({ type: [AnalyticsAgencyDto], description: 'One row per AB agency, A to Z; the rows partition the agency’s members.' })
   agencies!: AnalyticsAgency[];
 
-  @ApiProperty({ type: AnalyticsTotalDto, description: 'The sum of the rows, a percentage from the sums.' })
+  @ApiProperty({
+    type: AnalyticsTotalDto,
+    description: 'The KPM’s totals, over everybody in scope. `apeAnnual` is the KPM’s production this year, a leaver’s '
+      + 'included — the Overview’s figure (ADR-0204 §1) — and so no longer the sum of the rows, which count today’s members.',
+  })
   total!: KpmAnalyticsView['total'];
 
-  @ApiProperty({ type: [MonthlyProductionDto], description: 'The six months before this one, oldest first.' })
+  @ApiProperty({
+    type: [AnalyticsLeaderDto],
+    description: 'Every AB and AAB (status *Aktif*), lowest *APE bulan ini* % first, a leader with no % last (UI-152).',
+  })
+  leaders!: AnalyticsLeader[];
+
+  @ApiProperty({ type: [OfficeGroupDto], description: 'The office’s active custom groups, A to Z: *Lihat untuk*’s choices.' })
+  groups!: OfficeGroup[];
+
+  @ApiProperty({ example: 28, description: '*Seluruh KPM · n orang*: the agency’s members today, whichever group is read.' })
+  officePeople!: number;
+
+  @ApiProperty({ type: OfficeGroupDto, nullable: true, description: 'The group the figures are over (`?group=`); `null` for the whole KPM.' })
+  group!: OfficeGroup | null;
+
+  @ApiProperty({ type: [MonthlyProductionDto], description: 'The six months ending with this one, oldest first (UI-091).' })
   monthly!: KpmAnalyticsView['monthly'];
 }
 

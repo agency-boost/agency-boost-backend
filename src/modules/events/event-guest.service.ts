@@ -78,7 +78,7 @@ export interface GuestEventList {
 }
 
 /**
- * **The agent's *KPM Events*** (P18.5-T5, P18.5-T6; `Overall.html:3423-3448`, `:8425-8771`): the reader's events,
+ * **The agent's *KPM Events*** (P18.2-T5, P18.2-T6; `Overall.html:3423-3448`, `:8425-8771`): the reader's events,
  * their RSVP and its cancellation, the claim, and the answer.
  *
  * **Whose events.** Active events whose audience holds the reader **as at the event's start** (`EventAudienceReader`,

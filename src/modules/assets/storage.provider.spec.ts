@@ -21,32 +21,32 @@ const configOf = (values: Record<string, string | undefined>) => ({
   },
 }) as never;
 
-describe('P18.7-T2 the storage binding (ADR-0153, D12)', () => {
-  it('P18.7-T2 binds the bucket when GCS_BUCKET names one, in any environment', () => {
+describe('P18.4-T2 the storage binding (ADR-0153, D12)', () => {
+  it('P18.4-T2 binds the bucket when GCS_BUCKET names one, in any environment', () => {
     for (const NODE_ENV of ['development', 'test', 'staging', 'production']) {
       const storage = storageFor(configOf({ NODE_ENV, GCS_BUCKET: 'agencyboost-staging-assets', STORAGE_KEY_PREFIX: 'staging' }), clock);
       expect(storage).toBeInstanceOf(GcsAdapter);
     }
   });
 
-  it.each(['development', 'test'])('P18.7-T2 binds storage that refuses when %s has no bucket — the API still boots', (NODE_ENV) => {
+  it.each(['development', 'test'])('P18.4-T2 binds storage that refuses when %s has no bucket — the API still boots', (NODE_ENV) => {
     expect(storageFor(configOf({ NODE_ENV }), clock)).toBeInstanceOf(UnconfiguredStorage);
     expect(storageFor(configOf({ NODE_ENV, GCS_BUCKET: '' }), clock)).toBeInstanceOf(UnconfiguredStorage);
     // A blank value reaches here raw: `ConfigService.get` falls back to `process.env` when validation unset it.
     expect(storageFor(configOf({ NODE_ENV, GCS_BUCKET: '   ' }), clock)).toBeInstanceOf(UnconfiguredStorage);
   });
 
-  it.each(['staging', 'production', undefined])('P18.7-T2 refuses to choose for %s without a bucket: a deployed API always has storage', (NODE_ENV) => {
+  it.each(['staging', 'production', undefined])('P18.4-T2 refuses to choose for %s without a bucket: a deployed API always has storage', (NODE_ENV) => {
     expect(() => storageFor(configOf({ NODE_ENV }), clock)).toThrow(`GCS_BUCKET is required when NODE_ENV is ${NODE_ENV ?? 'unset'}`);
   });
 
-  it('P18.7-T2 is registered as the StoragePort, built from the config and the clock', () => {
+  it('P18.4-T2 is registered as the StoragePort, built from the config and the clock', () => {
     expect(STORAGE_PROVIDER).toMatchObject({ provide: StoragePort, useFactory: storageFor });
     expect((STORAGE_PROVIDER as { inject: unknown[] }).inject).toHaveLength(2);
   });
 });
 
-describe('P18.7-T2 storage that is not configured (D12)', () => {
+describe('P18.4-T2 storage that is not configured (D12)', () => {
   const storage = new UnconfiguredStorage();
   const owner = { kind: 'kpm', kpmId: 'k' } as const;
   const calls: [string, () => Promise<unknown>][] = [
@@ -58,7 +58,7 @@ describe('P18.7-T2 storage that is not configured (D12)', () => {
     ['putObject', () => storage.putObject()],
   ];
 
-  it.each(calls)('P18.7-T2 refuses %s with 503 STORAGE_NOT_CONFIGURED, saying so plainly', async (_name, call) => {
+  it.each(calls)('P18.4-T2 refuses %s with 503 STORAGE_NOT_CONFIGURED, saying so plainly', async (_name, call) => {
     const failure = await call().catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(DomainException);
     expect((failure as DomainException).code).toBe(ErrorCode.STORAGE_NOT_CONFIGURED);
@@ -66,13 +66,23 @@ describe('P18.7-T2 storage that is not configured (D12)', () => {
     expect((failure as DomainException).message).toBe(
       'File storage is not configured on this server, so files cannot be uploaded or opened here.',
     );
-    // P18.98-T5 AC-2: and in Indonesian, for a reader of Indonesian.
+    // P18.10-T5 AC-2: and in Indonesian, for a reader of Indonesian.
     expect((failure as DomainException).messageFor(readerIn('id'))).toBe(
       'Penyimpanan file belum dikonfigurasi di server ini, jadi file tidak dapat diunggah atau dibuka di sini.',
     );
   });
 
-  it('P18.7-T2 refuses through the port, as the asset service calls it', async () => {
+  it('P19.6-T1 refuses read — a branding image read back to resize or serve it — with 503, not the port’s plain Error', async () => {
+    // ADR-0218 §2: the port's own `read` throws a bare Error ("cannot read an object back"), which is a 500. Storage
+    // that is merely unconfigured says so as every other call here does, so the confirm and the public route answer 503.
+    const port: StoragePort = storage;
+    const failure = await port.read('dev/k/branding/logo.png', 1_000_000).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(DomainException);
+    expect((failure as DomainException).code).toBe(ErrorCode.STORAGE_NOT_CONFIGURED);
+    expect((failure as DomainException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+  });
+
+  it('P18.4-T2 refuses through the port, as the asset service calls it', async () => {
     const port: StoragePort = storage;
     await expect(port.createSignedUpload({ owner, folder: 'training', filename: 'a.pdf', mimeType: 'application/pdf' }))
       .rejects.toMatchObject({ code: ErrorCode.STORAGE_NOT_CONFIGURED });

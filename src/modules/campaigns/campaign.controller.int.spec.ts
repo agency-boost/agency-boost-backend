@@ -25,14 +25,14 @@ const PRUDENTIAL = '66f0000000000000000000c1';
 
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
-  // P18.5-T7 (leak 15): the settings reads are the Owner's and the Admins', as training's and events' are.
+  // P18.2-T7 (leak 15): the settings reads are the Owner's and the Admins', as training's and events' are.
   listRules: 'campaign_settings:read',
   list: 'campaign_settings:read',
   create: 'tenant_config:write',
   update: 'tenant_config:write',
   archive: 'tenant_config:write',
   restore: 'tenant_config:write',
-  // P18.6-T2 AC-5: the override of a final standing (its own spec: `campaign-standing-overrides.int.spec.ts`).
+  // P18.3-T2 AC-5: the override of a final standing (its own spec: `campaign-standing-overrides.int.spec.ts`).
   override: 'campaign_qualification:override',
   clearOverride: 'campaign_qualification:override',
 };
@@ -40,7 +40,7 @@ const ROUTES: Record<string, string> = {
 const aCampaign = (over: Record<string, unknown> = {}) => ({
   code: 'YEAR_END_DRIVE',
   title: 'Year-End Star Club Drive',
-  // Whole office months (P18.5-T7, D-windows): 00:00 on 1 October to 23:59 on 31 December, Jakarta.
+  // Whole office months (P18.2-T7, D-windows): 00:00 on 1 October to 23:59 on 31 December, Jakarta.
   startsAt: '2026-09-30T17:00:00Z',
   endsAt: '2026-12-31T16:59:59Z',
   reward: 'Extra unit budget',
@@ -129,7 +129,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       await request(server).post(`${url}/whatever/restore`).send({}).expect(403);
     });
 
-    it.each([['the Owner', OWNER], ['the Admin', ADMIN]])('P18.5-T7 shows %s the campaigns and the carrier rules', async (_name, who) => {
+    it.each([['the Owner', OWNER], ['the Admin', ADMIN]])('P18.2-T7 shows %s the campaigns and the carrier rules', async (_name, who) => {
       session.current = who;
 
       await request(app.getHttpServer()).get(url).expect(200);
@@ -139,11 +139,11 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
     });
 
     /*
-     * P18.5-T7, the phase file's *Found while preparing* 15: both reads sat on `tenant_config:read`, which every member
+     * P18.2-T7, the phase file's *Found while preparing* 15: both reads sat on `tenant_config:read`, which every member
      * holds, so a field member could read archived campaigns and the requirements of drafts. A member reads campaigns
      * at `GET /campaigns`, active ones only.
      */
-    it('P18.5-T8 review item 20 refuses a Super Admin outside a support session both settings reads: no office', async () => {
+    it('P18.2-T8 review item 20 refuses a Super Admin outside a support session both settings reads: no office', async () => {
       session.current = SUPER_ADMIN;
       for (const path of [url, `${url}/rules`]) {
         expect((await request(app.getHttpServer()).get(path).expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
@@ -151,7 +151,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
     });
 
     it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
-      'P18.5-T7 refuses %s the campaigns settings and the carrier rules (leak 15)', async (_name, who) => {
+      'P18.2-T7 refuses %s the campaigns settings and the carrier rules (leak 15)', async (_name, who) => {
         session.current = who;
 
         for (const path of [url, `${url}?includeArchived=true`, `${url}/rules`]) {
@@ -223,7 +223,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
         expect(res.body.length).toBeGreaterThan(0);
         expect(res.body[0]).toMatchObject({
           key: expect.any(String), name: expect.any(String), unit: expect.any(String),
-          phase: expect.any(Number), computed: expect.any(Boolean),
+          phase: expect.stringMatching(/^\d+(\.\d+)*$/), computed: expect.any(Boolean),
         });
       }
     });
@@ -232,7 +232,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       session.current = AGENT;
       type Served = { key: string; computed: boolean };
 
-      // Since the 2026-10-08 re-plan campaigns are evaluated in 18.5, after every metric registered
+      // Since the 2026-10-08 re-plan campaigns are evaluated in 18.2, after every metric registered
       // today, so every one answers `computed: true` (`registry.spec.ts` pins the set by key).
       const today = await request(app.getHttpServer()).get('/metrics').expect(200);
       expect(today.body.filter((m: Served) => !m.computed)).toEqual([]);
@@ -240,17 +240,17 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       // ADR-0035: a rule naming a metric whose phase has not shipped is recorded as waiting on
       // it. A screen can only say so if the wire carries the distinction, so it is proven with the
       // evaluation placed before the latest metrics, as it stood for a metric registered later.
-      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 18);
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: string }, 'CAMPAIGN_EVALUATION_PHASE', '18');
       const res = await request(app.getHttpServer()).get('/metrics').expect(200);
-      // The two event metrics are 18.5's since P18-T0 (D-registry), so they wait with the other three.
-      // P18.5-T8 registers *New Hire* at 18.5 (OD-152), so it waits with them.
+      // The two event metrics are 18.2's since P18-T0 (D-registry), so they wait with the other three.
+      // P18.2-T8 registers *New Hire* at 18.2 (OD-152), so it waits with them.
       expect(res.body.filter((m: Served) => !m.computed).map((m: Served) => m.key).sort()).toEqual([
         'CAMPAIGN_QUALIFICATION_STATUS', 'EVENT_ATTENDANCE_RATE', 'EVENT_ATTENDANCE_STATUS', 'EVENT_NPS', 'NEW_HIRES',
         'TRAINING_COMPLETION_PCT',
       ]);
     });
 
-    it('P18.5-T8 AC-1 serves the `campaign` flag on exactly the evaluable set, beside every requirable metric', async () => {
+    it('P18.2-T8 AC-1 serves the `campaign` flag on exactly the evaluable set, beside every requirable metric', async () => {
       session.current = OWNER;
       type Served = { key: string; campaign: boolean };
       const res = await request(app.getHttpServer()).get('/metrics').expect(200);
@@ -262,7 +262,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       expect(res.body.find((m: Served) => m.key === 'TRAINING_COMPLETION_PCT')).toMatchObject({ campaign: false });
     });
 
-    it('P18.5-T8 AC-1 refuses a requirement outside the evaluable set over HTTP, naming it', async () => {
+    it('P18.2-T8 AC-1 refuses a requirement outside the evaluable set over HTTP, naming it', async () => {
       session.current = OWNER;
       const res = await request(app.getHttpServer()).post('/kpm/settings/campaigns').send(aCampaign({
         requirements: [{ metricKey: 'TRAINING_COMPLETION_PCT', comparator: 'gte', value: 80 }],
@@ -272,14 +272,14 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
   });
 
   /**
-   * **The Owner's campaign refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): a code taken, a company-wide campaign and
+   * **The Owner's campaign refusals, in Bahasa Indonesia** (P18.10-T5 AC-7): a code taken, a company-wide campaign and
    * a requirement no campaign measures — the same code and details' shape as in English, the words the reader's.
    */
-  describe('P18.98-T5 AC-7 the Owner’s campaign refusals in Indonesian', () => {
+  describe('P18.10-T5 AC-7 the Owner’s campaign refusals in Indonesian', () => {
     const post = (body: Record<string, unknown>) =>
       request(app.getHttpServer()).post(url).set(...IN_INDONESIAN).send(body);
 
-    it('P18.98-T5 AC-7 a code taken and a company-wide campaign: 400 VALIDATION_FAILED, field and violations in Indonesian', async () => {
+    it('P18.10-T5 AC-7 a code taken and a company-wide campaign: 400 VALIDATION_FAILED, field and violations in Indonesian', async () => {
       session.current = OWNER;
       await request(app.getHttpServer()).post(url).send(aCampaign()).expect(201);
       const taken = await post(aCampaign()).expect(400);
@@ -306,7 +306,7 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
         .toBe('A campaign with the code YEAR_END_DRIVE already exists. Choose another code.');
     });
 
-    it('P18.98-T5 AC-7 a requirement no campaign measures, and part of a month, named in Indonesian', async () => {
+    it('P18.10-T5 AC-7 a requirement no campaign measures, and part of a month, named in Indonesian', async () => {
       session.current = OWNER;
       const res = await post(aCampaign({
         code: 'TRAINING_DRIVE', requirements: [{ metricKey: 'TRAINING_COMPLETION_PCT', comparator: 'gte', value: 80 }],

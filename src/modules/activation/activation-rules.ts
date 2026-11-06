@@ -86,7 +86,7 @@ export interface Progress<I extends PinnedItem> {
 /**
  * **`ACTIVATION_COMPLETION_PCT` and each aspect's status, computed once** (P13-T2 AC-5). The percentage
  * is `round(done / total × 100)` over the **pinned version's items** (`:6619`), half up in integers (`rateOver`;
- * P18.97-T3, parity F-254: 23 of 40 items is 58%, which `Math.round` read 57); an aspect is *Done* when
+ * P18.9-T3, parity F-254: 23 of 40 items is 58%, which `Math.round` read 57); an aspect is *Done* when
  * every item in it is, *Not started* when none is, *In progress* between (`:6537-6551`). A version with no
  * items — refused at publish, so never seen — reads as 0%.
  */
@@ -154,7 +154,7 @@ export function activityWeeksCompletedOn<D extends { date: LocalDate }>(
 }
 
 /**
- * **`coaching:weekly:4`'s predicate** (P18.96-T4 AC-2, ADR-0171 §3): the `n`th 1:1 with the hire **since their join
+ * **`coaching:weekly:4`'s predicate** (P18.8-T4 AC-2, ADR-0171 §3): the `n`th 1:1 with the hire **since their join
  * date** — a coaching session finalized at least once, on its office `date` (`CoachingReadings.countedSince`), a draft
  * never — oldest first, ties by session id so two reads agree. Two 1:1s on one day are two (ADR-0081). `null` before
  * there are `n`. A session dated before the start is not the hire's activation's.

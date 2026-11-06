@@ -2,7 +2,7 @@ import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn } from '@/common/i18n/reader';
 import { decodeUpload, decodeWindows1252, delimiterOf, parseCsv } from './production-csv';
 
-/** A refusal's words for an Indonesian reader (P18.98-T5 AC-2). */
+/** A refusal's words for an Indonesian reader (P18.10-T5 AC-2). */
 const inIndonesian = (fn: () => unknown): string => {
   try {
     fn();
@@ -54,7 +54,7 @@ describe('reading the bytes (ADR-0052)', () => {
       }));
     });
 
-    it('P18.98-T5 AC-2 says each in Indonesian too', () => {
+    it('P18.10-T5 AC-2 says each in Indonesian too', () => {
       expect(inIndonesian(() => decodeUpload(bytes()))).toBe('File ini kosong.');
       expect(inIndonesian(() => decodeUpload(bytes(0x41, 0x00, 0x42))))
         .toBe('Ini bukan file teks maupun workbook Excel. Unggah template yang sudah diisi sebagai .xlsx atau .csv.');

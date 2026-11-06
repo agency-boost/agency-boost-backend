@@ -9,7 +9,7 @@ import {
   CONFIGURED_EVENTS, EVENT_ANSWERS, EVENTS_FIXTURE_TITLES as TITLE, TOWN_HALL_ANSWERS,
 } from '../events-fixture';
 
-/** The Town Hall's title, naming its month in Indonesian as the office typed it (P18.98-T7). */
+/** The Town Hall's title, naming its month in Indonesian as the office typed it (P18.10-T7). */
 const townHall = (month: string) => TITLE.townHall(month);
 
 const RUN_MS = 300_000;
@@ -39,12 +39,12 @@ function pill(event: GuestEvent): string {
 }
 
 /**
- * **Phase 18.5 — events, seeded** (P18.5-T5 AC-11, P18.5-T6 AC-8; `events-fixture.ts`, whose header says which account
+ * **Phase 18.2 — events, seeded** (P18.2-T5 AC-11, P18.2-T6 AC-8; `events-fixture.ts`, whose header says which account
  * shows what). The seed run as the command runs it, at 10:00 on Saturday 10 October 2026 in Jakarta, then read back
  * through the events module's own services — what is asserted is what each account sees on a fresh seed — and run a
  * second time to prove it writes nothing.
  */
-describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Jakarta', () => {
+describe('Phase 18.2 the events seed — a run at 10:00 on 10 October 2026 in Jakarta', () => {
   const clock = new FixedClock(new Date('2026-10-10T03:00:00Z'));
   let wired: ReturnType<typeof configModule>;
   let seeded: SeedResult;
@@ -60,7 +60,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
   }, RUN_MS);
   afterAll(stopMongo);
 
-  it('P18.5-T5 AC-11 writes four events, eighteen member rows and twelve answers in 0417, nothing elsewhere', async () => {
+  it('P18.2-T5 AC-11 writes four events, eighteen member rows and twelve answers in 0417, nothing elsewhere', async () => {
     const kpm0417 = String((await col('kpms').findOne({ code: '0417' }))!._id);
     expect(Object.keys(seeded.events.events).sort()).toEqual([
       'KICKOFF', 'LEADERS_HUDDLE', 'NEW_AGENT_BOOTCAMP', 'PRODUCT_REFRESH', 'PRULINK_BRIEFING', 'SALES_CLINIC', 'TOWN_HALL',
@@ -75,7 +75,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
       .toBe(townHall('September'));
   });
 
-  it('P18.5-T5 AC-11 Rina’s /events shows all five card states, and no Leaders’ huddle', async () => {
+  it('P18.2-T5 AC-11 Rina’s /events shows all five card states, and no Leaders’ huddle', async () => {
     const events = await list('rina@kpm0417.test');
     expect(events.map((e) => [e.title, pill(e)])).toEqual([
       [TITLE.NEW_AGENT_BOOTCAMP, 'Feedback sent'],
@@ -88,7 +88,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(events[0].me.feedback).toMatchObject({ score: 9, why: EVENT_ANSWERS.rinaBootcamp[1] });
   });
 
-  it('P18.5-T5 AC-11 every seeded event starts at a plausible hour of the office’s day; only the huddle is the run’s', async () => {
+  it('P18.2-T5 AC-11 every seeded event starts at a plausible hour of the office’s day; only the huddle is the run’s', async () => {
     const start = async (code: string) => ((await col('events').findOne({ _id: new mongoose.Types.ObjectId(seeded.events.events[code]) }))!
       .startsAt as Date).toISOString();
     expect({
@@ -108,7 +108,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(await col('eventFeedback').findOne({})).not.toHaveProperty('version');
   });
 
-  it('P18.5-T5 AC-11 the Leaders’ huddle is running at the run, from an hour before it to six hours after', async () => {
+  it('P18.2-T5 AC-11 the Leaders’ huddle is running at the run, from an hour before it to six hours after', async () => {
     const huddle = (await col('events').findOne({ _id: new mongoose.Types.ObjectId(seeded.events.events.LEADERS_HUDDLE) }))!;
     expect([huddle.startsAt.toISOString(), huddle.endsAt.toISOString()]).toEqual(['2026-10-10T02:00:00.000Z', '2026-10-10T09:00:00.000Z']);
     // Still running three hours into the walk.
@@ -117,7 +117,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect((await later.eventGuests.list(agus)).events.find((e) => e.code === 'LEADERS_HUDDLE')).toMatchObject({ phase: 'running', ended: false });
   });
 
-  it('P18.5-T5 AC-11 Budi’s cancelled RSVP; Agus and Sari going to the huddle; Dewi, who leads nobody, does not see it', async () => {
+  it('P18.2-T5 AC-11 Budi’s cancelled RSVP; Agus and Sari going to the huddle; Dewi, who leads nobody, does not see it', async () => {
     expect((await list('budi@kpm0417.test')).find((e) => e.code === 'PRODUCT_REFRESH')!.me.rsvp).toBe('cancelled');
     for (const email of ['agus@kpm0417.test', 'sari@kpm0417.test']) {
       const huddle = (await list(email)).find((e) => e.code === 'LEADERS_HUDDLE');
@@ -126,7 +126,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect((await list('dewi@kpm0417.test')).map((e) => e.code)).not.toContain('LEADERS_HUDDLE');
   });
 
-  it('P18.5-T5 AC-11 Yanti’s current membership does not see the Bootcamp; her first membership’s answer stays with it', async () => {
+  it('P18.2-T5 AC-11 Yanti’s current membership does not see the Bootcamp; her first membership’s answer stays with it', async () => {
     expect((await list('removed@kpm0417.test')).map((e) => e.code)).not.toContain('NEW_AGENT_BOOTCAMP');
     const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     const first = await as('0417', 'removed@kpm0417.test', { removed: true });
@@ -136,7 +136,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     ]);
   });
 
-  it('P18.5-T6 AC-8 the Town Hall reads NPS 0 · 8 responses, as drawn; the Owner’s own row is the Admin’s to confirm', async () => {
+  it('P18.2-T6 AC-8 the Town Hall reads NPS 0 · 8 responses, as drawn; the Owner’s own row is the Admin’s to confirm', async () => {
     const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     const admin = await as('0417', 'admin@kpm0417.test', { admin: true });
     const summary = await wired.eventRollCalls.feedbackSummary(owner, seeded.events.events.TOWN_HALL);
@@ -152,7 +152,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(asOwner.people.find((p) => p.name === 'Rina Wijaya')).toMatchObject({ said: null, status: 'not_registered' });
   });
 
-  it('P18.5-T6 AC-8 PRULink: one confirmed answer, one awaiting, one absent; Sales clinic empty', async () => {
+  it('P18.2-T6 AC-8 PRULink: one confirmed answer, one awaiting, one absent; Sales clinic empty', async () => {
     const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     const prulink = await wired.eventRollCalls.feedbackSummary(owner, seeded.events.events.PRULINK_BRIEFING);
     expect(prulink).toMatchObject({ nps: 100, counted: 1, responses: 2, awaitingConfirmation: 1 });
@@ -168,14 +168,14 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(clinicCall.attendanceRate).toBe(0);
   });
 
-  it('P18.5-T5 AC-11 0555’s agent sees only 0555’s events — not its leaders’ huddle — and nobody there has answered', async () => {
+  it('P18.2-T5 AC-11 0555’s agent sees only 0555’s events — not its leaders’ huddle — and nobody there has answered', async () => {
     const lina = await as('0555', 'agent@kpm0555.test');
     const events = (await wired.eventGuests.list(lina)).events;
     expect(events.map((e) => e.code).sort()).toEqual(['KICKOFF', 'PRULINK_BRIEFING']);
     expect(events.every((e) => e.me.rsvp === null && e.me.feedback === null)).toBe(true);
   });
 
-  it('P18.5-T5 AC-11 a second run writes nothing', async () => {
+  it('P18.2-T5 AC-11 a second run writes nothing', async () => {
     const again = await seedDemo({ clock, log: quiet });
     expect(again.events.written).toBe(0);
     expect(again.written.eventRsvps ?? 0).toBe(0);
@@ -183,7 +183,7 @@ describe('Phase 18.5 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(again.written.events ?? 0).toBe(0);
   }, RUN_MS);
 
-  it('P18.5-T5 AC-11 a re-run in another month writes no event and prints the Town Hall’s stored title', async () => {
+  it('P18.2-T5 AC-11 a re-run in another month writes no event and prints the Town Hall’s stored title', async () => {
     const printed: string[] = [];
     const later = await seedDemo({ clock: new FixedClock(new Date('2026-11-20T03:00:00Z')), log: (text) => printed.push(text) });
     expect(later.events.written).toBe(0);

@@ -41,7 +41,7 @@ export function campaignPickerOrder(a: OfficeCampaign, b: OfficeCampaign): numbe
 const achievedApplies = (campaign: OfficeCampaign) => campaign.kind === 'seasonal' && campaign.phase === 'ended';
 
 /**
- * **One member's cell for one campaign** (P18.6-T2 AC-6, AC-8) — the evaluation the member's own dialog reads, the
+ * **One member's cell for one campaign** (P18.3-T2 AC-6, AC-8) — the evaluation the member's own dialog reads, the
  * override applied (`fromFrozen`).
  *
  * - *Chasing* (`chasing`, done) / *Not chasing* (`not_chasing`); *—* in both for a rung it is not open to.
@@ -74,7 +74,7 @@ export function campaignCell(
 }
 
 /**
- * **Campaigns in the Owner's compliance tree** (P18.6-T1 AC-3, P18.6-T2 AC-4, AC-6; D-window, D-chips, D-override).
+ * **Campaigns in the Owner's compliance tree** (P18.3-T1 AC-3, P18.3-T2 AC-4, AC-6; D-window, D-chips, D-override).
  *
  * - **The catalog**: the office's seasonal campaigns overlapping this year — ended ones included — **and one whose
  *   window's last month is last December**, which becomes final this January (the exit review's M1: without it a

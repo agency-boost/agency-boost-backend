@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# No image carries a credentials file or an env file (P18.7 review, H1).
+# No image carries a credentials file or an env file (P18.4 review, H1).
 #
 #   deploy/ci/no-secrets-in-image.sh agencyboost-api:ci agencyboost-tools:ci
 #

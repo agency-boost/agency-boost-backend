@@ -15,7 +15,8 @@ export class RequestDocumentUploadDto {
   @ApiProperty({
     example: 'application/pdf',
     maxLength: 255,
-    description: '`application/pdf`, and nothing else: any other type is refused `415 ASSET_TYPE_NOT_ALLOWED`.',
+    description: '`application/pdf` or `text/html` (ADR-0217 §1): any other type is refused '
+      + '`415 ASSET_TYPE_NOT_ALLOWED`. An HTML page is confirmed by its first bytes and drawn only in a sandboxed frame.',
   })
   @IsString() @MaxLength(255)
   mimeType!: string;

@@ -3,7 +3,9 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
 import { personLeadCounts, personLeadCountsAt, type CountedLead, type DatedLead } from '@/domain/metrics/lead-counts';
-import { recruitmentClosedIn } from '@/domain/metrics/recruitment-closed';
+import {
+  leadPotensiThisMonth, openAtEndOf, personPotensi, wonIn, type PersonPotensi, type PotensiMonth,
+} from '@/domain/metrics/potensi';
 import type { LeadCountsRow } from '@/domain/metrics/unit-rollup';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import type { OfficeDay } from '@/modules/tenants/tenant-day.service';
@@ -12,7 +14,7 @@ import { LeadRepository } from './lead.repository';
 import type { LeadType } from './lead.schema';
 
 /**
- * **One closing, as another module reads it** (P18.96-T4): a sales lead that reached *Paid and issued*, the instant it
+ * **One closing, as another module reads it** (P18.8-T4): a sales lead that reached *Paid and issued*, the instant it
  * first did and who moved it there, and whether it was logged from the checklist rather than walked up the ladder.
  */
 export interface LeadClosing {
@@ -66,6 +68,31 @@ export interface OpenLead {
   overdueDays: number | null;
   nextActionDate: string | null;
   nextActionNote: string | null;
+}
+
+/** An open lead behind a *Potensi* row (P19.1-T6 AC-6, AC-7): the client's or the kandidat's name, and its next step. */
+export interface PotensiOpenLead {
+  id: string;
+  name: string;
+  statusCode: string | null;
+  nextActionDate: string | null;
+  nextActionNote: string | null;
+}
+
+/** A kandidat marked *Berhasil* in the month, and the membership they became where one is linked. */
+export interface PotensiRekrutLead {
+  id: string;
+  name: string;
+  statusCode: string | null;
+  rekrutAt: Date;
+  joinedMembershipId: string | null;
+}
+
+/** One member's leads behind their *Potensi* row (`LeadReadings.potensiLeadsOf`). */
+export interface PotensiLeads {
+  sales: PotensiOpenLead[];
+  recruitment: PotensiOpenLead[];
+  rekrut: PotensiRekrutLead[];
 }
 
 /**
@@ -166,7 +193,7 @@ export class LeadReadings {
   }
 
   /**
-   * **How many open leads some members hold between them** (P18.8-T15 AC-4): open is `openOf`'s rule — no outcome,
+   * **How many open leads some members hold between them** (P18.5-T15 AC-4): open is `openOf`'s rule — no outcome,
    * not deleted. `owners` `null` is the office, the reader's own leads left out by `except`. A count, never rows.
    */
   async countOpenOf(ctx: RequestContext, owners: readonly string[] | null, except: string): Promise<number> {
@@ -258,22 +285,14 @@ export class LeadReadings {
     return new Map(ids.map((id) => [id, personLeadCountsAt(byOwner.get(id)!, { ...day, terminalRecruitmentCodes })]));
   }
 
-  /**
-   * **`RECRUITMENT_CLOSED_LAST_MONTH` for the office** (Phase 18, D-recruit): the recruitment leads closed won in
-   * a month, whoever owns them — the office's, as `LeadService.summary` counts the pipeline. One read of the
-   * month's won recruitment leads, three fields each; a count leaves here, never a lead.
+  /*
+   * `recruitmentClosed` was here: `RECRUITMENT_CLOSED_LAST_MONTH` as the recruitment leads closed won in a month (Phase
+   * 18, D-recruit). Retired by P19.3-T1 (ADR-0200 §5, D2): the figure is the office's upload's `RECRUITMENT`
+   * (`OfficialApe.officeMonths`), and a lead is a candidate the pipeline counts by stage.
    */
-  async recruitmentClosed(ctx: RequestContext, month: { start: Date; endExclusive: Date }): Promise<number> {
-    const rows = await this.leads.find(
-      ctx,
-      { type: 'recruitment', outcome: 'won', outcomeAt: { $gte: month.start, $lt: month.endExclusive } },
-      { projection: { type: 1, outcome: 1, outcomeAt: 1 } },
-    );
-    return recruitmentClosedIn(rows, month);
-  }
 
   /**
-   * **Each member's closings, for many members at once** (P18.96-T4 AC-1, AC-2): every **sales** lead of theirs that
+   * **Each member's closings, for many members at once** (P18.8-T4 AC-1, AC-2): every **sales** lead of theirs that
    * has reached *Paid and issued* (`FIRST_SALE_STAGE_CODE`), with the instant it **first** did, who moved it there,
    * and whether it was logged from the checklist (`loggedFrom`). A recruitment lead never: it is a person joining, not
    * a case. A deleted lead is not among them. One read for the whole list, on the `(kpmId, ownerMembershipId, …)`
@@ -292,6 +311,65 @@ export class LeadReadings {
     }
     for (const list of out.values()) list.sort(byClosedAt);
     return out;
+  }
+
+  /**
+   * **Each member's *Potensi* figures for a month, for many members at once** (P19.1-T6; ADR-0193): over every lead
+   * switched on for the month or marked *Berhasil* inside it — `personPotensi`'s rules, defined once in
+   * `domain/metrics/potensi.ts`. One read for the whole list, on the `(kpmId, ownerMembershipId, …)` index, five fields
+   * each; a count leaves here, never a lead. Every member asked about gets an entry, all zeros where they hold none.
+   */
+  async potensiOfMany(
+    ctx: RequestContext, membershipIds: readonly string[], m: PotensiMonth,
+  ): Promise<Map<string, PersonPotensi>> {
+    const ids = [...new Set(membershipIds)];
+    const byOwner = new Map<string, Parameters<typeof personPotensi>[0][number][]>(ids.map((id) => [id, []]));
+    if (ids.length > 0) {
+      const rows = await this.leads.find(ctx, {
+        ownerMembershipId: { $in: ids },
+        $or: [{ 'commitments.month': m.month }, { outcome: 'won', outcomeAt: { $gte: m.start, $lt: m.endExclusive } }],
+      }, { projection: { ownerMembershipId: 1, type: 1, outcome: 1, outcomeAt: 1, commitments: 1 } });
+      for (const row of rows) {
+        byOwner.get(row.ownerMembershipId)!.push({
+          type: row.type, outcome: row.outcome, outcomeAt: row.outcomeAt ?? null, commitments: row.commitments,
+        });
+      }
+    }
+    return new Map(ids.map((id) => [id, personPotensi(byOwner.get(id)!, m)]));
+  }
+
+  /**
+   * **One member's leads behind their *Potensi* row** (P19.1-T6 AC-6, AC-7; Q-2: a leader sees the names): their
+   * sales leads that are *potensi* for the month — switched on and still open at its end — nearest next action first,
+   * and their recruitment leads that are *potensi*, then those marked *Berhasil* in the month (*rekrut*), newest first,
+   * with the membership each became where one is linked. The caller decides who may read them and records the read.
+   */
+  async potensiLeadsOf(ctx: RequestContext, membershipId: string, m: PotensiMonth): Promise<PotensiLeads> {
+    const rows = await this.leads.find(ctx, {
+      ownerMembershipId: membershipId,
+      type: { $in: ['sales', 'recruitment'] },
+      $or: [{ 'commitments.month': m.month }, { outcome: 'won', outcomeAt: { $gte: m.start, $lt: m.endExclusive } }],
+    });
+    const open = rows
+      .filter((row) => leadPotensiThisMonth(row, m.month) && openAtEndOf({ outcome: row.outcome, outcomeAt: row.outcomeAt ?? null }, m))
+      .map((row) => ({ row, id: String(row._id), registeredAt: row.dateRegistered?.getTime() ?? 0, nextActionDate: row.nextActionDate }))
+      .sort(byNextAction)
+      .map(({ row, id }) => ({
+        id, name: row.name, type: row.type!, statusCode: row.statusCode,
+        nextActionDate: row.nextActionDate, nextActionNote: row.nextActionNote,
+      }));
+    const rekrut = rows
+      .filter((row) => row.type === 'recruitment' && wonIn({ outcome: row.outcome, outcomeAt: row.outcomeAt ?? null }, m))
+      .sort((a, b) => b.outcomeAt!.getTime() - a.outcomeAt!.getTime() || (String(a._id) < String(b._id) ? -1 : 1))
+      .map((row) => ({
+        id: String(row._id), name: row.name, statusCode: row.statusCode, rekrutAt: row.outcomeAt!,
+        joinedMembershipId: row.joinedMembershipId ?? null,
+      }));
+    return {
+      sales: open.filter((l) => l.type === 'sales').map(({ type: _type, ...l }) => l),
+      recruitment: open.filter((l) => l.type === 'recruitment').map(({ type: _type, ...l }) => l),
+      rekrut,
+    };
   }
 
   /**

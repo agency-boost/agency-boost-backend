@@ -24,7 +24,7 @@ Object.assign(process.env, {
   MONGODB_DB_NAME: 'agencyboost_boot',
   JWT_ACCESS_SECRET: 'a'.repeat(40),
   JWT_REFRESH_SECRET: 'b'.repeat(40),
-  // P18.7-T2: no storage key at all — a test boots without a bucket (D12).
+  // P18.4-T2: no storage key at all — a test boots without a bucket (D12).
   SMTP_HOST: 'smtp.test',
   MAIL_FROM: 'AgencyBoost <no-reply@test>',
   APP_BASE_URL: 'http://localhost:3000',

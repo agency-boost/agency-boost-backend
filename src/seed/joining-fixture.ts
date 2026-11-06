@@ -9,7 +9,7 @@ import { NotificationTemplate } from '@/modules/notifications/notification.types
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **Adding an agent, seeded** (P18.96-T3; ADR-0170; `functional/org-hierarchy.md`, *Adding an agent*): what *+ Add
+ * **Adding an agent, seeded** (P18.8-T3; ADR-0170; `functional/org-hierarchy.md`, *Adding an agent*): what *+ Add
  * agent* leaves behind that no other fixture does, in office 0417.
  *
  * | Signed in as | Sees |
@@ -122,7 +122,7 @@ export async function seedJoiningFixture(deps: JoiningFixtureDeps): Promise<Join
       _id: new mongoose.Types.ObjectId(transferId), kpmId,
       membershipId: deps.raka.membershipId, fromLeaderId: deps.satria.membershipId, toLeaderId: deps.agus.membershipId,
       requestedByMembershipId: deps.agus.membershipId,
-      // The name Agus typed in *+ Add agent* — all he is shown of the person (the P18.96 exit review, M3).
+      // The name Agus typed in *+ Add agent* — all he is shown of the person (the P18.8 exit review, M3).
       requestedName: 'Raka Aditama',
       status: 'pending', decidedAt: null, decidedByMembershipId: null,
       reason: null, deletedAt: null, createdBy: deps.agus.membershipId, updatedBy: deps.agus.membershipId,

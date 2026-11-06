@@ -5,7 +5,7 @@ import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { CALENDAR, CALENDAR_ALL_DAY_TYPE, type CalendarEntryType } from '@/domain/constants';
 import { CALENDAR_REFUSALS } from './calendar.messages';
 
-/** An entry's timing refused field by field, each sentence in both languages (P18.98-T5 AC-3). */
+/** An entry's timing refused field by field, each sentence in both languages (P18.10-T5 AC-3). */
 const SAY = CALENDAR_REFUSALS.VALIDATION_FAILED;
 const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
 

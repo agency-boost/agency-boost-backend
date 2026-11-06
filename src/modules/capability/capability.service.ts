@@ -8,7 +8,7 @@ import { CapabilityCatalogRepository } from './capability.repository';
 import { capabilitySeedDocument, defaultCapabilityLadder } from './capability-payload';
 import { CAPABILITY_REFUSALS } from './capability.messages';
 
-/** The office's own edits, refused in both languages (P18.98-T5 AC-3). */
+/** The office's own edits, refused in both languages (P18.10-T5 AC-3). */
 const SAY = CAPABILITY_REFUSALS.VALIDATION_FAILED;
 
 export interface CapabilityEntryView {

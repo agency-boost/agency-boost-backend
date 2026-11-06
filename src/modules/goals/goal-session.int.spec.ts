@@ -439,7 +439,7 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
 
   /*
    * Phase 11 exit review, B2 (ADR-0075, ADR-0058), **partly reversed by ADR-0183** (OD-242; the owner's staging review
-   * SR-07, P18.99-T17): the APE achieved so far is the carrier's figure where the office holds one, and otherwise the
+   * SR-07, P18.11-T17): the APE achieved so far is the carrier's figure where the office holds one, and otherwise the
    * figure typed — by the member, **or by anybody who may save their plan** (a leader who coaches them, the Owner, the
    * Admin). Lukas, Tari and Budi have no production on file; Indah has August and September.
    */

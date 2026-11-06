@@ -24,10 +24,13 @@ type Method = 'create' | 'createWithAccount' | 'setLevel' | 'activate';
 const CALLERS: Record<string, { method: Method; makes: string }[]> = {
   'modules/org/onboarding.service.ts': [{ method: 'create', makes: 'Agent, pending (registration)' }],
   'modules/org/leader-code.service.ts': [{ method: 'create', makes: 'Agent (a leader’s code)' }],
-  // P18.96-T3 (ADR-0170 §3): an invite accepted places its person at the ladder's joining rung, active.
+  // P18.8-T3 (ADR-0170 §3): an invite accepted places its person at the ladder's joining rung, active.
   'modules/org/invites.service.ts': [{ method: 'create', makes: 'Agent (an invite accepted)' }],
   'modules/tenants/roster-import.service.ts': [
     { method: 'createWithAccount', makes: 'any, from the role column, the account made with the seat' },
+    // ADR-0205 §5: a row whose code is already in the office updates that member, the rung through the role change's own
+    // method — so a promotion by file holds a seat under the same lease, and one past the limit is refused as there.
+    { method: 'setLevel', makes: 'any, from the role column, updating a code already in the office' },
   ],
   'modules/tenants/tenant.service.ts': [
     { method: 'create', makes: 'AB, assigning an Owner who is not yet a member' },
@@ -104,12 +107,12 @@ describe('every caller of the HierarchyService writes that can make a leader is 
     // The ladder's Senior Leader rung (ADR-0156): `AB` on the default ladder, a rung the limit counts.
     const tenantService = readFileSync(join(SRC, 'modules/tenants/tenant.service.ts'), 'utf8');
     expect(tenantService).toMatch(/const role = await this\.hierarchy\.entryRungCode\(kpmId, 'owner'\)/);
-    // P18.96-T2: and an existing agent, joined today (ADR-0169 §6) — the classification rides along, the rung does not move.
+    // P18.8-T2: and an existing agent, joined today (ADR-0169 §6) — the classification rides along, the rung does not move.
     expect(create?.text).toMatch(/\{\s*userId, role, leaderId: null, status: 'active', joining: \{ joinedAs: 'existing_agent' \},\s*\}/);
   });
 
   /*
-   * **The only way past the limit is AgencyBoost's approval** (ADR-0157 §3, P18.8-T2 AC-8). `withLeaderSeat` skips
+   * **The only way past the limit is AgencyBoost's approval** (ADR-0157 §3, P18.5-T2 AC-8). `withLeaderSeat` skips
    * the count for an `ApprovedPastLimit` alone; one is built — its `approvedRequestId` written — only where an
    * approved request is carried out, and those two methods are called from the request service alone, after
    * `leader_limit_request:decide`.

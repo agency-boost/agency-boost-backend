@@ -2,9 +2,9 @@ import type { TrainingStatus } from '@/domain/constants';
 import { rateOver } from './rate';
 
 /**
- * **`TRAINING_COMPLETION_PCT`** (`metrics-and-definitions.md`, *Training completion*; P18.5-T2 AC-2): the share
+ * **`TRAINING_COMPLETION_PCT`** (`metrics-and-definitions.md`, *Training completion*; P18.2-T2 AC-2): the share
  * of the modules **offered** in a scope that a member has marked *Done*. One function, invariant §8: the
- * learner's list, the coach's *Training* tab, `/coaching/me/training` and Phase 18.6's tree all count through it.
+ * learner's list, the coach's *Training* tab, `/coaching/me/training` and Phase 18.3's tree all count through it.
  *
  * - **The scope** is the whole catalog, one category, or one skill (ADR-0029's middle level).
  * - **The denominator is the modules offered in it** — in the office's published snapshot: active, under an
@@ -57,7 +57,7 @@ export interface TrainingCompletionByScope {
   categories: ReadonlyMap<string, TrainingCompletion>;
   skills: ReadonlyMap<string, TrainingCompletion>;
   /**
-   * **Every offered module done** — what 18.6's compliance chip counts a member toward (`KPM_Owner.html:
+   * **Every offered module done** — what 18.3's compliance chip counts a member toward (`KPM_Owner.html:
    * 3462-3468`). `false` when nothing is offered: a member is not *complete* on an empty catalog.
    */
   allOfferedDone: boolean;

@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
+import { GENDERS, type Gender } from '@/domain/constants';
 
 export type LeadDocument = HydratedDocument<Lead>;
 
@@ -10,7 +11,7 @@ export type LeadType = (typeof LEAD_TYPES)[number];
 export const LEAD_OUTCOMES = ['won', 'lost'] as const;
 export type LeadOutcome = (typeof LEAD_OUTCOMES)[number];
 
-/** Where a lead was written other than the Leads screen: a closing logged from the checklist (P18.96-T4). */
+/** Where a lead was written other than the Leads screen: a closing logged from the checklist (P18.8-T4). */
 export const LEAD_ORIGINS = ['activation_checklist'] as const;
 export type LeadOrigin = (typeof LEAD_ORIGINS)[number];
 
@@ -162,6 +163,24 @@ export class Lead {
   @Prop({ type: Date, default: null })
   consentAt!: Date | null;
 
+  /**
+   * **The client's age at the next birthday, on `ageRecordedOn`** (P19.7-T1 AC-1; ADR-0224 §1): optional, an integer
+   * from `LEAD_AGE.MIN` to `LEAD_AGE.MAX`, and read as **today's** age (`lead-age.ts`). A third party's personal data,
+   * kept for one purpose — to choose the products that fit and to read the premium from the insurer's illustration — and
+   * cleared by name with the lead's erasure (P20-T1). **No birth date** is stored (minimisation, ADR-0224 §6). No index:
+   * nothing searches or sorts on it.
+   */
+  @Prop({ type: Number, default: null })
+  age!: number | null;
+
+  /** The KPM's day `age` was written, `YYYY-MM-DD`: set by the server, never by a body. `null` with `age`. */
+  @Prop({ type: String, default: null })
+  ageRecordedOn!: string | null;
+
+  /** **`male` or `female`, or `null`** (ADR-0224 §1; ADR-0158's values): *Laki-laki*, *Perempuan* on screen. */
+  @Prop({ type: String, enum: [...GENDERS, null], default: null })
+  gender!: Gender | null;
+
   /** What the lead holds. Renaming a status moves neither this nor the id beside it. */
   @Prop({ type: String, default: null, uppercase: true, trim: true })
   statusCode!: string | null;
@@ -226,7 +245,7 @@ export class Lead {
   source!: string | null;
 
   /**
-   * **Where the lead sits in its owner's list**, smallest first (P18.8-T7, ADR-0161 §1).
+   * **Where the lead sits in its owner's list**, smallest first (P18.5-T7, ADR-0161 §1).
    *
    * The owner's, and nobody else's: `GET /leads` without `sort` reads it, and `PATCH /leads/order` is
    * the only route that writes it, with the caller's own open leads in the order they dragged them. A new
@@ -258,7 +277,7 @@ export class Lead {
   transitions!: LeadTransition[];
 
   /**
-   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3, ADR-0171 §3): `activation_checklist` for a sales
+   * **A closing logged from the 90-day checklist** (P18.8-T4 AC-3, ADR-0171 §3): `activation_checklist` for a sales
    * lead its owner or a leader created from *Which case? → Log a new closing*, straight at *Paid and issued* on the
    * day they gave, rather than walked up the ladder. It is the ADR's *manual tick that names a closing*: it counts as
    * a first sale marked `manual`, and **not as the data that confirms one** (`firstSaleOf`'s `dataOnly`). `null` for
@@ -266,6 +285,16 @@ export class Lead {
    */
   @Prop({ type: String, enum: [...LEAD_ORIGINS, null], default: null })
   loggedFrom!: LeadOrigin | null;
+
+  /**
+   * **The membership a recruitment lead became** (P19.1-T6 AC-7; UI-155; ADR-0193 §3): written when *+ Add agent* is
+   * completed from the lead's row on the Unit Dashboard's *Potensi* tab (*Tambahkan ke unit ›*) — at once when the code
+   * links an account already in the office, or when the invite it made is accepted. The membership `_id` (invariant §2),
+   * never a name. **It decides which button the row offers — *New Hires ›* or *Tambahkan ke unit ›* — and never whether
+   * the lead counts as a rekrut**, which its outcome alone decides. `null` for every other lead, and until then.
+   */
+  @Prop({ type: String, default: null })
+  joinedMembershipId!: string | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
@@ -284,7 +313,7 @@ export const LeadSchema = SchemaFactory.createForClass(Lead);
  * Every index leads with `kpmId` (invariant §1).
  *
  * The agent's own screen is the read this collection exists for: one member's live leads, newest
- * first, which is the prototype's default sort — and since P18.8-T7 the `dateRegistered` sort and the
+ * first, which is the prototype's default sort — and since P18.5-T7 the `dateRegistered` sort and the
  * closed cards, the default being the owner's own order (the last index below).
  */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, deletedAt: 1, dateRegistered: -1 });
@@ -296,7 +325,7 @@ LeadSchema.index({ kpmId: 1, type: 1, outcome: 1, statusCode: 1, deletedAt: 1 })
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, nextActionDate: 1, deletedAt: 1 });
 
 /**
- * The owner's own order (P18.8-T7): `GET /leads` without `sort`, and the first place a new lead takes,
+ * The owner's own order (P18.5-T7): `GET /leads` without `sort`, and the first place a new lead takes,
  * which is one less than the owner's smallest.
  */
 LeadSchema.index({ kpmId: 1, ownerMembershipId: 1, position: 1 });

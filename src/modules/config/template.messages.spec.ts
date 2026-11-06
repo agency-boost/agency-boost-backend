@@ -7,7 +7,7 @@ const V = R.VALIDATION_FAILED;
 const M = TEMPLATE_MESSAGES;
 
 /**
- * **Every sentence the Super Admin's templates and provisioning write, in both languages** (P18.98-T5 AC-2, AC-4): each
+ * **Every sentence the Super Admin's templates and provisioning write, in both languages** (P18.10-T5 AC-2, AC-4): each
  * refusal, and each reason *Save as template* gives for what it left out — said with its values kept as they are, both
  * arms of every choice included, and every entry of both catalogues here.
  */
@@ -39,11 +39,17 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.templateNeedsName', V.templateNeedsName, []],
   ['VALIDATION_FAILED.archivedCannotBeDefault', V.archivedCannotBeDefault, ['default']],
   ['VALIDATION_FAILED.alreadyThisCompanys', V.alreadyThisCompanys, []],
-  ['VALIDATION_FAILED.fromShape', V.fromShape, ['from', '"empty"', '"defaults"', '{ templateId }']],
+  ['VALIDATION_FAILED.fromShape', V.fromShape, ['from', '"empty"', '"defaults"', '{ templateId, rungMap? }']],
+  // P19.4-T5 AC-4 (ADR-0213 §4): the rung map's two refusals.
+  ['VALIDATION_FAILED.rungMapTarget', V.rungMapTarget({ codes: ['XX'] }), ['rungMap', 'XX']],
+  ['VALIDATION_FAILED.rungMapTarget', V.rungMapTarget({ codes: ['XX', 'YY'] }), ['XX, YY']],
+  ['VALIDATION_FAILED.rungMapShape', V.rungMapShape, ['rungMap', '{ "SBP": "BP" }']],
   ['VERSION_CONFLICT.defaultMoved', R.VERSION_CONFLICT.defaultMoved, ['default']],
+  ['VERSION_CONFLICT.draftMoved', R.VERSION_CONFLICT.draftMoved, []],
   ['TEMPLATE_IS_DEFAULT.cannotStopBeingDefault', R.TEMPLATE_IS_DEFAULT.cannotStopBeingDefault({ name: 'Main' }), ['Main']],
   ['TEMPLATE_IS_DEFAULT.cannotArchive', R.TEMPLATE_IS_DEFAULT.cannotArchive({ name: 'Main' }), ['Main']],
-  ['TEMPLATE_NAME_TAKEN.taken', R.TEMPLATE_NAME_TAKEN.taken({ name: 'Main' }), ['Main']],
+  // SA UI-017's sentence names no template (P19.4-T3 AC-12): the name is the field's own, and `details.name`.
+  ['TEMPLATE_NAME_TAKEN.taken', R.TEMPLATE_NAME_TAKEN.taken({ name: 'Main' }), []],
   ['TEMPLATE_RUNG_UNKNOWN.notOnTheLadder', R.TEMPLATE_RUNG_UNKNOWN.notOnTheLadder({ codes: ['SM'] }), ['SM']],
   ['TEMPLATE_RUNG_UNKNOWN.notOnTheLadder', R.TEMPLATE_RUNG_UNKNOWN.notOnTheLadder({ codes: ['SM', 'UM'] }), ['SM, UM']],
   ['ASSET_NOT_CONFIRMED.neverUploaded', R.ASSET_NOT_CONFIRMED.neverUploaded({ label: 'Guide', moduleCode: 'MOD_1' }),
@@ -68,7 +74,7 @@ const REASONS: [entry: keyof typeof M, sentence: Message, values: string[]][] = 
   ['ladderLeftOut', M.ladderLeftOut({ missing: 'milestone' }), ['milestone']],
 ];
 
-describe('P18.98-T5 AC-2 the templates’ sentences', () => {
+describe('P18.10-T5 AC-2 the templates’ sentences', () => {
   it.each([...REFUSALS, ...REASONS])('%s is said in English and in Indonesian, its values kept as they are', (_entry, sentence, values) => {
     const [en, id] = [english(sentence), indonesian(sentence)];
     expect(en).toBeTruthy();

@@ -62,6 +62,37 @@ export class TrainingContent {
 
 export const TrainingContentSchema = SchemaFactory.createForClass(TrainingContent);
 
+/** Why an office's own material left the module (ADR-0208 §3, §5). */
+export const CONTENT_HISTORY_REASONS = ['revert', 'template_push'] as const;
+export type ContentHistoryReason = (typeof CONTENT_HISTORY_REASONS)[number];
+
+/**
+ * **An office's own material, as it stood when it was put away** (ADR-0208 §3, §5; invariant §6): by *Urungkan
+ * perubahan saya*, or by a push the Super Admin confirmed. Kept on the module, readable, never hard-deleted — the files
+ * it names stay in the registry, released rather than removed.
+ */
+@Schema({ _id: false })
+export class TrainingContentHistoryEntry {
+  @Prop({ type: TrainingContentSchema, required: true })
+  content!: TrainingContent;
+
+  @Prop({ type: String, enum: CONTENT_HISTORY_REASONS, required: true })
+  reason!: ContentHistoryReason;
+
+  @Prop({ type: Date, required: true })
+  at!: Date;
+
+  /** The user who put it away: the Owner or an Admin reverting, or the Super Admin pushing. */
+  @Prop({ type: String, default: null })
+  by!: string | null;
+
+  /** The template pushed, for `template_push`. */
+  @Prop({ type: String, default: null })
+  templateId!: string | null;
+}
+
+export const TrainingContentHistoryEntrySchema = SchemaFactory.createForClass(TrainingContentHistoryEntry);
+
 /**
  * One thing an agent studies, taught under one skill (P5-T1, ADR-0029).
  *
@@ -93,6 +124,13 @@ export class TrainingModule {
   title!: string;
 
   /**
+   * ***Deskripsi singkat*** (P19.6-T4, ADR-0220 §1; UI-161): the grey line under the title, at most
+   * `TRAINING_TEXT.DESCRIPTION_MAX` characters of plain text, or `null`. The name stays `title`.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  description!: string | null;
+
+  /**
    * Whether agents are offered this module **at all**. Not when: that is the office's own
    * publish (P4-T6). A draft never reaches an agent, whatever the office publishes.
    */
@@ -122,6 +160,13 @@ export class TrainingModule {
    */
   @Prop({ type: TrainingContentSchema, default: null })
   officeContent!: TrainingContent | null;
+
+  /**
+   * **The office's own material it no longer shows**, newest last (ADR-0208 §3, §5): what *Urungkan perubahan saya*
+   * and a confirmed push moved out of `officeContent`. Readable in the module's history, never hard-deleted.
+   */
+  @Prop({ type: [TrainingContentHistoryEntrySchema], default: [] })
+  contentHistory!: TrainingContentHistoryEntry[];
 
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;

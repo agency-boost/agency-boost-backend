@@ -13,7 +13,7 @@ const COMPANY = '66f0000000000000000000c1';
 const ctxFor = (kpmId: string, over: Record<string, unknown> = {}) => new RequestContext('u1', 'none', {
   membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
-} as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+} as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
 const agent = (kpmId = KPM_A) => ctxFor(kpmId);
 const owner = (kpmId = KPM_A) => ctxFor(kpmId, { isKpmOwner: true });
 

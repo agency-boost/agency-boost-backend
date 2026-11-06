@@ -20,7 +20,7 @@ export abstract class MemberDeparture {
 }
 
 /**
- * **Every module's answer to one departure** (P18.5-T7 AC-5): the calendar's future entries and the campaigns' chases,
+ * **Every module's answer to one departure** (P18.2-T7 AC-5): the calendar's future entries and the campaigns' chases,
  * each a `MemberDeparture`, called in turn behind the one port `RemovalService` holds. Each runs whatever another
  * throws, and the first failure is rethrown once all have run — `RemovalService` logs it, as it always has.
  */

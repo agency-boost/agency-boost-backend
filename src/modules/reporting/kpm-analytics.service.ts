@@ -1,11 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { NotFoundException } from '@/common/errors/domain.exception';
 import { render } from '@/common/i18n/sentence';
 import { addDays } from '@/common/time/local-day';
 import { KPM_REPORTING, PERIOD, TIME, type KpmAnalyticsPeriod } from '@/domain/constants';
 import { coachingCoverage } from '@/domain/metrics/coaching-coverage';
-import { maaCountInUnit, monthly2ActiveCount } from '@/domain/metrics/maa-count-in-unit';
+import { maaCountInUnit, monthly2AverageCount } from '@/domain/metrics/maa-count-in-unit';
 import { mocRuleFor, mocRulesText, mocStatus, type Moc, type MocInput } from '@/domain/metrics/moc-status';
 import { memberAt } from '@/domain/metrics/office-headcount';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
@@ -16,13 +17,15 @@ import { CarrierRules, type CarrierRule } from '@/modules/campaigns/carrier-rule
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings } from '@/modules/leads/lead-readings';
-import { ProductionReadings, type MonthStanding } from '@/modules/production/production-readings';
-import { goalFigures, type PlannedGoal } from '@/modules/summary/summary-figures';
+import { OfficialApe } from '@/modules/production/official-ape';
+import type { MonthStanding } from '@/modules/production/production-readings';
+import { officialGoalFigures, type PlannedGoal } from '@/modules/summary/summary-figures';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS, partitionAgencies } from './agency-partition';
 import {
-  asOfLabel, byName, monthLabel, moneyOf, shiftMonth, twoMonthsLabel, yearToDateLabel, type Money, type Person,
+  byName, monthLabel, monthsLabel, moneyOf, shiftMonth, yearToDateLabel, type Money, type Person,
 } from './office-figures';
+import { OfficeGroups, type OfficeGroup } from './office-groups';
 import { OfficePeople, rungsFor, type OfficePerson } from './office-people';
 import { REPORTING_MESSAGES } from './reporting.messages';
 
@@ -33,7 +36,7 @@ export interface Figures {
   coached7d: Rate;
   activeAgents: number | null;
   /**
-   * *Producing this month*'s share (P18.97-T3 AC-10; ADR-0176 §12): `activeAgents` over **the members it counts from**,
+   * *Producing this month*'s share (P18.9-T3 AC-10; ADR-0176 §12): `activeAgents` over **the members it counts from**,
    * the prototype's `m.active / row.team` (`KPM_Owner.html:3342`), a whole percent through `rateOver` — the server's, so
    * the screen computes none (invariant §7). `null` while the month is not uploaded, and over nobody. *This month*: over
    * the row's `manpower.total`, today's. **A past month** (OD-235 → option 1, 2026-10-28): over that month's members —
@@ -47,7 +50,12 @@ export interface Figures {
    */
   activeOf: number;
   leads: { sales: number; salesPotential: number; recruit: number; recruitPotential: number };
-  manpower: { aab: number; agents: number; total: number };
+  /**
+   * *Manpower* (D3, ADR-0200 §6): today's active members of the row by class — `ab` since P19.3-T1, for the split
+   * *"x AB · y AAB · z Agents"*, an AB counted once, as AB (the Owner on an AB rung is the AB they are). `total` is
+   * every member of the row, the head included.
+   */
+  manpower: { ab: number; aab: number; agents: number; total: number };
 }
 
 export interface AnalyticsRow extends Figures {
@@ -63,6 +71,61 @@ export interface AnalyticsAgency extends AnalyticsRow {
   members: (Person & { rung: { code: string; label: string } })[];
 }
 
+/**
+ * **One leader of KPM Analytics' *Leader* list** (UI-152, its Appendix D row; P19.3-T3 AC-1, AC-2): every member of the
+ * `ab` or `aab` class with status *Aktif* (ADR-0200 §8, Q2), whether or not they lead anybody — Dewi Lestari, an AAB
+ * leading nobody, is one, with a Group of one.
+ *
+ * **Every figure is over the leader's *Group*** (ADR-0204 §2): the leader and everybody below them on today's edges,
+ * reaching below the next AB — the Unit Dashboard's `tiles.team.total` for that leader, through the same `ancestorIds`.
+ * The period's month's figures (*APE bulan ini*, *Active*) are over the Group's members on the month's last day, a
+ * leaver since placed by the edges they left with (OD-24, OD-74), as every row of the comparison is.
+ */
+export interface AnalyticsLeader {
+  head: Person & { isReader: boolean; leads: boolean };
+  /** The class (ADR-0156): *AB* or *AAB* — the row's pill and the chips' count. */
+  role: 'ab' | 'aab';
+  /**
+   * **The reader may open this leader's Unit Dashboard and Group Tree** (P19.3-T3 AC-3; ADR-0159 §2): the Owner and an
+   * Admin any leader's; a Core Leader their own and those of the leaders below them — the reach those two reads answer,
+   * 404 outside it. The sheet offers the links only where this is true, so a Core Leader is never sent to a refusal.
+   */
+  opens: boolean;
+  /** *Leader dari* / *"ke Agus"*: the leader's own upline today, `null` for a root (*—*). */
+  above: Person | null;
+  /** *"12 di Group"*: the leader and everybody below them today (ADR-0204 §2). */
+  group: number;
+  /** *"4 di Unit"*: the leader and their direct agents who lead nobody — the Unit Dashboard's *Your Unit*. */
+  unit: number;
+  /**
+   * The Group by class (ADR-0156), the leader included — for the split *"3 AAB · 8 Agents"* (UI-094, AC-10): every AAB
+   * counted, one who leads nobody included. `total` is `group`.
+   */
+  manpower: Figures['manpower'];
+  /** *APE bulan ini* over the Group, against the members' own monthly targets (ADR-0128, ADR-0204 §3). */
+  apeMonth: Money;
+  /**
+   * ***Active this month*** (D1, ADR-0200 §1): `MAA_COUNT_IN_UNIT` over the Group for the period's month — `null` while
+   * the office holds no file for it — out of `of`, with its *Unit* and *AAB* halves (*"Unit 1/4 · AAB 3/8"*), which add
+   * up to it: the Unit Dashboard's split (UI-013), here counted from the office's file.
+   */
+  active: {
+    count: number | null;
+    of: number;
+    pct: number | null;
+    unit: { count: number | null; of: number };
+    aab: { count: number | null; of: number };
+  };
+  /** *Coached 7D*: `COACHED_7D` over the Group today, the leader included. */
+  coached7d: Rate;
+  /** The Group's open leads and the period's promised ones (AC-13's line, *"48 penjualan · 19 rekrut"*). */
+  leads: Figures['leads'];
+  /** An AB's production club, over their agency's year to date (Q9, D-clubs); an AAB has none. */
+  club: { code: string; label: string } | null;
+  /** `MOC_STATUS` for the leader's rung: an AB's over their Direct Group, an AAB's over their Direct Unit (ADR-0134). */
+  moc: Moc | null;
+}
+
 /** `GET /kpm/analytics?period=`: the unit comparison by AB agency, MOC, the clubs, and six months of production. */
 export interface KpmAnalyticsView {
   period: KpmAnalyticsPeriod;
@@ -74,16 +137,27 @@ export interface KpmAnalyticsView {
    */
   mocRulesText: string;
   agencies: AnalyticsAgency[];
+  /**
+   * **The KPM's totals** (UI-109's tiles, above the Leader list; P19.3-T3 AC-4, AC-5): every member of the office —
+   * or of the group read — not only those placed under an AB. **`apeAnnual` is the KPM's production this year, a
+   * leaver's included** (ADR-0204 §1, OWN R1): the Overview's *Production — this year*, the same sum, so the two pages
+   * read one number. It is no longer the sum of the rows, which count today's members (*"Anggota saat ini"*). Over a
+   * group it is that group's members', who are all current.
+   */
   total: Figures & {
     abCount: number;
     mocMet: number;
     mocOf: number;
-    /**
-     * The year to date of members who left this year (OD-74): the Overview's, in no row — what the total's *APE —
-     * Annual* falls short of the Overview's by. `null` when no leaver holds a figure.
-     */
-    leaversExcludedMinor: number | null;
   };
+  /** Every AB and AAB, lowest *APE bulan ini* % first — *"↓ Perlu perhatian dulu"* — a leader with no % last. */
+  leaders: AnalyticsLeader[];
+  /** The office's custom groups (*All members → Groups*), A to Z, for *Lihat untuk* (OD-258). */
+  groups: OfficeGroup[];
+  /** *Seluruh KPM · n orang*: the office's members today, whichever group the figures are over. */
+  officePeople: number;
+  /** The group the figures are over (`?group=`), or `null` for the whole KPM (*Seluruh KPM*). */
+  group: OfficeGroup | null;
+  /** Six months **ending with the current one** (UI-091), oldest first; `null` is a month with no file. */
   monthly: { month: string; apeMinor: number | null }[];
 }
 
@@ -114,7 +188,7 @@ interface MemberFigures {
  *   production is the Overview's year to date (OD-74), which the total can fall short of by it;
  * - **Coached (7d)**: coaching's `coachingCoverage` over the row's members, **its head included** (D-coverage),
  *   so the rows add up to the office's coverage; period-independent;
- * - **Active this month / last month** — *Producing this month / last month* on the screen since P18.97-T3 (ADR-0176
+ * - **Active this month / last month** — *Producing this month / last month* on the screen since P18.9-T3 (ADR-0176
  *   §3): `MAA_COUNT_IN_UNIT` for the period's month — `null` while the office holds no file for it — and its share of
  *   the members it counts from, `rateOver`'s whole percent (`activePct`, AC-10), so the screen divides nothing: this
  *   month's of the row's manpower, a past month's of that month's members (OD-235);
@@ -128,13 +202,16 @@ interface MemberFigures {
  * whether they lead anybody (`head.leads`), and the MOC column's tooltip is composed from the company's rules
  * (`mocRulesText`).
  *
- * **MOC** (OD-22 → option 1, D-moc): the company's `moc` rule for the head's rung, read through the campaigns
- * module's one named reader (`CarrierRules`), over OD-22's stated reading (§A.7) and the client PRD's scopes —
- * `NET_APE` the year to date of the leader and their Direct Group (an AB) or Direct Unit (an AAB), the
- * `MONTHLY2_AA` counts over the last two months held — a member active in both, a member not yet one in either
- * month not active in it — `DIRECT_AB_COUNT` the ABs reporting to the AB now, and
- * `MOC_PERSISTENCY` the leader's own row for the latest month held. **The clubs** (D-clubs): `PRODUCTION_CLUB_TIER` over the agency's
- * year to date, from the same reader. Both period-independent. Nothing else of that module is touched.
+ * **MOC** (OD-22 → option 1, D-moc; the client's corrected reading since P19.3-T1, ADR-0201): the company's `moc`
+ * rule for the head's rung, read through the campaigns module's one named reader (`CarrierRules`), over the client
+ * PRD's scopes — `MOC_APE` (*APE*, D5) the year to date of the leader and their Direct Group (an AB) or Direct Unit
+ * (an AAB); the `MONTHLY2_AA` counts the mean, over the year's months held up to the latest (the APE criterion's
+ * months), of the scope's members active that month — a member not yet one in a month not active in it (Q6);
+ * `DIRECT_AB_COUNT` the ABs reporting to the AB now, *berdasarkan upline saat ini* (Q7); and `MOC_PERSISTENCY` the
+ * leader's own uploaded `UNIT_PERSISTENCY` for the latest month held, *Belum diunggah* where that month carries none,
+ * never an agent's percentage (D6). **The clubs** (D-clubs, Q9): `PRODUCTION_CLUB_TIER` over the agency's (the unit's)
+ * year to date, never the AB's own, from the same reader. Both period-independent. Nothing else of that module is
+ * touched.
  *
  * **Nothing is written**: the figures are over groups, never a member's own record (D-audit).
  */
@@ -146,15 +223,53 @@ export class KpmAnalyticsService {
     private readonly clock: Clock,
     private readonly sessions: CoachingReadings,
     private readonly leads: LeadReadings,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly goals: GoalService,
     private readonly carrierRules: CarrierRules,
+    /*
+     * **The group filter** (OD-258; P19.3-T3 AC-15). Optional so a spec that draws the comparison alone builds the
+     * service with the eight above; the application always provides it, and a `group` asked of a service without it
+     * is answered 404, as an unknown group is.
+     */
+    @Optional() @Inject(OfficeGroups) private readonly officeGroups: OfficeGroups | null = null,
   ) {}
 
-  async read(ctx: RequestContext, query: { period?: KpmAnalyticsPeriod } = {}): Promise<KpmAnalyticsView> {
+  async read(ctx: RequestContext, query: { period?: KpmAnalyticsPeriod; group?: string } = {}): Promise<KpmAnalyticsView> {
     // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404.
     const me = OfficePeople.requireAnalyticsReader(ctx);
+    const officeReader = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;
+    return this.compute(ctx, query, { me, officeReader });
+  }
+
+  /**
+   * ***Lihat sebagai KPM*'s *Overview*** (ADR-0207 §2, §3; P19.4-T3 AC-4): exactly what `read` answers the KPM's Owner,
+   * through the same code over the named office — a platform read's context (`RequestContext.platformRead`: no
+   * membership, read-only), the reader taken as the office's, as nobody in it. Nothing is written here, as `read` writes
+   * nothing; the platform read's audit entries record the visit. Anything but a platform read is `TENANT_NO_MEMBERSHIP`.
+   */
+  async analyticsForOffice(
+    ctx: RequestContext, query: { period?: KpmAnalyticsPeriod; group?: string } = {},
+  ): Promise<KpmAnalyticsView> {
+    OfficePeople.requirePlatformRead(ctx);
+    return this.compute(ctx, query, { me: null, officeReader: true });
+  }
+
+  /** The comparison over the context's office, read as `reader` reads it: what `read` and `readForOffice` both serve. */
+  private async compute(
+    ctx: RequestContext,
+    query: { period?: KpmAnalyticsPeriod; group?: string },
+    { me, officeReader }: { me: string | null; officeReader: boolean },
+  ): Promise<KpmAnalyticsView> {
     const period = query.period ?? KPM_REPORTING.ANALYTICS_DEFAULT_PERIOD;
+    /*
+     * **The group first** (ADR-0204 §4): another office's group, an archived one or an unknown id is 404 before
+     * anything else is read. A group grants nothing — the reader reads the whole office already — so it only names
+     * the people every figure below is over.
+     */
+    const [chosen, offered] = await Promise.all([
+      query.group === undefined ? Promise.resolve(null) : this.groupMembers(ctx, query.group),
+      this.officeGroups ? this.officeGroups.list(ctx) : Promise.resolve([] as OfficeGroup[]),
+    ]);
     const office = await this.days.office(ctx);
     const { timezone, today, month } = office;
     const year = today.slice(0, 4);
@@ -167,7 +282,14 @@ export class KpmAnalyticsService {
     // The rows hold members (D-units, OD-74): a member who has left is in none of today's figures, their production
     // the Overview's — read here to say how much of it the total leaves out, and for the period below.
     // Each member counted from their join date, in the office's zone (ADR-0172 §1).
-    const roster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${year}-01-01`), timezone);
+    const officeRoster = await this.people.read(ctx, this.clock.startOfLocalDay(timezone, `${year}-01-01`), timezone);
+    // Over a group, its members today and nobody else: a leaver is in no group's figures (ADR-0204 §4).
+    const inScope = (p: OfficePerson) => chosen === null || chosen.memberIds.has(p.membershipId);
+    const roster = chosen === null ? officeRoster : {
+      everyone: officeRoster.everyone.filter(inScope),
+      active: officeRoster.active.filter(inScope),
+      names: officeRoster.names,
+    };
     const leaverIds = roster.everyone.filter((p) => p.status === 'removed').map((p) => p.membershipId);
     const active = roster.active;
     const activeIds = active.map((p) => p.membershipId);
@@ -220,14 +342,15 @@ export class KpmAnalyticsService {
     const member = new Map<string, MemberFigures>([...active, ...periodLeavers].map((p) => {
       const id = p.membershipId;
       const now = standings.get(id)!;
-      const annual = goalFigures({ goal: plans.get(id)!, month, ...now, names: new Map() });
+      // The office's figures alone (ADR-0195, UI-157 item 5): a member's estimate fixes no target here.
+      const annual = officialGoalFigures({ goal: plans.get(id)!, month, ...now, names: new Map() });
       const inPeriod = periodSet.has(id);
       let apeMonth: GoalFigure | null = null;
       if (inPeriod && period === 'this_month') {
         apeMonth = { targetMinor: annual.monthly.targetMinor, actualMinor: now.thisMonth?.minor ?? null };
       } else if (inPeriod) {
         const then = standingsThen!.get(id)!;
-        const fixed = goalFigures({
+        const fixed = officialGoalFigures({
           goal: this.asOf(plansThen.get(id)!, periodYear === year ? now.throughLastMonth : then.yearToDate),
           month: periodMonth, ...then, names: new Map(),
         });
@@ -277,7 +400,9 @@ export class KpmAnalyticsService {
         activeOf,
         leads: { sales: sum.salesOpen, salesPotential: sum.salesClosing, recruit: sum.recruitOpen, recruitPotential: sum.recruitNominated },
         manpower: {
-          // By class (ADR-0156): an *Associate Leader* rung's members are the AABs, whatever it is called.
+          // By class (ADR-0156): a *Senior Leader* rung's members are the ABs, an *Associate Leader* rung's the AABs,
+          // whatever each is called — so the split counts the AB once, as AB (D3).
+          ab: now.filter((id) => byId.get(id)!.role === AGENCY_CLASS).length,
           aab: now.filter((id) => byId.get(id)!.role === UNIT_CLASS).length,
           agents: now.filter((id) => byId.get(id)!.role === AGENT_CLASS).length,
           total: now.length,
@@ -287,16 +412,17 @@ export class KpmAnalyticsService {
     const leaders = new Set(active.flatMap((p) => (p.leaderId === null ? [] : [p.leaderId])));
     const head = (id: string) => ({ membershipId: id, name: names.get(id) ?? '', isReader: id === me, leads: leaders.has(id) });
 
-    // ---- MOC's inputs (OD-22, §A.7) and the clubs (D-clubs): today's, whatever the period.
+    // ---- MOC's inputs (§A.7, ADR-0201) and the clubs (D-clubs): today's, whatever the period.
     const held = [...months].filter(([m, o]) => o.held && m <= month).map(([m]) => m).sort();
-    const lastTwo = held.slice(-KPM_REPORTING.MONTHLY2_MONTHS);
     const latestHeld = held.length > 0 ? held[held.length - 1] : null;
+    // The calendar year's months held, up to the latest: what *APE* runs through and *Monthly2 AA* averages over (Q6).
     const heldThisYear = held.filter((m) => m.startsWith(year));
-    // Each period in the reader's words and figures (P18.98-T5 AC-4): *Jan – Sep 2026*, *Agu and Sep 2026*.
+    // Each period in the reader's words and figures (P18.10-T5 AC-4): *Jan – Sep 2026*, *Jan – Jul, Sep 2026*.
     const reader = ctx.reader;
     const notUploaded = render(REPORTING_MESSAGES.notUploadedYet, reader);
     const ytdPeriod = heldThisYear.length === 0 ? year : yearToDateLabel(heldThisYear[heldThisYear.length - 1], reader);
-    const twoPeriod = lastTwo.length < KPM_REPORTING.MONTHLY2_MONTHS ? notUploaded : twoMonthsLabel(lastTwo[0], lastTwo[1], reader);
+    // The months the average read, named as they are — a month the office has no file for is not one of them.
+    const averagePeriod = heldThisYear.length === 0 ? notUploaded : monthsLabel(heldThisYear, reader);
     // The client PRD's scopes (§2): a leader's Direct Unit is their direct reports of the Agent class; an AB's Direct
     // Group is the Direct Unit and each AAB reporting to the AB, with that AAB's own Direct Unit — classes, ADR-0156.
     const directUnit = (leaderId: string) => active
@@ -306,31 +432,53 @@ export class KpmAnalyticsService {
       ...active.filter((p) => p.leaderId === abId && p.role === UNIT_CLASS)
         .flatMap((aab) => [aab.membershipId, ...directUnit(aab.membershipId)]),
     ];
-    const netApe = (ids: readonly string[]): MocInput => {
+    // `MOC_APE` (D5): the scope's official year to date, through the latest month of the year held — `NET_APE`'s.
+    const mocApe = (ids: readonly string[]): MocInput => {
       const held = ids.map((id) => member.get(id)!.apeAnnual!.actualMinor).filter((v): v is number => v !== null);
       return { current: held.length === 0 ? null : held.reduce((sum, v) => sum + v, 0), period: ytdPeriod };
     };
-    // Item 2: a member who was not yet a member on a month's last day was not active in it (`false`), so a new
-    // agent cannot count; the count is `null` only while fewer than two months are held.
-    const endOf = new Map(lastTwo.map((m) => [m, this.clock.monthBounds(timezone, m).endExclusive]));
+    // `MONTHLY2_AA` (Q6): the mean over the year's months held of the scope's members active that month. A member who
+    // was not yet a member on a month's last day was not active in it (`false`); `null` only with no month held.
+    const endOf = new Map(heldThisYear.map((m) => [m, this.clock.monthBounds(timezone, m).endExclusive]));
     const monthly2 = (ids: readonly string[]): MocInput => ({
-      current: monthly2ActiveCount(
-        ids.map((id) => lastTwo.map((m) => (memberAt(byId.get(id)!, endOf.get(m)!) ? maaIn(id, m) : false))),
-        lastTwo.length,
-        KPM_REPORTING.MONTHLY2_MONTHS,
+      current: monthly2AverageCount(
+        ids.map((id) => heldThisYear.map((m) => (memberAt(byId.get(id)!, endOf.get(m)!) ? maaIn(id, m) : false))),
+        heldThisYear.length,
       ),
-      period: twoPeriod,
+      period: averagePeriod,
     });
-    const persistency = (id: string): MocInput => ({
-      current: latestHeld === null ? null : cells.get(id)?.get(latestHeld)?.persistencyMonthly ?? null,
-      period: latestHeld === null ? notUploaded : monthLabel(latestHeld, reader),
-    });
+    // `MOC_PERSISTENCY` (D6): the leader's own `UNIT_PERSISTENCY` for the latest month held — the insurer's figure for
+    // their unit, uploaded on their row. *Belum diunggah* where that month carries none; never an agent's, never averaged.
+    const persistency = (id: string): MocInput => {
+      const current = latestHeld === null ? null : cells.get(id)?.get(latestHeld)?.unitPersistencyMonthly ?? null;
+      return { current, period: latestHeld === null || current === null ? notUploaded : monthLabel(latestHeld, reader) };
+    };
+    // `DIRECT_AB_COUNT` (Q7): the app keeps only today's upline, and the dialog's line says so.
+    const directAbPeriod = render(REPORTING_MESSAGES.byTodaysUpline, reader);
     const mocRules = rules.filter((r) => r.kind === 'moc');
     const mocOf = (headId: string, inputs: Record<string, MocInput>): Moc | null => {
       const rule = mocRuleFor(mocRules, byId.get(headId)!.orgLevelCode);
       return rule ? mocStatus(rule, inputs, reader) : null;
     };
     const tiers = clubTiers(rules);
+    // Each leader's MOC on their rung's own scope (ADR-0134): an AB's Direct Group, an AAB's Direct Unit.
+    const abMoc = (id: string) => {
+      const group = directGroup(id);
+      return mocOf(id, {
+        MOC_APE: mocApe([id, ...group]),
+        MONTHLY2_AA_DU: monthly2(directUnit(id)),
+        MONTHLY2_AA_DG: monthly2(group),
+        MOC_PERSISTENCY: persistency(id),
+        DIRECT_AB_COUNT: {
+          current: active.filter((p) => p.leaderId === id && p.role === AGENCY_CLASS).length,
+          period: directAbPeriod,
+        },
+      });
+    };
+    const aabMoc = (id: string) => {
+      const unitDirect = directUnit(id);
+      return mocOf(id, { MOC_APE: mocApe([id, ...unitDirect]), MONTHLY2_AA: monthly2(unitDirect), MOC_PERSISTENCY: persistency(id) });
+    };
 
     // Today's members head and lead; the period's leavers are placed by the edges they left with, heading nothing.
     const partition = partitionAgencies([
@@ -339,40 +487,75 @@ export class KpmAnalyticsService {
     ]);
     const agencies = partition.agencies.map((agency): AnalyticsAgency => {
       const figures = figuresOf(agency.memberIds);
-      const group = directGroup(agency.headId);
       return {
         head: head(agency.headId),
         ...figures,
         club: productionClubTier(figures.apeAnnual.achievedMinor, tiers),
-        moc: mocOf(agency.headId, {
-          NET_APE: netApe([agency.headId, ...group]),
-          MONTHLY2_AA_DU: monthly2(directUnit(agency.headId)),
-          MONTHLY2_AA_DG: monthly2(group),
-          MOC_PERSISTENCY: persistency(agency.headId),
-          DIRECT_AB_COUNT: {
-            current: active.filter((p) => p.leaderId === agency.headId && p.role === AGENCY_CLASS).length,
-            period: asOfLabel(today, reader),
-          },
-        }),
+        moc: abMoc(agency.headId),
         direct: { head: head(agency.headId), ...figuresOf(agency.directIds) },
         aabUnits: [...agency.units]
           .sort((a, b) => byName(names)(a.headId, b.headId))
-          .map((unit) => {
-            const unitDirect = directUnit(unit.headId);
-            return {
-              head: head(unit.headId),
-              ...figuresOf(unit.memberIds),
-              moc: mocOf(unit.headId, {
-                NET_APE: netApe([unit.headId, ...unitDirect]),
-                MONTHLY2_AA: monthly2(unitDirect),
-                MOC_PERSISTENCY: persistency(unit.headId),
-              }),
-            };
-          }),
+          .map((unit) => ({ head: head(unit.headId), ...figuresOf(unit.memberIds), moc: aabMoc(unit.headId) })),
         members: this.membersOf(agency.memberIds.filter((id) => id !== agency.headId && activeSet.has(id)), byId, names, ladder),
       };
     }).sort((a, b) => byName(names)(a.head.membershipId, b.head.membershipId));
 
+    // ---- The Leader list (UI-152; P19.3-T3 AC-1, AC-2, AC-6, AC-10). Every figure over the leader's Group.
+    const universe = [...active, ...periodLeavers];
+    // Everybody below each person, from the cached path (`ancestorIds`), once: what the Unit Dashboard's group reads.
+    const below = new Map<string, string[]>();
+    for (const p of universe) {
+      for (const ancestor of p.ancestorIds) below.set(ancestor, [...(below.get(ancestor) ?? []), p.membershipId]);
+    }
+    // The office's people today, the group's or not: a leader's upline may stand outside the group read.
+    const officeById = new Map(officeRoster.active.map((p) => [p.membershipId, p]));
+    const activeOver = (ids: readonly string[]) => {
+      const then = ids.filter((id) => periodSet.has(id));
+      return {
+        count: maaCountInUnit(then.map((id) => member.get(id)!.maa), monthHeld),
+        of: (period === 'this_month' ? ids.filter((id) => activeSet.has(id)) : then).length,
+      };
+    };
+    const agencyClubs = new Map(agencies.map((a) => [a.head.membershipId, a.club]));
+    const leaderRows = active
+      .filter((p) => p.role === AGENCY_CLASS || p.role === UNIT_CLASS)
+      .map((p): AnalyticsLeader => {
+        const id = p.membershipId;
+        const groupIds = [id, ...(below.get(id) ?? [])];
+        // *Unit* (ADR-0204 §2): the leader and their direct agents who lead nobody — the Unit Dashboard's *Your Unit*.
+        const unitIds = [id, ...universe
+          .filter((q) => q.leaderId === id && q.role === AGENT_CLASS && !leaders.has(q.membershipId))
+          .map((q) => q.membershipId)];
+        const unitSet = new Set(unitIds);
+        const figures = figuresOf(groupIds);
+        const upline = p.leaderId === null ? undefined : officeById.get(p.leaderId);
+        const ab = p.role === AGENCY_CLASS;
+        return {
+          head: head(id),
+          role: ab ? 'ab' : 'aab',
+          opens: officeReader || (me !== null && (id === me || p.ancestorIds.includes(me))),
+          above: upline ? { membershipId: upline.membershipId, name: names.get(upline.membershipId) ?? '' } : null,
+          group: figures.manpower.total,
+          unit: unitIds.filter((x) => activeSet.has(x)).length,
+          manpower: figures.manpower,
+          apeMonth: figures.apeMonth,
+          active: {
+            count: figures.activeAgents,
+            of: figures.activeOf,
+            pct: figures.activePct,
+            unit: activeOver(unitIds),
+            aab: activeOver(groupIds.filter((x) => !unitSet.has(x))),
+          },
+          coached7d: figures.coached7d,
+          leads: figures.leads,
+          club: ab ? agencyClubs.get(id) ?? null : null,
+          moc: ab ? abMoc(id) : aabMoc(id),
+        };
+      })
+      .sort(needsAttentionFirst(names));
+
+    // ---- The KPM's totals (UI-109's tiles): everybody in scope, under an AB or not.
+    const totals = figuresOf(universe.map((p) => p.membershipId));
     return {
       period,
       month: periodMonth,
@@ -380,31 +563,58 @@ export class KpmAnalyticsService {
       mocRulesText: mocRulesText(juniorFirst(mocRules, ladder), reader),
       agencies,
       total: {
-        // The rows partition the members placed under an AB, so their union's figures are the rows' sum.
-        ...figuresOf(partition.agencies.flatMap((a) => a.memberIds)),
+        ...totals,
+        /*
+         * **One production total per KPM** (ADR-0204 §1, OWN R1; P19.3-T3 AC-5): the office's year to date, a leaver's
+         * production included, against today's members' own goals — the Overview's sum, over the same people (everyone
+         * active, and everyone who left this year). Over a group, its members' alone, who are all current.
+         */
+        apeAnnual: chosen === null
+          ? moneyOf(rollUpGoal([
+            ...activeIds.map((id) => member.get(id)!.apeAnnual!),
+            ...leaverIds.map((id) => ({ targetMinor: null, actualMinor: standings.get(id)!.yearToDate?.minor ?? null })),
+          ]))
+          : totals.apeAnnual,
         abCount: agencies.length,
         mocMet: agencies.filter((a) => a.moc?.status === 'met').length,
         mocOf: agencies.filter((a) => a.moc !== null).length,
-        leaversExcludedMinor: sumHeld(leaverIds.map((id) => standings.get(id)!.yearToDate?.minor ?? null)),
       },
+      leaders: leaderRows,
+      groups: offered,
+      officePeople: officeRoster.active.length,
+      group: chosen?.group ?? null,
+      // UI-091: the six months ending with this one. Over a group, its members' cells, in a month the office holds.
       monthly: Array.from({ length: KPM_REPORTING.MONTHLY_CHART_MONTHS }, (_, i) => {
-        const m = shiftMonth(month, i - KPM_REPORTING.MONTHLY_CHART_MONTHS);
-        return { month: m, apeMinor: months.get(m)?.apeMonthlyMinor ?? null };
+        const m = shiftMonth(month, i - (KPM_REPORTING.MONTHLY_CHART_MONTHS - 1));
+        if (chosen === null) return { month: m, apeMinor: months.get(m)?.apeMonthlyMinor ?? null };
+        if (!(months.get(m)?.held ?? false)) return { month: m, apeMinor: null };
+        return { month: m, apeMinor: activeIds.reduce((sum, id) => sum + (cells.get(id)?.get(m)?.apeMonthly ?? 0), 0) };
       }),
     };
   }
 
+  /** `?group=`'s members, or 404: an unknown, archived or another office's group (and none without the reader). */
+  private async groupMembers(ctx: RequestContext, groupId: string) {
+    if (!this.officeGroups) throw new NotFoundException('Group');
+    return this.officeGroups.membersOf(ctx, groupId);
+  }
+
   /**
    * **A plan as it stood when an earlier month began** (ADR-0056): the same goal, measured against the year to
-   * date the office held then — or, where it held none, the member's own figure — so last month's target is the
-   * one the Summary fixed for it, not one recomputed from this month's file.
+   * date the office held then, so last month's target is the one the office's figures fixed for it, not one
+   * recomputed from this month's file.
+   *
+   * **Where the office held none, nothing** (ADR-0195; P19.1-T4 AC-12, UI-157 item 5). This fell back to the member's
+   * own typed figure until November 2026, so an estimate fixed an earlier month's target on the office's screen. The
+   * figure is still marked `self_reported` — the plan's own, at nothing — and `officialGoalFigures` reads it as
+   * nothing held: no month's target is taken from it.
    */
-  private asOf(plan: PlannedGoal & { apeAchievedMinor: number }, held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null): PlannedGoal {
+  private asOf(plan: PlannedGoal, held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null): PlannedGoal {
     return {
       ...plan,
       achieved: held
         ? { minor: held.minor, provenance: held.provenance, month: held.month }
-        : { minor: plan.apeAchievedMinor, provenance: 'self_reported', month: null },
+        : { minor: 0, provenance: 'self_reported', month: null },
     };
   }
 
@@ -433,10 +643,22 @@ export function juniorFirst<R extends CarrierRule>(rules: readonly R[], ladder: 
   return [...rules].sort((a, b) => rank(a) - rank(b));
 }
 
-/** The sum of the figures held, or `null` when none is — the rollup rule's. */
-function sumHeld(values: readonly (number | null)[]): number | null {
-  const held = values.filter((v): v is number => v !== null);
-  return held.length === 0 ? null : held.reduce((sum, v) => sum + v, 0);
+/**
+ * ***"↓ Perlu perhatian dulu"*** (UI-152): the lowest *APE bulan ini* % first; a leader with no % — no goal, or the month
+ * not uploaded — after every one with a %; A to Z among equals.
+ */
+export function needsAttentionFirst(names: ReadonlyMap<string, string>) {
+  const order = byName(names);
+  return (a: AnalyticsLeader, b: AnalyticsLeader): number => {
+    const pa = a.apeMonth.pct;
+    const pb = b.apeMonth.pct;
+    if (pa !== pb) {
+      if (pa === null) return 1;
+      if (pb === null) return -1;
+      return pa - pb;
+    }
+    return order(a.head.membershipId, b.head.membershipId);
+  };
 }
 
 /** The company's club tiers, from its `production_club` rules: each one's annual APE threshold (D-clubs). */

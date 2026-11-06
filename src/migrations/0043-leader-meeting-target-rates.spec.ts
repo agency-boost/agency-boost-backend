@@ -6,11 +6,11 @@ import { rateCellOf, up } from './0043-leader-meeting-target-rates';
 const MILIAR = 1_000_000_000 * 100;
 
 /**
- * **P18.97-T1 AC-11 — migration `0043`, the forum's typed targets as rates** (ADR-0175 §4; parity I-487). *"{n} ({r} @
+ * **P18.9-T1 AC-11 — migration `0043`, the forum's typed targets as rates** (ADR-0175 §4; parity I-487). *"{n} ({r} @
  * unit)"* is the rate *r*, *TBD* is no target, any other text is kept as typed; a *New AA* cell, and everything else on
  * the meeting, is left as it was. Run twice, it changes nothing.
  */
-describe('P18.97-T1 AC-11 migration 0043 — the forum’s typed targets, as rates per unit', () => {
+describe('P18.9-T1 AC-11 migration 0043 — the forum’s typed targets, as rates per unit', () => {
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   const meetings = () => db().collection('leaderMeetings');
 
@@ -31,7 +31,7 @@ describe('P18.97-T1 AC-11 migration 0043 — the forum’s typed targets, as rat
     updatedAt: new Date('2026-10-20T02:00:00Z'), ...extra,
   });
 
-  it('P18.97-T1 AC-11 the migration reads "{n} ({r} @ unit)" as the rate r: APE in sen, a count to two places', () => {
+  it('P18.9-T1 AC-11 the migration reads "{n} ({r} @ unit)" as the rate r: APE in sen, a count to two places', () => {
     expect(rateCellOf('flc', '8 (1 @ unit)', 2)).toEqual({ cell: { rate: 1, typed: null, version: 2 }, read: 'rate' });
     expect(rateCellOf('avg_monthly_aa', ' 22 (3 @ unit) ', 1).cell.rate).toBe(3);
     // A comma or a point; spaces around the parts; a different case.
@@ -43,7 +43,7 @@ describe('P18.97-T1 AC-11 migration 0043 — the forum’s typed targets, as rat
     expect(rateCellOf('flc', '1 (0.125 @ unit)', 1).cell.rate).toBe(0.13);
   });
 
-  it('P18.97-T1 AC-11 the migration reads TBD and an empty cell as no target, and keeps any other text as typed', () => {
+  it('P18.9-T1 AC-11 the migration reads TBD and an empty cell as no target, and keeps any other text as typed', () => {
     for (const none of ['TBD', 'tbd', '  ', '']) {
       expect(rateCellOf('ape', none, 4)).toEqual({ cell: { rate: null, typed: null, version: 4 }, read: 'none' });
     }
@@ -52,12 +52,12 @@ describe('P18.97-T1 AC-11 migration 0043 — the forum’s typed targets, as rat
     }
   });
 
-  it('P18.97-T1 AC-11 the migration on an empty database does nothing, and creates nothing', async () => {
+  it('P18.9-T1 AC-11 the migration on an empty database does nothing, and creates nothing', async () => {
     expect(await up(db())).toEqual({ meetings: 0, rates: 0, none: 0, kept: 0, current: 0 });
     expect(await meetings().countDocuments({})).toBe(0);
   });
 
-  it('P18.97-T1 AC-11 the migration: rates, no target and text kept, every office’s; New AA and the rest of the meeting untouched; run twice, nothing more', async () => {
+  it('P18.9-T1 AC-11 the migration: rates, no target and text kept, every office’s; New AA and the rest of the meeting untouched; run twice, nothing more', async () => {
     const frozen = { periods: { fy: '2025' }, rows: [{ key: 'new_aa', cells: {} }] };
     const a = meeting('kpm-0417', {
       ape: { value: 'TBD', version: 2 },
@@ -97,7 +97,7 @@ describe('P18.97-T1 AC-11 migration 0043 — the forum’s typed targets, as rat
     expect(await meetings().find({}).sort({ _id: 1 }).toArray()).toEqual(before);
   });
 
-  it('P18.97-T1 AC-11 the migration leaves what is no typed target, reads a cell with no version as 1, and never writes over a cell changed since it read it', async () => {
+  it('P18.9-T1 AC-11 the migration leaves what is no typed target, reads a cell with no version as 1, and never writes over a cell changed since it read it', async () => {
     const noField = meeting('kpm-0417', {});
     delete (noField as Record<string, unknown>).monthlyTargets;
     const odd = meeting('kpm-0417', { ape: null, manpower: 'TBD', flc: { value: 8, version: 2 }, avg_monthly_aa: { value: '22 (3 @ unit)' } });

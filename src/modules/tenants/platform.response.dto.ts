@@ -5,7 +5,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * here rather than generated from a service interface.
  *
  * Both are worth flagging: a raw document is what put an ObjectId in a column headed
- * **Owner** before P3.5-T14, and returning one means the wire shape is whatever the
+ * **Owner** before P3.1-T14, and returning one means the wire shape is whatever the
  * schema happens to hold. `CompanyResponseDto` documents what a client may rely on.
  */
 export class CompanyResponseDto {
@@ -38,6 +38,16 @@ export class CompanyResponseDto {
   })
   usesPlatformDefaults!: boolean;
 
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      '**On `GET /admin/companies` only.** *Dimulai kosong* on `/admin/companies` (SA UI-017): made blank '
+      + '(`usesPlatformDefaults: false`) **and** its default template has no published section yet — *Advanced '
+      + 'analytics*, which every template is made holding, aside. False once one section is published, or for a company '
+      + 'that took the presets. A write\'s answer leaves it out: a company just made blank has nothing published.',
+  })
+  startedBlank?: boolean;
+
   @ApiProperty({
     type: String,
     enum: ['insurer', 'template'],
@@ -56,8 +66,24 @@ export class AuditEntryResponseDto {
   @ApiProperty({ type: String, example: 'kpm.provisioned' })
   action!: string;
 
+  @ApiProperty({
+    type: String,
+    example: 'Draf template disimpan',
+    description:
+      '**The action in the reader\'s words** (SA UI-016), never its code — *"Analytics KPM 0417 '
+      + 'dilihat"* where it names the KPM it read. The action as recorded where no label names it.',
+  })
+  actionLabel!: string;
+
   @ApiProperty({ type: String, example: 'kpms' })
   targetCollection!: string;
+
+  @ApiProperty({
+    type: String,
+    example: 'Produk',
+    description: 'What kind of thing the target is, in the reader\'s words; the collection\'s name where nothing names it.',
+  })
+  targetKind!: string;
 
   @ApiProperty({ type: String, nullable: true })
   targetId!: string | null;
@@ -65,10 +91,12 @@ export class AuditEntryResponseDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '0417 · Surabaya Branch',
+    example: 'Prudential template · Aktivitas & rasio',
     description:
-      'What the target is called — a person\'s name, an office\'s code and branch, a company\'s '
-      + 'name. **Null when the id resolves to nothing, or to a collection nothing names yet**, '
+      'What the target is called (SA UI-016) — a person\'s name, *KPM 0417 · Bandung*, a company\'s '
+      + 'name, a template\'s, *"<template> · <section>"* for a template\'s section, a product\'s, a rung\'s, a KPM '
+      + 'request\'s branch; an office\'s own record by the member it is about, else its KPM. Deleted ones are still named. '
+      + '**Null when the id resolves to nothing, or to a collection nothing names yet**, '
       + 'and the reader is shown the id instead: a blank cell would read as nothing happened.',
   })
   targetLabel!: string | null;

@@ -3,11 +3,29 @@ import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
 import { ProductDocumentRefSchema } from './kpm-product-config.schema';
 import {
-  PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS,
-  type ProductCategory, type ProductChannel, type ProductLifecycle, type ProductNeed,
+  PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES, PRODUCT_DEFAULT_CURRENCIES, PRODUCT_KINDS,
+  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PROPOSAL_DEFAULT_INSURED,
+  type ProductCategory, type ProductChannel, type ProductCurrency, type ProductKind, type ProductLifecycle,
+  type ProductNeed, type ProposalDefaultInsured,
 } from '@/domain/constants';
+import type { FaqEntry, PdfDetailBlock, PlanOption, ProposalField } from './proposal-fields';
 
 export type ProductDocument = HydratedDocument<Product>;
+
+/**
+ * **One objection card** (P19.4-T4 AC-1, B1-1; ADR-0209 §9): what the customer says, and the reply. Plain text, each
+ * with its line breaks (B1-2).
+ */
+@Schema({ _id: false })
+export class Objection {
+  @Prop({ type: String, default: '' })
+  objection!: string;
+
+  @Prop({ type: String, default: '' })
+  answer!: string;
+}
+
+export const ObjectionSchema = SchemaFactory.createForClass(Objection);
 
 /**
  * The words an agent sells a product with — the seven fields the Owner's override modal names
@@ -31,11 +49,13 @@ export class AttackPlan {
   @Prop({ type: String, default: '', trim: true })
   fullScript!: string;
 
-  @Prop({ type: String, default: '', trim: true })
-  objectionTheySay!: string;
-
-  @Prop({ type: String, default: '', trim: true })
-  objectionYouSay!: string;
+  /**
+   * *4 · If they push back*: every objection and its reply, in order (P19.4-T4 AC-1; ADR-0209 §9). It replaced the
+   * one pair, `objectionTheySay` and `objectionYouSay`; migration `0054-product-objection-cards` moved each product's
+   * pair here, splitting the merged *`1. "…" → …`* text into cards.
+   */
+  @Prop({ type: [ObjectionSchema], default: [] })
+  objections!: Objection[];
 
   @Prop({ type: String, default: '', trim: true })
   nextAction!: string;
@@ -90,6 +110,27 @@ export class Product {
   @Prop({ type: String, required: true, enum: PRODUCT_CATEGORIES })
   category!: ProductCategory;
 
+  /**
+   * **A base or a rider** (P19.4-T4 AC-3; the riders spec's rule 1; ADR-0209 §1). A rider keeps its `category`, is
+   * never offered alone, and agents meet it only inside a base it attaches to.
+   */
+  @Prop({ type: String, enum: PRODUCT_KINDS, default: 'base' })
+  kind!: ProductKind;
+
+  /**
+   * **The base products a rider attaches to** (rule 2): ids of this company's active bases, at least one for a
+   * rider, `[]` for a base. Withdrawing a base takes it out of every list here (rule 4).
+   */
+  @Prop({ type: [String], default: [] })
+  attachesTo!: string[];
+
+  /**
+   * **The currencies its policies are sold in** (P19.4-T4 AC-12, B1-4; ADR-0209 §8): `IDR`, `USD` or both, in that
+   * order. A label, not money: the product carries no amount.
+   */
+  @Prop({ type: [String], enum: PRODUCT_CURRENCIES, default: () => [...PRODUCT_DEFAULT_CURRENCIES] })
+  currencies!: ProductCurrency[];
+
   /** `accident` is a need and not a category: those products sit under `health`. */
   @Prop({ type: [String], default: [], enum: PRODUCT_NEEDS })
   primaryNeeds!: ProductNeed[];
@@ -126,6 +167,48 @@ export class Product {
   @Prop({ type: [CommissionYearSchema], default: [] })
   commissionSchedule!: CommissionYear[];
 
+  /*
+   * **What the proposal reads from the product** (P19.7-T1 AC-2; ADR-0225 §1): the Super Admin's, in the company's
+   * catalogue, checked on every save by `checkProposalSettings` (§2) — so stored as plain documents, the shapes in
+   * `proposal-fields.ts`. Empty until set: a product with no fields is still offered, with *Tertanggung* and the premium.
+   */
+
+  /** The panel's fields between *Tertanggung* and the premium, in order (at most `PROPOSAL.FIELDS_MAX`). */
+  @Prop({ type: [Object], default: [] })
+  proposalFields!: ProposalField[];
+
+  /** *Lihat semua plan*'s cards, cheapest first, each an option of the `plan` field. */
+  @Prop({ type: [Object], default: [] })
+  planOptions!: PlanOption[];
+
+  /** *Tanya-jawab*: for the agent only, never printed. An office may replace it, held for approval (§5). */
+  @Prop({ type: [Object], default: [] })
+  faq!: FaqEntry[];
+
+  /** Page 2's detail blocks, each with the illustration it was read from. */
+  @Prop({ type: [Object], default: [] })
+  pdfDetail!: PdfDetailBlock[];
+
+  /** A conventional product's syariah name, where its syariah version is no product of its own (§3). */
+  @Prop({ type: String, default: null })
+  syariahName!: string | null;
+
+  /** `null` reads the category's: *Anak* for education, *Klien* for the rest. */
+  @Prop({ type: String, enum: [...PROPOSAL_DEFAULT_INSURED, null], default: null })
+  defaultInsured!: ProposalDefaultInsured | null;
+
+  /** The PDF's type label; `null` reads the category's (*KESEHATAN* …). */
+  @Prop({ type: String, default: null })
+  proposalTypeLabel!: string | null;
+
+  /**
+   * **Where the proposal fields came from, when an import wrote them** (ADR-0225 §10): `{ import, hash }`, the hash of
+   * what it wrote. The import writes again only while the product's fields still hash to it — never over a Super
+   * Admin's edit. `null` for fields nobody imported.
+   */
+  @Prop({ type: Object, default: null })
+  proposalFieldsSource!: { import: string; hash: string } | null;
+
   @Prop({ type: String, enum: PRODUCT_LIFECYCLES, default: 'active', index: true })
   lifecycle!: ProductLifecycle;
 
@@ -150,8 +233,15 @@ export class Product {
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;
 
+  /**
+   * **A soft delete** (P19.4-T4 AC-13, B1-5; ADR-0209 §10): a withdrawn product nothing references, set by
+   * `DELETE …/products/:productId`. Its code is never reused.
+   */
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
+
+  @Prop({ type: String, default: null })
+  deletedBy!: string | null;
 
   @Prop({ type: String, default: null })
   createdBy!: string | null;
@@ -170,3 +260,6 @@ ProductSchema.index(
 
 /** The read order. */
 ProductSchema.index({ companyId: 1, sortOrder: 1 });
+
+/** The riders of a base, read when a base is withdrawn or deleted (P19.4-T4 AC-6, AC-13). */
+ProductSchema.index({ companyId: 1, attachesTo: 1 });

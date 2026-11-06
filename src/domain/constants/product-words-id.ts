@@ -3,7 +3,7 @@ import { SEED_PRODUCTS_ID_A, SEED_REPLY_BY_NEED_ID as REPLIES_ID } from './produ
 import { SEED_PRODUCTS_ID_B } from './product-words-id-b';
 
 /**
- * **The platform's seed products in Bahasa Indonesia** (UI V1, UI-107; Phase 18.99 T13): every product of
+ * **The platform's seed products in Bahasa Indonesia** (UI V1, UI-107; Phase 18.11 T13): every product of
  * `SEED_PRODUCTS`, by code, field for field — its catalogue line, benefits, what makes it stand out, its best-fit
  * customer and its sales script — and the eight needs' replies (`SEED_REPLY_BY_NEED`).
  *
@@ -14,7 +14,7 @@ import { SEED_PRODUCTS_ID_B } from './product-words-id-b';
  * the insurance terms agents say in English (*as-billed*, *No Claim Bonus*, *Limit Booster*, *unit link*) stay.
  *
  * Split in two files only because two people translated them at once. **For the product owner's review before release**
- * (the report's UI-107): every pair is listed in `docs/05-delivery/phases/phase-18.99-translations-for-review.md`.
+ * (the report's UI-107): every pair is listed in `docs/05-delivery/phases/phase-18.11-translations-for-review.md`.
  */
 export const SEED_PRODUCTS_ID: Readonly<Record<string, SeedProductWords>> = { ...SEED_PRODUCTS_ID_A, ...SEED_PRODUCTS_ID_B };
 

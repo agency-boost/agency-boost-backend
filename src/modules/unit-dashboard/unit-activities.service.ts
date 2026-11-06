@@ -61,7 +61,7 @@ export interface UnitActivitiesView {
 }
 
 /**
- * **The Unit Dashboard's *Activities* tab** (UI V1, Phase 18.99 T4; UI-001, D-17; `functional/unit-dashboard.md`, *UI V1
+ * **The Unit Dashboard's *Activities* tab** (UI V1, Phase 18.11 T4; UI-001, D-17; `functional/unit-dashboard.md`, *UI V1
  * (2026-10-30)*): `GET /unit/dashboard/activities`.
  *
  * - **Whose**: the dashboard's own reach (`UnitDashboardService.people`) — the reader's unit, or `for` a leader below

@@ -5,7 +5,7 @@ import { baseSchemaOptions } from '@/common/schema/base.schema';
 export type CampaignChaseDocument = HydratedDocument<CampaignChase>;
 
 /**
- * **One member's chase of one campaign** (P18.5-T7, D-lists; OD-153: chasing is enrolment).
+ * **One member's chase of one campaign** (P18.2-T7, D-lists; OD-153: chasing is enrolment).
  *
  * The prototype keeps `chased` on the shared campaign (`Overall.html:7935`), so one agent's star would be every
  * agent's. Here it is the member's own record, **keyed by the membership `_id` and the campaign's stable code**

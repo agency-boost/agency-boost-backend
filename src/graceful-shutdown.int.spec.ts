@@ -73,14 +73,14 @@ class SlowController {
 }
 
 /**
- * **A shutdown in the middle of a request still delivers that request's email** (P18.7-T1, the review's
+ * **A shutdown in the middle of a request still delivers that request's email** (P18.4-T1, the review's
  * M1), through `app.close()`, which is what SIGTERM runs.
  *
  * Nest closes the HTTP server only after every `beforeApplicationShutdown` hook. With the drain as one of
  * those hooks it ran first, found nothing in flight and returned. The request finished afterwards and
  * dispatched its email into a process whose database was about to close, so the row stayed `pending`.
  */
-describe('a graceful shutdown (P18.7-T1)', () => {
+describe('a graceful shutdown (P18.4-T1)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -116,7 +116,7 @@ describe('a graceful shutdown (P18.7-T1)', () => {
     await stopMongo();
   });
 
-  it('P18.7-T1 stops listening, lets the open request finish, then waits for the email it sent', async () => {
+  it('P18.4-T1 stops listening, lets the open request finish, then waits for the email it sent', async () => {
     const server = app.getHttpServer();
     const answered = request(server).post('/slow').then((res) => res);
     await until(() => entered);
@@ -143,23 +143,23 @@ describe('a graceful shutdown (P18.7-T1)', () => {
   });
 });
 
-describe('GracefulShutdown with no HTTP server (P18.7-T1)', () => {
+describe('GracefulShutdown with no HTTP server (P18.4-T1)', () => {
   it.each([
     ['no adapter host', undefined],
     ['an adapter host with no adapter, as an application context has', {}],
-  ])('P18.7-T1 with %s, it only drains, with the drain\'s own bound', async (_what, host) => {
+  ])('P18.4-T1 with %s, it only drains, with the drain\'s own bound', async (_what, host) => {
     const drain = jest.fn().mockResolvedValue([]);
     await new GracefulShutdown({ drain } as never, host as never).beforeApplicationShutdown('SIGTERM');
     expect(drain).toHaveBeenCalledWith(10_000, 'SIGTERM');
   });
 });
 
-describe('stopListening (P18.7-T1)', () => {
-  it('P18.7-T1 has a bound that leaves time for the drain inside the 30 s grace period', () => {
+describe('stopListening (P18.4-T1)', () => {
+  it('P18.4-T1 has a bound that leaves time for the drain inside the 30 s grace period', () => {
     expect(HTTP_CLOSE_TIMEOUT_MS).toBe(15_000);
   });
 
-  it('P18.7-T1 answers at once for a server that is not listening, and a second call is harmless', async () => {
+  it('P18.4-T1 answers at once for a server that is not listening, and a second call is harmless', async () => {
     expect(await stopListening(undefined, 1_000)).toBe('not-listening');
     const server = createServer((_req, res) => res.end('ok'));
     expect(await stopListening(server, 1_000)).toBe('not-listening');
@@ -169,7 +169,7 @@ describe('stopListening (P18.7-T1)', () => {
     expect(await stopListening(server, 1_000)).toBe('not-listening');
   });
 
-  it('P18.7-T1 closes a keep-alive connection once its request is answered, rather than after its timeout', async () => {
+  it('P18.4-T1 closes a keep-alive connection once its request is answered, rather than after its timeout', async () => {
     const answer = gate();
     const server = createServer(async (_req, res) => {
       await answer.wait;
@@ -195,7 +195,7 @@ describe('stopListening (P18.7-T1)', () => {
     agent.destroy();
   });
 
-  it('P18.7-T1 closes what is still open at the bound, and says so', async () => {
+  it('P18.4-T1 closes what is still open at the bound, and says so', async () => {
     const warn = jest.fn();
     const server = createServer(() => undefined); // never answers
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

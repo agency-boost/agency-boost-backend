@@ -12,7 +12,7 @@ const ENDS_WITH_SUFFIX = / \(nama kami\)$/;
 
 /**
  * **A product's name without the seed's placeholder** (ADR-0167; the client's UI review of 2026-10-26, UI-023;
- * P18.95-T6 AC-4, parity I-424).
+ * P18.7-T6 AC-4, parity I-424).
  *
  * The demo seed gave each office's first product a display name of its own, the company's name with
  * *" (nama kami)"* after it, to show an office renaming a product (P5-T5). The client read

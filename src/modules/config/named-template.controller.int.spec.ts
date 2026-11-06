@@ -14,6 +14,8 @@ import { configModule, provisionOffice } from '../../../test/config-module';
 import { listenOnLoopback } from '../../../test/listen';
 import { IN_INDONESIAN } from '../../../test/i18n';
 import { NamedTemplateController } from './named-template.controller';
+import { TemplateMaterialService } from './template-material.service';
+import { TemplatePushService } from './template-push.service';
 import { NamedTemplateService } from './named-template.service';
 import { TemplateCopyService } from './template-copy.service';
 import { TemplateService } from './template.service';
@@ -53,6 +55,9 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
         { provide: NamedTemplateService, useValue: wired.namedTemplates },
         { provide: TemplateCopyService, useValue: wired.templateCopies },
         { provide: TemplateService, useValue: wired.templateService },
+        // ADR-0208: the Training section's material and the push, which the controller now also serves.
+        { provide: TemplateMaterialService, useValue: wired.templateMaterial },
+        { provide: TemplatePushService, useValue: wired.templatePush },
         { provide: ActivityConfigService, useValue: wired.activity },
         { provide: LeadStatusService, useValue: wired.leads },
         { provide: RatioService, useValue: wired.ratios },
@@ -95,6 +100,13 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       publishAll: 'company_template:write',
       offices: 'company_template:read',
       archive: 'company_template:write',
+      // ADR-0208 (P19.4-T1): the push, and the Training section's material.
+      apply: 'company_template:write',
+      requestMaterialUpload: 'company_template:write',
+      confirmMaterialUpload: 'company_template:write',
+      saveModuleMaterial: 'company_template:write',
+      // P19.6-T2 (ADR-0217 §4): the editor's preview of a lesson, in the sandboxed frame.
+      materialFileUrl: 'company_template:read',
     });
   });
 
@@ -130,7 +142,8 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       expect(made.body).toMatchObject({
         name: 'Jakarta branches', isDefault: false, status: 'active', origin: { kind: 'defaults' }, officeCount: 0,
       });
-      expect(Object.values(made.body.publishedVersions)).toEqual(Array(7).fill(1));
+      // Seven office kinds, the playbook (ADR-0210 §1) and *Advanced analytics* (ADR-0214 §1).
+      expect(Object.values(made.body.publishedVersions)).toEqual(Array(10).fill(1)); // and *Tampilan* (P19.6-T1, ADR-0218 §3)
 
       const list = await http().get(base).expect(200);
       expect(list.body.map((t: { name: string; isDefault: boolean }) => [t.name, t.isDefault])).toEqual([
@@ -148,11 +161,28 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       expect(res.body.error).toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', details: { name: 'prudential TEMPLATE' } });
     });
 
-    it('P18.98-T5 AC-7 refuses a taken name, archiving the default and a start it cannot read, in Indonesian', async () => {
+    it('P19.4-T3 AC-12 refuses an archived template’s name over HTTP, in SA UI-017’s words, on create and rename', async () => {
+      const made = (await http().post(base).send({ name: 'Manulife template', from: 'empty' }).expect(201)).body;
+      await http().post(`${base}/${made.id}/archive`).expect(200);
+
+      const create = await http().post(base).set(...IN_INDONESIAN).send({ name: 'Manulife Template', from: 'empty' }).expect(409);
+      expect(create.body.error).toMatchObject({
+        code: 'TEMPLATE_NAME_TAKEN', message: 'Nama ini sudah dipakai template lain.',
+        details: { name: 'Manulife Template', archived: true },
+      });
+      const defaultId = String((await wired.namedTemplates.resolve(COMPANY))._id);
+      const rename = await http().patch(`${base}/${defaultId}`).send({ name: 'manulife template' }).expect(409);
+      expect(rename.body.error).toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', message: 'This name is already used by another template.' });
+      // Another company's same name is its own.
+      await http().post(`/admin/companies/${OTHER_COMPANY}/templates`).send({ name: 'Manulife template', from: 'empty' }).expect(201);
+    });
+
+    it('P18.10-T5 AC-7 refuses a taken name, archiving the default and a start it cannot read, in Indonesian', async () => {
       const taken = await http().post(base).set(...IN_INDONESIAN).send({ name: 'prudential TEMPLATE', from: 'empty' }).expect(409);
       expect(taken.body.error).toMatchObject({
         code: 'TEMPLATE_NAME_TAKEN',
-        message: 'Perusahaan ini sudah memiliki template bernama prudential TEMPLATE. Pilih nama lain.',
+        // SA UI-017's words (P19.4-T3 AC-12).
+        message: 'Nama ini sudah dipakai template lain.',
         details: { name: 'prudential TEMPLATE' },
       });
 
@@ -167,7 +197,7 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       // The DTO's own decorator sentence (`field`), in `details.violations` and the message alike.
       const start = await http().post(base).set(...IN_INDONESIAN).send({ name: 'x', from: 'somewhere' }).expect(400);
       expect(start.body.error.details.violations).toEqual([
-        'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu template perusahaan',
+        'from harus "empty", "defaults", atau { templateId, rungMap? } yang menyebut salah satu template perusahaan',
       ]);
     });
 
@@ -215,11 +245,15 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       const jakarta = list.find((t) => t.id === made.id)!;
       expect(jakarta.sections.lead_pipeline).toEqual({ publishedVersion: 1, hasDraft: true });
       expect(jakarta.sections.activity_taxonomy).toEqual({ publishedVersion: 1, hasDraft: false });
-      expect(Object.keys(jakarta.sections)).toHaveLength(7);
+      expect(Object.keys(jakarta.sections)).toHaveLength(10); // P19.6-T1: *Tampilan*, the ninth section
 
-      // A template made empty: every kind *Kosong*.
+      // A template made empty: every kind *Kosong* — but *Advanced analytics*, never empty (ADR-0214 §9).
       const nothing = list.find((t) => t.id === empty.id)!;
-      expect(Object.values(nothing.sections)).toEqual(Array(7).fill({ publishedVersion: null, hasDraft: false }));
+      expect(Object.values(nothing.sections)).toEqual([
+        ...Array(8).fill({ publishedVersion: null, hasDraft: false }), { publishedVersion: 1, hasDraft: false },
+        // P19.6-T1 (ADR-0218 §3): *Tampilan* empty too.
+        { publishedVersion: null, hasDraft: false },
+      ]);
     });
 
     it('publishes every kind with a draft, the taxonomy before the ratios built on it, and reports a refusal without stopping the rest', async () => {
@@ -242,6 +276,11 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
         { kind: 'activation_checklist', outcome: 'skipped', reason: 'no_changes' },
         { kind: 'capability_ladder', outcome: 'skipped', reason: 'no_changes' },
         { kind: 'event_types', outcome: 'skipped', reason: 'no_changes' },
+        { kind: 'recruitment_playbook', outcome: 'skipped', reason: 'no_changes' },
+        // P19.6-T1 (ADR-0218 §3): *Tampilan*, before the last.
+        { kind: 'branding', outcome: 'skipped', reason: 'no_changes' },
+        // P19.5-T1 (ADR-0214 §1): published last, after the playbook.
+        { kind: 'advanced_analytics', outcome: 'skipped', reason: 'no_changes' },
       ]);
       expect(res.body.template).toMatchObject({ id: made.id, name: 'From scratch' });
       expect(res.body.template.sections.activity_taxonomy).toEqual({ publishedVersion: 1, hasDraft: false });
@@ -253,7 +292,7 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       expect(again.body.results.filter((r: { outcome: string }) => r.outcome === 'published')).toEqual([]);
     });
 
-    it('P18.98-T5 says a refused kind in the reader’s language', async () => {
+    it('P18.10-T5 says a refused kind in the reader’s language', async () => {
       const made = (await http().post(base).send({ name: 'Kosong', from: 'empty' }).expect(201)).body;
       await save(made.id, 'lead_pipeline', { statuses: [] });
       const res = await http().post(`${base}/${made.id}/publish`).set(...IN_INDONESIAN).expect(200);
@@ -277,7 +316,8 @@ describe('named templates and the reserved activity types over HTTP (P13.2-T6)',
       await http().post(`/admin/companies/66f0000000000000000000ff/templates/${made.id}/publish`).expect(404);
 
       const rows = wired.templates as unknown as mongoose.Model<{ templateId: string; status: string }>;
-      expect(await rows.countDocuments({ templateId: made.id, status: 'published' })).toBe(0);
+      // Only the *Advanced analytics* version 1 it was made with (ADR-0214 §9): the archived template's draft is not published.
+      expect(await rows.countDocuments({ templateId: made.id, status: 'published', kind: { $ne: 'advanced_analytics' } })).toBe(0);
     });
 
     it('lists the offices a template answers for, by code, with the kinds each is behind on and has no record of', async () => {

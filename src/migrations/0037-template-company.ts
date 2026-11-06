@@ -27,12 +27,12 @@ export interface TemplateCompanyResult {
 }
 
 /**
- * **The *Template* company** (ADR-0164 §1, §2; P18.9-T3 AC-2).
+ * **The *Template* company** (ADR-0164 §1, §2; P18.6-T3 AC-2).
  *
  * The *Template library*: a company of kind `template`, named **Template** (slug `template`), holding what a
  * new company copies — the role ladder with its leader tiers (ADR-0156), the 31 products, the carrier rules,
  * the recruitment playbook — and one named template, **Default template**, the company's default, with each of
- * the seven kinds published as version 1. All of it from the AgencyBoost defaults as Phase 18.8 left them: the
+ * the seven kinds published as version 1. All of it from the AgencyBoost defaults as Phase 18.5 left them: the
  * activity labels and benchmarks of ADR-0160, the tiers, and the activity binding of ADR-0163 in the taxonomy.
  * It runs on every deploy, so **every environment has it**, staging and production alike, before any tenant.
  *

@@ -71,7 +71,7 @@ export class ActivityReadings {
   }
 
   /**
-   * **Each person's activity count on each of a few days, for many people at once** (UI V1, Phase 18.99 T9: UI-059's
+   * **Each person's activity count on each of a few days, for many people at once** (UI V1, Phase 18.11 T9: UI-059's
    * *Hari ini* pill on the Group Tree, O-5; and UI-101's *Kmrn* / *Hari ini* on Home's team list, D-22) — the day's
    * `totalCount`, the number Activity Management saves and shows for that day, so the pill and the log never disagree.
    *
@@ -167,7 +167,7 @@ export class ActivityReadings {
    * The rule is ADR-0020's, on the **category**: an active one whose `appliesToOrgLevelCodes` is empty or
    * names the rung. A section the office restricted to leaders is not an agent's to be shown.
    *
-   * **And every archived section, marked `archived`** (ADR-0163 §6, P18.9-T2 AC-5): a period that holds counts
+   * **And every archived section, marked `archived`** (ADR-0163 §6, P18.6-T2 AC-5): a period that holds counts
    * against its types keeps them on its summary tile, as the Activity Dashboard keeps an archived section's rows.
    * Which of them the period holds counts for is the caller's to know — `sectionChips` keeps those and drops the
    * rest, so a section archived before the period began shows nothing.

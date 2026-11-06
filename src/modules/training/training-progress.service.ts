@@ -21,7 +21,7 @@ import { TrainingService } from './training.service';
 const DUPLICATE_KEY = 11000;
 
 /**
- * **The learner's training, and the coach's read of it** (P18.5-T1, T2, T4; `functional/training.md`, the Data
+ * **The learner's training, and the coach's read of it** (P18.2-T1, T2, T4; `functional/training.md`, the Data
  * contract; roles §3.7).
  *
  * - **What is offered is the snapshot's** (`OfferedTraining`): a module not offered is 404 on every route here,
@@ -247,6 +247,7 @@ export class TrainingProgressService {
     return {
       code: offered.module.code,
       title: offered.module.title,
+      description: offered.module.description ?? null,
       category: { code: offered.category.code, label: offered.category.label },
       skill: { code: offered.skill.code, label: offered.skill.label },
       // The storage key never leaves the server: an address is signed per open.

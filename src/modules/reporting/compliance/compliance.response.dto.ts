@@ -6,6 +6,8 @@ import type {
 } from './compliance.service';
 import type { ComplianceEventEntry } from './events.category';
 import type { ComplianceTrainingCategory, ComplianceTrainingModule, ComplianceTrainingSkill } from './training.category';
+import type { OfficeGroup } from '../office-groups';
+import { OfficeGroupDto } from '../reporting.response.dto';
 
 /** Declared for OpenAPI. The wire shapes live on the service's and the categories' types (`contract-tree.md`). */
 
@@ -201,4 +203,9 @@ export class ComplianceViewDto implements ComplianceView {
   tree!: ComplianceSectionDto[];
   @ApiProperty({ type: ComplianceCanDto }) can!: ComplianceCanDto;
   @ApiProperty({ type: ComplianceThresholdsDto }) thresholds!: ComplianceThresholdsDto;
+  @ApiProperty({ type: [OfficeGroupDto], description: 'The office’s active custom groups, A to Z: *Lihat untuk*’s choices.' })
+  groups!: OfficeGroup[];
+
+  @ApiProperty({ type: OfficeGroupDto, nullable: true, description: 'The group the read is over (`?group=`); `null` for the whole KPM.' })
+  group!: OfficeGroup | null;
 }

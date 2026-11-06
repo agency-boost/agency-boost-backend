@@ -10,15 +10,15 @@ import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
-import { ProductionReadings } from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { boundCodes, countOf, defaultBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { insightsFor, type Insight } from './insights';
 import { summaryPeriod, type SummaryPeriodQuery } from './summary-period';
 import {
-  activityTargets, goalFigures, paceFor, sectionChips, totalLogged,
-  type ActivityTarget, type FigureSource, type Pace, type PeriodFigures, type SectionChip,
+  activityTargets, goalFigures, paceFor, productionHeld, sectionChips, totalLogged,
+  type ActivityTarget, type FigureSource, type Pace, type PeriodFigures, type ProductionHeld, type SectionChip,
 } from './summary-figures';
 
 export type { FigureSource };
@@ -27,7 +27,7 @@ export type { FigureSource };
 export interface SummaryActivity {
   /**
    * The days counted: the calendar month, or the year, to today — the office's. A closed month or year is
-   * counted whole (P18.8-T11).
+   * counted whole (P18.5-T11).
    */
   from: LocalDate;
   to: LocalDate;
@@ -44,13 +44,13 @@ export interface SummaryActivity {
 }
 
 export interface SummaryView {
-  /** The year *Yearly* is about: this one, or with `year` or `month`, an earlier one (P18.8-T11). */
+  /** The year *Yearly* is about: this one, or with `year` or `month`, an earlier one (P18.5-T11). */
   year: string;
   /** The month *Monthly* is about, `YYYY-MM`: the office's calendar month, or an earlier one. */
   month: string;
   today: LocalDate;
   /**
-   * **Which period this is, and which there are** (P18.8-T11, ADR-0161 §4): the office's first month and its
+   * **Which period this is, and which there are** (P18.5-T11, ADR-0161 §4): the office's first month and its
    * current one — the range a `month` may name, and their years a `year` — and whether `month` and `year` are
    * the current ones. A closed period is read whole and carries no pace; the screen shows *The gap* for the
    * current one only.
@@ -59,11 +59,24 @@ export interface SummaryView {
   /** Whether a goal has been **saved** for the year. The defaults a first-time reader sees are not one. */
   goal: { set: boolean; savedAt: string | null };
   caseSizeMinor: number;
-  /** *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE. */
-  monthly: PeriodFigures & { source: FigureSource | null };
-  /** *Yearly*: the annual target against the year to date, from whichever writer holds it (P9-T6). */
-  yearly: PeriodFigures & { source: FigureSource };
-  /** The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (P18.8-T11). */
+  /**
+   * *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE — `production` `official` or
+   * `none`, and with none the helpers counting 0 achieved (UI-157 item 2).
+   */
+  monthly: PeriodFigures & { source: FigureSource | null } & ProductionHeld;
+  /**
+   * *Yearly*: the annual target against the year to date, from whichever writer holds it (P9-T6) — `production` says
+   * whose: the office's, the member's own estimate (*perkiraan Anda*, UI-157 item 4), or none yet.
+   */
+  yearly: PeriodFigures & { source: FigureSource } & ProductionHeld;
+  /**
+   * **An estimate the office's figure replaced** (P19.1-T4 AC-11, UI-157 item 4; ADR-0195 §3): the plan still stores a
+   * typed figure above 0, and the office now holds a year-to-date figure for the year — written after the estimate —
+   * which every screen reads instead. `uploadedOn` is the office's day that figure was written, for the card's
+   * *Diganti data produksi resmi (diunggah 5 Des)*; `null` when nothing was replaced (`replacedEstimate`).
+   */
+  estimateReplaced: { uploadedOn: LocalDate } | null;
+  /** The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (P18.5-T11). */
   pace: Pace | null;
   /**
    * **Where this page's counts of policies come from** (UI V1, UI-052), so the screen can say so: every one — the
@@ -90,7 +103,7 @@ export interface SummaryView {
     rows: OpenLead[];
     total: number;
     /**
-     * **The open leads Leads Management lists the reader besides their own** (P18.8-T15 AC-4; the client's UI
+     * **The open leads Leads Management lists the reader besides their own** (P18.5-T15 AC-4; the client's UI
      * review, UI-002): those of everybody else their `lead:read` reaches. Counted only on the reader's own
      * summary while their own card is empty — the one case its sentence reads — and 0 otherwise. An Agent's
      * grant is their own leads alone, so an Agent who leads somebody reads 0.
@@ -128,7 +141,7 @@ export interface SummaryView {
 export class SummaryService {
   constructor(
     private readonly goals: GoalService,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly activity: ActivityReadings,
     private readonly days: TenantDay,
     private readonly leadReadings: LeadReadings,
@@ -155,7 +168,7 @@ export class SummaryService {
   ) {}
 
   /**
-   * `asked` is the period (P18.8-T11, ADR-0161 §4): a month or a year, for oneself or with `for`; neither is this
+   * `asked` is the period (P18.5-T11, ADR-0161 §4): a month or a year, for oneself or with `for`; neither is this
    * month. One outside the office's calendar is refused `400`, after the subject is resolved — so a stranger is
    * still 404 — and before anything is read or recorded.
    */
@@ -176,7 +189,7 @@ export class SummaryService {
    */
   async of(ctx: RequestContext, subject: Subject, asked: SummaryPeriodQuery = {}): Promise<SummaryView> {
     const member = subject.membershipId;
-    // The office's day and the month it opened, in one read; the period checked against them (P18.8-T11).
+    // The office's day and the month it opened, in one read; the period checked against them (P18.5-T11).
     const day = await this.days.calendar(ctx);
     const period = summaryPeriod(day, asked);
     const { year } = period;
@@ -194,7 +207,7 @@ export class SummaryService {
     const showsLeads = subject.self || leadReach === null || leadReach.includes(member);
 
     /*
-     * **The period's days** (P18.8-T11): this month and this year to today, as ever; a closed month or year whole,
+     * **The period's days** (P18.5-T11): this month and this year to today, as ever; a closed month or year whole,
      * so it shows its final figures. The production ledger is the period's month's, which is also what fixes that
      * month's target as it stood when the month began (ADR-0056).
      */
@@ -222,8 +235,8 @@ export class SummaryService {
       // Which codes the three targets and the pace count: the office's binding, today (ADR-0163 §4).
       this.bindings ? this.bindings.resolveCascadeBinding(ctx) : Promise.resolve(defaultBinding()),
       // UI-054: the day the month's APE, and the year's, is valid for — the latest file standing for each.
-      this.uploadedOn(ctx, { from: period.month, to: period.month }, day.timezone),
-      this.uploadedOn(ctx, { from: `${year}-01`, to: period.month }, day.timezone),
+      this.latestUpload(ctx, { from: period.month, to: period.month }),
+      this.latestUpload(ctx, { from: `${year}-01`, to: period.month }),
     ]);
 
     /*
@@ -274,7 +287,7 @@ export class SummaryService {
      * 30 days, *M* the closings chip's target, *K* the policies this month's APE gap still needs over the
      * weeks left. A closing target exists only with a monthly target and a case size, so both are here.
      *
-     * **This month's only** (P18.8-T11, ADR-0161 §4): a month that has ended has no pace to keep and no weeks
+     * **This month's only** (P18.5-T11, ADR-0161 §4): a month that has ended has no pace to keep and no weeks
      * left, so it has no sentence — nor, with no pace, the `BEHIND_PACE` card, which is the sentence's rule.
      */
     const pace = !period.currentMonth || closingTarget === null || monthlyTarget === null ? null : paceFor({
@@ -297,11 +310,21 @@ export class SummaryService {
       },
       goal: { set: figures.set, savedAt: goal.savedAt },
       caseSizeMinor: figures.caseSizeMinor,
-      monthly,
-      yearly,
+      monthly: { ...monthly, ...productionHeld(monthly, figures.caseSizeMinor) },
+      yearly: { ...yearly, ...productionHeld(yearly, figures.caseSizeMinor) },
+      estimateReplaced: replacedEstimate({
+        typedMinor: goal.apeAchievedMinor,
+        typedAt: goal.apeAchievedTypedAt ?? goal.savedAt,
+        official: yearToDate,
+        latestImport: yearUpload,
+        timezone: day.timezone,
+      }),
       pace,
       policies: { source: 'activity_log', codes: [...binding.closings] },
-      uploadedOn: { month: monthUpload, year: yearUpload },
+      uploadedOn: {
+        month: monthUpload ? localDayOf(monthUpload, day.timezone) : null,
+        year: yearUpload ? localDayOf(yearUpload, day.timezone) : null,
+      },
       activity: {
         monthly: activityFor(monthWindow, counts, monthlyCounts),
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
@@ -323,7 +346,7 @@ export class SummaryService {
   }
 
   /**
-   * The open leads of everybody the reader's `lead:read` reaches but themselves (P18.8-T15 AC-4) — the downline
+   * The open leads of everybody the reader's `lead:read` reaches but themselves (P18.5-T15 AC-4) — the downline
    * `/leads` lists them, by the same `reach`. An office-wide grant is the office; `own` is nobody else.
    */
   private async unitOpenLeads(ctx: RequestContext, member: string): Promise<number> {
@@ -338,13 +361,35 @@ export class SummaryService {
    * `(kpmId, month, status, …)` index. The figure is the office's, so a leader's read of a coachee's Summary reads the
    * same date the coachee does.
    */
-  private async uploadedOn(ctx: RequestContext, months: { from: string; to: string }, timezone: string): Promise<LocalDate | null> {
+  private async latestUpload(ctx: RequestContext, months: { from: string; to: string }): Promise<Date | null> {
     if (!this.batches) return null;
     const [latest] = await this.batches.find(
       ctx,
       { month: { $gte: months.from, $lte: months.to }, status: 'committed', committedAt: { $ne: null } },
       { sort: { committedAt: -1 }, limit: 1, projection: { committedAt: 1 } },
     );
-    return latest?.committedAt ? localDayOf(latest.committedAt, timezone) : null;
+    return latest?.committedAt ?? null;
   }
+}
+
+/**
+ * **Did the office's figure replace an estimate?** (P19.1-T4 AC-11; ADR-0195 §3): the plan still stores a typed figure
+ * above 0, the office now holds a year-to-date figure for the year, and that figure was written **after** the estimate —
+ * the correction's moment for a figure corrected by hand, else the year's latest import. The answer is the office's day
+ * it was written, for *Diganti data produksi resmi (diunggah 5 Des)*; `null` when nothing was replaced, and when either
+ * moment is unknown. `typedAt` is when the estimate last changed, or the plan's `savedAt` on a row from before that was
+ * recorded. Pure.
+ */
+export function replacedEstimate(input: {
+  typedMinor: number;
+  typedAt: string | null;
+  official: { provenance: 'imported' | 'corrected'; correctedAt: Date | null } | null;
+  latestImport: Date | null;
+  timezone: string;
+}): { uploadedOn: LocalDate } | null {
+  const { typedMinor, typedAt, official, latestImport, timezone } = input;
+  if (official === null || typedMinor <= 0 || typedAt === null) return null;
+  const writtenAt = official.provenance === 'corrected' ? official.correctedAt : latestImport;
+  if (writtenAt === null || writtenAt.getTime() <= new Date(typedAt).getTime()) return null;
+  return { uploadedOn: localDayOf(writtenAt, timezone) };
 }

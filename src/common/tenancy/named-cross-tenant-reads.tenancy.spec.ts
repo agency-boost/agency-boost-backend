@@ -26,7 +26,13 @@ const CALLERS: Record<string, Record<string, string>> = {
     findAcrossAllTenants:
       'the platform overview and the platform admins list (`platform_metrics:read`, '
       + '`kpm_admin:list_platform`): active memberships across every office, for counts and the '
-      + 'Owner/Admin rows, by the Super Admin who is in none',
+      + 'Owner/Admin rows, by the Super Admin who is in none; and *Ganti Owner*\'s account picker '
+      + '(`kpm:assign_owner`, P19-T3 AC-5, ADR-0191 §5): the live memberships of at most twenty accounts found by '
+      + 'name or email, so the Super Admin sees which offices each already belongs to; and each Owner\'s own membership '
+      + 'in the offices listed (P19.4-T3, ADR-0212 §2), for *Diundang* — its `invitedAt` — and no other member\'s row',
+    countPerOfficeAcrossTenants:
+      'the offices list, a KPM\'s page and *Perlu perhatian Anda* (P19.4-T3 AC-8, SA R5, ADR-0212): each office\'s live '
+      + 'memberships, for *Anggota* and *"KPM {code} belum punya anggota"* — a count per office, never a row',
   },
   'assets/asset.service.ts': {
     findAcrossAllTenants:
@@ -35,7 +41,7 @@ const CALLERS: Record<string, Record<string, string>> = {
   },
   'tenants/org-level.service.ts': {
     countHoldingRungAcrossTenants:
-      'a rung\'s leader tier refused while anybody holds it (P18.8-T1, ADR-0156 §5): the rung is the company\'s and '
+      'a rung\'s leader tier refused while anybody holds it (P18.5-T1, ADR-0156 §5): the rung is the company\'s and '
       + 'its members are in every office of it, so the Super Admin, in none, counts them — a count, never a row',
   },
   'org/leader-limit-request.service.ts': {
@@ -48,7 +54,7 @@ const CALLERS: Record<string, Record<string, string>> = {
   },
   'org/invites.service.ts': {
     pendingCodeAcrossTenants:
-      '*+ Add agent* (P18.96-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
+      '*+ Add agent* (P18.8-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
       + 'company — the insurer issued the code and spans offices — answered as a boolean, never a row, an office or a name',
   },
   'org/leader-limit.ts': {
@@ -72,10 +78,69 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*Save as template* (P13.2-T7, ADR-0115 §5): one named office\'s published configuration — and '
       + 'its own training files, to duplicate, and its live activity binding — read by the Super Admin, who is in no office',
   },
+  'auth/account-links.service.ts': {
+    officeRoleOfLoginAcrossTenants:
+      '*Tambah akun* (P19.2-T1 AC-8, UI-169 item 5, ADR-0199 §1, §3): one login\'s own membership — its office id, '
+      + 'status and admin flag — in whichever office holds it, for whether a login may be linked (an Owner\'s, an '
+      + 'Admin\'s or a Super Admin\'s) and for the caller\'s own other login\'s views on `GET /auth/me`; never a row '
+      + 'of anything the office holds',
+  },
+  'products/product.service.ts': {
+    referencesToProductAcrossTenants:
+      'deleting a withdrawn product (P19.4-T4 AC-13, ADR-0209 §10): how many offices of the company still sell it or '
+      + 'hold a script for it, by the Super Admin who is in none — two counts, never a row, an office or a word',
+  },
+  'tenants/org-level-references.ts': {
+    countInOfficesAcrossTenants:
+      'deleting an archived rung (P19.4-T5 AC-2, ADR-0213 §2): whether any office of the rung\'s company still names it '
+      + '— a membership or its role history, a leader-limit request, a live or published setting, a campaign — counted by '
+      + 'the Super Admin who is in none, the company\'s offices named; a count per kind, never a row, a name or a word',
+  },
+  'config/analytics-template.service.ts': {
+    agentCodesInOfficesAcrossTenants:
+      'the template\'s *Advanced analytics* agent-code format, tested before it is published and as it is typed (P19.5-T1 '
+      + 'AC-11, ADR-0214 §7): the codes registered in every KPM that reads the template, by the Super Admin who is in '
+      + 'none — codes alone, never a name, an office or a row; up to five named, as the insurer issued them',
+    kodesHeldInOfficesAcrossTenants:
+      'the template\'s *Advanced analytics* locks (P19.5-T1 AC-7, ADR-0214 §2): which columns any KPM reading the '
+      + 'template holds a figure for, and the earliest month — kodes and months, never a figure, a person or an office',
+  },
+  'surveys/survey-open-runs.ts': {
+    countOpenInOfficesAcrossTenants:
+      'the template\'s *Bagian* switch before NPS or *Analitik kualitatif* goes off (P19.5-T4 AC-13, AA UI-022, AT-12, '
+      + 'ADR-0216 §2): how many survey runs are open on each office\'s own today in the KPMs reading the template, by the '
+      + 'Super Admin who is in none — two counts, never a run, an answer, an office or a person',
+  },
+  'reporting/advanced-analytics/quant-runs.service.ts': {
+    peerMediansAcrossTenants:
+      'the KPM\'s *Analitik kuantitatif* (P19.5-T3 AC-7, R3, D4, ADR-0215 §5): the median of each Quant metric over the '
+      + 'other KPMs of the caller\'s own company whose run holds it complete, three at least — the one cross-KPM read a '
+      + 'tenant role triggers; a median and a count, never another KPM\'s figure, name, id or template',
+  },
+  'reporting/platform/platform-reads.service.ts': {
+    listMembershipsAcrossTenants:
+      '*All members* and a KPM\'s *Anggota* (P19.4-T3 AC-1, ADR-0207 §2, §4): every membership of the offices named, the '
+      + 'listed fields alone, by the Super Admin who is in none — audited per read in the platform\'s log and each KPM\'s; and '
+      + 'the leaders of the page\'s rows, for their names; and *KPM & data*\'s member tiles, live memberships counted',
+  },
+  'reporting/platform/platform-reads.controller.ts': {
+    kpmComparisonAcrossTenants:
+      'the KPM comparison (P19.4-T3 AC-3, ADR-0207 §2, §4): each KPM\'s Overview, computed by its own code over the KPM '
+      + 'through `figuresForOffice`, counts and sums only, audited per read',
+    companyKpmsAcrossTenants:
+      'the company\'s *KPM & data* (P19.4-T3 AC-15, ADR-0207 §2): each KPM\'s month through the Overview\'s functions over '
+      + 'the KPM, and the D4 peer count, audited per read',
+  },
+  'tenants/admin.controller.ts': {
+    dataStatusAcrossTenants:
+      'the offices list\'s *Data terakhir* and *Perlu tindakan* (P19.4-T3 AC-8): whether each office\'s months are '
+      + 'uploaded — a month, never a figure of it',
+  },
   'config/activity-binding.service.ts': {
     findInOfficeAcrossTenants:
-      'an office\'s activity binding, kept by the Super Admin (P18.9-T2, ADR-0163 §3): one named office\'s binding '
-      + 'and its activity types — configuration, never a log — to show and to check a rebind against',
+      'an office\'s activity binding, read by the Super Admin (P18.6-T2, ADR-0163 §3): one named office\'s binding '
+      + 'and its activity types — configuration, never a log — to show on the KPM page; since P19.4-T3 the rebind is the '
+      + 'Owner\'s and the Admin\'s, through the scoped repositories (ADR-0206 §1)',
   },
 };
 
@@ -116,6 +181,18 @@ function callers(): Map<string, Set<string>> {
   return found;
 }
 
+/**
+ * **The `…ForOffice` reads** (ADR-0207 §4; P19.4-T3): the KPM's own Phase 19.3 functions run over a named office for the
+ * Super Admin, through a platform read's context. Each refuses any other context (`OfficePeople.requirePlatformRead`), and
+ * each is called from one file: the platform reads, which audit every call.
+ */
+const FOR_OFFICE: Record<string, string[]> = {
+  'reporting/platform/platform-reads.service.ts': ['analyticsForOffice', 'complianceForOffice', 'figuresForOffice'],
+  // P19.5-T3 AC-12 (ADR-0215 §9): the *Advanced analytics* tab, its own reads' file, audited per visit.
+  'reporting/advanced-analytics/admin-advanced-analytics.service.ts': ['advancedAnalyticsForOffice'],
+};
+const FOR_OFFICE_METHOD = /\.(figuresForOffice|analyticsForOffice|complianceForOffice|advancedAnalyticsForOffice)\s*\(/g;
+
 describe('named cross-tenant reads (invariant §1, P13.2-T7 AC-6)', () => {
   const found = callers();
 
@@ -140,7 +217,26 @@ describe('named cross-tenant reads (invariant §1, P13.2-T7 AC-6)', () => {
     }
   });
 
-  it('P18.9-T2 reads an office’s activity binding from configuration alone — nothing outside it is in reach', () => {
+  it('P19.4-T3 AC-16 the …ForOffice reads are called from the platform reads alone, and each refuses another context', () => {
+    const found = new Map<string, Set<string>>();
+    for (const file of globSync('**/*.ts', { cwd: MODULES }).filter((f) => !f.includes('.spec.')).map((f) => f.replace(/\\/g, '/'))) {
+      for (const m of readFileSync(join(MODULES, file), 'utf8').matchAll(FOR_OFFICE_METHOD)) {
+        found.set(file, (found.get(file) ?? new Set()).add(m[1]));
+      }
+    }
+    expect(Object.fromEntries([...found].map(([file, methods]) => [file, [...methods].sort()]))).toEqual(FOR_OFFICE);
+    for (const file of [
+      'reporting/kpm-overview.service.ts', 'reporting/kpm-analytics.service.ts', 'reporting/compliance/compliance.service.ts',
+      'reporting/advanced-analytics/advanced-analytics.service.ts',
+    ]) {
+      const source = readFileSync(join(MODULES, file), 'utf8');
+      const at = source.search(/async (figuresForOffice|analyticsForOffice|complianceForOffice|advancedAnalyticsForOffice)\(/);
+      expect([file, at > 0]).toEqual([file, true]);
+      expect([file, source.slice(at, at + 400).includes('OfficePeople.requirePlatformRead(ctx)')]).toEqual([file, true]);
+    }
+  });
+
+  it('P18.6-T2 reads an office’s activity binding from configuration alone — nothing outside it is in reach', () => {
     const source = readFileSync(join(MODULES, 'config/activity-binding.service.ts'), 'utf8');
     const constructor = source.slice(source.indexOf('constructor('), source.indexOf(') {}', source.indexOf('constructor(')));
     const injected = [...constructor.matchAll(/private readonly \w+\s*:\s*(\w+)/g)].map((m) => m[1]);

@@ -30,7 +30,7 @@ const ruleAt = ({ rule, group, criterion }: RulePlace) => {
 };
 
 /**
- * **The campaigns module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a campaign as the Owner writes it,
+ * **The campaigns module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a campaign as the Owner writes it,
  * a company's rule set, the agent's chase and the override of a final result. *Campaign*, *MDRT* and a metric's name
  * stay as the glossary keeps them (§A.4, §A.6); a requirement is a *syarat*, an override a *koreksi manual* and a
  * standing a *hasil campaign* (the API's vocabulary). A field is named as the API names it — `endsAt`, `poster.color`.
@@ -274,7 +274,7 @@ const mdrt = (language: Language, figures: Language) => ({
 });
 
 /**
- * **What the campaigns screens print that the server composes, in both languages** (P18.98-T5 AC-4; P18.5-T7,
+ * **What the campaigns screens print that the server composes, in both languages** (P18.10-T5 AC-4; P18.2-T7,
  * ADR-0142 §3): a requirement in words — *"APE of Rp 1,2 M or more"*, *"APE minimal Rp 1,2 M"* — and *Chasing
  * MDRT*'s header tooltip around them. The comparator is words (*minimal*, *maksimal*, *lebih dari*, *kurang dari*,
  * *tepat*); the metric's name is the registry's, kept (§A.4).

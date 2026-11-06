@@ -200,9 +200,12 @@ describe('the company product catalog (P5-T4)', () => {
       expect((await byCode(PRUDENTIAL, 'PRUSMART_PLAN')).lifecycle).toBe('withdrawn');
     });
 
-    it('has no delete: a policy whose product vanished is a record nobody can read', () => {
-      expect(products).not.toHaveProperty('remove');
-      expect(products).not.toHaveProperty('delete');
+    it('P19.4-T4 AC-13 deletes only a withdrawn product, softly: a product on sale is refused', async () => {
+      // The P5-T4 rule was "no delete at all"; ADR-0209 §10 admits one for a withdrawn product nothing names.
+      const mapan = await byCode(PRUDENTIAL, 'PRUMAPAN');
+      await expect(products.remove(superAdmin(), PRUDENTIAL, mapan.id))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { lifecycle: 'active' } });
+      expect((await products.list(PRUDENTIAL, { withCommission: true })).map((p) => p.id)).toContain(mapan.id);
     });
   });
 
@@ -233,8 +236,11 @@ describe('the company product catalog (P5-T4)', () => {
           opening: '<b>Halo</b>, boleh saya tanya sebentar?',
           benefits: ['<i>Proteksi</i> jiwa', '  ', 'Dana pendidikan'],
           fullScript: 'Halo. <br>Ini scriptnya.',
-          objectionTheySay: 'Terlalu mahal.',
-          objectionYouSay: 'Preminya bisa disesuaikan.',
+          objections: [
+            { objection: '<b>Terlalu</b> mahal.', answer: 'Preminya bisa disesuaikan.\n\nMulai Rp 200 rb.' },
+            // Neither side written: dropped, as a blank bullet is (P19.4-T4 AC-1).
+            { objection: '  ', answer: '' },
+          ],
           nextAction: 'Boleh saya siapkan ilustrasinya?',
         },
       });
@@ -244,9 +250,10 @@ describe('the company product catalog (P5-T4)', () => {
         opening: 'Halo, boleh saya tanya sebentar?',
         // The blank line goes: an empty bullet is a bullet an agent reads as a missing benefit.
         benefits: ['Proteksi jiwa', 'Dana pendidikan'],
-        fullScript: 'Halo. Ini scriptnya.',
-        objectionTheySay: 'Terlalu mahal.',
-        objectionYouSay: 'Preminya bisa disesuaikan.',
+        // A pasted `<br>` is the line break it meant since P19-T6 (AC-1, B1-2): the script keeps its lines.
+        fullScript: 'Halo.\nIni scriptnya.',
+        // The objections are cards, each side keeping its lines (P19.4-T4 AC-1, ADR-0209 §9).
+        objections: [{ objection: 'Terlalu mahal.', answer: 'Preminya bisa disesuaikan.\n\nMulai Rp 200 rb.' }],
         nextAction: 'Boleh saya siapkan ilustrasinya?',
       });
     });

@@ -11,12 +11,12 @@ const rowsOf = (group: UnitGroup): UnitRow[] => [group.head, ...group.members, .
 const everyRow = (view: UnitDashboardView): UnitRow[] => [...view.yourUnit.rows, ...view.units.flatMap(rowsOf)];
 
 /**
- * **The Unit Dashboard's UI V1 reads** (Phase 18.99 T4; `functional/unit-dashboard.md`, *UI V1 (2026-10-30)*) on real
+ * **The Unit Dashboard's UI V1 reads** (Phase 18.11 T4; `functional/unit-dashboard.md`, *UI V1 (2026-10-30)*) on real
  * rows, office 0417 (KPM A) beside 0555 (KPM B): *Closing* per person and *Last updated* (UI-028), and the *Activities*
  * tab's table and ratios (UI-001) — with its reach, its refusals and its tenant boundary. The office is
  * `test/coaching-office.ts`'s; *today* is Monday 14 September 2026 in Jakarta.
  */
-describe('the Unit Dashboard, UI V1 (Phase 18.99 T4)', () => {
+describe('the Unit Dashboard, UI V1 (Phase 18.11 T4)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   const db = () => mongoose.connection.db!;

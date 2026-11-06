@@ -6,8 +6,12 @@ import type { RecruitmentPlaybookBody } from '@/domain/constants';
 export type RecruitmentPlaybookDocument = HydratedDocument<RecruitmentPlaybook>;
 
 /**
- * **A company's recruitment playbook** (OD-88 → option 5, ADR-0125; D-model): the words every office of
- * the company reads live when one of its members builds a recruitment plan.
+ * **A company's recruitment playbook, as it was until P19.4-T5** (OD-88 → option 5, ADR-0125; D-model). *Since ADR-0210
+ * the playbook is a template section (`companyTemplates`, kind `recruitment_playbook`), read live by each KPM from its
+ * template; migration `0056` moved every record there and marked it `migratedTo`. Nothing reads or writes this
+ * collection since, but migration `0025`'s backfill and the history below.*
+ *
+ * It was the words every office of the company read live when one of its members built a recruitment plan.
  *
  * **Company-partitioned, as `products` is** (ADR-0033): one row per company, no `kpmId`, read through the
  * named company-filtered method `RecruitmentPlaybookService.ofCompany` — never through an office's scoped
@@ -44,6 +48,14 @@ export class RecruitmentPlaybook {
 
   @Prop({ type: String, default: null })
   createdBy!: string | null;
+
+  /**
+   * **Where migration `0056` moved it** (ADR-0210 §5): the company's default template and the version it became there,
+   * or `null` — not moved. Since P19.4-T5 the playbook is a template section and this record is **read by nothing**; it
+   * stays as its history, never hard-deleted (invariant §6).
+   */
+  @Prop({ type: Object, default: null })
+  migratedTo!: { templateId: string; version: number } | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

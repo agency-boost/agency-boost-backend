@@ -84,7 +84,7 @@ export class AdminDelegationService {
       ...rows.map((r) => r.adminAccess?.grantedByUserId).filter((u): u is string => !!u),
     ]);
     const isOwner = Boolean(ctx.membership?.isKpmOwner);
-    // A person whose account is gone is still named — in the reader's language (P18.98-T5 AC-4).
+    // A person whose account is gone is still named — in the reader's language (P18.10-T5 AC-4).
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     return rows.map((row) => {

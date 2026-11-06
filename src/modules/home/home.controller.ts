@@ -7,7 +7,7 @@ import { HOME_ACTION_DTOS, HomeDto } from './home.response.dto';
 import { HomeService, type HomeView } from './home.service';
 
 /**
- * **Home** (UI V1, 2026-10-30, Phase 18.99 T11; UI-100, UI-101; `functional/home.md`): `GET /home`, every block of the
+ * **Home** (UI V1, 2026-10-30, Phase 18.11 T11; UI-100, UI-101; `functional/home.md`): `GET /home`, every block of the
  * page every field member lands on, in one read. Takes nothing: it is the reader's own.
  */
 @ApiTags('home')
@@ -30,7 +30,9 @@ export class HomeController {
       + 'counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its '
       + '*Unit* and *AAB* split, and *Laporan tim* — everybody in your Group but you, yesterday’s and today’s count, '
       + 'nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. '
-      + 'Somebody who leads nobody gets `leader: null`.',
+      + '**Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks and *Tim saya* (*Anggota '
+      + 'tim*, *Recruitment pipeline*, *New hires*) at zero when nobody reports to them yet (ADR-0189 §4); an Agent who '
+      + 'leads nobody gets `leader: null`.',
   })
   @ApiResponse({ status: 200, type: HomeDto })
   @ApiResponse({

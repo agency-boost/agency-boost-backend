@@ -22,7 +22,10 @@ import { ProductionService } from '../production/production.service';
 import { ProductionImportService } from '../production/production-import.service';
 import { ProductionMonths } from '../production/production-months.service';
 import { ProductionCorrections } from '../production/production-correction.service';
-import { VALUE_COLUMNS } from '../production/production-preview';
+
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them. */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 import { TEMPLATE_HEADER_V1 } from '../production/production-template';
 import { SummaryController } from '../summary/summary.controller';
 import { SummaryService } from '../summary/summary.service';
@@ -111,7 +114,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     expect(declaredPermissions(UnitActivitiesController)).toEqual({ read: 'unit_dashboard:read' });
   });
 
-  describe('UI-001 GET /unit/dashboard/activities — a positive and a negative per role (Phase 18.99 T4)', () => {
+  describe('UI-001 GET /unit/dashboard/activities — a positive and a negative per role (Phase 18.11 T4)', () => {
     const activities = (query: Record<string, string> = {}) => http().get('/unit/dashboard/activities').query(query);
 
     it('UI-001 positive: an AB is answered the table and the Unit and Group ratios; an AAB their own group', async () => {
@@ -260,7 +263,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
         const res = await patch({ month: UNIT_MONTH, revision: await revision(), rows: [rinaRow(millions * M)] }).expect(200);
         expect(res.body).toMatchObject({ updated: 1, state: { month: UNIT_MONTH, locked: false } });
         const stored = await db().collection('monthlyAgentData').findOne({ membershipId: office.id.RINA, month: UNIT_MONTH });
-        expect(stored!.apeMonthly).toMatchObject({
+        expect(stored!.values.APE).toMatchObject({
           value: millions * M, provenance: 'corrected', correctedBy: office.id[who], reason: UNIT_DASHBOARD_CORRECTION_REASON,
         });
       },
@@ -296,7 +299,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       as('SARI');
       const before = await revision();
       for (const named of ['LUKAS', 'B_AGENT', 'PEER_AGENT'] as const) {
-        const res = await patch({ month: UNIT_MONTH, revision: before, rows: [rinaRow(60 * M), { membershipId: office.id[named], apeYtdMinor: 1 }] }).expect(404);
+        const res = await patch({ month: UNIT_MONTH, revision: before, rows: [rinaRow(60 * M), { membershipId: office.id[named], apeMonthlyMinor: 1 }] }).expect(404);
         expect(res.body.error.code).toBe('NOT_FOUND');
       }
       expect(await revision()).toBe(before);
@@ -306,8 +309,16 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       as('SARI');
       const now = await revision();
       expect((await patch({ month: UNIT_MONTH, revision: now - 1, rows: [rinaRow(61 * M)] }).expect(409)).body.error.code).toBe('VERSION_CONFLICT');
-      const res = await patch({ month: UNIT_MONTH, revision: now, rows: [{ membershipId: office.id.RINA, apeYtdMinor: 1 }] }).expect(422);
-      expect(res.body.error).toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { membershipId: office.id.RINA, cadence: 'ytd' } });
+      const res = await patch({ month: UNIT_MONTH, revision: now, rows: [{ membershipId: office.id.RINA, apeMonthlyMinor: Number.MAX_SAFE_INTEGER + 2 }] }).expect(422);
+      expect(res.body.error).toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { membershipId: office.id.RINA, kode: 'APE', ytd: false } });
+    });
+
+    it('P19.5-T2 AC-7 refuses a year to date over HTTP: 400 naming it — the year is the months’ sum (R4)', async () => {
+      as('SARI');
+      const now = await revision();
+      const res = await patch({ month: UNIT_MONTH, revision: now, rows: [{ membershipId: office.id.RINA, apeYtdMinor: 300 * M }] }).expect(400);
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'apeYtdMinor', membershipId: office.id.RINA } });
+      expect(await revision()).toBe(now);
     });
 
     it.each([
@@ -333,10 +344,10 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     });
 
     /*
-     * **The save's refusals in Indonesian** (P18.98-T5 AC-7): the words follow the request's `Accept-Language`, the
+     * **The save's refusals in Indonesian** (P18.10-T5 AC-7): the words follow the request's `Accept-Language`, the
      * office's month in the reader's figures; the code and every detail — the field each names — are the same.
      */
-    it('P18.98-T5 AC-7 refuses another month, a row with no figure, a person twice and a malformed month, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses another month, a row with no figure, a person twice and a malformed month, in Indonesian', async () => {
       as('SARI');
       const before = await revision();
       const save = (over: Record<string, unknown>) =>
@@ -398,7 +409,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       const coached = [...roster.directAgents, ...roster.units.flatMap((u: { head: Row; members: Row[] }) => [u.head, ...u.members])] as Row[];
       session.current = ownerFor(office.id[leader]);
       const table = (await http().get(`/kpm/data-upload/${UNIT_MONTH}`).expect(200)).body as {
-        rows: { membershipId: string; metrics: { ape: { monthly: { value: number | null; provenance: string | null }; ytd: { value: number | null; provenance: string | null } } } }[];
+        rows: { membershipId: string; values: { APE: { value: number | null; provenance: string | null } }; ytd: { APE: { value: number | null; provenance: string | null } } }[];
       };
 
       for (const row of everyRow(month)) {
@@ -409,8 +420,19 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
           overMinor: cell.overMinor, policiesNeeded: cell.policiesNeeded, targetMet: cell.targetMet,
           source: cell.source,
         });
+        /*
+         * The Summary's figures, less what the Summary adds for its own reader (UI-157: `production`, the helpers
+         * without it) — and **the office's figure or nothing** (P19.1-T4 AC-12, ADR-0195): where the Summary's year is the
+         * member's own (`self_reported`), the dashboard holds no APE produced for the year and no source.
+         */
+        const official = (period: Record<string, unknown> & { source: { provenance: string } | null }) => {
+          const { production: _production, withoutProduction: _without, ...rest } = period;
+          return period.source?.provenance === 'self_reported'
+            ? { ...rest, actualMinor: null, attainmentPct: null, gapMinor: null, overMinor: null, policiesNeeded: null, targetMet: false, source: null }
+            : rest;
+        };
         expect({ leader, who: row.name, month: figures(row.goal), year: figures(yearly.goal), set: row.goal.set })
-          .toEqual({ leader, who: row.name, month: summary.monthly, year: summary.yearly, set: summary.goal.set });
+          .toEqual({ leader, who: row.name, month: official(summary.monthly), year: official(summary.yearly), set: summary.goal.set });
 
         if (!row.isReader) {
           const theirs = coached.find((r) => r.membershipId === row.membershipId)!;
@@ -418,12 +440,13 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
             .toEqual({ leader, who: row.name, status: theirs.status, last: theirs.lastOneOnOne });
         }
 
-        const cells = table.rows.find((r) => r.membershipId === row.membershipId)!.metrics.ape;
+        // The month table's APE and its year to date — the months' sum on both since P19.5-T2 (R4).
+        const mine = table.rows.find((r) => r.membershipId === row.membershipId)!;
         expect({ leader, who: row.name, production: row.production }).toMatchObject({
           leader, who: row.name,
           production: {
-            monthly: { valueMinor: cells.monthly.value, provenance: cells.monthly.provenance },
-            ytd: { valueMinor: cells.ytd.value, provenance: cells.ytd.provenance },
+            monthly: { valueMinor: mine.values.APE.value, provenance: mine.values.APE.provenance },
+            ytd: { valueMinor: mine.ytd.APE.value, provenance: mine.ytd.APE.provenance },
           },
         });
       }
@@ -459,14 +482,14 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       await importFile(file(
         ['RINA', { 'ape.monthly': '70', 'ape.ytd': '230' }], ['NINA', { 'ape.monthly': '12', 'ape.ytd': '40' }],
         ['DODI', { 'ape.monthly': '5', 'ape.ytd': '5' }], ['BUDI', { 'ape.ytd': '60' }],
-      ), `${office.id.RINA}:apeMonthly`);
+      ), `${office.id.RINA}:APE`);
       await all();
 
-      // 2. Sari corrects Rina's month and Dodi's year from the dashboard.
+      // 2. Sari corrects Rina's month and Dodi's from the dashboard (the year is the months' sum since P19.5-T2).
       as('SARI');
       await patch({
         month: UNIT_MONTH, revision: await revision(),
-        rows: [{ membershipId: office.id.RINA, apeMonthlyMinor: 75 * M }, { membershipId: office.id.DODI, apeYtdMinor: 9 * M }],
+        rows: [{ membershipId: office.id.RINA, apeMonthlyMinor: 75 * M }, { membershipId: office.id.DODI, apeMonthlyMinor: 9 * M }],
       }).expect(200);
       await all();
 
@@ -479,7 +502,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       await all();
 
       // 4. The carrier restates Rina's month, and the importer ticks it: the file's figure wins.
-      const replaced = await importFile(file(['RINA', { 'ape.monthly': '72' }]), `${office.id.RINA}:apeMonthly`);
+      const replaced = await importFile(file(['RINA', { 'ape.monthly': '72' }]), `${office.id.RINA}:APE`);
       as('AGUS');
       const rina = everyRow((await dashboard().expect(200)).body).find((r) => r.membershipId === office.id.RINA)!;
       expect(rina.production.monthly).toMatchObject({ valueMinor: 72 * M, provenance: 'imported' });

@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
+import { NotFoundException } from '@/common/errors/domain.exception';
 import type { LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { KPM_REPORTING } from '@/domain/constants';
@@ -10,6 +11,7 @@ import { can } from '@/modules/rbac/permissions';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { partitionAgencies } from '../agency-partition';
 import { byName } from '../office-figures';
+import { OfficeGroups, type OfficeGroup } from '../office-groups';
 import { OfficePeople } from '../office-people';
 import { REPORTING_REFUSALS } from '../reporting.messages';
 import { ActivationComplianceCategory } from './activation.category';
@@ -75,19 +77,24 @@ export interface ComplianceView {
   can: { override: boolean };
   /** UI V1 (UI-109): where a bar turns red and green, `KPM_REPORTING`'s, so no screen re-declares them. */
   thresholds: { lowBelowPct: number; highFromPct: number };
+  /** The office's custom groups for *Lihat untuk* (OD-258; P19.3-T3 AC-15), as the Overview tab's read serves them. */
+  groups: OfficeGroup[];
+  /** The group the tree and the six counts are over (`?group=`), or `null` for the whole KPM. */
+  group: OfficeGroup | null;
 }
 
-/** What the read takes: a category, and — on the three categories that hold several — an item. */
+/** What the read takes: a category, and — on the three categories that hold several — an item; and a custom group. */
 export interface ComplianceQuery {
   category?: ComplianceCategoryKey;
   item?: string;
+  group?: string;
 }
 
 /** The cell of a row whose category has no item to read: *—*, out of every count. */
 const NO_ITEM: ComplianceCell = { status: null, done: null, on: null };
 
 /**
- * **The Owner's compliance tree** (Phase 18.6, P18.6-T1; `functional/kpm-analytics.md`, *Compliance, Events, and
+ * **The Owner's compliance tree** (Phase 18.3, P18.3-T1; `functional/kpm-analytics.md`, *Compliance, Events, and
  * Campaigns*): `KPM_Owner.html:1262-1286`, `:3449-4118` — one read per screen, computed on each read, not paginated.
  *
  * - **Who is in it** (D-units, ADR-0135, ADR-0136): the office's active members at the end of its day — the
@@ -119,23 +126,51 @@ export class ComplianceService {
     private readonly activation: ActivationComplianceCategory,
     private readonly events: EventsComplianceCategory,
     private readonly campaigns: CampaignsComplianceCategory,
+    /** The group filter (OD-258), optional as the analytics' is: a `group` asked without it is 404, as an unknown one. */
+    @Optional() @Inject(OfficeGroups) private readonly officeGroups: OfficeGroups | null = null,
   ) {}
 
   async read(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
     // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404, before anything is read.
     OfficePeople.requireAnalyticsReader(ctx);
+    return this.compute(ctx, query);
+  }
+
+  /**
+   * ***Lihat sebagai KPM*'s *Compliance*** (ADR-0207 §2, §3; P19.4-T3 AC-4): exactly what `read` answers the KPM's
+   * Owner, through the same code over the named office — a platform read's context (`RequestContext.platformRead`: no
+   * membership, read-only, so no category's read-time write happens and `can.override` is `false`). The chosen
+   * category's disclosure entries are written as `read` writes them, the Super Admin the actor, in the KPM's own log.
+   * Anything but a platform read is `TENANT_NO_MEMBERSHIP`.
+   */
+  async complianceForOffice(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
+    OfficePeople.requirePlatformRead(ctx);
+    return this.compute(ctx, query);
+  }
+
+  /** The tree over the context's office: what `read` and `readForOffice` both serve. */
+  private async compute(ctx: RequestContext, query: ComplianceQuery): Promise<ComplianceView> {
     const category = query.category ?? 'training';
     const asked = query.item ?? null;
     if (asked !== null && SINGLE_ITEM_CATEGORIES.includes(category)) {
       refuseWith([REPORTING_REFUSALS.VALIDATION_FAILED.itemNotTaken({ category })]);
     }
 
+    // The group first (ADR-0204 §4): another office's, an archived or an unknown one is 404 before anything is read.
+    const [inGroup, offered] = await Promise.all([
+      query.group === undefined ? Promise.resolve(null)
+        : this.officeGroups ? this.officeGroups.membersOf(ctx, query.group) : Promise.reject(new NotFoundException('Group')),
+      this.officeGroups ? this.officeGroups.list(ctx) : Promise.resolve([] as OfficeGroup[]),
+    ]);
     const office = await this.days.office(ctx);
     const { today, timezone } = office;
     const year = today.slice(0, 4);
     const roster = await this.people.read(ctx, null, timezone);
     const endOfToday = this.clock.endOfLocalDay(timezone, today);
-    const members = roster.active.filter((p) => memberAt(p, endOfToday));
+    // Over a group, its members today alone: the tree, the six counts and the sub-line (P19.3-T3 AC-15).
+    const members = roster.active
+      .filter((p) => memberAt(p, endOfToday))
+      .filter((p) => inGroup === null || inGroup.memberIds.has(p.membershipId));
     const names = roster.names;
     const order = byName(names);
     const leaders = new Set(members.flatMap((p) => (p.leaderId === null ? [] : [p.leaderId])));
@@ -235,6 +270,8 @@ export class ComplianceService {
         lowBelowPct: KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT,
         highFromPct: KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT,
       },
+      groups: offered,
+      group: inGroup?.group ?? null,
     };
 
     // Last, once the answer exists: what the chosen category's cells disclosed (D-audit-tree), in one insert.

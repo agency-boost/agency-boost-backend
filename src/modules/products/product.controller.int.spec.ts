@@ -130,7 +130,8 @@ describe('the product catalog controller (P5-T4)', () => {
         }))
         .filter((r) => r.method !== undefined);
 
-      expect(routes).toHaveLength(7);
+      // Eight since P19.4-T4: `DELETE …/:productId`, a withdrawn product's soft delete (ADR-0209 §10).
+      expect(routes).toHaveLength(8);
       expect(routes.filter((r) => !r.permission).map((r) => r.name)).toEqual([]);
     });
   });
@@ -223,10 +224,12 @@ describe('the product catalog controller (P5-T4)', () => {
       expect(reopened.body).toMatchObject({ lifecycle: 'active', replacedByProductId: null });
     });
 
-    it('has no delete route', async () => {
+    it('P19.4-T4 AC-13 refuses deleting a product on sale: it is withdrawn first', async () => {
       const mapan = (await shelf())[0];
 
-      await request(app.getHttpServer()).delete(`${url}/${mapan.id}`).expect(404);
+      const res = await request(app.getHttpServer()).delete(`${url}/${mapan.id}`).expect(400);
+      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { lifecycle: 'active' } });
+      expect((await shelf()).map((p) => p.id)).toContain(mapan.id);
     });
 
     it('answers 404 for a company that does not exist', async () => {

@@ -16,7 +16,7 @@ import { checkRatioCreate, checkRatioUpdate } from './config-input';
 import { CONFIG_REFUSALS } from './config.messages';
 import { diverges } from './ratio-diverges';
 
-/** The ratios' own refusals, in both languages (P18.98-T5 AC-3). */
+/** The ratios' own refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 export interface RatioDefinitionView {
@@ -52,7 +52,7 @@ export interface RatioDefinitionView {
   appliesToOrgLevelCodes: string[];
 }
 
-/** Whether a row's formula has moved from its standard (ADR-0024): its own file since UI V1 (Phase 18.99 T4). */
+/** Whether a row's formula has moved from its standard (ADR-0024): its own file since UI V1 (Phase 18.11 T4). */
 export { diverges } from './ratio-diverges';
 
 /**

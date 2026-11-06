@@ -18,12 +18,30 @@ import {
   NotificationPreferences, NotificationPreferencesDocument,
 } from './notification.schema';
 import {
-  DeliveryStatus, NotificationChannel, NotificationChannelAdapter,
+  DeliveryStatus, isAuthTemplate, NotificationChannel, NotificationChannelAdapter,
   NotificationTemplateId, RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
 } from './notification.types';
 
 /** One channel's delivery record, as `notifications.delivery` holds it. */
 type Delivery = { status: DeliveryStatus; at?: Date; error?: string };
+
+/**
+ * **What the provider answered a send it refused** (P19-T1 AC-7; UI-163): nodemailer carries the SMTP server's reply on
+ * the error (`response`, `responseCode`) and its own kind of failure (`code`: `EAUTH`, `ETIMEDOUT` …). The error's text
+ * usually quotes the reply; where it does not, the reply is added, so the delivery row and the log say what the server
+ * said and not only that it failed.
+ */
+export function providerAnswerOf(err: unknown): { error: string; code?: string; responseCode?: number; response?: string } {
+  if (!(err instanceof Error)) return { error: String(err) };
+  const { code, responseCode, response } = err as Error & { code?: unknown; responseCode?: unknown; response?: unknown };
+  const reply = typeof response === 'string' && response.trim() ? response.trim() : undefined;
+  return {
+    error: reply && !err.message.includes(reply) ? `${err.message} (${reply})` : err.message,
+    ...(typeof code === 'string' ? { code } : {}),
+    ...(typeof responseCode === 'number' ? { responseCode } : {}),
+    ...(reply ? { response: reply } : {}),
+  };
+}
 
 /** The recipient's choices, as `send` reads them. `null` when they have made none. */
 type Preferences = { optedOutChannels?: NotificationChannel[]; mutedTemplates?: string[] } | null;
@@ -43,7 +61,7 @@ interface Dispatch {
 }
 
 /**
- * **How long a shutdown waits for the deliveries still in flight** (P18.7-T1, ADR-0152), in
+ * **How long a shutdown waits for the deliveries still in flight** (P18.4-T1, ADR-0152), in
  * milliseconds. A deploy stops the old container with SIGTERM and gives it 30 s before SIGKILL
  * (`stop_grace_period` in `deploy/compose.yml`). An SMTP send is bounded by `SMTP_TIMEOUT_MS`
  * (5 s by default) per dial and per greeting, so ten seconds covers a slow relay and leaves the
@@ -99,7 +117,7 @@ function officeOf(kpmId: string): RequestContext {
 }
 
 /**
- * Renders a template id + payload into a subject and body, **for a reader** (P18.98-T5 AC-5): the recipient's language,
+ * Renders a template id + payload into a subject and body, **for a reader** (P18.10-T5 AC-5): the recipient's language,
  * words and figures. A renderer that writes one language may ignore it.
  */
 export abstract class TemplateRenderer {
@@ -168,7 +186,7 @@ export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   private readonly adapters = new Map<NotificationChannel, NotificationChannelAdapter>();
   /**
-   * Every delivery started and not awaited, until it settles (P18.7-T1). Keyed by a promise that never
+   * Every delivery started and not awaited, until it settles (P18.4-T1). Keyed by a promise that never
    * rejects, so waiting on them all cannot fail, and removed by that same promise once it settles.
    */
   private readonly inFlight = new Map<Promise<void>, InFlightDelivery>();
@@ -189,7 +207,7 @@ export class NotificationService {
     private readonly audit: AuditService,
     @Inject(NOTIFICATION_ADAPTERS) adapters: NotificationChannelAdapter[] = [],
     /**
-     * **Whose language an email is written in** (P18.98-T5 AC-5): the recipient's `users.locale`, read when the email
+     * **Whose language an email is written in** (P18.10-T5 AC-5): the recipient's `users.locale`, read when the email
      * is rendered, off the request. Absent where a spec builds the service by hand: every recipient then reads as one
      * who has chosen nothing, or as the request that caused the email.
      */
@@ -216,7 +234,13 @@ export class NotificationService {
    * `pending` on its row: visible on the delivery map, rather than lost silently.
    */
   async send(request: SendRequest & { userId: string; kpmId?: string | null }): Promise<void> {
-    const prefs = await this.preferencesOf(request.userId);
+    /*
+     * **The account's own mail ignores the recipient's choices** (P19-T1 AC-6; ADR-0190 §5): an opt-out of notification
+     * email, or a muted template, is about notices — never about the link that verifies an address, resets a password
+     * or says the password changed. Read as nobody's choices, so every channel the template declares is delivered.
+     */
+    const auth = isAuthTemplate(request.templateId);
+    const prefs = auth ? null : await this.preferencesOf(request.userId);
 
     // Guard the arrays, not just the document: a preferences row written before a
     // field existed, or a partial upsert, leaves them undefined — and a crash here
@@ -250,13 +274,35 @@ export class NotificationService {
       readAt: null,
     });
 
-    this.settle(dispatched, request.templateId, String(created._id), (channel, outcome) => this.notifications
-      .updateOne(
-        // Only over the `pending` this call wrote: an outcome never overwrites one recorded since.
-        { _id: created._id, [`delivery.${channel}.status`]: 'pending' },
-        { $set: { [`delivery.${channel}`]: outcome } },
-      )
-      .exec());
+    const notificationId = String(created._id);
+    // A channel settled before it was dispatched — no adapter — is the auth mail's outcome too, and said as one (AC-7).
+    if (auth) {
+      for (const [channel, settled] of Object.entries(delivery)) {
+        if (settled.status !== 'pending') this.logAuthDelivery(request.templateId, notificationId, channel, settled);
+      }
+    }
+    this.settle(dispatched, request.templateId, notificationId, (channel, outcome) => {
+      if (auth) this.logAuthDelivery(request.templateId, notificationId, channel, outcome);
+      return this.notifications
+        .updateOne(
+          // Only over the `pending` this call wrote: an outcome never overwrites one recorded since.
+          { _id: created._id, [`delivery.${channel}.status`]: 'pending' },
+          { $set: { [`delivery.${channel}`]: outcome } },
+        )
+        .exec();
+    });
+  }
+
+  /**
+   * **Every auth send, in the log with its outcome** (P19-T1 AC-7; UI-163: *"log every send with its result so failures
+   * are visible"*): `sent` at log level, `failed` at error level with what the provider answered — the same text the
+   * row's `delivery.<channel>.error` records — both naming the template and the notification row, never the address
+   * or the token.
+   */
+  private logAuthDelivery(templateId: string, notificationId: string, channel: string, outcome: Delivery): void {
+    const line = { templateId, notificationId, channel, status: outcome.status };
+    if (outcome.status === 'failed') this.logger.error({ ...line, error: outcome.error }, 'auth mail not sent');
+    else this.logger.log(line, `auth mail ${outcome.status}`);
   }
 
   /**
@@ -335,7 +381,7 @@ export class NotificationService {
   }
 
   /**
-   * **Every delivery in flight, awaited, for at most `timeoutMs`** (P18.7-T1): what a shutdown calls
+   * **Every delivery in flight, awaited, for at most `timeoutMs`** (P18.4-T1): what a shutdown calls
    * once the HTTP server has stopped and its last requests have finished (`GracefulShutdown`, in
    * `src/graceful-shutdown.ts`), before the database connection closes, so each outcome is recorded. A delivery that starts while it waits (a
    * request the server was still finishing) is waited for too. Whatever is still in flight when the time is
@@ -392,7 +438,7 @@ export class NotificationService {
   }
 
   /**
-   * **The message, for its recipient** (P18.98-T5 AC-5): their saved language, else the request that caused it where
+   * **The message, for its recipient** (P18.10-T5 AC-5): their saved language, else the request that caused it where
    * that was theirs (`SendRequest.reader`), else a reader who has chosen nothing (`recipientReader`). Read when an
    * external channel delivers — off the request, which is not kept waiting for it.
    */
@@ -455,7 +501,7 @@ export class NotificationService {
   }
 
   /**
-   * Hold `work` in the in-flight set until it settles, whichever way (P18.7-T1). The key is a promise that
+   * Hold `work` in the in-flight set until it settles, whichever way (P18.4-T1). The key is a promise that
    * never rejects, so `drain` can wait on all of them without one failure ending the wait. `work` itself is
    * left as it is: whoever started it still sees its rejection.
    */
@@ -491,8 +537,10 @@ export class NotificationService {
       await adapter.send(request, typeof rendered === 'function' ? await rendered() : rendered);
       return { status: 'sent', at: this.clock.now() };
     } catch (err) {
-      this.logger.error({ err, channel, templateId: request.templateId }, 'delivery failed');
-      return { status: 'failed', at: this.clock.now(), error: err instanceof Error ? err.message : String(err) };
+      // With the provider's answer where it gave one (P19-T1 AC-7): the SMTP reply, its code, nodemailer's kind.
+      const { error, ...answer } = providerAnswerOf(err);
+      this.logger.error({ err, channel, templateId: request.templateId, ...answer }, 'delivery failed');
+      return { status: 'failed', at: this.clock.now(), error };
     }
   }
 
@@ -537,7 +585,7 @@ export class NotificationService {
       items: items.map((n) => ({
         notificationId: String(n._id),
         templateId: n.templateId,
-        // In the reader's language, when it is read (P18.98-T5 AC-4): a notice stored before reads in it too.
+        // In the reader's language, when it is read (P18.10-T5 AC-4): a notice stored before reads in it too.
         ...describeNotification(n.templateId, n.payload, ctx.reader),
         href: inboxAddress(n.templateId, n.payload),
         kpmId: n.kpmId,

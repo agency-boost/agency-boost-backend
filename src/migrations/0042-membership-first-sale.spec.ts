@@ -6,7 +6,7 @@ const db = () => mongoose.connection.db as mongoose.mongo.Db;
 const col = (name: string) => db().collection(name);
 
 /**
- * P18.96-T4 AC-1 (ADR-0171 §1). Every membership is given its first sale from what the office already holds: its sales
+ * P18.8-T4 AC-1 (ADR-0171 §1). Every membership is given its first sale from what the office already holds: its sales
  * leads' first day at *Paid and issued*, a checklist-logged closing as `manual`, and — failing both — the production
  * file's first month with a policy. Office by office, in the office's zone, earlier only, and once.
  */
@@ -42,13 +42,13 @@ describe('0042 — every membership’s first sale (ADR-0171 §1)', () => {
     return { date: row?.firstSaleDate ?? null, source: row?.firstSaleSource ?? null, collection: row?.firstSaleRecordCollection ?? null };
   };
 
-  it('P18.96-T4 AC-1 is a no-op on an empty database, twice', async () => {
+  it('P18.8-T4 AC-1 is a no-op on an empty database, twice', async () => {
     expect(await up(db())).toEqual({ written: 0, unchanged: 0 });
     expect(await up(db())).toEqual({ written: 0, unchanged: 0 });
     expect(await col('memberships').countDocuments({})).toBe(0);
   });
 
-  it('P18.96-T4 AC-1 gives each member the earliest closing since joining, from the lead, on the office’s day', async () => {
+  it('P18.8-T4 AC-1 gives each member the earliest closing since joining, from the lead, on the office’s day', async () => {
     const kpmId = await office();
     const dimas = await member(kpmId);
     await lead(kpmId, dimas, '2026-08-20T23:30:00Z');
@@ -58,7 +58,7 @@ describe('0042 — every membership’s first sale (ADR-0171 §1)', () => {
     expect(await saleOf(dimas)).toEqual({ date: '2026-08-21', source: 'lead', collection: 'leads' });
   });
 
-  it('P18.96-T4 AC-1 a checklist-logged closing is manual; failing both, the file’s first month — never before the join date', async () => {
+  it('P18.8-T4 AC-1 a checklist-logged closing is manual; failing both, the file’s first month — never before the join date', async () => {
     const kpmId = await office();
     const logged = await member(kpmId);
     await lead(kpmId, logged, '2026-08-05T03:00:00Z', { loggedFrom: 'activation_checklist' });
@@ -72,7 +72,7 @@ describe('0042 — every membership’s first sale (ADR-0171 §1)', () => {
     expect(await saleOf(filed)).toEqual({ date: '2026-07-15', source: 'monthly_file', collection: 'monthlyAgentData' });
   });
 
-  it('P18.96-T4 AC-1 leaves out a recruitment lead, a deleted lead, a lead short of Paid and issued, a deleted month and a month of none', async () => {
+  it('P18.8-T4 AC-1 leaves out a recruitment lead, a deleted lead, a lead short of Paid and issued, a deleted month and a month of none', async () => {
     const kpmId = await office();
     const none = await member(kpmId);
     await lead(kpmId, none, '2026-08-05T03:00:00Z', { type: 'recruitment' });
@@ -87,7 +87,7 @@ describe('0042 — every membership’s first sale (ADR-0171 §1)', () => {
     expect((await saleOf(none)).date).toBeNull();
   });
 
-  it('P18.96-T4 AC-1 moves a held date only earlier, and running it twice changes nothing', async () => {
+  it('P18.8-T4 AC-1 moves a held date only earlier, and running it twice changes nothing', async () => {
     const kpmId = await office();
     const held = await member(kpmId, { firstSaleDate: '2026-08-10', firstSaleSource: 'lead', firstSaleRecordCollection: 'leads', firstSaleRecordId: 'x' });
     await lead(kpmId, held, '2026-08-20T03:00:00Z');
@@ -100,7 +100,7 @@ describe('0042 — every membership’s first sale (ADR-0171 §1)', () => {
     expect(await up(db())).toEqual({ written: 0, unchanged: 2 });
   });
 
-  it('P18.96-T4 AC-1 is tenant-safe: another office’s lead or month never names this office’s member', async () => {
+  it('P18.8-T4 AC-1 is tenant-safe: another office’s lead or month never names this office’s member', async () => {
     const a = await office();
     const b = await office({ code: '0555' });
     const rina = await member(a);

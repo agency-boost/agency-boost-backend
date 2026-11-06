@@ -12,7 +12,7 @@ export interface GoalsComplianceCatalog {
 }
 
 /**
- * **Goal Setting** in the Owner's compliance tree (P18.6-T1 AC-5): one item, the office's calendar year.
+ * **Goal Setting** in the Owner's compliance tree (P18.3-T1 AC-5): one item, the office's calendar year.
  *
  * - **A goal set is OD-160's one predicate** (`goalSet`, `domain/metrics/goal-set.ts`): saved for the year with an
  *   annual APE target above zero — the Overview's *"{n} members have no goal set…"* reads the same function. *Set*

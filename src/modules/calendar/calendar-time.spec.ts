@@ -130,7 +130,7 @@ describe('the calendar’s clock, in the office’s zone', () => {
 });
 
 describe('the rules an entry’s timing keeps (P12-T2 AC-5)', () => {
-  /** Each rule broken, as the API's English writes it (P18.98-T5: each is a sentence in both languages). */
+  /** Each rule broken, as the API's English writes it (P18.10-T5: each is a sentence in both languages). */
   const refused = (result: ReturnType<typeof timingOf>) => englishAll('violations' in result ? result.violations : []);
   /** The same, in Indonesian. */
   const refusedInIndonesian = (result: ReturnType<typeof timingOf>) => indonesianAll('violations' in result ? result.violations : []);
@@ -195,7 +195,7 @@ describe('the rules an entry’s timing keeps (P12-T2 AC-5)', () => {
       .toEqual(['endsOn must be at most 31 days from startsOn, inclusive.']);
   });
 
-  it('P18.98-T5 AC-3 says every rule in Indonesian, each field named as the API names it', () => {
+  it('P18.10-T5 AC-3 says every rule in Indonesian, each field named as the API names it', () => {
     expect(refusedInIndonesian(timingOf('client', {}, JAKARTA)))
       .toEqual(['date wajib diisi.', 'start wajib diisi.', 'end wajib diisi.']);
     expect(refusedInIndonesian(timingOf('meeting', {

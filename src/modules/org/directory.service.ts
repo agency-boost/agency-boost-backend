@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
@@ -7,6 +7,7 @@ import { NotFoundException } from '@/common/errors/domain.exception';
 import { render } from '@/common/i18n/sentence';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
@@ -44,7 +45,7 @@ export interface DirectoryMember {
   isKpmAdmin: boolean;
   /** A Core Leader now: tagged, on a leader rung (ADR-0159 §1). */
   isCoreLeader: boolean;
-  /** This viewer may tag or untag them from the row (P18.8-T5 AC-3) — an offer, never the gate. */
+  /** This viewer may tag or untag them from the row (P18.5-T5 AC-3) — an offer, never the gate. */
   canTagCoreLeader: boolean;
   joinedAt: string | null;
   /**
@@ -55,7 +56,7 @@ export interface DirectoryMember {
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
   /**
-   * **The day the person came back to this office, if they did** (P18.97-T4 AC-3, ADR-0176 §5; `rejoinedOn` in
+   * **The day the person came back to this office, if they did** (P18.9-T4 AC-3, ADR-0176 §5; `rejoinedOn` in
    * `rejoined.ts`): on a live membership that follows a removed one, its own join date — the directory's *Rejoined*;
    * on a removed membership the person has since returned from, the later one's — *Rejoined {date}* under
    * *Removed*. `null` otherwise. Read from the memberships of the same person this reader may see, so it says nothing
@@ -64,7 +65,7 @@ export interface DirectoryMember {
   rejoinedOn: string | null;
 
   /**
-   * What **this viewer** may do to **this person** (P3.5-T13).
+   * What **this viewer** may do to **this person** (P3.1-T13).
    *
    * Sent rather than inferred, for the reason `TeamMember.canChangeRole` already gives:
    * these are server rules, and a screen carrying a second copy of them is a screen that
@@ -80,7 +81,7 @@ export interface DirectoryMember {
   canRemove: boolean;
 
   /**
-   * **What the person records** (ADR-0158 §6, P18.8-T4 AC-6): on **one member's read** —
+   * **What the person records** (ADR-0158 §6, P18.5-T4 AC-6): on **one member's read** —
    * `GET /members/:membershipId`, the person page's *Personal* card — and only to the office's
    * Owner, its Admins, or the person themselves. Absent from every other read: the roster's rows,
    * a leader's read of somebody in their unit, the reports list. A `null` inside is *Not recorded*.
@@ -94,6 +95,11 @@ export interface MemberPersonal {
   gender: Gender | null;
   companyJoinMonth: string | null;
   workStatus: WorkStatus | null;
+  /**
+   * **The office's company, by name** (ADR-0205 §4, OWN UI-025): what *Bergabung di <company>* names beside
+   * `companyJoinMonth` — *Bergabung di Prudential*. `null` for an office with no company, or a company since removed.
+   */
+  companyName: string | null;
 }
 
 export interface DirectoryPage {
@@ -166,7 +172,21 @@ export class DirectoryService {
     // — `ContextResolver` derives `isKpmOwner` by comparing the two — so a roster that
     // wants to say who owns the office has to make the same join.
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
+    /*
+     * The office's company, for one field on one member's read: `personal.companyName` (ADR-0205 §4). Optional so the
+     * specs that build this service by hand for the roster need not say it; without it the name is `null`.
+     */
+    @Optional() @InjectModel(Company.name) private readonly companies: Model<CompanyDocument> | null = null,
   ) {}
+
+  /** The office's company's name, or `null` (ADR-0205 §4: *Bergabung di <company>*). */
+  private async companyName(ctx: RequestContext): Promise<string | null> {
+    if (!ctx.kpmId || !this.companies) return null;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('companyId').exec();
+    if (!kpm?.companyId) return null;
+    const company = await this.companies.findOne({ _id: kpm.companyId, deletedAt: null }).select('name').lean().exec();
+    return (company as { name?: string } | null)?.name ?? null;
+  }
 
   /** The office's owner, as a user id. Null for an office nobody administers yet. */
   private async ownerUserId(ctx: RequestContext): Promise<string | null> {
@@ -334,7 +354,7 @@ export class DirectoryService {
   }
 
   /**
-   * **Every membership of these people in this office that the reader may see** (P18.97-T4 AC-3), in one query and
+   * **Every membership of these people in this office that the reader may see** (P18.9-T4 AC-3), in one query and
    * whatever their state, by person — what `rejoinedOn` reads to say who came back. Narrowed as the page was
    * (`siblingsWithinReach`), so a leader's roster says nothing of a membership outside their unit.
    */
@@ -356,7 +376,7 @@ export class DirectoryService {
     ctx: RequestContext,
     ownerUserId: string | null,
   ): Omit<DirectoryMember, 'rejoinedOn'> {
-    // A person whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    // A person whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
     const fullName = user?.fullName ?? render(ORG_MESSAGES.unknownName, ctx.reader);
     const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
@@ -387,7 +407,7 @@ export class DirectoryService {
       isKpmAdmin: m.adminAccess?.isKpmAdmin ?? false,
       // ADR-0159 §1: the effective flag — the tag on a leader rung — which is what the row's chip says.
       isCoreLeader: isEffectiveCoreLeader(m),
-      // The row's control (P18.8-T5 AC-3): the viewer may tag, and the member leads by rung and has not left.
+      // The row's control (P18.5-T5 AC-3): the viewer may tag, and the member leads by rung and has not left.
       // `GroupService.setCoreLeader` refuses regardless.
       canTagCoreLeader: !removed && isLeaderClass(m.role) && ctx !== undefined && can(ctx, 'member:tag_core_leader'),
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
@@ -451,10 +471,10 @@ export class DirectoryService {
     // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here.
     const office = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
     if (!office && String(scoped._id) !== ctx.membershipId) return decorated;
-    const user = await this.users
-      .findOne({ _id: scoped.userId })
-      .select('dateOfBirth gender companyJoinMonth')
-      .exec();
+    const [user, companyName] = await Promise.all([
+      this.users.findOne({ _id: scoped.userId }).select('dateOfBirth gender companyJoinMonth').exec(),
+      this.companyName(ctx),
+    ]);
     return {
       ...decorated,
       personal: {
@@ -462,6 +482,7 @@ export class DirectoryService {
         gender: user?.gender ?? null,
         companyJoinMonth: user?.companyJoinMonth ?? null,
         workStatus: scoped.workStatus ?? null,
+        companyName,
       },
     };
   }

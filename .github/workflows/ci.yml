@@ -1,6 +1,6 @@
 name: ci
 
-# Every pull request, and every deploy (P18.7-T4, ADR-0154): deploy.yml calls this workflow before it
+# Every pull request, and every deploy (P18.4-T4, ADR-0154): deploy.yml calls this workflow before it
 # builds anything, so a push to development or main is checked once, by the run that ships it. A
 # `push` trigger here as well would run the same suite twice for every merge.
 on:
@@ -203,7 +203,7 @@ jobs:
       - name: Dependency audit
         run: pnpm audit --audit-level high
 
-  # The image the VMs run, built as deploy.yml builds it and started as a VM starts it (P18.7-T3,
+  # The image the VMs run, built as deploy.yml builds it and started as a VM starts it (P18.4-T3,
   # ADR-0152). deploy/ci/container-smoke.sh gives it a mongo:7.0 on a private network and asserts that
   # readiness answers 200, then 503 once the database is stopped, then 200 again: what bin/deploy.sh
   # relies on to roll back an image that cannot reach its database. It runs the same on a laptop.
@@ -246,7 +246,7 @@ jobs:
       - name: Neither image carries a credentials file or an env file
         run: bash deploy/ci/no-secrets-in-image.sh agencyboost-api:ci agencyboost-tools:ci
 
-  # The VM's scripts and compose file (P18.7-T3). None of them runs anywhere before it reaches a VM,
+  # The VM's scripts and compose file (P18.4-T3). None of them runs anywhere before it reaches a VM,
   # so a typo here is otherwise found by a failed deploy. CI's own scripts, in .github/ci, are checked too.
   scripts:
     runs-on: ubuntu-latest

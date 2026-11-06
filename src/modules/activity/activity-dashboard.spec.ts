@@ -72,7 +72,7 @@ describe('the Activity Dashboard’s range and columns (P10-T1)', () => {
       expect(refused({ from: '2026-02-31', to: TODAY })).toMatchObject({ details: { field: 'from' } });
     });
 
-    it('P18.98-T5 AC-2 says each refusal in both languages, a day and a count in the reader’s figures', () => {
+    it('P18.10-T5 AC-2 says each refusal in both languages, a day and a count in the reader’s figures', () => {
       const late = refused({ from: '2026-09-20', to: '2026-09-29' });
       expect(english(late.sentence)).toBe('The range ends after today, 28 Sep 2026. Nothing has been logged yet.');
       expect(indonesian(late.sentence)).toBe('Rentang ini berakhir setelah hari ini, 28 Sep 2026. Belum ada yang tercatat.');

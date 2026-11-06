@@ -4,11 +4,11 @@ import {
 } from './index';
 
 /**
- * **A rung's leader tier decides who leads** (ADR-0156, P18.8-T1): the tiers, the class each gives, the classes the
+ * **A rung's leader tier decides who leads** (ADR-0156, P18.5-T1): the tiers, the class each gives, the classes the
  * leader limit counts, and the default ladder's tiers — pinned so a change to one fails here before it re-classes
  * anybody. Each is documented once in `docs/00-product/metrics-and-definitions.md`.
  */
-describe('P18.8-T1 the leader tier (ADR-0156)', () => {
+describe('P18.5-T1 the leader tier (ADR-0156)', () => {
   it('AC-1 has two tiers, Senior and Associate; no tier is *Not a leader*', () => {
     expect([...LEADER_TIERS]).toEqual(['senior', 'associate']);
   });
@@ -52,8 +52,8 @@ describe('P18.8-T1 the leader tier (ADR-0156)', () => {
   });
 });
 
-describe('P18.95-T9 AC-1 what a rung is called in a sentence (ADR-0167 §10)', () => {
-  it('P18.95-T9 AC-1 calls the default ladder AB, AAB and Agent: a short code as itself, a longer one by its label', () => {
+describe('P18.7-T9 AC-1 what a rung is called in a sentence (ADR-0167 §10)', () => {
+  it('P18.7-T9 AC-1 calls the default ladder AB, AAB and Agent: a short code as itself, a longer one by its label', () => {
     expect(RUNG_SHORT_CODE_MAX_LENGTH).toBe(4);
     expect(DEFAULT_ORG_LADDER.map(shortOfRung)).toEqual(['Agent', 'AAB', 'AB']);
     // A company's own: a code of four or fewer reads as one; five or more is shouted, so its label is used.

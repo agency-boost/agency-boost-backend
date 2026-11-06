@@ -41,7 +41,7 @@ describe('HealthController', () => {
    * switches traffic, and the smoke test after a deploy. `200` with `degraded` passed all three with
    * no database behind them.
    */
-  it.each([0, 2, 3, 99])('P18.7-T1 answers 503 when the connection is not up (readyState %d)', async (readyState) => {
+  it.each([0, 2, 3, 99])('P18.4-T1 answers 503 when the connection is not up (readyState %d)', async (readyState) => {
     const controller = new HealthController({ readyState } as never);
     const res = recordingResponse();
     await controller.ready(res);
@@ -52,7 +52,7 @@ describe('HealthController', () => {
   it('leaks no version or dependency detail', async () => {
     const controller = new HealthController({ readyState: 1 } as never);
     const body = JSON.stringify(await controller.ready(recordingResponse()));
-    // P18.7-T2: the storage vendor is GCS now (ADR-0153), so the regex names it rather than Cloudinary.
+    // P18.4-T2: the storage vendor is GCS now (ADR-0153), so the regex names it rather than Cloudinary.
     expect(body).not.toMatch(/version|mongodb|storage|googleapis|node/i);
   });
 });

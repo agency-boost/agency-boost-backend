@@ -1,15 +1,26 @@
 import { AvatarDto, ProfileFactsDto } from '@/modules/users/profile.dto';
 import { SummaryDto } from '@/modules/summary/summary.response.dto';
+import { MemberPerformanceDto } from '@/modules/summary/member-performance.response.dto';
 import { Type } from '@nestjs/common';
+import {
+  AdminAdvancedAnalyticsSectionDto, AdvancedAnalyticsShellDto, DemographicsDto, EventsNpsDto, MapaDto, MapaTargetDto,
+  QuantDto, SubgroupDto, SubgroupTargetDto,
+} from '@/modules/reporting/advanced-analytics/advanced-analytics.response.dto';
 import { XLSX_MIME_TYPE } from '@/domain/constants';
 import {
-  AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, MyKpmRequestDto, ReadinessDto,
+  BrandingPreviewAnswerDto, BrandingSettingsDto, ConfirmedBrandingImageDto, PublicBrandingDto,
+} from '@/modules/branding/branding.response.dto';
+import {
+  AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, ReadinessDto,
   RedeemedInviteDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import {
   InboxDto, NotificationReadStateDto, UnreadCountDto,
 } from '@/modules/notifications/notification.response.dto';
 import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from '@/modules/leads/lead.response.dto';
+import {
+  ProposalCatalogDto, ProposalDuplicatedDto, ProposalPageDto, ProposalPatchedDto, ProposalResponseDto,
+} from '@/modules/proposals/proposal.response.dto';
 import { GoalPreviewDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
@@ -22,16 +33,17 @@ import {
   UntaggedMemberDto, MemberPhoneDto, MemberSearchResultDto, WaitingRequestCountDto,
 } from '@/modules/org/org.response.dto';
 import {
-  KpmAdminViewDto, KpmRequestRowDto, KpmViewDto, OrgLevelRowDto, PlatformAdminRowDto,
-  PlatformOverviewDto, RosterCommitDto, RosterPreviewDto, RosterTemplateDto,
+  AccountChoiceDto, CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
+  MyKpmRequestStateDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto, RosterCommitDto, RosterPreviewDto,
+  RosterTemplateDto,
 } from '@/modules/tenants/tenant.response.dto';
-import {
-  AuditEntryResponseDto, CompanyResponseDto, PublicCompanyDto,
-} from '@/modules/tenants/platform.response.dto';
+import { CompanyResponseDto, PublicCompanyDto } from '@/modules/tenants/platform.response.dto';
+import { AuditPageDto } from '@/modules/audit/audit.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
   ActivityBindingDto, CompanyTemplateDto, NamedTemplateDto, OfficeActivityBindingDto, PublishAllDto, PublishStateDto,
-  SavedOfficeTemplateDto, TemplateOfficeDto, TenantConfigDto,
+  SavedOfficeTemplateDto, TemplateOfficeStandingDto, TenantConfigDto,
+  ApplyTemplateResultDto, ConfirmedUploadDto,
 } from '@/modules/config/config.response.dto';
 import {
   ModuleContentDto, SignedUploadDto, SignedUrlDto, TrainingCategoryDto,
@@ -39,6 +51,7 @@ import {
 import {
   TrainingModulePageDto, TrainingOpenDto, TrainingProgressDto,
 } from '@/modules/training/training-progress.response.dto';
+import { TemplateSyncResultDto, TemplateSyncViewDto } from '@/modules/config/template-sync.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
   ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
@@ -48,8 +61,7 @@ import {
   EffectiveScriptDto, KpmProductDto, SignedUrlDto as ProductSignedUrlDto,
 } from '@/modules/products/kpm-product.response.dto';
 import {
-  PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto, RecruitmentPlaybookAdminDto,
-  RecruitmentPlaybookDto,
+  PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto,
 } from '@/modules/recruitment/recruitment.response.dto';
 import {
   AttackPlanDto, CatalogDocumentUrlDto, CatalogListDto, CatalogProductDto,
@@ -64,15 +76,18 @@ import {
   CampaignCardDto, CampaignDetailDto, CampaignListDto, ChasingDto,
 } from '@/modules/campaigns/campaign-agent.response.dto';
 import { CapabilityCatalogDto } from '@/modules/capability/capability.response.dto';
-import { BillingPricesDto } from '@/modules/billing/billing.response.dto';
+import { BillingKpmRowDto, BillingPricesDto, QuoteSentDto } from '@/modules/billing/billing.response.dto';
 import {
   AcceptedInviteDto, AddAgentResultDto, InviteBannerDto, InviteListDto, RequestedTransferDto, SharedInviteDto,
   TransferDto,
 } from '@/modules/org/invites.response.dto';
 
-/** What one operation answers with: a class, and whether it comes back as an array. */
+/**
+ * What one operation answers with: a class, and whether it comes back as an array — or, with no class, **only a file**
+ * of the media types in `files` (P19.7-T3: the proposal's PDF, ADR-0222), which is documented as binary and nothing else.
+ */
 export interface ResponseShape {
-  type: Type<unknown>;
+  type?: Type<unknown>;
   isArray?: true;
   /**
    * Media types the operation may answer **as a file** instead, by a query parameter: the two templates' `format`
@@ -99,11 +114,15 @@ import {
 import { CoacheeDto, CoachingRosterDto } from '@/modules/coaching/coaching.response.dto';
 import { ProductionUpdatedDto, UnitDashboardDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
 import { UnitActivitiesDto } from '@/modules/unit-dashboard/unit-activities.response.dto';
+import { UnitPotensiDto, UnitPotensiPersonDto } from '@/modules/unit-dashboard/unit-potensi.response.dto';
 import { HomeDto } from '@/modules/home/home.response.dto';
 import {
-  AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
+  AdoptionDto, KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto, ReviewedDto,
 } from '@/modules/reporting/reporting.response.dto';
 import { ComplianceViewDto } from '@/modules/reporting/compliance/compliance.response.dto';
+import {
+  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformMembersPageDto,
+} from '@/modules/reporting/platform/platform-reads.response.dto';
 import {
   CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
 } from '@/modules/coaching/coaching-session.response.dto';
@@ -121,6 +140,12 @@ import {
   MeetingViewDto, MonthlyTargetSavedDto, ShareLinkDto, ShareLinksRevokedDto,
 } from '@/modules/leader-meetings/leader-meetings.response.dto';
 
+import { AnalyticsCodeCheckDto, AnalyticsOpenRunsDto } from '@/modules/config/analytics-template.response.dto';
+import {
+  CoachingSurveyDto, SurveyAnswerSavedDto, SurveyFormDto, SurveyListDto, SurveyPendingDto, SurveyResultsDto, SurveyRunDto,
+  SurveySubmittedDto,
+} from '@/modules/surveys/surveys.response.dto';
+
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P6: what an agent did, day by day.
   ActivityController_readDay: { type: ActivityDayDto },
@@ -130,20 +155,34 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ActivityController_dashboard: { type: ActivityDashboardDto },
   ActivityController_ratios: { type: ActivityRatiosDto },
   SummaryController_read: { type: SummaryDto },
+  // P19.3-T4 (ADR-0205 §1): a member's four tiles.
+  MemberPerformanceController_read: { type: MemberPerformanceDto },
   // Phase 15: a leader's unit, and *Update production*.
   UnitDashboardController_read: { type: UnitDashboardDto },
   UnitDashboardController_updateProduction: { type: ProductionUpdatedDto },
-  // UI V1 (Phase 18.99 T4, UI-001): the Activities tab's table.
+  // UI V1 (Phase 18.11 T4, UI-001): the Activities tab's table.
   UnitActivitiesController_read: { type: UnitActivitiesDto },
+  // P19.1-T6 (UI-155): the Potensi tab, and a person's sheet.
+  UnitPotensiController_read: { type: UnitPotensiDto },
+  UnitPotensiController_person: { type: UnitPotensiPersonDto },
   HomeController_read: { type: HomeDto },
   // Phase 18: the Owner's reporting — the Overview, its not-logged list and target, the analytics, the platform's.
   KpmOverviewController_read: { type: KpmOverviewDto },
   KpmOverviewController_notLogged: { type: NotLoggedDto },
   KpmOverviewController_setRecruitTarget: { type: RecruitTargetDto },
+  // P19.3-T2 (UI-149): *Sudah sesuai* on a settings page, the setup card's reviewed flag.
+  KpmSetupController_markReviewed: { type: ReviewedDto },
   KpmAnalyticsController_read: { type: KpmAnalyticsDto },
   PlatformAnalyticsController_read: { type: PlatformAnalyticsDto },
-  // P18.6-T1: the Owner's compliance tree — the six chips, the catalog, the selection and the tree.
+  // P18.3-T1: the Owner's compliance tree — the six chips, the catalog, the selection and the tree.
   ComplianceController_read: { type: ComplianceViewDto },
+  // P19.4-T3 (ADR-0207 §2): the Super Admin's reads across KPMs.
+  PlatformReadsController_members: { type: PlatformMembersPageDto },
+  PlatformReadsController_comparison: { type: KpmComparisonPageDto },
+  PlatformReadsController_analytics: { type: KpmAnalyticsDto },
+  PlatformReadsController_compliance: { type: ComplianceViewDto },
+  PlatformReadsController_data: { type: KpmDataDto },
+  PlatformReadsController_companyKpms: { type: CompanyKpmsDto },
   // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
   LeaderMeetingsController_list: { type: MeetingListViewDto },
   LeaderMeetingsController_create: { type: MeetingCardDto },
@@ -203,10 +242,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NewHiresController_tick: { type: ActivationViewDto },
   NewHiresController_correctStart: { type: ActivationViewDto },
   NewHiresController_saveNote: { type: ActivationNoteSavedDto },
-  // P18.96-T4: the closings *Which case?* names — the hire's own, and a hire's for a leader.
+  // P18.8-T4: the closings *Which case?* names — the hire's own, and a hire's for a leader.
   ActivationProgressController_closings: { type: ActivationClosingsDto },
   NewHiresController_closings: { type: ActivationClosingsDto },
-  // P18.96-T6 AC-4: *Mark left*.
+  // P18.8-T6 AC-4: *Mark left*.
   AuthController_resendVerification: { type: StatusAckDto },
   AuthController_sessions: { type: SessionDto, isArray: true },
   HealthController_live: { type: StatusAckDto },
@@ -229,6 +268,11 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AuthController_requestEmailChange: { type: StatusAckDto },
   AuthController_verifyEmailChange: { type: EmailChangedDto },
   AuthController_me: { type: MeDto },
+  // UI-169 item 5 (ADR-0199): a linked login — the start, the link's page, the switch, and removing it (204).
+  AccountLinksController_start: { type: StatusAckDto },
+  AccountLinksController_confirm: { type: StatusAckDto },
+  AccountLinksController_switchLogin: { type: AccessTokenDto },
+  AccountLinksController_remove: { type: StatusAckDto },
   AuthController_updateMe: { type: MeDto },
   // UI V1 (UI-111): *Profil saya*'s read-only facts and its photo.
   ProfileController_facts: { type: ProfileFactsDto },
@@ -239,7 +283,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_me: { type: JoinStateDto },
   OnboardingController_kpms: { type: KpmDirectoryEntryDto, isArray: true },
   OnboardingController_register: { type: JoinStateDto },
-  OnboardingController_myKpmRequest: { type: MyKpmRequestDto },
+  // P19-T2 AC-2 (ADR-0191 §1): the request, and the company one is for.
+  OnboardingController_myKpmRequest: { type: MyKpmRequestStateDto },
   OnboardingController_askForKpm: { type: KpmRequestRowDto },
   OnboardingController_leaders: { type: LeaderChoiceDto, isArray: true },
   OnboardingController_request: { type: JoinStateDto },
@@ -254,7 +299,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OnboardingController_decline: { type: PendingRequestDto, isArray: true },
   OnboardingController_untagged: { type: UntaggedMemberDto, isArray: true },
   OnboardingController_tag: { type: UntaggedMemberDto, isArray: true },
-  // P18.96-T3 (ADR-0170): + Add agent, its invites and transfers; an invite's link; the office's transfer requests.
+  // P18.8-T3 (ADR-0170): + Add agent, its invites and transfers; an invite's link; the office's transfer requests.
   NewHireAgentsController_add: { type: AddAgentResultDto },
   NewHireAgentsController_list: { type: InviteListDto },
   NewHireAgentsController_resend: { type: SharedInviteDto },
@@ -279,7 +324,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_updateType: { type: ActivityTypeDto },
   TenantConfigController_archiveType: { type: ActivityTypeDto },
   TenantConfigController_restoreType: { type: ActivityTypeDto },
-  // P18.9-T2 (ADR-0163): an office's activity binding — the Owner's and Admin's read, the Super Admin's read and write.
+  // P18.6-T2 (ADR-0163): an office's activity binding — the Owner's and Admin's read, the Super Admin's read and write.
   ActivityBindingReadController_read: { type: ActivityBindingDto },
   ActivityBindingAdminController_read: { type: OfficeActivityBindingDto },
   ActivityBindingAdminController_update: { type: OfficeActivityBindingDto },
@@ -291,6 +336,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TenantConfigController_setLateStage: { type: LeadStatusDto },
   GoalController_read: { type: GoalResponseDto },
   GoalController_save: { type: GoalResponseDto },
+  GoalController_saveEstimate: { type: GoalResponseDto },
   GoalController_preview: { type: GoalPreviewDto },
   ProductionController_readMonth: { type: MonthViewDto },
   // ADR-0184: `format=xlsx` answers the workbook itself.
@@ -314,11 +360,67 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   LeadController_remove: { type: DeletedLeadDto },
   TenantConfigController_archiveLeadStatus: { type: LeadStatusDto },
   TenantConfigController_restoreLeadStatus: { type: LeadStatusDto },
-  AdminController_elevateSession: { type: StatusAckDto },
   AdminController_readTemplate: { type: CompanyTemplateDto },
   AdminController_templateHistory: { type: CompanyTemplateDto, isArray: true },
   AdminController_saveTemplateDraft: { type: CompanyTemplateDto },
   AdminController_publishTemplate: { type: CompanyTemplateDto },
+  // P19.5-T1 (ADR-0214 §1, §7): the *Advanced analytics* editor's code check and open runs.
+  AnalyticsTemplateController_codeCheck: { type: AnalyticsCodeCheckDto },
+  AnalyticsTemplateController_openRuns: { type: AnalyticsOpenRunsDto },
+  // P19.5-T4 (ADR-0216): a member's surveys, the KPM's runs and results, and the coaching *Survei* tab.
+  SurveysController_pending: { type: SurveyPendingDto },
+  SurveysController_list: { type: SurveyListDto },
+  SurveysController_form: { type: SurveyFormDto },
+  SurveysController_answer: { type: SurveyAnswerSavedDto },
+  SurveysController_submit: { type: SurveySubmittedDto },
+  // 204: nothing comes back; the entry is the table's placeholder.
+  SurveysController_popupShown: { type: StatusAckDto },
+  SurveyRunsController_nps: { type: SurveyResultsDto },
+  SurveyRunsController_qual: { type: SurveyResultsDto },
+  SurveyRunsController_create: { type: SurveyRunDto },
+  SurveyRunsController_update: { type: SurveyRunDto },
+  SurveyRunsController_cancel: { type: StatusAckDto },
+  CoachingSurveyController_read: { type: CoachingSurveyDto },
+  // P19.5-T3 (ADR-0215): the KPM's *Advanced analytics* page, and the Super Admin's tab on it.
+  AdvancedAnalyticsController_shell: { type: AdvancedAnalyticsShellDto },
+  AdvancedAnalyticsController_demographics: { type: DemographicsDto },
+  AdvancedAnalyticsController_mapa: { type: MapaDto },
+  AdvancedAnalyticsController_quant: { type: QuantDto },
+  AdvancedAnalyticsController_subgroup: { type: SubgroupDto },
+  AdvancedAnalyticsController_events: { type: EventsNpsDto },
+  AdvancedAnalyticsController_setMapaTarget: { type: MapaTargetDto },
+  AdvancedAnalyticsController_setSubgroupTarget: { type: SubgroupTargetDto },
+  AdminAdvancedAnalyticsController_shell: { type: AdvancedAnalyticsShellDto },
+  AdminAdvancedAnalyticsController_section: { type: AdminAdvancedAnalyticsSectionDto },
+  // P19.7-T2 (ADR-0221): the simple proposal. P19.7-T3 (ADR-0222): its PDF, a file and nothing else.
+  ProposalController_pdf: { files: ['application/pdf'] },
+  // P19.6-T5 (ADR-0219 §4): the Super Admin's guide, its HTML and its PDF — files and nothing else.
+  PlatformGuideController_html: { files: ['text/html'] },
+  PlatformGuideController_pdf: { files: ['application/pdf'] },
+  // P19.6-T1 (ADR-0218 §14): *Tampilan KPM*, the template's images, the public sign-in read and the files.
+  BrandingSettingsController_read: { type: BrandingSettingsDto },
+  BrandingSettingsController_save: { type: BrandingSettingsDto },
+  BrandingSettingsController_preview: { type: BrandingPreviewAnswerDto },
+  BrandingSettingsController_reset: { type: BrandingSettingsDto },
+  BrandingSettingsController_upload: { type: SignedUploadDto },
+  BrandingSettingsController_confirm: { type: ConfirmedBrandingImageDto },
+  TemplateBrandingController_upload: { type: SignedUploadDto },
+  TemplateBrandingController_confirm: { type: ConfirmedBrandingImageDto },
+  TemplateBrandingController_preview: { type: BrandingPreviewAnswerDto },
+  PublicBrandingController_read: { type: PublicBrandingDto },
+  PublicBrandingController_file: { files: ['image/png', 'image/webp'] },
+  ProposalController_list: { type: ProposalPageDto },
+  ProposalController_catalog: { type: ProposalCatalogDto },
+  ProposalController_read: { type: ProposalResponseDto },
+  ProposalController_create: { type: ProposalResponseDto },
+  ProposalController_update: { type: ProposalPatchedDto },
+  ProposalController_addItem: { type: ProposalResponseDto },
+  ProposalController_updateItem: { type: ProposalResponseDto },
+  ProposalController_removeItem: { type: ProposalResponseDto },
+  ProposalController_done: { type: ProposalResponseDto },
+  ProposalController_duplicate: { type: ProposalDuplicatedDto },
+  // 204: a soft delete answers nothing; the entry is the table's placeholder.
+  ProposalController_remove: { type: StatusAckDto },
   // P13.2-T6: a company's named templates (ADR-0115).
   NamedTemplateController_list: { type: NamedTemplateDto, isArray: true },
   NamedTemplateController_create: { type: NamedTemplateDto },
@@ -326,7 +428,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   NamedTemplateController_archive: { type: NamedTemplateDto },
   // ADR-0185: *Terbitkan semua*, and the offices behind the checklist's count.
   NamedTemplateController_publishAll: { type: PublishAllDto },
-  NamedTemplateController_offices: { type: TemplateOfficeDto, isArray: true },
+  NamedTemplateController_offices: { type: TemplateOfficeStandingDto, isArray: true },
+  // ADR-0208: the push to the offices made from a template, and its Training section's material.
+  NamedTemplateController_apply: { type: ApplyTemplateResultDto },
+  NamedTemplateController_requestMaterialUpload: { type: SignedUploadDto },
+  NamedTemplateController_confirmMaterialUpload: { type: ConfirmedUploadDto },
+  NamedTemplateController_materialFileUrl: { type: SignedUrlDto },
+  NamedTemplateController_saveModuleMaterial: { type: CompanyTemplateDto },
   // P13.2-T7: the copies across an owner boundary answer with the template they made.
   NamedTemplateController_importFrom: { type: NamedTemplateDto },
   // P13.2's exit review (finding 2): with what the office held that the template left out, and why.
@@ -350,7 +458,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TrainingController_saveContent: { type: ModuleContentDto },
   TrainingController_resetContent: { type: ModuleContentDto },
   TrainingController_contentUrl: { type: SignedUrlDto },
-  // P18.5-T1, T4: the learner's training — the offered catalog with a member's statuses, a module, an open, a status.
+  // ADR-0220 §4: *Sinkron dari template* — what the KPM's names would take from its template, and taking them.
+  TemplateSyncController_read: { type: TemplateSyncViewDto },
+  TemplateSyncController_apply: { type: TemplateSyncResultDto },
+  // P18.2-T1, T4: the learner's training — the offered catalog with a member's statuses, a module, an open, a status.
   TrainingProgressController_read: { type: TrainingProgressDto },
   TrainingProgressController_module: { type: TrainingModulePageDto },
   TrainingProgressController_open: { type: TrainingOpenDto },
@@ -368,6 +479,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ProductController_closeToNewBusiness: { type: ProductResponseDto },
   ProductController_withdraw: { type: ProductResponseDto },
   ProductController_reopen: { type: ProductResponseDto },
+  // 204 (P19.4-T4, ADR-0209 §10): a soft delete answers nothing; the entry is the table's placeholder.
+  ProductController_remove: { type: StatusAckDto },
 
   // What an office decides about its company's products (P5-T5).
   KpmProductController_list: { type: KpmProductDto, isArray: true },
@@ -397,8 +510,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   RecruitmentPitchController_requestUpload: { type: SignedUploadDto },
   RecruitmentPitchController_attach: { type: PitchSlotDto },
   RecruitmentPitchController_setConfirmation: { type: PitchSlotDto },
-  RecruitmentPlaybookController_read: { type: RecruitmentPlaybookAdminDto },
-  RecruitmentPlaybookController_save: { type: RecruitmentPlaybookDto },
 
   // The events an office runs (P5-T6).
   EventController_listTypes: { type: EventTypeDto, isArray: true },
@@ -411,17 +522,17 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   EventController_update: { type: EventDto },
   EventController_archive: { type: EventDto },
   EventController_restore: { type: EventDto },
-  // P18.5-T5, T6: the roll call, the picker's people and the Feedback Summary, the office's administration's.
+  // P18.2-T5, T6: the roll call, the picker's people and the Feedback Summary, the office's administration's.
   EventController_invitees: { type: EventInviteeListDto },
   EventController_rollCall: { type: RollCallDto },
   EventController_saveRollCall: { type: RollCallDto },
   EventController_feedbackSummary: { type: FeedbackSummaryDto },
-  // P18.5-T5, T6: the agent's *KPM Events* — the list, the modal, RSVP, the claim and the answer.
+  // P18.2-T5, T6: the agent's *KPM Events* — the list, the modal, RSVP, the claim and the answer.
   EventGuestController_list: { type: GuestEventListDto },
   EventGuestController_read: { type: GuestEventDto },
   EventGuestController_rsvp: { type: GuestEventDto },
   EventGuestController_cancelRsvp: { type: GuestEventDto },
-  // UI V1 (Phase 18.99 T13, UI-108): *Tidak ikut* after *Ikut*, the RSVP back to none.
+  // UI V1 (Phase 18.11 T13, UI-108): *Tidak ikut* after *Ikut*, the RSVP back to none.
   EventGuestController_withdrawRsvp: { type: GuestEventDto },
   EventGuestController_claim: { type: GuestEventDto },
   EventGuestController_submitFeedback: { type: GuestEventDto },
@@ -434,10 +545,10 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CampaignController_update: { type: CampaignDto },
   CampaignController_archive: { type: CampaignDto },
   CampaignController_restore: { type: CampaignDto },
-  // P18.6-T2: the override of a final standing, set and cleared.
+  // P18.3-T2: the override of a final standing, set and cleared.
   CampaignController_override: { type: StandingOverrideResultDto },
   CampaignController_clearOverride: { type: StandingOverrideResultDto },
-  // Phase 18.5: the agent's campaigns — the list, one campaign with its progress, the chase, and whose chases.
+  // Phase 18.2: the agent's campaigns — the list, one campaign with its progress, the chase, and whose chases.
   CampaignAgentController_list: { type: CampaignListDto },
   CampaignAgentController_chasing: { type: ChasingDto },
   CampaignAgentController_detail: { type: CampaignDetailDto },
@@ -490,6 +601,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_kpmRequests: { type: KpmRequestRowDto, isArray: true },
   AdminController_approveKpmRequest: { type: KpmRequestRowDto, isArray: true },
   AdminController_declineKpmRequest: { type: KpmRequestRowDto, isArray: true },
+  // P19-T3 (ADR-0191): removing a request, the owner picker, the code check, moving and deleting an office.
+  AdminController_deleteKpmRequest: { type: KpmRequestRowDto, isArray: true },
+  AdminController_searchAccounts: { type: AccountChoiceDto, isArray: true },
+  AdminController_codeAvailability: { type: CodeAvailabilityDto },
+  AdminController_moveCompany: { type: KpmAdminViewDto },
+  AdminController_tenantContents: { type: KpmContentsDto },
+  AdminController_deleteTenant: { type: KpmDeletedDto },
   AdminController_listCompanies: { type: CompanyResponseDto, isArray: true },
   // Public, and two fields only — a visitor asking which insurer issued their agent
   // code has no business knowing how each one is configured (ADR-0017).
@@ -500,11 +618,13 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_listOrgLevels: { type: OrgLevelRowDto, isArray: true },
   AdminController_createOrgLevel: { type: OrgLevelRowDto, isArray: true },
   AdminController_updateOrgLevel: { type: OrgLevelRowDto, isArray: true },
+  AdminController_deleteOrgLevel: { type: OrgLevelRowDto, isArray: true },
   // P13.2-T3: the Super Admin's rows carry the subscription, Leaders used and the ended state.
-  AdminController_listTenants: { type: KpmAdminViewDto, isArray: true },
-  AdminController_createTenant: { type: KpmViewDto },
-  AdminController_readTenant: { type: KpmAdminViewDto },
+  AdminController_listTenants: { type: KpmListRowDto, isArray: true },
+  AdminController_createTenant: { type: KpmCreatedDto },
+  AdminController_readTenant: { type: KpmProfileDto },
   AdminController_assignOwner: { type: KpmAdminViewDto },
+  AdminController_resendOwnerInvitation: { type: KpmAdminViewDto },
   AdminController_setStatus: { type: KpmAdminViewDto },
   AdminController_updateSubscription: { type: KpmAdminViewDto },
   // ADR-0184: `format=csv` and `format=xlsx` answer the file itself.
@@ -514,11 +634,14 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // ADR-0184: the roster as a file, a workbook or a CSV — the same answers as the paste's.
   AdminController_previewRosterFile: { type: RosterPreviewDto },
   AdminController_importRosterFile: { type: RosterCommitDto },
-  AdminController_readAudit: { type: AuditEntryResponseDto, isArray: true },
+  AdminController_readAudit: { type: AuditPageDto },
   AdminController_impersonate: { type: ImpersonationSessionDto },
   AdminController_endImpersonation: { type: StatusAckDto },
   // P13.2-T2: the quote tool's price table, the Super Admin's alone (ADR-0111).
   BillingController_prices: { type: BillingPricesDto },
+  // P19.4-T3 (ADR-0211 §3, §5): the list of KPMs, and a quote sent to one KPM's Owner.
+  KpmBillingController_list: { type: BillingKpmRowDto, isArray: true },
+  KpmBillingController_sendQuote: { type: QuoteSentDto },
 };
 
 /**
@@ -533,5 +656,8 @@ const SHARED_SHAPES: Type<unknown>[] = [
 
 /** Every class the table names, so Swagger emits a schema for each. */
 export const RESPONSE_MODELS: Type<unknown>[] = [
-  ...new Set([...Object.values(RESPONSE_SHAPES).map((s) => s.type), ...SHARED_SHAPES]),
+  ...new Set([
+    ...Object.values(RESPONSE_SHAPES).flatMap((s) => (s.type ? [s.type] : [])),
+    ...SHARED_SHAPES,
+  ]),
 ];

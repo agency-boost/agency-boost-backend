@@ -55,7 +55,7 @@ describe('the words the two sales screens print (Overall.html)', () => {
     );
   });
 
-  it('P18.98-T5 AC-4 says the run-off note in Indonesian too, *run-off* kept as the insurer’s word', () => {
+  it('P18.10-T5 AC-4 says the run-off note in Indonesian too, *run-off* kept as the insurer’s word', () => {
     expect(indonesian(PRODUCT_RUN_OFF_NOTE)).toBe(
       'Dalam masa run-off — tidak lagi diterbitkan untuk pemohon baru. Ditampilkan hanya sebagai referensi; bukan '
         + 'bagian dari etalase penjualan saat ini.',

@@ -32,8 +32,8 @@ export interface TrainingRowFilter {
 }
 
 /**
- * **`TrainingProgressReadings` — the one read of training progress** (P18.5-T2 AC-3): the port T1's learner
- * read, T4's coach read, T3's activation evaluator and Phase 18.6's compliance tree read through, so none of
+ * **`TrainingProgressReadings` — the one read of training progress** (P18.2-T2 AC-3): the port T1's learner
+ * read, T4's coach read, T3's activation evaluator and Phase 18.3's compliance tree read through, so none of
  * them can disagree about what a member has done.
  *
  * **Bounded for many members** (AC-3): `ofMany` reads the offered catalog once, every member's rows in one
@@ -148,7 +148,9 @@ export class TrainingProgressReadings {
         // What it held when it was withdrawn, so the person tab's *Format* cell says what it was, as an offered row's does.
         formats: formatsOfContent(module),
         displayOrder: module.displayOrder,
-        skill: { code: skill.code, label: skill.label, displayOrder: skill.displayOrder },
+        skill: {
+          code: skill.code, label: skill.label, description: skill.description ?? null, displayOrder: skill.displayOrder,
+        },
         category: {
           code: category.code, label: category.label, description: category.description,
           displayOrder: category.displayOrder,
@@ -164,7 +166,7 @@ interface HistoryPlace {
   title: string;
   formats: TrainingItemKind[];
   displayOrder: number;
-  skill: { code: string; label: string; displayOrder: number };
+  skill: { code: string; label: string; description: string | null; displayOrder: number };
   category: { code: string; label: string; description: string | null; displayOrder: number };
 }
 
@@ -228,7 +230,7 @@ function compose(
   const offeredCategories = new Set(catalog.tree.map((c) => c.code));
 
   /*
-   * **A category with no published module is not offered** (P18.97-T4 AC-9, ADR-0176 §9; the client's UI-031): the
+   * **A category with no published module is not offered** (P18.9-T4 AC-9, ADR-0176 §9; the client's UI-031): the
    * snapshot carries every active category, and *Product* or *Recruiting* with nothing in them drew a tab an agent
    * opened onto *coming soon*. Such a category is left out — or, where the member's history sits under it, read as
    * no longer offered, its skills with it, so the person tab still draws what was done and no tab is drawn.
@@ -238,6 +240,8 @@ function compose(
     const skills: TrainingSkillProgressView[] = category.skills.map((skill) => ({
       code: skill.code,
       label: skill.label,
+      // A snapshot published before P19.6-T4 carries none: read as none.
+      description: skill.description ?? null,
       offered: offersSomething,
       ...(counts.skills.get(skill.code) ?? NOTHING),
       modules: skill.modules.map((module) => {
@@ -246,6 +250,7 @@ function compose(
         return {
           code: module.code,
           title: module.title,
+          description: module.description ?? null,
           formats: formats.get(module.code) ?? [],
           status,
           completedAt: status === 'done' && row?.completedAt ? row.completedAt.toISOString() : null,
@@ -309,6 +314,7 @@ function withdrawnSkills(
     .map(([skillCode, entries]) => ({
       code: skillCode,
       label: entries[0].place.skill.label,
+      description: entries[0].place.skill.description ?? null,
       offered: false,
       ...NOTHING,
       modules: [],

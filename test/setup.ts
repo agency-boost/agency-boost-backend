@@ -26,10 +26,10 @@ process.on('unhandledRejection', (reason) => {
 jest.setTimeout(30_000);
 
 /**
- * **Every integration suite reads the API in English unless a test asks for Indonesian** (ADR-0179 §9; P18.98-T5
- * AC-7). The app sends `Accept-Language` on every request (P18.98-T2 AC-6), so a suite sends the one an English screen
+ * **Every integration suite reads the API in English unless a test asks for Indonesian** (ADR-0179 §9; P18.10-T5
+ * AC-7). The app sends `Accept-Language` on every request (P18.10-T2 AC-6), so a suite sends the one an English screen
  * sends: `en`. A request with no header is nobody's choice, and reads Bahasa Indonesia since `LANGUAGE_LIVE` went live
- * at P18.98-T4's exit (2026-10-29); this keeps every English word written before the phase standing. **The figures in
+ * at P18.10-T4's exit (2026-10-29); this keeps every English word written before the phase standing. **The figures in
  * them are an English reader's** since then — *Aug*, *IDR 200M*, *09:00* — where nobody's choice read *Agu*, *Rp 200
  * jt*, *09.00* before (`readerOf`). A test that sets the header itself is left alone: `.set('Accept-Language', 'id')`
  * for Indonesian, or `''` for none at all — nobody's choice (`common/i18n/reader.ts` reads an empty header as none).

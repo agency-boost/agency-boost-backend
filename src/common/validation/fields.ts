@@ -15,7 +15,7 @@ import { field } from './violations';
 
 /** How a code may be typed. Case is forgiven; the code saved is upper case. */
 export const CODE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,39}$/;
-/** What a code's refusal says (P18.98-T5 AC-3): a service's sentence, in both languages. */
+/** What a code's refusal says (P18.10-T5 AC-3): a service's sentence, in both languages. */
 export const CODE_SENTENCE = VALIDATION_REFUSALS.VALIDATION_FAILED.codeShape;
 /** The same, as a DTO's `@Matches` takes it (`field`). */
 export const CODE_MESSAGE = field(CODE_SENTENCE);

@@ -6,7 +6,7 @@
 export const REDACTED = '[redacted]';
 
 /**
- * The token's segment of a shared link's path, whatever follows it — a meeting's, and since P18.96-T3 an invite's
+ * The token's segment of a shared link's path, whatever follows it — a meeting's, and since P18.8-T3 an invite's
  * (`/v1/invites/{token}` and its `/accept`, ADR-0170 §3), which is a credential to join an office. Not
  * `/new-hires/invites/{inviteId}`, whose id is a row's, not a secret.
  */

@@ -2,7 +2,7 @@ import { formatMonth } from '@/common/format/format';
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The Unit Dashboard's refusals, in both languages** (P18.98-T5 AC-2, AC-3): *Update production*'s save, which
+ * **The Unit Dashboard's refusals, in both languages** (P18.10-T5 AC-2, AC-3): *Update production*'s save, which
  * takes the agency's current month only, each row a figure, each person once. The month is written in the reader's
  * figures (*Okt 2026*); the agency is the *KPM* (glossary §B.9), production *produksi*, *Unit Dashboard* stays English
  * (§A.1). A field is named as the API names it (`month`).
@@ -39,6 +39,19 @@ export const UNIT_DASHBOARD_REFUSALS = refusals('modules/unit-dashboard', {
     futureDate: {
       en: 'There is nothing to show after today: pick this week or month, or an earlier one.',
       id: 'Belum ada yang bisa ditampilkan setelah hari ini: pilih minggu atau bulan ini, atau yang sebelumnya.',
+    },
+
+    /*
+     * The *Potensi* tab's reads (P19.1-T6, UI-155): `month` names a calendar month on the agency's calendar, never one
+     * after the current month — the month picker stops there.
+     */
+    potensiMonthShape: {
+      en: 'month must be a month, YYYY-MM',
+      id: 'month harus berupa bulan, dengan format YYYY-MM',
+    },
+    futureMonth: {
+      en: 'There is nothing to show after this month: pick this month or an earlier one.',
+      id: 'Belum ada yang bisa ditampilkan setelah bulan ini: pilih bulan ini atau yang sebelumnya.',
     },
   },
 });

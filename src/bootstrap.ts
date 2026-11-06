@@ -34,7 +34,7 @@ export const VALIDATION_PIPE_OPTIONS = {
   // product's premise is that a silently wrong number is worse than a crash.
   transformOptions: { enableImplicitConversion: false },
   /*
-   * **The refusal in the reader's language** (P18.98-T5 AC-3): `400 VALIDATION_FAILED` with `details.violations`, as
+   * **The refusal in the reader's language** (P18.10-T5 AC-3): `400 VALIDATION_FAILED` with `details.violations`, as
    * Nest's own factory answers — the same English, so every assertion on it stands — each violation a sentence the
    * error filter writes for the request's reader (`common/validation/violations.ts`).
    */
@@ -55,7 +55,7 @@ export const VALIDATION_PIPE_OPTIONS = {
  */
 
 /**
- * **How long a browser may reuse a preflight's answer** (P18.95-T5's finding, UI-030). Without
+ * **How long a browser may reuse a preflight's answer** (P18.7-T5's finding, UI-030). Without
  * `Access-Control-Max-Age` Chrome keeps one for five seconds, so a screen's reads paid an `OPTIONS`
  * round trip again every few seconds — one more on each of the three serial requests a hard load makes
  * (refresh, `/auth/me`, then the reads). Ten minutes; Chrome caps it at two hours. A change to
@@ -67,7 +67,7 @@ export function configureApp(app: INestApplication): void {
   const config = app.get(ConfigService);
 
   /*
-   * **Who the client is, behind the proxy** (P18.7-T1, ADR-0152). `TRUST_PROXY` is validated to
+   * **Who the client is, behind the proxy** (P18.4-T1, ADR-0152). `TRUST_PROXY` is validated to
    * `false` or a hop count; anything else reaching here is a misconfiguration, and it trusts nothing
    * rather than everything. `req.ip` is what the login limiter keys on and what a session row
    * records, so believing a forged `X-Forwarded-For` would let a client choose its own bucket.
@@ -93,7 +93,7 @@ export function configureApp(app: INestApplication): void {
 
   app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
-  // Read by `corsOriginsOf`, as the refresh-origin check on `/auth/refresh` reads it (P18.7-T1).
+  // Read by `corsOriginsOf`, as the refresh-origin check on `/auth/refresh` reads it (P18.4-T1).
   const origins = corsOriginsOf(config.get<string>('CORS_ORIGINS', ''));
   app.enableCors({
     origin: origins.length > 0 ? origins : false,

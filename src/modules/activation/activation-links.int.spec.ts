@@ -202,7 +202,7 @@ describe('the activation’s linked items complete from real writes (Phase 13 ex
       expect(view.done).toBe(3);
     });
 
-    it('P18.96-T7 AC-1 (UI-007) the leader’s first read of a hire left unhealed answers the settled counts — Initial Setup 3/4, never the stored 1/4 — and so do two first reads at once', async () => {
+    it('P18.8-T7 AC-1 (UI-007) the leader’s first read of a hire left unhealed answers the settled counts — Initial Setup 3/4, never the stored 1/4 — and so do two first reads at once', async () => {
       // Dimas's shape on staging: his leader ticked *Set up company CRM system*, and his goal and his lead were written
       // straight into their collections, as the seed writes them — no write signalled the engine — so the stored row
       // holds one of Initial Setup's four.

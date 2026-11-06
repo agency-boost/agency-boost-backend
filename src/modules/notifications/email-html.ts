@@ -1,5 +1,5 @@
 /**
- * **The HTML alternative of an email, derived from its text** (P18.99-T18, ADR-0182).
+ * **The HTML alternative of an email, derived from its text** (P18.11-T18, ADR-0182).
  *
  * The text stays the one source of every word (`email-renderer.ts`): this only presents it. A message sent as text
  * alone scores worse with spam filters than one carrying both parts, and some clients show a bare URL in plain text as

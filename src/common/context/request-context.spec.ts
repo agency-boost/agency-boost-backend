@@ -139,7 +139,7 @@ describe('request context factories', () => {
 });
 
 /**
- * **The effective Core Leader** (ADR-0159 §1, §4; P18.8-T5 AC-1): the tag on a leader class — one rule, read by the
+ * **The effective Core Leader** (ADR-0159 §1, §4; P18.5-T5 AC-1): the tag on a leader class — one rule, read by the
  * context, the directory, the forum and KPM analytics alike.
  */
 describe('the Core Leader', () => {
@@ -165,10 +165,10 @@ describe('the Core Leader', () => {
 });
 
 /**
- * **P18.98-T5 AC-1 — the reader is on the context** (ADR-0179 §7): resolved once by `AuthGuard`, what every service
+ * **P18.10-T5 AC-1 — the reader is on the context** (ADR-0179 §7): resolved once by `AuthGuard`, what every service
  * writes a sentence for. A context built for a job, or by hand, reads as a reader who has chosen nothing.
  */
-describe('P18.98-T5 the context’s reader', () => {
+describe('P18.10-T5 the context’s reader', () => {
   const member = {
     membershipId: 'm1', kpmId: 'k1', orgLevelCode: 'AB', hierarchyRole: 'ab' as const, status: 'active' as const,
     isKpmOwner: false, isKpmAdmin: false, directCount: 0,
@@ -180,18 +180,17 @@ describe('P18.98-T5 the context’s reader', () => {
   });
 
   it('AC-1 carries the reader it was given', () => {
-    const ctx = new RequestContext('u1', 'none', member, null, null, false, false, [], { language: 'id', figures: 'id' });
+    const ctx = new RequestContext('u1', 'none', member, null, null, false, false, { language: 'id', figures: 'id' });
     expect(ctx.reader).toEqual({ language: 'id', figures: 'id' });
   });
 
   it('AC-1 answers the same context for another reader, every other fact kept', () => {
-    const session = new RequestContext('u1', 'none', member, 'root', null, true, true, ['tenant_config:write']);
+    const session = new RequestContext('u1', 'none', member, 'root', null, true, true);
     const indonesian = session.withReader({ language: 'id', figures: 'id' });
     expect(indonesian).not.toBe(session);
     expect(indonesian.reader).toEqual({ language: 'id', figures: 'id' });
     expect(indonesian).toMatchObject({
-      userId: 'u1', impersonatorUserId: 'root', mustChangePassword: true, impersonationReadOnly: true,
-      impersonationWriteScope: ['tenant_config:write'], membership: member,
+      userId: 'u1', impersonatorUserId: 'root', mustChangePassword: true, impersonationReadOnly: true, membership: member,
     });
     expect(Object.isFrozen(indonesian)).toBe(true);
     // The office a Super Admin acts inside travels too.
@@ -199,7 +198,7 @@ describe('P18.98-T5 the context’s reader', () => {
   });
 
   it('AC-1 keeps the reader of the request somebody joins an office from', () => {
-    const asked = new RequestContext('u1', 'none', null, null, null, false, false, [], { language: 'id', figures: 'id' });
+    const asked = new RequestContext('u1', 'none', null, null, null, false, false, { language: 'id', figures: 'id' });
     expect(RequestContext.joiningTenant(asked, 'k1').reader).toEqual({ language: 'id', figures: 'id' });
   });
 });

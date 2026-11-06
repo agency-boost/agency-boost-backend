@@ -4,9 +4,9 @@ import type { FilterQuery, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 // The domain's, not Nest's: it answers `NOT_FOUND`, the code every tenant-scoped refusal uses; and a malformed request
-// is `400 VALIDATION_FAILED` in the reader's language (P18.98-T5 AC-3).
+// is `400 VALIDATION_FAILED` in the reader's language (P18.10-T5 AC-3).
 import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
-import type { TrainingPublishState } from '@/domain/constants';
+import { TRAINING_FILE_MIME_TYPES, type TrainingPublishState } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AssetService } from '@/modules/assets/asset.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -46,10 +46,31 @@ export interface TrainingModuleView {
   code: string;
   skillCode: string;
   title: string;
+  /** *Deskripsi singkat* (P19.6-T4, ADR-0220 §1): the grey line under the title, or `null`. */
+  description: string | null;
   publishState: TrainingPublishState;
   displayOrder: number;
   version: number;
   status: Status;
+  /**
+   * **Where the material agents are shown comes from** (ADR-0208 §1; UI-162): `own` — the office's replacement; `company`
+   * — the template's, as provisioning or a push gave it; `none` — the module holds no file, video or link. On the
+   * settings list only: what *x / y modul punya materi* counts. Never in what agents are offered.
+   */
+  material?: ModuleMaterial;
+}
+
+/** Where a module's effective material comes from (ADR-0208 §1). */
+export type ModuleMaterial = 'own' | 'company' | 'none';
+
+/** A module **has material** when its effective content holds at least one file, video or link (ADR-0208 §1). */
+export function materialOf(module: { companyContent?: unknown; officeContent?: unknown }): ModuleMaterial {
+  const holds = (raw: unknown) => {
+    const content = asContent(raw);
+    return content.files.length + content.videos.length + content.links.length > 0;
+  };
+  if (module.officeContent) return holds(module.officeContent) ? 'own' : 'none';
+  return holds(module.companyContent) ? 'company' : 'none';
 }
 
 /** A skill on its own, as a write answers. */
@@ -58,6 +79,8 @@ export interface TrainingSkillRow {
   code: string;
   categoryCode: string;
   label: string;
+  /** *Deskripsi singkat* (P19.6-T4, ADR-0220 §1): the grey line under the name, or `null`. */
+  description: string | null;
   displayOrder: number;
   version: number;
   status: Status;
@@ -124,7 +147,8 @@ export class TrainingService {
    */
   async list(ctx: RequestContext, includeArchived = false): Promise<TrainingCategoryView[]> {
     const live = includeArchived ? {} : { status: 'active' };
-    return this.tree(ctx, live, live, live);
+    // Each module says where its material comes from: what *x / y modul punya materi* counts (UI-162).
+    return this.tree(ctx, live, live, live, true);
   }
 
   /**
@@ -221,7 +245,7 @@ export class TrainingService {
   }
 
   /**
-   * Label, and the category it sits in. **Never the code.** A skill that moves takes its modules
+   * Label, *Deskripsi singkat* (P19.6-T4), and the category it sits in. **Never the code.** A skill that moves takes its modules
    * with it — their category is the skill's — and goes to the end of its new category.
    */
   async updateSkill(ctx: RequestContext, id: string, body: unknown): Promise<TrainingSkillRow> {
@@ -231,6 +255,7 @@ export class TrainingService {
 
     const set: Record<string, unknown> = {};
     if (input.label !== undefined) set.label = input.label;
+    if (input.description !== undefined) set.description = input.description;
     if (input.categoryCode !== undefined && input.categoryCode !== existing.categoryCode) {
       await this.requireActiveCategory(ctx, input.categoryCode);
       set.categoryCode = input.categoryCode;
@@ -294,7 +319,7 @@ export class TrainingService {
   }
 
   /**
-   * Title, publish state and the skill it teaches. **Never the code.** Publishing or
+   * Title, *Deskripsi singkat* (P19.6-T4), publish state and the skill it teaches. **Never the code.** Publishing or
    * unpublishing a module is an edit like any other, and reaches agents when the office next
    * publishes.
    */
@@ -305,6 +330,7 @@ export class TrainingService {
 
     const set: Record<string, unknown> = {};
     if (input.title !== undefined) set.title = input.title;
+    if (input.description !== undefined) set.description = input.description;
     if (input.publishState !== undefined) set.publishState = input.publishState;
     if (input.skillCode !== undefined && input.skillCode !== existing.skillCode) {
       await this.requireActiveSkill(ctx, input.skillCode);
@@ -353,12 +379,13 @@ export class TrainingService {
     ctx: RequestContext,
     params: { filename: string; mimeType: string; bytes: number },
   ) {
-    return this.assets.requestUpload(ctx, { folder: 'training', ...params });
+    // The training file's list, HTML lessons included (P19.6-T2, ADR-0217 §1).
+    return this.assets.requestUpload(ctx, { folder: 'training', ...params }, TRAINING_FILE_MIME_TYPES);
   }
 
-  /** Ask storage what actually landed, and record that (ADR-0040). */
+  /** Ask storage what actually landed, and record that (ADR-0040): a file claimed as HTML that is not one is refused. */
   async confirmContentUpload(ctx: RequestContext, storageKey: string) {
-    const asset = await this.assets.confirmUpload(ctx, storageKey);
+    const asset = await this.assets.confirmUpload(ctx, storageKey, TRAINING_FILE_MIME_TYPES);
     return {
       storageKey: asset.storageKey, mimeType: asset.mimeType, bytes: asset.bytes,
     };
@@ -406,7 +433,7 @@ export class TrainingService {
     await this.moveReferences(ctx, before, after);
 
     /*
-     * **No version moves** (the Phase 18.5 exit review): a module's `version` is what the office's publish bar compares
+     * **No version moves** (the Phase 18.2 exit review): a module's `version` is what the office's publish bar compares
      * (`TenantConfigService.fingerprint`), and its content is not snapshot material — it reaches agents at once, read
      * live. Moving it here told an Owner who had only replaced a file that the office had something to publish.
      */
@@ -423,23 +450,29 @@ export class TrainingService {
   }
 
   /**
-   * Give the module back its company material (AC-9).
+   * ***Urungkan perubahan saya*** — give the module back its template's material (AC-9; ADR-0208 §3).
    *
-   * Removing the replacement is writing `null`, which is the whole of the fallback rule. The
-   * office's own uploads are released rather than deleted — somebody may put them back, and
-   * deleting a file because it stopped being referenced is a decision nobody made.
+   * Removing the replacement is writing `null`, which is the whole of the fallback rule. **The office's own material is
+   * kept**: moved to the module's `contentHistory`, readable, never hard-deleted (invariant §6), and its uploads are
+   * released rather than deleted — somebody may put them back, and deleting a file because it stopped being shown is a
+   * decision nobody made. Every other office is unaffected.
    */
   async resetContent(ctx: RequestContext, code: string): Promise<TrainingContentView> {
     const module = await this.requireModule(ctx, code);
     if (module.officeContent === null) return this.readContent(ctx, code);
 
-    await this.moveReferences(ctx, storageKeysOf(asContent(module.officeContent)), []);
-    // No version moves, as a save's does not: content is read live, not published (the Phase 18.5 exit review).
+    const own = asContent(module.officeContent);
+    await this.moveReferences(ctx, storageKeysOf(own), []);
+    // No version moves, as a save's does not: content is read live, not published (the Phase 18.2 exit review).
     await this.modules.updateById(ctx, String(module._id), {
       $set: { officeContent: null },
+      $push: {
+        contentHistory: { content: own, reason: 'revert', at: this.clock.now(), by: ctx.userId, templateId: null },
+      },
     });
     await this.record(ctx, 'training_module.content_reset', 'trainingModules', module, {
       code: module.code,
+      kept: { files: own.files.length, videos: own.videos.length, links: own.links.length },
     });
     return this.readContent(ctx, code);
   }
@@ -510,6 +543,8 @@ export class TrainingService {
     categoryFilter: FilterQuery<TrainingCategoryDocument>,
     skillFilter: FilterQuery<TrainingSkillDocument>,
     moduleFilter: FilterQuery<TrainingModuleDocument>,
+    /** The settings list: each module with where its material comes from. Never what agents are offered. */
+    withMaterial = false,
   ): Promise<TrainingCategoryView[]> {
     const order = { sort: { displayOrder: 1 as const } };
     const [categories, skills, modules] = await Promise.all([
@@ -525,7 +560,9 @@ export class TrainingService {
           ...this.skillRow(skill),
           modules: modules
             .filter((module) => module.skillCode === skill.code)
-            .map((module) => this.moduleView(module)),
+            .map((module) => (withMaterial
+              ? { ...this.moduleView(module), material: materialOf(module) }
+              : this.moduleView(module))),
         })),
     }));
   }
@@ -573,6 +610,8 @@ export class TrainingService {
       code: doc.code,
       categoryCode: doc.categoryCode,
       label: doc.label,
+      // Absent on a row written before P19.6-T4 and not yet split: read as none.
+      description: doc.description ?? null,
       displayOrder: doc.displayOrder,
       version: doc.version,
       status: doc.status,
@@ -585,6 +624,7 @@ export class TrainingService {
       code: doc.code,
       skillCode: doc.skillCode,
       title: doc.title,
+      description: doc.description ?? null,
       publishState: doc.publishState,
       displayOrder: doc.displayOrder,
       version: doc.version,

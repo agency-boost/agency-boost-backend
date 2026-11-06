@@ -6,7 +6,7 @@ import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { GroupRepository } from './org.repositories';
 
 /**
- * **What the sidebar's profile line says about a member, after their role** (ADR-0159 §5, P18.8-T6 AC-1): the
+ * **What the sidebar's profile line says about a member, after their role** (ADR-0159 §5, P18.5-T6 AC-1): the
  * names of the groups they are tagged with — the *Groups* of `/people/members`, live ones only, A to Z — and their
  * office, as its code and branch (*0417 · Cempaka Putih*). The *Core Leader* half is the context's own
  * (`RequestContext.isCoreLeader`), so it is not read again here.

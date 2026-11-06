@@ -6,8 +6,8 @@ import { messages } from '@/common/i18n/sentence';
  * do, what each column holds, This Month against YTD, the decimal mark, what not to change, and that a partial file is
  * fine (ADR-0051). Its headings are `common/spreadsheet`'s.
  *
- * **The file's own words stay the file's** (P18.98-T3 AC-4): a column is named as the header names it — *Agent Code*,
- * *APE (Rp M) — This Month* — in both languages; *APE*, *FYP*, *YTD* and *Data upload* are kept (§A.4).
+ * *Since P19.5-T2* (ADR-0214 §5) the columns are the KPM's template's, each named as the header names it in the reader's
+ * language — *APE (Rp juta) [APE]* — and described by its unit, its start month, whom it is for and its tip.
  */
 export const PRODUCTION_TEMPLATE_WORDS = messages('modules/production template', {
   title: ({ month }: { month: string }) => ({
@@ -38,51 +38,64 @@ export const PRODUCTION_TEMPLATE_WORDS = messages('modules/production template',
     en: 'For you to read. It is never used to match a row.',
     id: 'Untuk Anda baca. Nama tidak pernah dipakai untuk mencocokkan baris.',
   },
-  ape: {
-    en: 'APE, in millions of rupiah: 1.5 is Rp 1,500,000.',
-    id: 'APE, dalam juta rupiah: 1,5 berarti Rp 1.500.000.',
+  /** P19.5-T2 (ADR-0214 §5): a column's unit, as the guide's *Isi* begins. */
+  unitOf: ({ unit }: { unit: 'rp_million' | 'percent' | 'count' }) => ({
+    en: unit === 'rp_million' ? 'In millions of rupiah: 1.5 is Rp 1,500,000.'
+      : unit === 'percent' ? 'A percentage from 0 to 100: 85, or 85%.' : 'A whole number.',
+    id: unit === 'rp_million' ? 'Dalam juta rupiah: 1,5 berarti Rp 1.500.000.'
+      : unit === 'percent' ? 'Persentase dari 0 sampai 100: 85, atau 85%.' : 'Bilangan bulat.',
+  }),
+  requiredFrom: ({ month }: { month: string }) => ({
+    en: `Required for every agent from ${month}.`,
+    id: `Wajib diisi untuk setiap agen mulai ${month}.`,
+  }),
+  optional: {
+    en: 'Optional.',
+    id: 'Tidak wajib.',
   },
-  persistency: {
-    en: 'Rolling persistency, a percentage from 0 to 100: 85, or 85%.',
-    id: 'Rolling persistency, persentase dari 0 sampai 100: 85, atau 85%.',
+  startsIn: ({ month }: { month: string }) => ({
+    en: `Counts from ${month}.`,
+    id: `Berlaku mulai ${month}.`,
+  }),
+  notYetInForce: {
+    en: 'Not yet in force for this month: leave it empty.',
+    id: 'Belum berlaku untuk bulan ini: kosongkan.',
   },
-  recruitment: {
-    en: 'People recruited, a whole number.',
-    id: 'Orang yang direkrut, bilangan bulat.',
-  },
-  newActiveAgents: {
-    en: 'New active agents, a whole number.',
-    id: 'Agen aktif baru, bilangan bulat.',
-  },
-  fyp: {
-    en: 'FYP, in millions of rupiah.',
-    id: 'FYP, dalam juta rupiah.',
-  },
-  policyCount: {
-    en: 'Policies, a whole number.',
-    id: 'Jumlah polis, bilangan bulat.',
+  leaderRowsOnly: {
+    en: 'AB and AAB rows only; leave it empty on an agent’s row.',
+    id: 'Hanya untuk baris AB dan AAB; kosongkan di baris agen.',
   },
   thisMonth: {
     en: 'This month alone.',
     id: 'Bulan ini saja.',
   },
   yearToDate: {
-    en: 'From January to this month.',
-    id: 'Dari Januari sampai bulan ini.',
+    en: 'The year to date the carrier reports, January to this month.',
+    id: 'YTD yang dilaporkan perusahaan, Januari sampai bulan ini.',
   },
-  ruleCadence: {
-    en: 'This Month is the month alone; YTD is the year so far, January to this month — so YTD is never less than This '
-      + 'Month.',
-    id: 'This Month adalah bulan ini saja; YTD adalah tahun berjalan, Januari sampai bulan ini — jadi YTD tidak pernah lebih '
-      + 'kecil dari This Month.',
+  /** P19.5-T2 (R4): a year to date is calculated, and only a column the template uploads one for has a YTD column. */
+  ruleCalculatedYtd: {
+    en: 'Fill in each month’s own figures. The year to date is calculated from the months, so it has no column here — '
+      + 'except for a column marked YTD, whose year to date the carrier reports.',
+    id: 'Isi angka bulan ini saja. YTD dihitung dari bulan-bulannya, jadi tidak ada kolomnya di sini — kecuali kolom '
+      + 'bertanda YTD, yang YTD-nya dilaporkan perusahaan.',
   },
   ruleNumbers: {
     en: 'Type a figure as a number, with your spreadsheet’s own decimal mark. Money is in millions of rupiah (Rp M).',
-    id: 'Ketik angka sebagai angka, dengan tanda desimal spreadsheet Anda sendiri. Uang dalam juta rupiah (Rp M).',
+    id: 'Ketik angka sebagai angka, dengan tanda desimal spreadsheet Anda sendiri. Uang dalam juta rupiah (Rp juta).',
   },
   ruleUnchanged: {
-    en: 'Do not change the Agent Code column, the column names or their order, and do not rename the Data sheet.',
-    id: 'Jangan mengubah kolom Agent Code, nama kolom, atau urutannya, dan jangan mengganti nama sheet Data.',
+    en: 'Do not change the Agent Code column, and keep the [KODE] at the end of each column name: it is how a column is '
+      + 'read, whatever its name says.',
+    id: 'Jangan mengubah kolom Agent Code, dan pertahankan [KODE] di akhir setiap nama kolom: dari situlah kolom dibaca, '
+      + 'apa pun namanya.',
+  },
+  /** P19.3-T1: the leader rows' column — optional, and never on an agent's row. */
+  ruleLeaderOnly: {
+    en: 'A column for AB and AAB rows only takes no figure on an agent’s row: one there is listed in the preview and not '
+      + 'stored; the rest of the row imports.',
+    id: 'Kolom khusus baris AB dan AAB tidak diisi di baris agen: angka di sana ditampilkan di pratinjau dan tidak '
+      + 'disimpan; sisa barisnya tetap diimpor.',
   },
   rulePartial: {
     en: 'A partial file is fine: an empty cell or a missing row keeps what is stored, and a row that cannot be read is '
@@ -90,4 +103,32 @@ export const PRODUCTION_TEMPLATE_WORDS = messages('modules/production template',
     id: 'File sebagian tidak masalah: sel kosong atau baris yang tidak ada tetap seperti yang tersimpan, dan baris yang tidak '
       + 'dapat dibaca ditampilkan di pratinjau sementara sisanya diimpor.',
   },
+});
+
+/**
+ * **What a preview says about the file's columns** (P19.5-T2 AC-3; AA UI-013, AT-3; ADR-0214 §5): a column of the KPM's
+ * template the file lacks, and a header the file has that nothing stores. Not refusals — the file still imports — so a
+ * catalogue of their own, written for the preview's reader.
+ */
+export const PRODUCTION_UPLOAD_NOTES = messages('modules/production notes', {
+  /** AA UI-013's own words: a column the file lacks is *not provided*, and no row is skipped for it. */
+  columnMissing: ({ name }: { name: string }) => ({
+    en: `Column ${name} is empty in this file. The rows still import.`,
+    id: `Kolom ${name} kosong di file ini. Baris tetap diimpor.`,
+  }),
+  /** An archived or unknown `[KODE]`, or an issued YTD of a column whose year to date is calculated. */
+  columnRetired: ({ name }: { name: string }) => ({
+    en: `Column ${name} is no longer used. It is not stored.`,
+    id: `Kolom ${name} tidak dipakai lagi`,
+  }),
+  /** A header that matches nothing, with no `[KODE]`. */
+  columnUnknown: ({ header }: { header: string }) => ({
+    en: `Column ${header} is not recognised. It is not stored.`,
+    id: `Kolom ${header} tidak dikenali`,
+  }),
+  /** A column whose *Berlaku mulai* is after the month: it is not read for it (R2). */
+  columnNotInForce: ({ name, from }: { name: string; from: string }) => ({
+    en: (figures) => `Column ${name} counts from ${formatMonth(from, figures)}, so it is not imported for this month.`,
+    id: `Kolom ${name} berlaku mulai ${formatMonth(from, 'id')}, jadi tidak diimpor untuk bulan ini.`,
+  }),
 });

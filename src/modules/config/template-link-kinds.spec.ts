@@ -10,11 +10,11 @@ const NOW = new Date('2026-10-10T03:00:00Z');
 const root = new RequestContext('u-root', 'super_admin', null).withReader(SOURCE_READER);
 
 /**
- * **The Company template's *Auto*, from the `live` the server serves** (P18.5-T3 AC-6, I-80): an
+ * **The Company template's *Auto*, from the `live` the server serves** (P18.2-T3 AC-6, I-80): an
  * `activation_checklist` read answers the link registry — the three feature kinds and the training kind — with what
  * each completes on and whether it is live, so the tab's badge never re-declares it. Every other kind answers none.
  */
-describe('the Company template’s link kinds (P18.5-T3 AC-6)', () => {
+describe('the Company template’s link kinds (P18.2-T3 AC-6)', () => {
   let wired: ReturnType<typeof configModule>;
   let companyId: string;
 
@@ -42,13 +42,13 @@ describe('the Company template’s link kinds (P18.5-T3 AC-6)', () => {
     training: { label: 'Training module', route: '/training', completesWhen: 'the hire has completed that training module', live: true },
   };
 
-  it('P18.5-T3 AC-6 an activation checklist read answers every kind, the training kind live', async () => {
+  it('P18.2-T3 AC-6 an activation checklist read answers every kind, the training kind live', async () => {
     const empty = await wired.templateService.read(companyId, 'activation_checklist', undefined, SOURCE_READER);
     expect(empty.linkKinds).toEqual(expected);
     expect(empty.linkKinds).toEqual(activationLinkKinds());
   });
 
-  it('P18.5-T3 AC-6 a saved draft carries them too, binding a training module or not', async () => {
+  it('P18.2-T3 AC-6 a saved draft carries them too, binding a training module or not', async () => {
     const saved = await wired.templateService.saveDraft(root, companyId, 'activation_checklist', {
       aspects: [{
         code: 'TRAINING', label: '1. Training', displayOrder: 1,
@@ -61,11 +61,11 @@ describe('the Company template’s link kinds (P18.5-T3 AC-6)', () => {
     expect(saved.linkKinds).toEqual(expected);
   });
 
-  it('P18.5-T3 AC-6 every other kind answers none', async () => {
+  it('P18.2-T3 AC-6 every other kind answers none', async () => {
     const taxonomy = await wired.templateService.read(companyId, 'training_taxonomy', undefined, SOURCE_READER);
     expect(taxonomy).not.toHaveProperty('linkKinds');
   });
-  it('P18.98-T7 what completes each kind is written for the reader — the activation module’s own words', async () => {
+  it('P18.10-T7 what completes each kind is written for the reader — the activation module’s own words', async () => {
     const id = readerIn('id');
     const read = await wired.templateService.read(companyId, 'activation_checklist', undefined, id);
     expect(Object.fromEntries(Object.entries(read.linkKinds!).map(([k, v]) => [k, v.completesWhen]))).toEqual({

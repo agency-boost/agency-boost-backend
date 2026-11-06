@@ -2,7 +2,7 @@ import { refusals } from '@/common/i18n/sentence';
 import { RESOURCE_NAMES, type ResourceName } from './resources';
 
 /**
- * **The refusals every module shares, and the error filter's own** (P18.98-T5 AC-2): the resource that is not found,
+ * **The refusals every module shares, and the error filter's own** (P18.10-T5 AC-2): the resource that is not found,
  * the permission that is missing, an office suspended or never joined, a record changed under the reader, and what the
  * filter says for a request it never let reach a service. The Indonesian is the approved glossary's §B.6 wherever it
  * holds the sentence.

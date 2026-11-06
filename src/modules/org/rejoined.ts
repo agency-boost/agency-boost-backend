@@ -12,7 +12,7 @@ export interface RejoinFacts {
 }
 
 /**
- * **The day a member came back, if they did** (P18.97-T4 AC-3, ADR-0176 §5; the client's UI-024): one person, one
+ * **The day a member came back, if they did** (P18.9-T4 AC-3, ADR-0176 §5; the client's UI-024): one person, one
  * office, several memberships over time (invariant §2), each kept — so a directory that lists the live one beside a
  * *Removed* tab holding the old one reads as a contradiction unless it says which came back.
  *

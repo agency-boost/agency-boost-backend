@@ -79,8 +79,14 @@ describe('a member’s month (P11-T6 AC-4)', () => {
       expect(pace({ standing: first }).monthlyTargetMinor).toBe(85 * M);
     });
 
-    it('P11-T6 AC-4 with nothing uploaded at all, the agent’s own figure stands in (P9-T6)', () => {
-      expect(pace({ standing: NOTHING, goal: goal({ apeAchievedMinor: 160 * M }) }).monthlyTargetMinor).toBe(85 * M);
+    it('P19.1-T4 AC-12 with nothing uploaded at all, the agent’s own figure no longer stands in: the roster is a leader’s screen', () => {
+      /*
+       * Until November 2026 the typed Rp 160 M stood in (P9-T6), and the month's target was (500 − 160) ÷ 4 = Rp 85 M. A
+       * member's own estimate now fixes no target on a leader's screen (ADR-0195, UI-157 item 5): nothing is uploaded, so
+       * the year starts from zero — 500 ÷ 4 = Rp 125 M — whatever the plan stores.
+       */
+      expect(pace({ standing: NOTHING, goal: goal({ apeAchievedMinor: 160 * M }) }).monthlyTargetMinor).toBe(125 * M);
+      expect(pace({ standing: NOTHING, goal: goal({ apeAchievedMinor: 0 }) }).monthlyTargetMinor).toBe(125 * M);
     });
 
     it('P11-T6 AC-4 subtracts this month’s APE only from this month’s own year to date', () => {
@@ -124,13 +130,13 @@ describe('a member’s month (P11-T6 AC-4)', () => {
       expect(pace({ counts: new Map() }).pacingToMaa).toBe(false);
     });
 
-    it('P18.9-T2 AC-2 counts the codes the office binds, not the platform’s (invariant §4)', () => {
+    it('P18.6-T2 AC-2 counts the codes the office binds, not the platform’s (invariant §4)', () => {
       const rebound = { ...defaultBinding(), leads: ['RECRUIT_FOLLOWUP'] };
       expect(pace({ binding: rebound, counts: logged(0, 0, 0, 16) }).pacingToMaa).toBe(true);
       expect(pace({ binding: rebound, counts: logged(16) }).pacingToMaa).toBe(false);
     });
 
-    it('P18.9-T2 AC-2 a role bound to [A, B] counts both', () => {
+    it('P18.6-T2 AC-2 a role bound to [A, B] counts both', () => {
       // 8 of the old code and 8 of its replacement: the 16 the month needs, as 16 of one would be.
       const replaced = { ...defaultBinding(), leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] };
       expect(pace({ binding: replaced, counts: logged(8, 0, 0, 8) }).pacingToMaa).toBe(true);

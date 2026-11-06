@@ -154,7 +154,7 @@ describe('the recruitment plan (D-plan)', () => {
       const plan = recruitmentPlanFor(SEED_RECRUITMENT_PLAYBOOK, readBrief({
         type: 'retiree', motivation: 'leadership,flexibility', hesitation: 'time,no-network',
       })!, EN);
-      // The client's shorter words tag the openings as they label the chips (P18.95-T6 AC-2).
+      // The client's shorter words tag the openings as they label the chips (P18.7-T6 AC-2).
       expect(plan.openings.map((o) => o.motivation.label)).toEqual(['Flexibility', 'Lead a team']);
       expect(plan.objections.map((o) => [o.hesitation.code, o.profileOwn, o.theySay])).toEqual([
         ['no-network', false, 'I don\'t really have a network of people to sell to.'],
@@ -229,12 +229,12 @@ describe('the recruitment plan (D-plan)', () => {
     });
   });
 
-  it('P18.95-T6 AC-2 serves the vocabulary as the chips draw it, in their order, in the client’s shorter words', () => {
+  it('P18.7-T6 AC-2 serves the vocabulary as the chips draw it, in their order, in the client’s shorter words', () => {
     expect(recruitmentVocabulary(EN)).toEqual({
       types: shippedChips('type'), motivations: shippedChips('motivation'), hesitations: shippedChips('hesitation'),
     });
   });
-  describe('P18.98-T7 the chips in the reader’s language (ADR-0179 §7)', () => {
+  describe('P18.10-T7 the chips in the reader’s language (ADR-0179 §7)', () => {
     const ID = readerIn('id');
 
     it('serves every chip’s label in Indonesian to an Indonesian reader, the codes and order unchanged', () => {

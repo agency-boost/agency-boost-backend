@@ -6,7 +6,7 @@ import { CAMPAIGNS_MESSAGES } from './campaigns.messages';
 
 /**
  * What the campaigns screens print that the server composes — pure, so each rule is a unit test
- * (P18.5-T7; D-lists, OD-152). **Written for a reader** (P18.98-T5 AC-4): each function that writes words takes the
+ * (P18.2-T7; D-lists, OD-152). **Written for a reader** (P18.10-T5 AC-4): each function that writes words takes the
  * reader last, and the figures in them are the reader's; with none it writes what it wrote before the phase.
  */
 

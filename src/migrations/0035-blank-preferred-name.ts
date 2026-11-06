@@ -6,7 +6,7 @@ export interface BlankPreferredNameResult {
 }
 
 /**
- * **A blank preferred name is no name** (P18.8-T15 AC-1, the client's UI review, UI-005).
+ * **A blank preferred name is no name** (P18.5-T15 AC-1, the client's UI review, UI-005).
  *
  * The profile sent `''` for an empty *Preferred name* and `PATCH /auth/me` stored it, so every screen that
  * read `preferredName ?? fullName` printed nothing in the header and the rosters. The API stores `null` for

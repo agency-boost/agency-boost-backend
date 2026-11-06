@@ -1,5 +1,5 @@
 /*
- * The two APIs' database users, one per environment (P18.7-T3, ADR-0152, ADR-0155).
+ * The two APIs' database users, one per environment (P18.4-T3, ADR-0152, ADR-0155).
  *
  * The mongo image runs this once, on the first start against an empty /data/db, as the root user it
  * has just created from MONGO_INITDB_ROOT_USERNAME / _PASSWORD. It never runs again: an existing data

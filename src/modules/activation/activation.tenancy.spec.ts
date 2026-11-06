@@ -17,7 +17,7 @@ function ctx(kpmId: string, opts: { admin?: boolean } = {}) {
   return new RequestContext('u1', 'none', {
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
     isKpmOwner: !opts.admin, isKpmAdmin: Boolean(opts.admin), directCount: 0,
-  }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+  }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
 }
 
 /**
@@ -76,13 +76,13 @@ describe('the office activation checklist (P5-T3)', () => {
         route: '/goals',
         completesWhen: 'the hire has saved any goal since joining',
         live: true,
-        // P18.96-T4: no form — only a data-backed item opens one when ticked by hand.
+        // P18.8-T4: no form — only a data-backed item opens one when ticked by hand.
         form: null,
       });
       expect(items.find((i) => i.code === 'CRM_SETUP')!.link).toBeNull();
     });
 
-    it('P18.96-T4 AC-2 keeps the Owner’s settings as stored: the three data-backed items store no link there, and their published version is not edited', async () => {
+    it('P18.8-T4 AC-2 keeps the Owner’s settings as stored: the three data-backed items store no link there, and their published version is not edited', async () => {
       const view = await activation.read(ctx(KPM_A));
       const items = view.published!.aspects.flatMap((a) => a.items);
       for (const code of ['FIRST_CASE_CLOSED', 'INDEPENDENT_AGENT_MILESTONE', 'WEEKLY_CHECK_IN']) {
@@ -93,7 +93,7 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(storedItems.find((i) => i.code === 'FIRST_CASE_CLOSED')!.autoLink).toBeNull();
     });
 
-    it('P18.96-T7 G2 serves the Owner’s settings what completes the three: each item’s link is its bound data kind, its autoLink still null', async () => {
+    it('P18.8-T7 G2 serves the Owner’s settings what completes the three: each item’s link is its bound data kind, its autoLink still null', async () => {
       const view = await activation.read(ctx(KPM_A));
       const byCode = new Map(view.published!.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
       expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
@@ -120,7 +120,7 @@ describe('the office activation checklist (P5-T3)', () => {
       });
     });
 
-    it('P18.96-T4 AC-2 binds them by code for a field reader: the version a hire pins reads each with its data kind', async () => {
+    it('P18.8-T4 AC-2 binds them by code for a field reader: the version a hire pins reads each with its data kind', async () => {
       const version = (await activation.findVersion(ctx(KPM_A), 1))!;
       const byCode = new Map(version.aspects.flatMap((a) => a.items).map((i) => [i.code, i]));
       expect(byCode.get('FIRST_CASE_CLOSED')).toMatchObject({
@@ -137,7 +137,7 @@ describe('the office activation checklist (P5-T3)', () => {
       expect(byCode.get('CRM_SETUP')!.link).toBeNull();
     });
 
-    it('P18.96-T4 AC-2 refuses a data kind in a stored link: it belongs to the item its code names', async () => {
+    it('P18.8-T4 AC-2 refuses a data kind in a stored link: it belongs to the item its code names', async () => {
       await expect(activation.saveDraft(ctx(KPM_A), {
         aspects: [{ code: 'START', label: 'Start', items: [{ code: 'MY_SALE', label: 'My sale', autoLink: 'sales:first' }] }],
       })).rejects.toThrow(/sales:first is not chosen for an item/);
@@ -321,7 +321,7 @@ describe('the office activation checklist (P5-T3)', () => {
       const item = saved.draft!.aspects[2].items[0];
 
       expect(item.autoLink).toBe('training:PROSPECT_LIST');
-      // The link reads as the module's own title, not its code, and goes to the module's own page (P18.5-T3 AC-1, AC-5).
+      // The link reads as the module's own title, not its code, and goes to the module's own page (P18.2-T3 AC-1, AC-5).
       expect(item.link).toEqual({
         kind: 'training:PROSPECT_LIST',
         label: 'Menyusun daftar prospek Anda',
@@ -372,12 +372,12 @@ describe('the office activation checklist (P5-T3)', () => {
     });
   });
 
-  describe('P18.98-T5 in the reader’s language', () => {
+  describe('P18.10-T5 in the reader’s language', () => {
     const inIndonesian = (kpmId: string) => ctx(kpmId).withReader(readerIn('id'));
     const refusalOf = async (call: Promise<unknown>): Promise<DomainException> =>
       (await call.catch((err: unknown) => err)) as DomainException;
 
-    it('P18.98-T5 AC-4 says what completes each link in the reader’s words: page names and module titles as they are', async () => {
+    it('P18.10-T5 AC-4 says what completes each link in the reader’s words: page names and module titles as they are', async () => {
       const items = (await activation.read(inIndonesian(KPM_A))).published!.aspects.flatMap((a) => a.items);
       const link = (code: string) => items.find((i) => i.code === code)!.link;
       expect(link('GOAL_SETTING')).toEqual({
@@ -408,7 +408,7 @@ describe('the office activation checklist (P5-T3)', () => {
       });
     });
 
-    it('P18.98-T5 AC-4 a training link reads its module’s title in both, and what completes it in the reader’s words', async () => {
+    it('P18.10-T5 AC-4 a training link reads its module’s title in both, and what completes it in the reader’s words', async () => {
       const next = asDraft(await activation.read(ctx(KPM_A)));
       next.aspects[2].items[0].autoLink = 'training:PROSPECT_LIST';
       const saved = await activation.saveDraft(inIndonesian(KPM_A), next);
@@ -417,7 +417,7 @@ describe('the office activation checklist (P5-T3)', () => {
       });
     });
 
-    it('P18.98-T5 AC-3 refuses to publish in Indonesian: 400 VALIDATION_FAILED, the same answer, the reader’s words', async () => {
+    it('P18.10-T5 AC-3 refuses to publish in Indonesian: 400 VALIDATION_FAILED, the same answer, the reader’s words', async () => {
       const nothing = await refusalOf(activation.publish(inIndonesian(KPM_A)));
       expect([nothing.code, nothing.getStatus(), nothing.details]).toEqual(['VALIDATION_FAILED', 400, undefined]);
       expect(nothing.message).toBe('There is nothing to publish. Change something first — a published version is immutable, '
@@ -432,7 +432,7 @@ describe('the office activation checklist (P5-T3)', () => {
       );
     });
 
-    it('P18.98-T5 AC-3 names a module nobody is offered in Indonesian, each module’s own sentence after the first', async () => {
+    it('P18.10-T5 AC-3 names a module nobody is offered in Indonesian, each module’s own sentence after the first', async () => {
       const next = asDraft(await activation.read(ctx(KPM_A)));
       next.aspects[2].items[0].autoLink = 'training:NO_SUCH_MODULE';
       next.aspects[2].items[1].autoLink = 'training:OTHER_MODULE';

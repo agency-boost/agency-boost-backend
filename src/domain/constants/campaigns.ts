@@ -1,5 +1,5 @@
 /**
- * An office's campaigns, as the agent's *Campaigns* screen draws them (Phase 18.5, P18.5-T7, T8; D-fields,
+ * An office's campaigns, as the agent's *Campaigns* screen draws them (Phase 18.2, P18.2-T7, T8; D-fields,
  * D-windows, D-lists; `metrics-and-definitions.md` §B.22).
  *
  * Every word and number a campaign screen needs that is not the office's own data lives here once, and is served
@@ -61,7 +61,7 @@ export const MDRT_CAMPAIGN_CODE = 'MDRT_QUALIFICATION';
  * **What a window reads as on the card and in the dialog**, verbatim where the prototype writes one
  * (`Overall.html:7972`, `:8012`) but for its dates, which are written in the reader's figures (ADR-0167 §1) — *1 Jan –
  * 31 Des* where it wrote *Jan 1 – Dec 31*; a campaign's own dates are composed in the office's calendar instead.
- * **Sentences in both languages since P18.98-T5** (`campaigns.messages.ts`), written for the reader who reads them.
+ * **Sentences in both languages since P18.10-T5** (`campaigns.messages.ts`), written for the reader who reads them.
  *
  * *Chasing MDRT*'s header tooltip, `MDRT_TOOLTIP`, is there too: the prototype's opening, and the words for an
  * office running no MDRT campaign (OD-152 → option 3, D-18; ADR-0142 §3).
@@ -73,7 +73,7 @@ export const CAMPAIGN_ROLLING_MONTHS = 12;
 
 /**
  * `CAMPAIGN_QUALIFICATION_STATUS`'s values (§A.6; ADR-0143): a chaser is `qualified`, `in_progress`, `not_met` or
- * `unknown`; a member who did not chase is `not_joined` — only a chaser can qualify, and the Phase 18.6 tree reads
+ * `unknown`; a member who did not chase is `not_joined` — only a chaser can qualify, and the Phase 18.3 tree reads
  * `not_joined` as *Not achieved*.
  */
 export const CAMPAIGN_QUALIFICATION_STATUSES = ['qualified', 'in_progress', 'not_met', 'unknown', 'not_joined'] as const;

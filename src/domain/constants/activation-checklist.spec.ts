@@ -12,7 +12,7 @@ import {
 import { SEEDED_ACTIVATION_LABELS_BEFORE_OD_238 } from './activation-checklist';
 
 /**
- * **The seed in the prototype's English** (P18.98-T7, OD-238): the words it gave before it was written in Bahasa
+ * **The seed in the prototype's English** (P18.10-T7, OD-238): the words it gave before it was written in Bahasa
  * Indonesia, by code. What the prototype is compared against; the Indonesian is pinned word for word below.
  */
 const WAS = SEEDED_ACTIVATION_LABELS_BEFORE_OD_238;
@@ -66,12 +66,12 @@ describe('the activation checklist seed (P5-T3)', () => {
   });
 
   /*
-   * **The platform's Default template in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5): what every new
+   * **The platform's Default template in Bahasa Indonesia** (P18.10-T7; OD-238, option 1; ADR-0179 §5): what every new
    * hire reads, pinned word for word — *goal*, *leader*, *closing*, *case*, *1-on-1*, *milestone*, *Leads Management*
    * and *Activity Tracker* kept English by the approved glossary — and the English recorded for migration 0046 is
    * exactly what changed, every code once.
    */
-  it('P18.98-T7 writes the five aspects and the sixteen items in Bahasa Indonesia', () => {
+  it('P18.10-T7 writes the five aspects and the sixteen items in Bahasa Indonesia', () => {
     expect(SEED_ACTIVATION_ASPECTS.map((a) => a.label)).toEqual([
       '1. Pengenalan', '2. Persiapan awal', '3. Pelatihan & sertifikasi', '4. Penjualan pertama', '5. Kebiasaan rutin',
     ]);
@@ -121,7 +121,7 @@ describe('the activation checklist seed (P5-T3)', () => {
   it('takes item 13’s wording from the Owner’s template, not the agent’s view', () => {
     const item = SEED_ACTIVATION_ITEMS.find((i) => i.code === 'FIRST_CASE_CLOSED')!;
     expect(englishItem(item)).toBe('Close first case independently');
-    // In Bahasa Indonesia since P18.98-T7, *independently* kept: *secara mandiri*.
+    // In Bahasa Indonesia since P18.10-T7, *independently* kept: *secara mandiri*.
     expect(item.label).toBe('Closing case pertama secara mandiri');
     expect(prototypeItems()).toContain('Close first case');
   });
@@ -202,25 +202,25 @@ describe('the link registry (P5-T3 AC-7)', () => {
     expect(mayTickByHand(null, false)).toBe(true);
   });
 
-  it('P18.5-T3 AC-1 lets nobody tick a training-linked item while its module is offered: the evaluator exists', () => {
+  it('P18.2-T3 AC-1 lets nobody tick a training-linked item while its module is offered: the evaluator exists', () => {
     expect(mayTickByHand('training:PROSPECT_LIST')).toBe(false);
     expect(mayTickByHand('training:PROSPECT_LIST', true)).toBe(false);
   });
 
-  it('P18.5-T3 AC-4 D-orphan: a training-linked item is ticked by hand while its module is not offered', () => {
+  it('P18.2-T3 AC-4 D-orphan: a training-linked item is ticked by hand while its module is not offered', () => {
     expect(mayTickByHand('training:CLIENT_RETENTION', false)).toBe(true);
     // `offered` is a training link's question alone: a feature link binds no module.
     expect(mayTickByHand('feature:goals', false)).toBe(false);
   });
 
-  it('P18.5 exit review (training review 1) an item its link completed is never hand-edited, whatever its link now', () => {
+  it('P18.2 exit review (training review 1) an item its link completed is never hand-edited, whatever its link now', () => {
     expect(mayTickByHand('training:CLIENT_RETENTION', false, true)).toBe(false);
     expect(mayTickByHand('training:', true, true)).toBe(false);
     expect(mayTickByHand(null, true, true)).toBe(false);
     expect(mayTickByHand('training:CLIENT_RETENTION', false, false)).toBe(true);
   });
 
-  it('P18.5-T3 AC-1 an item linked to a kind nothing declares is ticked by hand, offered or not', () => {
+  it('P18.2-T3 AC-1 an item linked to a kind nothing declares is ticked by hand, offered or not', () => {
     expect(mayTickByHand('training:', true)).toBe(true);
     expect(mayTickByHand('feature:whatever', false)).toBe(true);
   });
@@ -259,7 +259,7 @@ describe('the link registry (P5-T3 AC-7)', () => {
     });
   });
 
-  it('P18.5-T3 AC-1 declares every kind live: the three feature kinds, and the training link since its evaluator', () => {
+  it('P18.2-T3 AC-1 declares every kind live: the three feature kinds, and the training link since its evaluator', () => {
     for (const kind of Object.values(ACTIVATION_LINK_KINDS)) {
       expect(kind.live).toBe(true);
     }
@@ -281,9 +281,9 @@ describe('the link registry (P5-T3 AC-7)', () => {
   });
 });
 
-/** P18.96-T4 (ADR-0171 §3): the three data-backed items, bound by code, ticked by hand only with their record. */
-describe('the data-backed items (P18.96-T4 AC-2, AC-3)', () => {
-  it('P18.96-T4 AC-2 binds the platform’s three items by code, and the words the items carry say what each waits for', () => {
+/** P18.8-T4 (ADR-0171 §3): the three data-backed items, bound by code, ticked by hand only with their record. */
+describe('the data-backed items (P18.8-T4 AC-2, AC-3)', () => {
+  it('P18.8-T4 AC-2 binds the platform’s three items by code, and the words the items carry say what each waits for', () => {
     expect(ACTIVATION_CODE_BOUND_LINKS).toEqual({
       FIRST_CASE_CLOSED: 'sales:first', INDEPENDENT_AGENT_MILESTONE: 'sales:closings:3', WEEKLY_CHECK_IN: 'coaching:weekly:4',
     });
@@ -295,12 +295,12 @@ describe('the data-backed items (P18.96-T4 AC-2, AC-3)', () => {
     expect(ACTIVATION_FIRST_CASE_CODE).toBe('FIRST_CASE_CLOSED');
   });
 
-  it('P18.96-T4 AC-2 pins the constants: three closings, four 1:1s, and the sales ladder’s Paid and issued by its code', () => {
+  it('P18.8-T4 AC-2 pins the constants: three closings, four 1:1s, and the sales ladder’s Paid and issued by its code', () => {
     expect([ACTIVATION_INDEPENDENT_CLOSINGS, ACTIVATION_WEEKLY_CHECK_INS, FIRST_SALE_STAGE_CODE]).toEqual([3, 4, 'PAID_AND_ISSUED']);
     expect(SEED_LEAD_STATUSES.find((s) => s.code === FIRST_SALE_STAGE_CODE)).toMatchObject({ pipeline: 'sales', isTerminal: true });
   });
 
-  it('P18.96-T4 AC-2 reads an item’s own link first, else the kind its code is bound to, else none — the seed stores none', () => {
+  it('P18.8-T4 AC-2 reads an item’s own link first, else the kind its code is bound to, else none — the seed stores none', () => {
     expect(effectiveAutoLink('FIRST_CASE_CLOSED', null)).toBe('sales:first');
     expect(effectiveAutoLink('WEEKLY_CHECK_IN', null)).toBe('coaching:weekly:4');
     // An office's own choice for the item stays.
@@ -312,7 +312,7 @@ describe('the data-backed items (P18.96-T4 AC-2, AC-3)', () => {
     }
   });
 
-  it('P18.96-T4 AC-2 registers each data kind live, with its source line’s words, no route, and its form', () => {
+  it('P18.8-T4 AC-2 registers each data kind live, with its source line’s words, no route, and its form', () => {
     expect(ACTIVATION_DATA_LINKS).toEqual(['sales:first', 'sales:closings:3', 'coaching:weekly:4']);
     expect(ACTIVATION_DATA_LINK_KINDS['sales:first']).toMatchObject({ label: 'Sales data', route: null, live: true, form: 'closing' });
     expect(ACTIVATION_DATA_LINK_KINDS['sales:closings:3']).toMatchObject({ label: 'Sales data', form: 'closing' });
@@ -330,7 +330,7 @@ describe('the data-backed items (P18.96-T4 AC-2, AC-3)', () => {
     expect(recordFormOf('feature:goals')).toBeNull();
   });
 
-  it('P18.96-T4 AC-3 a hand write to a data item: a tick needs its record, an untick is free, one its data completed is refused', () => {
+  it('P18.8-T4 AC-3 a hand write to a data item: a tick needs its record, an untick is free, one its data completed is refused', () => {
     expect(dataItemHandWrite('sales:first', true, false)).toBe('needs_record');
     expect(dataItemHandWrite('coaching:weekly:4', false, false)).toBe('free');
     expect(dataItemHandWrite('sales:closings:3', true, true)).toBe('refused');

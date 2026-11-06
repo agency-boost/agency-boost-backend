@@ -5,7 +5,7 @@ import { refusals } from '@/common/i18n/sentence';
 const idCount = (n: number) => formatNumber(n, undefined, 'id');
 
 /**
- * **The leads module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a lead's own fields, a write to
+ * **The leads module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a lead's own fields, a write to
  * somebody else's lead, a move along a pipeline, a close, a stage the office retired, and the reorder. *Lead*,
  * *Pipeline* and *Recruitment* stay English (glossary §A.6), and a kept-English noun keeps its English plural —
  * *1 lead*, *3 leads* (§B.0 rule 8); a stage is a *tahap*, a lead won *berhasil* and one lost *tidak berhasil*, as the
@@ -45,6 +45,15 @@ export const LEAD_REFUSALS = refusals('modules/leads', {
     contactEmail: {
       en: 'contact.email must be an email address.',
       id: 'contact.email harus berupa alamat email.',
+    },
+    /* The client's age and gender (P19.7-T1 AC-1; ADR-0224 §3): the shape here, the bounds `LEAD_AGE_OUT_OF_RANGE`'s. */
+    ageShape: {
+      en: 'age must be a whole number of years, or null to clear it.',
+      id: 'age harus berupa bilangan bulat (tahun), atau null untuk mengosongkannya.',
+    },
+    genderShape: {
+      en: 'gender must be male, female or null.',
+      id: 'gender harus male, female, atau null.',
     },
 
     /* The service's (`lead.service.ts`): a message, and the field sentence its `details.violations` carries. */
@@ -95,6 +104,13 @@ export const LEAD_REFUSALS = refusals('modules/leads', {
       id: `${idCount(count)} ${count === 1 ? 'lead' : 'leads'} Anda yang masih terbuka tidak ada di ids`,
     }),
   },
+  LEAD_AGE_OUT_OF_RANGE: {
+    /* ADR-0224 §3: the screen's own sentence in Indonesian, *"Umur harus 1–100."* */
+    between: ({ min, max }: { min: number; max: number }) => ({
+      en: `Age must be ${min}–${max}.`,
+      id: `Umur harus ${min}–${max}.`,
+    }),
+  },
   LEAD_ALREADY_CLOSED: {
     reopenToMove: {
       en: 'This lead is closed. Reopen it before moving it again.',
@@ -116,6 +132,14 @@ export const LEAD_REFUSALS = refusals('modules/leads', {
     moveFirst: {
       en: 'A lead is won at the stage that closes its pipeline. Move it there first.',
       id: 'Lead ditandai berhasil di tahap yang menutup pipeline-nya. Pindahkan ke tahap itu dulu.',
+    },
+  },
+  LEAD_STATUS_FINAL: {
+    moveBackFirst: {
+      en: 'This lead is at the stage that closes its pipeline, so it can only be marked won. If it fell through, move '
+        + 'it back to an earlier stage first, then mark it not won.',
+      id: 'Lead ini sudah di tahap yang menutup pipeline-nya, jadi hanya bisa ditandai berhasil. Jika batal, pindahkan '
+        + 'dulu ke tahap sebelumnya, lalu tandai tidak berhasil.',
     },
   },
   CONFIG_ARCHIVED: {

@@ -8,7 +8,7 @@ import type {
 } from './compliance-category';
 
 /**
- * **Activity Mgmt** in the Owner's compliance tree (P18.6-T1 AC-6): one item, *"Activity log — last 7 days"*.
+ * **Activity Mgmt** in the Owner's compliance tree (P18.3-T1 AC-6): one item, *"Activity log — last 7 days"*.
  *
  * - **The Overview's own functions** (*Settled already*): each member's latest day logged
  *   (`ActivityReadings.lastLoggedOnMany`, one aggregate for everybody, bounded to the window) and `loggedWithin` over

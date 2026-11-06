@@ -24,6 +24,7 @@ const ROUTES: Record<string, string> = {
   read: 'goal:read',
   preview: 'goal:read',
   save: 'goal:update',
+  saveEstimate: 'goal:update',
 };
 
 /**
@@ -210,13 +211,13 @@ describe('goals over HTTP (P8-T3)', () => {
   });
 
   /*
-   * **The preview over HTTP** (P18.99-T5, UI V1 UI-014): the body a save takes, a read's `for`, a 200 that writes
+   * **The preview over HTTP** (P18.11-T5, UI V1 UI-014): the body a save takes, a read's `for`, a 200 that writes
    * nothing. Its reach and the cross-office 404 are `goal-access.tenancy.spec.ts`'.
    */
-  describe('P18.99-T5 UI-014 the preview', () => {
+  describe('P18.11-T5 UI-014 the preview', () => {
     const preview = `${url}/preview`;
 
-    it('P18.99-T5 UI-014 works out what the inputs would make, as a save would, and writes nothing', async () => {
+    it('P18.11-T5 UI-014 works out what the inputs would make, as a save would, and writes nothing', async () => {
       const res = await http().post(preview).send(plan()).expect(200);
 
       expect(res.body).toMatchObject({
@@ -230,20 +231,20 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(saved.body.projected).toEqual(res.body.projected);
     });
 
-    it('P18.99-T5 UI-014 moves with an input: a case size halved doubles the policies', async () => {
+    it('P18.11-T5 UI-014 moves with an input: a case size halved doubles the policies', async () => {
       const res = await http().post(preview).send(plan({ caseSizeMinor: 9_000_000_00 })).expect(200);
 
       expect(res.body.projected.policiesPerMonth).toBe(12);
     });
 
-    it('P18.99-T5 UI-014 answers an unusable assumption with projected: null, where a save answers 422', async () => {
+    it('P18.11-T5 UI-014 answers an unusable assumption with projected: null, where a save answers 422', async () => {
       const res = await http().post(preview).send(plan({ caseSizeMinor: 0 })).expect(200);
 
       expect(res.body.projected).toBeNull();
       await http().put(url).send(plan({ caseSizeMinor: 0 })).expect(422);
     });
 
-    it('P18.99-T5 UI-014 refuses a field that is no number, and a field nobody defined, by name', async () => {
+    it('P18.11-T5 UI-014 refuses a field that is no number, and a field nobody defined, by name', async () => {
       const shape = await http().post(preview).send(plan({ caseSizeMinor: 'many' })).expect(400);
       expect(JSON.stringify(shape.body)).toMatch(/caseSizeMinor/);
       const extra = await http().post(preview).send({ ...plan(), snapshot: { policiesPerMonth: 6 } }).expect(400);
@@ -251,7 +252,7 @@ describe('goals over HTTP (P8-T3)', () => {
       await http().post('/goals/2026-Q1/preview').send(plan()).expect(400);
     });
 
-    it('P18.99-T5 UI-014 takes a read’s for, and an Agent naming anybody else is not found', async () => {
+    it('P18.11-T5 UI-014 takes a read’s for, and an Agent naming anybody else is not found', async () => {
       const SUBJECT = '66f0000000000000000000d2';
       await mongoose.connection.db!.collection('memberships').insertOne({
         _id: new mongoose.Types.ObjectId(SUBJECT), kpmId: FIXTURE_KPM, userId: 'u-subject', leaderCode: 'LC-D2',
@@ -271,7 +272,7 @@ describe('goals over HTTP (P8-T3)', () => {
       await http().post(preview).query({ membershipId: SUBJECT }).send(plan()).expect(400);
     });
 
-    it.each(EVERY_MEMBER)('P18.99-T5 UI-014 lets %s preview their own plan', async (_name, who) => {
+    it.each(EVERY_MEMBER)('P18.11-T5 UI-014 lets %s preview their own plan', async (_name, who) => {
       session.current = who;
       await http().post(preview).send(plan()).expect(200);
     });
@@ -286,7 +287,7 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(await mongoose.connection.db!.collection('goals').countDocuments({})).toBe(0);
     });
 
-    it('P18.99-T5 UI-014 refuses a Super Admin by name, as the read does', async () => {
+    it('P18.11-T5 UI-014 refuses a Super Admin by name, as the read does', async () => {
       session.current = SUPER_ADMIN;
       const res = await http().post(preview).send(plan()).expect(403);
 
@@ -339,12 +340,12 @@ describe('goals over HTTP (P8-T3)', () => {
   });
 
   /*
-   * **The same refusals in Indonesian** (P18.98-T5 AC-7): the request's `Accept-Language` decides the words. Goal
+   * **The same refusals in Indonesian** (P18.10-T5 AC-7): the request's `Accept-Language` decides the words. Goal
    * Settings' own labels — *Closing rate* — stay English in both (glossary §A.4), and a figure is written the reader's
    * way: *12,5*.
    */
-  describe('P18.98-T5 AC-7 in Indonesian', () => {
-    it('P18.98-T5 AC-7 refuses a period that has ended in Indonesian, its details unchanged', async () => {
+  describe('P18.10-T5 AC-7 in Indonesian', () => {
+    it('P18.10-T5 AC-7 refuses a period that has ended in Indonesian, its details unchanged', async () => {
       const res = await http().put('/goals/2025').set('Accept-Language', 'id').send(plan()).expect(409);
 
       expect(res.body.error).toMatchObject({
@@ -355,7 +356,7 @@ describe('goals over HTTP (P8-T3)', () => {
       });
     });
 
-    it('P18.98-T5 AC-7 says every assumption that cannot make a plan in Indonesian, one after another', async () => {
+    it('P18.10-T5 AC-7 says every assumption that cannot make a plan in Indonesian, one after another', async () => {
       const res = await http().put(url).set('Accept-Language', 'id')
         .send(plan({ caseSizeMinor: 0, closingRatePct: 101 })).expect(422);
 
@@ -366,7 +367,7 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(res.body.error).toMatchObject({ code: 'GOAL_INVALID_ASSUMPTION', message: violations.join(' '), details: { violations } });
     });
 
-    it('P18.98-T5 AC-7 refuses a goal’s own fields in Indonesian, a figure in Indonesian figures', async () => {
+    it('P18.10-T5 AC-7 refuses a goal’s own fields in Indonesian, a figure in Indonesian figures', async () => {
       const res = await http().put(url).set('Accept-Language', 'id')
         .send(plan({ caseSizeMinor: 1_000.5, commissionRatePct: -1 })).expect(400);
 
@@ -377,6 +378,53 @@ describe('goals over HTTP (P8-T3)', () => {
           'commissionRatePct harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.',
         ] },
       });
+    });
+  });
+
+  describe('P19.1-T4 the member’s own estimate: PUT /goals/:period/ape-estimate (UI-157 item 4; ADR-0195)', () => {
+    const estimateUrl = '/goals/2026/ape-estimate';
+
+    it.each(EVERY_MEMBER)('P19.1-T4 AC-10 positive: %s writes the estimate on their own plan, and reads it back', async (_name, who) => {
+      session.current = who;
+      await http().put(url).send(plan()).expect(200);
+      const res = await http().put(estimateUrl).send({ apeAchievedMinor: 120_000_000_00 }).expect(200);
+      expect(res.body).toMatchObject({
+        apeAchievedMinor: 120_000_000_00,
+        achieved: { minor: 120_000_000_00, provenance: 'self_reported', month: null },
+        projected: { remainingApeMinor: 380_000_000_00 },
+      });
+      expect((await http().get(url).expect(200)).body.apeAchievedMinor).toBe(120_000_000_00);
+      // *Hapus*: null clears it, as 0 does.
+      expect((await http().put(estimateUrl).send({ apeAchievedMinor: null }).expect(200)).body.apeAchievedMinor).toBe(0);
+      expect((await http().put(estimateUrl).send({ apeAchievedMinor: 0 }).expect(200)).body.apeAchievedMinor).toBe(0);
+    });
+
+    it('P19.1-T4 AC-13 negative: a Super Admin holds no goal:update, and is refused by the guard', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await http().put(estimateUrl).send({ apeAchievedMinor: 1 }).expect(403);
+      expect(res.body.error.details).toEqual({ permission: 'goal:update' });
+    });
+
+    it('P19.1-T4 AC-13 a plan nobody saved is not found: there is no target to estimate against', async () => {
+      await http().put(estimateUrl).send({ apeAchievedMinor: 120_000_000_00 }).expect(404);
+    });
+
+    it('P19.1-T4 AC-13 refuses a fraction of a sen, a negative figure, a missing one and a field nobody defined', async () => {
+      await http().put(url).send(plan()).expect(200);
+      for (const body of [{ apeAchievedMinor: 1.5 }, { apeAchievedMinor: -1 }, {}, { apeAchievedMinor: 1, for: 'x' }]) {
+        const res = await http().put(estimateUrl).send(body).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      }
+    });
+
+    it('P19.1-T4 AC-13 a year that has ended is not estimated for: GOAL_PERIOD_LOCKED', async () => {
+      await mongoose.connection.db!.collection('goals').insertOne({
+        kpmId: FIXTURE_KPM, membershipId: AGENT.membershipId, period: '2025', mode: 'direct', annualApeTargetMinor: 1,
+        savingsTargetMinor: 0, commissionRatePct: 0, monthsLeftOverride: null, apeAchievedMinor: 0, caseSizeMinor: 1,
+        leadsToApptPct: 30, closingRatePct: 30, version: 1, savedAt: NOW, deletedAt: null,
+      });
+      const res = await http().put('/goals/2025/ape-estimate').send({ apeAchievedMinor: 1 }).expect(409);
+      expect(res.body.error.code).toBe('GOAL_PERIOD_LOCKED');
     });
   });
 

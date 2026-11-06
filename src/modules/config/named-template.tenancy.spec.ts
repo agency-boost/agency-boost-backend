@@ -3,7 +3,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionFrom } from '../../../test/config-module';
-import { OFFICE_TEMPLATE_KINDS, platformDefaultPayload } from './template-defaults';
+import { NAMED_TEMPLATE_KINDS, OFFICE_TEMPLATE_KINDS, platformDefaultPayload } from './template-defaults';
 
 const NOW = new Date('2026-10-07T03:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -44,7 +44,7 @@ describe('named templates (P13.2-T6)', () => {
       expect(first).toMatchObject({
         name: 'Prudential template', isDefault: true, status: 'active', origin: { kind: 'defaults' },
       });
-      expect(first.publishedVersions).toEqual(Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((k) => [k, 1])));
+      expect(first.publishedVersions).toEqual(Object.fromEntries(NAMED_TEMPLATE_KINDS.map((k) => [k, 1])));
       for (const kind of OFFICE_TEMPLATE_KINDS) {
         expect((await wired.templateService.read(COMPANY, kind)).payload).toEqual(platformDefaultPayload(kind));
       }
@@ -54,8 +54,9 @@ describe('named templates (P13.2-T6)', () => {
     it('holds nothing for a company created blank — the switch’s sentence, now true', async () => {
       const [first] = await wired.namedTemplates.list(BLANK);
       expect(first).toMatchObject({ name: 'Blank Co template', isDefault: true, origin: { kind: 'empty' } });
-      expect(Object.values(first.publishedVersions)).toEqual(Array(7).fill(null));
-      expect(await col('companyTemplates').countDocuments({ companyId: BLANK })).toBe(0);
+      // P19.5-T1 (ADR-0214 §9): every kind empty but *Advanced analytics*, whose four system columns are never missing.
+      expect(Object.values(first.publishedVersions)).toEqual([...Array(8).fill(null), 1, null]); // P19.6-T1: *Tampilan* empty too
+      expect(await col('companyTemplates').countDocuments({ companyId: BLANK })).toBe(1);
     });
   });
 
@@ -64,10 +65,11 @@ describe('named templates (P13.2-T6)', () => {
       const empty = await wired.namedTemplates.create(sa, COMPANY, { name: 'Empty one', from: 'empty' });
       const full = await wired.namedTemplates.create(sa, COMPANY, { name: '  Full   one ', from: 'defaults' });
       expect(empty).toMatchObject({ isDefault: false, origin: { kind: 'empty' } });
-      expect(Object.values(empty.publishedVersions)).toEqual(Array(7).fill(null));
+      // P19.5-T1 (ADR-0214 §9): *Kosong* holds the platform's *Advanced analytics* version 1, and nothing else.
+      expect(Object.values(empty.publishedVersions)).toEqual([...Array(8).fill(null), 1, null]); // P19.6-T1: *Tampilan* empty too
       // The name is trimmed and its inner spaces collapsed.
       expect(full).toMatchObject({ name: 'Full one', origin: { kind: 'defaults' } });
-      expect(Object.values(full.publishedVersions)).toEqual(Array(7).fill(1));
+      expect(Object.values(full.publishedVersions)).toEqual(Array(10).fill(1)); // and *Tampilan* (P19.6-T1)
       expect((await audit('template.created')).map((r) => r.after.from)).toEqual(['defaults', 'empty', 'empty', 'defaults']);
     });
 
@@ -81,10 +83,28 @@ describe('named templates (P13.2-T6)', () => {
         .resolves.toMatchObject({ name: 'Prudential template' });
     });
 
-    it('frees an archived template’s name, and renames with an audit row naming both', async () => {
+    /*
+     * *Changed 2026-11-05 (P19.4-T3 AC-12; SA UI-017):* an archived template's name was freed for reuse (ADR-0115 §3), and
+     * Manulife ended with two *"Manulife template"*. Names are unique within the company, archived ones included.
+     */
+    it('P19.4-T3 AC-12 keeps an archived template’s name: a new template, a rename and the archived one’s own rename are refused', async () => {
       const old = await wired.namedTemplates.create(sa, COMPANY, { name: 'Jakarta', from: 'empty' });
       await wired.namedTemplates.archive(sa, COMPANY, old.id);
-      await expect(wired.namedTemplates.create(sa, COMPANY, { name: 'Jakarta', from: 'empty' })).resolves.toBeTruthy();
+      await expect(wired.namedTemplates.create(sa, COMPANY, { name: 'jakarta', from: 'empty' }))
+        .rejects.toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', status: 409, details: { name: 'jakarta', archived: true } });
+      const other = await wired.namedTemplates.create(sa, COMPANY, { name: 'Other', from: 'empty' });
+      await expect(wired.namedTemplates.update(sa, COMPANY, other.id, { name: 'JAKARTA' }))
+        .rejects.toMatchObject({ code: 'TEMPLATE_NAME_TAKEN' });
+      // The archived template is renamed under the same rule — not onto an active one's name.
+      await expect(wired.namedTemplates.update(sa, COMPANY, old.id, { name: 'Other' }))
+        .rejects.toMatchObject({ code: 'TEMPLATE_NAME_TAKEN', details: { archived: false } });
+      // Another company may use it, and nothing was written by a refusal.
+      await expect(wired.namedTemplates.create(sa, BLANK, { name: 'Jakarta', from: 'empty' })).resolves.toBeTruthy();
+      expect((await wired.namedTemplates.list(COMPANY)).map((t) => t.name).sort())
+        .toEqual(['Jakarta', 'Other', 'Prudential template']);
+    });
+
+    it('renames with an audit row naming both', async () => {
 
       await wired.namedTemplates.update(sa, COMPANY, defaultId, { name: 'Prudential — Jabodetabek' });
       expect(await audit('template.renamed')).toEqual([expect.objectContaining({
@@ -149,7 +169,8 @@ describe('named templates (P13.2-T6)', () => {
       // The default's event types are where they were: its own version 1, the defaults.
       expect((await wired.templateService.read(COMPANY, 'event_types')).payload).toEqual(platformDefaultPayload('event_types'));
       expect((await wired.templateService.history(COMPANY, 'event_types', second.id)).map((h) => h.version)).toEqual([1]);
-      expect(await col('companyTemplates').countDocuments({ companyId: COMPANY, templateId: second.id })).toBe(1);
+      // Its event types and the *Advanced analytics* version 1 every template is made with (ADR-0214 §9).
+      expect(await col('companyTemplates').countDocuments({ companyId: COMPANY, templateId: second.id })).toBe(2);
 
       // Campaign kinds hang under no template, whichever is named.
       const campaigns = await wired.templateService.read(COMPANY, 'campaign_kinds', second.id);

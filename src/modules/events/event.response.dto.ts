@@ -87,7 +87,7 @@ export class EventDto {
   version!: number;
 }
 
-// ---------------------------------------------------------------- Phase 18.5 (P18.5-T5, P18.5-T6)
+// ---------------------------------------------------------------- Phase 18.2 (P18.2-T5, P18.2-T6)
 
 export class NpsConstantsDto {
   @ApiProperty({ type: Number, example: 0 }) scaleMin!: number;

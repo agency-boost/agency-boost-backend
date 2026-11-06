@@ -33,8 +33,25 @@ import { TemplateService } from '@/modules/config/template.service';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
 import { NamedTemplateSchema } from '@/modules/config/named-template.schema';
 import { NamedTemplateService } from '@/modules/config/named-template.service';
+import { AnalyticsConfigReader } from '@/modules/config/analytics-config.reader';
+import { AnalyticsTemplateService } from '@/modules/config/analytics-template.service';
+import { SurveyRun, SurveyRunSchema } from '@/modules/surveys/survey-run.schema';
+import { SurveyParticipation, SurveyParticipationSchema } from '@/modules/surveys/survey-participation.schema';
+import { SurveyResponse, SurveyResponseSchema } from '@/modules/surveys/survey-response.schema';
+import {
+  SurveyParticipationRepository, SurveyResponseRepository, SurveyRunRepository,
+} from '@/modules/surveys/survey.repositories';
+import { SurveyOffice } from '@/modules/surveys/survey-office';
+import { SurveyOpening } from '@/modules/surveys/survey-opening';
+import { SurveysService } from '@/modules/surveys/surveys.service';
+import { SurveyRunsService } from '@/modules/surveys/survey-runs.service';
+import { CoachingSurveyService } from '@/modules/surveys/coaching-survey.service';
+import { SurveyOpenRuns } from '@/modules/surveys/survey-open-runs';
 import { OfficeSettingsSource } from '@/modules/config/office-settings.source';
 import { TemplateCopyService } from '@/modules/config/template-copy.service';
+import { TemplateMaterialService } from '@/modules/config/template-material.service';
+import { TemplatePushService } from '@/modules/config/template-push.service';
+import { TemplateSyncService } from '@/modules/config/template-sync.service';
 import {
   TrainingCategory, TrainingCategorySchema,
 } from '@/modules/training/training-category.schema';
@@ -76,6 +93,10 @@ import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.
 import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { LeadRepository } from '@/modules/leads/lead.repository';
+import { Proposal, ProposalSchema } from '@/modules/proposals/proposal.schema';
+import { ProposalRepository } from '@/modules/proposals/proposal.repository';
+import { ProposalReadings } from '@/modules/proposals/proposal-readings';
+import { ProposalService } from '@/modules/proposals/proposal.service';
 import { LeadService } from '@/modules/leads/lead.service';
 import { LeadReadings } from '@/modules/leads/lead-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
@@ -104,7 +125,8 @@ import { CapabilityService } from '@/modules/capability/capability.service';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { CoachResolver } from '@/modules/org/coach-resolver';
-import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { GroupRepository, MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { MembershipHistory, MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { AssetSchema } from '@/modules/assets/asset.schema';
 import { AssetRepository } from '@/modules/assets/asset.repository';
@@ -130,6 +152,10 @@ import { ProductionMonths } from '@/modules/production/production-months.service
 import { ProductionImportService } from '@/modules/production/production-import.service';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { ProductionReadings } from '@/modules/production/production-readings';
+import { UnregisteredAgentData, UnregisteredAgentDataSchema } from '@/modules/production/unregistered-agent-data.schema';
+import { UnregisteredAgentDataRepository } from '@/modules/production/unregistered-agent-data.repository';
+import { UploadCompleteness } from '@/modules/production/upload-completeness';
+import { HeldProductionRows } from '@/modules/production/held-production-rows.service';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -179,8 +205,20 @@ import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
 import { KpmRecruitTarget, KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 import { KpmRecruitTargetRepository } from '@/modules/reporting/kpm-recruit-target.repository';
+import { OfficeGroups } from '@/modules/reporting/office-groups';
 import { OfficePeople } from '@/modules/reporting/office-people';
+import { AdvancedAnalyticsService } from '@/modules/reporting/advanced-analytics/advanced-analytics.service';
+import { AdminAdvancedAnalytics } from '@/modules/reporting/advanced-analytics/admin-advanced-analytics.service';
+import { QuantRuns } from '@/modules/reporting/advanced-analytics/quant-runs.service';
+import { AnalyticsTargetRepository, QuantRunRepository } from '@/modules/reporting/advanced-analytics/advanced-analytics.repositories';
+import { AnalyticsTarget, AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
+import { QuantRun, QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
 import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
+import { KpmSetupMark, KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
+import { KpmSetupMarkRepository } from '@/modules/reporting/kpm-setup-mark.repository';
+import { KpmSetup } from '@/modules/reporting/kpm-setup.service';
+import { OfficePhones } from '@/modules/reporting/office-phones';
 import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
 import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
@@ -235,7 +273,7 @@ export function configModule(
   );
   const kpms = model('KpmModelForConfig', KpmSchema);
   /*
-   * P18.9-T2 (ADR-0163): an office's activity binding, and `resolveCascadeBinding`, the one reader every cascade
+   * P18.6-T2 (ADR-0163): an office's activity binding, and `resolveCascadeBinding`, the one reader every cascade
    * count goes through — the summary, coaching, the Unit Dashboard, pace status, the goals and the campaigns below.
    */
   const activityBindingRows = model(ActivityBinding.name, ActivityBindingSchema);
@@ -269,7 +307,7 @@ export function configModule(
     orgLevels,
     audit,
     clock,
-    // P18.9-T2: a bound type is not archived (ADR-0163 §5).
+    // P18.6-T2: a bound type is not archived (ADR-0163 §5).
     activityBindings,
   );
   const ratios = new RatioService(
@@ -291,7 +329,7 @@ export function configModule(
     kpms as never,
   );
   /*
-   * P18.5-T1, T2: each member's progress, what the published snapshot offers, and the one read every reader of
+   * P18.2-T1, T2: each member's progress, what the published snapshot offers, and the one read every reader of
    * progress goes through. Before the activation engine, which completes a training-linked item from them.
    */
   const trainingProgressRows = new TrainingProgressRepository(
@@ -311,7 +349,7 @@ export function configModule(
     kpms as never,
     audit,
     clock,
-    // The Phase 18.5 exit review (B2): a hire's link titles come from what the office offers.
+    // The Phase 18.2 exit review (B2): a hire's link titles come from what the office offers.
     offeredTraining,
   );
   // P5-T4. Company-partitioned: it takes a companyId, and never a kpmId.
@@ -320,6 +358,8 @@ export function configModule(
     model('CompanyModelForConfig', CompanySchema) as never,
     audit,
     clock,
+    // P19.4-T4: the offices' rows a delete counts (ADR-0209 §10).
+    new KpmProductConfigRepository(model('KpmProductConfigModel', KpmProductConfigSchema) as never),
   );
   // P5-T5: what an office decides about its company's products.
   const kpmProducts = new KpmProductService(
@@ -332,8 +372,18 @@ export function configModule(
     audit,
     clock,
   );
+  /*
+   * P19.7-T2 (ADR-0221): the proposals — the record, its service over the office's shelf above, and the one reader the
+   * leads and the Unit Dashboard use (`proposalReadings`), handed to both below.
+   */
+  const proposalRows = new ProposalRepository(model(Proposal.name, ProposalSchema) as never);
+  const proposalReadings = new ProposalReadings(proposalRows, clock);
+  const proposals = new ProposalService(
+    proposalRows, new LeadRepository(model(Lead.name, LeadSchema) as never), kpmProducts,
+    new TenantDay(kpms as never, clock), audit, clock, productRows as never,
+  );
   // P5-T6: the events an office runs. Nothing per-person lives on one.
-  // P18.5-T5, T6: the members' rows beside them (RSVPs, claims, confirmations, answers), the audience as at the
+  // P18.2-T5, T6: the members' rows beside them (RSVPs, claims, confirmations, answers), the audience as at the
   // start, the readings, the agent's side and the office's roll call and summary.
   const eventTypeRows = new EventTypeRepository(model(EventType.name, EventTypeSchema) as never);
   const eventRows = new EventRepository(model(Event.name, EventSchema) as never);
@@ -379,7 +429,10 @@ export function configModule(
   // P9-T1: the office's production, month by month — the authoritative APE source. Built before
   // the goals, which read it (P9-T6).
   const monthRows = new MonthlyAgentDataRepository(model(MonthlyAgentData.name, MonthlyAgentDataSchema) as never);
-  const productionReadings = new ProductionReadings(monthRows);
+  // P19.5-T1 (ADR-0214 §3): the one reader every KPM reads its template's *Advanced analytics* section by — read by the
+  // production readings since P19.5-T2 for the custom kodes.
+  const analyticsConfig = new AnalyticsConfigReader(kpms as never, namedTemplateRows as never, templates as never);
+  const productionReadings = new ProductionReadings(monthRows, analyticsConfig);
 
   // P8-T1: one agent's agreed plan for one period.
   // P10-T9, P10-T5: a member's counts, and the sections their rung is shown — the activity module's seam.
@@ -406,9 +459,9 @@ export function configModule(
     ),
     activityReadings,
     clock,
-    // P18.5-T3: a training-linked item completes from the hire's progress.
+    // P18.2-T3: a training-linked item completes from the hire's progress.
     trainingReadings,
-    // P18.96-T4: the data-backed items read the production file and the coaching sessions.
+    // P18.8-T4: the data-backed items read the production file and the coaching sessions.
     productionReadings,
     new CoachingReadings(new CoachingSessionRepository(model(CoachingSession.name, CoachingSessionSchema) as never), clock),
   );
@@ -416,19 +469,19 @@ export function configModule(
     activationRows, activation, activationEngine, memberships,
     new MembershipHistoryRepository(model(MembershipHistory.name, MembershipHistorySchema) as never), coach,
     new MemberNames(memberships, users as never), new TenantDay(kpms as never, clock), audit, clock,
-    // P18.5-T3, D-orphan: which modules are offered now.
+    // P18.2-T3, D-orphan: which modules are offered now.
     offeredTraining,
   );
-  // P18.5-T1, T4: the learner's training and the coach's read; a module marked done signals the activation above.
+  // P18.2-T1, T4: the learner's training and the coach's read; a module marked done signals the activation above.
   const trainingProgress = new TrainingProgressService(
     trainingProgressRows, trainingReadings, offeredTraining, training, coach, subjectReads,
     new TenantDay(kpms as never, clock), audit, clock, activationProgress,
   );
   /*
-   * P18.96-T4: each person's first sale, answered to the leads' and the production file's writes — the real one, so a
+   * P18.8-T4: each person's first sale, answered to the leads' and the production file's writes — the real one, so a
    * spec that moves a lead to *Paid and issued* watches the membership and the checklist move, as the app does.
    */
-  // P18.96-T6: each new hire's 3M activation, kept once decided — before a first sale, a join date or leaving moves it.
+  // P18.8-T6: each new hire's 3M activation, kept once decided — before a first sale, a join date or leaving moves it.
   // *Mark left* removes the new hire through the removal's own path (no departure hook here: no calendar in these specs).
   // UI-025: *Mark left* is retired, so the 3M service no longer removes anybody (ADR-0180 §6).
   const activation3M = new Activation3MService(memberships, new TenantDay(kpms as never, clock), clock);
@@ -459,9 +512,9 @@ export function configModule(
     ),
     // P13-T3: a goal saved on a hire's membership completes their `feature:goals` item.
     activationProgress,
-    // P18.8-T10: a new plan's two percentages open on the office's benchmarks (ADR-0160 §3).
+    // P18.5-T10: a new plan's two percentages open on the office's benchmarks (ADR-0160 §3).
     new RatioDefinitionRepository(ratioDefinitions as never),
-    // P18.9-T2: the measured rates and `cascadeBinding` read the office's binding.
+    // P18.6-T2: the measured rates and `cascadeBinding` read the office's binding.
     activityBindings,
   );
   // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
@@ -484,7 +537,7 @@ export function configModule(
     activationProgress,
     // The published copy is handed over below, once `config` exists.
     undefined,
-    // P18.9-T2: the 7-day targets count the office's binding.
+    // P18.6-T2: the 7-day targets count the office's binding.
     activityBindings,
   );
   // P10-T4: the Personal Summary, read from the goal, the office's production and the member's log.
@@ -504,7 +557,7 @@ export function configModule(
     subjectReads,
     // Phase 15: who corrected a figure, by name.
     new MemberNames(memberships, users as never),
-    // P18.9-T2: the targets, the pace and the tiles count the office's binding.
+    // P18.6-T2: the targets, the pace and the tiles count the office's binding.
     activityBindings,
     // UI V1 (UI-054): the day the page's APE is valid for, from the office's production imports.
     new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
@@ -545,7 +598,7 @@ export function configModule(
     subjectReads,
     notifier,
     clock,
-    // P18.96-T4: a 1:1 finalized or logged with a new hire counts toward their *Weekly 1-on-1 check-in*.
+    // P18.8-T4: a 1:1 finalized or logged with a new hire counts toward their *Weekly 1-on-1 check-in*.
     activationProgress,
   );
   // P11-T10: a finalized session's print, and the reader's own coaching.
@@ -561,7 +614,17 @@ export function configModule(
     productionNames,
     audit,
   );
-  const production = new ProductionService(monthRows, memberships, productionNames, kpms as never, productionMonths);
+  // P19.5-T2 (ADR-0214 §8, §11): the held *Belum terdaftar* rows, and each month's completeness.
+  const unregisteredRows = new UnregisteredAgentDataRepository(model(UnregisteredAgentData.name, UnregisteredAgentDataSchema) as never);
+  const uploadCompleteness = new UploadCompleteness(monthRows, memberships, kpms as never, clock, analyticsConfig);
+  const heldRows = new HeldProductionRows(unregisteredRows, monthRows, audit, clock);
+  // P19.5-T3 (ADR-0215 §6): the Quant runs, told of every production write — frozen before one past their 15th.
+  const quantRunRows = new QuantRunRepository(model(QuantRun.name, QuantRunSchema) as never, kpms as never);
+  const quantRuns = new QuantRuns(quantRunRows, memberships, monthRows, productionReadings, uploadCompleteness, clock);
+  const production = new ProductionService(
+    monthRows, memberships, productionNames, kpms as never, productionMonths, analyticsConfig, uploadCompleteness,
+    unregisteredRows, clock,
+  );
   const productionImport = new ProductionImportService(
     production,
     productionMonths,
@@ -571,11 +634,18 @@ export function configModule(
     productionNames,
     audit,
     clock,
-    // P18.96-T4: a policy in the file may be a member's first sale.
+    // P18.8-T4: a policy in the file may be a member's first sale.
     firstSale,
+    // P19.5-T2: the held rows, and the office's zone for an *as of* day.
+    unregisteredRows,
+    kpms as never,
+    // P19.5-T3: the Quant runs.
+    quantRuns,
   );
-  // P9-T5: one figure by hand.
-  const productionCorrections = new ProductionCorrections(productionMonths, monthRows, memberships, audit, clock, firstSale);
+  // P9-T5: one figure by hand — by kode, against the KPM's template (P19.5-T2).
+  const productionCorrections = new ProductionCorrections(
+    productionMonths, monthRows, memberships, audit, clock, firstSale, analyticsConfig, quantRuns,
+  );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
     new CampaignRepository(model(Campaign.name, CampaignSchema) as never),
@@ -583,7 +653,7 @@ export function configModule(
     kpms as never,
     audit,
     clock,
-    // P18.5-T7: a campaign's rungs are checked against the company's ladder.
+    // P18.2-T7: a campaign's rungs are checked against the company's ladder.
     orgLevels,
   );
   // P5-T8: the office's capability catalog.
@@ -609,7 +679,7 @@ export function configModule(
     activation,
     events,
     capability,
-    // P18.9-T2: the binding rendered into each snapshot, as its record.
+    // P18.6-T2: the binding rendered into each snapshot, as its record.
     activityBindings,
   );
   /*
@@ -636,10 +706,12 @@ export function configModule(
     subjectReads,
     // P13-T3: a lead in a hire's pipeline completes their `feature:leads` item.
     activationProgress,
-    // P18.96-T4: a sales lead at *Paid and issued* may be its owner's first sale.
+    // P18.8-T4: a sales lead at *Paid and issued* may be its owner's first sale.
     firstSale,
+    // P19.7-T2: the owner's proposals on their own leads — the pill, the filter, the *Riwayat* notes.
+    proposalReadings,
   );
-  // P18.96-T4: a data-backed item's hand tick, with its record — through the leads and the coaching sessions.
+  // P18.8-T4: a data-backed item's hand tick, with its record — through the leads and the coaching sessions.
   const activationRecords = new ActivationItemRecords(
     activationProgress, leadRecords, coachingSession, new TenantDay(kpms as never, clock),
   );
@@ -665,9 +737,9 @@ export function configModule(
     clock,
     config,
     namedTemplateRows as never,
-    // P18.9-T2: the office's binding, copied from the source's taxonomy.
+    // P18.6-T2: the office's binding, copied from the source's taxonomy.
     activityBindingRows as never,
-    // P18.9-T3: the Template library an office may start from, and the ladder its rungs are checked against.
+    // P18.6-T3: the Template library an office may start from, and the ladder its rungs are checked against.
     model('CompanyModelForConfig', CompanySchema) as never,
     orgLevels,
   );
@@ -689,6 +761,41 @@ export function configModule(
     new KpmOfficeCounter(kpms as never),
     audit,
     clock,
+    // ADR-0213 §4: a copy's rung map reads the company's ladder.
+    orgLevels,
+  );
+  // P19.5-T4 (ADR-0216): the surveys, on the same office's rows — the runs, who was invited, the sent forms.
+  const surveyRunRows = new SurveyRunRepository(model(SurveyRun.name, SurveyRunSchema) as never);
+  const surveyParticipationRows = new SurveyParticipationRepository(model(SurveyParticipation.name, SurveyParticipationSchema) as never);
+  const surveyResponseRows = new SurveyResponseRepository(model(SurveyResponse.name, SurveyResponseSchema) as never);
+  const surveyOffice = new SurveyOffice(
+    new TenantDay(kpms as never, clock), kpms as never, model('CompanyModelForConfig', CompanySchema) as never,
+  );
+  const surveyOpening = new SurveyOpening(surveyRunRows, surveyParticipationRows, memberships, analyticsConfig, clock);
+  const surveyOpenRuns = new SurveyOpenRuns(surveyRunRows, kpms as never, clock);
+  const surveys = {
+    runs: surveyRunRows,
+    participation: surveyParticipationRows,
+    responses: surveyResponseRows,
+    office: surveyOffice,
+    opening: surveyOpening,
+    openRuns: surveyOpenRuns,
+    member: new SurveysService(
+      surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, memberships,
+      new MemberNames(memberships, users as never), users as never, clock,
+    ),
+    kpm: new SurveyRunsService(
+      surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, analyticsConfig, audit, clock,
+    ),
+    coaching: new CoachingSurveyService(
+      surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, memberships, coach,
+      new MemberNames(memberships, users as never), subjectReads, users as never,
+    ),
+  };
+  // P19.5-T1 (ADR-0214): the section's own rules — the locks, the pattern test over the KPMs' codes, the notice.
+  const analyticsTemplates = new AnalyticsTemplateService(
+    templates as never, kpms as never, analyticsConfig, namedTemplates, memberships, monthRows, notifier,
+    surveyOpenRuns, clock,
   );
   const templateService = new TemplateService(
     templates as never,
@@ -698,6 +805,7 @@ export function configModule(
     new KpmOfficeCounter(kpms as never),
     provisioning,
     namedTemplates,
+    analyticsTemplates,
   );
   /*
    * P13.2-T7: the copies across an owner boundary — an office's published settings read by name across
@@ -709,11 +817,52 @@ export function configModule(
     new ActivationTemplateRepository(activationTemplates as never),
     new TrainingModuleRepository(trainingModules as never),
     new AssetRepository(assetRows as never),
-    // P18.9-T2: the office's live binding, which *Save as template* carries.
+    // P18.6-T2: the office's live binding, which *Save as template* carries.
     activityBindingRepository,
   );
   const templateCopies = new TemplateCopyService(
     namedTemplates, officeSettings, assets, orgLevels, provisioning, kpms as never, audit,
+  );
+  /*
+   * ADR-0208 (P19.4-T1): a template's Training material, and its push to the offices made from it — every write into
+   * an office through that office's tenant repositories, as the app wires them.
+   */
+  const templateMaterial = new TemplateMaterialService(namedTemplates, templateService, assets, audit);
+  const templatePush = new TemplatePushService(
+    namedTemplates,
+    templates as never,
+    model('CompanyModelForConfig', CompanySchema) as never,
+    kpms as never,
+    new KpmOfficeCounter(kpms as never),
+    new ActivityCategoryRepository(categories as never),
+    new ActivityTypeRepository(types as never),
+    activityBindingRepository,
+    new RatioDefinitionRepository(ratioDefinitions as never),
+    new LeadStatusRepository(leadStatuses as never),
+    new TrainingCategoryRepository(trainingCategories as never),
+    new TrainingSkillRepository(trainingSkills as never),
+    new TrainingModuleRepository(trainingModules as never),
+    new ActivationTemplateRepository(activationTemplates as never),
+    new CapabilityCatalogRepository(model(CapabilityCatalog.name, CapabilityCatalogSchema) as never),
+    eventTypeRows,
+    config,
+    memberships,
+    assets,
+    notifier,
+    audit,
+    clock,
+  );
+  // P19.6-T4 (ADR-0220 §4): *Sinkron dari template* — a KPM takes its template's names, through its own repositories.
+  const templateSync = new TemplateSyncService(
+    kpms as never,
+    templates as never,
+    namedTemplateRows as never,
+    new TrainingCategoryRepository(trainingCategories as never),
+    new TrainingSkillRepository(trainingSkills as never),
+    new TrainingModuleRepository(trainingModules as never),
+    new CapabilityCatalogRepository(model(CapabilityCatalog.name, CapabilityCatalogSchema) as never),
+    config,
+    audit,
   );
   // P11-T9: the Leader Notes tab — one coachee's capability ticks, and the leaders' notes about them.
   const coachingProfiles = new CoachingProfileRepository(model(CoachingProfile.name, CoachingProfileSchema) as never);
@@ -751,9 +900,9 @@ export function configModule(
    * leader's corrections through the month table's own function.
    */
   /*
-   * Phase 18.5: campaigns, the member's side — the chases and the frozen standings through their tenant repositories,
+   * Phase 18.2: campaigns, the member's side — the chases and the frozen standings through their tenant repositories,
    * the one named reader of chases, the evaluation through production's and activity's own readings, the agent's
-   * service, the 18.6 port, and what leaving does to a member's chases.
+   * service, the 18.3 port, and what leaving does to a member's chases.
    */
   const campaignRows = new CampaignRepository(model(Campaign.name, CampaignSchema) as never);
   const campaignChases = new CampaignChaseRepository(model(CampaignChase.name, CampaignChaseSchema) as never);
@@ -762,7 +911,7 @@ export function configModule(
   const campaignEvaluation = new CampaignEvaluation(
     productionReadings, productionMonths, activityReadings, new RatioDefinitionRepository(ratioDefinitions as never),
     memberships, campaignChases, campaignStandings, campaignRows, new TenantDay(kpms as never, clock), clock, audit,
-    // P18.9-T2: the cascade touches count the office's binding.
+    // P18.6-T2: the cascade touches count the office's binding.
     activityBindings,
   );
   const campaignAgent = new CampaignAgentService(
@@ -773,7 +922,7 @@ export function configModule(
     campaignRows, memberships, campaignEvaluation, new TenantDay(kpms as never, clock), clock,
   );
   const campaignDeparture = new CampaignChaseDeparture(campaignChases, clock, audit);
-  // P18.6-T2: the override of a final standing.
+  // P18.3-T2: the override of a final standing.
   const campaignStandingOverrides = new CampaignStandingOverrides(
     campaignRows, memberships, campaignStandings, campaignEvaluation, new MemberNames(memberships, users as never), audit, clock,
   );
@@ -788,14 +937,16 @@ export function configModule(
     ),
     subjectReads,
     campaignChaseReadings,
-    // P18.96-T5: the head's own membership, for whether they count for production yet.
+    // P18.8-T5: the head's own membership, for whether they count for production yet.
     memberships,
-    // UI V1 (Phase 18.99 T4, UI-028): the office's imports, for *Last updated*.
+    // UI V1 (Phase 18.11 T4, UI-028): the office's imports, for *Last updated*.
     new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
-    // P18.9-T2: the activity cells count the office's binding.
+    // P18.6-T2: the activity cells count the office's binding.
     activityBindings,
+    // P19.7-T2 AC-13: `PROPOSALS_MADE` per row.
+    proposalReadings,
   );
-  // UI V1 (Phase 18.99 T4, UI-001): the Activities tab — the dashboard's reach, the counts and the Ratio page's ratios.
+  // UI V1 (Phase 18.11 T4, UI-001): the Activities tab — the dashboard's reach, the counts and the Ratio page's ratios.
   const unitActivities = new UnitActivitiesService(
     unitDashboard, new TenantDay(kpms as never, clock), activityReadings,
     new ActivityRatioReadings(
@@ -808,17 +959,17 @@ export function configModule(
   );
 
   /*
-   * Phase 17: recruitment tools — the company's playbook (read through its named company-filtered method),
-   * the plan built from it, and an office's four pitch documents through the tenant-scoped repository.
+   * Phase 17: recruitment tools — the playbook of the template an office was made from (ADR-0210 §4, read through its
+   * named company-filtered methods), the plan built from it, and an office's four pitch documents through the
+   * tenant-scoped repository. The company-level records stay, read by nothing but migration `0056`.
    */
   const recruitmentPlaybookRows = model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema);
   const recruitmentPlaybooks = new RecruitmentPlaybookService(
-    recruitmentPlaybookRows as never,
-    model('CompanyModelForConfig', CompanySchema) as never,
-    users as never,
-    audit,
+    kpms as never,
+    namedTemplateRows as never,
+    templates as never,
   );
-  const recruitmentPlans = new RecruitmentPlanService(recruitmentPlaybooks, new TenantDay(kpms as never, clock));
+  const recruitmentPlans = new RecruitmentPlanService(recruitmentPlaybooks);
   const recruitmentPitch = new RecruitmentPitchService(
     new RecruitmentPitchRepository(model(RecruitmentPitchSlot.name, RecruitmentPitchSlotSchema) as never),
     assets, audit, new TenantDay(kpms as never, clock), clock,
@@ -840,17 +991,43 @@ export function configModule(
     model('CompanyModelForConfig', CompanySchema) as never, orgLevels, clock,
   );
   const carrierRules = new CarrierRules(model(QualificationRule.name, QualificationRuleSchema) as never, kpms as never);
+  // P19.3-T2 (UI-149, UI-150): the setup card's marks, what waits on the settings pages, the months still open.
+  const setupMarks = new KpmSetupMarkRepository(model(KpmSetupMark.name, KpmSetupMarkSchema) as never);
+  const kpmSetup = new KpmSetup(
+    setupMarks, kpms as never, memberships,
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
+    new ProductionMonthRepository(model(ProductionMonth.name, ProductionMonthSchema) as never),
+    new KpmProductConfigRepository(model('KpmProductConfigModel', KpmProductConfigSchema) as never),
+    new ActivationTemplateRepository(activationTemplates as never),
+    audit, clock,
+  );
   const kpmOverview = new KpmOverviewService(
     officePeople, new TenantDay(kpms as never, clock), clock, activityReadings, coachingReadings,
     leadReadings, recruitTargets, productionReadings, goals, subjectReads, audit,
+    kpmSetup, new OfficePhones(memberships, users as never),
   );
+  // P19.3-T3 (OD-258): the office's custom groups, through the two tenant repositories.
+  const officeGroups = new OfficeGroups(new GroupRepository(model(Group.name, GroupSchema) as never), memberships);
   const kpmAnalytics = new KpmAnalyticsService(
     officePeople, new TenantDay(kpms as never, clock), clock, coachingReadings, leadReadings,
-    productionReadings, goals, carrierRules,
+    productionReadings, goals, carrierRules, officeGroups,
   );
   const platformAnalytics = new PlatformAnalyticsService(
     kpms as never, model('CompanyModelForConfig', CompanySchema) as never, memberships, orgLevels, clock,
   );
+  // P19.5-T3 (ADR-0215): the KPM's *Advanced analytics* page over the same readings, and the Super Admin's tab on it.
+  const analyticsTargets = new AnalyticsTargetRepository(model(AnalyticsTarget.name, AnalyticsTargetSchema) as never);
+  const advancedAnalytics = new AdvancedAnalyticsService(
+    analyticsConfig, new TenantDay(kpms as never, clock), officePeople, memberships,
+    new MemberNames(memberships, users as never), users as never, eventReadings, activityReadings, coachingReadings,
+    monthRows, productionReadings, uploadCompleteness,
+    new LeaderScorecardService(
+      officePeople, productionReadings, monthRows, memberships, clock,
+      new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
+    ),
+    analyticsTargets, quantRuns, surveyRunRows, audit, clock,
+  );
+  const adminAdvancedAnalytics = new AdminAdvancedAnalytics(kpms as never, advancedAnalytics, surveys.kpm, audit);
   const directoryColumns = new DirectoryColumns(
     activityReadings, coachingReadings, new TenantDay(kpms as never, clock), clock, subjectReads,
   );
@@ -860,11 +1037,13 @@ export function configModule(
 
   return {
     activity, ratios, leads, config, provisioning, templates, templateService, audit, clock, changes,
-    namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows,
+    namedTemplates, namedTemplateRows, officeSettings, templateCopies, assetRows, templateMaterial, templatePush,
+    templateSync,
     orgLevels, kpms, companies: model('CompanyModelForConfig', CompanySchema), training, activation,
     products, assets, storage, avatarLinks, kpmProducts, events, campaigns, capability, activityLogs,
     leadRecords,
     goals, production, productionMonths, productionImport, productionCorrections, productionReadings, summary,
+    unregisteredRows, uploadCompleteness, heldRows,
     sentNotifications, coach, subjectReads,
     coachingSessions, coachingReadings, paceStatus, coachingRoster, activityReadings, coachee,
     coachingSnapshots, coachingSession, releasedNotifications,
@@ -877,10 +1056,15 @@ export function configModule(
     campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
     campaignStandingsReader, campaignDeparture, campaignStandingOverrides,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
-    leadReadings, recruitTargets, officePeople, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
+    leadReadings, recruitTargets, officePeople, officeGroups, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
+    setupMarks, kpmSetup,
     directoryColumns, memberships, users,
     eventRsvps, eventFeedback, eventAudiences, eventReadings, eventGuests, eventRollCalls,
     activityBindings, activityBindingRows,
+    analyticsConfig, analyticsTemplates,
+    surveys,
+    proposals, proposalRows, proposalReadings,
+    quantRunRows, quantRuns, analyticsTargets, advancedAnalytics, adminAdvancedAnalytics,
   };
 }
 

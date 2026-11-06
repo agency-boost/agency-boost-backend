@@ -2,7 +2,7 @@ import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { render, type Message } from '@/common/i18n/sentence';
 
 /**
- * **A sentence as a test reads it** (P18.98-T5 AC-7; ADR-0179 §9: English unless a test asks).
+ * **A sentence as a test reads it** (P18.10-T5 AC-7; ADR-0179 §9: English unless a test asks).
  *
  * - `english` — the API's English as it wrote it before the phase, its figures Indonesian (`SOURCE_READER`): what a
  *   refusal's `Error.message` holds and what an integration suite reads by default.

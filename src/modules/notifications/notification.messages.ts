@@ -1,7 +1,7 @@
 import { messages, refusals } from '@/common/i18n/sentence';
 
 /**
- * **What the inbox says, in both languages** (P18.98-T5 AC-4; ADR-0179 §7): each template's title and detail, composed
+ * **What the inbox says, in both languages** (P18.10-T5 AC-4; ADR-0179 §7): each template's title and detail, composed
  * when the inbox is read, in the reader's language — so a notice stored before the phase reads in the new language
  * too. A name in a notice, and a reason somebody typed, are the payload's, shown as typed; the fallbacks for a payload
  * that holds none are ours, and translated. The words name the screens a notice sends somebody to as the screens name
@@ -162,9 +162,10 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     id: 'Seseorang dari AgencyBoost sedang melihat layar Anda',
   },
   supportStartedDefault: { en: 'A support session has started.', id: 'Sesi dukungan telah dimulai.' },
+  // P19.4-T2 (ADR-0206 §3): a session only looks, and nobody can approve otherwise — the second person is retired.
   supportLookOnly: {
-    en: 'They can only look, unless a second person approves otherwise.',
-    id: 'Dia hanya dapat melihat, kecuali orang kedua menyetujui sebaliknya.',
+    en: 'They can only look: nothing can be changed in the session.',
+    id: 'Dia hanya dapat melihat: tidak ada yang bisa diubah dalam sesi ini.',
   },
   supportInYourOffice: { en: 'A support session started in your office', id: 'Sesi dukungan dimulai di KPM Anda' },
   supportHelpingDefault: {
@@ -181,11 +182,47 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     id: `${title} akan segera berlangsung`,
   }),
   eventComingUpDefault: { en: 'Check the time and where it is.', id: 'Periksa waktu dan tempatnya.' },
+  /*
+   * **The Super Admin applied a template to the office** (ADR-0208 §7): the template by its name, as typed, and the
+   * settings it changed by their own names — kept English, as the settings' tabs are (§A.3).
+   */
+  templateApplied: ({ name }: { name: string }) => ({
+    en: `The ${name} settings were applied to your KPM`,
+    id: `Pengaturan ${name} diterapkan ke KPM Anda`,
+  }),
+  aTemplate: { en: 'company template', id: 'template perusahaan' },
+  templateAppliedDetail: ({ sections }: { sections: string }) => ({
+    en: `AgencyBoost updated ${sections} from your company's template. Your agents see it now.`,
+    id: `AgencyBoost memperbarui ${sections} dari template perusahaan Anda. Agen Anda sudah melihatnya.`,
+  }),
+  templateAppliedWaiting: ({ sections }: { sections: string }) => ({
+    en: `AgencyBoost updated ${sections} from your company's template. Your agents see it once you publish your `
+      + 'settings.',
+    id: `AgencyBoost memperbarui ${sections} dari template perusahaan Anda. Agen Anda melihatnya setelah Anda `
+      + 'menerbitkan pengaturan.',
+  }),
+  someSettings: { en: 'some settings', id: 'beberapa pengaturan' },
+  /*
+   * **The template's Data upload changed** (P19.5-T1 AC-17; AA UI-019): the mockup's own sentence, with the new columns
+   * by their names and their first start month; without new columns, the version it moved to.
+   */
+  analyticsColumnsAdded: ({ n, names, month }: { n: number; names: string; month: string }) => ({
+    en: `Data upload template changed: ${n} new ${n === 1 ? 'column' : 'columns'} (${names}) from ${month}`,
+    id: `Template data upload berubah: ${n} kolom baru (${names}) mulai ${month}`,
+  }),
+  analyticsVersion: ({ version }: { version: number }) => ({
+    en: `Data upload template changed to v${version}.`,
+    id: `Template data upload berubah ke v${version}.`,
+  }),
+  analyticsFollows: ({ name, version }: { name: string; version: number }) => ({
+    en: `Columns follow ${name} v${version}.`,
+    id: `Kolom mengikuti ${name} v${version}.`,
+  }),
   somethingHappened: { en: 'Something happened', id: 'Ada sesuatu yang terjadi' },
 });
 
 /**
- * **What the email says, in both languages** (P18.98-T5 AC-5): the frame every email shares — the subject's tag, the
+ * **What the email says, in both languages** (P18.10-T5 AC-5): the frame every email shares — the subject's tag, the
  * greeting and the sign-off — and the two auth emails, which have no inbox row of their own. Every other email is the
  * inbox's words (`NOTICE_MESSAGES`) in the frame.
  */
@@ -195,9 +232,13 @@ export const EMAIL_MESSAGES = messages('modules/notifications: emails', {
   helloNobody: { en: 'Hello,', id: 'Halo,' },
   signOff: { en: '— AgencyBoost', id: '— AgencyBoost' },
   verifySubject: { en: 'Verify your email address', id: 'Verifikasi alamat email Anda' },
+  /*
+   * *Changed 2026-11-04 (P19-T1; UI-163, ADR-0190 §1, §4):* the link opens a page with one button, and signing in no
+   * longer waits for it. It read *"Open this link to verify your address. You cannot sign in until you have."*
+   */
   verifyOpen: {
-    en: 'Open this link to verify your address. You cannot sign in until you have.',
-    id: 'Buka tautan ini untuk memverifikasi alamat Anda. Anda tidak dapat masuk sebelum melakukannya.',
+    en: 'Open this link and press Verify my email to verify your address.',
+    id: 'Buka tautan ini, lalu tekan Verifikasi email saya untuk memverifikasi alamat Anda.',
   },
   verifyIgnore: {
     en: 'If you did not create an AgencyBoost account, ignore this — nothing happens '
@@ -241,9 +282,60 @@ export const EMAIL_MESSAGES = messages('modules/notifications: emails', {
     en: 'If this was not you, change your password now: that cancels the change.',
     id: 'Jika ini bukan Anda, segera ubah kata sandi Anda: itu membatalkan perubahan ini.',
   },
+  /* P19-T1 AC-5 (2026-11-04; UI-163, ADR-0190 §5): the password changed — by a reset or from the profile. */
+  passwordChangedSubject: { en: 'Your password was changed', id: 'Kata sandi Anda diubah' },
+  passwordChangedLine: {
+    en: 'The password of your AgencyBoost account was just changed, and every device signed in with the old one was '
+      + 'signed out.',
+    id: 'Kata sandi akun AgencyBoost Anda baru saja diubah, dan semua perangkat yang masuk dengan kata sandi lama sudah '
+      + 'dikeluarkan.',
+  },
+  passwordChangedNotYou: {
+    en: 'If this was not you, reset your password now with this link:',
+    id: 'Jika ini bukan Anda, segera atur ulang kata sandi Anda lewat tautan ini:',
+  },
+  /*
+   * UI-169 item 5 (2026-11-05; ADR-0199 §2): a linked login — the link to the other login's address, naming who asked;
+   * the notice to the starting login's, with no link; and the notice to both once it is linked.
+   */
+  linkRequestSubject: { en: 'Link this login to another', id: 'Tautkan akun ini ke akun lain' },
+  linkRequestAsked: ({ name, email }: { name: string; email: string }) => ({
+    en: `${name} (${email}) asked to link their AgencyBoost login to this one, so both appear in one account menu. `
+      + 'Open this link and enter the password of this login to link them.',
+    id: `${name} (${email}) meminta akun AgencyBoost-nya ditautkan ke akun ini, agar keduanya muncul di satu menu akun. `
+      + 'Buka tautan ini dan masukkan kata sandi akun ini untuk menautkannya.',
+  }),
+  linkRequestIgnore: {
+    en: 'If you did not ask for this, ignore it. Nothing is linked until the link is opened and this login\'s password '
+      + 'is given, and the link expires on its own.',
+    id: 'Jika Anda tidak memintanya, abaikan email ini. Tidak ada yang ditautkan sampai tautan dibuka dan kata sandi akun '
+      + 'ini dimasukkan, dan tautan ini akan kedaluwarsa dengan sendirinya.',
+  },
+  linkNoticeSubject: { en: 'Your login is being linked', id: 'Akun Anda sedang ditautkan' },
+  linkNoticeAsked: ({ email }: { email: string }) => ({
+    en: `Someone signed in to your account asked to link it to the login ${email}. `
+      + 'It is linked only when the link sent to that address is opened with that login\'s password.',
+    id: `Seseorang yang masuk ke akun Anda meminta akun ini ditautkan ke akun ${email}. `
+      + 'Akun baru tertaut setelah tautan yang dikirim ke alamat tersebut dibuka dengan kata sandi akun itu.',
+  }),
+  linkNoticeNotYou: {
+    en: 'If this was not you, change your password now: that cancels it.',
+    id: 'Jika ini bukan Anda, segera ubah kata sandi Anda: itu membatalkannya.',
+  },
+  linkedSubject: { en: 'Two logins were linked', id: 'Dua akun telah ditautkan' },
+  linkedLine: ({ email }: { email: string }) => ({
+    en: `Your AgencyBoost login is now linked to the login ${email}: each appears in the other's account menu. `
+      + 'Nothing else is shared — each keeps its own password and sessions.',
+    id: `Akun AgencyBoost Anda sekarang tertaut ke akun ${email}: masing-masing muncul di menu akun yang lain. `
+      + 'Tidak ada lagi yang dibagi — masing-masing tetap memakai kata sandi dan sesinya sendiri.',
+  }),
+  linkedNotYou: {
+    en: 'If this was not you, remove the link in My profile, under Security, and change your password.',
+    id: 'Jika ini bukan Anda, hapus tautan itu di Profil saya, bagian Keamanan, lalu ubah kata sandi Anda.',
+  },
 });
 
-/** **The inbox's own refusal** (P18.98-T5 AC-2): a permission the reader does not hold. */
+/** **The inbox's own refusal** (P18.10-T5 AC-2): a permission the reader does not hold. */
 export const NOTIFICATION_REFUSALS = refusals('modules/notifications', {
   PERM_DENIED: {
     cannot: { en: 'You cannot do that.', id: 'Anda tidak dapat melakukannya.' },

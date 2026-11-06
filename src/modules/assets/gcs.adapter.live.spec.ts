@@ -7,7 +7,7 @@ import { GcsAdapter } from './gcs.adapter';
 import { SignedUpload } from './storage.port';
 
 /**
- * **The adapter against a real bucket** (P18.7-T2, ADR-0153; the plan's *Verifikasi → GCS*). Opt-in: nothing but
+ * **The adapter against a real bucket** (P18.4-T2, ADR-0153; the plan's *Verifikasi → GCS*). Opt-in: nothing but
  * `pnpm test:storage-live` runs it — `jest.config.ts` and `test:unit` ignore `*.live.spec.ts`, so it is never part
  * of `pnpm test`, `test:unit` or `test:coverage`, and CI never reaches a bucket.
  *
@@ -31,7 +31,7 @@ const NETWORK_MS = 60_000;
 
 if (!BUCKET) {
   console.warn(
-    'P18.7-T2 storage-live: skipped — GCS_LIVE_BUCKET is not set. Set it to a bucket, with Application Default '
+    'P18.4-T2 storage-live: skipped — GCS_LIVE_BUCKET is not set. Set it to a bucket, with Application Default '
     + 'Credentials impersonating the runtime signer, to run the suite against real storage.',
   );
 }
@@ -56,7 +56,7 @@ function post(signed: SignedUpload, body: Buffer, filename: string, fields = sig
   return fetch(signed.uploadUrl, { method: 'POST', body: form });
 }
 
-live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live`)', () => {
+live('P18.4-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live`)', () => {
   const clock = new SystemClock();
   let adapter: GcsAdapter;
   // Built here, not in the describe body, which runs even when the suite is skipped.
@@ -77,7 +77,7 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
   /** The PDF the first case uploads; the replay, the links and the copy read it. */
   let uploaded: SignedUpload;
 
-  it('P18.7-T2 an upload through the signed form answers 204, and lands as what it is', async () => {
+  it('P18.4-T2 an upload through the signed form answers 204, and lands as what it is', async () => {
     uploaded = await sign();
     expect(uploaded.storageKey).toMatch(new RegExp(`^${PREFIX}/${RUN}/live/[0-9A-HJKMNP-TV-Z]{26}$`));
     const res = await post(uploaded, PDF, 'Opportunity_Overview.pdf');
@@ -87,14 +87,14 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     });
   }, NETWORK_MS);
 
-  it('P18.7-T2 the same form replayed is refused 403: the create-only signer cannot replace an object', async () => {
+  it('P18.4-T2 the same form replayed is refused 403: the create-only signer cannot replace an object', async () => {
     const replay = await post(uploaded, EXE, 'replay.pdf');
     expect(replay.status).toBe(403);
     // And what was there is still there.
     await expect(adapter.describe(uploaded.storageKey)).resolves.toMatchObject({ mimeType: 'application/pdf', bytes: PDF.length });
   }, NETWORK_MS);
 
-  it('P18.7-T2 a 26 MB file is refused by the policy’s content-length-range, and nothing lands', async () => {
+  it('P18.4-T2 a 26 MB file is refused by the policy’s content-length-range, and nothing lands', async () => {
     const signed = await sign();
     const big = Buffer.concat([Buffer.from('%PDF-1.4\n', 'latin1'), Buffer.alloc(26 * 1024 * 1024, 0x20)]);
     expect(big.length).toBeGreaterThan(ASSET_LIMITS.MAX_BYTES);
@@ -105,14 +105,14 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     await expect(adapter.describe(signed.storageKey)).resolves.toBeNull();
   }, 3 * NETWORK_MS);
 
-  it('P18.7-T2 a form whose Content-Type differs from the signed one is refused 403, and nothing lands', async () => {
+  it('P18.4-T2 a form whose Content-Type differs from the signed one is refused 403, and nothing lands', async () => {
     const signed = await sign('application/pdf');
     const res = await post(signed, PNG, 'poster.png', { ...signed.fields, 'Content-Type': 'image/png' });
     expect(res.status).toBe(403);
     await expect(adapter.describe(signed.storageKey)).resolves.toBeNull();
   }, NETWORK_MS);
 
-  it('P18.7-T2 an executable renamed .pdf uploads, and is refused at confirm: its bytes are no PDF', async () => {
+  it('P18.4-T2 an executable renamed .pdf uploads, and is refused at confirm: its bytes are no PDF', async () => {
     const signed = await sign('application/pdf');
     expect((await post(signed, EXE, 'Opportunity_Overview.pdf')).status).toBe(204);
     await expect(adapter.describe(signed.storageKey)).resolves.toEqual({
@@ -127,7 +127,7 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     expect(updateCompanyAsset).not.toHaveBeenCalled();
   }, NETWORK_MS);
 
-  it('P18.7-T2 a PNG uploaded as a JPEG is confirmed as image/png, and its link serves image/png over the stored claim (review L6)', async () => {
+  it('P18.4-T2 a PNG uploaded as a JPEG is confirmed as image/png, and its link serves image/png over the stored claim (review L6)', async () => {
     const signed = await sign('image/jpeg');
     expect((await post(signed, PNG, 'IMG-20261019-WA0001.jpg')).status).toBe(204);
     const stored = await adapter.describe(signed.storageKey);
@@ -138,7 +138,7 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     expect(opened.headers.get('content-type')).toBe('image/png');
   }, NETWORK_MS);
 
-  it('P18.7-T2 a link opens the file inline as a PDF while it lives, and is refused once it has expired', async () => {
+  it('P18.4-T2 a link opens the file inline as a PDF while it lives, and is refused once it has expired', async () => {
     const opened = await fetch(await adapter.createSignedUrl(uploaded.storageKey, ASSET_LIMITS.SIGNED_URL_TTL_SECONDS, 'application/pdf'));
     expect(opened.status).toBe(200);
     expect(opened.headers.get('content-type')).toBe('application/pdf');
@@ -154,7 +154,7 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     expect(await expired.text()).toMatch(/expired/i);
   }, NETWORK_MS);
 
-  it('P18.7-T2 a copy lands in the destination’s folder under a fresh key, as what the source is', async () => {
+  it('P18.4-T2 a copy lands in the destination’s folder under a fresh key, as what the source is', async () => {
     const copied = await adapter.copy({
       storageKey: uploaded.storageKey, owner: { kind: 'company', companyId: RUN }, folder: 'training',
     });
@@ -163,7 +163,7 @@ live('P18.7-T2 GcsAdapter against a real bucket (opt-in, `pnpm test:storage-live
     await expect(adapter.describe(copied.storageKey)).resolves.toEqual(copied);
   }, NETWORK_MS);
 
-  it('P18.7-T2 putObject is idempotent: the second run sends nothing and reports what the first stored', async () => {
+  it('P18.4-T2 putObject is idempotent: the second run sends nothing and reports what the first stored', async () => {
     const params = { owner, folder: 'live', name: 'opportunity-demonstration', mimeType: 'application/pdf', body: PDF };
     const first = await adapter.putObject(params);
     expect(first).toEqual({

@@ -4,9 +4,9 @@ import { Test } from '@nestjs/testing';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import { ViewOnlySessionGuard } from '@/common/auth/view-only-session.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
-import { SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { GoalController } from '@/modules/goals/goal.controller';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadController } from '@/modules/leads/lead.controller';
@@ -29,26 +29,24 @@ const KPM_B = '66f0000000000000000000b2';
 const RINA = '66f000000000000000000101';
 const BUDI = '66f000000000000000000102';
 
-/** A support session as office A's Owner — `setup` with the scope, `support` without it (ADR-0162). */
-const asOwner = (writeScope: readonly string[]) =>
-  new RequestContext(OWNER.userId, 'none', OWNER.membership, 'sa-1', null, false, true, writeScope);
-const SETUP = asOwner(SETUP_SESSION_WRITE_SCOPE);
-const LOOK_ONLY = asOwner([]);
+/** A support session as office A's Owner: the only kind there is, which only looks (ADR-0206 §3). */
+const SESSION = new RequestContext(OWNER.userId, 'none', OWNER.membership, 'sa-1', null, false, true);
 /** Office B's own Owner, signed in as themselves, to read what B holds. */
 const OWNER_B = new RequestContext('u-owner-b', 'none', {
   ...OWNER.membership!, membershipId: 'mem-b', kpmId: KPM_B,
 });
 
 /**
- * **A setup session over HTTP, on the routes `auth.e2e.int.spec.ts` does not mount** (P18.9-T1 AC-2, AC-6;
- * ADR-0162): the production file it may upload, and the lead and the goal it may not write.
+ * **A session's writes over HTTP, on the routes `auth.e2e.int.spec.ts` does not mount** (P19.4-T2 AC-2, AC-7;
+ * ADR-0206 §4; Overview case 9). Each was *"a setup session may"* (P18.6-T1, ADR-0162, superseded) and is pinned the
+ * other way round: the production file a setup session uploaded, and the lead and the goal it never could, are each
+ * `403 IMPERSONATION_READ_ONLY` with nothing written — and read as before.
  *
- * Who is signed in is the stubbed guard's, as in every controller spec: whether a real token resolves to
- * this context is `auth.e2e`'s question, and asked there. What only a request answers is here — that
- * `PermissionsGuard` lets a scoped write through and refuses the rest, on real routes with their own
- * decorators, and that the write lands in the session's office alone.
+ * Who is signed in is the stubbed guard's, as in every controller spec: that a real token resolves to a session is
+ * `auth.e2e`'s question. `ViewOnlySessionGuard` and `PermissionsGuard` run as the app runs them, in that order.
+ * `view-only-session.int.spec.ts` walks every write route of the real app.
  */
-describe('a setup session over HTTP: the file, a lead and a goal (P18.9-T1)', () => {
+describe('P19.4-T2 a session over HTTP: the file, a lead and a goal', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   const http = () => request(app.getHttpServer());
@@ -70,7 +68,9 @@ describe('a setup session over HTTP: the file, a lead and a goal (P18.9-T1)', ()
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(productionPipe());
     app.useGlobalFilters(new DomainExceptionFilter());
-    app.useGlobalGuards(new StubAuth(), new PermissionsGuard(app.get(Reflector)));
+    app.useGlobalGuards(
+      new StubAuth(), new ViewOnlySessionGuard(app.get(Reflector)), new PermissionsGuard(app.get(Reflector)),
+    );
     await app.init();
     await listenOnLoopback(app);
   });
@@ -81,7 +81,7 @@ describe('a setup session over HTTP: the file, a lead and a goal (P18.9-T1)', ()
   });
 
   beforeEach(async () => {
-    session.current = SETUP;
+    session.current = SESSION;
     await clearCollections();
     await mongoose.model(ProductionMonth.name).syncIndexes();
     const kpms = wired.kpms as { create: (d: unknown) => Promise<unknown> };
@@ -110,49 +110,53 @@ describe('a setup session over HTTP: the file, a lead and a goal (P18.9-T1)', ()
   const commit = () => http().post('/kpm/data-upload/commit').field('month', '2026-09').field('revision', '0')
     .attach('file', Buffer.from(FILLED), 'filled.csv');
 
-  it('AC-6 uploads a production file: previews it and confirms the import, in its own office', async () => {
+  /** What the office holds: its months and its batches — compared before and after each refusal. */
+  const held = async () => ({
+    months: await mongoose.connection.db!.collection('productionMonths').countDocuments({}),
+    batches: await mongoose.connection.db!.collection('dataUploadBatches').countDocuments({}),
+    leads: await mongoose.connection.db!.collection('leads').countDocuments({}),
+    goals: await mongoose.connection.db!.collection('goals').countDocuments({}),
+  });
+
+  it('P19.4-T2 AC-7 refuses the production file a setup session uploaded: preview and commit, nothing written', async () => {
+    const before = await held();
+    for (const res of [await preview(), await commit()]) {
+      expect([res.status, res.body.error?.code]).toEqual([403, 'IMPERSONATION_READ_ONLY']);
+      expect(res.body.error.message)
+        .toBe('This is a view-only session. Nothing can be changed while you view as somebody else.');
+    }
+    expect(await held()).toEqual(before);
+    // And reads the month as before.
+    expect((await http().get('/kpm/data-upload/2026-09')).status).toBe(200);
+  });
+
+  it('P19.4-T2 AC-2 refuses a lead and a goal — the Owner\'s own, as the root AB, included — nothing written', async () => {
+    const before = await held();
+    const refusals: [string, request.Test][] = [
+      ['create a lead', http().post('/leads').send({ name: 'Calon', typeCode: 'NEW' })],
+      ['change a lead', http().patch('/leads/66f0000000000000000000d1').send({ name: 'x' })],
+      ['set a goal', http().put('/goals/2026').send({ mode: 'direct' })],
+    ];
+    for (const [what, req] of refusals) {
+      const res = await req;
+      expect([what, res.status, res.body.error?.code]).toEqual([what, 403, 'IMPERSONATION_READ_ONLY']);
+    }
+    expect(await held()).toEqual(before);
+    // Reading them is a read, and stays open.
+    expect((await http().get('/leads')).status).toBe(200);
+  });
+
+  it('P19.4-T2 AC-2 the Owner themselves uploads the same file, in their own office alone', async () => {
+    session.current = OWNER;
     expect((await preview()).status).toBe(200);
     const committed = await commit();
     expect(committed.status).toBe(201);
     expect(committed.body.batch).toMatchObject({ status: 'committed', cellCount: 1 });
 
-    const month = await http().get('/kpm/data-upload/2026-09');
-    expect(month.body.rows[0].metrics.ape.monthly).toMatchObject({ value: 150_000_000, provenance: 'imported' });
-  });
-
-  it('AC-6 a setup session for office A writes nothing of office B', async () => {
-    await commit();
     session.current = OWNER_B;
     const b = await http().get('/kpm/data-upload/2026-09');
     expect(b.status).toBe(200);
     expect(b.body.rows.map((r: { name: string }) => r.name)).toEqual(['Budi Santoso']);
-    expect(b.body.rows[0].metrics.ape.monthly.value).toBeNull();
-    expect(b.body.withData).toBe(0);
-  });
-
-  it('AC-2 a session that only looks is refused the same upload', async () => {
-    session.current = LOOK_ONLY;
-    for (const res of [await preview(), await commit()]) {
-      expect(res.status).toBe(403);
-      expect(res.body.error.message).toContain('read-only support session');
-    }
-    // And reads it as before.
-    expect((await http().get('/kpm/data-upload/2026-09')).status).toBe(200);
-  });
-
-  it('AC-6 may not write a lead or a goal — the Owner\'s own, as the root AB, included', async () => {
-    const refusals: [string, request.Test, string][] = [
-      ['create a lead', http().post('/leads').send({ name: 'Calon', typeCode: 'NEW' }), 'lead:create'],
-      ['change a lead', http().patch('/leads/66f0000000000000000000d1').send({ name: 'x' }), 'lead:update'],
-      ['set a goal', http().put('/goals/2026').send({ mode: 'direct' }), 'goal:update'],
-    ];
-    for (const [what, req, permission] of refusals) {
-      const res = await req;
-      expect([what, res.status, res.body.error?.code, res.body.error?.details?.permission])
-        .toEqual([what, 403, 'PERM_DENIED', permission]);
-      expect(res.body.error.message).toContain('This setup session can change the office');
-    }
-    // Reading them is a read, and stays open.
-    expect((await http().get('/leads')).status).toBe(200);
+    expect(b.body.rows[0].values.APE.value).toBeNull();
   });
 });

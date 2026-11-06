@@ -8,7 +8,7 @@ import type { ComplianceView } from './compliance.service';
 const M = 1_000_000 * 100;
 
 /**
- * **KPM A never reads KPM B** (invariant §1; P18.6-T1 AC-1, a cross-tenant test per category). The tree resolves its
+ * **KPM A never reads KPM B** (invariant §1; P18.3-T1 AC-1, a cross-tenant test per category). The tree resolves its
  * office from the reader's membership and every category reads through the tenant-scoped readers of the module that
  * owns its records, so:
  *
@@ -18,7 +18,7 @@ const M = 1_000_000 * 100;
  *   set, days logged, activations graduated — changes no chip and no cell of 0417's, and 0555's Owner reads 0555's
  *   members alone, with 0555's own statuses.
  */
-describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
+describe('the compliance tree, isolated (invariant §1; P18.3-T1 AC-1)', () => {
   let h: ComplianceHarness;
   const db = () => mongoose.connection.db!;
   const T1: ComplianceCategoryKey[] = ['training', 'goals', 'activity', 'activation'];
@@ -43,7 +43,7 @@ describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
     return out;
   };
 
-  it('P18.6-T1 AC-1 training: 0555’s own module, asked of 0417, is 404 — the answer for a module nobody has', async () => {
+  it('P18.3-T1 AC-1 training: 0555’s own module, asked of 0417, is 404 — the answer for a module nobody has', async () => {
     await expect(h.compliance.read(h.ctx('OWNER'), { category: 'training', item: 'GADING_ONLY' }))
       .rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(h.compliance.read(h.ctx('OWNER'), { category: 'training', item: 'NOBODY_HAS_IT' }))
@@ -53,7 +53,7 @@ describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
     expect(view.selected).toEqual({ category: 'training', item: 'GADING_ONLY' });
   });
 
-  it('P18.6-T1 AC-1, P18.6-T2 events and campaigns: 0555’s own event and campaign, asked of 0417, are 404', async () => {
+  it('P18.3-T1 AC-1, P18.3-T2 events and campaigns: 0555’s own event and campaign, asked of 0417, are 404', async () => {
     const event = await h.wired.events.create(h.ownerOfB(), {
       code: 'GADING_TALK', typeCode: 'TRAINING', title: 'Gading talk', startsAt: '2026-10-20T02:00:00Z',
       endsAt: '2026-10-20T05:00:00Z', audience: { issuer: 'kpm', scope: 'all_agents' },
@@ -75,7 +75,7 @@ describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
     expect(mine.catalog.campaigns.map((c) => c.code)).not.toContain('GADING_PUSH');
   });
 
-  it('P18.6-T1 AC-1 a refused cross-office read writes no entry', async () => {
+  it('P18.3-T1 AC-1 a refused cross-office read writes no entry', async () => {
     const before = await db().collection('auditLog').countDocuments({});
     await expect(h.compliance.read(h.ctx('OWNER'), { category: 'training', item: 'GADING_ONLY' })).rejects.toBeTruthy();
     expect(await db().collection('auditLog').countDocuments({})).toBe(before);
@@ -86,7 +86,7 @@ describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
    * carry 0555's members. These carry **0417's** membership ids under 0555's `kpmId`: only the office filter keeps them
    * out. Agus has none of his own in any category, so each planted row would move a chip and a cell if it were read.
    */
-  it('P18.6-T1 AC-1 exit review 1: rows filed under another office carrying 0417’s membership ids move no chip and no cell', async () => {
+  it('P18.3-T1 AC-1 exit review 1: rows filed under another office carrying 0417’s membership ids move no chip and no cell', async () => {
     const before = await snapshot();
     const agus = h.id('AGUS');
     const lukas = h.id('LUKAS');
@@ -129,7 +129,7 @@ describe('the compliance tree, isolated (invariant §1; P18.6-T1 AC-1)', () => {
     }
   });
 
-  it.each(T1)('P18.6-T1 AC-1 %s: nothing of 0555 reaches 0417’s tree, and 0555’s Owner reads 0555 alone', async (category) => {
+  it.each(T1)('P18.3-T1 AC-1 %s: nothing of 0555 reaches 0417’s tree, and 0555’s Owner reads 0555 alone', async (category) => {
     const before = await snapshot();
     // 0555 grows, in every category: twenty Agents under its AB with everything done, set, logged and graduated.
     const bAb = h.id('B_AB');

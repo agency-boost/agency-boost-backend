@@ -3,11 +3,11 @@ import { join } from 'node:path';
 
 /**
  * **The campaigns module reads its tenant-scoped collections through its repositories alone** (invariant §1; the Phase
- * 18.5 permission review, item 19). A source-shape assertion, as `raw-writes.tenancy.spec.ts` is: every
+ * 18.2 permission review, item 19). A source-shape assertion, as `raw-writes.tenancy.spec.ts` is: every
  * `@InjectModel(…)` in the module's code is a repository injecting its own model, or one of the exceptions below,
  * each with its reason. A service injecting `CampaignChase`, `CampaignStanding` or `Campaign` raw fails here by name.
  */
-describe('P18.5-T8 review item 19 — the campaigns services use no raw model', () => {
+describe('P18.2-T8 review item 19 — the campaigns services use no raw model', () => {
   const code = readdirSync(__dirname).filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts'));
 
   /** `file: model` for every injection in the module's code. */
@@ -30,16 +30,16 @@ describe('P18.5-T8 review item 19 — the campaigns services use no raw model', 
     'carrier-rules.ts: Kpm': 'the tenant record itself, by `_id: ctx.kpmId` (`repositories.tenancy.spec.ts`)',
   };
 
-  it('P18.5-T8 review item 19 finds the injections at all, so a silent zero cannot pass', () => {
+  it('P18.2-T8 review item 19 finds the injections at all, so a silent zero cannot pass', () => {
     expect(injections.length).toBeGreaterThanOrEqual(REPOSITORIES.length);
   });
 
-  it('P18.5-T8 review item 19 injects only the repositories’ own models and the exceptions written down', () => {
+  it('P18.2-T8 review item 19 injects only the repositories’ own models and the exceptions written down', () => {
     expect([...injections].sort()).toEqual([...REPOSITORIES, ...Object.keys(ALLOWED)].sort());
     for (const reason of Object.values(ALLOWED)) expect(reason.length).toBeGreaterThan(20);
   });
 
-  it('P18.5-T8 review item 19 no service of the new member-side code injects a model', () => {
+  it('P18.2-T8 review item 19 no service of the new member-side code injects a model', () => {
     const memberSide = [
       'campaign-agent.service.ts', 'campaign-chase-readings.ts', 'campaign-evaluation.ts', 'campaign-standings-reader.ts',
       'campaign-departure.ts',

@@ -2,7 +2,7 @@ import type { LocalDate } from '@/common/time/local-day';
 import type { JoinedAs } from '@/domain/constants';
 
 /**
- * **`COUNTS_FOR_PRODUCTION` — who a unit's production and *on pace* read** (ADR-0172 §2, P18.96-T5 AC-2;
+ * **`COUNTS_FOR_PRODUCTION` — who a unit's production and *on pace* read** (ADR-0172 §2, P18.8-T5 AC-2;
  * `metrics-and-definitions.md`, *Counts for production*). **Defined here once**: the Unit Dashboard's totals and tiles,
  * its rows' *New hire* tag and every later reader of the same rule call `countsForProduction`.
  *

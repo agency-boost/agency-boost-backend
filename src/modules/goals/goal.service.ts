@@ -19,12 +19,12 @@ import { GOAL_DEFAULT_RATIOS, GOAL_DEFAULTS, PERIOD } from '@/domain/constants';
 import { defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { RatioDefinitionRepository } from '@/modules/config/activity.repository';
-import { ProductionReadings } from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
-import { checkGoal, typedApeOf, typedByAfter } from './goal-input';
+import { checkEstimate, checkGoal, typedApeOf, typedByAfter } from './goal-input';
 import { GOAL_REFUSALS } from './goals.messages';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -166,7 +166,7 @@ export interface GoalTypist {
 }
 
 /**
- * **A plan worked out and not saved** (`GoalService.preview`, P18.99-T5): what the inputs a screen holds would mean,
+ * **A plan worked out and not saved** (`GoalService.preview`, P18.11-T5): what the inputs a screen holds would mean,
  * by the formula a save uses. `monthsLeft` is the figure in force — the typed one, or the office's calendar.
  */
 export interface GoalPreview {
@@ -262,6 +262,11 @@ export interface GoalView {
    */
   measured: GoalMeasured | null;
   savedAt: string | null;
+  /**
+   * **When the APE produced last changed** (P19.1-T4 AC-11, ADR-0195 §3): the Summary says the office's figure replaced
+   * an estimate only when it was written after this. `null` on a row from before the field, and on the defaults.
+   */
+  apeAchievedTypedAt: string | null;
   savedByMembershipId: string | null;
   version: number;
 }
@@ -291,7 +296,7 @@ export class GoalService {
     private readonly memberships: MembershipRepository,
     private readonly names: MemberNames,
     private readonly notifications: NotificationService,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly activity: ActivityReadings,
     private readonly coach: CoachResolver,
     /*
@@ -306,7 +311,7 @@ export class GoalService {
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
     /*
-     * P18.8-T10 AC-1 (ADR-0160 §3): the office's two benchmarks a new plan's percentages open on — the working
+     * P18.5-T10 AC-1 (ADR-0160 §3): the office's two benchmarks a new plan's percentages open on — the working
      * copy `/activity/ratio` reads. The application always provides it; optional, with the token named as
      * `ActivityService`'s `published` explains, so a hand-built instance that offers no defaults need not, and
      * without it the defaults are `GOAL_DEFAULTS`.
@@ -489,6 +494,8 @@ export class GoalService {
           monthsLeftOverride: input.monthsLeft ?? null,
           apeAchievedMinor: typed,
           apeAchievedTypedBy: typedBy,
+          // When the figure changed (P19.1-T4 AC-11): kept as it was when this save leaves it alone.
+          apeAchievedTypedAt: typed !== (previous?.apeAchievedMinor ?? 0) ? now : (previous?.apeAchievedTypedAt ?? null),
           caseSizeMinor: input.caseSizeMinor!,
           leadsToApptPct: input.leadsToApptPct!,
           closingRatePct: input.closingRatePct!,
@@ -544,6 +551,53 @@ export class GoalService {
   }
 
   /**
+   * **The member's own estimate of the APE produced so far this year** (P19.1-T4 AC-10, AC-13; the 6 November handover's
+   * UI-157 item 4, *Isi produksi sementara*; OD-250's default, ADR-0195): `PUT /goals/:period/ape-estimate`, from the
+   * Summary's goal card. **One value with Goal Settings' *APE yang sudah dicapai tahun ini***: the plan's
+   * `apeAchievedMinor`, provenance `self_reported`, which either screen writes and both read as *perkiraan Anda*.
+   *
+   * - **The caller's own plan only**: no `for`. A coach types a member's figure on their *Goal Setting* tab, through the
+   *   plan's save (ADR-0183); this route is the member's.
+   * - **A saved plan only** (`404 Goal` without one): the Summary offers it under a goal it measures, and an estimate
+   *   with no target to measure it against would only be stored.
+   * - **The member's own save's rule, for one field** (ADR-0195 §2): the figure, who typed it (the member) and when
+   *   change; the plan as it stood is kept in `revisions[]` and the version moves on, as a save's does. Not a re-plan:
+   *   the other inputs, the agreed snapshot and `savedAt` stay. The audit entry is `goal.estimate_set` or
+   *   `goal.estimate_cleared` — no amount, as ADR-0183's `apeAchievedChanged` carries none.
+   * - **`null` or 0 clears it** (*Hapus*): nothing typed is 0, as on every plan saved before there was an estimate.
+   * - **Apart from the office's production** (AC-13): stored on the plan, never in `monthlyAgentData`. Once the office
+   *   holds a year-to-date figure for the year every screen reads that instead, and nobody's screen reads the estimate
+   *   again (`achievedOf`; the Summary's `estimateReplaced`). No leader's or office's screen reads it at all
+   *   (`officialGoalFigures`).
+   */
+  async saveEstimate(ctx: RequestContext, period: string, body: unknown): Promise<GoalView> {
+    const membershipId = this.me(ctx);
+    const minor = checkEstimate(body);
+    const goal = await this.goals.findOne(ctx, { membershipId, period });
+    if (!goal) throw new NotFoundException('Goal');
+    const day = await this.days.for(ctx);
+    this.requireOpenPeriod(period, day);
+    // Unchanged — the same figure, typed by the member — writes nothing and records nothing.
+    const unchanged = minor === goal.apeAchievedMinor && (goal.apeAchievedTypedBy ?? null) === null;
+    const now = this.clock.now();
+    const current = unchanged
+      ? goal
+      : (await this.goals.updateById(ctx, String(goal._id), {
+        $set: { apeAchievedMinor: minor, apeAchievedTypedBy: null, apeAchievedTypedAt: now },
+        // The plan as it stood, whole, as a save keeps it (ADR-0042, ADR-0183): an estimate is one of its inputs.
+        $inc: { version: 1 },
+        $push: { revisions: revisionOf(goal, now) },
+      })) ?? goal;
+    if (!unchanged) {
+      await this.record(ctx, minor === 0 ? 'goal.estimate_cleared' : 'goal.estimate_set', String(goal._id), { period });
+    }
+    return this.view(
+      current, day, await this.achievedFor(ctx, membershipId, period, current),
+      await this.measuring(ctx, membershipId, day), await this.binding(ctx),
+    );
+  }
+
+  /**
    * The goal for a period, or **the office's defaults** when there is none (P8-T3).
    *
    * A first-time reader opens on five filled cards rather than five empty ones, which is what the
@@ -557,7 +611,7 @@ export class GoalService {
   }
 
   /**
-   * **What a plan would mean, before anybody saves it** (P18.99-T5, UI V1 UI-014, UI-016, UI-017): the cascade over
+   * **What a plan would mean, before anybody saves it** (P18.11-T5, UI V1 UI-014, UI-016, UI-017): the cascade over
    * the inputs a screen holds, worked out by the one formula a save uses and **written nowhere**.
    *
    * Goal Settings' result card and its commitment move as a slider moves. The screen holds no copy of the cascade
@@ -769,6 +823,7 @@ export class GoalService {
       cascadeBinding: copyOf(binding),
       measured: this.measured(activity, binding),
       savedAt: null,
+      apeAchievedTypedAt: null,
       savedByMembershipId: null,
     };
   }
@@ -829,6 +884,7 @@ export class GoalService {
       cascadeBinding: copyOf(binding),
       measured: this.measured(activity, binding),
       savedAt: doc.savedAt ? doc.savedAt.toISOString() : null,
+      apeAchievedTypedAt: doc.apeAchievedTypedAt ? doc.apeAchievedTypedAt.toISOString() : null,
       savedByMembershipId: doc.savedByMembershipId,
       version: doc.version,
     };

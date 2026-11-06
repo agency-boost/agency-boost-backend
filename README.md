@@ -104,7 +104,7 @@ runbook is [`../docs/03-engineering/deployment-gcp.md`](../docs/03-engineering/d
 A push to `development` deploys staging. A push to `main`, which arrives through an approved release PR
 from `development`, deploys production. There are no per-PR environments. **Release the backend first**,
 then promote the frontend on Vercel (`../frontend/README.md`). Production starts **dark**, with no tenant
-and no seed, until P19-T7 (D11).
+and no seed, until P20-T7 (D11).
 
 All four hosts share the site `agencyboost.id`, so the refresh cookie stays `SameSite=Lax`
 (`COOKIE_CROSS_SITE=false`). Each API accepts its own app's origin and no other, the sibling
@@ -130,7 +130,7 @@ What does:
 - One Mongo and one VM mean one outage takes both down.
 
 This is acceptable only while production holds no real data
-(`../docs/02-specs/nfr/security-and-privacy.md`). **Before real tenants (P19-T7), production moves to a
+(`../docs/02-specs/nfr/security-and-privacy.md`). **Before real tenants (P20-T7), production moves to a
 VM of its own**, the original ADR-0152 shape, or that isolation is built.
 
 ### Memory
@@ -141,7 +141,7 @@ An e2-small has 2 GB. `compose.yml` holds every service to a budget:
 - Caddy: 128m.
 
 `bootstrap.sh` adds 2 GB of swap, which a migration or a seed running beside both APIs leans on.
-Resize to **e2-medium** before P19-T7, or sooner if the staging seed runs out of memory.
+Resize to **e2-medium** before P20-T7, or sooner if the staging seed runs out of memory.
 
 ### What `deploy.yml` does
 
@@ -384,6 +384,35 @@ It prints the provider, the host, the port and the server's answer, never the pa
 server accepted the message. Each provider's recipe, and staying out of spam:
 [`../docs/03-engineering/email-delivery.md`](../docs/03-engineering/email-delivery.md).
 
+### The Prudential proposal fields
+
+The owner's Prudential proposal-fields draft of 3 November 2026 is written into one company's catalogue by the operator
+([ADR-0225](../docs/04-adr/0225-the-company-catalogue-carries-each-products-proposal-fields-and-a-kpm-may-override-the-faq-and-plan-highlights.md)
+§10; `../docs/02-specs/functional/sales-tools.md`, *The proposal's fields*):
+
+```bash
+sudo /opt/agencyboost/bin/import-proposal-fields.sh prod prudential   # node dist/cli/import-proposal-fields.js in api-prod
+```
+
+It matches products by code, writes only fields nobody has edited, never overwrites a Super Admin's, reports what it
+wrote, left unchanged, skipped and could not find, and changes nothing on a second run. Exit 0 when it ran.
+
+### The owner's 23 lessons
+
+The owner's lessons (the superproject's `revisions/2026-11-03/files/training-modules`) are attached to one company's
+template modules by the operator, from a copy of that folder on the VM — **never from the image**
+(`../docs/02-specs/functional/training.md`, *The lessons in the modules*; the runbook's §9.2):
+
+```bash
+sudo /opt/agencyboost/bin/import-lessons.sh prod prudential ~/training-modules --from-kpm 00001 --dry-run
+sudo /opt/agencyboost/bin/import-lessons.sh prod prudential ~/training-modules --from-kpm 00001   # node dist/cli/import-lessons.js in api-prod
+```
+
+`--from-kpm` reads which lesson each module takes from that KPM's own lesson PDFs (production's KaiZen); without it a
+module takes the lesson titled as it is. Each lesson goes first in its modules with its A4 PDF beside it, in a new
+published version of the template's *Training*; no KPM is written. Its last line is one summary, all zeros on a second
+run. The demo seed does the same where it finds the folder beside this repository or in `SEED_LESSONS_DIR`.
+
 ### Backups
 
 - **Snapshots of the data disk `mongodb`**:
@@ -403,7 +432,7 @@ server accepted the message. Each provider's recipe, and staying out of spam:
   `journalctl -t agencyboost-backup -p err`, and read **why** with `journalctl -u agencyboost-backup -n 40`: the
   first shows only that a run failed.
 - Both kinds live in this one project, so **neither survives the project being deleted**. A backups
-  bucket in a separate project, or a locked retention policy, is a P19-T6 option.
+  bucket in a separate project, or a locked retention policy, is a P20-T6 option.
 - Restore drills, Mongo upgrades and secret rotation are in the runbook.
 
 The Vercel function files (`vercel.json`, `api/index.js`, `src/serverless.ts`) are the old staging path
@@ -453,8 +482,8 @@ How the three repositories' workflows fit together is in
 
 ## Status
 
-Every phase through 18.6 has shipped (16 was retired and 10.2 canceled): every role's screens and
+Every phase through 18.3 has shipped (16 was retired and 10.2 canceled): every role's screens and
 endpoints, through the Owner's compliance tree.
-**Phase 18.7, Environments and deployment** ([phase file](../docs/05-delivery/phases/phase-18.7-environments-and-deployment.md)),
-adds the container, the VM, the pipeline and Cloud Storage. Phase 19 hardens it for real customers'
+**Phase 18.4, Environments and deployment** ([phase file](../docs/05-delivery/phases/phase-18.4-environments-and-deployment.md)),
+adds the container, the VM, the pipeline and Cloud Storage. Phase 20 hardens it for real customers'
 data; until then production stays dark.

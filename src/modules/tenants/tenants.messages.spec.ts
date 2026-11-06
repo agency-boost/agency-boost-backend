@@ -8,7 +8,7 @@ const V = R.VALIDATION_FAILED;
 const M = TENANTS_MESSAGES;
 
 /**
- * **Every sentence the tenants module writes, in both languages** (P18.98-T5 AC-2, AC-4): each refusal, each row's
+ * **Every sentence the tenants module writes, in both languages** (P18.10-T5 AC-2, AC-4): each refusal, each row's
  * issue and each of the overview's words, said with its values — a code, a name, a count, a file's own word — kept as
  * they are, and every entry of both catalogues here, both arms of every choice a sentence makes included.
  */
@@ -20,7 +20,30 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
     ['"prudential"', 'Prudential']],
   ['COMPANY_IS_TEMPLATE_LIBRARY.holdsNoOffice', R.COMPANY_IS_TEMPLATE_LIBRARY.holdsNoOffice({ name: 'Template' }),
     ['Template library']],
-  ['TENANT_CODE_TAKEN.taken', R.TENANT_CODE_TAKEN.taken({ code: '0417', company: 'Prudential' }), ['0417', 'Prudential']],
+  // P19-T3 AC-4 (ADR-0191 §4): the office holding the code is named, then its company.
+  ['TENANT_CODE_TAKEN.taken', R.TENANT_CODE_TAKEN.taken({ code: '1001', kpm: 'KPM 1001 · stellar', company: 'Prudential' }),
+    ['1001', 'KPM 1001 · stellar', 'Prudential']],
+  ['TENANT_REQUEST_IN_PROGRESS.beingApproved', R.TENANT_REQUEST_IN_PROGRESS.beingApproved, []],
+  // P19.4-T3 (ADR-0212): the Owner's invitation and a new Owner's agent code.
+  ['TENANT_OWNER_NOT_INVITABLE.noOwner', R.TENANT_OWNER_NOT_INVITABLE.noOwner, ['Ganti pemilik']],
+  ['TENANT_OWNER_NOT_INVITABLE.noEmail', R.TENANT_OWNER_NOT_INVITABLE.noEmail({ name: 'Wulan Kartika' }), ['Wulan Kartika']],
+  ['TENANT_OWNER_NOT_INVITABLE.signedIn', R.TENANT_OWNER_NOT_INVITABLE.signedIn({ name: 'Wulan Kartika' }), ['Wulan Kartika']],
+  ['AGENT_CODE_TAKEN.ownerCode', R.AGENT_CODE_TAKEN.ownerCode({ agentCode: '70045001', company: 'Prudential' }),
+    ['70045001', 'Prudential']],
+  ['TENANT_COMPANY_MISMATCH.askOwnCompany', R.TENANT_COMPANY_MISMATCH.askOwnCompany({ company: 'Manulife' }),
+    ['Manulife']],
+  ['TENANT_COMPANY_MISMATCH.ownerOtherCompany',
+    R.TENANT_COMPANY_MISMATCH.ownerOtherCompany({ name: 'Victor Gunawan', userCompany: 'Manulife', kpmCompany: 'Prudential' }),
+    ['Victor Gunawan', 'Manulife', 'Prudential']],
+  ['TENANT_COMPANY_MISMATCH.ownerNoCompany', R.TENANT_COMPANY_MISMATCH.ownerNoCompany({ name: 'Victor Gunawan' }),
+    ['Victor Gunawan']],
+  ['TENANT_NOT_EMPTY.cannotMove', R.TENANT_NOT_EMPTY.cannotMove({ members: 1 }), ['1']],
+  ['TENANT_NOT_EMPTY.cannotMove', R.TENANT_NOT_EMPTY.cannotMove({ members: 3 }), ['3']],
+  ['TENANT_NOT_EMPTY.cannotDelete', R.TENANT_NOT_EMPTY.cannotDelete({ members: 1, records: 1 }), ['1']],
+  ['TENANT_NOT_EMPTY.cannotDelete', R.TENANT_NOT_EMPTY.cannotDelete({ members: 0, records: 12 }), ['0', '12']],
+  ['VALIDATION_FAILED.chooseCompany', V.chooseCompany, []],
+  ['VALIDATION_FAILED.sameCompany', V.sameCompany, []],
+  ['VALIDATION_FAILED.searchTwoCharacters', V.searchTwoCharacters, []],
   ['PERM_LAST_OWNER.alwaysAnOwner', R.PERM_LAST_OWNER.alwaysAnOwner, ['Owner']],
   ['ORG_AGENT_ALREADY_TAGGED.alreadyInOffice', R.ORG_AGENT_ALREADY_TAGGED.alreadyInOffice, []],
   ['TENANT_REQUEST_ALREADY_OPEN.alreadyAsked', R.TENANT_REQUEST_ALREADY_OPEN.alreadyAsked, []],
@@ -40,6 +63,15 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['ORG_LEVEL_TIER_IN_USE.held', R.ORG_LEVEL_TIER_IN_USE.held({ members: 1, label: 'Unit Manager' }), ['Unit Manager']],
   ['ORG_LEVEL_TIER_IN_USE.held', R.ORG_LEVEL_TIER_IN_USE.held({ members: 2, label: 'Unit Manager' }), ['Unit Manager']],
   ['INTERNAL_ERROR.ladderCannotCount', R.INTERNAL_ERROR.ladderCannotCount, []],
+  // P19.4-T5 (ADR-0213 §2): a rung's delete refused — live, or named by records of each kind, counted.
+  ['INTERNAL_ERROR.ladderCannotSearch', R.INTERNAL_ERROR.ladderCannotSearch, []],
+  ['ORG_LEVEL_IN_USE.stillActive', R.ORG_LEVEL_IN_USE.stillActive({ label: 'Agency Builder' }), ['Agency Builder']],
+  ['ORG_LEVEL_IN_USE.named', R.ORG_LEVEL_IN_USE.named({
+    label: 'AB', references: [{ kind: 'memberships', count: 1 }],
+  }), ['AB', '1']],
+  ['ORG_LEVEL_IN_USE.named', R.ORG_LEVEL_IN_USE.named({
+    label: 'AB', references: [{ kind: 'memberships', count: 1250 }, { kind: 'companyTemplates', count: 2 }],
+  }), ['AB', '2']],
   ['VALIDATION_FAILED.nothingToChange', V.nothingToChange, []],
   ['VALIDATION_FAILED.nameTheOwner', V.nameTheOwner, ['email']],
   ['VALIDATION_FAILED.ownerDeactivated', V.ownerDeactivated, []],
@@ -60,8 +92,9 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.priceWholeRupiah', V.priceWholeRupiah, ['sen']],
   ['VALIDATION_FAILED.leaderLimitRange', V.leaderLimitRange({ min: 1, max: 10_000 }), ['10.000']],
   ['VALIDATION_FAILED.keepActiveOnOrOff', V.keepActiveOnOrOff, []],
-  ['VALIDATION_FAILED.rowsWouldNotImport', V.rowsWouldNotImport({ count: 1 }), ['1']],
-  ['VALIDATION_FAILED.rowsWouldNotImport', V.rowsWouldNotImport({ count: 3 }), ['3']],
+  // P19.3-T4 (ADR-0205): the member import's refusals of a whole file, and each cell's problem, which skips its row.
+  ['VALIDATION_FAILED.fileUnreadable', V.fileUnreadable, []],
+  ['VALIDATION_FAILED.nothingToImport', V.nothingToImport, []],
   // ADR-0184: the roster as a file.
   ['VALIDATION_FAILED.attachRosterFile', V.attachRosterFile, ['`file`', '.xlsx', '.csv']],
   ['VALIDATION_FAILED.rosterNotAForm', V.rosterNotAForm, ['`file`']],
@@ -69,39 +102,43 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['ASSET_TOO_LARGE.rosterTooLarge', R.ASSET_TOO_LARGE.rosterTooLarge({ mb: 1 }), ['1 MB']],
   ['VALIDATION_FAILED.headerOnly', V.headerOnly, []],
   ['VALIDATION_FAILED.fileEmpty', V.fileEmpty, []],
-  ['VALIDATION_FAILED.headerExactly', V.headerExactly({ header: 'fullName,email' }), ['fullName,email']],
-  ['VALIDATION_FAILED.columnCount', V.columnCount({ expected: 9, found: 3 }), ['9', '3']],
+  ['VALIDATION_FAILED.missingColumns', V.missingColumns({ columns: 'Kode agen, Peran' }), ['Kode agen, Peran']],
+  ['VALIDATION_FAILED.unknownColumns', V.unknownColumns({ columns: ['Tangal lahir'], accepted: ['Kode agen', 'Nama'] }),
+    ['"Tangal lahir"', 'Kode agen, Nama']],
+  ['VALIDATION_FAILED.columnTwice', V.columnTwice({ column: 'Nama' }), ['Nama']],
+  ['VALIDATION_FAILED.columnCount', V.columnCount({ expected: 11, found: 3 }), ['11', '3']],
   ['VALIDATION_FAILED.nameRequired', V.nameRequired, []],
+  ['VALIDATION_FAILED.roleRequired', V.roleRequired, []],
   ['VALIDATION_FAILED.notAnEmail', V.notAnEmail({ value: 'not-an-email' }), ['"not-an-email"']],
   ['VALIDATION_FAILED.agentCodeRequired', V.agentCodeRequired, []],
   ['VALIDATION_FAILED.notAnAgentCode', V.notAnAgentCode({ value: 'PRU-1' }), ['"PRU-1"', '3', '32']],
-  ['VALIDATION_FAILED.notARung', V.notARung({ value: 'senior manager' }), ['"senior manager"', 'AB, AAB']],
-  ['VALIDATION_FAILED.birthDateRequired', V.birthDateRequired, []],
-  ['VALIDATION_FAILED.joinMonthRequired', V.joinMonthRequired, []],
-  ['VALIDATION_FAILED.notAWorkStatus', V.notAWorkStatus({ value: 'fulltime' }), ['"fulltime"', 'full-time', 'part-time']],
-  ['VALIDATION_FAILED.workStatusRequired', V.workStatusRequired, ['full-time', 'part-time']],
+  ['VALIDATION_FAILED.notTemplateCode', V.notTemplateCode({ value: '7004510', example: '70012345' }), ['"7004510"', '70012345']],
+  ['VALIDATION_FAILED.ownerNameShort', V.ownerNameShort, ['owner.fullName']],
+  ['VALIDATION_FAILED.ownerPhoneShape', V.ownerPhoneShape, ['owner.phone', '+62']],
+  ['VALIDATION_FAILED.ownerAgentCodeShape', V.ownerAgentCodeShape, ['owner.agentCode']],
+  ['VALIDATION_FAILED.ownerAgentCodeNeeded', V.ownerAgentCodeNeeded, []],
+  ['VALIDATION_FAILED.ownerEmailNeeded', V.ownerEmailNeeded, ['owner.email']],
+  ['VALIDATION_FAILED.notAWorkStatus', V.notAWorkStatus({ value: 'fulltime' }), ['"fulltime"', 'Full-time', 'Part-time']],
   ['VALIDATION_FAILED.notAGender', V.notAGender({ value: 'f' }), ['"f"', 'male', 'female']],
-  ['VALIDATION_FAILED.genderRequired', V.genderRequired, ['male', 'female']],
   ['VALIDATION_FAILED.alreadyOnLine', V.alreadyOnLine({ line: 2 }), ['2']],
-  ['VALIDATION_FAILED.notALadderRung', V.notALadderRung({ role: 'SM', rungs: ['AAB', 'AB', 'AGENT'] }),
-    ['"SM"', 'AAB, AB, AGENT']],
   ['VALIDATION_FAILED.emailHasAccount', V.emailHasAccount, []],
   ['VALIDATION_FAILED.agentCodeHeld', V.agentCodeHeld({ email: 'rina@kpm.test' }), ['rina@kpm.test']],
   ['VALIDATION_FAILED.agentCodeHeldElsewhere', V.agentCodeHeldElsewhere, []],
-  ['VALIDATION_FAILED.leaderNotFound', V.leaderNotFound({ code: '88001' }), ['88001']],
-  ['VALIDATION_FAILED.leaderLoop', V.leaderLoop, []],
-  ['VALIDATION_FAILED.pastLimitForSuperAdmin', V.pastLimitForSuperAdmin({ max: 10, used: 1 }), ['10', 'Agent']],
-  ['VALIDATION_FAILED.pastLimitForSuperAdmin', V.pastLimitForSuperAdmin({ max: 10, used: 9 }), ['10', '9']],
   ['VALIDATION_FAILED.pastLimitForOffice', V.pastLimitForOffice({ max: 10, used: 1 }), ['10', 'AgencyBoost']],
   ['VALIDATION_FAILED.pastLimitForOffice', V.pastLimitForOffice({ max: 10, used: 9 }), ['10', '9']],
+  // ADR-0211 §1 (P19.4-T3 AC-10): *Paket*'s refusal.
+  ['VALIDATION_FAILED.planOneOf', V.planOneOf, ['6']],
 ];
 
 const WORDS: [entry: keyof typeof M, sentence: Message, values: string[]][] = [
   ['unownedTag', M.unownedTag, ['KPM']],
-  ['unownedTitle', M.unownedTitle({ count: 1 }), ['1']],
-  ['unownedTitle', M.unownedTitle({ count: 4 }), ['4']],
-  ['unownedDetail', M.unownedDetail, ['Owner']],
-  ['reviewAction', M.reviewAction, []],
+  ['noOwnerTitle', M.noOwnerTitle({ code: '0602' }), ['0602', 'Owner']],
+  ['noOwnerDetail', M.noOwnerDetail, ['Owner']],
+  ['pendingOwnerDetail', M.pendingOwnerDetail({ name: 'Wulan Kartika' }), ['Wulan Kartika', 'Ganti pemilik']],
+  ['noMembersTag', M.noMembersTag, []],
+  ['noMembersTitle', M.noMembersTitle({ code: '0602' }), ['0602']],
+  ['noMembersDetail', M.noMembersDetail, ['People']],
+  ['openOfficeAction', M.openOfficeAction, ['KPM']],
   ['requestTag', M.requestTag, ['KPM']],
   ['requestTitle', M.requestTitle({ count: 1 }), ['1']],
   ['requestTitle', M.requestTitle({ count: 2 }), ['2']],
@@ -112,7 +149,7 @@ const WORDS: [entry: keyof typeof M, sentence: Message, values: string[]][] = [
   ['unknownOffice', M.unknownOffice, []],
 ];
 
-describe('P18.98-T5 AC-2 the tenants module’s sentences', () => {
+describe('P18.10-T5 AC-2 the tenants module’s sentences', () => {
   it.each([...REFUSALS, ...WORDS])('%s is said in English and in Indonesian, its values kept as they are', (_entry, sentence, values) => {
     const [en, id] = [english(sentence), indonesian(sentence)];
     expect(en).toBeTruthy();
@@ -142,11 +179,15 @@ describe('P18.98-T5 AC-2 the tenants module’s sentences', () => {
       .toBe('P sudah memiliki jenjang dengan kode SM.');
     expect(indonesian(R.CONFIG_RUNG_UNKNOWN.notOnTheLadder({ codes: ['X'], subject: 'section' })))
       .toMatch(/^X bukan jenjang aktif di susunan jenjang perusahaan Anda\. Bagian berlaku /);
-    expect(english(V.rowsWouldNotImport({ count: 1 }))).toMatch(/^1 row would not import\./);
-    expect(english(V.rowsWouldNotImport({ count: 2 }))).toMatch(/^2 rows would not import\./);
+    expect(english(V.unknownColumns({ columns: ['A', 'B'], accepted: ['Nama'] }))).toBe('"A", "B": not a column of the template. Its columns are Nama.');
     expect(english(V.pastLimitForOffice({ max: 3, used: 1 }))).toContain('and 1 is in use already');
-    expect(english(V.pastLimitForSuperAdmin({ max: 3, used: 2 }))).toContain('and 2 are in use already');
-    expect(english(M.unownedTitle({ count: 1 }))).toBe('1 office has no Owner');
+    expect(english(V.pastLimitForOffice({ max: 3, used: 2 }))).toContain('and 2 are in use already');
+    // P19.4-T3 AC-8 (SA R5): one row per KPM, in the report's words.
+    expect(indonesian(M.noOwnerTitle({ code: '0602' }))).toBe('KPM 0602 belum punya Owner');
+    expect(indonesian(M.noMembersTitle({ code: '0602' }))).toBe('KPM 0602 belum punya anggota');
+    // P19.4-T3 AC-7 (A5-2): the setup spec's sentence, then the KPM holding the code (OD-246).
+    expect(indonesian(R.TENANT_CODE_TAKEN.taken({ code: '0417', kpm: 'KPM 0417 · Gading Serpong', company: 'Prudential' })))
+      .toBe('Kode 0417 sudah dipakai KPM lain di Prudential: KPM 0417 · Gading Serpong.');
     expect(english(M.requestTitle({ count: 3 }))).toBe('3 offices are waiting for a decision');
     expect(indonesian(M.requestTitle({ count: 3 }))).toBe('3 KPM menunggu keputusan');
   });

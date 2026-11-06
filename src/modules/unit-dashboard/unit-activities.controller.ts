@@ -10,7 +10,7 @@ import { UnitActivitiesService } from './unit-activities.service';
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
- * **The Unit Dashboard's *Activities* tab** (UI V1, Phase 18.99 T4; UI-001; `functional/unit-dashboard.md`, *UI V1
+ * **The Unit Dashboard's *Activities* tab** (UI V1, Phase 18.11 T4; UI-001; `functional/unit-dashboard.md`, *UI V1
  * (2026-10-30)*): the count per activity type × person for a week or a month, and the ratios of the *Unit* and the
  * *Group* over the last 30 days. Its own controller beside `UnitDashboardController`, on the same prefix and the same
  * grant: a literal path, so it never shadows `GET /unit/dashboard`.

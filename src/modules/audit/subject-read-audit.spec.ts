@@ -93,7 +93,7 @@ describe('SubjectReadAudit (P11-T3 AC-8)', () => {
       })));
     });
 
-    it('P18.6-T1 AC-9 a range per subject: each entry from its own day, still one insert, the reader still skipped', async () => {
+    it('P18.3-T1 AC-9 a range per subject: each entry from its own day, still one insert, the reader still skipped', async () => {
       const { reads, inserts, audit } = seam();
       const starts: Record<string, string> = { 'mem-a': '2026-07-01', 'mem-b': '2026-08-15' };
 
@@ -111,7 +111,7 @@ describe('SubjectReadAudit (P11-T3 AC-8)', () => {
       })));
     });
 
-    it('P18.6-T1 AC-9 the compliance tree’s own surface, `kpm_compliance`, beside the retired `compliance`', async () => {
+    it('P18.3-T1 AC-9 the compliance tree’s own surface, `kpm_compliance`, beside the retired `compliance`', async () => {
       const { reads, inserts } = seam();
       await reads.recordMany(leader, [{ membershipId: 'mem-a' }], 'kpm_compliance', { from: null, to: '2026-09-14' });
       expect(inserts[0][0].after).toEqual({ surface: 'kpm_compliance', from: null, to: '2026-09-14' });

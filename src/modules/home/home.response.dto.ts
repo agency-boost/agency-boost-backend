@@ -109,6 +109,15 @@ class HomeLeaderDto {
   coached7d!: HomeSplitDto;
   @ApiProperty({ type: [HomeTeamPersonDto], description: 'Nobody-reported first, then not today, then the rest.' })
   team!: HomeTeamPersonDto[];
+  @ApiProperty({ minimum: 0, description: '*Tim saya · Anggota tim*: everybody in your Group but you.' })
+  members!: number;
+  @ApiProperty({
+    minimum: 0,
+    description: '*Tim saya · Recruitment pipeline*: `RECRUITMENT_PIPELINE_NOW` over your Group, you included.',
+  })
+  recruitmentPipeline!: number;
+  @ApiProperty({ minimum: 0, description: '*Tim saya · New hires*: your Group’s new hires before a first sale (ADR-0172 §1).' })
+  newHires!: number;
 }
 
 export class HomeDto implements HomeView {
@@ -132,7 +141,12 @@ export class HomeDto implements HomeView {
     description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’.',
   })
   actions!: HomeView['actions'];
-  @ApiProperty({ type: HomeLeaderDto, nullable: true, description: '`null` for somebody who leads nobody.' })
+  @ApiProperty({
+    type: HomeLeaderDto,
+    nullable: true,
+    description: 'Every leader by role — an AB, an AAB, an Owner or an Admin — at zero with no team yet (ADR-0189 §4); '
+      + '`null` for an Agent who leads nobody.',
+  })
   leader!: HomeLeaderDto | null;
 }
 

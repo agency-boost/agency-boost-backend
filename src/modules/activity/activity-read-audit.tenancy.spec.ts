@@ -162,7 +162,9 @@ describe('reading another member’s activity is audited (P10.1-T7, §3.5)', () 
       const spelling = globSync('**/*.ts', { cwd: src })
         .filter((file) => !file.includes('.spec.') && !file.startsWith('seed/'))
         .filter((file) => readFileSync(join(src, file), 'utf8').includes("'activity_log.read_raw'"));
-      expect(spelling).toEqual(['modules/audit/subject-read-audit.ts']);
+      // The audit log's label catalogue names the action as a key to translate it (P19.2-T2, the audit read); it writes
+      // nothing and reads nothing, so the seam is still the only module that spells the action to record it.
+      expect(spelling.sort()).toEqual(['modules/audit/audit-labels.messages.ts', 'modules/audit/subject-read-audit.ts']);
     });
   });
 

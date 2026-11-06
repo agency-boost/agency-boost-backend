@@ -13,7 +13,7 @@ import { COACHING_REFUSALS } from './coaching.messages';
  */
 export const SESSION_LIMITS = { ITEMS_MAX: 50, TIPS_MAX: 50, TEXT_MAX: 500, REASON_MAX: 500, ID_MAX: 64 } as const;
 
-/** `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. Said in both languages (P18.98-T5). */
+/** `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. Said in both languages (P18.10-T5). */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_MESSAGE = field(COACHING_REFUSALS.VALIDATION_FAILED.dateShape);
 

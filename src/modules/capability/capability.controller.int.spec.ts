@@ -142,7 +142,7 @@ describe('skills and stages over HTTP (P5-T8)', () => {
       .send({ part: 'rung', code: 'X', label: 'X' }).expect(400);
   });
 
-  it('P18.98-T5 AC-7 refuses a reused code, and a reorder naming too few, in Indonesian for an Indonesian reader', async () => {
+  it('P18.10-T5 AC-7 refuses a reused code, and a reorder naming too few, in Indonesian for an Indonesian reader', async () => {
     const before = (await request(app.getHttpServer()).get(url).expect(200)).body;
     const taken = before.milestones[0].code as string;
 

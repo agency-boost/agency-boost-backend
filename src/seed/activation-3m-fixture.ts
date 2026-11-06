@@ -10,7 +10,7 @@ import { seedObjectId } from './coaching-fixture';
 import { markNewHires } from './join-dates';
 
 /**
- * **3M activation on `/new-hires`, seeded** (P18.96-T6; ADR-0171 §2, ADR-0173; amended by UI V1, UI-023, the owner's
+ * **3M activation on `/new-hires`, seeded** (P18.8-T6; ADR-0171 §2, ADR-0173; amended by UI V1, UI-023, the owner's
  * D-24; `functional/activation.md`, *3M activation — Seed*): the two cases Agus's people had none of. Every other new
  * hire under him has a first sale — Indah's, Dimas's and Siti's on day 39 to 46, Rina's, Budi's, Novi's and Wahyu's
  * inside their 90 days, all ***Teraktivasi*** since UI V1 — but Yanti, inside her 90 days with none. So two new hires are
@@ -188,7 +188,7 @@ export async function seedActivation3MFixture(deps: Activation3MSeedDeps): Promi
   }
 
   const guide = [
-    '3M ACTIVATION on /new-hires (P18.96-T6; ADR-0171 §2, ADR-0173; UI V1, UI-023)  (from src/seed/activation-3m-fixture.ts)',
+    '3M ACTIVATION on /new-hires (P18.8-T6; ADR-0171 §2, ADR-0173; UI V1, UI-023)  (from src/seed/activation-3m-fixture.ts)',
     `  agus@kpm0417.test    Teraktivasi: Wahyu, Novi, Budi, Rina, Indah, Dimas, Siti · amber: Lukman (day 96: ${closed})`,
     '                       Belum: Yanti, and Tari (marked left on day 35, which decides nothing)',
     '                       Aktivasi 3M 100% (7 of 7 decided; Lukman late and Tari, Yanti in their 90 days in neither part);',

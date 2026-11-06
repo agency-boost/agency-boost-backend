@@ -1,5 +1,5 @@
 /*
- * **No `dotenv` here** (P18.7-T1, ADR-0152). `pnpm migrate` loads `.env` with `-r dotenv/config` before
+ * **No `dotenv` here** (P18.4-T1, ADR-0152). `pnpm migrate` loads `.env` with `-r dotenv/config` before
  * this file runs; the image runs `node dist/migrations/run.js` with the environment the container was
  * given, and `dotenv` is a dev dependency the image does not install. An import here made the compiled
  * runner fail to start in production before it read a single variable.
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const clock = new SystemClock();
 
   /*
-   * **Every migration, every deploy: there is no ledger** (P18.7-T1). Nothing records which ones have run,
+   * **Every migration, every deploy: there is no ledger** (P18.4-T1). Nothing records which ones have run,
    * so `deploy.sh` runs the whole list each time, and the contract is the one `README.md` in this folder
    * states: each is forward-only and idempotent, and a second run changes nothing. A migration that holds
    * only within a single run (0002's collision guard did) breaks the deploy after the one that first ran
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 }
 
 /*
- * **A failed migration is a failed command** (P18.7-T1). `void main()` left a rejection to Node, whose
+ * **A failed migration is a failed command** (P18.4-T1). `void main()` left a rejection to Node, whose
  * exit code depends on its version and flags; `deploy.sh` runs the migrations before it switches traffic
  * and stops on a non-zero exit, so the code has to be non-zero whatever Node does by default.
  */

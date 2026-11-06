@@ -8,7 +8,8 @@ import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { cascadeCounts, computeCascade } from '@/modules/goals/goal-cascade';
 import { GoalRepository } from '@/modules/goals/goal.repository';
 import type { Goal } from '@/modules/goals/goal.schema';
-import { ProductionReadings, type MonthStanding } from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
+import type { MonthStanding } from '@/modules/production/production-readings';
 import { monthlyApeTarget, ytdBeforeThisMonth } from '@/modules/summary/summary-figures';
 import { boundCodes, countOf, defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
@@ -98,8 +99,12 @@ export function monthPaceOf(input: {
     // This month's own year to date is what the goal reads when it is the latest the office holds.
     thisMonth: standing.thisMonth && standing.yearToDate?.month === month
       ? { ytdMinor: standing.yearToDate.minor, monthlyMinor: standing.thisMonth.minor } : null,
-    // The agent's own figure stands in only while the office holds no year to date at all (P9-T6).
-    ownFigureMinor: standing.yearToDate === null ? goal.apeAchievedMinor : null,
+    /*
+     * **The office's figures alone** (ADR-0195; P19.1-T4 AC-12, UI-157 item 5): the roster's status is a leader's
+     * screen, so a member's own estimate fixes no target here. It stood in, while the office held no year to date,
+     * until November 2026 (P9-T6); the member's own Summary still takes it (`summaryPlan`).
+     */
+    ownFigureMinor: null,
   });
   const targetMinor = monthlyApeTarget(planned, before, monthNumber);
   const plan = cascadeCounts(targetMinor, goal);
@@ -149,7 +154,7 @@ export function monthPaceOf(input: {
 export class PaceStatusReadings {
   constructor(
     private readonly goals: GoalRepository,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly activity: ActivityReadings,
     /*
      * ADR-0163 §4: which activity types each cascade role counts — the office's binding, the one reader. Optional,

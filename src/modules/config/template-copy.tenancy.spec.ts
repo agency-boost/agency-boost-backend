@@ -9,7 +9,7 @@ import { AssetRepository } from '@/modules/assets/asset.repository';
 import { AssetService } from '@/modules/assets/asset.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionFrom, provisionOffice } from '../../../test/config-module';
-import { OFFICE_TEMPLATE_KINDS } from './template-defaults';
+import { NAMED_TEMPLATE_KINDS, OFFICE_TEMPLATE_KINDS } from './template-defaults';
 
 const NOW = new Date('2026-10-07T03:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -17,7 +17,7 @@ const ALLIANZ = '66f0000000000000000000c2';
 const KPM = '66f0000000000000000000a1';
 const OTHER_KPM = '66f0000000000000000000a2';
 const NEW_KPM = '66f0000000000000000000a9';
-/** The Super Admin, reading the API's English — the reasons asserted below — as nobody's choice is Indonesian (P18.98-T4). */
+/** The Super Admin, reading the API's English — the reasons asserted below — as nobody's choice is Indonesian (P18.10-T4). */
 const sa = RequestContext.platform('root').withReader(SOURCE_READER);
 const col = (name: string) => mongoose.connection.db!.collection(name);
 
@@ -104,7 +104,7 @@ describe('template copies (P13.2-T7)', () => {
         name: 'Jakarta branches', isDefault: false, status: 'active',
         origin: { kind: 'copy', templateId: prudentialDefault },
       });
-      expect(copy.publishedVersions).toEqual(Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((k) => [k, 1])));
+      expect(copy.publishedVersions).toEqual(Object.fromEntries(NAMED_TEMPLATE_KINDS.map((k) => [k, 1])));
       // The newest published taxonomy, with its codes.
       expect(await read(PRUDENTIAL, 'activity_taxonomy', copy.id))
         .toEqual(await read(PRUDENTIAL, 'activity_taxonomy', prudentialDefault));
@@ -170,7 +170,8 @@ describe('template copies (P13.2-T7)', () => {
       const empty = await wired.namedTemplates.create(sa, PRUDENTIAL, { name: 'Empty', from: 'empty' });
       await wired.namedTemplates.archive(sa, PRUDENTIAL, empty.id);
       const copy = await wired.namedTemplates.create(sa, PRUDENTIAL, { name: 'Revived', from: { templateId: empty.id } });
-      expect(Object.values(copy.publishedVersions)).toEqual(Array(7).fill(null));
+      // Empty but for *Advanced analytics*, which every template holds (ADR-0214 §9) and a copy takes.
+      expect(Object.values(copy.publishedVersions)).toEqual([...Array(8).fill(null), 1, null]); // P19.6-T1: *Tampilan* empty too
       expect(copy.status).toBe('active');
     });
 
@@ -223,7 +224,9 @@ describe('template copies (P13.2-T7)', () => {
         name: 'BSD City settings', isDefault: false, companyId: PRUDENTIAL,
         origin: { kind: 'office', kpmId: KPM, companyId: PRUDENTIAL },
       });
-      expect(Object.values(saved.publishedVersions)).toEqual(Array(7).fill(1));
+      // An office holds no playbook (ADR-0210 §4): the template made from it holds none either. It holds the platform's
+      // *Advanced analytics* version 1, which every template is made with (ADR-0214 §9).
+      expect(Object.values(saved.publishedVersions)).toEqual([...Array(7).fill(1), null, 1, null]); // P19.6-T1: no *Tampilan* from an office
 
       const taxonomy = await read(PRUDENTIAL, 'activity_taxonomy', saved.id);
       expect((taxonomy.types as Payload[]).find((t) => t.code === 'LEADS_CONTACTED')!.label).not.toBe('Unpublished rename');
@@ -299,7 +302,7 @@ describe('template copies (P13.2-T7)', () => {
         'kpms', 'companies', 'companyOrgLevels', 'templates', 'companyTemplates', 'auditLog', 'assets',
         'configSnapshots', 'activationTemplates', 'trainingCategories', 'trainingSkills', 'trainingModules',
         'eventTypes', 'capabilityCatalogs',
-        // P18.9-T2 (ADR-0163): the office's live activity binding, configuration the Super Admin keeps.
+        // P18.6-T2 (ADR-0163): the office's live activity binding, configuration the Super Admin keeps.
         'activityBindings',
       ]);
       expect(touched.has('configSnapshots')).toBe(true);
@@ -415,7 +418,7 @@ describe('template copies (P13.2-T7)', () => {
           kind: 'activation_checklist', code: item,
           reason: `Checklist item ${item} is kept as a manual item: the training module PROSPECT_LIST it linked to is not offered in this office.`,
         }]);
-        // P18.98-T5 AC-4: written for the person who saved — an Indonesian one reads why in Indonesian.
+        // P18.10-T5 AC-4: written for the person who saved — an Indonesian one reads why in Indonesian.
         const inIndonesian = await wired.templateCopies.saveOffice(
           sa.withReader(readerIn('id')), KPM, { name: 'Checklist (ID)', companyId: PRUDENTIAL },
         );
@@ -436,7 +439,7 @@ describe('template copies (P13.2-T7)', () => {
       const rows = await liveRows(PRUDENTIAL);
       await expect(wired.templateCopies.saveOffice(sa, KPM, { name: 'Broken', companyId: PRUDENTIAL }))
         .rejects.toMatchObject({ status: 400, message: expect.stringContaining('KPM 0417’s published settings would produce a broken office') });
-      // P18.98-T5 AC-3: the same refusal, in Indonesian for an Indonesian reader — the source and every problem.
+      // P18.10-T5 AC-3: the same refusal, in Indonesian for an Indonesian reader — the source and every problem.
       const refused = await wired.templateCopies.saveOffice(sa, KPM, { name: 'Broken', companyId: PRUDENTIAL })
         .catch((err: unknown) => err);
       expect(refused).toBeInstanceOf(DomainException);
@@ -625,7 +628,7 @@ describe('template copies (P13.2-T7)', () => {
         companyId: PRUDENTIAL, name: 'From Allianz', isDefault: false,
         origin: { kind: 'import', templateId: allianzDefault, companyId: ALLIANZ },
       });
-      expect(Object.values(imported.publishedVersions)).toEqual(Array(7).fill(1));
+      expect(Object.values(imported.publishedVersions)).toEqual(Array(10).fill(1)); // P19.6-T1: *Tampilan* too
       const content = ((await read(PRUDENTIAL, 'training_taxonomy', imported.id)).modules as Module[])[0].content!;
       expect(content.files[0].storageKey).toMatch(new RegExp(`^dev/company/${PRUDENTIAL}/training/`));
       expect(content.links.map((l) => l.url)).toEqual(['https://portal.test']);

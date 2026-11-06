@@ -11,7 +11,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { CampaignEvaluation, evaluationInput } from './campaign-evaluation';
 import { CampaignRepository } from './campaign.repository';
 
-/** One campaign as Phase 18.6's tree lists it. */
+/** One campaign as Phase 18.3's tree lists it. */
 export interface OfficeCampaign {
   code: string;
   title: string;
@@ -29,7 +29,7 @@ export interface OfficeCampaign {
   final: boolean;
 }
 
-/** A final standing's override, as the tree's *Achieved* cell names it (P18.6-T2 AC-7). */
+/** A final standing's override, as the tree's *Achieved* cell names it (P18.3-T2 AC-7). */
 export interface OfficeStandingOverride {
   status: 'qualified' | 'not_met';
   reason: string;
@@ -47,7 +47,7 @@ export interface OfficeStanding {
   /** `CAMPAIGN_QUALIFICATION_STATUS`: only a chaser is `qualified` (OD-153); a final standing's override applied. */
   status: QualificationStatus;
   final: boolean;
-  /** The override on the stored final standing — who, when and why — or `null` (P18.6-T2 AC-7). */
+  /** The override on the stored final standing — who, when and why — or `null` (P18.3-T2 AC-7). */
   overridden: OfficeStandingOverride | null;
 }
 
@@ -55,10 +55,10 @@ export interface OfficeStanding {
 export interface OfficeStandingsQuery {
   /** Only these campaigns, by code. */
   codes?: readonly string[];
-  /** These memberships instead of every active one — the compliance tree's members (P18.6-T2). */
+  /** These memberships instead of every active one — the compliance tree's members (P18.3-T2). */
   memberIds?: readonly string[];
   /**
-   * D-window, `[start, end)` (P18.6-T1, T2): seasonal campaigns whose dates overlap it — ended ones included — or
+   * D-window, `[start, end)` (P18.3-T1, T2): seasonal campaigns whose dates overlap it — ended ones included — or
    * whose window's last month is the month just before it (last December, for a calendar year: it becomes final
    * inside this one; the exit review's M1), or not started yet whatever their year (round 2), and structural ones
    * running now. Archived campaigns are never read.
@@ -78,7 +78,7 @@ export interface OfficeStandings {
 }
 
 /**
- * **The bulk reader the compliance tree's *Campaigns* category reads** (P18.5-T8 AC-8; P18.6-T2 AC-6, AC-7) — a
+ * **The bulk reader the compliance tree's *Campaigns* category reads** (P18.2-T8 AC-8; P18.3-T2 AC-6, AC-7) — a
  * service port, **no route**.
  *
  * `ofOffice(ctx, { codes?, memberIds?, window? })`: the office's active campaigns — every one, those codes, or
@@ -152,7 +152,7 @@ export class CampaignStandingsReader {
 }
 
 /**
- * **D-window** (P18.6-T1, T2), in the office's zone:
+ * **D-window** (P18.3-T1, T2), in the office's zone:
  *
  * - a **seasonal** campaign whose dates overlap `[start, end)` — upcoming, running or ended — **or whose window's last
  *   month is the month just before `start`** (last December, for a calendar year). Such a window becomes final inside

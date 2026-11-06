@@ -6,7 +6,7 @@ import { HttpStatus } from '@nestjs/common';
 import { VALIDATION_REFUSALS } from './validation.messages';
 
 /**
- * **The pipe's refusals in the reader's language** (P18.98-T5 AC-3).
+ * **The pipe's refusals in the reader's language** (P18.10-T5 AC-3).
  *
  * `ValidationPipe` answers `400 VALIDATION_FAILED` with every violation in `details.violations` and all of them, joined
  * by `; `, as the message. Its words are class-validator's — English, from templates class-validator has kept for

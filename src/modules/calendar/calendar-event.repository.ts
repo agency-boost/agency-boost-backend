@@ -28,7 +28,7 @@ export interface CalendarEntryFields {
  *
  * **No unscoped method, and none is wanted.** The Owner, the Admin and the Super Admin read no
  * calendar (ADR-0094); a support session reads its member's through that member's office, scoped like
- * anybody else (roles §3.13). P19-T1's erasure cascade will add its own, named.
+ * anybody else (roles §3.13). P20-T1's erasure cascade will add its own, named.
  */
 @Injectable()
 export class CalendarEventRepository extends TenantScopedRepository<CalendarEventDocument> {

@@ -93,13 +93,13 @@ describe.each([
     await expect(wired.calendar.readOne(rinaCtx, first.calendar.marked.declinedHuddle)).resolves.toMatchObject({ myAnswer: 'declined' });
   });
 
-  it('P18.95-T8 AC-2 Seed: Agus’s week holds a Zoom address and another meeting address, so Join Zoom and Join meeting can be walked', async () => {
+  it('P18.7-T8 AC-2 Seed: Agus’s week holds a Zoom address and another meeting address, so Join Zoom and Join meeting can be walked', async () => {
     const week = await wired.calendar.read(await as('agus@kpm0417.test'), {});
     expect(named(week, T.standup)!.notes).toBe(T.zoom);
     expect(named(week, T.goalReview)!.notes).toBe(T.goalReviewNotes);
   });
 
-  it('P18.95-T8 AC-2 Seed: Agus compares Sari’s month too — the same projection as her week, her client visit in full', async () => {
+  it('P18.7-T8 AC-2 Seed: Agus compares Sari’s month too — the same projection as her week, her client visit in full', async () => {
     const sari = await memberOf('sari@kpm0417.test');
     const month = await wired.calendar.read(await as('agus@kpm0417.test'), { view: 'month', for: String(sari._id) });
     expect(month.view).toBe('month');

@@ -66,7 +66,7 @@ describe('the coaching session’s rules (P11-T5)', () => {
       expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, SOURCE_READER)).toBe('Follow up with Pak Hendro');
     });
 
-    it('P18.98-T5 AC-4 writes the line for its reader, the lead’s name and a note as typed', () => {
+    it('P18.10-T5 AC-4 writes the line for its reader, the lead’s name and a note as typed', () => {
       expect(leadActionText({ name: 'Pak Hendro', nextActionNote: null }, readerIn('id'))).toBe('Follow up dengan Pak Hendro');
       expect(leadActionText({ name: 'Pak Hendro', nextActionNote: ' Bawa SPAJ. ' }, readerIn('id'))).toBe('Bawa SPAJ.');
       expect(leadActionsOf([lead({ id: 'c', name: 'Ibu Rina', nextActionDate: '2026-09-15' })], readerIn('id')))
@@ -202,7 +202,7 @@ describe('the coaching session’s rules (P11-T5)', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-2 says each rule in Indonesian too, the lead’s name as typed', () => {
+    it('P18.10-T5 AC-2 says each rule in Indonesian too, the lead’s name as typed', () => {
       expect(indonesianAll(FINALIZE_RULES.map((rule) => finalizeSentence({ rule, leadName: 'Pak Fauzan Akbar' })))).toEqual([
         'Tambahkan paling tidak satu action item sebelum memfinalkan.',
         'Isi atau hapus coaching tip yang kosong sebelum memfinalkan.',

@@ -3,7 +3,7 @@ import { ACTIVATION_3M } from '@/domain/constants/joining';
 import { rateOver } from './rate';
 
 /**
- * **`ACTIVATION_3M` and `ACTIVATION_3M_PCT`** (ADR-0171 §2, ADR-0173; P18.96-T6 AC-1, AC-2; amended by UI V1, 2026-10-30,
+ * **`ACTIVATION_3M` and `ACTIVATION_3M_PCT`** (ADR-0171 §2, ADR-0173; P18.8-T6 AC-1, AC-2; amended by UI V1, 2026-10-30,
  * the owner's D-24 – D-26 and UI-023; `metrics-and-definitions.md`, *3M activation*) — whether a new hire made their
  * first sale (*pecah telor*) by day 90 of joining, and the share of the decided ones who did. **Defined here once**:
  * `/new-hires`, the lock written on the membership, the Strategic Leader Forum's *3M new agent %* row and the seed all

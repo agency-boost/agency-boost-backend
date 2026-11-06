@@ -1,17 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import type { Reader } from '@/common/i18n/reader';
 import { render } from '@/common/i18n/sentence';
 import {
   APPROVED_PRODUCT_FIELDS, DOCUMENT_MIME_TYPES, OVERRIDABLE_PRODUCT_FIELDS, PRODUCT_DOCUMENT_FOLDER,
   PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_DOCUMENT_SLOTS,
-  SCRIPT_OVERRIDE_FIELDS, type ProductDocumentSlot, type ScriptReviewState,
+  SCRIPT_OVERRIDE_FIELDS, SCRIPT_WORD_FIELDS, type ProductDocumentSlot, type ProductKind, type ScriptReviewState,
 } from '@/domain/constants';
-import { plainText } from '@/common/validation/plain-text';
+import { plainText, plainTextLines } from '@/common/validation/plain-text';
 import { AssetService } from '@/modules/assets/asset.service';
 import type { SignedUpload } from '@/modules/assets/storage.port';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -19,7 +20,9 @@ import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
 import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
+import { objectionCards } from './product.service';
 import { documentSlotLabel, PRODUCTS_REFUSALS } from './products.messages';
+import { readFaq, readOfficePlanHighlights, type FaqEntry, type PlanHighlight } from './proposal-fields';
 
 /** One value an office reads, and whether the office is the one who chose it. */
 export interface EffectiveField<T> {
@@ -34,6 +37,11 @@ export interface ProductDocumentView {
   /** Null in both halves means nobody has attached anything to this slot yet. */
   storageKey: string | null;
   filename: string | null;
+  /**
+   * What storage holds (ADR-0040): a PDF, or an HTML page drawn only in the sandboxed frame (P19.6-T2, ADR-0217 §4).
+   * `null` for an empty slot, and for a company document recorded before the type was kept.
+   */
+  mimeType: string | null;
   /** Where the file came from — the prototype's own *"Uploaded by KPM"* vs *"From the catalog"*. */
   source: 'kpm' | 'company' | 'none';
 }
@@ -45,8 +53,18 @@ export interface KpmProductView {
   companyName: string;
   channel: string;
   category: string;
+  /**
+   * *Produk dasar* or *Rider* (P19.4-T4 AC-8; ADR-0209 §6). A rider has no switch, words or documents of its own here:
+   * it is listed under each of its bases, and on exactly when one of them is.
+   */
+  kind: ProductKind;
+  /** A rider's base products, by id; `[]` for a base. */
+  attachesTo: string[];
   lifecycle: string;
-  /** False for a product the company has withdrawn, whatever this office once decided. */
+  /**
+   * False for a product the company has withdrawn, whatever this office once decided — and for a rider no base
+   * offers (ADR-0209 §4).
+   */
   sellable: boolean;
   active: EffectiveField<boolean>;
   displayName: EffectiveField<string>;
@@ -55,7 +73,18 @@ export interface KpmProductView {
    * tagline. **The draft, not what agents read** — that is {@link KpmProductService.effectiveScript}.
    */
   description: EffectiveField<string>;
-  script: Record<string, EffectiveField<string | string[]>>;
+  /** The script fields: text, the benefits a list, the objections a list of cards (ADR-0209 §9). */
+  script: Record<string, EffectiveField<unknown>>;
+  /**
+   * **The proposal's *Tanya-jawab*** (P19.7-T1 AC-3; ADR-0225 §5): this office's draft — the whole list — else the
+   * company's. Held for approval with the script, so agents read the approved one (`effectiveProposalWordsOf`).
+   */
+  faq: EffectiveField<FaqEntry[]>;
+  /**
+   * **The company's plans, each with its highlights as this office drafted them**, else the company's (ADR-0225 §5): in
+   * the company's order, so a plan the company no longer has is not here, whatever the office's draft names.
+   */
+  plans: { name: string; popular: boolean; highlights: EffectiveField<PlanHighlight[]> }[];
   /** Whether this office's own script override may reach its agents yet (ADR-0037). */
   reviewState: ScriptReviewState;
   rejectionReason: string | null;
@@ -91,8 +120,8 @@ export interface OfficeShelf {
 export interface EffectiveWords {
   /** `kpm` once the office has approved any of its own words for this product; else `company`. */
   source: 'kpm' | 'company';
-  /** The seven script fields, each the effective value. No markup, ever. */
-  script: Record<string, string | string[]>;
+  /** The script fields, each the effective value — the objections a list of cards. No markup, ever. */
+  script: Record<string, unknown>;
   /** The office's approved description (OD-136), else the company's tagline. */
   description: string;
 }
@@ -113,15 +142,20 @@ export function effectiveWordsOf(
   product: { defaultAttackPlan: unknown; tagline: string },
   approvedOverrides: Record<string, unknown> | null | undefined,
 ): EffectiveWords {
-  const plan = product.defaultAttackPlan as Record<string, string | string[]>;
-  const approved = (approvedOverrides ?? {}) as Record<string, string | string[]>;
+  const plan = product.defaultAttackPlan as Record<string, unknown>;
+  const approved = (approvedOverrides ?? {}) as Record<string, unknown>;
   const has = (field: string) => Object.prototype.hasOwnProperty.call(approved, field);
 
   return {
-    source: APPROVED_PRODUCT_FIELDS.some(has) ? 'kpm' : 'company',
+    // The script's own words: an approved FAQ or plan highlights is the proposal's (`effectiveProposalWordsOf`).
+    source: SCRIPT_WORD_FIELDS.some(has) ? 'kpm' : 'company',
     // Field by field: an office may have approved a rewrite of two fields and left the rest.
     script: Object.fromEntries(
-      SCRIPT_OVERRIDE_FIELDS.map((field) => [field, has(field) ? approved[field] : plan[field]]),
+      SCRIPT_OVERRIDE_FIELDS.map((field) => {
+        const value = has(field) ? approved[field] : plan[field];
+        // The cards as plain objects, whichever half they came from (ADR-0209 §9).
+        return [field, field === 'objections' ? cardsOf(value) : value];
+      }),
     ),
     description: has('description') ? String(approved.description) : product.tagline,
   };
@@ -129,8 +163,17 @@ export function effectiveWordsOf(
 
 const SLOT_KEYS = PRODUCT_DOCUMENT_SLOTS.map((s) => s.key) as readonly string[];
 
-/** The office's settings, refused in both languages (P18.98-T5 AC-3). */
+/** The office's settings, refused in both languages (P18.10-T5 AC-3). */
 const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
+
+/**
+ * **The override fields written in paragraphs** (P19-T6 AC-1): every text field of the script, each a textarea in
+ * the Owner's modal, keeps its line breaks as the company's own does (`ProductService`). The list of benefits is a
+ * list, one line each.
+ */
+const MULTI_LINE_OVERRIDES: ReadonlySet<string> = new Set(
+  SCRIPT_OVERRIDE_FIELDS.filter((field) => field !== 'benefits' && field !== 'objections'),
+);
 
 /**
  * What an office sells, and the words it sells it with (P5-T5, ADR-0033, ADR-0037).
@@ -176,17 +219,16 @@ export class KpmProductService {
       this.configs.find(ctx, {}),
     ]);
     const byProduct = new Map(rows.map((row) => [row.productId, row]));
-    return {
-      companyId,
-      entries: products.map((product) => {
-        const row = byProduct.get(String(product._id)) ?? null;
-        return {
-          product,
-          view: this.view(ctx.reader, product, row),
-          approved: (row?.approvedOverrides ?? undefined) as Record<string, unknown> | undefined,
-        };
-      }),
-    };
+    const entries = products.map((product) => {
+      // A rider holds no row of its own here (ADR-0209 §6): whatever one says, it is not read.
+      const row = product.kind === 'rider' ? null : byProduct.get(String(product._id)) ?? null;
+      return {
+        product,
+        view: this.view(ctx.reader, product, row),
+        approved: (row?.approvedOverrides ?? undefined) as Record<string, unknown> | undefined,
+      };
+    });
+    return { companyId, entries: withRidersFollowingTheirBases(entries) };
   }
 
   /**
@@ -198,7 +240,7 @@ export class KpmProductService {
   async setActive(
     ctx: RequestContext, productId: string, active: boolean | null,
   ): Promise<KpmProductView> {
-    const product = await this.requireProduct(ctx, productId);
+    const product = await this.requireOfficeProduct(ctx, productId);
 
     // A withdrawn product is one the company has taken off the market. An office turning it back
     // on would be selling something its insurer no longer issues.
@@ -225,7 +267,7 @@ export class KpmProductService {
   async saveOverrides(
     ctx: RequestContext, productId: string, body: Record<string, unknown>,
   ): Promise<KpmProductView> {
-    const product = await this.requireProduct(ctx, productId);
+    const product = await this.requireOfficeProduct(ctx, productId);
 
     /*
      * Only the fields the caller sent.
@@ -260,9 +302,33 @@ export class KpmProductService {
       }
       // **Sanitised on write, the same as the company's half** (AC-6). Anybody who can write a
       // script could otherwise write a tag, and the prototype renders scripts with `innerHTML`.
+      // A script field keeps its line breaks as the company's does (P19-T6 AC-1); a name, the
+      // description and each benefit stay one line.
+      // The objections are cards, each side keeping its lines, as the company's are (ADR-0209 §9).
+      if (key === 'objections') {
+        set['overrides.objections'] = objectionCards(value);
+        continue;
+      }
+      /*
+       * **The proposal's FAQ and plan highlights** (P19.7-T1 AC-3; ADR-0225 §2, §5): held to the company's own bounds,
+       * `400 VALIDATION_FAILED` naming the path; a plan the company does not have is refused by name. An empty map of
+       * highlights is no override at all, so it gives them back to the company.
+       */
+      if (key === 'faq') {
+        set['overrides.faq'] = readFaq(value);
+        continue;
+      }
+      if (key === 'planHighlights') {
+        const highlights = readOfficePlanHighlights(value, (product.planOptions ?? []).map((plan) => plan.name));
+        if (Object.keys(highlights).length === 0) {
+          unset['overrides.planHighlights'] = '';
+          unset['approvedOverrides.planHighlights'] = '';
+        } else set['overrides.planHighlights'] = highlights;
+        continue;
+      }
       set[`overrides.${key}`] = Array.isArray(value)
         ? value.map(plainText).filter((line) => line !== '')
-        : plainText(value);
+        : MULTI_LINE_OVERRIDES.has(key) ? plainTextLines(value) : plainText(value);
     }
 
     // Only new words wait for approval: a description given back is in `unset`, not here.
@@ -287,7 +353,9 @@ export class KpmProductService {
     });
     await this.record(ctx, 'kpm_product.override_saved', row, {
       code: product.code, fields: Object.keys(input), reviewState: row.reviewState,
-      ...(Object.keys(unset).length > 0 ? { givenBack: ['description'] } : {}),
+      ...(Object.keys(unset).length > 0
+        ? { givenBack: Object.keys(unset).filter((path) => path.startsWith('overrides.')).map((path) => path.slice('overrides.'.length)) }
+        : {}),
     });
     return this.view(ctx.reader, product, row);
   }
@@ -302,7 +370,7 @@ export class KpmProductService {
   async resetOverride(
     ctx: RequestContext, productId: string, field: string,
   ): Promise<KpmProductView> {
-    const product = await this.requireProduct(ctx, productId);
+    const product = await this.requireOfficeProduct(ctx, productId);
     if (!(OVERRIDABLE_PRODUCT_FIELDS as readonly string[]).includes(field)) {
       throw new InvalidRequestException(SAY.notOverridable({ field }));
     }
@@ -323,8 +391,9 @@ export class KpmProductService {
   }
 
   /**
-   * **A signed upload for an office's own product document** (P17-T9, D-productdocs): a PDF of at most
-   * 25 MB, into the office's own `products` folder, refused before anything is signed otherwise. The key is
+   * **A signed upload for an office's own product document** (P17-T9, D-productdocs): a PDF or an HTML page
+   * (P19.6-T2, ADR-0217 §1) of at most 25 MB, into the office's own `products` folder, refused before anything is
+   * signed otherwise. The key is
    * then attached to a slot by {@link setDocument}, as it always was.
    */
   async requestDocumentUpload(
@@ -340,7 +409,7 @@ export class KpmProductService {
     slot: string,
     file: { storageKey: string; label: string },
   ): Promise<KpmProductView> {
-    const product = await this.requireProduct(ctx, productId);
+    const product = await this.requireOfficeProduct(ctx, productId);
     this.requireSlot(slot);
 
     /*
@@ -348,9 +417,9 @@ export class KpmProductService {
      * what storage reports recorded. P17-T9: this asked for an already-confirmed upload first — the check
      * delivery makes — and no product route confirms one, so an upload signed for this slot could never be
      * attached. Confirming is that check and more: another office's key is still 404, bytes that never came
-     * are still `409 ASSET_NOT_UPLOADED` — and **a file storage holds as anything but a PDF is refused**
-     * (`415 ASSET_TYPE_NOT_ALLOWED`), whatever it was signed as, with nothing attached: a product document
-     * is a PDF (`DOCUMENT_MIME_TYPES`).
+     * are still `409 ASSET_NOT_UPLOADED` — and **a file storage holds as anything but a PDF or an HTML page is
+     * refused** (`415 ASSET_TYPE_NOT_ALLOWED`), whatever it was signed as, with nothing attached: a product document
+     * is a PDF or a page (`DOCUMENT_MIME_TYPES`; P19.6-T2, ADR-0217 §1).
      */
     const stored = await this.assets.confirmUpload(ctx, file.storageKey, DOCUMENT_MIME_TYPES);
 
@@ -383,7 +452,7 @@ export class KpmProductService {
   async resetDocument(
     ctx: RequestContext, productId: string, slot: string,
   ): Promise<KpmProductView> {
-    const product = await this.requireProduct(ctx, productId);
+    const product = await this.requireOfficeProduct(ctx, productId);
     this.requireSlot(slot);
 
     const existing = (await this.configs.findOne(ctx, { productId }))?.documents?.get(slot);
@@ -566,6 +635,24 @@ export class KpmProductService {
 
   // -------------------------------------------------------------------- internals
 
+  /**
+   * **A product this office may write a decision about** (P19.4-T4 AC-8; the riders spec's rule 6; ADR-0209 §6): one
+   * of its own company's — another's is `404` — and not a rider, which is refused `409 PRODUCT_IS_RIDER`: a rider
+   * follows its bases, and its words and documents are the company's.
+   */
+  private async requireOfficeProduct(ctx: RequestContext, productId: string): Promise<ProductDocument> {
+    const product = await this.requireProduct(ctx, productId);
+    if (product.kind === 'rider') {
+      throw new DomainException(
+        ErrorCode.PRODUCT_IS_RIDER,
+        PRODUCTS_REFUSALS.PRODUCT_IS_RIDER.followsItsBase({ name: product.name }),
+        HttpStatus.CONFLICT,
+        { productId: String(product._id) },
+      );
+    }
+    return product;
+  }
+
   /** A product of this office's **own** company. Another company's is a 404, never a 403. */
   private async requireProduct(
     ctx: RequestContext, productId: string,
@@ -634,7 +721,7 @@ export class KpmProductService {
 
   /**
    * The company's product with the office's decisions laid over it, field by field — **each document slot named in
-   * the reader's language** (P18.98-T7), its file's own name as typed.
+   * the reader's language** (P18.10-T7), its file's own name as typed.
    */
   private view(
     reader: Reader, product: ProductDocument, row: KpmProductConfigDocument | null,
@@ -651,8 +738,8 @@ export class KpmProductService {
 
     const script: KpmProductView['script'] = {};
     for (const name of SCRIPT_OVERRIDE_FIELDS) {
-      const companyValue = (plan as unknown as Record<string, string | string[]>)[name];
-      script[name] = field(name, companyValue);
+      const companyValue = (plan as unknown as Record<string, unknown>)[name];
+      script[name] = field(name, name === 'objections' ? cardsOf(companyValue) : companyValue);
     }
 
     return {
@@ -661,34 +748,77 @@ export class KpmProductService {
       companyName: product.name,
       channel: product.channel,
       category: product.category,
+      kind: product.kind ?? 'base',
+      attachesTo: [...(product.attachesTo ?? [])],
       lifecycle: product.lifecycle,
       // A withdrawn product is not sellable whatever this office decided, and no office action
-      // was needed to make that true (AC-5).
-      sellable: product.lifecycle !== 'withdrawn',
+      // was needed to make that true (AC-5). Nor is a rider no base offers (ADR-0209 §4).
+      sellable: product.lifecycle !== 'withdrawn'
+        && (product.kind !== 'rider' || (product.attachesTo ?? []).length > 0),
       active: row?.active === null || row?.active === undefined
         ? { value: product.activeByDefault, overridden: false }
         : { value: row.active, overridden: true },
       displayName: field('displayName', product.name),
       description: field('description', product.tagline),
       script,
+      faq: field('faq', (product.faq ?? []).map(({ question, answer }) => ({ question, answer }))),
+      plans: (product.planOptions ?? []).map((plan) => {
+        const own = (has('planHighlights') ? overrides.planHighlights : {}) as Record<string, PlanHighlight[]>;
+        const mine = Object.prototype.hasOwnProperty.call(own, plan.name);
+        return {
+          name: plan.name,
+          popular: plan.popular,
+          highlights: {
+            value: (mine ? own[plan.name] : plan.highlights).map(({ label, value }) => ({ label, value })),
+            overridden: mine,
+          },
+        };
+      }),
       reviewState: row?.reviewState ?? 'none',
       rejectionReason: row?.rejectionReason ?? null,
       documents: PRODUCT_DOCUMENT_SLOTS.map(({ key }) => {
         const label = render(documentSlotLabel(key), reader);
         const own = row?.documents?.get(key);
         const theirs = product.defaultDocuments?.get(key) as
-          { storageKey?: string; label?: string } | undefined;
+          { storageKey?: string; label?: string; mimeType?: string } | undefined;
         if (own) {
-          return { slot: key, label, storageKey: own.storageKey, filename: own.label, source: 'kpm' as const };
+          return {
+            slot: key, label, storageKey: own.storageKey, filename: own.label, mimeType: own.mimeType ?? null,
+            source: 'kpm' as const,
+          };
         }
         if (theirs?.storageKey) {
           return {
             slot: key, label, storageKey: theirs.storageKey,
-            filename: theirs.label ?? null, source: 'company' as const,
+            filename: theirs.label ?? null, mimeType: theirs.mimeType ?? null, source: 'company' as const,
           };
         }
-        return { slot: key, label, storageKey: null, filename: null, source: 'none' as const };
+        return { slot: key, label, storageKey: null, filename: null, mimeType: null, source: 'none' as const };
       }),
     };
   }
+}
+
+/** The company's cards as plain objects, whatever the document hands back. */
+function cardsOf(value: unknown): { objection: string; answer: string }[] {
+  return ((value as { objection: string; answer: string }[] | undefined) ?? [])
+    .map(({ objection, answer }) => ({ objection, answer }));
+}
+
+/**
+ * **A rider is on for an office exactly when one of its bases is** (P19.4-T4 AC-8; the riders spec's rule 6; ADR-0209
+ * §6): derived on every read from the bases' own decisions, with nothing stored for the rider. A base counts while
+ * the office keeps it on and the company still sells it. Never `overridden`: the office decided nothing about it.
+ */
+export function withRidersFollowingTheirBases<E extends { readonly product: ProductDocument; readonly view: KpmProductView }>(
+  entries: readonly E[],
+): E[] {
+  const onBases = new Set(entries
+    .filter(({ product, view }) => product.kind !== 'rider' && view.active.value && view.sellable)
+    .map(({ product }) => String(product._id)));
+  return entries.map((entry) => {
+    if (entry.product.kind !== 'rider') return entry;
+    const on = entry.view.sellable && entry.view.attachesTo.some((id) => onBases.has(id));
+    return { ...entry, view: { ...entry.view, active: { value: on, overridden: false } } };
+  });
 }

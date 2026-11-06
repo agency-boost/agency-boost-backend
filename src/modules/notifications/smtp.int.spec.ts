@@ -93,7 +93,7 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
   it('delivers a verification mail a person could act on', async () => {
     const { adapter: smtp, config } = adapter();
     const rendered = new EmailTemplateRenderer(config)
-      // Written for an English reader: a recipient who has chosen nothing reads Bahasa Indonesia since P18.98-T4's exit.
+      // Written for an English reader: a recipient who has chosen nothing reads Bahasa Indonesia since P18.10-T4's exit.
       .render(NotificationTemplate.EMAIL_VERIFICATION, {
         token: 'real-token-abc', fullName: 'Rina Wijaya',
       }, readerIn('en'));
@@ -115,7 +115,7 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
     expect(body).toContain('— AgencyBoost');
   });
 
-  it('P18.99-T18 sends multipart text and HTML, the HTML\'s link an anchor, with Reply-To when configured (ADR-0182)', async () => {
+  it('P18.11-T18 sends multipart text and HTML, the HTML\'s link an anchor, with Reply-To when configured (ADR-0182)', async () => {
     /*
      * Against the server, because what a mail client sees is the MIME it receives: one `multipart/alternative` with the
      * text first and the HTML second, and the Reply-To header. A mocked `sendMail` would prove only that the options
@@ -145,7 +145,7 @@ describe('SMTP, end to end (P4-T14 AC-7)', () => {
     expect(body).not.toContain('<b>Wijaya</b></p>');
   });
 
-  it('P18.99-T18 sends no Reply-To when none is configured', async () => {
+  it('P18.11-T18 sends no Reply-To when none is configured', async () => {
     await adapter().adapter.send(
       { userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} },
       { subject: 'S', body: 'B' },

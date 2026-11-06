@@ -8,7 +8,6 @@ import {
   ActivationTemplate, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
 import { FixedClock } from '@/common/clock/clock.port';
-import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { RequestContext } from '@/common/context/request-context';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -48,8 +47,7 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { ProductService } from '@/modules/products/product.service';
-import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
-import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
+import { RecruitmentPlaybook } from '@/modules/recruitment/recruitment-playbook.schema';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -73,7 +71,7 @@ function ctx(opts: { superAdmin?: boolean; owner?: boolean; admin?: boolean; kpm
           isKpmAdmin: opts.admin ?? false, directCount: 0,
         }
       : null,
-  ).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+  ).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
 }
 
 /** Inferring the model type keeps mongoose's generics out of the test's way. */
@@ -152,6 +150,8 @@ describe('TenantService', () => {
         companies as never,
         new AuditService(auditModel as never),
         clock,
+        // P19.4-T4: the offices' rows a delete counts (ADR-0209 §10); not exercised here.
+        {} as never,
       ),
       new CampaignService(
         new CampaignRepository(mongoose.model(Campaign.name, CampaignSchema) as never),
@@ -161,13 +161,6 @@ describe('TenantService', () => {
         clock,
       ),
       namedTemplates,
-      // Phase 17: a company started from the defaults is given the recruitment playbook's words.
-      new RecruitmentPlaybookService(
-        mongoose.model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema) as never,
-        companies as never,
-        users as never,
-        new AuditService(auditModel as never),
-      ),
     );
   });
   afterAll(stopMongo);
@@ -206,7 +199,7 @@ describe('TenantService', () => {
       orgLevelId: 'lvl-fixture', orgLevelCode: 'FIXTURE',
     });
 
-  describe('creating a company (P3.5-T14 AC-7)', () => {
+  describe('creating a company (P3.1-T14 AC-7)', () => {
     it('refuses a duplicate slug by name, rather than falling through to a 500', async () => {
       // `E11000` is neither a DomainException nor an HttpException, so before this it
       // reached the filter's last branch: HTTP 500, INTERNAL_ERROR, logged as unhandled.
@@ -307,15 +300,19 @@ describe('TenantService', () => {
           .countDocuments({ companyId: String(normal._id) })).toBeGreaterThan(0);
       });
 
-      it('P17-T2 AC-3 gives a company started from the defaults version 1 of the recruitment playbook, and a blank one none', async () => {
+      it('P19.4-T5 AC-5 makes no template and no company-level playbook, from the defaults or blank (ADR-0213 §3, ADR-0210 §6)', async () => {
         const normal = await service.createCompany(ctx({ superAdmin: true }), { name: 'Defaults Co', slug: 'defaults-co' });
         const blank = await service.createCompany(ctx({ superAdmin: true }), {
           name: 'Blank Four', slug: 'blank-four', usesPlatformDefaults: false,
         });
 
-        const given = await mongoose.model(RecruitmentPlaybook.name).findOne({ companyId: String(normal._id) }).lean().exec();
-        expect(given).toMatchObject({ version: 1, updatedBy: null, deletedAt: null, body: SEED_RECRUITMENT_PLAYBOOK });
-        expect(await mongoose.model(RecruitmentPlaybook.name).countDocuments({ companyId: String(blank._id) })).toBe(0);
+        for (const company of [normal, blank]) {
+          // No "<Company> template" (B1-8): its page opens on "+ Template baru".
+          expect(await mongoose.model(NamedTemplate.name).countDocuments({ companyId: String(company._id) })).toBe(0);
+          // The playbook is a template section: the company holds none, and migration 0056 knows to leave it so.
+          expect(await mongoose.model(RecruitmentPlaybook.name).countDocuments({ companyId: String(company._id) })).toBe(0);
+          expect(company.playbookInTemplates).toBe(true);
+        }
       });
 
       it('records the choice, because it decides what nine screens show', async () => {
@@ -499,7 +496,7 @@ describe('TenantService', () => {
       expect(kpm.code).toBe('0417');
     });
 
-    it('P3.5-T14 AC-7: names the owner rather than handing back their id', async () => {
+    it('P3.1-T14 AC-7: names the owner rather than handing back their id', async () => {
       // The console rendered `ownerUserId` in a column headed **Owner** — a 24-character
       // hex string where a person's name belongs. The join is the API's to make: no
       // screen can turn a user id into a name.
@@ -522,12 +519,12 @@ describe('TenantService', () => {
       expect(owned.ownerUserId).toEqual(expect.any(String));
     });
 
-    it('P3.5-T14 AC-7: carries the company name, so no screen joins it client-side', async () => {
+    it('P3.1-T14 AC-7: carries the company name, so no screen joins it client-side', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
       expect(kpm.companyName).toBe('Prudential');
     });
 
-    it('P3.5-T14: says an owner is Unknown rather than dropping the office', async () => {
+    it('P3.1-T14: says an owner is Unknown rather than dropping the office', async () => {
       // An owner whose account has gone is a different problem from an office with no
       // owner, and the screen renders them differently — one is a name, the other is a
       // call to act. Hard-deleting a user should not be able to make an office look
@@ -549,7 +546,7 @@ describe('TenantService', () => {
       expect(read.ownerUserId).toBe(String(ghost._id));
     });
 
-    it('P3.5-T14: resolves every owner in one query, not one per office', async () => {
+    it('P3.1-T14: resolves every owner in one query, not one per office', async () => {
       // The roster is unpaginated. A lookup per row turns a list of offices into a list
       // of round trips, and the pattern this copies (kpm-request.service `rows()`)
       // batches for exactly that reason.
@@ -574,7 +571,7 @@ describe('TenantService', () => {
       spy.mockRestore();
     });
 
-    it('P3.5-T14: keeps the internal agent-code sequence off the wire', async () => {
+    it('P3.1-T14: keeps the internal agent-code sequence off the wire', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
       expect(kpm).not.toHaveProperty('counters');
       expect(kpm).not.toHaveProperty('deletedAt');
@@ -602,6 +599,8 @@ describe('TenantService', () => {
         // is the point of ADR-0017 and not something a fixture gets to skip.
         companyId,
         agentCode: nextCode(),
+        // ADR-0190 §4 (P19-T3): only a verified address may own an office.
+        emailVerifiedAt: NOW,
       });
       return String(user._id);
     }
@@ -757,6 +756,14 @@ describe('TenantService', () => {
       expect(back.suspendedReason).toBeNull();
     });
 
+    it('P2-T4 suspends with no reason given as no reason — null, never an empty string or a missing field', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      const s = await service.setStatus(ctx({ superAdmin: true }), String(kpm._id), 'suspended');
+      expect(s).toMatchObject({ status: 'suspended', suspendedReason: null, suspendedAt: NOW.toISOString() });
+      const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.suspended' }).lean<{ after: unknown }>();
+      expect(audit?.after).toEqual({ status: 'suspended', reason: null });
+    });
+
     it('refuses suspension by a KPM Owner', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
       await expect(
@@ -787,9 +794,56 @@ describe('TenantService', () => {
         service.readProfile(ctx({ superAdmin: true }), String(kpm._id)),
       ).resolves.toBeDefined();
     });
+
+    it('P19.4-T3 AC-9 the Super Admin’s read carries Ringkasan’s Admins, read-only, and the members by rung; the Owner’s none', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const admin = await users.create({
+        email: 'admin@ringkasan.test', fullName: 'Maya Kusuma', passwordHash: 'x', companyId, agentCode: nextCode(),
+        lastLoginAt: NOW,
+      });
+      await mongoose.model(Membership.name).create({
+        kpmId: String(kpm._id), userId: String(admin._id), role: 'ab', status: 'active', agentCode: 'RK-1', agentSeq: 1,
+        leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl', orgLevelCode: 'AB',
+        adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null },
+      });
+      const read = await service.readProfile(sa, String(kpm._id)) as { admins: unknown; membersByRole: { code: string; count: number }[] };
+      expect(read.admins).toEqual([{ fullName: 'Maya Kusuma', state: 'active' }]);
+      expect(read.membersByRole.find((r) => r.code === 'AB')?.count).toBe(1);
+      const own = await service.readProfile(ctx({ owner: true, kpmId: String(kpm._id) }), String(kpm._id));
+      expect(own).not.toHaveProperty('admins');
+      expect(own).not.toHaveProperty('membersByRole');
+    });
+
+    it('P19.4-T3 AC-9 each Admin’s state is their invitation’s — Aktif, Diundang, Belum diundang — listed by name', async () => {
+      const sa = ctx({ superAdmin: true });
+      const kpm = await service.createKpm(sa, input());
+      const admin = async (fullName: string, over: { lastLoginAt?: Date; invitedAt?: Date }) => {
+        const user = await users.create({
+          email: `${fullName.split(' ')[0].toLowerCase()}@ringkasan.test`, fullName, passwordHash: 'x', companyId,
+          agentCode: nextCode(), lastLoginAt: over.lastLoginAt ?? null,
+        });
+        await mongoose.model(Membership.name).create({
+          kpmId: String(kpm._id), userId: String(user._id), role: 'ab', status: 'active', agentCode: nextCode(), agentSeq: 1,
+          leaderCode: nextCode(), leaderId: null, ancestorIds: [], depth: 0, orgLevelId: 'lvl', orgLevelCode: 'AB',
+          invitedAt: over.invitedAt ?? null,
+          adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null },
+        });
+      };
+      await admin('Yusuf Pratama', {});
+      await admin('Maya Kusuma', { lastLoginAt: NOW, invitedAt: NOW });
+      await admin('Citra Dewi', { invitedAt: NOW });
+
+      const read = await service.readProfile(sa, String(kpm._id)) as { admins: unknown };
+      expect(read.admins).toEqual([
+        { fullName: 'Citra Dewi', state: 'invited' },
+        { fullName: 'Maya Kusuma', state: 'active' },
+        { fullName: 'Yusuf Pratama', state: 'not_invited' },
+      ]);
+    });
   });
 
-  describe('the platform overview (P3.5-T1)', () => {
+  describe('the platform overview (P3.1-T1)', () => {
     it('AC-2: is Super Admin only, like everything else on this console', async () => {
       await expect(service.platformOverview(ctx({ owner: true }))).rejects.toMatchObject({
         code: 'PERM_DENIED',
@@ -829,42 +883,51 @@ describe('TenantService', () => {
       expect(card.initials).toHaveLength(2);
     });
 
-    it('AC-1: raises an office with no Owner, because only the platform can fix it', async () => {
+    it('AC-1, P19.4-T3 AC-8: raises a KPM with no Owner and one with no member, by its code (SA R5)', async () => {
       const sa = ctx({ superAdmin: true });
-      await service.createKpm(sa, input());
+      const kpm = await service.createKpm(sa, input());
 
       const { attention } = await service.platformOverview(sa);
-      expect(attention).toHaveLength(1);
+      expect(attention).toHaveLength(2);
       expect(attention[0]).toMatchObject({
         tag: 'KPM owner',
         severity: 'structural',
-        title: '1 office has no Owner',
+        title: `KPM ${kpm.code} has no Owner`,
+        href: `/admin/tenants/${kpm._id}`,
       });
+      expect(attention[1]).toMatchObject({ tag: 'Members', title: `KPM ${kpm.code} has no members yet` });
     });
 
-    it('P18.98-T5 AC-4 writes the queue’s rows for the Super Admin reading them, in Indonesian for an Indonesian one', async () => {
+    it('P18.10-T5 AC-4 writes the queue’s rows for the Super Admin reading them, in Indonesian for an Indonesian one', async () => {
       const sa = ctx({ superAdmin: true });
-      await service.createKpm(sa, input());
+      const kpm = await service.createKpm(sa, input());
 
       const { attention } = await service.platformOverview(sa.withReader(readerIn('id')));
       expect(attention).toEqual([{
         tag: 'KPM Owner',
         severity: 'structural',
-        title: '1 KPM belum memiliki Owner',
-        detail: 'Tidak ada yang dapat mengelola KPM sampai Owner ditetapkan, dan hanya platform yang dapat menetapkannya.',
-        href: '/admin/tenants',
-        actionLabel: 'Tinjau',
+        title: `KPM ${kpm.code} belum punya Owner`,
+        detail: 'Tidak ada yang bisa menjalankan KPM sampai ada Owner, dan hanya platform yang bisa menetapkannya.',
+        href: `/admin/tenants/${kpm._id}`,
+        actionLabel: 'Buka KPM',
+      }, {
+        tag: 'Anggota',
+        severity: 'structural',
+        title: `KPM ${kpm.code} belum punya anggota`,
+        detail: 'Belum ada siapa pun selain Owner. Owner atau Admin KPM mengimpor anggota di menu People.',
+        href: `/admin/tenants/${kpm._id}`,
+        actionLabel: 'Buka KPM',
       }]);
     });
 
     it('I-48: raises a pending KPM request, which is the only way to reach that screen', async () => {
-      // P3.5-T2 built the entity, the endpoints and the screen and left this row behind,
+      // P3.1-T2 built the entity, the endpoints and the screen and left this row behind,
       // so `/admin/kpm-requests` was reachable from nowhere — the nav item was still
       // flagged `upcoming`, which renders an anchor with no href.
       const sa = ctx({ superAdmin: true });
       const asker = await users.create({
         email: 'asker@kpm.test', fullName: 'Rangga Wibisono', passwordHash: 'x',
-        companyId, agentCode: nextCode(),
+        companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
       await mongoose.model(KpmRequest.name).create({
         requestedByUserId: String(asker._id), companyId, branchName: 'Surabaya Branch',
@@ -910,15 +973,18 @@ describe('TenantService', () => {
       const kpm = await service.createKpm(sa, input());
       const user = await users.create({
         email: 'o@kpm.test', fullName: 'Owner', passwordHash: 'x',
-        companyId, agentCode: nextCode(),
+        companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
       await service.assignOwner(sa, String(kpm._id), { userId: String(user._id) });
+      // P19.4-T3 AC-8 (SA R5): an Owner alone is not a KPM set up — a member besides the Owner clears the last row.
+      expect((await service.platformOverview(sa)).attention.map((a) => a.title)).toEqual([`KPM ${kpm.code} has no members yet`]);
+      await seedMember(String(kpm._id), 'u-first-agent', 'agent');
 
       expect((await service.platformOverview(sa)).attention).toEqual([]);
     });
   });
 
-  describe('the platform admin roster (P3.5-T12)', () => {
+  describe('the platform admin roster (P3.1-T12)', () => {
     const seedMemberFor = (kpmId: string, userId: string, admin = false) =>
       mongoose.model(Membership.name).create({
         kpmId, userId, role: 'ab', status: 'active', agentCode: `${kpmId.slice(-4)}-${userId}`,
@@ -937,7 +1003,7 @@ describe('TenantService', () => {
       const kpm = await service.createKpm(sa, input());
       const owner = await users.create({
         email: 'o@kpm.test', fullName: 'Wilson Tanoto', passwordHash: 'x',
-        companyId, agentCode: nextCode(),
+        companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
       await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
 
@@ -957,7 +1023,7 @@ describe('TenantService', () => {
       const kpm = await service.createKpm(sa, input());
       const person = await users.create({
         email: 'a@kpm.test', fullName: 'Agus Prasetyo', passwordHash: 'x',
-        companyId, agentCode: nextCode(),
+        companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
       await seedMemberFor(String(kpm._id), String(person._id), true);
 
@@ -971,7 +1037,7 @@ describe('TenantService', () => {
       const kpm = await service.createKpm(sa, input());
       const owner = await users.create({
         email: 'both@kpm.test', fullName: 'Both Roles', passwordHash: 'x',
-        companyId, agentCode: nextCode(),
+        companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
       await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
       await mongoose.model(Membership.name).updateOne(
@@ -993,7 +1059,7 @@ describe('TenantService', () => {
   });
 
   /*
-   * These arrive from a URL. Before the Phase 3.5 exit review they reached a raw model
+   * These arrive from a URL. Before the Phase 3.1 exit review they reached a raw model
    * with no validation, and Mongoose's CastError is neither a DomainException nor an
    * HttpException — so `GET /admin/tenants/nope` was a 500 logged as an unhandled error
    * for somebody who mistyped a character. `TenantScopedRepository` had already answered
@@ -1053,6 +1119,15 @@ describe('TenantService', () => {
       expect(updated.address).toBe('Jl. Raya Serpong');
       expect(updated.contactPhone).toBeNull();
       expect(updated.fiscalYearStartMonth).toBe(4);
+    });
+
+    it('P4-T5 clears an address emptied or sent as null, as it clears an emptied number: a blank is no address', async () => {
+      const id = await anOffice();
+      await service.updateIdentity(ctx({ owner: true, kpmId: id }), id, { address: 'Jl. Raya Serpong', contactPhone: '021 555' });
+      expect((await service.updateIdentity(ctx({ owner: true, kpmId: id }), id, { address: '   ' })).address).toBeNull();
+      await service.updateIdentity(ctx({ owner: true, kpmId: id }), id, { address: 'Jl. Raya Serpong' });
+      const cleared = await service.updateIdentity(ctx({ owner: true, kpmId: id }), id, { address: null, contactPhone: null });
+      expect(cleared).toMatchObject({ address: null, contactPhone: null });
     });
 
     it('changes it for an Admin too, like every page under Settings (ADR-0027)', async () => {

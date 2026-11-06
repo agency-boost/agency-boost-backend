@@ -4,7 +4,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { NOTIFICATION_DRAIN_TIMEOUT_MS, NotificationService } from '@/modules/notifications/notification.service';
 
 /**
- * **How long a shutdown waits for the requests already being answered** (P18.7-T1, ADR-0152), in
+ * **How long a shutdown waits for the requests already being answered** (P18.4-T1, ADR-0152), in
  * milliseconds. With the drain's ten seconds after it, the two fit inside the 30 s a deploy gives the
  * old container before SIGKILL (`stop_grace_period` in `deploy/compose.yml`). A request still open
  * at the end has its connection closed.
@@ -49,7 +49,7 @@ export function stopListening(server: Server | undefined, timeoutMs: number, log
 }
 
 /**
- * **The order a shutdown happens in** (P18.7-T1, ADR-0152), on `app.close()` and so on SIGTERM:
+ * **The order a shutdown happens in** (P18.4-T1, ADR-0152), on `app.close()` and so on SIGTERM:
  *
  * 1. **Stop listening, and let the open requests finish.** Nest closes the HTTP server only after every
  *    `beforeApplicationShutdown` hook has run, so a drain that ran first found nothing in flight. A

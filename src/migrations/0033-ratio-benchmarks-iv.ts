@@ -35,7 +35,7 @@ function matching(move: Move, prefix = ''): Record<string, unknown> {
 }
 
 /**
- * **The client's benchmarks, and *Set appointment to meeting*** (ADR-0160 §2, OD-181; P18.8-T9 AC-2).
+ * **The client's benchmarks, and *Set appointment to meeting*** (ADR-0160 §2, OD-181; P18.5-T9 AC-2).
  *
  * Selling and recruitment success rise from 15% to 30%, leads per activity from 0.30 to 1, and *Meeting per
  * approach* becomes *Set appointment to meeting*, written as a percent, with a benchmark of 50% where it was 1.50.

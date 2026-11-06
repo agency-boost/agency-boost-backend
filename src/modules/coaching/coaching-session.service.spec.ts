@@ -120,10 +120,10 @@ describe('the coaching session’s races (P11-T5)', () => {
   });
 
   /*
-   * **A 1:1 logged after it was held refuses in both languages** (P18.96-T4 AC-3; P18.98-T5 AC-2). The checklist's
+   * **A 1:1 logged after it was held refuses in both languages** (P18.8-T4 AC-3; P18.10-T5 AC-2). The checklist's
    * route checks the date and the note before it asks, so these are the service's own backstop, read here directly.
    */
-  it('P18.98-T5 AC-2 a 1:1 logged for a day to come, with a blank note, or by an Agent is refused in both languages', async () => {
+  it('P18.10-T5 AC-2 a 1:1 logged for a day to come, with a blank note, or by an Agent is refused in both languages', async () => {
     const svc = service({});
     const refusal = async (run: Promise<unknown>): Promise<DomainException> => {
       try {

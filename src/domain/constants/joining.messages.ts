@@ -1,7 +1,7 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **What is wrong with a join date a leader gave, in both languages** (P18.98-T5 AC-3; ADR-0169 §3) — `joinDate`
+ * **What is wrong with a join date a leader gave, in both languages** (P18.10-T5 AC-3; ADR-0169 §3) — `joinDate`
  * named as the API names it, as the shared envelope's other field sentences are.
  */
 export const JOINING_REFUSALS = refusals('domain/joining', {

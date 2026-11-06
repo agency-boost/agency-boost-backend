@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Empty staging's demo data and seed it again (P18.7-T3, ADR-0152, ADR-0155). **Staging only**:
+# Empty staging's demo data and seed it again (P18.4-T3, ADR-0152, ADR-0155). **Staging only**:
 # production starts dark and is never seeded (plan decision D11).
 #
 #   sudo /opt/agencyboost/bin/seed.sh staging <registry>/agencyboost-staging/tools@sha256:<digest>
@@ -8,7 +8,7 @@
 # The seed-staging workflow builds the tools image (the build stage: dev dependencies and the
 # TypeScript source, which the seed runs from) and calls this over IAP SSH. Like deploy.sh, the work
 # runs as a systemd unit of its own (agencyboost-seed-<time>-<pid>), so a dropped session does not
-# leave a seed half-written (P18.7 review, M2).
+# leave a seed half-written (P18.4 review, M2).
 #
 # **Production's database is out of its reach, and that is checked, not assumed.** Staging and
 # production share one MongoDB on this VM (ADR-0155). The seed runs as tools-staging, with staging's

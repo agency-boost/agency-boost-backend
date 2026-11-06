@@ -1,7 +1,7 @@
 import type { Gender, WorkStatus } from '@/domain/constants';
 
 /**
- * **What every seeded person records** (ADR-0158, P18.8-T4): a birth date, a gender, the month they
+ * **What every seeded person records** (ADR-0158, P18.5-T4): a birth date, a gender, the month they
  * joined Prudential and how they work in their office — so the person page's *Personal* card and
  * `/profile` have something to show for everybody a reviewer signs in as, and *Not recorded* is only
  * ever the deliberate case.

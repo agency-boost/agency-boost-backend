@@ -17,7 +17,7 @@ const OLD_8 = 'Melakukan diskusi follow up dari presentasi NBO sebelumnya';
 const NEW_8 = 'Melakukan diskusi follow up dari presentasi recruitment sebelumnya';
 
 /**
- * **ADR-0160 §1 for offices that already exist** (P18.8-T8 AC-3): items 3, 7 and 8 take the client's words in the
+ * **ADR-0160 §1 for offices that already exist** (P18.5-T8 AC-3): items 3, 7 and 8 take the client's words in the
  * working copy, the newest snapshot agents read, and every Company template — only where a seeded wording is still
  * there (both of item 7's), item 7's note going with its seeded label, no version moving, and a second run doing
  * nothing.
@@ -72,7 +72,7 @@ describe('0032 — items 3, 7 and 8 in the client’s words (ADR-0160 §1)', () 
     ]);
   });
 
-  it('P18.8-T8 AC-3 rewrites the seeded words in the working copy, the newest snapshot and the templates, versions kept', async () => {
+  it('P18.5-T8 AC-3 rewrites the seeded words in the working copy, the newest snapshot and the templates, versions kept', async () => {
     // A's three and B's three; C's item 8, whose label is the seed's though its note is an Owner's.
     expect(await up(db())).toEqual({ types: 7, snapshots: 1, templates: 1 });
 
@@ -104,7 +104,7 @@ describe('0032 — items 3, 7 and 8 in the client’s words (ADR-0160 §1)', () 
     expect(templates[1].payload.types[1].description).toBeNull();
   });
 
-  it('P18.8-T8 AC-3 leaves an Owner’s own words alone, and the note beside a label they wrote', async () => {
+  it('P18.5-T8 AC-3 leaves an Owner’s own words alone, and the note beside a label they wrote', async () => {
     await up(db());
     const rows = await db().collection('activityTypes').find({ kpmId: KPM_C }).sort({ displayOrder: 1 }).toArray();
     expect(rows.map((r) => [r.code, r.label, r.description])).toEqual([
@@ -119,12 +119,12 @@ describe('0032 — items 3, 7 and 8 in the client’s words (ADR-0160 §1)', () 
       .toEqual(['Telepon prospek', 'Presentasi BOP']);
   });
 
-  it('P18.8-T8 AC-3 is idempotent: a second run writes nothing', async () => {
+  it('P18.5-T8 AC-3 is idempotent: a second run writes nothing', async () => {
     await up(db());
     expect(await up(db())).toEqual({ types: 0, snapshots: 0, templates: 0 });
   });
 
-  it('P18.8-T8 AC-3 passes over a snapshot published without an activity taxonomy', async () => {
+  it('P18.5-T8 AC-3 passes over a snapshot published without an activity taxonomy', async () => {
     await db().collection('configSnapshots').insertOne({
       kpmId: KPM_B, version: 1, sourceVersion: 1, publishedAt: new Date(), publishedBy: null, deletedAt: null, payload: { ratios: [] },
     });

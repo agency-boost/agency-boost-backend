@@ -1,3 +1,4 @@
+import { AnalyticsEditorDto } from './analytics-template.response.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RATIO_DISPLAY_UNITS, type ActivationLinkKind, type RatioDisplayUnit } from '@/domain/constants';
 import type { ActivityCategoryView, ActivityTypeView } from './activity.service';
@@ -8,15 +9,23 @@ import type { RatioDefinitionView } from './ratio.service';
 import type {
   PublishState, SnapshotEventTypeView, TenantConfigView,
 } from './tenant-config.service';
-import type { PublishAllOutcome, PublishAllView, TemplateView } from './template.service';
+import type { PublishAllOutcome, PublishAllView, PublishedKindView, TemplateView } from './template.service';
 import type { NamedTemplateView, TemplateOfficeView, TemplateSectionState } from './named-template.service';
 import type { DroppedSettingView } from './office-template';
+import type { PushDifference, PushState } from './template-push';
+import type {
+  ApplyKindOutcome, ApplyOfficeResult, ApplyView, KindStanding, TemplateOfficeStandingView,
+} from './template-push.service';
 import type {
   ActivityBindingView, BindableType, OfficeActivityBindingView,
 } from './activity-binding.service';
 import type { SavedOfficeTemplateView } from './template-copy.service';
 import { TEMPLATE_ORIGINS, type TemplateOrigin } from './named-template.schema';
-import { OFFICE_TEMPLATE_KINDS, type OfficeTemplateKind } from './template-defaults';
+import {
+  NAMED_TEMPLATE_KINDS, OFFICE_TEMPLATE_KINDS, type NamedTemplateKind, type OfficeTemplateKind,
+} from './template-defaults';
+import type { RecruitmentPlaybookBody } from '@/domain/constants';
+import { RecruitmentPlaybookLimitsDto, RecruitmentVocabularyDto } from '@/modules/recruitment/recruitment.response.dto';
 import { TEMPLATE_KINDS, type TemplateKind } from './company-template.schema';
 import { TrainingCategoryDto } from '@/modules/training/training.response.dto';
 import { ActivationVersionDto } from '@/modules/activation/activation.response.dto';
@@ -413,7 +422,7 @@ export class TenantConfigDto implements TenantConfigView {
   version!: number;
 }
 
-/** One link kind, as the Company template's *Activation checklist* tab reads it (P18.5-T3 AC-6). */
+/** One link kind, as the Company template's *Activation checklist* tab reads it (P18.2-T3 AC-6). */
 export class ActivationLinkKindDto implements ActivationLinkKind {
   @ApiProperty({ type: String, example: 'Training module' })
   label!: string;
@@ -443,6 +452,39 @@ export class ActivationLinkKindsDto {
   training!: ActivationLinkKindDto;
 }
 
+/** The newest published version of one kind, beside the draft on the read (P19-T6 AC-3). */
+export class PublishedTemplateKindDto implements PublishedKindView {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: Number, description: 'What new offices are seeded from today.' })
+  version!: number;
+
+  @ApiProperty({ type: Number })
+  revision!: number;
+
+  @ApiProperty({ type: Object, description: 'Shape depends on `kind`.' })
+  payload!: Record<string, unknown>;
+
+  @ApiProperty({ type: String, nullable: true })
+  publishedAt!: string | null;
+}
+
+/** What a playbook section's editor reads beside its words (ADR-0210 §1). */
+export class PlaybookEditorDto {
+  @ApiProperty({
+    type: 'object', additionalProperties: true,
+    description: 'The AgencyBoost words, a whole playbook — what *Mulai dari kata-kata AgencyBoost* starts from.',
+  })
+  defaults!: RecruitmentPlaybookBody;
+
+  @ApiProperty({ type: () => RecruitmentVocabularyDto })
+  vocabulary!: RecruitmentVocabularyDto;
+
+  @ApiProperty({ type: () => RecruitmentPlaybookLimitsDto, description: 'The bounds a publish holds each text to.' })
+  limits!: RecruitmentPlaybookLimitsDto;
+}
+
 /** A company's KPM template, as a Super Admin sees it (P4-T8, ADR-0018). */
 export class CompanyTemplateDto implements TemplateView {
   @ApiProperty({ type: String, description: 'Empty when nothing has been saved yet.' })
@@ -465,6 +507,15 @@ export class CompanyTemplateDto implements TemplateView {
 
   @ApiProperty({ type: Number, description: 'The version this is, or will be once published.' })
   version!: number;
+
+  @ApiProperty({
+    type: Number,
+    example: 3,
+    description: 'How many times the kind\'s working copy has been written; `0` for nothing saved. A draft save sends '
+      + 'it back as `expectedRevision`, and one somebody else has moved past is `409 VERSION_CONFLICT`. '
+      + '`version` does not move when a draft is saved.',
+  })
+  revision!: number;
 
   @ApiProperty({ type: String, enum: ['draft', 'published', 'archived'] })
   status!: 'draft' | 'published' | 'archived';
@@ -508,6 +559,31 @@ export class CompanyTemplateDto implements TemplateView {
       + 'reads *Auto* only where `live`. `training` answers for every `training:<moduleCode>` link.',
   })
   linkKinds?: ActivationLinkKindsDto;
+
+  @ApiPropertyOptional({
+    type: () => PublishedTemplateKindDto,
+    nullable: true,
+    description:
+      '**The read only**: the live version beside the draft — the newest published version of the kind, '
+      + 'or `null` where nothing is published. A draft no longer hides what offices are made from today.',
+  })
+  published?: PublishedTemplateKindDto | null;
+
+  @ApiPropertyOptional({
+    type: () => PlaybookEditorDto,
+    description:
+      '`recruitment_playbook` only (ADR-0210 §1): the AgencyBoost words to start the section from, the brief\u2019s '
+      + 'vocabulary the words are keyed by, in the reader\u2019s language, and the bounds a publish holds each text to.',
+  })
+  playbook?: PlaybookEditorDto;
+
+  @ApiPropertyOptional({
+    type: () => AnalyticsEditorDto,
+    description:
+      '`advanced_analytics` only (ADR-0214 §1): the KPMs that read the template, the kodes they hold data for — whose '
+      + 'unit and start month are locked — *Dipakai di*, next month and the bounds a draft is held to.',
+  })
+  analytics?: AnalyticsEditorDto;
 }
 
 /** Whether the office has edited anything since agents last had a copy (P4-T6). */
@@ -587,15 +663,17 @@ export class NamedTemplateDto implements NamedTemplateView {
   @ApiProperty({
     type: Object,
     description:
-      'The newest published version of each of the seven kinds, keyed by kind; null where none is '
-      + 'published, which an office made from this template gets empty.',
+      'The newest published version of each of its kinds, keyed by kind — the seven an office copies and '
+      + '`recruitment_playbook` (ADR-0210 §1); null where none is published, which an office made from this template '
+      + 'gets empty, and its agents meet the playbook-empty state.',
   })
-  publishedVersions!: Record<OfficeTemplateKind, number | null>;
+  publishedVersions!: Record<NamedTemplateKind, number | null>;
 
   @ApiProperty({
     type: Object,
     description:
-      'Each of the seven kinds, keyed by kind: `publishedVersion` (null where none is) and `hasDraft`, a draft '
+      'Each of its kinds, keyed by kind, `recruitment_playbook` among them: `publishedVersion` (null where none is) and '
+      + '`hasDraft`, a draft '
       + 'saved and not published (ADR-0185 §3) — the template card\u2019s sections published and changes waiting, '
       + 'and the checklist\u2019s *Terbit vN*, *Draf* or *Kosong*.',
     example: {
@@ -604,7 +682,7 @@ export class NamedTemplateDto implements NamedTemplateView {
       activation_checklist: { publishedVersion: null, hasDraft: false },
     },
   })
-  sections!: Record<OfficeTemplateKind, TemplateSectionStateDto>;
+  sections!: Record<NamedTemplateKind, TemplateSectionStateDto>;
 
   @ApiProperty({
     type: Number,
@@ -665,8 +743,8 @@ export class SavedOfficeTemplateDto extends NamedTemplateDto implements SavedOff
 
 /** What *Terbitkan semua* did with one kind (ADR-0185 §3). */
 export class PublishAllOutcomeDto {
-  @ApiProperty({ enum: OFFICE_TEMPLATE_KINDS })
-  kind!: OfficeTemplateKind;
+  @ApiProperty({ enum: NAMED_TEMPLATE_KINDS })
+  kind!: NamedTemplateKind;
 
   @ApiProperty({
     enum: ['published', 'skipped', 'refused'],
@@ -720,4 +798,131 @@ export class TemplateOfficeDto implements TemplateOfficeView {
     description: 'Kinds the office has no record of: created before provisioning recorded them, so not known.',
   })
   unrecorded!: OfficeTemplateKind[];
+}
+
+/** One thing a KPM did to a section, against the version it was last given (ADR-0208 §4). */
+export class PushDifferenceDto implements PushDifference {
+  @ApiProperty({ type: String, example: 'types', description: 'The level: `categories`, `types`, `modules`, `statuses`, …' })
+  level!: string;
+
+  @ApiProperty({ type: String, example: 'COFFEE_MEETING', description: 'The item’s code.' })
+  code!: string;
+
+  @ApiProperty({ enum: ['added', 'removed', 'changed'] })
+  change!: PushDifference['change'];
+
+  @ApiPropertyOptional({
+    type: [String], example: ['label'],
+    description: '`changed` only: the fields that differ — `material` for a training module showing the KPM’s own.',
+  })
+  fields?: string[];
+}
+
+/** Where a KPM stands on one section (ADR-0208 §4). */
+export class KindStandingDto implements KindStanding {
+  @ApiProperty({ enum: OFFICE_TEMPLATE_KINDS })
+  kind!: OfficeTemplateKind;
+
+  @ApiProperty({
+    enum: ['unchanged', 'changed', 'current'],
+    description: '`current`: the KPM holds the newest version, and a push skips it. `changed`: it differs from the '
+      + 'version it was last given. `unchanged`: it does not, however old that version.',
+  })
+  state!: PushState;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'The version of this template the KPM was last given.' })
+  givenVersion!: number | null;
+
+  @ApiProperty({ type: Number })
+  newestVersion!: number;
+
+  @ApiProperty({ type: () => PushDifferenceDto, isArray: true, description: '`changed` only; empty otherwise.' })
+  differences!: PushDifference[];
+
+  @ApiPropertyOptional({ type: Number, description: 'Training only: modules showing the KPM’s own material.' })
+  ownMaterialModules?: number;
+}
+
+/**
+ * One office a template answers for — and, with `?kind=`, where it stands on the sections asked about (ADR-0208 §4).
+ * Without `?kind=` the two fields are absent and the row is ADR-0185 §4's, as before.
+ */
+export class TemplateOfficeStandingDto extends TemplateOfficeDto implements Partial<TemplateOfficeStandingView> {
+  @ApiPropertyOptional({
+    enum: ['unchanged', 'changed', 'current'],
+    description: 'With `?kind=` only. `changed` when any section is; `current` when every section is.',
+  })
+  state?: PushState;
+
+  @ApiPropertyOptional({
+    type: () => KindStandingDto, isArray: true,
+    description: 'With `?kind=` only: the sections asked about that the template has published, in publishing order.',
+  })
+  kinds?: KindStanding[];
+}
+
+/** A template's material upload, confirmed against storage: what landed, as storage reports it (ADR-0040). */
+export class ConfirmedUploadDto {
+  @ApiProperty({ type: String })
+  storageKey!: string;
+
+  @ApiProperty({ type: String, example: 'application/pdf' })
+  mimeType!: string;
+
+  @ApiProperty({ type: Number, example: 1048576 })
+  bytes!: number;
+}
+
+/** What a push did for one KPM and one section (ADR-0208 §4). */
+export class ApplyKindOutcomeDto {
+  @ApiProperty({ enum: OFFICE_TEMPLATE_KINDS })
+  kind!: OfficeTemplateKind;
+
+  @ApiProperty({ enum: ['applied', 'skipped', 'refused'] })
+  outcome!: ApplyKindOutcome['outcome'];
+
+  @ApiPropertyOptional({ type: Number, description: '`applied`: the template version the KPM now holds.' })
+  version?: number;
+
+  @ApiPropertyOptional({ type: Boolean, description: '`applied`: the KPM’s own training material was replaced.' })
+  replaced?: boolean;
+
+  @ApiPropertyOptional({ enum: ['current'], description: '`skipped`: the KPM already held the newest version.' })
+  reason?: 'current';
+
+  @ApiPropertyOptional({
+    type: Object,
+    description: '`refused`: the refusal’s `code` and `message`, in the reader’s language.',
+    example: { code: 'TEMPLATE_APPLY_UNCONFIRMED', message: 'KPM 0417 changed this section itself…' },
+  })
+  error?: { code: string; message: string };
+}
+
+export class ApplyOfficeResultDto implements ApplyOfficeResult {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String, example: '0417' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'BSD City Branch' })
+  branchName!: string;
+
+  @ApiProperty({ type: () => ApplyKindOutcomeDto, isArray: true })
+  results!: ApplyKindOutcome[];
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'The KPM had changes of its own waiting to be published, so what was applied waits with them.',
+  })
+  awaitingPublish!: boolean;
+}
+
+/** *Terapkan juga ke KPM yang sudah ada*'s answer (ADR-0208 §4). */
+export class ApplyTemplateResultDto implements ApplyView {
+  @ApiProperty({ type: String })
+  templateId!: string;
+
+  @ApiProperty({ type: () => ApplyOfficeResultDto, isArray: true, description: 'Each KPM, in the order sent.' })
+  offices!: ApplyOfficeResult[];
 }

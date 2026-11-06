@@ -30,6 +30,13 @@ export class TrainingSkill {
   @Prop({ type: String, required: true, trim: true })
   label!: string;
 
+  /**
+   * ***Deskripsi singkat*** (P19.6-T4, ADR-0220 §1; UI-161): the grey line under the name, at most
+   * `TRAINING_TEXT.DESCRIPTION_MAX` characters of plain text, or `null`. The name stays `label`.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  description!: string | null;
+
   /** Within its category. */
   @Prop({ type: Number, required: true })
   displayOrder!: number;

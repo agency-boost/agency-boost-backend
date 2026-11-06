@@ -8,7 +8,7 @@ import type {
   ProgressRowView,
 } from './campaign-agent.service';
 
-/** The card's poster: an emoji and a design-token colour name (P18.5-T7, D-fields). */
+/** The card's poster: an emoji and a design-token colour name (P18.2-T7, D-fields). */
 export class AgentCampaignPosterDto {
   @ApiProperty({ type: String, description: 'One emoji. Decorative: the screen hides it from assistive technology.' })
   emoji!: string;

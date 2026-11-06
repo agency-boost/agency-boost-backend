@@ -1,7 +1,7 @@
 import type { EventPhase } from '@/domain/constants';
 
 /**
- * **Where an event sits relative to now, from its instants** (P5-T6 AC-3; P18.5-T5, F-42 amended).
+ * **Where an event sits relative to now, from its instants** (P5-T6 AC-3; P18.2-T5, F-42 amended).
  *
  * One boundary for everything that turns on it: **an event has ended from `endsAt`** (`now >= endsAt`). Until then it
  * takes an RSVP and a cancellation, and a running event sits with the upcoming ones (*"share feedback once they

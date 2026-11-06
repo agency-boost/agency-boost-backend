@@ -2,9 +2,9 @@ import { Logger } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 
 /**
- * **A sale may have happened** (P18.96-T4 AC-1, AC-2; ADR-0171 §1): a sales lead moved to *Paid and issued*, a closing
+ * **A sale may have happened** (P18.8-T4 AC-1, AC-2; ADR-0171 §1): a sales lead moved to *Paid and issued*, a closing
  * logged from the checklist, or production-file figures written — an import committed, a figure corrected by hand.
- * **Or one the file gave may be gone** (the P18.96 exit review, M4): an import reverted, a month's policies corrected
+ * **Or one the file gave may be gone** (the P18.8 exit review, M4): an import reverted, a month's policies corrected
  * to none or cleared — `FirstSaleService` then recomputes a first sale read from that month, while no 3M result is kept.
  *
  * `LeadService.setStatus` and `logClosing`, `ProductionImportService.commit` and `revert`, and

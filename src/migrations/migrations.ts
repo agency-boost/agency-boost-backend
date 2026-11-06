@@ -45,9 +45,19 @@ import { up as defaultTemplateInIndonesian } from './0046-default-template-in-in
 import { up as leavingDecidesNo3M } from './0047-leaving-decides-no-3m';
 import { up as defaultTemplateMotivation } from './0048-default-template-motivation';
 import { up as calendarAllDay } from './0049-calendar-all-day';
+import { up as kpmCodeUniqueAmongLive } from './0050-kpm-code-unique-among-live';
+import { up as mocApeKey } from './0051-moc-ape-key';
+import { up as kpmSetupRunningOffices } from './0052-kpm-setup-running-offices';
+import { up as productKindAndCurrency } from './0053-product-kind-and-currency';
+import { up as productObjectionCards } from './0054-product-objection-cards';
+import { up as viewAsOnly } from './0055-view-as-only';
+import { up as playbookIntoTemplate } from './0056-playbook-into-template';
+import { up as advancedAnalyticsV1 } from './0057-advanced-analytics-v1';
+import { up as uploadValuesByKode } from './0058-upload-values-by-kode';
+import { up as trainingTitleSplit } from './0059-training-title-split';
 
 /*
- * The list on its own (P18.7-T3), so a spec can run every migration against an empty database without
+ * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
  * importing `run.ts`, which connects and runs as soon as it is loaded.
  */
 /**
@@ -82,46 +92,74 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   ['0025-recruitment-playbook', recruitmentPlaybook],
   ['0026-moc-persistency', mocPersistency],
   ['0027-campaign-kinds', campaignKinds],
-  // There is no 0028: Phase 18.5's contract held it for events, which needed none. 0029 is training's (OD-150).
+  // There is no 0028: Phase 18.2's contract held it for events, which needed none. 0029 is training's (OD-150).
   ['0029-training-sales-subtitle', trainingSalesSubtitle],
-  // P18.8-T1: every rung's leader tier, AB senior and AAB associate, so nobody's class moves (ADR-0156 §1).
+  // P18.5-T1: every rung's leader tier, AB senior and AAB associate, so nobody's class moves (ADR-0156 §1).
   ['0030-org-level-leader-tier', orgLevelLeaderTier],
-  // P18.8-T7: every lead's place in its owner's list, newest registration first (ADR-0161 §1).
+  // P18.5-T7: every lead's place in its owner's list, newest registration first (ADR-0161 §1).
   ['0031-lead-position', leadPosition],
-  // P18.8-T8, T9 (ADR-0160): items 3, 7 and 8 in the client's words; the benchmarks and Set appointment to meeting.
+  // P18.5-T8, T9 (ADR-0160): items 3, 7 and 8 in the client's words; the benchmarks and Set appointment to meeting.
   ['0032-cascade-item-words', cascadeItemWords],
   ['0033-ratio-benchmarks-iv', ratioBenchmarksIv],
-  // P18.9-T2 (ADR-0163): every office and template binds today's three codes, one per cascade role.
+  // P18.6-T2 (ADR-0163): every office and template binds today's three codes, one per cascade role.
   ['0034-activity-bindings', activityBindings],
-  // P18.8-T15 (UI-005): an empty or blank preferred name is stored as none, so the full name shows.
+  // P18.5-T15 (UI-005): an empty or blank preferred name is stored as none, so the full name shows.
   ['0035-blank-preferred-name', blankPreferredName],
-  // P18.9-T3 (ADR-0164): every company an insurer, then the Template company, its Default template and its company data.
+  // P18.6-T3 (ADR-0164): every company an insurer, then the Template company, its Default template and its company data.
   ['0036-company-kind', companyKind],
   ['0037-template-company', templateCompany],
-  // P18.95-T9 (UI-027, ADR-0167 §10): the recruitment pipeline's first status in the sales pipeline's words.
+  // P18.7-T9 (UI-027, ADR-0167 §10): the recruitment pipeline's first status in the sales pipeline's words.
   ['0038-first-status-wording', firstStatusWording],
-  // P18.95-T6 (UI-023): the demo seed's *PRUMapan (nama kami)* given back to the company's name.
+  // P18.7-T6 (UI-023): the demo seed's *PRUMapan (nama kami)* given back to the company's name.
   ['0039-product-name-placeholder', productNamePlaceholder],
-  // P18.96-T2 (ADR-0169 §6): every membership's join date, and new hire or existing agent, from its activation.
+  // P18.8-T2 (ADR-0169 §6): every membership's join date, and new hire or existing agent, from its activation.
   ['0040-membership-join-date', membershipJoinDate],
-  // P18.96-T4 (ADR-0171 §1): every membership's first sale, from its leads and the production file. No 0041: T3, which
+  // P18.8-T4 (ADR-0171 §1): every membership's first sale, from its leads and the production file. No 0041: T3, which
   // held the number, needed no migration — the list runs in order and keeps no ledger, so the gap changes nothing.
   ['0042-membership-first-sale', membershipFirstSale],
-  // P18.97-T1 (ADR-0175 §4, UI-008): the forum's typed targets as rates per unit — "{n} ({r} @ unit)" the rate r, TBD none.
+  // P18.9-T1 (ADR-0175 §4, UI-008): the forum's typed targets as rates per unit — "{n} ({r} @ unit)" the rate r, TBD none.
   ['0043-leader-meeting-target-rates', leaderMeetingTargetRates],
-  // P18.97-T4 (ADR-0176 §9, UI-031): a real line for each default training category, where the seeded words are still held.
-  // No 0044: it was held for P18.97-T1's frozen scorecards, which are read tolerantly and need none (AC-19).
+  // P18.9-T4 (ADR-0176 §9, UI-031): a real line for each default training category, where the seeded words are still held.
+  // No 0044: it was held for P18.9-T1's frozen scorecards, which are read tolerantly and need none (AC-19).
   ['0045-training-category-descriptions', trainingCategoryDescriptions],
-  // P18.98-T7 (OD-238, ADR-0179 §5): the Template company's Default template in Bahasa Indonesia, where it still holds
+  // P18.10-T7 (OD-238, ADR-0179 §5): the Template company's Default template in Bahasa Indonesia, where it still holds
   // the seeded English — never an office's own words, nor any copy made from the template before.
   ['0046-default-template-in-indonesian', defaultTemplateInIndonesian],
-  // P18.99-T3 (UI V1, UI-023; the owner's D-24): a 3M result a leaving kept, inside the 90 days, given back to the sale
+  // P18.11-T3 (UI V1, UI-023; the owner's D-24): a 3M result a leaving kept, inside the 90 days, given back to the sale
   // and the join date — a leaving decides nothing and there is no *Keluar*.
   ['0047-leaving-decides-no-3m', leavingDecidesNo3M],
-  // P18.99-T10 (UI V1, UI-063): the owner's seventh training category, *Motivation*, in the Template company's Default
+  // P18.11-T10 (UI V1, UI-063): the owner's seventh training category, *Motivation*, in the Template company's Default
   // template, after *Team Management* — never an office's own taxonomy, nor any copy made from the template before.
   ['0048-default-template-motivation', defaultTemplateMotivation],
-  // P18.99-T15 (UI V1, UI-104 point 8): every calendar entry says whether it is all-day — an old trip yes, the rest no —
+  // P18.11-T15 (UI V1, UI-104 point 8): every calendar entry says whether it is all-day — an old trip yes, the rest no —
   // now that a trip may have times.
   ['0049-calendar-all-day', calendarAllDay],
+  // P19-T3 (ADR-0191 §3, §5): a KPM code unique among an insurer's live offices, so a deleted office gives its code back.
+  ['0050-kpm-code-unique-among-live', kpmCodeUniqueAmongLive],
+  // P19.3-T1 (ADR-0201 §1, D5): APE is APE — the MOC rules' and their templates' `NET_APE` renamed `MOC_APE`, in place.
+  ['0051-moc-ape-key', mocApeKey],
+  // P19.3-T2 (UI-149, Overview R2): an office already running when the setup card arrived — a member besides its Owner
+  // and an upload — has its four settings pages marked, so it is not asked to set up what it already uses.
+  ['0052-kpm-setup-running-offices', kpmSetupRunningOffices],
+  // P19.4-T4 (ADR-0209 §1, §8): every product a base, attached to nothing, sold in IDR — what it always was.
+  ['0053-product-kind-and-currency', productKindAndCurrency],
+  // P19.4-T4 (ADR-0209 §9, B1-1): every objection pair — a product's and an office's override — as cards, the merged
+  // `1. "…" → …` text split; the original in the audit log.
+  ['0054-product-objection-cards', productObjectionCards],
+  // P19.4-T2 (ADR-0206 §5, UI-151): view-as only looks — every session still open that was started as a setup session
+  // or elevated to write is ended at the deploy, `endReason: 'view_as_only'`, with its `impersonation.ended` entry.
+  ['0055-view-as-only', viewAsOnly],
+  // P19.4-T5 (ADR-0210 §5, B1-11): each company's recruitment playbook into its default template — and each template a
+  // KPM was made from — as a published version continuing the record's, the record marked `migratedTo`.
+  ['0056-playbook-into-template', playbookIntoTemplate],
+  // P19.5-T1 (ADR-0214 §9): every template's *Advanced analytics* version 1, equal to today's seven upload columns, its
+  // agent-code pattern the first every registered code matches; Prudential's §3 seed as a draft.
+  ['0057-advanced-analytics-v1', advancedAnalyticsV1],
+  // P19.5-T2 (ADR-0214 §9): each month row's cells by kode — `values`, `ytdValues` — stamped `templateVersion: 1` and
+  // its KPM's template; the batches' rows re-keyed by kode, the batches given `analyticsConfig` v1. No figure changes.
+  ['0058-upload-values-by-kode', uploadValuesByKode],
+  // P19.6-T4 (ADR-0220 §3, UI-161): every *"Name: description"* skill and module split once at its first colon — the
+  // templates' newest published version as a new one, drafts in place, each KPM's rows a new version with its agents'
+  // copy published again; an unchanged KPM's `seededFrom` moved with its template. A row keyed `description` is done.
+  ['0059-training-title-split', trainingTitleSplit],
 ];

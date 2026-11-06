@@ -6,7 +6,7 @@ import { render } from '@/common/i18n/sentence';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import {
   ASSET_LIMITS, PRODUCT_AGE_BAND_LABELS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORY_LABELS,
-  PRODUCT_RUN_OFF_NOTE, type ProductCategory, type ProductLifecycle,
+  PRODUCT_RUN_OFF_NOTE, type ObjectionCard, type ProductCategory, type ProductCurrency, type ProductLifecycle,
 } from '@/domain/constants';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { planFor, type Brief, type ScoredProduct } from './attack-plan.scorer';
@@ -25,6 +25,8 @@ export interface CatalogCardView {
   channel: string;
   lifecycle: ProductLifecycle;
   needs: string[];
+  /** The currencies it is sold in, `IDR` first — a label on the card (P19.4-T4 AC-12; ADR-0209 §8). */
+  currencies: ProductCurrency[];
 }
 
 export interface CatalogScriptView {
@@ -32,9 +34,15 @@ export interface CatalogScriptView {
   opening: string;
   benefits: string[];
   fullScript: string;
-  objectionTheySay: string;
-  objectionYouSay: string;
+  /** *4 · If they push back*: every card, in order (ADR-0209 §9). */
+  objections: ObjectionCard[];
   nextAction: string;
+}
+
+/** A rider an agent may add to this base: *"Bisa ditambah: …"* (P19.4-T4 AC-5; ADR-0209 §3). */
+export interface CatalogRiderView {
+  code: string;
+  name: string;
 }
 
 /** One product as the drawer reads it (`Overall.html:10200-10386`), and as the plan shows it. */
@@ -49,7 +57,13 @@ export interface CatalogProductView extends CatalogCardView {
   /** Absent without `commission_rates:read`: left out, never sent and hidden (F-15, ADR-0038). */
   commissionSchedule?: { year: number; rate: number }[];
   script: CatalogScriptView;
-  documents: { slot: string; label: string; available: boolean }[];
+  /** `mimeType` is what the slot holds — `text/html` is drawn only in the sandboxed frame (P19.6-T2, ADR-0217 §4). */
+  documents: { slot: string; label: string; available: boolean; mimeType: string | null }[];
+  /**
+   * *"Bisa ditambah: …"* — the riders on sale that attach to this base, in the company's order (ADR-0209 §3). Empty
+   * for a base with none. A rider is never a product of its own here.
+   */
+  riders: CatalogRiderView[];
 }
 
 export interface AttackPlanView {
@@ -70,6 +84,8 @@ export interface AttackPlanView {
 interface ShelfItem extends OfficeShelfEntry {
   /** The code of the company's product that replaced it, kept on here or not: a fact about the company. */
   readonly successorCode: string | null;
+  /** The riders on sale attached to this base (ADR-0209 §3). */
+  readonly riders: readonly CatalogRiderView[];
 }
 
 /** The office's shelf as the field reads see it: what it keeps on, and the one read it came from. */
@@ -78,9 +94,8 @@ interface FieldShelf {
   readonly items: readonly ShelfItem[];
 }
 
-const SCRIPT_KEYS = [
-  'goodFit', 'opening', 'benefits', 'fullScript', 'objectionTheySay', 'objectionYouSay', 'nextAction',
-] as const satisfies readonly (keyof CatalogScriptView)[];
+/** The script's text fields: each one string, in the reader's words where it is still the seed's. */
+type TextKey = 'goodFit' | 'opening' | 'fullScript' | 'nextAction';
 
 /**
  * **The field reads of the office's products** — the Product Catalog, its drawer, a document's link and
@@ -174,14 +189,27 @@ export class ProductCatalogService {
 
     const read = await this.offices.shelfOf(ctx);
     const byId = new Map(read.entries.map((entry) => [String(entry.product._id), entry.product]));
+    /*
+     * **A rider is never a product of its own here** (P19.4-T4 AC-5; the riders spec's rule 3; ADR-0209 §3): not in
+     * the list, its filters, the needs finder or the plan's pick, and its own address is `404`. It is met inside a
+     * base it attaches to, as *"Bisa ditambah"* — while it is on sale. A rider no base offers is seen nowhere.
+     */
+    const riders = read.entries.filter(({ product }) => product.kind === 'rider' && product.lifecycle === 'active');
     const items = read.entries
       // Kept on: the office's decision, else the company's default — and never once the company
       // has withdrawn it, whatever the office decided (D-shelf).
-      .filter(({ view }) => view.active.value && view.sellable)
+      .filter(({ product, view }) => product.kind !== 'rider' && view.active.value && view.sellable)
       .map((entry) => {
         const { replacedByProductId } = entry.product;
         const successor = replacedByProductId ? byId.get(replacedByProductId) : undefined;
-        return { ...entry, successorCode: successor?.code ?? null };
+        const id = String(entry.product._id);
+        return {
+          ...entry,
+          successorCode: successor?.code ?? null,
+          riders: riders
+            .filter(({ product }) => (product.attachesTo ?? []).includes(id))
+            .map(({ product, view }) => ({ code: product.code, name: view.displayName.value })),
+        };
       });
     return { read, items };
   }
@@ -211,6 +239,7 @@ export class ProductCatalogService {
       channel: product.channel,
       lifecycle: product.lifecycle,
       needs: [...product.primaryNeeds],
+      currencies: [...(product.currencies ?? ['IDR'])],
     };
   }
 
@@ -219,10 +248,18 @@ export class ProductCatalogService {
     const words = effectiveWordsOf(product, approved);
     // The platform's seed words in the reader's language, a company's or an office's as typed (UI V1, UI-107).
     const say = productWordsFor(product.code, ctx.reader);
-    const script = Object.fromEntries(SCRIPT_KEYS.map((key) => {
-      const value = words.script[key];
-      return [key, key === 'benefits' ? ((value as string[] | undefined) ?? []).map(say) : say(String(value ?? ''))];
-    })) as unknown as CatalogScriptView;
+    const text = (key: TextKey) => say(String(words.script[key] ?? ''));
+    // In the modal's order: 0 to 5.
+    const script: CatalogScriptView = {
+      goodFit: text('goodFit'),
+      opening: text('opening'),
+      benefits: ((words.script.benefits as string[] | undefined) ?? []).map(say),
+      fullScript: text('fullScript'),
+      // Every card, each side in the reader's words where it is still the platform's seed (ADR-0209 §9).
+      objections: ((words.script.objections as ObjectionCard[] | undefined) ?? [])
+        .map(({ objection, answer }) => ({ objection: say(objection), answer: say(answer) })),
+      nextAction: text('nextAction'),
+    };
 
     return {
       ...this.card(ctx, item),
@@ -230,12 +267,12 @@ export class ProductCatalogService {
       differentiator: say(product.differentiator),
       bestFit: say(product.bestFor),
       ageBands: product.eligibleAgeBands.map((band) => PRODUCT_AGE_BAND_LABELS[band] ?? String(band)),
-      // *Lump-sum* is a word, written for the reader (P18.98-T7); a range of sums reads the same in both.
+      // *Lump-sum* is a word, written for the reader (P18.10-T7); a range of sums reads the same in both.
       budgetBands: product.eligibleBudgetBands.map((band) => {
         const words = budgetBandWords(band);
         return words ? render(words, ctx.reader) : (PRODUCT_BUDGET_BAND_LABELS[band] ?? String(band));
       }),
-      // Written for the reader (P18.98-T5 AC-4): the drawer's note in their language.
+      // Written for the reader (P18.10-T5 AC-4): the drawer's note in their language.
       runOffNote: product.lifecycle === 'closed_to_new_business' ? render(PRODUCT_RUN_OFF_NOTE, ctx.reader) : null,
       successorCode: item.successorCode,
       // One schedule per product, every agent's (OD-135), so any scope of the grant reads it.
@@ -247,7 +284,10 @@ export class ProductCatalogService {
         }
         : {}),
       script,
-      documents: view.documents.map((d) => ({ slot: d.slot, label: d.label, available: d.source !== 'none' })),
+      documents: view.documents.map((d) => ({
+        slot: d.slot, label: d.label, available: d.source !== 'none', mimeType: d.mimeType,
+      })),
+      riders: [...item.riders],
     };
   }
 

@@ -17,7 +17,7 @@ import {
  * The tenant-scoped collections that were still reached with `@InjectModel` and a
  * hand-written filter (P4-T11).
  *
- * `raw-writes.tenancy.spec.ts` has held the **writes** since P3.5-T15 — it fails on any
+ * `raw-writes.tenancy.spec.ts` has held the **writes** since P3.1-T15 — it fails on any
  * write to a tenant-scoped model whose filter omits `kpmId`. That is a backstop, not a
  * structure: it can only see the shape of a call, so a read has nothing for it to check
  * and a correct-looking filter still has to be written by hand every time.
@@ -180,7 +180,7 @@ export class LeaderLimitRequestRepository extends TenantScopedRepository<LeaderL
 }
 
 /**
- * **A leader's invites** (ADR-0170 §2, P18.96-T3 AC-2): tenant-scoped like every office record — a leader lists,
+ * **A leader's invites** (ADR-0170 §2, P18.8-T3 AC-2): tenant-scoped like every office record — a leader lists,
  * resends and cancels their own, and a link is opened in the office its token names, through the inherited methods.
  *
  * One read goes past the office, by name: whether an agent code already has an invite waiting **anywhere in the
@@ -206,7 +206,7 @@ export class MemberInviteRepository extends TenantScopedRepository<MemberInviteD
 }
 
 /**
- * **Transfer requests** (ADR-0170 §4, P18.96-T3 AC-3): an office's asks to move a member to another leader. Read,
+ * **Transfer requests** (ADR-0170 §4, P18.8-T3 AC-3): an office's asks to move a member to another leader. Read,
  * created and decided inside the office, through the inherited scoped methods, and nothing else.
  */
 @Injectable()

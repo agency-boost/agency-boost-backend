@@ -5,8 +5,11 @@ import { configModule } from '../../../test/config-module';
 import { Goal } from '../goals/goal.schema';
 import { MonthlyAgentData } from './monthly-agent-data.schema';
 import { ProductionMonth } from './production-month.schema';
-import { VALUE_COLUMNS } from './production-preview';
 import { TEMPLATE_HEADER_V1 } from './production-template';
+
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them. */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 
 // 09:00 on 27 September in Jakarta: September is open.
 const NOW = new Date('2026-09-27T02:00:00Z');
@@ -51,7 +54,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
     return wired.productionImport.commit(ctx, month, String(p.revision), f, replace);
   };
   const correct = async (over: Record<string, unknown>) => wired.productionCorrections.correct(A, {
-    month: '2026-09', membershipId: RINA, metric: 'ape', cadence: 'ytd', value: rpM(120),
+    month: '2026-09', membershipId: RINA, kode: 'APE', ytd: false, value: rpM(120),
     revision: (await wired.productionMonths.state(A, '2026-09')).revision, reason: 'Carrier restated it', ...over,
   } as never);
   const plan = (over: Record<string, unknown> = {}) => ({
@@ -82,14 +85,18 @@ describe('three writers, one visible answer (P9-T6)', () => {
     ] as never);
   });
 
+  /*
+   * *Since P19.5-T2* (R4, ADR-0214 §10) the year to date a goal reads is **the sum of the months held**, never the file's
+   * own YTD column — which a file still carries and the preview notes as no longer used. Each walk below writes months.
+   */
   describe('AC-2, AC-3 — the precedence the spec states, walked end to end', () => {
     it('the agent’s own → the carrier’s → a correction → kept through a re-upload → replaced when ticked → back on revert', async () => {
       // 1. Before any file: the agent's own figure, and it says so.
       await wired.goals.save(A, plan());
       expect((await goal()).achieved).toEqual({ minor: rpM(50), provenance: 'self_reported', month: null });
 
-      // 2. The carrier's file arrives: the goal reads it, and the agent's figure is kept, not overwritten.
-      await importFile(file(['PRU-001', { 'ape.monthly': '10', 'ape.ytd': '100' }]));
+      // 2. The carrier's file arrives: the goal reads the months' sum, and the agent's figure is kept, not overwritten.
+      await importFile(file(['PRU-001', { 'ape.monthly': '100', 'ape.ytd': '100' }]));
       let g = await goal();
       expect(g.achieved).toEqual({ minor: rpM(100), provenance: 'imported', month: '2026-09' });
       expect(g.apeAchievedMinor).toBe(rpM(50));
@@ -100,12 +107,12 @@ describe('three writers, one visible answer (P9-T6)', () => {
       expect((await goal()).achieved).toEqual({ minor: rpM(120), provenance: 'corrected', month: '2026-09' });
 
       // 4. The same file again, unticked: the correction stands (ADR-0053).
-      const kept = await importFile(file(['PRU-001', { 'ape.monthly': '10', 'ape.ytd': '100', 'fyp.monthly': '1' }]));
+      const kept = await importFile(file(['PRU-001', { 'ape.monthly': '100', 'fyp.monthly': '1' }]));
       expect(kept.batch).toMatchObject({ keptCorrectionCount: 1 });
       expect((await goal()).achieved).toMatchObject({ minor: rpM(120), provenance: 'corrected' });
 
       // 5. The carrier restates, and the importer ticks it: the carrier's figure wins.
-      const replaced = await importFile(file(['PRU-001', { 'ape.ytd': '130' }]), `${RINA}:apeYtd`);
+      const replaced = await importFile(file(['PRU-001', { 'ape.monthly': '130' }]), `${RINA}:APE`);
       expect((await goal()).achieved).toEqual({ minor: rpM(130), provenance: 'imported', month: '2026-09' });
 
       // 6. Reverting that import brings the correction back, whole.
@@ -114,13 +121,13 @@ describe('three writers, one visible answer (P9-T6)', () => {
 
       // And nothing ever wrote the agent's own figure into production, or over it.
       expect((await goal()).apeAchievedMinor).toBe(rpM(50));
-      expect(await db().collection('monthlyAgentData').countDocuments({ 'apeYtd.provenance': 'self_reported' })).toBe(0);
+      expect(await db().collection('monthlyAgentData').countDocuments({ 'values.APE.provenance': 'self_reported' })).toBe(0);
     });
   });
 
   describe('AC-3 — the goal screen reads the carrier’s figure once there is one', () => {
     it('agrees the plan against it: the snapshot is computed from the figure the screen showed', async () => {
-      await importFile(file(['PRU-001', { 'ape.ytd': '400' }]));
+      await importFile(file(['PRU-001', { 'ape.monthly': '400' }]));
       const saved = await wired.goals.save(A, plan({ apeAchievedMinor: rpM(50) }));
       // 500 - 400 = 100 left over 3.2 months, not 450.
       expect(saved.achieved.provenance).toBe('imported');
@@ -129,32 +136,32 @@ describe('three writers, one visible answer (P9-T6)', () => {
     });
 
     it('opens a first-time plan on the carrier’s figure too', async () => {
-      await importFile(file(['PRU-001', { 'ape.ytd': '200' }]));
+      await importFile(file(['PRU-001', { 'ape.monthly': '200' }]));
       const offered = await wired.goals.readOrDefaults(A, '2026');
       expect(offered.achieved).toEqual({ minor: rpM(200), provenance: 'imported', month: '2026-09' });
       expect(offered.apeAchievedMinor).toBe(0);
     });
 
-    it('reads the latest month with a year-to-date figure, in the plan’s own year', async () => {
+    it('P19.5-T2 AC-7 reads the sum of the months held in the plan’s own year, never a file’s own YTD', async () => {
       await wired.productionMonths.reopen(A, '2026-08');
-      await importFile(file(['PRU-001', { 'ape.ytd': '80' }]), undefined, '2026-08');
+      await importFile(file(['PRU-001', { 'ape.monthly': '80', 'ape.ytd': '999' }]), undefined, '2026-08');
       await importFile(file(['PRU-001', { 'ape.monthly': '5' }]));
-      // September has no YTD, so August answers.
-      expect(await wired.productionReadings.apeYearToDate(A, RINA, '2026')).toEqual({ minor: rpM(80), provenance: 'imported', month: '2026-08', correctedBy: null, correctedAt: null });
+      expect(await wired.productionReadings.apeYearToDate(A, RINA, '2026')).toEqual({ minor: rpM(85), provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null });
       expect(await wired.productionReadings.apeYearToDate(A, RINA, '2025')).toBeNull();
       expect(await wired.productionReadings.apeYearToDate(A, RINA, 'soon')).toBeNull();
     });
 
-    it('falls back past a year-to-date figure somebody emptied by hand', async () => {
+    it('leaves out a month somebody emptied by hand — and says the sum was corrected', async () => {
       await wired.productionMonths.reopen(A, '2026-08');
-      await importFile(file(['PRU-001', { 'ape.ytd': '80' }]), undefined, '2026-08');
-      await importFile(file(['PRU-001', { 'ape.ytd': '90' }]));
+      await importFile(file(['PRU-001', { 'ape.monthly': '80' }]), undefined, '2026-08');
+      await importFile(file(['PRU-001', { 'ape.monthly': '90' }]));
       await correct({ value: null, reason: 'Belongs to October' });
-      expect((await wired.productionReadings.apeYearToDate(A, RINA, '2026'))!.month).toBe('2026-08');
+      const held = await wired.productionReadings.apeYearToDate(A, RINA, '2026');
+      expect(held).toMatchObject({ minor: rpM(80), month: '2026-08', provenance: 'imported' });
     });
 
     it('never reads another office’s production, though both offices have a PRU-001', async () => {
-      await importFile(file(['PRU-001', { 'ape.ytd': '900' }]), undefined, '2026-09', B);
+      await importFile(file(['PRU-001', { 'ape.monthly': '900' }]), undefined, '2026-09', B);
       await wired.goals.save(A, plan());
       expect((await goal()).achieved.provenance).toBe('self_reported');
     });
@@ -163,20 +170,21 @@ describe('three writers, one visible answer (P9-T6)', () => {
   describe('AC-1, AC-4 — every month cell says whose it is, with no second request', () => {
     it('names who corrected a figure, when and why — and keeps a figure emptied by hand visible as a decision', async () => {
       await importFile(file(['PRU-001', { 'ape.monthly': '10', 'fyp.monthly': '5' }]));
-      await correct({ cadence: 'monthly', value: rpM(12) });
-      await correct({ metric: 'fyp', cadence: 'monthly', value: null, reason: 'Belongs to October' });
+      await correct({ value: rpM(12) });
+      await correct({ kode: 'FYP', value: null, reason: 'Belongs to October' });
 
       const view = await wired.production.readMonth(A, '2026-09');
       const rina = view.rows.find((r) => r.membershipId === RINA)!;
-      expect(rina.metrics.ape.monthly).toEqual({
+      expect(rina.values.APE).toEqual({
         value: rpM(12), provenance: 'corrected',
-        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Carrier restated it' },
+        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Carrier restated it' }, outOfBounds: null,
       });
-      expect(rina.metrics.fyp.monthly).toEqual({
+      expect(rina.values.FYP).toEqual({
         value: null, provenance: 'corrected',
-        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Belongs to October' },
+        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Belongs to October' }, outOfBounds: null,
       });
-      expect(rina.metrics.ape.ytd).toEqual({ value: null, provenance: null, correction: null });
+      // The year to date is the month's, corrected — and says who (R4).
+      expect(rina.ytd.APE).toMatchObject({ value: rpM(12), provenance: 'corrected', calculated: true, correction: { by: 'Rina Wijaya' } });
       // An emptied figure is still nothing held: it does not count as a member with figures.
       expect(view.withData).toBe(1);
     });

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# One-time setup of the AgencyBoost VM, which serves staging and production both (P18.7-T3, ADR-0152,
+# One-time setup of the AgencyBoost VM, which serves staging and production both (P18.4-T3, ADR-0152,
 # ADR-0155). Ubuntu 24.04 or 26.04, or Debian 12. Idempotent: run again, it repairs what is missing and
 # leaves alone what is already right. It never formats a disk that has anything on it.
 #
@@ -167,7 +167,7 @@ fi
 # containers' own output is the other: Docker keeps it as JSON lines under /var/lib/docker/containers.
 if [[ -d /etc/google-cloud-ops-agent ]]; then
   ops_config=$(cat <<'EOF'
-# Written by deploy/vm/bootstrap.sh (P18.7-T3). The defaults (syslog, host metrics) still apply.
+# Written by deploy/vm/bootstrap.sh (P18.4-T3). The defaults (syslog, host metrics) still apply.
 logging:
   receivers:
     agencyboost_journal:
@@ -332,7 +332,7 @@ systemctl enable --now agencyboost-backup.timer >/dev/null
 # seed is staging's alone: production is never seeded (D11).
 sudoers_tmp=$(mktemp)
 cat >"$sudoers_tmp" <<EOF
-# Written by deploy/vm/bootstrap.sh (P18.7-T3, ADR-0155). The GitHub deployers, over IAP SSH.
+# Written by deploy/vm/bootstrap.sh (P18.4-T3, ADR-0155). The GitHub deployers, over IAP SSH.
 $deployer_staging ALL=(root) NOPASSWD: $AB_HOME/bin/deploy.sh staging *, $AB_HOME/bin/seed.sh staging *
 $deployer_prod ALL=(root) NOPASSWD: $AB_HOME/bin/deploy.sh prod *
 EOF

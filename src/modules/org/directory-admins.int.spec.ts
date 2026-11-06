@@ -42,7 +42,7 @@ const OWNER_B = new RequestContext('u-owner-b', 'none', {
 });
 
 /**
- * **The roster's *Rejoined* and the admin grant's refusals, over HTTP** (P18.97-T4 AC-3, AC-5; ADR-0176 §5; the
+ * **The roster's *Rejoined* and the admin grant's refusals, over HTTP** (P18.9-T4 AC-3, AC-5; ADR-0176 §5; the
  * client's UI-024 and UI-026).
  *
  * `org.tenancy.spec.ts` proves what `DirectoryService` and `AdminDelegationService` answer by calling them; a service
@@ -51,7 +51,7 @@ const OWNER_B = new RequestContext('u-owner-b', 'none', {
  * membership with `404` and a pending one with `422 ORG_ADMIN_TARGET_NOT_ACTIVE` — the refusals `/people/admins`
  * relies on when it offers only the office's active members.
  */
-describe('the roster’s Rejoined and the admin grant, over HTTP (P18.97-T4)', () => {
+describe('the roster’s Rejoined and the admin grant, over HTTP (P18.9-T4)', () => {
   let app: INestApplication;
   let members: MembershipRepository;
   let hierarchy: HierarchyService;
@@ -155,8 +155,8 @@ describe('the roster’s Rejoined and the admin grant, over HTTP (P18.97-T4)', (
     yantiBack = await place(FIXTURE_KPM, yanti, 'agent', root, 'active', '2026-09-30');
   });
 
-  describe('GET /members (P18.97-T4 AC-3)', () => {
-    it('P18.97-T4 AC-3 marks the live membership that came back, and nobody else, in the Directory', async () => {
+  describe('GET /members (P18.9-T4 AC-3)', () => {
+    it('P18.9-T4 AC-3 marks the live membership that came back, and nobody else, in the Directory', async () => {
       const res = await request(app.getHttpServer()).get('/members').expect(200);
       const byId = new Map(res.body.members.map((m: { membershipId: string; rejoinedOn: string | null }) => [m.membershipId, m.rejoinedOn]));
       expect(byId.get(yantiBack)).toBe('2026-09-30');
@@ -164,14 +164,14 @@ describe('the roster’s Rejoined and the admin grant, over HTTP (P18.97-T4)', (
       expect(byId.has(yantiFirst)).toBe(false);
     });
 
-    it('P18.97-T4 AC-3 gives the removed membership the day she came back, under Removed', async () => {
+    it('P18.9-T4 AC-3 gives the removed membership the day she came back, under Removed', async () => {
       const res = await request(app.getHttpServer()).get('/members?status=removed').expect(200);
       expect(res.body.members.map((m: { membershipId: string; rejoinedOn: string | null }) => [m.membershipId, m.rejoinedOn]))
         .toEqual([[yantiFirst, '2026-09-30']]);
       expect(res.body.counts).toMatchObject({ directory: 2, removed: 1 });
     });
 
-    it('P18.97-T4 AC-3 answers another office’s Owner with none of it', async () => {
+    it('P18.9-T4 AC-3 answers another office’s Owner with none of it', async () => {
       session.current = OWNER_B;
       const res = await request(app.getHttpServer()).get('/members?status=removed').expect(200);
       expect(res.body.members).toEqual([]);
@@ -179,8 +179,8 @@ describe('the roster’s Rejoined and the admin grant, over HTTP (P18.97-T4)', (
     });
   });
 
-  describe('POST /members/:membershipId/admin (P18.97-T4 AC-5)', () => {
-    it('P18.97-T4 AC-5 grants the active membership of a member who came back', async () => {
+  describe('POST /members/:membershipId/admin (P18.9-T4 AC-5)', () => {
+    it('P18.9-T4 AC-5 grants the active membership of a member who came back', async () => {
       // The Owner as a real person, since a grant records who made it by their account.
       const ownerRow = await members.findById(OWNER, root);
       session.current = new RequestContext(ownerRow!.userId, 'none', {
@@ -191,26 +191,26 @@ describe('the roster’s Rejoined and the admin grant, over HTTP (P18.97-T4)', (
       expect(res.body.map((a: { membershipId: string }) => a.membershipId)).toEqual([yantiBack]);
     });
 
-    it('P18.97-T4 AC-5 refuses a removed membership with 404, and grants nothing', async () => {
+    it('P18.9-T4 AC-5 refuses a removed membership with 404, and grants nothing', async () => {
       const res = await request(app.getHttpServer()).post(`/members/${yantiFirst}/admin`).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
       expect((await members.findById(OWNER, yantiFirst))!.adminAccess?.isKpmAdmin ?? false).toBe(false);
     });
 
-    it('P18.97-T4 AC-5 refuses a pending membership with 422 ORG_ADMIN_TARGET_NOT_ACTIVE, and grants nothing', async () => {
+    it('P18.9-T4 AC-5 refuses a pending membership with 422 ORG_ADMIN_TARGET_NOT_ACTIVE, and grants nothing', async () => {
       const waiting = await place(FIXTURE_KPM, await person('Fajar Nugroho'), 'agent', null, 'pending');
       const res = await request(app.getHttpServer()).post(`/members/${waiting}/admin`).expect(422);
       expect(res.body.error).toMatchObject({ code: 'ORG_ADMIN_TARGET_NOT_ACTIVE', details: { status: 'pending' } });
       expect((await members.findById(OWNER, waiting))!.adminAccess?.isKpmAdmin ?? false).toBe(false);
     });
 
-    it('P18.97-T4 AC-5 refuses another office’s member with 404, never 403', async () => {
+    it('P18.9-T4 AC-5 refuses another office’s member with 404, never 403', async () => {
       const theirs = await place(KPM_B, await person('Dewi Lestari'), 'ab', null);
       const res = await request(app.getHttpServer()).post(`/members/${theirs}/admin`).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
     });
 
-    it('P18.97-T4 AC-5 refuses an Admin the grant itself: managing admins is the Owner’s', async () => {
+    it('P18.9-T4 AC-5 refuses an Admin the grant itself: managing admins is the Owner’s', async () => {
       session.current = ADMIN;
       const res = await request(app.getHttpServer()).post(`/members/${yantiBack}/admin`).expect(403);
       expect(res.body.error.code).toBe('PERM_OWNER_ONLY');

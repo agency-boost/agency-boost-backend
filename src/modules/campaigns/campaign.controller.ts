@@ -96,7 +96,7 @@ export class CampaignController {
     return this.campaigns.restore(ctx, id);
   }
 
-  // ---------------------------------------------------------------- Phase 18.6 (P18.6-T2): the override
+  // ---------------------------------------------------------------- Phase 18.3 (P18.3-T2): the override
 
   @Put(':code/standings/:membershipId/override')
   @RequirePermission('campaign_qualification:override')

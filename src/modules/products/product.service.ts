@@ -1,17 +1,28 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
-import { SEED_PRODUCTS, type ProductLifecycle } from '@/domain/constants';
+import {
+  DomainException, InvalidRequestException, NotFoundException, VersionConflictException,
+} from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
+import {
+  DEFAULT_TENANT_TIMEZONE, PRODUCT_CURRENCIES, SEED_PRODUCTS, seedObjectionsOf,
+  type ObjectionCard, type ProductCurrency, type ProductKind, type ProductLifecycle, type ProposalDefaultInsured,
+} from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
-import { plainText } from '@/common/validation/plain-text';
+import { plainText, plainTextLines } from '@/common/validation/plain-text';
+import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
-import { PRODUCTS_REFUSALS } from './products.messages';
+import { PRODUCTS_REFUSALS, referenceWords } from './products.messages';
+import {
+  checkProposalSettings, PROPOSAL_SETTING_KEYS,
+  type FaqEntry, type PdfDetailBlock, type PlanOption, type ProposalField, type ProposalSettings,
+} from './proposal-fields';
 
-/** The company's catalogue, refused in both languages (P18.98-T5 AC-3). */
+/** The company's catalogue, refused in both languages (P18.10-T5 AC-3). */
 const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
 
 export interface CommissionYearView {
@@ -24,9 +35,19 @@ export interface AttackPlanView {
   opening: string;
   benefits: string[];
   fullScript: string;
-  objectionTheySay: string;
-  objectionYouSay: string;
+  /** *4 · If they push back*, every card in order (ADR-0209 §9). */
+  objections: ObjectionCard[];
   nextAction: string;
+}
+
+/** What still names a withdrawn product, by kind (`409 PRODUCT_IN_USE`, ADR-0209 §10). */
+export interface ProductReferences {
+  /** Offices that sell it: a `kpmProductConfigs` row switched on. */
+  activations: number;
+  /** Offices with a script for it — drafted, approved or sent back (ADR-0037). */
+  scriptApprovals: number;
+  /** Riders of this company attached to it. */
+  riders: number;
 }
 
 export interface ProductView {
@@ -37,6 +58,12 @@ export interface ProductView {
   tagline: string;
   channel: string;
   category: string;
+  /** *Produk dasar* or *Rider* (ADR-0209 §1). */
+  kind: ProductKind;
+  /** A rider's base products, by id; `[]` for a base. */
+  attachesTo: string[];
+  /** The currencies it is sold in, `IDR` first (ADR-0209 §8). */
+  currencies: ProductCurrency[];
   primaryNeeds: string[];
   eligibleAgeBands: number[];
   eligibleBudgetBands: number[];
@@ -46,6 +73,16 @@ export interface ProductView {
   defaultAttackPlan: AttackPlanView;
   /** Absent for a reader without `commission_rates:read` — left out, never sent and hidden. */
   commissionSchedule?: CommissionYearView[];
+  /** The proposal panel's fields, in order (P19.7-T1; ADR-0225 §1). */
+  proposalFields: ProposalField[];
+  planOptions: PlanOption[];
+  faq: FaqEntry[];
+  pdfDetail: PdfDetailBlock[];
+  syariahName: string | null;
+  /** As stored: `null` reads the category's. */
+  defaultInsured: ProposalDefaultInsured | null;
+  /** As stored: `null` reads the category's. */
+  proposalTypeLabel: string | null;
   lifecycle: ProductLifecycle;
   replacedByProductId: string | null;
   activeByDefault: boolean;
@@ -53,8 +90,45 @@ export interface ProductView {
   version: number;
 }
 
+/** A stored value as plain JSON: a Mongoose array is a proxy `structuredClone` cannot copy. */
+const plainJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/** The proposal settings a product holds, as plain values — what `checkProposalSettings` reads and a view answers. */
+export function proposalSettingsOf(doc: Partial<ProposalSettings>): ProposalSettings {
+  return plainJson({
+    proposalFields: doc.proposalFields ?? [],
+    planOptions: doc.planOptions ?? [],
+    faq: doc.faq ?? [],
+    pdfDetail: doc.pdfDetail ?? [],
+    syariahName: doc.syariahName ?? null,
+    defaultInsured: doc.defaultInsured ?? null,
+    proposalTypeLabel: doc.proposalTypeLabel ?? null,
+  });
+}
+
+/** Whether a write names any of the proposal's settings. */
+const touchesProposal = (input: Record<string, unknown>) => PROPOSAL_SETTING_KEYS.some((key) => input[key] !== undefined);
+
 /** Both halves strip it: a rule enforced on one side only is a rule with a way around it. */
 const plain = plainText;
+
+/**
+ * **A field written in paragraphs keeps its line breaks** (P19-T6 AC-1, B1-2): what sets the product apart and
+ * every text field of the attack plan — each a textarea, here and in the Owner's override — with markup out as
+ * {@link plain} takes it. A name, a tagline, *best for* and each benefit stay one line: each is typed into one.
+ */
+const lines = plainTextLines;
+
+/**
+ * **The objection cards as a write stores them** (P19.4-T4 AC-1; ADR-0209 §9): each side plain text with its line
+ * breaks kept (B1-2), in the order sent; a card with neither side written is dropped. The DTO bounds the count
+ * (`PRODUCT_OBJECTIONS_MAX`) and each text.
+ */
+export function objectionCards(value: unknown): ObjectionCard[] {
+  return ((value as { objection?: unknown; answer?: unknown }[] | undefined) ?? [])
+    .map((card) => ({ objection: lines(card?.objection), answer: lines(card?.answer) }))
+    .filter((card) => card.objection !== '' || card.answer !== '');
+}
 
 /**
  * A company's product catalog (P5-T4, ADR-0033).
@@ -73,6 +147,8 @@ export class ProductService {
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /** Offices' rows, counted across offices to refuse deleting a product one still names (ADR-0209 §10). */
+    private readonly offices: KpmProductConfigRepository,
   ) {}
 
   /** Every product of one company, in order, withdrawn rows included. */
@@ -90,10 +166,18 @@ export class ProductService {
     await this.requireCompany(companyId);
     const code = String(input.code ?? '').trim().toUpperCase();
     await this.refuseTakenCode(companyId, code);
+    // A rider names its bases from the start; a base attaches to nothing (ADR-0209 §2).
+    const kind = await this.kindAndBases(companyId, null, input);
+    const proposal = touchesProposal(input) ? this.proposalWrite(input, {
+      channel: String(input.channel), category: String(input.category),
+      currencies: (input.currencies as string[] | undefined) ?? ['IDR'],
+    }, {}) : {};
 
     const last = await this.of(companyId).sort({ sortOrder: -1 }).limit(1).exec();
     const created = await this.products.create({
       ...this.writable(input),
+      ...kind,
+      ...proposal,
       companyId,
       code,
       // Appended: somebody adding a product has not said where on the shelf it goes.
@@ -110,11 +194,47 @@ export class ProductService {
     return this.view(created, true);
   }
 
-  /** Everything except the identity and the lifecycle, which move through their own routes. */
+  /**
+   * Everything except the identity and the lifecycle, which move through their own routes.
+   *
+   * **Pinned to the version the editor read, when it says one** (P19-T6 AC-2; the 11-03 handover's B1-10): an
+   * `expectedVersion` the product has moved past — somebody else saved it, closed it or withdrew it since — is
+   * refused `409 VERSION_CONFLICT` and nothing is written, where the last save used to win. The pin is part of the
+   * write's own filter, so of two saves racing on one version exactly one lands. Absent, the write lands whatever
+   * the version, as it always did: an API caller from before the pin still works.
+   */
   async update(
     ctx: RequestContext, companyId: string, productId: string, input: Record<string, unknown>,
   ): Promise<ProductView> {
     const set = this.writable(input);
+    const expected = typeof input.expectedVersion === 'number' ? input.expectedVersion : undefined;
+    const kindChange = input.kind !== undefined || input.attachesTo !== undefined;
+    /*
+     * **The proposal's settings are checked across the product as it will be** (P19.7-T1 AC-3; ADR-0225 §2): a plan
+     * card against the plan field, a formula against the money keys, a currency option against what the product
+     * sells, `syariahName` against its channel — so a change to the channel or the currencies is checked too.
+     */
+    const proposalChange = touchesProposal(input) || input.channel !== undefined || input.currencies !== undefined;
+    if (kindChange || proposalChange) {
+      /*
+       * **The kind and the bases are checked against the row as it is** (ADR-0209 §2): a rider's bases must be this
+       * company's active bases, and a kind cannot change under an attachment. Read first, so a refusal names the
+       * product; the write below is still pinned to the version the editor read.
+       */
+      const current = await this.of(companyId).findOne({ _id: this.idOf(productId) }).exec();
+      if (!current) throw new NotFoundException('Product');
+      if (expected !== undefined && expected !== current.version) {
+        throw new VersionConflictException(expected, current.version);
+      }
+      if (kindChange) Object.assign(set, await this.kindAndBases(companyId, current, input));
+      if (proposalChange) {
+        Object.assign(set, this.proposalWrite(input, {
+          channel: (set.channel as string | undefined) ?? current.channel,
+          category: (set.category as string | undefined) ?? current.category,
+          currencies: (set.currencies as string[] | undefined) ?? current.currencies ?? ['IDR'],
+        }, proposalSettingsOf(current)));
+      }
+    }
     if (Object.keys(set).length === 0) throw new InvalidRequestException(SAY.nothingToChange);
 
     /*
@@ -124,11 +244,19 @@ export class ProductService {
      * one's starting point.
      */
     const previous = await this.products.findOneAndUpdate(
-      { _id: productId, companyId, deletedAt: null },
+      {
+        _id: this.idOf(productId), companyId, deletedAt: null,
+        ...(expected === undefined ? {} : { version: expected }),
+      },
       { $set: { ...set, updatedBy: ctx.userId }, $inc: { version: 1 } },
       { new: false },
     ).exec();
-    if (!previous) throw new NotFoundException('Product');
+    if (!previous) {
+      // The scope first: a product of another company is not here, whatever version was named (ADR-0002).
+      const now = expected === undefined ? null : await this.of(companyId).findOne({ _id: this.idOf(productId) }).exec();
+      if (now) throw new VersionConflictException(expected!, now.version);
+      throw new NotFoundException('Product');
+    }
     const updated = await this.of(companyId).findOne({ _id: productId }).orFail().exec();
 
     const was = previous.toObject() as unknown as Record<string, unknown>;
@@ -177,7 +305,81 @@ export class ProductService {
     await this.record(ctx, `product.${lifecycle}`, updated, {
       code: updated.code, replacedByProductId: replacedByProductId ?? null,
     });
+    if (lifecycle === 'withdrawn' && updated.kind === 'base') await this.detachFromRiders(ctx, companyId, updated);
     return this.view(updated, true);
+  }
+
+  /**
+   * **A withdrawn base leaves its riders** (P19.4-T4 AC-6; the riders spec's rule 4; ADR-0209 §4): it is taken out of
+   * every rider's `attachesTo`, each rider so changed a new version, audited `product.updated` with the reason
+   * `base_withdrawn`. A rider left with none is hidden from agents — no base offers it — and its row says so. Putting
+   * the base back on sale does not re-attach it: the Super Admin chooses again.
+   */
+  private async detachFromRiders(ctx: RequestContext, companyId: string, base: ProductDocument): Promise<void> {
+    const baseId = String(base._id);
+    const riders = await this.products.find({ companyId, kind: 'rider', attachesTo: baseId, deletedAt: null }).exec();
+    for (const rider of riders) {
+      const changed = await this.products.findOneAndUpdate(
+        { _id: rider._id, companyId, deletedAt: null },
+        { $pull: { attachesTo: baseId }, $set: { updatedBy: ctx.userId }, $inc: { version: 1 } },
+        { new: true },
+      ).exec();
+      if (!changed) continue;
+      await this.record(
+        ctx, 'product.updated', changed,
+        { attachesTo: [...changed.attachesTo], reason: 'base_withdrawn', baseId, baseCode: base.code },
+        { attachesTo: [...rider.attachesTo] },
+      );
+    }
+  }
+
+  /**
+   * **Delete a withdrawn product nothing references** (P19.4-T4 AC-13; B1-5, OD-264; ADR-0209 §10): a soft delete —
+   * `deletedAt`, audited `product.deleted` — after which no read lists it. Its code is never reused.
+   *
+   * - A product on sale or in run-off is refused (`400`): it is withdrawn first.
+   * - **A product something names is refused `409 PRODUCT_IN_USE`**, `details.references` the kinds and counts: an
+   *   office that sells it, an office's script for it, a rider attached to it. Nothing is written.
+   * - Neither a lead nor a training module names a product today, so neither is counted: there is nothing to count.
+   */
+  async remove(ctx: RequestContext, companyId: string, productId: string): Promise<void> {
+    const product = await this.of(companyId).findOne({ _id: this.idOf(productId) }).exec();
+    if (!product) throw new NotFoundException('Product');
+    if (product.lifecycle !== 'withdrawn') {
+      throw new InvalidRequestException(SAY.deleteOnSale({ name: product.name }), { lifecycle: product.lifecycle });
+    }
+
+    const references = await this.referencesTo(ctx, companyId, String(product._id));
+    if (references.activations + references.scriptApprovals + references.riders > 0) {
+      throw new DomainException(
+        ErrorCode.PRODUCT_IN_USE,
+        PRODUCTS_REFUSALS.PRODUCT_IN_USE.referenced({ name: product.name, reasons: referenceWords(references) }),
+        HttpStatus.CONFLICT,
+        { productId: String(product._id), code: product.code, references },
+      );
+    }
+
+    const at = this.clock.now();
+    const deleted = await this.products.findOneAndUpdate(
+      { _id: product._id, companyId, deletedAt: null, lifecycle: 'withdrawn' },
+      { $set: { deletedAt: at, deletedBy: ctx.userId, updatedBy: ctx.userId }, $inc: { version: 1 } },
+      { new: true },
+    ).exec();
+    if (!deleted) throw new NotFoundException('Product');
+    await this.record(
+      ctx, 'product.deleted', deleted,
+      { code: deleted.code, deletedAt: at.toISOString() },
+      { code: product.code, lifecycle: product.lifecycle },
+    );
+  }
+
+  /** What names one product: offices' rows across every office of the company, and the company's riders. */
+  private async referencesTo(ctx: RequestContext, companyId: string, productId: string): Promise<ProductReferences> {
+    const [offices, riders] = await Promise.all([
+      this.offices.referencesToProductAcrossTenants(ctx, productId),
+      this.products.countDocuments({ companyId, kind: 'rider', attachesTo: productId, deletedAt: null }).exec(),
+    ]);
+    return { ...offices, riders };
   }
 
   /** The whole shelf in the order wanted, so two people reordering cannot interleave. */
@@ -221,7 +423,18 @@ export class ProductService {
       eligibleAgeBands: [...product.eligibleAgeBands],
       eligibleBudgetBands: [...product.eligibleBudgetBands],
       benefits: [...product.benefits],
-      defaultAttackPlan: { ...product.defaultAttackPlan, benefits: [...product.defaultAttackPlan.benefits] },
+      defaultAttackPlan: {
+        goodFit: product.defaultAttackPlan.goodFit,
+        opening: product.defaultAttackPlan.opening,
+        benefits: [...product.defaultAttackPlan.benefits],
+        fullScript: product.defaultAttackPlan.fullScript,
+        // The seed's one pair, as the card a product stores (ADR-0209 §9).
+        objections: seedObjectionsOf(product.defaultAttackPlan),
+        nextAction: product.defaultAttackPlan.nextAction,
+      },
+      kind: 'base',
+      attachesTo: [],
+      currencies: ['IDR'],
       companyId,
       commissionSchedule: [],
       replacedByProductId: null,
@@ -263,6 +476,8 @@ export class ProductService {
       return {
         ...structuredClone(fields),
         _id: ids.get(String(_id)),
+        // A rider's bases are the copies of its bases (ADR-0209 §2): never the source company's ids.
+        attachesTo: (product.attachesTo ?? []).flatMap((id) => (ids.has(id) ? [String(ids.get(id))] : [])),
         companyId,
         commissionSchedule: [],
         defaultDocuments: {},
@@ -302,8 +517,9 @@ export class ProductService {
 
   private async refuseTakenCode(companyId: string, code: string): Promise<void> {
     // Counting withdrawn rows: a retired code that came back as something else would change the
-    // meaning of every policy and every attack plan still pointing at it.
-    if (await this.products.exists({ companyId, code, deletedAt: null })) {
+    // meaning of every policy and every attack plan still pointing at it. **And deleted ones** (P19.4-T4 AC-13,
+    // ADR-0209 §10): the unique index counts live rows only, so a deleted product's code is refused here.
+    if (await this.products.exists({ companyId, code })) {
       throw new InvalidRequestException(SAY.codeTaken({ code }));
     }
   }
@@ -311,10 +527,11 @@ export class ProductService {
   /** The fields a write may set — never `code`, never `lifecycle`, never `companyId`. */
   private writable(input: Record<string, unknown>): Record<string, unknown> {
     const set: Record<string, unknown> = {};
-    const text = ['name', 'tagline', 'differentiator', 'bestFor'] as const;
+    const text = ['name', 'tagline', 'bestFor'] as const;
     for (const field of text) {
       if (input[field] !== undefined) set[field] = plain(input[field]);
     }
+    if (input.differentiator !== undefined) set.differentiator = lines(input.differentiator);
     for (const field of ['channel', 'category'] as const) {
       if (input[field] !== undefined) set[field] = input[field];
     }
@@ -325,22 +542,111 @@ export class ProductService {
       set.benefits = (input.benefits as unknown[]).map(plain).filter((line) => line !== '');
     }
     if (input.activeByDefault !== undefined) set.activeByDefault = Boolean(input.activeByDefault);
+    if (input.currencies !== undefined) {
+      // Stored in the registry's order, `IDR` first, so *IDR + USD* reads one way everywhere (ADR-0209 §8).
+      const named = new Set(input.currencies as string[]);
+      set.currencies = PRODUCT_CURRENCIES.filter((currency) => named.has(currency));
+    }
     if (input.commissionSchedule !== undefined) {
       set.commissionSchedule = this.schedule(input.commissionSchedule as CommissionYearView[]);
     }
     if (input.defaultAttackPlan !== undefined) {
       const plan = input.defaultAttackPlan as Record<string, unknown>;
+      // Every text field of the plan keeps its lines (P19-T6 AC-1); a benefit is one line of the list.
       set.defaultAttackPlan = {
-        goodFit: plain(plan.goodFit),
-        opening: plain(plan.opening),
+        goodFit: lines(plan.goodFit),
+        opening: lines(plan.opening),
         benefits: ((plan.benefits as unknown[]) ?? []).map(plain).filter((line) => line !== ''),
-        fullScript: plain(plan.fullScript),
-        objectionTheySay: plain(plan.objectionTheySay),
-        objectionYouSay: plain(plan.objectionYouSay),
-        nextAction: plain(plan.nextAction),
+        fullScript: lines(plan.fullScript),
+        objections: objectionCards(plan.objections),
+        nextAction: lines(plan.nextAction),
       };
     }
     return set;
+  }
+
+  /**
+   * **A product's kind and its bases, as a write sets them** (P19.4-T4 AC-4; the riders spec's rule 2; ADR-0209 §2).
+   * `{}` when the write names neither and creates nothing.
+   *
+   * - A rider names at least one base — empty is *"Pilih minimal satu produk dasar"*, `details.field: 'attachesTo'` —
+   *   and each is a live product of **this** company, a base, and on sale. Another company's id is refused as one
+   *   this catalogue does not have, naming nothing of that company.
+   * - A base attaches to nothing.
+   * - **A kind does not change under an attachment** (`409 PRODUCT_KIND_IN_USE`): a base some rider attaches to does
+   *   not become a rider, and a rider still attached does not become a base unless the same write clears its bases.
+   */
+  private async kindAndBases(
+    companyId: string, current: ProductDocument | null, input: Record<string, unknown>,
+  ): Promise<{ kind?: ProductKind; attachesTo?: string[] }> {
+    if (current === null && input.kind === undefined && input.attachesTo === undefined) return {};
+    const kind = (input.kind as ProductKind | undefined) ?? current?.kind ?? 'base';
+    const sent = input.attachesTo as string[] | undefined;
+
+    if (kind === 'base') {
+      if (sent !== undefined && sent.length > 0) {
+        throw new InvalidRequestException(SAY.baseAttaches, { field: 'attachesTo' });
+      }
+      if (current?.kind === 'rider' && sent === undefined && current.attachesTo.length > 0) {
+        throw new DomainException(
+          ErrorCode.PRODUCT_KIND_IN_USE,
+          PRODUCTS_REFUSALS.PRODUCT_KIND_IN_USE.riderHasBases({ name: current.name, bases: current.attachesTo.length }),
+          HttpStatus.CONFLICT,
+          { productId: String(current._id), bases: current.attachesTo.length },
+        );
+      }
+      return { kind, attachesTo: [] };
+    }
+
+    if (current?.kind === 'base') {
+      const riders = await this.products
+        .countDocuments({ companyId, kind: 'rider', attachesTo: String(current._id), deletedAt: null }).exec();
+      if (riders > 0) {
+        throw new DomainException(
+          ErrorCode.PRODUCT_KIND_IN_USE,
+          PRODUCTS_REFUSALS.PRODUCT_KIND_IN_USE.baseHasRiders({ name: current.name, riders }),
+          HttpStatus.CONFLICT,
+          { productId: String(current._id), riders },
+        );
+      }
+    }
+    const bases = [...new Set(sent ?? current?.attachesTo ?? [])];
+    if (bases.length === 0) throw new InvalidRequestException(SAY.attachAtLeastOne, { field: 'attachesTo' });
+    // A rider is never its own base: it is a rider.
+    if (current && bases.includes(String(current._id))) {
+      throw new InvalidRequestException(SAY.attachToRider({ name: current.name }), { field: 'attachesTo' });
+    }
+    const valid = bases.filter((id) => Types.ObjectId.isValid(id));
+    const found = valid.length === 0 ? [] : await this.of(companyId).find({ _id: { $in: valid } }).exec();
+    if (found.length !== bases.length) {
+      throw new InvalidRequestException(SAY.attachNotOnShelf, { field: 'attachesTo' });
+    }
+    const rider = found.find((product) => product.kind === 'rider');
+    if (rider) throw new InvalidRequestException(SAY.attachToRider({ name: rider.name }), { field: 'attachesTo' });
+    const offSale = found.find((product) => product.lifecycle !== 'active');
+    if (offSale) throw new InvalidRequestException(SAY.attachNotActive({ name: offSale.name }), { field: 'attachesTo' });
+    return { kind, attachesTo: bases };
+  }
+
+  /**
+   * **The proposal settings a write sets** (P19.7-T1 AC-3; ADR-0225 §2): the stored ones with the write's over them,
+   * checked whole, and the keys the write sent taken from the result. `{}` when it sent none (a change of channel or
+   * currencies is checked, and writes nothing here).
+   */
+  private proposalWrite(
+    input: Record<string, unknown>,
+    product: { channel: string; category: string; currencies: readonly string[] },
+    stored: Partial<ProposalSettings>,
+  ): Partial<ProposalSettings> {
+    const today = this.clock.localDateFor(DEFAULT_TENANT_TIMEZONE, this.clock.now());
+    const sent = Object.fromEntries(PROPOSAL_SETTING_KEYS.filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
+    const checked = checkProposalSettings(sent, stored, { ...product, today });
+    return Object.fromEntries(Object.keys(sent).map((key) => [key, checked[key as keyof ProposalSettings]]));
+  }
+
+  /** A product id as the database holds it, or one that matches nothing — a malformed id is not here (`404`). */
+  private idOf(productId: string): Types.ObjectId | string {
+    return Types.ObjectId.isValid(productId) ? new Types.ObjectId(productId) : '0'.repeat(24);
   }
 
   /**
@@ -386,6 +692,9 @@ export class ProductService {
       tagline: doc.tagline,
       channel: doc.channel,
       category: doc.category,
+      kind: doc.kind ?? 'base',
+      attachesTo: [...(doc.attachesTo ?? [])],
+      currencies: [...(doc.currencies ?? ['IDR'])],
       primaryNeeds: [...doc.primaryNeeds],
       eligibleAgeBands: [...doc.eligibleAgeBands],
       eligibleBudgetBands: [...doc.eligibleBudgetBands],
@@ -397,8 +706,7 @@ export class ProductService {
         opening: plan.opening,
         benefits: [...plan.benefits],
         fullScript: plan.fullScript,
-        objectionTheySay: plan.objectionTheySay,
-        objectionYouSay: plan.objectionYouSay,
+        objections: (plan.objections ?? []).map(({ objection, answer }) => ({ objection, answer })),
         nextAction: plan.nextAction,
       },
       // Left out rather than emptied: a reader without the permission never receives the field,
@@ -406,6 +714,11 @@ export class ProductService {
       ...(withCommission
         ? { commissionSchedule: doc.commissionSchedule.map((c) => ({ year: c.year, rate: c.rate })) }
         : {}),
+      // Plain copies of what is stored: the documents are the checked shapes of `proposal-fields.ts` (ADR-0225 §1).
+      ...(proposalSettingsOf({
+        proposalFields: doc.proposalFields, planOptions: doc.planOptions, faq: doc.faq, pdfDetail: doc.pdfDetail,
+        syariahName: doc.syariahName, defaultInsured: doc.defaultInsured, proposalTypeLabel: doc.proposalTypeLabel,
+      })),
       lifecycle: doc.lifecycle,
       replacedByProductId: doc.replacedByProductId,
       activeByDefault: doc.activeByDefault,

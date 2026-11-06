@@ -14,8 +14,8 @@ import { NoEventQueryDto, SaveEventDto, SaveEventTypeDto, SaveRollCallDto } from
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
- * The events an office runs (P5-T6, ADR-0034), and — since Phase 18.5 — what its administration reads of the
- * members' answers: the roll call, the *Feedback Summary* and the audience picker's people (P18.5-T5, P18.5-T6).
+ * The events an office runs (P5-T6, ADR-0034), and — since Phase 18.2 — what its administration reads of the
+ * members' answers: the roll call, the *Feedback Summary* and the audience picker's people (P18.2-T5, P18.2-T6).
  *
  * **Nothing per-person is stored on an event.** RSVP, attendance and feedback are their own per-member records
  * (`eventRsvps`, `eventFeedback`); the member's side is `EventGuestController` at `/events`.
@@ -154,7 +154,7 @@ export class EventController {
     return this.events.restore(ctx, id);
   }
 
-  // ---------------------------------------------------------------- Phase 18.5 (P18.5-T5, P18.5-T6)
+  // ---------------------------------------------------------------- Phase 18.2 (P18.2-T5, P18.2-T6)
 
   @Get('invitees')
   @RequirePermission('event_settings:read')

@@ -21,10 +21,10 @@ const WORDS = messages('common/i18n spec words', {
 });
 
 /**
- * **P18.98-T5 — a sentence in both languages, written for its reader** (ADR-0179 §7): a catalogue files each by code,
+ * **P18.10-T5 — a sentence in both languages, written for its reader** (ADR-0179 §7): a catalogue files each by code,
  * a refusal's is written when it is answered, and a figure inside it is written in the reader's figures' language.
  */
-describe('P18.98-T5 sentences', () => {
+describe('P18.10-T5 sentences', () => {
   it('AC-2 writes a sentence in its reader’s language', () => {
     expect(render(SAY.LEAD_ALREADY_CLOSED.closed, readerIn('en'))).toBe('This lead is closed.');
     expect(render(SAY.LEAD_ALREADY_CLOSED.closed, readerIn('id'))).toBe('Lead ini sudah ditutup.');

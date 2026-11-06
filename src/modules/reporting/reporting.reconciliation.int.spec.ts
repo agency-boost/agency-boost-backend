@@ -27,7 +27,6 @@ import { ProductionService } from '@/modules/production/production.service';
 import { ProductionImportService } from '@/modules/production/production-import.service';
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
-import { VALUE_COLUMNS } from '@/modules/production/production-preview';
 import { TEMPLATE_HEADER_V1 } from '@/modules/production/production-template';
 import { UnitDashboardController } from '@/modules/unit-dashboard/unit-dashboard.controller';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
@@ -45,6 +44,9 @@ import { KpmAnalyticsController, KpmOverviewController } from './reporting.contr
 const M = 1_000_000 * 100;
 const MONTH = '2026-09';
 const MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09'].map((m) => `2026-${m}`);
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them (P19.5-T2). */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 
 interface Money { achievedMinor: number | null; targetMinor: number | null; pct: number | null }
 interface Rate { count: number; of: number; pct: number | null }
@@ -55,10 +57,12 @@ interface Figures {
 }
 interface Row extends Figures { head: { membershipId: string } }
 interface Agency extends Row { direct: Row; aabUnits: Row[]; members: { membershipId: string }[] }
-interface Analytics { agencies: Agency[]; total: Figures & { leaversExcludedMinor: number | null }; monthly: { month: string; apeMinor: number | null }[] }
+interface Analytics { agencies: Agency[]; total: Figures; monthly: { month: string; apeMinor: number | null }[] }
+/** A row of the month table by kode (P19.5-T2): the month's figures in `values`, each year to date in `ytd`. */
 interface TableRow {
   membershipId: string;
-  metrics: { ape: { monthly: { value: number | null }; ytd: { value: number | null } } };
+  values: Record<string, { value: number | null } | undefined>;
+  ytd: Record<string, { value: number | null } | undefined>;
   monthlyActiveAgent: boolean | null;
 }
 
@@ -133,7 +137,7 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
   function ytdFrom(table: Map<string, TableRow[]>, ids: readonly string[]): number | null {
     const figures = ids.map((id) => {
       for (const month of [...MONTHS].reverse()) {
-        const value = table.get(month)!.find((r) => r.membershipId === id)?.metrics.ape.ytd.value ?? null;
+        const value = table.get(month)!.find((r) => r.membershipId === id)?.ytd.APE?.value ?? null;
         if (value !== null) return value;
       }
       return null;
@@ -171,10 +175,17 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     const sep = table.get(MONTH)!;
     const aug = table.get('2026-08')!;
     const sum = (rows: TableRow[], cadence: 'monthly' | 'ytd') => {
-      const held = rows.map((r) => r.metrics.ape[cadence].value).filter((v): v is number => v !== null);
+      const held = rows.map((r) => (cadence === 'monthly' ? r.values : r.ytd).APE?.value ?? null).filter((v): v is number => v !== null);
       return held.length === 0 ? null : held.reduce((a, b) => a + b, 0);
     };
-    const leaversYtd = now.total.leaversExcludedMinor ?? 0;
+    // This year's leavers' year to date, from the office's file (OD-74): the sum of each one's months held this year, as
+    // every year to date is since P19.5-T2.
+    const leftThisYear = await db().collection('memberships')
+      .find({ kpmId: KPM_A, status: 'removed', removedAt: { $gte: new Date('2025-12-31T17:00:00Z') } }).toArray();
+    const leaverFile = await db().collection('monthlyAgentData')
+      .find({ kpmId: KPM_A, deletedAt: null, month: { $gte: '2026-01' }, membershipId: { $in: leftThisYear.map((l) => String(l._id)) } })
+      .sort({ month: 1 }).toArray();
+    const leaversYtd = leaverFile.reduce((n, r) => n + ((r.values?.APE?.value ?? 0) as number), 0);
     expect([at('ytd = the table, leavers included'), overview.production.ytd.achievedMinor])
       .toEqual([at('ytd = the table, leavers included'), (ytdFrom(table, memberIds) ?? 0) + leaversYtd || null]);
     expect([at('this month’s APE = the table'), now.total.apeMonth.achievedMinor]).toEqual([at('this month’s APE = the table'), sum(sep, 'monthly')]);
@@ -183,21 +194,23 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     const leavers = await db().collection('memberships').find({ kpmId: KPM_A, status: 'removed' }).toArray();
     const leaverRows = await db().collection('monthlyAgentData')
       .find({ kpmId: KPM_A, month: '2026-08', membershipId: { $in: leavers.map((l) => String(l._id)) } }).toArray();
-    const leftInAugust = leaverRows.reduce((n, r) => n + (r.apeMonthly?.value ?? 0), 0);
+    const leftInAugust = leaverRows.reduce((n, r) => n + (r.values?.APE?.value ?? 0), 0);
     // Item 1: last month's figures are over the members it had on 31 August — a leaver since included, their
     // August APE and their MAA flag with them. 1 September, 00:00 in Jakarta, is the end of August.
     const endOfAugust = new Date('2026-08-31T17:00:00Z');
     const augustLeavers = new Set(leavers.filter((l) => l.removedAt && l.removedAt.getTime() >= endOfAugust.getTime()).map((l) => String(l._id)));
     const augustLeaverRows = leaverRows.filter((r) => augustLeavers.has(r.membershipId));
-    const augustLeaverApe = augustLeaverRows.reduce((n, r) => n + (r.apeMonthly?.value ?? 0), 0);
+    const augustLeaverApe = augustLeaverRows.reduce((n, r) => n + (r.values?.APE?.value ?? 0), 0);
     const augustLeaverMaa = augustLeaverRows
-      .filter((r) => monthlyActiveAgent(r.apeMonthly?.value ?? null, r.policyCountMonthly?.value ?? null) === true).length;
+      .filter((r) => monthlyActiveAgent(r.values?.APE?.value ?? null, r.values?.POLICY_COUNT?.value ?? null) === true).length;
     expect([at('last month’s APE = the table, and its leavers since'), then.total.apeMonth.achievedMinor])
       .toEqual([at('last month’s APE = the table, and its leavers since'), ((sum(aug, 'monthly') ?? 0) + augustLeaverApe) || null]);
     expect([at('last month’s MAA = the table, and its leavers since'), then.total.activeAgents])
       .toEqual([at('last month’s MAA = the table, and its leavers since'), aug.filter((r) => r.monthlyActiveAgent === true).length + augustLeaverMaa]);
-    expect([at('chart = the table, and leavers'), now.monthly.at(-1)!.apeMinor])
+    // UI-091 (P19.3-T3 AC-7): the chart ends with this month, so August is the bar before the last.
+    expect([at('chart = the table, and leavers'), now.monthly.at(-2)!.apeMinor])
       .toEqual([at('chart = the table, and leavers'), (sum(aug, 'monthly') ?? 0) + leftInAugust || null]);
+    expect(now.monthly.at(-1)!.month).toBe(MONTH);
     expect([at('pipeline = LeadService.summary'), overview.recruitment.pipelineNow, overview.recruitment.expectedToClose])
       .toEqual([at('pipeline = LeadService.summary'), summary.recruitmentPipelineNow, summary.recruitmentExpectedToClose]);
     expect([at('headcount = the directory'), overview.composition.total]).toEqual([at('headcount = the directory'), directory.counts.directory]);
@@ -227,14 +240,16 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
 
     // ---- Exit test 2: one value, across surfaces.
     const sumRows = (key: (f: Figures) => number | null) => now.agencies.reduce((n, a) => n + (key(a) ?? 0), 0);
+    // P19.3-T3 AC-5 (ADR-0204 §1): the rows are today's members, so the total's year to date is theirs and the leavers'.
     expect([at('total = rows'), now.total.manpower.total, now.total.coached7d.count, now.total.apeAnnual.achievedMinor ?? 0, now.total.leads.recruit])
       .toEqual([at('total = rows'), sumRows((f) => f.manpower.total), sumRows((f) => f.coached7d.count),
-        sumRows((f) => f.apeAnnual.achievedMinor), sumRows((f) => f.leads.recruit)]);
+        sumRows((f) => f.apeAnnual.achievedMinor) + leaversYtd, sumRows((f) => f.leads.recruit)]);
     expect([at('manpower = headcount'), now.total.manpower.total]).toEqual([at('manpower = headcount'), overview.composition.total]);
     expect([at('coached = coverage'), now.total.coached7d]).toEqual([at('coached = coverage'), overview.coaching.coverage7d]);
     expect([at('annual target'), now.total.apeAnnual.targetMinor]).toEqual([at('annual target'), overview.production.ytd.targetMinor]);
-    expect([at('annual APE + leavers = the Overview'), (now.total.apeAnnual.achievedMinor ?? 0) + leaversYtd])
-      .toEqual([at('annual APE + leavers = the Overview'), overview.production.ytd.achievedMinor ?? 0]);
+    // P19.3-T3 AC-5 (OWN R1, case 2): one production total per KPM, the same on the Overview and the analytics.
+    expect([at('annual APE = the Overview'), now.total.apeAnnual.achievedMinor ?? 0])
+      .toEqual([at('annual APE = the Overview'), overview.production.ytd.achievedMinor ?? 0]);
     for (const key of ['apeAnnual', 'coached7d', 'manpower'] as const) {
       expect([at(`${key} ignores the period`), then.total[key]]).toEqual([at(`${key} ignores the period`), now.total[key]]);
     }
@@ -248,7 +263,7 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     }[];
     /*
      * The office's month sums its rows by the rollup rule, every target held; the dashboard's tile **pairs** each target
-     * with the production it measures (ADR-0165 §1, P18.8-T15 AC-6). One set of rows, two documented rules.
+     * with the production it measures (ADR-0165 §1, P18.5-T15 AC-6). One set of rows, two documented rules.
      */
     const office = rollUpGoal(unitRows.map((r) => r.goal));
     expect([at('the month = the Unit Dashboard’s rows'), now.total.apeMonth.achievedMinor, now.total.apeMonth.targetMinor])
@@ -296,16 +311,22 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     await reconciles('as it stands');
   }, 60_000);
 
-  it('P18-T6 AC-2 exit test 1 through an import, a correction, a leader’s correction and a revert', async () => {
+  it('P19.5-T2 AC-7 P18-T6 AC-2 exit test 1 through an import, a correction of a month, a leader’s correction and a revert', async () => {
     const batch = await importFile(MONTH, await file(
       ['NINA', { 'ape.monthly': '12', 'ape.ytd': '40', 'policyCount.monthly': '1' }], ['DODI', { 'ape.monthly': '5', 'ape.ytd': '5' }],
       ['TARI', { 'ape.monthly': '0', 'ape.ytd': '0', 'policyCount.monthly': '0' }],
     ));
     await reconciles('after an import');
 
+    // The Owner corrects Dodi's September: a year to date is the sum of the months (P19.5-T2), corrected through a month —
+    // the year's own cell, which this corrected before, is refused (AC-7).
     asOwner();
     await http().patch('/kpm/data-upload/cell').send({
-      month: MONTH, membershipId: office.id.DODI, metric: 'ape', cadence: 'ytd', value: 9 * M, revision: await revision(),
+      month: MONTH, membershipId: office.id.DODI, kode: 'APE', ytd: true, value: 9 * M, revision: await revision(),
+      reason: 'The carrier restated it by email',
+    }).expect(400);
+    await http().patch('/kpm/data-upload/cell').send({
+      month: MONTH, membershipId: office.id.DODI, kode: 'APE', ytd: false, value: 9 * M, revision: await revision(),
       reason: 'The carrier restated it by email',
     }).expect(200);
     await reconciles('after a correction');
@@ -343,19 +364,21 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     const after = (await http().get('/kpm/overview').expect(200)).body;
     expect(after.composition.total).toBe(16);
     const analytics = (await http().get('/kpm/analytics').expect(200)).body as Analytics;
-    expect(analytics.total.leaversExcludedMinor).toBe(180 * M);
-    expect(after.production.ytd.achievedMinor).toBe((analytics.total.apeAnnual.achievedMinor ?? 0) + 180 * M);
+    // P19.3-T3 AC-5: the leaver's 180 jt stays in the one total, on both pages; the rows count today's members.
+    expect(after.production.ytd.achievedMinor).toBe(analytics.total.apeAnnual.achievedMinor);
+    expect(analytics.agencies.reduce((n, a) => n + (a.apeAnnual.achievedMinor ?? 0), 0) + 180 * M)
+      .toBe(analytics.total.apeAnnual.achievedMinor);
     // Last month's figures still count Dimas, a member on 31 August (item 1): his August APE and his MAA flag are
     // in its total and in his agency's (Direct) row; Manpower is today's people, without him.
     const previous = (await http().get('/kpm/analytics').query({ period: 'previous_month' }).expect(200)).body as Analytics;
     expect(previous.total.manpower.total).toBe(16);
     const dimasAugust = await db().collection('monthlyAgentData').findOne({ membershipId: office.id.DIMAS, month: '2026-08' });
-    expect(dimasAugust!.apeMonthly.value).toBe(20 * M);
-    expect(monthlyActiveAgent(dimasAugust!.apeMonthly.value, dimasAugust!.policyCountMonthly.value)).toBe(true);
+    expect(dimasAugust!.values.APE.value).toBe(20 * M);
+    expect(monthlyActiveAgent(dimasAugust!.values.APE.value, dimasAugust!.values.POLICY_COUNT.value)).toBe(true);
     const augustTable = (await http().get('/kpm/data-upload/2026-08').expect(200)).body.rows as TableRow[];
     expect(augustTable.map((r) => r.membershipId)).not.toContain(office.id.DIMAS);
     expect(previous.total.apeMonth.achievedMinor)
-      .toBe(augustTable.reduce((n, r) => n + (r.metrics.ape.monthly.value ?? 0), 0) + 20 * M);
+      .toBe(augustTable.reduce((n, r) => n + (r.values.APE?.value ?? 0), 0) + 20 * M);
     expect(previous.total.activeAgents).toBe(augustTable.filter((r) => r.monthlyActiveAgent === true).length + 1);
     // Placed by the edge he left with: Agus's (Direct) row holds his August — Agus 30 + Indah 20 + Dimas 20.
     const agus = previous.agencies.find((a) => a.head.membershipId === office.id.AGUS)!;
@@ -405,7 +428,7 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
       const previous = (await http().get('/kpm/analytics').query({ period: 'previous_month' }).expect(200)).body as Analytics;
       const september = (await http().get(`/kpm/data-upload/${MONTH}`).expect(200)).body.rows as TableRow[];
       expect(previous.total.activeAgents).toBe(september.filter((r) => r.monthlyActiveAgent === true).length);
-      expect(previous.total.apeMonth.achievedMinor).toBe(september.reduce((n, r) => n + (r.metrics.ape.monthly.value ?? 0), 0));
+      expect(previous.total.apeMonth.achievedMinor).toBe(september.reduce((n, r) => n + (r.values.APE?.value ?? 0), 0));
     } finally {
       (wired.clock as FixedClock).set(ROSTER_NOW);
     }

@@ -73,7 +73,7 @@ describe('PasswordService', () => {
       expect(english(problems[1])).toMatch(/begin or end with a space/);
     });
 
-    it('P18.98-T5 AC-3 names each problem in Indonesian too', () => {
+    it('P18.10-T5 AC-3 names each problem in Indonesian too', () => {
       expect(indonesianAll(passwords.validate(' short '))).toEqual([
         'Kata sandi minimal 8 karakter.',
         'Kata sandi tidak boleh diawali atau diakhiri spasi.',

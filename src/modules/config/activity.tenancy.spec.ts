@@ -265,7 +265,7 @@ describe('the office activity taxonomy (P4-T1)', () => {
     it('uses the KPM Owner wording where the two prototypes disagree (AC-3), and the client’s for items 3, 7 and 8', async () => {
       // The Owner app is the configuration screen — it depicts what an Owner edits — so
       // its wording is authoritative. The agent app has items 7–9 in English. Items 3, 7 and 8
-      // read the client's words since ADR-0160 (2026-10-26), and item 7 has no note (P18.8-T8 AC-2).
+      // read the client's words since ADR-0160 (2026-10-26), and item 7 has no note (P18.5-T8 AC-2).
       const types = (await service.list(ctx(KPM_A))).flatMap((c) => c.types);
       const byCode = new Map(types.map((t) => [t.code, t]));
       expect(byCode.get('LEADS_CONTACTED')).toMatchObject({ label: 'Set Appointment', description: 'telepon, WhatsApp, tatap muka, dll' });

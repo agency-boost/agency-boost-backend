@@ -60,7 +60,11 @@ export interface RegistrationInput {
 
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_DAYS = 30;
-const VERIFICATION_TTL_HOURS = 24;
+/**
+ * How long a single-use emailed link lasts: verifying an address, an email change's link (ADR-0181) and a linked login's
+ * (ADR-0199 §2, which reuses it rather than restating it).
+ */
+export const VERIFICATION_TTL_HOURS = 24;
 const RESET_TTL_MINUTES = 30;
 
 /**
@@ -99,7 +103,7 @@ export class AuthService {
   // ---------------------------------------------------------------- registration
 
   /**
-   * `reader` is the request's (P18.98-T5 AC-5): the verification email is written in it for a person who has saved no
+   * `reader` is the request's (P18.10-T5 AC-5): the verification email is written in it for a person who has saved no
    * language — a new account never has.
    */
   async register(input: RegistrationInput, reader?: Reader): Promise<UserDocument> {
@@ -107,7 +111,7 @@ export class AuthService {
   }
 
   /**
-   * **`register`, saying whether it made the account** (P18.96-T3 AC-4). Registration on an invite's link joins the
+   * **`register`, saying whether it made the account** (P18.8-T3 AC-4). Registration on an invite's link joins the
    * office only for an account made here and now: an address that already exists answers the same shape as ever —
    * confirming it would be the enumeration oracle `register` refuses to be — and must not join anybody to anything.
    */
@@ -189,7 +193,7 @@ export class AuthService {
 
   /**
    * **A birth date in the past and at least 18 years ago, a join month not in the future** (ADR-0158 §2,
-   * P18.8-T4 AC-4), each refused `400 VALIDATION_FAILED` with the field named — registration's, and
+   * P18.5-T4 AC-4), each refused `400 VALIDATION_FAILED` with the field named — registration's, and
    * `PATCH /auth/me`'s for whichever of the two it carries.
    *
    * Measured against **today in `Asia/Jakarta`**, the one office timezone v1 has (ADR-0016): a person
@@ -236,13 +240,12 @@ export class AuthService {
         HttpStatus.FORBIDDEN,
       );
     }
-    if (!user.emailVerifiedAt) {
-      throw new DomainException(
-        ErrorCode.AUTH_EMAIL_NOT_VERIFIED,
-        AUTH_REFUSALS.AUTH_EMAIL_NOT_VERIFIED.verifyFirst,
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    /*
+     * **An address not yet verified signs in** (P19-T1 AC-4; UI-163, ADR-0190 §4). It was refused here,
+     * `403 AUTH_EMAIL_NOT_VERIFIED` — a dead end whenever the mail was slow, filtered or spent by a scanner. Every shell
+     * now says *"Verifikasi email Anda · Kirim ulang"* until it is (`emailVerified` on `/auth/me`), and what must be sure
+     * of the address checks it itself (`verified-address.ts`).
+     */
 
     user.lastLoginAt = this.clock.now();
     await user.save();
@@ -395,13 +398,13 @@ export class AuthService {
       .exec();
     if (!user || user.emailVerifiedAt) return;
 
-    // `issueVerification` sends it. It was sent a second time here, so every resend delivered two (P18.98-T5).
+    // `issueVerification` sends it. It was sent a second time here, so every resend delivered two (P18.10-T5).
     await this.issueVerification(user, reader);
   }
 
   /**
    * A fresh verification link, emailed. **In the language of the request that asked for it** where the person has
-   * saved none (P18.98-T5 AC-5): `reader` is that request's, and their saved `users.locale` wins over it.
+   * saved none (P18.10-T5 AC-5): `reader` is that request's, and their saved `users.locale` wins over it.
    */
   async issueVerification(user: UserDocument, reader?: Reader): Promise<string> {
     const raw = this.passwords.generateToken();
@@ -421,14 +424,72 @@ export class AuthService {
     return raw;
   }
 
+  /**
+   * **Verify the address — the press of *Verifikasi email saya*, never the page's load** (P19-T1 AC-1, AC-2; UI-163,
+   * ADR-0190 §1–§2).
+   *
+   * The page sent its token the moment it loaded, and the token is single-use, so a mail scanner that opened the link
+   * first — or the person's second open — spent it, and the first real open read *"Tautan itu sudah tidak berlaku"*. The
+   * page now sends it only when its button is pressed, and **an address already verified answers success** whatever
+   * state its link is in: pressed again, opened from an older mail, or after a reset verified it. A link that names
+   * nobody, or one expired before the address was verified, is still `400 AUTH_TOKEN_INVALID`.
+   */
   async verifyEmail(rawToken: string): Promise<void> {
-    const record = await this.consumeSingleUse(rawToken, 'email_verification');
-    await this.users
-      .updateOne(
-        { _id: record.userId },
-        { $set: { emailVerifiedAt: this.clock.now(), status: 'active' } },
-      )
+    const record = await this.tokens
+      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'email_verification' })
       .exec();
+    if (!record) throw linkInvalid();
+    const user = await this.users.findOne({ _id: record.userId, deletedAt: null }).exec();
+    if (!user) throw linkInvalid();
+    if (user.emailVerifiedAt) return;
+
+    try {
+      await this.consumeSingleUse(rawToken, 'email_verification');
+    } catch (err) {
+      // Pressed twice at once: the other press spent the token and verified the address, which is this one's success.
+      if (await this.addressVerified(record.userId)) return;
+      throw err;
+    }
+    await this.markVerified(record.userId);
+  }
+
+  /** Whether the account's address is verified now, read again. */
+  private async addressVerified(userId: string): Promise<boolean> {
+    const user = await this.users.findOne({ _id: userId, deletedAt: null }).select('emailVerifiedAt').lean().exec();
+    return Boolean(user?.emailVerifiedAt);
+  }
+
+  /**
+   * **The address proven** — by its verification link, or by a password reset (P19-T1 AC-3): `emailVerifiedAt` set where
+   * it was not, and an account still `invited` made `active`. Never a `deactivated` one, which the unconditional write
+   * this replaced would have brought back. *Public since 2026-11-05 (P19.2-T1 AC-8):* a linked login's confirm proves the
+   * other login's mailbox the same way (ADR-0199 §2).
+   */
+  async markVerified(userId: string): Promise<void> {
+    await this.users
+      .updateOne({ _id: userId, deletedAt: null, emailVerifiedAt: null }, { $set: { emailVerifiedAt: this.clock.now() } })
+      .exec();
+    await this.users.updateOne({ _id: userId, deletedAt: null, status: 'invited' }, { $set: { status: 'active' } }).exec();
+  }
+
+  /**
+   * **"Kata sandi Anda diubah"** (P19-T1 AC-5; UI-163, ADR-0190 §5): after a reset and after a change, to the address the
+   * account has, in their language — else the request's. Sent whatever they chose for notification email (AC-6). **It
+   * never fails the change**: the password is already new, and a refusal here would say otherwise; a failure is logged.
+   */
+  private async tellPasswordChanged(userId: string, reader?: Reader): Promise<void> {
+    try {
+      const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
+      if (!user) return;
+      await this.notifications.send({
+        userId,
+        templateId: NotificationTemplate.PASSWORD_CHANGED,
+        payload: { fullName: user.fullName },
+        reader,
+      });
+    } catch (err) {
+      this.logger.error({ err, userId }, 'could not send the password-changed mail');
+    }
   }
 
   // ------------------------------------------------------------- password reset
@@ -451,7 +512,7 @@ export class AuthService {
       expiresAt: new Date(this.clock.now().getTime() + RESET_TTL_MINUTES * 60_000),
     });
 
-    // In the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
+    // In the language of the page that asked, for a person who has saved none (P18.10-T5 AC-5).
     await this.notifications.send({
       userId: String(user._id),
       templateId: NotificationTemplate.PASSWORD_RESET,
@@ -460,7 +521,12 @@ export class AuthService {
     });
   }
 
-  async resetPassword(rawToken: string, newPassword: string): Promise<void> {
+  /**
+   * A new password from a reset link. **It marks the address verified** (P19-T1 AC-3; ADR-0190 §3): the link was opened
+   * from that mailbox, which is all a verification link proves. Every session ends, a pending email change is
+   * cancelled, and *"Kata sandi Anda diubah"* is sent (AC-5) — in the account's language, else the page's (`reader`).
+   */
+  async resetPassword(rawToken: string, newPassword: string, reader?: Reader): Promise<void> {
     const problems = this.passwords.validate(newPassword);
     if (problems.length) {
       throw new DomainException(
@@ -478,7 +544,7 @@ export class AuthService {
         {
           $set: {
             passwordHash: await this.passwords.hash(newPassword),
-            // A reset lifts the roster-import gate too (P3.6-T4). It proves control of
+            // A reset lifts the roster-import gate too (P3.2-T4). It proves control of
             // the mailbox and produces a password nobody else has seen, which is the
             // whole of what the gate is waiting for — and somebody who never received
             // their generated password would otherwise be locked out with no way back.
@@ -488,13 +554,19 @@ export class AuthService {
       )
       .exec();
 
+    await this.markVerified(record.userId);
+
     // A reset is what you do when you believe the password was compromised, so every
     // existing session dies with it — and any email change asked for with it (ADR-0181 §4).
     await this.logoutAll(record.userId, 'password reset');
     await this.cancelEmailChange(record.userId, 'password reset');
+    // And a link this login started and nobody confirmed yet (ADR-0199 §2): its notice says *change your password*.
+    await this.cancelPendingLink(record.userId, 'password reset');
+    await this.tellPasswordChanged(record.userId, reader);
   }
 
-  async changePassword(userId: string, current: string, next: string): Promise<void> {
+  /** From *Profil saya* or *Choose your own password*: the current one again, then every other session ends (AC-5's mail). */
+  async changePassword(userId: string, current: string, next: string, reader?: Reader): Promise<void> {
     const user = await this.users.findOne({ _id: userId }).select('+passwordHash').exec();
     if (!user || !(await this.passwords.verify(user.passwordHash, current))) {
       throw new DomainException(
@@ -526,12 +598,15 @@ export class AuthService {
     }
 
     user.passwordHash = await this.passwords.hash(next);
-    // The one thing that lifts the roster-import gate (P3.6-T4). Nothing else clears it.
+    // The one thing that lifts the roster-import gate (P3.2-T4). Nothing else clears it.
     user.mustChangePassword = false;
     await user.save();
     await this.logoutAll(userId, 'password changed');
     // What the old address's notice tells somebody to do when the change was not theirs (ADR-0181 §4).
     await this.cancelEmailChange(userId, 'password changed');
+    // The same for a link this login started (ADR-0199 §2): the notice to its address says *change your password now*.
+    await this.cancelPendingLink(userId, 'password changed');
+    await this.tellPasswordChanged(userId, reader);
   }
 
   // ---------------------------------------------------------------- email change
@@ -601,7 +676,7 @@ export class AuthService {
       reader,
     });
 
-    // The request is recorded as well as the change (the Phase 18.99 exit review, L10): an account asked to move to an
+    // The request is recorded as well as the change (the Phase 18.11 exit review, L10): an account asked to move to an
     // address it never reached is a trail somebody may need — a stolen password trying to take the account away. As
     // `user.email_changed`: the platform's scope, written as the person, with the address as it is and as asked.
     await this.audit?.record(new RequestContext(userId, user.platformRole, null), {
@@ -621,6 +696,10 @@ export class AuthService {
    * address was taken since it was sent is `409 AUTH_EMAIL_TAKEN` once and invalid after. The swap marks the address
    * verified — the link proved the mailbox — and is audited `user.email_changed` with before and after. **Sessions
    * stay signed in**: the person proved both the password and the new mailbox.
+   *
+   * *Since 2026-11-04 (P19-T1 AC-4, ADR-0190 §4):* an account whose address was never verified may sign in, and so may
+   * ask for a change — the way out of an address mistyped at registration, whose mail never arrives. The account still
+   * moves only when the new address's own link is opened, which marks it verified: a change needs a proven address.
    */
   async confirmEmailChange(rawToken: string): Promise<EmailChanged> {
     const record = await this.consumeSingleUse(rawToken, 'email_change');
@@ -672,6 +751,64 @@ export class AuthService {
         { $set: { revokedAt: this.clock.now(), revokedReason: reason } },
       )
       .exec();
+  }
+
+  /**
+   * **A link this login started, not yet confirmed, stops working** (UI-169 item 5; ADR-0199 §2): a newer start replaces
+   * it, and a password change or reset cancels it — what the notice to the starting address tells somebody to do.
+   */
+  async cancelPendingLink(userId: string, reason: string): Promise<void> {
+    await this.tokens
+      .updateMany(
+        { userId, kind: 'account_link', usedAt: null, revokedAt: null },
+        { $set: { revokedAt: this.clock.now(), revokedReason: reason } },
+      )
+      .exec();
+  }
+
+  // ------------------------------------------------------------ linked logins' sessions
+
+  /**
+   * **This login's own live session, from a refresh token the browser presented** (ADR-0199 §2, §4): the row, when the
+   * token is a refresh token of `userId` that is neither spent, revoked nor expired — or `null`. **It changes nothing**:
+   * a link's confirm reads whether the browser holds the starting login's session, and a switch whether the cookie it
+   * parks is the active login's own, and neither may rotate a token the browser still holds.
+   */
+  async liveSessionOf(rawToken: string | null | undefined, userId: string): Promise<AuthTokenDocument | null> {
+    if (!rawToken) return null;
+    const record = await this.tokens
+      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
+      .exec();
+    if (!record || record.userId !== userId || record.usedAt || record.revokedAt) return null;
+    return record.expiresAt.getTime() > this.clock.now().getTime() ? record : null;
+  }
+
+  /**
+   * **Rotate the other login's parked session, if it is one** (ADR-0199 §4): `refresh`, for a token that belongs to
+   * `userId`, answering `null` where `refresh` would refuse. A token of another login is left alone and answers `null`;
+   * a spent one still revokes its family, as every reuse does.
+   */
+  async refreshOwnedBy(rawToken: string | null | undefined, userId: string, meta: Meta = {}): Promise<TokenPair | null> {
+    if (!rawToken) return null;
+    const record = await this.tokens
+      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
+      .exec();
+    if (!record || record.userId !== userId) return null;
+    try {
+      return await this.refresh(rawToken, meta);
+    } catch (err) {
+      if (err instanceof DomainException && err.code === ErrorCode.AUTH_SESSION_ENDED) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * **A new session for a login whose password was just given** (ADR-0199 §2, §4): a linked login's confirm, and a
+   * switch that had to ask. A sign-in in every respect but the form — `lastLoginAt`, a new token family.
+   */
+  async signInProven(userId: string, meta: Meta = {}): Promise<TokenPair> {
+    await this.users.updateOne({ _id: userId }, { $set: { lastLoginAt: this.clock.now() } }).exec();
+    return this.issuePair(userId, randomUUID(), meta);
   }
 
   // ------------------------------------------------------------------- internals

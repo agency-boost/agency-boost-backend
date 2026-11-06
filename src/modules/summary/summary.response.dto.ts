@@ -21,7 +21,39 @@ class PeriodFiguresDto implements PeriodFigures {
   @ApiProperty() targetMet!: boolean;
 }
 
-export class MonthlyFiguresDto extends PeriodFiguresDto {
+/** UI-157 item 2: the helpers with nothing held, counting 0 achieved. */
+class WithoutProductionDto {
+  @ApiProperty({ description: '*Sisa*: the whole target — `APE_GAP_TO_TARGET` at an APE of 0. IDR minor units.' }) gapMinor!: number;
+  @ApiProperty({ type: Number, nullable: true, description: '`POLICIES_NEEDED` at an APE of 0; `null` without a case size.' }) policiesNeeded!: number | null;
+}
+
+/** Whose figure the period's APE produced is, and the helpers without one (P19.1-T4, UI-157; ADR-0195). */
+class ProductionHeldDto extends PeriodFiguresDto {
+  @ApiProperty({
+    enum: ['official', 'estimate', 'none'],
+    description: '`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal '
+      + 'Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183); the year only. `none`: nothing yet.',
+  })
+  production!: 'official' | 'estimate' | 'none';
+  @ApiProperty({
+    type: WithoutProductionDto, nullable: true,
+    description: 'With `production: none` and a target above 0 not yet met, the helpers counting what was achieved as 0 '
+      + '(UI-157 item 2), which the screen marks *(belum ada data produksi)*; `null` otherwise.',
+  })
+  withoutProduction!: { gapMinor: number; policiesNeeded: number | null } | null;
+}
+
+/** P19.1-T4 AC-11: the office's figure replaced an estimate. */
+class EstimateReplacedDto {
+  @ApiProperty({
+    type: String, format: 'date', example: '2026-12-05',
+    description: 'The office’s day its year-to-date figure was written — the correction’s, or the year’s latest import — '
+      + 'after the estimate: *Diganti data produksi resmi (diunggah 5 Des)*.',
+  })
+  uploadedOn!: string;
+}
+
+export class MonthlyFiguresDto extends ProductionHeldDto {
   @ApiProperty({
     type: FigureSourceDto, nullable: true,
     description: 'Where this month’s APE came from; `null` until the file for the month arrives.',
@@ -29,7 +61,7 @@ export class MonthlyFiguresDto extends PeriodFiguresDto {
   source!: FigureSource | null;
 }
 
-export class YearlyFiguresDto extends PeriodFiguresDto {
+export class YearlyFiguresDto extends ProductionHeldDto {
   @ApiProperty({ type: FigureSourceDto, description: 'The office’s year to date, or the agent’s own figure.' })
   source!: FigureSource;
 }
@@ -167,7 +199,7 @@ class SummaryUploadedOnDto {
   year!: string | null;
 }
 
-/** Which period the Summary is for, and which there are (P18.8-T11, ADR-0161 §4). */
+/** Which period the Summary is for, and which there are (P18.5-T11, ADR-0161 §4). */
 class SummaryPeriodDto {
   @ApiProperty({ example: '2025-03', description: 'The office’s first month, `YYYY-MM`, in its zone: the earliest `month` there is, and its year the earliest `year`.' })
   firstMonth!: string;
@@ -195,6 +227,13 @@ export class SummaryDto implements SummaryView {
 
   @ApiProperty({ type: YearlyFiguresDto, description: '*Yearly*: the annual target against the year to date.' })
   yearly!: YearlyFiguresDto;
+
+  @ApiProperty({
+    type: EstimateReplacedDto, nullable: true,
+    description: 'The office’s year-to-date figure, written after it, replaced a typed estimate the plan still stores '
+      + '(UI-157 item 4, ADR-0195 §3); `null` when nothing was replaced.',
+  })
+  estimateReplaced!: { uploadedOn: string } | null;
 
   @ApiProperty({ type: PaceDto, nullable: true, description: 'The pace sentence (ADR-0109); `null` without a goal, and for a month that has ended (ADR-0161).' })
   pace!: Pace | null;

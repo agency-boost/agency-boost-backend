@@ -2,7 +2,7 @@ import { ulid } from 'ulid';
 import { Fields, refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { TRAINING_REFUSALS, type ContentItem } from './training.messages';
 
-/** What a module's content is refused with (P18.98-T5 AC-3): each sentence in both languages, its item named. */
+/** What a module's content is refused with (P18.10-T5 AC-3): each sentence in both languages, its item named. */
 const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 
 /** One uploaded file or short video, as a write sends it. */

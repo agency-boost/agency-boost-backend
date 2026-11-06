@@ -111,6 +111,18 @@ export class UpdateProductionDto {
   @Min(0)
   revision!: number;
 
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      'The unit the dashboard was read for (its `for`), which the screen sends whenever it has one. Omitted, your own. '
+      + 'The Owner and an Admin naming another leader’s unit are refused `403 PERM_DENIED`: that view is read-only '
+      + '(UI-152).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  for?: string;
+
   @ApiProperty({ type: [ProductionRowDto], minItems: 1, maxItems: UNIT_DASHBOARD.MAX_ROWS_PER_SAVE })
   @IsArray()
   @ArrayMinSize(1)

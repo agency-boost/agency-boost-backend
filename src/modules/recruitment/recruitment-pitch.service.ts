@@ -27,8 +27,11 @@ export interface PitchSlotView {
   /** `true` for the four the readiness counts; `false` for *Company Profile* and *Agency Profile* (ADR-0177). */
   required: boolean;
   state: RecruitmentPitchState;
-  /** `null`, never a placeholder, where the slot holds nothing (T4 AC-5). */
-  file: { name: string; bytes: number; uploadedOn: string } | null;
+  /**
+   * `null`, never a placeholder, where the slot holds nothing (T4 AC-5). `mimeType` is what storage holds: a PDF, or an
+   * HTML page that a reader draws only in the sandboxed frame (P19.6-T2, ADR-0217 §4).
+   */
+  file: { name: string; bytes: number; uploadedOn: string; mimeType: string } | null;
   /** `[]` for a slot with no checklist. Whether each item is ticked — never by whom. */
   checklist: { code: string; label: string; ticked: boolean }[];
   /** `0` while the slot has never held a file. */
@@ -103,8 +106,8 @@ export class RecruitmentPitchService {
 
   /**
    * `POST /kpm/settings/recruitment-pitch/uploads` (T4 AC-2): a signed upload into the office's own
-   * `recruitment-pitch` folder — **a PDF of at most 25 MB**, refused before the signature otherwise
-   * (`ASSET_TYPE_NOT_ALLOWED`, `ASSET_TOO_LARGE`).
+   * `recruitment-pitch` folder — **a PDF or an HTML page (P19.6-T2, ADR-0217 §1) of at most 25 MB**, refused before
+   * the signature otherwise (`ASSET_TYPE_NOT_ALLOWED`, `ASSET_TOO_LARGE`).
    */
   async requestUpload(
     ctx: RequestContext, params: { filename: string; mimeType: string; bytes: number },
@@ -136,7 +139,7 @@ export class RecruitmentPitchService {
     const asset = await this.assets.confirmUpload(ctx, storageKey, RECRUITMENT.PITCH_MIME_TYPES);
     const file = {
       storageKey: asset.storageKey,
-      // A file with no name of its own takes its slot's title, in the language of whoever uploads it (P18.98-T7).
+      // A file with no name of its own takes its slot's title, in the language of whoever uploads it (P18.10-T7).
       fileName: asset.originalFilename ?? render(pitchSlotTitle(definition.code), ctx.reader),
       mimeType: asset.mimeType,
       bytes: asset.bytes,
@@ -234,7 +237,7 @@ export class RecruitmentPitchService {
   }
 
   /**
-   * One slot, **its words written for the reader** (P18.98-T7; ADR-0179 §7): the title, the line and each checklist
+   * One slot, **its words written for the reader** (P18.10-T7; ADR-0179 §7): the title, the line and each checklist
    * item's label are the platform's, served in the reader's language — the codes, the file's own name and the rest as
    * they are.
    */
@@ -251,7 +254,9 @@ export class RecruitmentPitchService {
       line: render(pitchSlotLine(definition.code), reader),
       required: definition.required,
       state: recruitmentPitchState(row !== null, checklist),
-      file: row ? { name: row.fileName, bytes: row.bytes, uploadedOn: localDayOf(row.uploadedAt, timezone) } : null,
+      file: row ? {
+        name: row.fileName, bytes: row.bytes, uploadedOn: localDayOf(row.uploadedAt, timezone), mimeType: row.mimeType,
+      } : null,
       checklist,
       version: row?.version ?? 0,
     };

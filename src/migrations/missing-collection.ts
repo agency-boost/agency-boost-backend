@@ -9,7 +9,7 @@ export function isNamespaceNotFound(err: unknown): boolean {
 
 /**
  * **A read that is empty when its collection does not exist yet, and fails for any other reason**
- * (P18.7-T1, the review's L4).
+ * (P18.4-T1, the review's L4).
  *
  * A new VM's first deploy runs every migration before the API has created a single collection, and
  * `indexes()` on a missing collection throws `NamespaceNotFound`. That one error means "nothing here

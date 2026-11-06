@@ -328,15 +328,15 @@ describe('who may set whose goal (P8-T4)', () => {
   });
 
   /*
-   * **The preview reaches whom a read reaches, and writes nothing** (P18.99-T5, UI V1 UI-014): Goal Settings' result
+   * **The preview reaches whom a read reaches, and writes nothing** (P18.11-T5, UI V1 UI-014): Goal Settings' result
    * card and a coachee's *Goal Setting* tab work a plan out as a slider moves, through `goal:read`'s reach.
    */
-  describe('P18.99-T5 UI-014 — the preview', () => {
+  describe('P18.11-T5 UI-014 — the preview', () => {
     const preview = (who: RequestContext, forWhom?: string, over: Record<string, unknown> = {}) =>
       wired.goals.preview(who, '2026', plan(over), forWhom);
     const goals = () => mongoose.connection.db!.collection('goals').countDocuments();
 
-    it('P18.99-T5 UI-014 works a downline’s plan out for their leader and saves nothing', async () => {
+    it('P18.11-T5 UI-014 works a downline’s plan out for their leader and saves nothing', async () => {
       const worked = await preview(aab(), AGENT, { caseSizeMinor: 9_000_000_00 });
 
       // 500 jt over 5 months is 100 jt a month: 12 policies of 9 jt, 40 meetings at 30%, 134 appointments at 30%.
@@ -364,9 +364,10 @@ describe('who may set whose goal (P8-T4)', () => {
 
     it('ADR-0183 measures it against the office’s figure once one is held, whatever the leader types', async () => {
       await save(agent(), undefined, { apeAchievedMinor: 100_000_000_00 });
+      // P19.5-T2 (ADR-0214 §10): the year to date is the months' sum, so the office's Rp 200 M is August's own APE.
       await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
         kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
-        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+        templateVersion: 1, values: { APE: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null } },
       } as never);
 
       const worked = await preview(aab(), AGENT, { apeAchievedMinor: 400_000_000_00 });
@@ -380,7 +381,7 @@ describe('who may set whose goal (P8-T4)', () => {
 
       await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
         kpmId: KPM, membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
-        apeYtd: { value: 200_000_000_00, provenance: 'corrected', sourceBatchId: null },
+        templateVersion: 1, values: { APE: { value: 200_000_000_00, provenance: 'corrected', sourceBatchId: null } },
       } as never);
       const locked = await save(ab(), AGENT, { apeAchievedMinor: 900_000_000_00 });
       expect(locked.apeAchievedMinor).toBe(300_000_000_00);
@@ -390,25 +391,25 @@ describe('who may set whose goal (P8-T4)', () => {
     it('ADR-0183 another office’s production never unlocks or locks this office’s figure (invariant §1)', async () => {
       await mongoose.connection.db!.collection('monthlyAgentData').insertOne({
         kpmId: '66f0000000000000000009ff', membershipId: AGENT, month: '2026-08', agentCode: 'PRU-1', deletedAt: null,
-        apeYtd: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null },
+        templateVersion: 1, values: { APE: { value: 200_000_000_00, provenance: 'imported', sourceBatchId: null } },
       } as never);
       expect((await save(aab(), AGENT, { apeAchievedMinor: 300_000_000_00 })).achieved)
         .toEqual({ minor: 300_000_000_00, provenance: 'self_reported', month: null, typedBy: { membershipId: AAB, name: 'Ibu Sari' } });
     });
 
-    it('P18.99-T5 UI-014 takes the member’s own typed figure on their own plan', async () => {
+    it('P18.11-T5 UI-014 takes the member’s own typed figure on their own plan', async () => {
       const worked = await preview(agent(), undefined, { apeAchievedMinor: 400_000_000_00 });
 
       expect(worked.achieved.minor).toBe(400_000_000_00);
       expect(worked.projected!.remainingApeMinor).toBe(100_000_000_00);
     });
 
-    it('P18.99-T5 UI-014 keeps an agent out of a colleague’s plan, and an AAB out of somebody not below them: 404', async () => {
+    it('P18.11-T5 UI-014 keeps an agent out of a colleague’s plan, and an AAB out of somebody not below them: 404', async () => {
       await expect(preview(sibling(), AGENT)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
       await expect(preview(aab(), OUTSIDER)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
     });
 
-    it('P18.99-T5 UI-014 keeps an Owner out of a real membership in another office: 404 (invariant §1)', async () => {
+    it('P18.11-T5 UI-014 keeps an Owner out of a real membership in another office: 404 (invariant §1)', async () => {
       const FOREIGN = '66f000000000000000000107';
       await mongoose.connection.db!.collection('memberships').insertOne({
         ...person(FOREIGN, 'AGENT', null, []),
@@ -418,14 +419,14 @@ describe('who may set whose goal (P8-T4)', () => {
       await expect(preview(owner(), FOREIGN)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
     });
 
-    it('P18.99-T5 UI-014 answers an assumption that cannot make a plan with projected: null, not a refusal', async () => {
+    it('P18.11-T5 UI-014 answers an assumption that cannot make a plan with projected: null, not a refusal', async () => {
       const worked = await preview(agent(), undefined, { caseSizeMinor: 0 });
 
       expect(worked.projected).toBeNull();
       expect(worked.monthsLeft).toBe(5);
     });
 
-    it('P18.99-T5 UI-014 reads the months left from the office’s calendar when none is typed', async () => {
+    it('P18.11-T5 UI-014 reads the months left from the office’s calendar when none is typed', async () => {
       const worked = await preview(agent(), undefined, { monthsLeft: null });
       const read = await wired.goals.readOrDefaults(agent(), '2026');
 

@@ -6,7 +6,7 @@ import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repositor
 import { TrainingProgress, TrainingProgressDocument } from './training-progress.schema';
 
 /**
- * Every member's training progress (P18.5-T1). No escape hatch to the raw model — the repository is the
+ * Every member's training progress (P18.2-T1). No escape hatch to the raw model — the repository is the
  * chokepoint that makes forgetting `kpmId` impossible (invariant §1), and soft delete its default filter (§6).
  */
 @Injectable()

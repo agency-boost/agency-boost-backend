@@ -10,7 +10,7 @@ import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
  * prototype's, verbatim, and `recruitment.spec.ts` reads each one back out of that file — except seven chip
  * labels, the client's shorter words of 2026-10-26 (UI-015, below), which the spec pins as the client gave them.
  *
- * **The English source of words the API serves in the reader's language** (P18.98-T7; ADR-0179 §7): the chips' labels,
+ * **The English source of words the API serves in the reader's language** (P18.10-T7; ADR-0179 §7): the chips' labels,
  * the pitch slots' titles and lines and the checklist's labels are the platform's own words, not the company's, and
  * `modules/recruitment/recruitment.messages.ts` (`RECRUITMENT_MESSAGES`) holds each beside its Indonesian, its English
  * read from here. A code never changes. The playbook below is the company's content, shown as typed (§5).
@@ -33,7 +33,7 @@ export type RecruitmentTypeCode = (typeof RECRUITMENT_CANDIDATE_TYPES)[number]['
  * *What's driving them* (`:313-321`), in the chips' order. Several may be chosen; at least one.
  *
  * **The labels are the client's shorter words** (ADR-0167; the client's UI review of 2026-10-26, UI-015;
- * P18.95-T6 AC-2, parity I-421), at every size: the prototype's *Extra income on the side*, *Full career
+ * P18.7-T6 AC-2, parity I-421), at every size: the prototype's *Extra income on the side*, *Full career
  * change*, *Flexibility / time freedom* and *Building a team / leadership* stacked one chip per line on a
  * phone. **The codes are the prototype's and do not change**: an address, a playbook's openings and every
  * test key on them, never on a label. The plan prints the same label beside the opening it tags.
@@ -109,7 +109,7 @@ export const RECRUITMENT = {
   LINK_TTL_SECONDS: ASSET_LIMITS.SIGNED_URL_TTL_SECONDS,
   /** The office's own folder the pitch documents land in, fixed by the server (ADR-0032). */
   PITCH_UPLOAD_FOLDER: 'recruitment-pitch',
-  /** A pitch document is a PDF and nothing else (D-slots). */
+  /** A pitch document is a PDF (D-slots), or an HTML page drawn in the sandboxed frame (P19.6-T2, ADR-0217 §1). */
   PITCH_MIME_TYPES: DOCUMENT_MIME_TYPES,
   /** At most 25 MB: the one ceiling every upload has (`ASSET_MAX_BYTES`). */
   PITCH_MAX_BYTES: ASSET_LIMITS.MAX_BYTES,

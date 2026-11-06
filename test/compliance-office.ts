@@ -31,7 +31,7 @@ import { clearCollections, startMongo, stopMongo } from './mongo';
 import { buildReportingOffice, type ReportingOffice } from './reporting-office';
 
 /**
- * **The Owner's compliance tree, wired** (P18.6-T1): `test/reporting-office.ts`'s 0417 and 0555 — both offices'
+ * **The Owner's compliance tree, wired** (P18.3-T1): `test/reporting-office.ts`'s 0417 and 0555 — both offices'
  * configuration provisioned and **published**, so what is offered is the snapshot's — plus **one unplaced member**
  * of 0417, Oscar (an Agent under no AB: in the Overview's figures, in no row and no chip of the tree), and the tree's
  * service built over the real readers. The routes behind the real `PermissionsGuard` and the production pipe:
@@ -127,9 +127,11 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
     new GoalsComplianceCategory(wired.goals, wired.clock),
     new ActivityComplianceCategory(wired.activityReadings),
     new ActivationComplianceCategory(activationReadings),
-    // P18.6-T2's two (BE-ec), over the readers their contract names.
+    // P18.3-T2's two (BE-ec), over the readers their contract names.
     new EventsComplianceCategory(wired.eventReadings),
     new CampaignsComplianceCategory(wired.campaignStandingsReader, new MemberNames(wired.memberships, wired.users as never)),
+    // P19.3-T3 (OD-258): *Lihat untuk*'s custom groups.
+    wired.officeGroups,
   );
 
   const moduleRef = await Test.createTestingModule({
@@ -177,7 +179,7 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
     start: async (who, startDate, over = {}) => {
       const job = RequestContext.forJob(kpmOf(who), 'compliance-harness');
       const version = (await wired.activation.findVersion(job, 1))!;
-      // P18.96-T6: the new hire a placement makes them, joined that day (ADR-0169 §2), as `/new-hires` lists them.
+      // P18.8-T6: the new hire a placement makes them, joined that day (ADR-0169 §2), as `/new-hires` lists them.
       await db.collection('memberships').updateOne(
         { _id: new mongoose.Types.ObjectId(id(who)), kpmId: kpmOf(who) }, { $set: { joinDate: startDate, joinedAs: 'new_hire' } },
       );

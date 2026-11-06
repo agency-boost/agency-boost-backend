@@ -2,7 +2,7 @@ import { LEADER_MEETING_LIMITS, LEADER_MEETING_TARGET_RATE_DECIMALS } from '@/do
 import { rateOver } from '@/domain/metrics/rate';
 import type { ScorecardAsOf, ScorecardRecord } from './scorecard/scorecard-record';
 import type {
-  ColumnKey, ColumnPeriod, ScorecardCell, ScorecardChips, ScorecardUnit, RowKey, TargetRowKey,
+  ColumnKey, ColumnPeriod, ScorecardCell, ScorecardChips, ScorecardDefinitions, ScorecardUnit, RowKey, TargetRowKey,
 } from './scorecard/scorecard.types';
 import { COLUMN_KEYS, TARGET_ROW_KEYS } from './scorecard/scorecard.types';
 import type {
@@ -70,7 +70,7 @@ export interface MeetingListView {
 }
 
 /**
- * **A *Monthly Target*, as the table draws it** (ADR-0175 §4, P18.97-T1 AC-10): the rate typed per unit and **its
+ * **A *Monthly Target*, as the table draws it** (ADR-0175 §4, P18.9-T1 AC-10): the rate typed per unit and **its
  * value, `rate × # of units`** — the meeting's own units, the frozen ones once frozen — or, with no rate, the text a
  * target was typed as before rates where migration `0043` could not read one (AC-11). A cell never typed is version 0.
  */
@@ -85,15 +85,15 @@ export interface MonthlyTarget {
 }
 
 /**
- * **What a change is counted in** (P18.97-T8 F1, parity F-256): `percent`, a whole percentage of last year's figure;
+ * **What a change is counted in** (P18.9-T8 F1, parity F-256): `percent`, a whole percentage of last year's figure;
  * `points`, the difference between two percentages in whole percentage points.
  */
 export type YtdChangeUnit = 'percent' | 'points';
 
 /**
- * **A phone's card's change** (P18.97-T1 AC-17): *YTD {Y}* against *YTD {Y−1}*, computed here once (invariant §7) —
+ * **A phone's card's change** (P18.9-T1 AC-17): *YTD {Y}* against *YTD {Y−1}*, computed here once (invariant §7) —
  * a whole percentage of last year's for a count, a sum or a ratio (`rateOver`), and **for a row whose own figure is a
- * percentage, the difference in whole percentage points** (P18.97-T8 F1): a share of a share reads as either, so 60%
+ * percentage, the difference in whole percentage points** (P18.9-T8 F1): a share of a share reads as either, so 60%
  * against 100% is *−40 points*, never *−40%*. **`none`**, *—*, where either is no figure, or — a percentage of
  * last year's — last year's is 0.
  */
@@ -109,7 +109,7 @@ export interface ScorecardRow {
 }
 
 /**
- * **A period one or more of whose figures leaves months out** (P18.97-T1 AC-12): the column, and every month any of
+ * **A period one or more of whose figures leaves months out** (P18.9-T1 AC-12): the column, and every month any of
  * its figures names — what its *(\*)* note says, each figure that leaves one out marked *\**.
  */
 export interface PartialPeriod {
@@ -129,6 +129,12 @@ export interface Scorecard {
   partialPeriods: PartialPeriod[];
   /** `null` while live; the instant it was frozen onto the meeting otherwise. */
   frozenAt: string | null;
+  /**
+   * **Which definitions the rows follow** (P19.3-T1; ADR-0202 §4): `data_sources` — live, or frozen since P19.3-T1 —
+   * or `reference_slide`, frozen before it. The footnotes the screen draws are this one's, so a footnote never describes
+   * a figure it is not.
+   */
+  definitions: ScorecardDefinitions;
 }
 
 export interface AgendaItem {
@@ -225,7 +231,7 @@ export function actionItemsInOrder(rows: readonly LeaderMeetingActionItem[]): Ac
 const TARGET_VALUE_SCALE = 10 ** LEADER_MEETING_TARGET_RATE_DECIMALS;
 
 /**
- * **A stored target as the table draws it** (P18.97-T1 AC-10, AC-11): its rate times the meeting's units. A cell still
+ * **A stored target as the table draws it** (P18.9-T1 AC-10, AC-11): its rate times the meeting's units. A cell still
  * in the text it was typed in before rates — a database migration `0043` has not reached — shows that text as typed,
  * with no rate, as one the migration could not read does. Never parsed here: reading a text as a rate is the
  * migration's alone.
@@ -255,7 +261,7 @@ const POINT_PARTS = 10_000;
 /**
  * *YTD {Y}* against *YTD {Y−1}* — `none` where either is no figure.
  *
- * - **A row whose figure is a percentage** (`unit: 'percentage'`, *3M new agent %*; P18.97-T8 F1): the difference in
+ * - **A row whose figure is a percentage** (`unit: 'percentage'`, *3M new agent %*; P18.9-T8 F1): the difference in
  *   whole percentage points, rounded half up toward +∞ as `rateOver` rounds — *60%* against *100%* is −40, *45%*
  *   against *30%* is +15. A difference from 0% is a difference, so last year's 0 is not `none` here.
  * - **Every other row**: a whole percentage of last year's — `none` where last year's is 0. Whole figures — counts,
@@ -315,5 +321,6 @@ export function scorecardOf(
     asOf: record.asOf,
     partialPeriods: partialPeriodsOf(record.rows),
     frozenAt: frozenAt ? frozenAt.toISOString() : null,
+    definitions: record.definitions,
   };
 }

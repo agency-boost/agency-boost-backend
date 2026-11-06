@@ -13,11 +13,11 @@ type View = { pct: number; done: number; aspects: { items: Item[] }[] };
 const item = (view: View, code: string) => view.aspects.flatMap((a) => a.items).find((i) => i.code === code)!;
 
 /**
- * **P18.96-T4 — the first sale and the data-backed checklist items, over HTTP** (ADR-0171 §1, §3). The activation's
+ * **P18.8-T4 — the first sale and the data-backed checklist items, over HTTP** (ADR-0171 §1, §3). The activation's
  * routes, the leads' and — through the services — the production file's corrections and the coaching sessions, with
  * the permission guard in front of the real services. The clock is Monday 14 September 2026, 10:00 in Jakarta.
  */
-describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-0171)', () => {
+describe('P18.8-T4 — the first sale and the data-backed checklist items (ADR-0171)', () => {
   let h: ActivationHarness;
   const id = (who: Who) => h.id(who);
   const kpmOf = (who: Who) => h.office.as(who).kpmId!;
@@ -57,7 +57,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
     // A month past its window is reopened first, as the Owner would before correcting it.
     const state = await h.wired.productionMonths.reopen(owner, month);
     return h.wired.productionCorrections.correct(owner, {
-      month, membershipId: id(who), metric: 'policyCount', cadence: 'monthly', value, revision: state.revision,
+      month, membershipId: id(who), kode: 'POLICY_COUNT', ytd: false, value, revision: state.revision,
       reason: 'The carrier confirmed the policy',
     });
   };
@@ -74,26 +74,26 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
   // ------------------------------------------------------------------ AC-1
 
   describe('AC-1 the first sale is kept on the membership — the earliest, never later', () => {
-    it('P18.96-T4 AC-1 a sales lead reaching Paid and issued is the first sale, from the lead, on its office day', async () => {
+    it('P18.8-T4 AC-1 a sales lead reaching Paid and issued is the first sale, from the lead, on its office day', async () => {
       await h.start('BUDI', '2026-07-15');
       const lead = await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-20T03:00:00Z');
       expect(await firstSale('BUDI')).toEqual({ date: '2026-08-20', source: 'lead', collection: 'leads', id: lead });
     });
 
-    it('P18.96-T4 AC-1 counts the office’s day, not the server’s: a move at 23:30 UTC is the next day in Jakarta', async () => {
+    it('P18.8-T4 AC-1 counts the office’s day, not the server’s: a move at 23:30 UTC is the next day in Jakarta', async () => {
       await h.start('BUDI', '2026-07-15');
       await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-20T23:30:00Z');
       expect((await firstSale('BUDI')).date).toBe('2026-08-21');
     });
 
-    it('P18.96-T4 AC-1 a recruitment lead never counts, and nor does a sales lead short of Paid and issued', async () => {
+    it('P18.8-T4 AC-1 a recruitment lead never counts, and nor does a sales lead short of Paid and issued', async () => {
       await h.start('BUDI', '2026-07-15');
       await walked('BUDI', 'Sdri. Maya', ['NOT_APPROACHED', 'MEETING_SCHEDULED'], '2026-08-20T03:00:00Z', 'recruitment');
       await walked('BUDI', 'Pak Hendro', ['NOT_YET_APPROACHED', 'POLICY_SUBMITTED', 'APPROVED_NOT_PAID'], '2026-08-21T03:00:00Z');
       expect(await firstSale('BUDI')).toEqual({ date: null, source: null, collection: null, id: null });
     });
 
-    it('P18.96-T4 AC-1 an earlier sale moves it earlier, a later one never moves it, and deleting the lead does not clear it', async () => {
+    it('P18.8-T4 AC-1 an earlier sale moves it earlier, a later one never moves it, and deleting the lead does not clear it', async () => {
       await h.start('BUDI', '2026-07-15');
       const later = await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-25T03:00:00Z');
       expect((await firstSale('BUDI')).date).toBe('2026-08-25');
@@ -109,7 +109,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect((await firstSale('BUDI')).date).toBe('2026-08-10');
     });
 
-    it('P18.96-T4 AC-1 a closing logged by a checklist tick is a first sale marked manual, on the day it names', async () => {
+    it('P18.8-T4 AC-1 a closing logged by a checklist tick is a first sale marked manual, on the day it names', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('SARI');
       await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
@@ -121,7 +121,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await firstSale('BUDI')).toEqual({ date: '2026-09-03', source: 'manual', collection: 'leads', id: String(logged!._id) });
     });
 
-    it('P18.96-T4 AC-1 failing both, the production file’s first month with a policy, from the monthly file — never before the join date', async () => {
+    it('P18.8-T4 AC-1 failing both, the production file’s first month with a policy, from the monthly file — never before the join date', async () => {
       await h.start('BUDI', '2026-07-15');
       await policies('BUDI', '2026-08', 1);
       expect(await firstSale('BUDI')).toMatchObject({ date: '2026-08-01', source: 'monthly_file', collection: 'monthlyAgentData' });
@@ -132,7 +132,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await firstSale('DODI')).toMatchObject({ date: '2026-09-03', source: 'monthly_file' });
     });
 
-    it('P18.96-T4 AC-1 the file is the fallback: a lead after it does not move it later, an earlier lead does', async () => {
+    it('P18.8-T4 AC-1 the file is the fallback: a lead after it does not move it later, an earlier lead does', async () => {
       await h.start('BUDI', '2026-07-15');
       await policies('BUDI', '2026-09', 1);
       expect((await firstSale('BUDI')).date).toBe('2026-09-01');
@@ -142,14 +142,14 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await firstSale('BUDI')).toMatchObject({ date: '2026-08-28', source: 'lead' });
     });
 
-    it('P18.96-T4 AC-1 evidence before the join date is not this hire’s first sale', async () => {
+    it('P18.8-T4 AC-1 evidence before the join date is not this hire’s first sale', async () => {
       await h.start('BUDI', '2026-08-15');
       await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-01T03:00:00Z');
       await policies('BUDI', '2026-07', 1);
       expect((await firstSale('BUDI')).date).toBeNull();
     });
 
-    it('P18.96-T4 AC-1 is tenant-safe: another office’s sale never names this office’s member', async () => {
+    it('P18.8-T4 AC-1 is tenant-safe: another office’s sale never names this office’s member', async () => {
       await h.start('BUDI', '2026-07-15');
       await h.col('leads').insertOne({
         kpmId: KPM_B, ownerMembershipId: id('BUDI'), name: 'Elsewhere', type: 'sales', statusCode: 'PAID_AND_ISSUED',
@@ -164,7 +164,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
   // ------------------------------------------------------------------ AC-2
 
   describe('AC-2 the three items tick themselves from the data, bound by code', () => {
-    it('P18.96-T4 AC-2 Close first case independently ticks from a sales lead’s Paid and issued, in the write, naming the lead', async () => {
+    it('P18.8-T4 AC-2 Close first case independently ticks from a sales lead’s Paid and issued, in the write, naming the lead', async () => {
       await h.start('BUDI', '2026-07-15');
       const lead = await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-20T03:00:00Z');
       expect(await stored('BUDI', 'FIRST_CASE_CLOSED')).toMatchObject({
@@ -178,7 +178,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect((await mine('BUDI'))).toMatchObject({ firstCaseClosed: true });
     });
 
-    it('P18.96-T4 AC-2 …and from the production file, when the leads hold none', async () => {
+    it('P18.8-T4 AC-2 …and from the production file, when the leads hold none', async () => {
       await h.start('BUDI', '2026-07-15');
       await policies('BUDI', '2026-08', 1);
       expect(await stored('BUDI', 'FIRST_CASE_CLOSED')).toMatchObject({
@@ -186,7 +186,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       });
     });
 
-    it('P18.96-T4 AC-2 Reach Independent Agent milestone waits for the third closing since joining, and ticks on it', async () => {
+    it('P18.8-T4 AC-2 Reach Independent Agent milestone waits for the third closing since joining, and ticks on it', async () => {
       await h.start('BUDI', '2026-07-15');
       // One before the join date, which is not this activation's.
       await walked('BUDI', 'Before', SALE, '2026-07-10T03:00:00Z');
@@ -199,7 +199,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       });
     });
 
-    it('P18.96-T4 AC-2 …from the leads alone: policies in the production file never make it', async () => {
+    it('P18.8-T4 AC-2 …from the leads alone: policies in the production file never make it', async () => {
       await h.start('BUDI', '2026-07-15');
       await walked('BUDI', 'One', SALE, '2026-08-01T03:00:00Z');
       await walked('BUDI', 'Two', SALE, '2026-08-10T03:00:00Z');
@@ -207,7 +207,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(item(await mine('BUDI'), 'INDEPENDENT_AGENT_MILESTONE').done).toBe(false);
     });
 
-    it('P18.96-T4 AC-2 Weekly 1-on-1 check-in waits for the fourth 1:1 since joining; one before the join date is not counted', async () => {
+    it('P18.8-T4 AC-2 Weekly 1-on-1 check-in waits for the fourth 1:1 since joining; one before the join date is not counted', async () => {
       await h.start('DODI', '2026-08-01');
       await oneOnOne('NINA', 'DODI', '2026-07-28');
       for (const date of ['2026-08-03', '2026-08-10', '2026-08-17']) await oneOnOne('NINA', 'DODI', date);
@@ -220,7 +220,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       });
     });
 
-    it('P18.96-T4 AC-2 a draft is no 1:1: three finalized and a draft leave it waiting', async () => {
+    it('P18.8-T4 AC-2 a draft is no 1:1: three finalized and a draft leave it waiting', async () => {
       await h.start('DODI', '2026-08-01');
       for (const date of ['2026-08-03', '2026-08-10', '2026-08-17']) await oneOnOne('NINA', 'DODI', date);
       await h.wired.coachingSessions.create(h.office.as('NINA'), {
@@ -229,7 +229,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(item(await mine('DODI'), 'WEEKLY_CHECK_IN').done).toBe(false);
     });
 
-    it('P18.96-T4 AC-2 binds by code, so an office that renamed the item’s label keeps the link, and its own item keeps its own', async () => {
+    it('P18.8-T4 AC-2 binds by code, so an office that renamed the item’s label keeps the link, and its own item keeps its own', async () => {
       const doc = await h.start('BUDI', '2026-07-15');
       await h.col('activationTemplates').updateOne(
         { kpmId: kpmOf('BUDI'), version: doc.templateVersion, 'aspects.items.code': 'FIRST_CASE_CLOSED' },
@@ -249,7 +249,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
   // ------------------------------------------------------------------ AC-3
 
   describe('AC-3 a hand tick opens its form, and the tick and the record are saved together', () => {
-    it('P18.96-T4 AC-3 refuses a bare tick of a data-backed item, 422 naming the form, and writes nothing', async () => {
+    it('P18.8-T4 AC-3 refuses a bare tick of a data-backed item, 422 naming the form, and writes nothing', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       for (const [code, form] of [['FIRST_CASE_CLOSED', 'closing'], ['INDEPENDENT_AGENT_MILESTONE', 'closing'], ['WEEKLY_CHECK_IN', 'one_on_one']]) {
@@ -263,7 +263,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('auditLog').countDocuments({ action: 'activation.item_ticked' })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 refuses a record on an item that takes none, and one of the wrong kind', async () => {
+    it('P18.8-T4 AC-3 refuses a record on an item that takes none, and one of the wrong kind', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       await h.http().put('/activation/me/items/CRM_SETUP')
@@ -273,7 +273,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('leads').countDocuments({ ownerMembershipId: id('BUDI') })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 a new closing logged by the hire: one lead in their pipeline, the tick naming it, both audited', async () => {
+    it('P18.8-T4 AC-3 a new closing logged by the hire: one lead in their pipeline, the tick naming it, both audited', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       const view = (await h.http().put('/activation/me/items/FIRST_CASE_CLOSED')
@@ -290,7 +290,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(audits.find((a) => a.action === 'lead.created')!.after).toMatchObject({ loggedFrom: 'activation_checklist', outcome: 'won' });
     });
 
-    it('P18.96-T4 AC-3 the record fails, and the tick does not stick: a day before the join date, a missing name, nothing written', async () => {
+    it('P18.8-T4 AC-3 the record fails, and the tick does not stick: a day before the join date, a missing name, nothing written', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('SARI');
       for (const record of [
@@ -304,7 +304,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await stored('BUDI', 'FIRST_CASE_CLOSED')).toMatchObject({ done: false, source: null });
     });
 
-    it('P18.98-T5 AC-7 refuses a record in Indonesian: every field’s sentence, the join date and today in the reader’s figures', async () => {
+    it('P18.10-T5 AC-7 refuses a record in Indonesian: every field’s sentence, the join date and today in the reader’s figures', async () => {
       const doc = await h.start('BUDI', '2026-08-01');
       /** An item's label as the office stored it — typed by the office, so interpolated as typed in either language. */
       const labelOf = async (code: string) => {
@@ -356,7 +356,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('leads').countDocuments({ ownerMembershipId: id('BUDI') })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 the tick does not stick when the leads module refuses the closing: an office with no Paid and issued stage', async () => {
+    it('P18.8-T4 AC-3 the tick does not stick when the leads module refuses the closing: an office with no Paid and issued stage', async () => {
       await h.start('BUDI', '2026-07-15');
       jest.spyOn(h.wired.leadRecords, 'logClosing').mockRejectedValueOnce(new Error('the closing could not be written'));
       h.as('BUDI');
@@ -366,7 +366,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       jest.restoreAllMocks();
     });
 
-    it('P18.96-T4 AC-3 names an existing closing: the hire’s own, listed by GET …/closings; another member’s is 404', async () => {
+    it('P18.8-T4 AC-3 names an existing closing: the hire’s own, listed by GET …/closings; another member’s is 404', async () => {
       await h.start('BUDI', '2026-08-15');
       // Before the join date, so the link does not complete it: the tick names it by hand.
       const lead = await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-01T03:00:00Z');
@@ -391,7 +391,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
         .toBeGreaterThanOrEqual(1);
     });
 
-    it('P18.96-T4 AC-3 a leader’s Log 1:1 is a coaching session with the hire, finalized on the day given, counted at once', async () => {
+    it('P18.8-T4 AC-3 a leader’s Log 1:1 is a coaching session with the hire, finalized on the day given, counted at once', async () => {
       await h.start('DODI', '2026-08-01');
       for (const date of ['2026-08-03', '2026-08-10', '2026-08-17']) await oneOnOne('NINA', 'DODI', date);
       h.as('NINA');
@@ -410,7 +410,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('auditLog').countDocuments({ action: 'coaching_session.logged', targetMembershipId: id('DODI') })).toBe(1);
     });
 
-    it('P18.96-T4 AC-3 the hire’s own Log 1:1 is their date and note on the item — a coachee writes no session about themselves', async () => {
+    it('P18.8-T4 AC-3 the hire’s own Log 1:1 is their date and note on the item — a coachee writes no session about themselves', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       const view = (await h.http().put('/activation/me/items/WEEKLY_CHECK_IN')
@@ -421,7 +421,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('coachingSessions').countDocuments({ coacheeMembershipId: id('BUDI'), date: '2026-09-07' })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 an Agent who leads cannot log a 1:1 (403) nor read the hire’s closings (404), and nothing is written', async () => {
+    it('P18.8-T4 AC-3 an Agent who leads cannot log a 1:1 (403) nor read the hire’s closings (404), and nothing is written', async () => {
       await h.start('TARI', '2026-08-01');
       h.as('LUKAS');
       expect((await h.http().put(`/new-hires/${id('TARI')}/items/WEEKLY_CHECK_IN`)
@@ -437,7 +437,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('coachingSessions').countDocuments({ coacheeMembershipId: id('TARI') })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 unticks a hand tick freely, leaving its record where it is; an item its data completed is nobody’s to untick', async () => {
+    it('P18.8-T4 AC-3 unticks a hand tick freely, leaving its record where it is; an item its data completed is nobody’s to untick', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       await h.http().put('/activation/me/items/INDEPENDENT_AGENT_MILESTONE')
@@ -452,7 +452,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
         .toBe('ACTIVATION_ITEM_AUTOMATIC');
     });
 
-    it('P18.96-T4 AC-3 any AB or AAB above the hire may record for them: Agus, two rungs up, logs a closing for Budi', async () => {
+    it('P18.8-T4 AC-3 any AB or AAB above the hire may record for them: Agus, two rungs up, logs a closing for Budi', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('AGUS');
       const view = (await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
@@ -461,7 +461,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('leads').findOne({ ownerMembershipId: id('BUDI'), name: 'Ibu Ratna' })).toMatchObject({ createdBy: id('AGUS') });
     });
 
-    it('P18.96-T4 AC-3 a read-only support session writes neither the tick nor the record', async () => {
+    it('P18.8-T4 AC-3 a read-only support session writes neither the tick nor the record', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as(h.supporting('BUDI'));
       await h.http().put('/activation/me/items/FIRST_CASE_CLOSED')
@@ -469,7 +469,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await h.col('leads').countDocuments({ ownerMembershipId: id('BUDI') })).toBe(0);
     });
 
-    it('P18.96-T4 AC-3 a leader outside the hire’s reach, and another office’s, are 404 on the tick and the closings; nothing written', async () => {
+    it('P18.8-T4 AC-3 a leader outside the hire’s reach, and another office’s, are 404 on the tick and the closings; nothing written', async () => {
       await h.start('BUDI', '2026-07-15');
       for (const who of ['PEER_AB', 'B_AB', 'DEWI'] as const) {
         h.as(who);
@@ -485,7 +485,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
   // ------------------------------------------------------------------ AC-4, AC-5
 
   describe('AC-4 waiting for data, then the data · AC-5 the leader and the hire read the same', () => {
-    it('P18.96-T4 AC-4 a tick with a logged closing waits for data, and switches to the file’s month when it shows a policy', async () => {
+    it('P18.8-T4 AC-4 a tick with a logged closing waits for data, and switches to the file’s month when it shows a policy', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('SARI');
       await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
@@ -500,7 +500,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(await firstSale('BUDI')).toMatchObject({ date: '2026-09-03', source: 'manual' });
     });
 
-    it('P18.96-T4 AC-4 …or to a closing of the leads flow', async () => {
+    it('P18.8-T4 AC-4 …or to a closing of the leads flow', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('BUDI');
       await h.http().put('/activation/me/items/FIRST_CASE_CLOSED')
@@ -511,7 +511,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       });
     });
 
-    it('P18.96-T4 AC-4 a leader’s 1:1 short of four waits, and the fourth switches it', async () => {
+    it('P18.8-T4 AC-4 a leader’s 1:1 short of four waits, and the fourth switches it', async () => {
       await h.start('DODI', '2026-08-01');
       h.as('NINA');
       await h.http().put(`/new-hires/${id('DODI')}/items/WEEKLY_CHECK_IN`)
@@ -521,7 +521,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(item(await mine('DODI'), 'WEEKLY_CHECK_IN')).toMatchObject({ source: 'link', waiting: false });
     });
 
-    it('P18.96-T4 AC-5 the leader’s detail and the hire’s page show the same state, item by item', async () => {
+    it('P18.8-T4 AC-5 the leader’s detail and the hire’s page show the same state, item by item', async () => {
       await h.start('BUDI', '2026-07-15');
       h.as('SARI');
       await h.http().put(`/new-hires/${id('BUDI')}/items/INDEPENDENT_AGENT_MILESTONE`)
@@ -537,7 +537,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
       expect(item(own, 'INDEPENDENT_AGENT_MILESTONE')).toMatchObject({ source: 'leader', waiting: true });
     });
 
-    it('P18.96-T4 AC-4 a read-only support session writes nothing: the data met in memory, the row untouched', async () => {
+    it('P18.8-T4 AC-4 a read-only support session writes nothing: the data met in memory, the row untouched', async () => {
       await h.start('BUDI', '2026-07-15');
       await h.col('leads').insertOne({
         kpmId: kpmOf('BUDI'), ownerMembershipId: id('BUDI'), name: 'Ibu Ratna', type: 'sales', statusCode: 'PAID_AND_ISSUED',
@@ -550,7 +550,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
     });
   });
 
-  it('P18.96-T4 AC-2 the reads stay bounded: the roster asks the same queries for one hire as for three, closings and the file once', async () => {
+  it('P18.8-T4 AC-2 the reads stay bounded: the roster asks the same queries for one hire as for three, closings and the file once', async () => {
     const queries = async () => {
       const seen: string[] = [];
       mongoose.set('debug', (collection: string, method: string) => { seen.push(`${collection}.${method}`); });
@@ -572,7 +572,7 @@ describe('P18.96-T4 — the first sale and the data-backed checklist items (ADR-
     expect(one.filter((q) => q === 'coachingSessions.find')).toHaveLength(1);
   });
 
-  it('P18.96-T4 AC-1 a job context of one office never reads another’s: the refresh is scoped', async () => {
+  it('P18.8-T4 AC-1 a job context of one office never reads another’s: the refresh is scoped', async () => {
     await h.start('BUDI', '2026-07-15');
     await walked('BUDI', 'Ibu Ratna', SALE, '2026-08-20T03:00:00Z');
     await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('BUDI')) }, { $unset: { firstSaleDate: '' } });

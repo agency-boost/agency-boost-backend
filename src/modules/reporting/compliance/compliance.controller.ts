@@ -11,7 +11,7 @@ import { ComplianceService } from './compliance.service';
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
- * **The compliance tree** (P18.6-T1; `functional/kpm-analytics.md`, *Compliance, Events, and Campaigns*, the Data
+ * **The compliance tree** (P18.3-T1; `functional/kpm-analytics.md`, *Compliance, Events, and Campaigns*, the Data
  * contract): the analytics' third tab. A literal path of its own, beside `GET /kpm/analytics`, which it does not shadow.
  */
 @ApiTags('kpm-reporting')

@@ -16,16 +16,16 @@ const refusal = (fn: () => unknown) => {
 
 /**
  * **The two bodies a member and a confirmer send**, read field by field (ADR-0030), and the answer's race — the paths
- * an HTTP spec reaches only by luck (P18.5-T5 AC-7, P18.5-T6 AC-3).
+ * an HTTP spec reaches only by luck (P18.2-T5 AC-7, P18.2-T6 AC-3).
  */
-describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3)', () => {
-  describe('P18.5-T6 AC-3 checkFeedback', () => {
-    it('P18.5-T6 AC-3 keeps a score and trims both texts, absent texts as empty', () => {
+describe('the answer and the roll call, read whole (P18.2-T5 AC-7, P18.2-T6 AC-3)', () => {
+  describe('P18.2-T6 AC-3 checkFeedback', () => {
+    it('P18.2-T6 AC-3 keeps a score and trims both texts, absent texts as empty', () => {
       expect(checkFeedback({ score: 0 })).toEqual({ score: 0, why: '', improve: '' });
       expect(checkFeedback({ score: 10, why: '  a  ', improve: '\nb\n' })).toEqual({ score: 10, why: 'a', improve: 'b' });
     });
 
-    it('P18.5-T6 AC-3 collects every violation before refusing, a body that is not an object included', () => {
+    it('P18.2-T6 AC-3 collects every violation before refusing, a body that is not an object included', () => {
       expect(refusal(() => checkFeedback(null))).toEqual(['VALIDATION_FAILED', ['score is required.']]);
       expect(refusal(() => checkFeedback([1]))).toEqual([
         'VALIDATION_FAILED', ['The change must be an object of fields.', 'score is required.'],
@@ -36,15 +36,15 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
     });
   });
 
-  describe('P18.5-T5 AC-7 checkRollCall', () => {
+  describe('P18.2-T5 AC-7 checkRollCall', () => {
     const id = (n: number) => `66f00000000000000000${String(n).padStart(4, '0')}`;
 
-    it('P18.5-T5 AC-7 reads true, false and null for each membership', () => {
+    it('P18.2-T5 AC-7 reads true, false and null for each membership', () => {
       expect(checkRollCall({ entries: [{ membershipId: id(1), attended: true }, { membershipId: id(2), attended: false }, { membershipId: id(3), attended: null }] }))
         .toEqual([{ membershipId: id(1), attended: true }, { membershipId: id(2), attended: false }, { membershipId: id(3), attended: null }]);
     });
 
-    it('P18.5-T5 AC-7 refuses a body that is not an object, a list that is not one, and each malformed row', () => {
+    it('P18.2-T5 AC-7 refuses a body that is not an object, a list that is not one, and each malformed row', () => {
       expect(refusal(() => checkRollCall('x'))).toEqual(['VALIDATION_FAILED', ['The change must be an object of fields.']]);
       expect(refusal(() => checkRollCall({ entries: {} }))).toEqual(['VALIDATION_FAILED', ['entries must be a list.']]);
       expect(refusal(() => checkRollCall({ entries: [7, { membershipId: '' , attended: true }, { membershipId: id(1), attended: 1 }] })))
@@ -53,21 +53,21 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
         ]]);
     });
 
-    it('P18.5-T5 AC-7 refuses null, a list for a body, and a field beside entries', () => {
+    it('P18.2-T5 AC-7 refuses null, a list for a body, and a field beside entries', () => {
       expect(refusal(() => checkRollCall(null))).toEqual(['VALIDATION_FAILED', ['The change must be an object of fields.']]);
       expect(refusal(() => checkRollCall([]))).toEqual(['VALIDATION_FAILED', ['The change must be an object of fields.']]);
       expect(refusal(() => checkRollCall({ entries: [{ membershipId: id(1), attended: true }], note: 'x' })))
         .toEqual(['VALIDATION_FAILED', ['property note should not exist']]);
     });
 
-    it('P18.5-T5 AC-7 holds 1 to 500 people, no membership twice', () => {
+    it('P18.2-T5 AC-7 holds 1 to 500 people, no membership twice', () => {
       const many = Array.from({ length: ROLL_CALL_MAX_ENTRIES + 1 }, (_, i) => ({ membershipId: id(i), attended: true }));
       expect(refusal(() => checkRollCall({ entries: many }))).toEqual(['VALIDATION_FAILED', ['entries must hold 1–500 people.']]);
       expect(checkRollCall({ entries: many.slice(0, ROLL_CALL_MAX_ENTRIES) })).toHaveLength(ROLL_CALL_MAX_ENTRIES);
     });
   });
 
-  describe('P18.5-T6 AC-3 two submits racing', () => {
+  describe('P18.2-T6 AC-3 two submits racing', () => {
     const me = new RequestContext('u', 'none', {
       membershipId: 'mem-1', kpmId: 'kpm-1', orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
       isKpmOwner: false, isKpmAdmin: false, directCount: 0,
@@ -90,18 +90,18 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
       new FixedClock(new Date('2026-09-14T03:00:00Z')),
     );
 
-    it('P18.5-T6 AC-3 the unique index refusing the second is the single-submit rule: 409, not a fault', async () => {
+    it('P18.2-T6 AC-3 the unique index refusing the second is the single-submit rule: 409, not a fault', async () => {
       await expect(service({ code: 11000 }).submitFeedback(me, 'evt-1', { score: 9 }))
         .rejects.toMatchObject({ response: { code: 'EVENT_FEEDBACK_ALREADY_SUBMITTED' } });
     });
 
-    it('P18.5-T6 AC-3 any other failure is not dressed as one', async () => {
+    it('P18.2-T6 AC-3 any other failure is not dressed as one', async () => {
       await expect(service(new Error('disk full')).submitFeedback(me, 'evt-1', { score: 9 })).rejects.toThrow('disk full');
       await expect(service(null).submitFeedback(me, 'evt-1', { score: 9 })).rejects.toBeNull();
     });
   });
 
-  describe('P18.5-T5 AC-5, AC-7 the member’s row, written once — the repository’s two writes', () => {
+  describe('P18.2-T5 AC-5, AC-7 the member’s row, written once — the repository’s two writes', () => {
     const me = new RequestContext('u', 'none', {
       membershipId: 'mem-1', kpmId: 'kpm-1', orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
       isKpmOwner: false, isKpmAdmin: false, directCount: 0,
@@ -137,7 +137,7 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
     const write = (repo: EventRsvpRepository, upsert = true) =>
       repo.writeWhen(me, 'evt-1', 'mem-1', { claimedAt: null }, { claimedAt: new Date() }, upsert);
 
-    it('P18.5-T5 AC-5 updates a row still as expected, answering it as it was; scoped to the office', async () => {
+    it('P18.2-T5 AC-5 updates a row still as expected, answering it as it was; scoped to the office', async () => {
       const before = { _id: 'row-1', claimedAt: null };
       const { repo, asked } = repository({ rows: [before] });
       await expect(write(repo)).resolves.toEqual({ id: 'row-1', before });
@@ -145,13 +145,13 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
       expect(asked.options).toEqual([{ new: false }]);
     });
 
-    it('P18.5-T5 AC-5 creates a missing row, scoped on insert, answering no row before it', async () => {
+    it('P18.2-T5 AC-5 creates a missing row, scoped on insert, answering no row before it', async () => {
       const { repo, asked } = repository({ rows: [null, { _id: 'row-2' }] });
       await expect(write(repo)).resolves.toEqual({ id: 'row-2', before: null });
       expect(asked.updates[1]).toMatchObject({ $setOnInsert: { kpmId: 'kpm-1', deletedAt: null, createdBy: 'mem-1' } });
     });
 
-    it('P18.5-T5 AC-5 a row already changed answers null: no upsert, a row there in another state, or the index refusing a racing insert', async () => {
+    it('P18.2-T5 AC-5 a row already changed answers null: no upsert, a row there in another state, or the index refusing a racing insert', async () => {
       await expect(write(repository({}).repo, false)).resolves.toBeNull();
       const there = repository({ there: true });
       await expect(write(there.repo)).resolves.toBeNull();
@@ -159,12 +159,12 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
       await expect(write(repository({ fail: { code: 11000 } }).repo)).resolves.toBeNull();
     });
 
-    it('P18.5-T5 AC-5 any other failure of the insert is not dressed as nothing done', async () => {
+    it('P18.2-T5 AC-5 any other failure of the insert is not dressed as nothing done', async () => {
       await expect(write(repository({ fail: new Error('disk full') }).repo)).rejects.toThrow('disk full');
       await expect(write(repository({ fail: null }).repo)).rejects.toBeNull();
     });
 
-    it('P18.5-T5 AC-7 the roll call’s rows in one unordered batch, each scoped; the rows it created by position', async () => {
+    it('P18.2-T5 AC-7 the roll call’s rows in one unordered batch, each scoped; the rows it created by position', async () => {
       const { repo, asked } = repository({ bulk: { upsertedIds: { 1: 'new-row' } } });
       const result = await repo.setMany(me, 'evt-1', [
         { membershipId: 'a', set: { confirmedAttended: true } }, { membershipId: 'b', set: { confirmedAttended: false } },
@@ -177,7 +177,7 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
         ]);
     });
 
-    it('P18.5-T5 AC-7 a batch that fails part-way answers which rows failed and the error, never throwing', async () => {
+    it('P18.2-T5 AC-7 a batch that fails part-way answers which rows failed and the error, never throwing', async () => {
       const error = { writeErrors: [{ index: 0 }], result: { upsertedIds: { 1: 'row-b' } } };
       const { repo } = repository({ fail: error });
       await expect(repo.setMany(me, 'evt-1', [{ membershipId: 'a', set: {} }, { membershipId: 'b', set: {} }]))
@@ -191,7 +191,7 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
     });
   });
 
-  describe('P18.5-T5 AC-7 a roll-call batch that fails part-way', () => {
+  describe('P18.2-T5 AC-7 a roll-call batch that fails part-way', () => {
     const owner = new RequestContext('u', 'none', {
       membershipId: 'owner', kpmId: 'kpm-1', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
       isKpmOwner: true, isKpmAdmin: false, directCount: 0,
@@ -222,14 +222,14 @@ describe('the answer and the roll call, read whole (P18.5-T5 AC-7, P18.5-T6 AC-3
     };
     const all = { entries: ['a', 'b', 'c'].map((membershipId) => ({ membershipId, attended: true })) };
 
-    it('P18.5-T5 AC-7 audits exactly the rows written — the existing row, a created one, never a failed one — then fails', async () => {
+    it('P18.2-T5 AC-7 audits exactly the rows written — the existing row, a created one, never a failed one — then fails', async () => {
       const error = new Error('one row refused');
       const { svc, audits } = service({ created: {}, failed: [1], error });
       await expect(svc.saveRollCall(owner, 'evt-1', all)).rejects.toBe(error);
       expect(audits[0].map((a) => [a.targetMembershipId, a.targetId])).toEqual([['a', 'row-a'], ['c', null]]);
     });
 
-    it('P18.5-T5 AC-7 a created row is audited under the id the batch gave it', async () => {
+    it('P18.2-T5 AC-7 a created row is audited under the id the batch gave it', async () => {
       const { svc, audits } = service({ created: { 1: 'row-b', 2: 'row-c' }, failed: [], error: null });
       await expect(svc.saveRollCall(owner, 'evt-1', all)).resolves.toMatchObject({ eventId: 'evt-1' });
       expect(audits[0].map((a) => a.targetId)).toEqual(['row-a', 'row-b', 'row-c']);

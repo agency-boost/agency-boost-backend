@@ -59,16 +59,16 @@ export class NewHiresService {
     private readonly clock: Clock,
     // ADR-0169 §2: the join date's correction writes the membership's `joinDate` beside the activation's start.
     private readonly memberships: MembershipRepository,
-    // P18.96-T4 AC-3: a tick of a data-backed item, with its record; and the hire's closings it names.
+    // P18.8-T4 AC-3: a tick of a data-backed item, with its record; and the hire's closings it names.
     private readonly records: ActivationItemRecords,
-    // P18.96-T6 AC-1: each new hire's 3M activation, kept once decided.
+    // P18.8-T6 AC-1: each new hire's 3M activation, kept once decided.
     private readonly results: Activation3MService,
     // UI V1, UI-027: the hire's WhatsApp number on their detail (`users.phone`), for the leader who coaches them.
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
 
   /**
-   * **`GET /new-hires`** (ADR-0173; P18.96-T6 AC-2, AC-3; UI V1, UI-023): **every new hire the reader coaches whose
+   * **`GET /new-hires`** (ADR-0173; P18.8-T6 AC-2, AC-3; UI V1, UI-023): **every new hire the reader coaches whose
    * join date is in the last twelve months** (`newHiresWindow`, the office's calendar) — `joinedAs = new_hire`, at any
    * depth, never an existing agent — in three sections by their **status** (D-24): *In progress* (no first sale, days 1
    * to 90), *Teraktivasi* (a first sale — by day 90, or after it in amber) and *not activated* (no first sale, past day
@@ -256,7 +256,7 @@ export class NewHiresService {
 
   /**
    * **`PUT /new-hires/:membershipId/items/:code`**: a leader's tick or untick, attributed to them (OD-121) — and, for a
-   * data-backed item, with its record, saved together (P18.96-T4 AC-3, `ActivationItemRecords`).
+   * data-backed item, with its record, saved together (P18.8-T4 AC-3, `ActivationItemRecords`).
    */
   async tick(
     ctx: RequestContext, membershipId: string, code: string, change: { done: boolean; record?: ItemRecordInput },
@@ -266,7 +266,7 @@ export class NewHiresService {
   }
 
   /**
-   * **`GET /new-hires/:membershipId/closings`** (P18.96-T4 AC-3): a hire's closings, for *Which case?* — to a leader
+   * **`GET /new-hires/:membershipId/closings`** (P18.8-T4 AC-3): a hire's closings, for *Which case?* — to a leader
    * who reaches the hire's activation and reads their leads (`lead:read`'s reach); recorded as a read of their leads.
    */
   async closings(ctx: RequestContext, membershipId: string): Promise<ActivationClosingsView> {
@@ -291,7 +291,7 @@ export class NewHiresService {
     const state = activationState(doc.graduatedAt, office.today, activationEndsOn(office.timezone, doc.startDate));
     if (state !== 'open') throw activationClosed(state);
 
-    // P18.96-T6 AC-1: a 3M result already decided is kept from the join date it was decided on, before the date moves.
+    // P18.8-T6 AC-1: a 3M result already decided is kept from the join date it was decided on, before the date moves.
     await this.results.keepBeforeChange(ctx, [membershipId]);
     const updated = await this.progress.updateItems(
       ctx, { _id: doc._id, graduatedAt: null },

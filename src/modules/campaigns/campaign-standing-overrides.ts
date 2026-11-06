@@ -71,7 +71,7 @@ export function checkStandingOverrideClear(body: unknown): { reason: string } {
 }
 
 /**
- * **The override of a final campaign standing** (P18.6-T2 AC-5; ADR-0144 §4, D-override): the Owner's or an Admin's
+ * **The override of a final campaign standing** (P18.3-T2 AC-5; ADR-0144 §4, D-override): the Owner's or an Admin's
  * correction of a result the evaluator could not see — set to `qualified` or `not_met` with a required reason, and
  * cleared with one. Its only control is the compliance tree's *Achieved* cell.
  *

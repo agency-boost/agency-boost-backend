@@ -62,7 +62,7 @@ export const PRODUCT_CHANNEL_LABELS: Readonly<Record<ProductChannel, string>> = 
  * run-off note and the *Attack Plan* tab's are the screens' (`:9676`, `:10290`): each says something
  * different, where it is.
  *
- * **A sentence in both languages since P18.98-T5** (AC-4), held in `attack-plan.messages.ts` and written for the
+ * **A sentence in both languages since P18.10-T5** (AC-4), held in `attack-plan.messages.ts` and written for the
  * request's reader where the drawer's answer is built (`ProductCatalogService`).
  */
 export const PRODUCT_RUN_OFF_NOTE = ATTACK_PLAN_MESSAGES.runOffNote;

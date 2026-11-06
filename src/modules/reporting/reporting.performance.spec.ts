@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { DirectoryService } from '@/modules/org/directory.service';
+import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 
@@ -125,8 +126,8 @@ describe('the Owner’s reporting, measured at 500 members (P18-T7)', () => {
           const ape = (10 + (i % 30)) * M;
           ytd += ape;
           months.push({
-            kpmId, membershipId: p.id, month, agentCode: `S${i}`, deletedAt: null, apeMonthly: cell(ape), apeYtd: cell(ytd),
-            persistencyMonthly: cell(70 + (i % 30)), policyCountMonthly: cell(i % 4),
+            kpmId, membershipId: p.id, month, agentCode: `S${i}`, deletedAt: null,
+            ...byKode({ apeMonthly: cell(ape), apeYtd: cell(ytd), persistencyMonthly: cell(70 + (i % 30)), policyCountMonthly: cell(i % 4) }),
           });
         });
         // A year of logging, weekly, and the last fortnight daily — for all but every seventh member.

@@ -3,14 +3,14 @@ import { join } from 'node:path';
 import { CODE_PATTERN } from '@/common/validation/fields';
 import {
   MOTIVATION_CATEGORY, SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS,
-  SEEDED_TRAINING_WORDINGS_BEFORE_OD_238,
+  SEEDED_TRAINING_WORDINGS_BEFORE_OD_238, TRAINING_TEXT, splitTrainingTitle,
 } from './training-taxonomy';
 
 /** The prototype's six: every seeded category but the owner's *Motivation* (UI V1, UI-063), which no prototype draws. */
 const PROTOTYPE_SIX = SEED_TRAINING_CATEGORIES.filter((c) => c.code !== MOTIVATION_CATEGORY.code);
 
 /**
- * **The seed in the prototype's English** (P18.98-T7, OD-238): the words it gave before it was written in Bahasa
+ * **The seed in the prototype's English** (P18.10-T7, OD-238): the words it gave before it was written in Bahasa
  * Indonesia, where it changed one, and its own where it kept one English. What the prototype is compared against.
  */
 const WAS = SEEDED_TRAINING_WORDINGS_BEFORE_OD_238;
@@ -57,7 +57,7 @@ describe('the seeded training taxonomy (P5-T1)', () => {
   });
 
   /*
-   * **UI V1 (Phase 18.99 T10; UI-063): the owner's seventh, *Motivation*,** fifth in the category row — *Sales · Product ·
+   * **UI V1 (Phase 18.11 T10; UI-063): the owner's seventh, *Motivation*,** fifth in the category row — *Sales · Product ·
    * Recruiting · Team Management · Motivation · Soft Skills · Company and KPM* — a stable code, *Motivasi* in the
    * approved glossary's word, empty as the five after Sales are.
    */
@@ -88,12 +88,12 @@ describe('the seeded training taxonomy (P5-T1)', () => {
   });
 
   /*
-   * **The platform's Default template in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5). Pinned here,
+   * **The platform's Default template in Bahasa Indonesia** (P18.10-T7; OD-238, option 1; ADR-0179 §5). Pinned here,
    * word for word, because these are the words every new office starts with: *Sales*, *Recruitment* and *Closing* kept
    * English by the approved glossary (§A.3, §A.6), every other one Indonesian, and the English recorded for migration
    * 0046 is exactly what the seed changed.
    */
-  it('P18.98-T7 writes the six categories, the skills and the modules in Bahasa Indonesia', () => {
+  it('P18.10-T7 writes the six categories, the skills and the modules in Bahasa Indonesia', () => {
     expect(PROTOTYPE_SIX.map((c) => c.label)).toEqual([
       'Sales', 'Produk', 'Recruitment', 'Manajemen tim', 'Soft skills', 'Perusahaan dan KPM',
     ]);
@@ -145,5 +145,31 @@ describe('the seeded training taxonomy (P5-T1)', () => {
     const skills = new Set(SEED_TRAINING_SKILLS.map((s) => s.code));
     expect(SEED_TRAINING_SKILLS.filter((s) => !categories.has(s.categoryCode))).toEqual([]);
     expect(SEED_TRAINING_MODULES.filter((m) => !skills.has(m.skillCode))).toEqual([]);
+  });
+});
+
+/** P19.6-T4 (ADR-0220 §1, §3; UI-161): a skill's and a module's short description, and the rule that splits a title. */
+describe('short descriptions and the split rule (P19.6-T4)', () => {
+  it('P19.6-T4 AC-1 pins the description at 160 characters (metrics-and-definitions.md, TRAINING_TEXT)', () => {
+    expect(TRAINING_TEXT.DESCRIPTION_MAX).toBe(160);
+  });
+
+  it('P19.6-T4 AC-2 splits "Name: description" at the first colon followed by a space, both halves trimmed', () => {
+    expect(splitTrainingTitle('Leads generation: 8 cara mendapat calon nasabah')).toEqual({
+      split: true, name: 'Leads generation', description: '8 cara mendapat calon nasabah',
+    });
+    expect(splitTrainingTitle('  Fact finding :  menghitung: kebutuhan  ')).toEqual({
+      split: true, name: 'Fact finding', description: 'menghitung: kebutuhan',
+    });
+  });
+
+  it('P19.6-T4 AC-2 leaves a title whole with no colon-and-space, an empty half, or a description past the limit', () => {
+    expect(splitTrainingTitle('Closing')).toEqual({ split: false, reason: 'no_colon' });
+    expect(splitTrainingTitle('Jam 10:30 pagi')).toEqual({ split: false, reason: 'no_colon' });
+    expect(splitTrainingTitle(': hanya deskripsi')).toEqual({ split: false, reason: 'empty_half' });
+    expect(splitTrainingTitle('Nama:  ')).toEqual({ split: false, reason: 'empty_half' });
+    expect(splitTrainingTitle('Nama: ')).toEqual({ split: false, reason: 'empty_half' });
+    expect(splitTrainingTitle(`Nama: ${'x'.repeat(161)}`)).toEqual({ split: false, reason: 'too_long' });
+    expect(splitTrainingTitle(`Nama: ${'x'.repeat(160)}`)).toMatchObject({ split: true });
   });
 });

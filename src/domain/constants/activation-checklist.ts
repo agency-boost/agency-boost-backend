@@ -12,7 +12,7 @@
  *
  * **Codes, never positions.** A hire's progress names its items by code, so a code that moved would
  * re-score somebody. The codes are ours; every label is the prototype's, **written in Bahasa Indonesia since
- * P18.98-T7** (OD-238, option 1): the platform's Default template is in the client's default language, with the
+ * P18.10-T7** (OD-238, option 1): the platform's Default template is in the client's default language, with the
  * approved glossary's kept-English terms (*goal*, *leader*, *closing*, *case*, *1-on-1*, *milestone*) kept.
  */
 
@@ -30,7 +30,7 @@ export const ACTIVATION_TRAINING_LINK_PREFIX = 'training:';
 export interface ActivationLinkKind {
   /** What the agent's screen calls it in *"Go to {label} →"* (P13-T4). */
   readonly label: string;
-  /** Where that link sends them; `null` for a data kind, whose way in is its own form (P18.96-T4 AC-3). */
+  /** Where that link sends them; `null` for a data kind, whose way in is its own form (P18.8-T4 AC-3). */
   readonly route: string | null;
   /** What completes it, in one sentence — the screens and the manual both read this. */
   readonly completesWhen: string;
@@ -55,7 +55,7 @@ export interface ActivationLinkKind {
  *
  * **The three feature kinds are live** (P13-T3 AC-1): a goal, a lead or an activity day written through
  * its own module completes the item bound to it, by code (`activation-links.ts`), and nobody ticks it by
- * hand. **So is the training kind, since P18.5-T3** (`ACTIVATION_TRAINING_LINK`, below).
+ * hand. **So is the training kind, since P18.2-T3** (`ACTIVATION_TRAINING_LINK`, below).
  */
 export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, ActivationLinkKind>> = {
   'feature:goals': {
@@ -81,7 +81,7 @@ export const ACTIVATION_LINK_KINDS: Readonly<Record<ActivationFeatureLink, Activ
 /**
  * A training link's shape, for the screens that offer one and the manual that explains it.
  *
- * **Live since P18.5-T3** (ADR-0031): an item bound to `training:<moduleCode>` completes when its hire marks that
+ * **Live since P18.2-T3** (ADR-0031): an item bound to `training:<moduleCode>` completes when its hire marks that
  * module *Done* (`trainingProgress.status`), attributed to the hire, at the progress's `completedAt`, and nobody
  * ticks it by hand while the module is offered. `route` is the catalog's; each served link resolves it to the
  * module's own page, `/training/{categoryCode}/{moduleCode}` (`ActivationService.linkView`).
@@ -94,7 +94,7 @@ export const ACTIVATION_TRAINING_LINK: ActivationLinkKind = {
 };
 
 /**
- * **Every link kind, as a screen with no office to resolve against reads it** (P18.5-T3 AC-6, I-80): the three
+ * **Every link kind, as a screen with no office to resolve against reads it** (P18.2-T3 AC-6, I-80): the three
  * feature kinds by their own name, and `training` for every `training:<moduleCode>` link. The Company template's
  * *Activation checklist* tab draws its *Auto* badge from this, served with the template's read, so the frontend
  * never re-declares the registry (invariant §7) and the badge says *Auto* only for a kind the server says is live.
@@ -128,7 +128,7 @@ export interface SeedActivationItem {
 
 /**
  * The prototype's five sections, in its order and with its numbering in the label — **in Bahasa Indonesia since
- * P18.98-T7** (OD-238, option 1; ADR-0179 §5), as the sixteen items are. The prototype's English is
+ * P18.10-T7** (OD-238, option 1; ADR-0179 §5), as the sixteen items are. The prototype's English is
  * `SEEDED_ACTIVATION_LABELS_BEFORE_OD_238`'s.
  */
 export const SEED_ACTIVATION_ASPECTS: readonly SeedActivationAspect[] = [
@@ -180,7 +180,7 @@ export const SEED_ACTIVATION_ITEMS: readonly SeedActivationItem[] = [
 export const ACTIVATION_FIRST_CASE_CODE = 'FIRST_CASE_CLOSED';
 
 /**
- * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English
+ * **The words the seed gave before P18.10-T7** (OD-238, option 1), per code — the prototype's English
  * (`Overall.html:6435-6458`; item 13 `KPM_Owner.html:1553`). Kept only so migration `0046` can recognise the Template company's
  * Default template where it still holds them, and for the specs. No office and no template is given them any more.
  */
@@ -216,11 +216,11 @@ export const SEEDED_ACTIVATION_LABELS_BEFORE_OD_238: {
 };
 
 /*
- * ── The data-backed items (ADR-0171 §3, P18.96-T4) ──────────────────────────────────────────────────
+ * ── The data-backed items (ADR-0171 §3, P18.8-T4) ──────────────────────────────────────────────────
  */
 
 /**
- * **The three kinds that complete from the office's sales and coaching records** (ADR-0171 §3, P18.96-T4 AC-2):
+ * **The three kinds that complete from the office's sales and coaching records** (ADR-0171 §3, P18.8-T4 AC-2):
  *
  * - `sales:first` — the hire's **first sale since joining**, from the data: a sales lead that reached *Paid and
  *   issued* through the leads flow, or — failing that — a policy in the monthly production file (`firstSaleOf`);
@@ -251,7 +251,7 @@ export const ACTIVATION_WEEKLY_CHECK_INS = 4;
  */
 export const FIRST_SALE_STAGE_CODE = 'PAID_AND_ISSUED';
 
-/** What a hand tick of a data-backed item is saved with (P18.96-T4 AC-3): a closing, or a 1:1. */
+/** What a hand tick of a data-backed item is saved with (P18.8-T4 AC-3): a closing, or a 1:1. */
 export type ActivationRecordForm = 'closing' | 'one_on_one';
 
 /** A data kind's registry entry: the link's, the form a hand tick opens, and the words of its source line. */
@@ -260,7 +260,7 @@ export interface ActivationDataLinkKind extends ActivationLinkKind {
 }
 
 /**
- * **The data kinds' entries** (P18.96-T4 AC-2). `label` is the source line's — *"Completed from {label} · {date}"*
+ * **The data kinds' entries** (P18.8-T4 AC-2). `label` is the source line's — *"Completed from {label} · {date}"*
  * (`functional/activation.md`, *Data-backed items*) — and `route` is `null`: the item's way in is its own form, not
  * a *Go to* (AC-3).
  */
@@ -305,7 +305,7 @@ export function isActivationDataLink(link: string | null): link is ActivationDat
 }
 
 /**
- * **The link an item is read with** (P18.96-T4 AC-2): its own `autoLink` where it has one — an office's own choice
+ * **The link an item is read with** (P18.8-T4 AC-2): its own `autoLink` where it has one — an office's own choice
  * stays — else the kind its code is bound to, else none.
  */
 export function effectiveAutoLink(code: string, autoLink: string | null): string | null {
@@ -335,12 +335,12 @@ export function activationLinkKind(link: string | null): ActivationLinkKind | un
  * item bound to a kind no phase has built yet could never complete, and nobody bound to it could
  * reach 100% (ADR-0031). The moment a kind goes live, the answer flips to no, for every role.
  *
- * **`offered`** is D-orphan's (P18.5-T3 AC-4): whether the training module a `training:` link binds is offered
+ * **`offered`** is D-orphan's (P18.2-T3 AC-4): whether the training module a `training:` link binds is offered
  * now, in the office's published snapshot. While it is not — archived or unpublished since the hire's version
  * was published — nobody could mark it *Done*, so the item is ticked by hand, for ADR-0031's own reason; a
  * `done` record made earlier still completes it. It says nothing about a feature link, which binds no module.
  *
- * **`completedByLink`** (the Phase 18.5 exit review, training review 1): an item its link already completed is never
+ * **`completedByLink`** (the Phase 18.2 exit review, training review 1): an item its link already completed is never
  * hand-edited — not unticked, and not re-ticked over the link's attribution — whatever its link's state now. Without
  * it, D-orphan reopened such an item to a hand tick the moment its module was withdrawn.
  */
@@ -353,7 +353,7 @@ export function mayTickByHand(link: string | null, offered = true, completedByLi
 }
 
 /**
- * **A hand write to a data-backed item** (P18.96-T4 AC-3): which ones are taken.
+ * **A hand write to a data-backed item** (P18.8-T4 AC-3): which ones are taken.
  *
  * - `refused` — its data already completed it (`completedByLink`): nobody edits it by hand, as any link's;
  * - `needs_record` — a tick: taken only with its record, the closing it names or the 1:1, saved together;

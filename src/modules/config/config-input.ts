@@ -53,7 +53,7 @@ const SUMMARY_GROUP_FIELDS = ['summaryGroupCode', 'summaryGroupLabel'] as const;
 
 /**
  * Said once, because a create, an update and a template row all refuse it the same way — in both languages
- * (P18.98-T5 AC-3).
+ * (P18.10-T5 AC-3).
  */
 export const SUMMARY_GROUP_PAIR_SENTENCE = CONFIG_REFUSALS.VALIDATION_FAILED.summaryGroupPair;
 

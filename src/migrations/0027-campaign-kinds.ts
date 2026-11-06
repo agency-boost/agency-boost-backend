@@ -23,7 +23,7 @@ const DEFAULTS: Readonly<Record<string, unknown>> = {
 };
 
 /**
- * **The fields the agent's campaign card draws, for every campaign written before them** (Phase 18.5, P18.5-T7 AC-9;
+ * **The fields the agent's campaign card draws, for every campaign written before them** (Phase 18.2, P18.2-T7 AC-9;
  * D-fields).
  *
  * `Overall.html`'s card draws a kind, a section, a poster, a blurb and *Ongoing* programmes with no end

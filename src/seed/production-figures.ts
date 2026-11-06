@@ -17,8 +17,16 @@ export const monthField = (metric: string, cadence: 'monthly' | 'ytd') => `${met
  */
 export function seedMonthFigures(
   i: number, month: string, scale = 1,
-  /** A quiet month whatever `i` says (P18.96-T5): a new hire's first weeks, before a first sale. */
-  options: { quiet?: boolean } = {},
+  /** A quiet month whatever `i` says (P18.8-T5): a new hire's first weeks, before a first sale. */
+  options: {
+    quiet?: boolean;
+    /**
+     * **A history month** (P19.5-T2; R4): the months before last month, which the reporting fixture files. A member's
+     * quiet months are this month and last month's; the months before them sold — so the year to date, now the months'
+     * sum, still holds them, as the file's own year to date always said.
+     */
+    history?: boolean;
+  } = {},
 ): Record<string, number> {
   const m = Number(month.slice(5));
   const apeM = (8 + ((i * 13 + m * 5) % 55)) * scale;
@@ -30,9 +38,15 @@ export function seedMonthFigures(
     fyp: Math.round(apeM * 0.6 * MINOR_UNITS_PER_RP_MILLION),
     policyCount: 1 + ((i * 3 + m) % 5),
   };
-  const quiet = options.quiet === true || i % 6 === 3;
+  const quiet = options.quiet === true || (options.history !== true && i % 6 === 3);
   const sold = ['ape', 'fyp', 'policyCount'];
-  const monthly = quiet ? { ...usual, ape: 0, fyp: 0, policyCount: 0 } : usual;
+  /*
+   * A quiet member's history months hold their APE without a policy count: their year to date — the months' sum since
+   * P19.5-T2 — is what the file's YTD always said, and no first sale is read from a file month (ADR-0171 §1), so an
+   * existing agent with none keeps none.
+   */
+  const monthly = quiet ? { ...usual, ape: 0, fyp: 0, policyCount: 0 }
+    : options.history === true && i % 6 === 3 ? { ...usual, policyCount: 0 } : usual;
   const ytd = (metric: string) => {
     if (metric === 'persistency') return monthly[metric] - 2;
     return quiet && sold.includes(metric) ? usual[metric] * (m - 1) : monthly[metric] * m;
@@ -41,4 +55,18 @@ export function seedMonthFigures(
     [monthField(metric, 'monthly'), monthly[metric]],
     [monthField(metric, 'ytd'), ytd(metric)],
   ]));
+}
+
+/**
+ * **A leader row's unit persistency on a seeded file** (P19.3-T1; ADR-0201 §2, the data sources' D6): the insurer's
+ * persistency for an AB's or an AAB's unit, `UNIT_PERSISTENCY`, written as `unitPersistencyMonthly` beside their own
+ * figures — so MOC's persistency criterion and the Unit comparison have a figure to read on a fresh seed. Believable,
+ * different per leader and per month, with one decimal place, as an insurer writes it: 76.0 to 94.9. Never derived from
+ * the leader's agents (the column is the insurer's figure, not ours).
+ *
+ * `i` is the leader's place on the office's roster, as `seedMonthFigures`' is.
+ */
+export function seedUnitPersistency(i: number, month: string): number {
+  const m = Number(month.slice(5));
+  return (760 + ((i * 37 + m * 11) % 190)) / 10;
 }

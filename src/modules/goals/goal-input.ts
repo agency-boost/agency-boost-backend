@@ -3,7 +3,7 @@ import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { GOAL_MODES, type GoalMode } from './goal.schema';
 import { GOAL_REFUSALS } from './goals.messages';
 
-/** A goal's field sentences, in both languages (P18.98-T5 AC-3): its own, and the shared *… is required.* */
+/** A goal's field sentences, in both languages (P18.10-T5 AC-3): its own, and the shared *… is required.* */
 const SAY = GOAL_REFUSALS.VALIDATION_FAILED;
 const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
 
@@ -144,6 +144,22 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
   }
 
   return f.done(out);
+}
+
+/**
+ * **What `PUT /goals/:period/ape-estimate` takes** (P19.1-T4, UI-157 item 4; ADR-0195 §2): `{ apeAchievedMinor }`, whole
+ * IDR sen in the goal's money bounds, nothing else — the member's own estimate of the APE produced so far this year.
+ * `null` is *Hapus*, and clears it to 0, nothing typed — as 0 does.
+ */
+export function checkEstimate(body: unknown): number {
+  if (raw(body, 'apeAchievedMinor') === null) {
+    new Fields(body, ['apeAchievedMinor']).done({});
+    return 0;
+  }
+  const f = new Fields(body, ['apeAchievedMinor']);
+  const value = f.number('apeAchievedMinor', GOAL_BOUNDS.money, true);
+  if (value !== undefined && !Number.isInteger(value)) f.violations.push(SAY.wholeSen({ field: 'apeAchievedMinor' }));
+  return f.done({ apeAchievedMinor: value as number }).apeAchievedMinor;
 }
 
 /**

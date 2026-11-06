@@ -65,8 +65,6 @@ describe('POST /admin/tenants — Start from, without the AgencyBoost defaults (
       wired.products,
       wired.campaigns,
       wired.namedTemplates,
-      wired.recruitmentPlaybooks,
-      wired.templateCopies,
     );
 
     const moduleRef = await Test.createTestingModule({
@@ -100,7 +98,10 @@ describe('POST /admin/tenants — Start from, without the AgencyBoost defaults (
     // What every environment holds before any tenant (ADR-0164 §2), and an insurer copied from it.
     await templateCompany(db(), NOW);
     companyId = String((await tenants.createCompany(SUPER_ADMIN, { name: 'Prudential', slug: 'prudential' }))._id);
-    ownDefault = (await wired.namedTemplates.list(companyId))[0].id;
+    // A new company has no template (ADR-0213 §3): its first, copied from the built-in default, becomes its default.
+    ownDefault = (await wired.templateCopies.importFrom(SUPER_ADMIN, companyId, {
+      fromCompanyId: LIBRARY, templateId: LIBRARY_DEFAULT, name: 'Prudential template',
+    })).id;
   });
 
   const post = (startFrom?: Record<string, unknown>, code = '0417') => request(app.getHttpServer())

@@ -4,6 +4,30 @@ import { configSchemaOptions } from '@/common/schema/base.schema';
 
 export type ConfigSnapshotDocument = HydratedDocument<ConfigSnapshot>;
 
+/** Where a published version came from (ADR-0208 §5). */
+export type ConfigSnapshotOrigin =
+  | { source: 'kpm' }
+  | {
+    source: 'template_push';
+    templateId: string;
+    /** The version of each kind pushed. */
+    templateVersions: Partial<Record<string, number>>;
+    /** The Super Admin's user id: a platform write has no membership. */
+    pushedBy: string;
+    pushedAt: Date;
+  }
+  /**
+   * ***Sinkron dari template*** (P19.6-T4, ADR-0220 §4): the KPM's Owner or an Admin took its template's names and
+   * descriptions — the template, and the versions of `training_taxonomy` and `capability_ladder` read.
+   */
+  | {
+    source: 'template_sync';
+    templateId: string;
+    templateVersions: Partial<Record<string, number | null>>;
+  }
+  /** A migration republished the KPM (P19.6-T4, ADR-0220 §3: `0059-training-title-split`), naming itself. */
+  | { source: 'migration'; migration: string };
+
 /**
  * What an office's agents are actually working against (P4-T6).
  *
@@ -51,6 +75,14 @@ export class ConfigSnapshot {
   /** Membership id of whoever published it. Null for the copy provisioning writes. */
   @Prop({ type: String, default: null })
   publishedBy!: string | null;
+
+  /**
+   * **What made this version** (ADR-0208 §5): `kpm` — the office's own *Publish*; `template_push` — the Super Admin
+   * applied a template's newest published sections to it, naming the template, its versions, who and when; `null` on a
+   * version written before the field existed, and on provisioning's first copy, which `publishedBy: null` already says.
+   */
+  @Prop({ type: Object, default: null })
+  origin!: ConfigSnapshotOrigin | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

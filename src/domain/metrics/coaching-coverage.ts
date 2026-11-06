@@ -7,7 +7,7 @@ import { rateOver } from './rate';
  * scope who were coached inside the window.
  *
  * **The formula is the definition**: `count(members where COACHED_nD) / count(members in scope)`, rounded
- * to a whole percent half up **in integers** (`rateOver`; P18.97-T3, parity F-254 — 23 of 40 is 58%, which
+ * to a whole percent half up **in integers** (`rateOver`; P18.9-T3, parity F-254 — 23 of 40 is 58%, which
  * `Math.round(23 / 40 * 100)` read 57), read once for each window of `COACHING_COVERAGE_WINDOWS` (§B.4) —
  * `COACHED_7D`, the primary, then `COACHED_30D`. `COACHED_nD` is `coaching-recency.ts`'s, over `DAYS_SINCE_LAST_COACHING`,
  * so every rule that metric carries holds here without being restated:

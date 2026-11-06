@@ -46,11 +46,11 @@ async function as(email: string, flags: { owner?: boolean; admin?: boolean } = {
 }
 
 /**
- * **Adding an agent, seeded** (P18.96-T3; `joining-fixture.ts`): the seed run as the command runs it, then read back
+ * **Adding an agent, seeded** (P18.8-T3; `joining-fixture.ts`): the seed run as the command runs it, then read back
  * through the invites' and transfers' own services — what Agus sees on `/new-hires`, what the Owner sees on *All
  * Members*, and what Yusuf's link opens — and run again to prove the second run writes none of it.
  */
-describe('P18.96-T3 the adding-an-agent seed — a run at 10:00 on 27 October 2026 in Jakarta', () => {
+describe('P18.8-T3 the adding-an-agent seed — a run at 10:00 on 27 October 2026 in Jakarta', () => {
   const clock = new FixedClock(new Date('2026-10-27T03:00:00Z'));
   let first: SeedResult;
   let invites: InvitesService;
@@ -83,7 +83,7 @@ describe('P18.96-T3 the adding-an-agent seed — a run at 10:00 on 27 October 20
   }, RUN_MS);
   afterAll(stopMongo);
 
-  it('P18.96-T3 Seed Agus has one invite waiting to join — Yusuf, code 80777, joining today — and no other', async () => {
+  it('P18.8-T3 Seed Agus has one invite waiting to join — Yusuf, code 80777, joining today — and no other', async () => {
     const { today, invites: mine } = await invites.list(await as('agus@kpm0417.test'));
     expect(today).toBe('2026-10-27');
     expect(mine.map((i) => [i.fullName, i.agentCode, i.joinDate, i.status, i.leader.name])).toEqual([
@@ -95,7 +95,7 @@ describe('P18.96-T3 the adding-an-agent seed — a run at 10:00 on 27 October 20
     expect(await col('users').countDocuments({ agentCode: { $in: ['80777', '80778'] } })).toBe(0);
   });
 
-  it('P18.96-T3 Seed Yusuf’s link opens the banner the guide prints', async () => {
+  it('P18.8-T3 Seed Yusuf’s link opens the banner the guide prints', async () => {
     const kpm = await col('kpms').findOne({ code: '0417' });
     const token = joiningInviteToken(String(kpm!._id));
     expect(first.joining.invitePath).toBe(`/register?invite=${encodeURIComponent(token)}`);
@@ -105,13 +105,13 @@ describe('P18.96-T3 the adding-an-agent seed — a run at 10:00 on 27 October 20
     });
   });
 
-  it('P18.96-T3 Seed the Owner has Agus’s transfer request for Raka Aditama, who still reports to Satria; Agus sees it as his', async () => {
+  it('P18.8-T3 Seed the Owner has Agus’s transfer request for Raka Aditama, who still reports to Satria; Agus sees it as his', async () => {
     const queue = await transfers.queue(await as('owner@kpm0417.test', { owner: true }));
     expect(queue.map((t) => [t.member.name, t.from?.name, t.to.name, t.requestedBy.name, t.requestedName])).toEqual([
       ['Raka Aditama', 'Satria Nugraha', 'Agus Prasetyo', 'Agus Prasetyo', 'Raka Aditama'],
     ]);
     expect((await memberOf('raka@kpm0417.test')).leaderId).toBe(String((await memberOf('satria@kpm0417.test'))._id));
-    // P18.96-T8 M3: Agus sees the name he typed, and nothing of Satria's unit.
+    // P18.8-T8 M3: Agus sees the name he typed, and nothing of Satria's unit.
     const mine = await transfers.mine(await as('agus@kpm0417.test'));
     expect(mine.map((t) => [t.requestedName, t.to.name, t.status])).toEqual([['Raka Aditama', 'Agus Prasetyo', 'pending']]);
     expect(JSON.stringify(mine)).not.toContain('Satria');
@@ -119,13 +119,13 @@ describe('P18.96-T3 the adding-an-agent seed — a run at 10:00 on 27 October 20
     expect(told.map((n) => n.payload.memberName)).toEqual(['Raka Aditama', 'Raka Aditama']);
   });
 
-  it('P18.96-T3 Seed Putri and Fajar stay leaderless, so + Add agent with their codes links them', async () => {
+  it('P18.8-T3 Seed Putri and Fajar stay leaderless, so + Add agent with their codes links them', async () => {
     for (const email of ['pending@kpm0417.test', 'untagged@kpm0417.test']) {
       expect([email, await memberOf(email)]).toEqual([email, expect.objectContaining({ status: 'pending', leaderId: null })]);
     }
   });
 
-  it('P18.96-T3 Seed a second run writes none of it', async () => {
+  it('P18.8-T3 Seed a second run writes none of it', async () => {
     const again = await seedDemo({ clock, log: quiet });
     expect(again.joining.written).toBe(0);
     expect(first.joining.written).toBe(3);

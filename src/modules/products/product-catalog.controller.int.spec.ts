@@ -161,15 +161,18 @@ describe('the Product Catalog and the Sales Attack Plan over HTTP (Phase 14)', (
       const res = await get('/product-catalog').expect(200);
       expect(Object.keys(res.body)).toEqual(['products']);
       expect(Object.keys(res.body.products[0]).sort()).toEqual(
-        ['category', 'channel', 'code', 'lifecycle', 'name', 'needs', 'tagline'],
+        // `currencies` since P19.4-T4 (AC-12, ADR-0209 §8): a label on the card.
+        ['category', 'channel', 'code', 'currencies', 'lifecycle', 'name', 'needs', 'tagline'],
       );
     });
 
     it('answers one product with the drawer’s fields', async () => {
       const res = await get('/product-catalog/PRUMAPAN').expect(200);
       expect(Object.keys(res.body).sort()).toEqual([
+        // `currencies` and `riders` (*Bisa ditambah*) since P19.4-T4 (AC-5, AC-12; ADR-0209 §3, §8).
         'ageBands', 'benefits', 'bestFit', 'budgetBands', 'category', 'channel', 'code', 'commissionSchedule',
-        'differentiator', 'documents', 'lifecycle', 'name', 'needs', 'runOffNote', 'script', 'successorCode', 'tagline',
+        'currencies', 'differentiator', 'documents', 'lifecycle', 'name', 'needs', 'riders', 'runOffNote', 'script',
+        'successorCode', 'tagline',
       ]);
     });
 
@@ -208,8 +211,9 @@ describe('the Product Catalog and the Sales Attack Plan over HTTP (Phase 14)', (
         script: {
           goodFit: MAPAN_ID.defaultAttackPlan.goodFit, opening: MAPAN_ID.defaultAttackPlan.opening,
           benefits: MAPAN_ID.defaultAttackPlan.benefits, fullScript: MAPAN_ID.defaultAttackPlan.fullScript,
-          objectionTheySay: MAPAN_ID.defaultAttackPlan.objectionTheySay,
-          objectionYouSay: SEED_REPLY_BY_NEED_ID.retirement, nextAction: MAPAN_ID.defaultAttackPlan.nextAction,
+          // The pair as its card since P19.4-T4 (ADR-0209 §9), each side in Indonesian.
+          objections: [{ objection: MAPAN_ID.defaultAttackPlan.objectionTheySay, answer: SEED_REPLY_BY_NEED_ID.retirement }],
+          nextAction: MAPAN_ID.defaultAttackPlan.nextAction,
         },
       });
       const plan = (await get('/attack-plan?need=retirement&age=2&budget=2').set(...IN_INDONESIAN).expect(200)).body;

@@ -57,3 +57,13 @@ export const ROSTER_UPLOAD = {
    */
   MAX_TEXT_LENGTH: 512_000,
 } as const;
+
+/**
+ * **The invitation a member import sends a new person** (P19.3-T4, ADR-0205 §10): a one-time link to choose their
+ * password, through the reset link's mechanism (P4-T14). Seven days, because an invitation waits for somebody who has
+ * not asked for it, where a reset link (30 minutes) answers somebody who just did. After it, *Lupa kata sandi?* with the
+ * same address proves the mailbox the same way. Documented in §B.31 beside `ROSTER_UPLOAD`.
+ */
+export const ROSTER_INVITATION = {
+  TTL_DAYS: 7,
+} as const;

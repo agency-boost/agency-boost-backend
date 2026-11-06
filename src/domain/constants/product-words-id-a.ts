@@ -1,7 +1,7 @@
 import type { ProductNeed, SeedProductWords } from './product-catalog';
 
 /**
- * **The seed products' words in Bahasa Indonesia, part A** (UI V1, UI-107; Phase 18.99 T13): the first sixteen of
+ * **The seed products' words in Bahasa Indonesia, part A** (UI V1, UI-107; Phase 18.11 T13): the first sixteen of
  * `SEED_PRODUCTS`, field for field, and the eight needs' replies. Served to a reader in Indonesian wherever a company
  * still holds the platform's English word for word (`modules/products/product-words.ts`); a word a company or an office
  * typed is shown as typed. Translated for the product owner's review before release.

@@ -29,11 +29,11 @@ function terminal(): PassThrough & PasswordInput & { raw: boolean[] } {
 }
 
 /**
- * **The first Super Admin, made from the command line** (P18.7-T1), against the in-memory database the
+ * **The first Super Admin, made from the command line** (P18.4-T1), against the in-memory database the
  * way the VM runs it: `run()` with its own connection, the environment it is given, and the password on
  * standard input.
  */
-describe('create-super-admin (P18.7-T1)', () => {
+describe('create-super-admin (P18.4-T1)', () => {
   let env: Record<string, string>;
   const users = () => mongoose.connection.db!.collection('users');
 
@@ -52,7 +52,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     await users().deleteMany({});
   });
 
-  it('P18.7-T1 creates a verified, active Super Admin who sells for nobody, with the password hashed', async () => {
+  it('P18.4-T1 creates a verified, active Super Admin who sells for nobody, with the password hashed', async () => {
     const call = io();
     expect(await run(['Ops@AgencyBoost.id', '--name', 'Rina Operator'], call)).toBe(0);
 
@@ -81,7 +81,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(call.err.text()).toContain(`Connecting to database "${env.MONGODB_DB_NAME}"`);
   });
 
-  it('P18.7-T1 refuses a second run, before asking for a password, and creates nothing', async () => {
+  it('P18.4-T1 refuses a second run, before asking for a password, and creates nothing', async () => {
     expect(await run(['first@agencyboost.id'], io())).toBe(0);
 
     const stdin = terminal(); // nobody types: a prompt here would hang the test
@@ -92,7 +92,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({ platformRole: 'super_admin' })).toBe(1);
   });
 
-  it('P18.7-T1 checks again as it creates: a Super Admin made since the first check still stops it', async () => {
+  it('P18.4-T1 checks again as it creates: a Super Admin made since the first check still stops it', async () => {
     // The race `run` cannot see: another operator's run landing between its check and the insert.
     await users().insertOne({ email: 'raced@agencyboost.id', platformRole: 'super_admin', status: 'active', deletedAt: null });
     const create = createSuperAdmin(
@@ -103,7 +103,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({})).toBe(1);
   });
 
-  it('P18.7-T1 counts a deactivated Super Admin, and not an erased one', async () => {
+  it('P18.4-T1 counts a deactivated Super Admin, and not an erased one', async () => {
     await users().insertOne({ email: 'old@agencyboost.id', platformRole: 'super_admin', status: 'deactivated', deletedAt: null });
     expect(await run(['new@agencyboost.id'], io())).toBe(1);
 
@@ -112,7 +112,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({ platformRole: 'super_admin', deletedAt: null })).toBe(1);
   });
 
-  it('P18.7-T1 refuses an address that already has an account rather than promoting it, before the prompt', async () => {
+  it('P18.4-T1 refuses an address that already has an account rather than promoting it, before the prompt', async () => {
     await users().insertOne({ email: 'agent@kpm0417.test', platformRole: 'none', deletedAt: null });
     const call = io(terminal()); // nobody types: a prompt here would hang the test
     expect(await run(['Agent@KPM0417.test'], call)).toBe(1);
@@ -121,7 +121,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().findOne({ email: 'agent@kpm0417.test' })).toMatchObject({ platformRole: 'none' });
   });
 
-  it('P18.7-T1 applies the app\'s password rules, without printing the password', async () => {
+  it('P18.4-T1 applies the app\'s password rules, without printing the password', async () => {
     // Seven characters: one under `PASSWORD.MIN_LENGTH`.
     const call = io(Readable.from(['tooshrt\n']));
     expect(await run(['ops@agencyboost.id'], call)).toBe(1);
@@ -130,7 +130,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({})).toBe(0);
   });
 
-  it('P18.7-T1 refuses an empty standard input, and an address that is not one', async () => {
+  it('P18.4-T1 refuses an empty standard input, and an address that is not one', async () => {
     const empty = io(Readable.from([]));
     expect(await run(['ops@agencyboost.id'], empty)).toBe(1);
     expect(empty.err.text()).toContain('No password on standard input');
@@ -142,7 +142,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({})).toBe(0);
   });
 
-  it('P18.7-T1 stops, rather than waiting for ever, when the terminal\'s input closes or fails', async () => {
+  it('P18.4-T1 stops, rather than waiting for ever, when the terminal\'s input closes or fails', async () => {
     const closed = terminal();
     const call = io(closed);
     const done = run(['ops@agencyboost.id'], call);
@@ -159,19 +159,19 @@ describe('create-super-admin (P18.7-T1)', () => {
     expect(await users().countDocuments({})).toBe(0);
   });
 
-  it('P18.7-T1 exits non-zero without MONGODB_URI, saying so', async () => {
+  it('P18.4-T1 exits non-zero without MONGODB_URI, saying so', async () => {
     const call = { ...io(), env: {} };
     expect(await run(['ops@agencyboost.id'], call)).toBe(1);
     expect(call.err.text()).toContain('MONGODB_URI is not set');
   });
 
-  it('P18.7-T1 exits non-zero when the database cannot be reached', async () => {
+  it('P18.4-T1 exits non-zero when the database cannot be reached', async () => {
     const call = { ...io(), env: { MONGODB_URI: 'mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=200' } };
     expect(await run(['ops@agencyboost.id'], call)).toBe(1);
     expect(call.err.text()).toContain('create-super-admin failed:');
   });
 
-  it('P18.7-T1 reads the password at a terminal twice, echoing none of it', async () => {
+  it('P18.4-T1 reads the password at a terminal twice, echoing none of it', async () => {
     const stdin = terminal();
     const call = io(stdin);
     const done = run(['ops@agencyboost.id'], call);
@@ -190,7 +190,7 @@ describe('create-super-admin (P18.7-T1)', () => {
     await expect(new PasswordService().verify(row.passwordHash, PASSWORD)).resolves.toBe(true);
   });
 
-  it('P18.7-T1 refuses two passwords that differ, and stops on Ctrl-C', async () => {
+  it('P18.4-T1 refuses two passwords that differ, and stops on Ctrl-C', async () => {
     const differ = terminal();
     const asked = readPassword(differ, capture());
     differ.write(`${PASSWORD}\r`);
@@ -210,13 +210,13 @@ describe('create-super-admin (P18.7-T1)', () => {
   });
 
   describe('its arguments', () => {
-    it('P18.7-T1 takes one email, and a name with --name', () => {
+    it('P18.4-T1 takes one email, and a name with --name', () => {
       expect(parseArgs(['ops@agencyboost.id'])).toEqual({ email: 'ops@agencyboost.id', fullName: DEFAULT_FULL_NAME });
       expect(parseArgs(['--name', ' Rina ', 'ops@agencyboost.id'])).toEqual({ email: 'ops@agencyboost.id', fullName: 'Rina' });
     });
 
     it.each([[[]], [['a@x.id', 'b@x.id']], [['--name']], [['a@x.id', '--name', ' ']], [['--password', 'x', 'a@x.id']], [['--help']]])(
-      'P18.7-T1 refuses %j with the usage, exit code 2',
+      'P18.4-T1 refuses %j with the usage, exit code 2',
       (argv) => {
         let thrown: unknown;
         try {
@@ -230,7 +230,7 @@ describe('create-super-admin (P18.7-T1)', () => {
       },
     );
 
-    it('P18.7-T1 a usage error exits 2 through run, before connecting anywhere', async () => {
+    it('P18.4-T1 a usage error exits 2 through run, before connecting anywhere', async () => {
       const call = io();
       expect(await run([], call)).toBe(2);
       expect(call.err.text()).toContain('Usage: node dist/cli/create-super-admin.js <email>');

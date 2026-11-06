@@ -1,7 +1,7 @@
 import { english, indonesian } from '../../../test/i18n';
 import { birthDateProblem, isYearMonth, joinMonthProblem, latestAdultBirthDate } from './personal-data';
 
-/** ADR-0158 §2, P18.8-T4 AC-4: a birth date in the past and at least 18 years ago; a join month not in the future. */
+/** ADR-0158 §2, P18.5-T4 AC-4: a birth date in the past and at least 18 years ago; a join month not in the future. */
 describe('what a person records (ADR-0158)', () => {
   const TODAY = '2026-10-26';
 
@@ -51,7 +51,7 @@ describe('what a person records (ADR-0158)', () => {
     });
   });
 
-  it('P18.98-T5 AC-3 says each problem in Indonesian too', () => {
+  it('P18.10-T5 AC-3 says each problem in Indonesian too', () => {
     expect(indonesian(birthDateProblem('2008-10-27', TODAY))).toBe('Tanggal lahir harus paling tidak 18 tahun yang lalu.');
     expect(indonesian(birthDateProblem(TODAY, TODAY))).toBe('Tanggal lahir harus sebelum hari ini.');
     expect(indonesian(birthDateProblem('15/03/1990', TODAY)))

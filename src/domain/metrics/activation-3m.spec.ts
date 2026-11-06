@@ -7,7 +7,7 @@ import {
 } from './activation-3m';
 
 /**
- * `ACTIVATION_3M` and `ACTIVATION_3M_PCT` (ADR-0171 §2, P18.96-T6 AC-1, AC-2; `metrics-and-definitions.md`, *3M
+ * `ACTIVATION_3M` and `ACTIVATION_3M_PCT` (ADR-0171 §2, P18.8-T6 AC-1, AC-2; `metrics-and-definitions.md`, *3M
  * activation*): the boundaries the definition names, every one an office date.
  */
 const JOINED = '2026-07-01';
@@ -19,13 +19,13 @@ const hire = (over: Partial<Activation3MInput> = {}): Activation3MInput => ({
 });
 
 describe('3M activation (ADR-0171 §2)', () => {
-  it('P18.96-T6 AC-1 pins the 90 days and the twelve months, and the three results', () => {
+  it('P18.8-T6 AC-1 pins the 90 days and the twelve months, and the three results', () => {
     expect(ACTIVATION_3M).toEqual({ DAYS: 90, WINDOW_MONTHS: 12 });
     expect([...ACTIVATION_3M_RESULTS]).toEqual(['in_progress', 'activated', 'not_activated']);
     expect([...ACTIVATION_3M_LOCKS]).toEqual(['activated', 'not_activated']);
   });
 
-  it('P18.96-T6 AC-1 counts the join date as day 1 and day 90 as the join date plus 89, across a month and a leap day', () => {
+  it('P18.8-T6 AC-1 counts the join date as day 1 and day 90 as the join date plus 89, across a month and a leap day', () => {
     expect(activation3MLastDay(JOINED)).toBe(DAY_90);
     expect(activation3MDay(JOINED, JOINED)).toBe(1);
     expect(activation3MDay(JOINED, DAY_90)).toBe(90);
@@ -47,7 +47,7 @@ describe('3M activation (ADR-0171 §2)', () => {
     expect(activation3MDecided(hire({ firstSaleDate: '2026-07-20' }), DAY_90)).toBeNull();
   });
 
-  it('P18.96-T6 AC-1 a first sale on day 90 is activated; on day 91 it is not; none by then is not', () => {
+  it('P18.8-T6 AC-1 a first sale on day 90 is activated; on day 91 it is not; none by then is not', () => {
     expect(activation3MOf(hire({ firstSaleDate: DAY_90 }), DAY_91)).toBe('activated');
     expect(activation3MOf(hire({ firstSaleDate: DAY_91 }), DAY_91)).toBe('not_activated');
     expect(activation3MOf(hire(), DAY_91)).toBe('not_activated');
@@ -86,7 +86,7 @@ describe('3M activation (ADR-0171 §2)', () => {
     expect(activation3MOf(hire(), DAY_91)).toBe('not_activated');
   });
 
-  it('P18.96-T6 AC-1 a kept lock is the answer whatever the records say since — a backdated sale, a corrected join date', () => {
+  it('P18.8-T6 AC-1 a kept lock is the answer whatever the records say since — a backdated sale, a corrected join date', () => {
     expect(activation3MOf(hire({ locked: 'not_activated', firstSaleDate: '2026-07-10' }), '2026-11-01')).toBe('not_activated');
     // A lock is the answer inside the 90 days too, and an *activated* one stays even without a sale on record.
     expect(activation3MOf(hire({ locked: 'not_activated', firstSaleDate: '2026-07-10' }), '2026-07-11')).toBe('not_activated');
@@ -94,7 +94,7 @@ describe('3M activation (ADR-0171 §2)', () => {
     expect(activation3MDecided(hire({ locked: 'activated' }), JOINED)).toBe('activated');
   });
 
-  it('P18.96-T6 AC-1 is computed from office dates alone: no instant, so the server’s clock decides nothing', () => {
+  it('P18.8-T6 AC-1 is computed from office dates alone: no instant, so the server’s clock decides nothing', () => {
     // The caller turns today into the office's day; the same days give the same answer.
     const input = hire({ firstSaleDate: DAY_90 });
     expect([activation3MOf(input, '2026-09-27'), activation3MOf(input, DAY_90), activation3MOf(input, DAY_91)])
@@ -103,7 +103,7 @@ describe('3M activation (ADR-0171 §2)', () => {
 });
 
 describe('the year /new-hires lists (ADR-0173 §1)', () => {
-  it('P18.96-T6 AC-3 runs from the day after the same date twelve months back to today', () => {
+  it('P18.8-T6 AC-3 runs from the day after the same date twelve months back to today', () => {
     expect(newHiresWindow('2026-10-27')).toEqual({ from: '2025-10-28', to: '2026-10-27' });
     expect(newHiresWindow('2026-03-01')).toEqual({ from: '2025-03-02', to: '2026-03-01' });
     // A month-end clamps: 29 February 2028 counts back to 28 February 2027.
@@ -142,14 +142,14 @@ describe('ACTIVATION_3M_PCT (ADR-0171 §2, rule A of UI V1)', () => {
     expect(activation3MShare([...Array(7).fill(sold), late, running, running])).toMatchObject({ pct: 100, late: 1, inProgress: 2 });
   });
 
-  it('P18.96-T6 AC-2 is no figure while nobody is decided — never 0%', () => {
+  it('P18.8-T6 AC-2 is no figure while nobody is decided — never 0%', () => {
     expect(activation3MShare([])).toEqual({ activated: 0, notActivated: 0, late: 0, inProgress: 0, pct: null });
     expect(activation3MShare([running, running]).pct).toBeNull();
     expect(activation3MShare([late]).pct).toBeNull();
     expect(activation3MShare([missed]).pct).toBe(0);
   });
 
-  it('P18.96-T6 AC-2 by join month: each month’s new hires, newest first, an empty month not listed', () => {
+  it('P18.8-T6 AC-2 by join month: each month’s new hires, newest first, an empty month not listed', () => {
     const byMonth = activation3MByJoinMonth([
       { joinDate: '2026-07-22', ...sold },
       { joinDate: '2026-07-31', ...missed },

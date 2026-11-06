@@ -1,7 +1,7 @@
 import { messages } from '@/common/i18n/sentence';
 
 /**
- * **The words the product drawer is sent, in both languages** (P18.98-T5 AC-4): written for the request's reader
+ * **The words the product drawer is sent, in both languages** (P18.10-T5 AC-4): written for the request's reader
  * where the drawer's answer is built (`ProductCatalogService`). *Run-off* stays the insurer's word; the shelf an
  * office sells from is its *etalase*.
  */

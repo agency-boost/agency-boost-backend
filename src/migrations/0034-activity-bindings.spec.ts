@@ -8,7 +8,7 @@ const NOW = new Date('2026-10-26T02:00:00.000Z');
 const TODAY = { leads: ['LEADS_CONTACTED'], appointments: ['SELL_PRESENTATION'], closings: ['SELL_SUBMISSION'] };
 
 /**
- * **ADR-0163 §1 for offices and templates that already exist** (P18.9-T2 AC-1): every office is given a binding of
+ * **ADR-0163 §1 for offices and templates that already exist** (P18.6-T2 AC-1): every office is given a binding of
  * today's three codes in its working copy and its newest snapshot, and every `activity_taxonomy` template the same
  * three — each only where none is held, so an office already rebound keeps its binding and a second run does nothing.
  */
@@ -50,7 +50,7 @@ describe('0034 — every office and template binds today’s codes (ADR-0163 §1
     ]);
   });
 
-  it('P18.9-T2 AC-1 writes today’s three into every office, its newest snapshot and every template, and only there', async () => {
+  it('P18.6-T2 AC-1 writes today’s three into every office, its newest snapshot and every template, and only there', async () => {
     expect(await up(db(), NOW)).toEqual({ offices: 1, snapshots: 2, templates: 2 });
 
     const a = await db().collection('activityBindings').findOne({ kpmId: KPM_A });
@@ -76,7 +76,7 @@ describe('0034 — every office and template binds today’s codes (ADR-0163 §1
     ]);
   });
 
-  it('P18.9-T2 AC-1 a second run writes nothing', async () => {
+  it('P18.6-T2 AC-1 a second run writes nothing', async () => {
     await up(db(), NOW);
     expect(await up(db(), new Date('2026-10-27T02:00:00.000Z'))).toEqual({ offices: 0, snapshots: 0, templates: 0 });
     const a = await db().collection('activityBindings').findOne({ kpmId: KPM_A });

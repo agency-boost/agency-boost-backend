@@ -6,6 +6,7 @@ import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { PasswordService } from '@/modules/auth/password.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -33,14 +34,14 @@ import { RoleChangeService } from './role-change.service';
 const KPM_A = new mongoose.Types.ObjectId().toString();
 const KPM_B = new mongoose.Types.ObjectId().toString();
 const NOW = new Date('2026-10-26T03:00:00Z');
-/** Contexts read the API's English (`SOURCE_READER`), as asserted below: nobody's choice is Indonesian (P18.98-T4). */
+/** Contexts read the API's English (`SOURCE_READER`), as asserted below: nobody's choice is Indonesian (P18.10-T4). */
 const SA = RequestContext.platform('sa-1').withReader(SOURCE_READER);
 
 /** The office's own context, for a fixture written on its behalf. */
 const office = (kpmId: string) => RequestContext.superAdminInTenant('sa-1', kpmId);
 
 /**
- * **A leader past the limit waits for AgencyBoost's approval** (P18.8-T2, ADR-0157), over a real database: the
+ * **A leader past the limit waits for AgencyBoost's approval** (P18.5-T2, ADR-0157), over a real database: the
  * refusal says it may be asked about (AC-2); the office asks, lists and cancels (AC-3); the Super Admin's queue,
  * approval past the limit and decline (AC-4); the audit rows and the asker's notice (AC-5); and nothing crosses
  * from one office to the other (AC-8).
@@ -48,7 +49,7 @@ const office = (kpmId: string) => RequestContext.superAdminInTenant('sa-1', kpmI
  * KPM A has a limit of 2 and stands at it: the Owner (the root AB) and one AAB. KPM B is another office of the
  * same company, with members of its own.
  */
-describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
+describe('P18.5-T2 — a leader past the limit waits for AgencyBoost', () => {
   let members: MembershipRepository;
   let hierarchy: HierarchyService;
   let roles: RoleChangeService;
@@ -95,7 +96,10 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
     approvals = new ApprovalsService(
       members, hierarchy, joinRequests, historyRepo, users as never, audit, notifications as never, clock,
     );
-    roster = new RosterImportService(members, hierarchy, kpms as never, users as never, new PasswordService(), audit, clock);
+    roster = new RosterImportService(
+      members, hierarchy, kpms as never, users as never, new PasswordService(), audit, clock, orgLevels, historyRepo,
+      notifications as never, (mongoose.models[AuthToken.name] ?? mongoose.model(AuthToken.name, AuthTokenSchema)) as never,
+    );
     service = new LeaderLimitRequestService(
       new LeaderLimitRequestRepository(rows as never), members, hierarchy, roles, approvals, users as never,
       kpms as never, audit, notifications as never, clock,
@@ -197,11 +201,14 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       });
     });
 
-    it('the roster import and an Owner’s assignment cannot wait: canRequest false', async () => {
-      const file = [ROSTER_TEMPLATE_HEADER, 'Ana,ana@kpm.test,9901,aab,,1990-01-01,2020-01,full-time,female'].join('\n');
-      await expect(roster.commit(SA, KPM_A, file)).rejects.toMatchObject({
-        code: 'LEADER_LIMIT_REACHED', details: { canRequest: false },
-      });
+    it('the roster import and an Owner’s assignment cannot wait: a row past the limit is skipped, never asked about', async () => {
+      // P19.3-T4 (ADR-0205 §5): the row is skipped with the limit's words, and nothing waits for anybody's approval.
+      const file = [ROSTER_TEMPLATE_HEADER, '9901,Ana,AB,,,ana@kpm.test'].join('\n');
+      // The office's Owner imports since P19.4-T2 (ADR-0206 §2); the Super Admin did until then.
+      const asOwner = await as(KPM_A, owner, { owner: true });
+      const preview = await roster.preview(asOwner, KPM_A, file);
+      expect(preview.rows.map((r) => r.outcome)).toEqual(['skipped']);
+      await expect(roster.commit(asOwner, KPM_A, file)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
       // An Owner assigned who is not yet a member is made the root AB through `create`, as here.
       await expect(hierarchy.create(office(KPM_A), { userId: await person(), role: 'ab', status: 'active' }))
         .rejects.toMatchObject({ code: 'LEADER_LIMIT_REACHED', details: { canRequest: false } });
@@ -366,7 +373,7 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
         .toMatch(/no longer a member/);
       expect(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, { status: 'pending', orgLevelCode: 'AGENT' }))
         .toBeNull();
-      // P18.98-T5: the reason is a sentence, in both languages.
+      // P18.10-T5: the reason is a sentence, in both languages.
       expect(indonesian(staleReason({ action: 'promote', fromOrgLevelCode: 'AGENT' }, null)))
         .toBe('Dia sudah bukan anggota KPM ini.');
       expect(indonesian(staleReason({ action: 'activate', fromOrgLevelCode: 'AGENT' }, { status: 'active', orgLevelCode: 'AGENT' })))
@@ -451,11 +458,11 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
   });
 
   /*
-   * **P18.98-T5 — the leader limit's words, in the reader's language** (ADR-0179 §7). The refusals are written for
+   * **P18.10-T5 — the leader limit's words, in the reader's language** (ADR-0179 §7). The refusals are written for
    * their reader by the error filter (`messageFor`); `Error.message` and `details` stay the English the API wrote. A
    * stale request's decline reason is stored, so it is written in the deciding Super Admin's language (AC-6).
    */
-  describe('P18.98-T5 in Indonesian', () => {
+  describe('P18.10-T5 in Indonesian', () => {
     const ID = readerIn('id');
     const refusalOf = async (work: Promise<unknown>): Promise<DomainException> => {
       const err = await work.then(() => null, (e: unknown) => e);
@@ -463,7 +470,7 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       return err as DomainException;
     };
 
-    it('P18.98-T5 AC-7 says the limit both ways — ask AgencyBoost, or wait for it to raise the limit — the English as before', async () => {
+    it('P18.10-T5 AC-7 says the limit both ways — ask AgencyBoost, or wait for it to raise the limit — the English as before', async () => {
       const asked = await refusalOf(roles.change(await asOwner(), other, 'aab'));
       expect(asked.code).toBe('LEADER_LIMIT_REACHED');
       expect(asked.message).toBe(
@@ -486,7 +493,7 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       expect(leaderLimitReached(1500, 1500).messageFor(ID)).toMatch(/^KPM ini sudah mencapai batas 1\.500 leaders /);
     });
 
-    it('P18.98-T5 AC-6, AC-7 a stale approval is refused in the Super Admin’s language, and closed with its reason in it', async () => {
+    it('P18.10-T5 AC-6, AC-7 a stale approval is refused in the Super Admin’s language, and closed with its reason in it', async () => {
       const request = await service.create(await asOwner(), other, promote);
       await mongoose.model(Membership.name).updateOne({ _id: other }, { $set: { orgLevelCode: 'AB', role: 'ab' } });
 
@@ -513,7 +520,7 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
         .toMatchObject({ reason });
     });
 
-    it('P18.98-T5 AC-7 refuses an ask, a second ask and a decision in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses an ask, a second ask and a decision in Indonesian', async () => {
       const unnamed = await refusalOf(service.create(await asOwner(), other, { action: 'promote' }));
       expect([unnamed.code, unnamed.messageFor(ID)])
         .toEqual(['VALIDATION_FAILED', 'Sebutkan jenjang yang akan diberikan kepadanya.']);
@@ -540,7 +547,7 @@ describe('P18.8-T2 — a leader past the limit waits for AgencyBoost', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-4 names a person whose account is gone in the reader’s language', async () => {
+    it('P18.10-T5 AC-4 names a person whose account is gone in the reader’s language', async () => {
       await service.create(await asOwner(), other, promote);
       await users.deleteOne({ _id: (await members.findById(office(KPM_A), other))!.userId });
       expect((await service.list(await asOwner()))[0].subjectName).toBe('Unknown');

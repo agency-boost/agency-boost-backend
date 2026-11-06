@@ -44,8 +44,28 @@ export class DataUploadBatch {
   @Prop({ type: String, required: true })
   fileSha256!: string;
 
-  @Prop({ type: Number, required: true })
-  templateVersion!: number;
+  /**
+   * **The file's header version, on a batch from before P19.5-T2** — 1 or 2, `TEMPLATE_HEADERS` — kept as it was and
+   * not written again (ADR-0214 §9): a file is read against the KPM's template now, whose version is `analyticsConfig`.
+   */
+  @Prop({ type: Number, default: null })
+  templateVersion!: number | null;
+
+  /**
+   * **The template's *Advanced analytics* version the file was read against** (P19.5-T2 AC-12; R6; ADR-0214 §9): what
+   * the upload history shows as *"v<n>"*. `templateId` is `null` for the platform's own configuration. Migration
+   * `upload-values-by-kode` gives every batch before it version 1.
+   */
+  @Prop({ type: Object, default: null })
+  analyticsConfig!: { templateId: string | null; version: number } | null;
+
+  /** D8 (P19.5-T2): the office day a running month's upload stands at, `YYYY-MM-DD`; `null` for a final one. */
+  @Prop({ type: String, default: null })
+  asOf!: string | null;
+
+  /** *Belum terdaftar* rows the import held apart (ADR-0214 §8). */
+  @Prop({ type: Number, default: 0 })
+  heldRowCount!: number;
 
   /**
    * A CSV or an Excel workbook (ADR-0184). A batch written before workbooks were read has none stored, and reads

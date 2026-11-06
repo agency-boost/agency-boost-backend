@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -20,6 +20,7 @@ import { generateLeaderCode } from './leader-code';
 import { withLeaderSeat, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
 import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
 import { ORG_REFUSALS } from './org.messages';
+import { HeldRowsPort, signalCodeRegistered } from './held-rows.port';
 import type { WorkStatus } from '@/domain/constants';
 
 export interface CreateMembershipInput {
@@ -47,7 +48,7 @@ export interface CreateMembershipInput {
 }
 
 /**
- * What a placement says about a person's join (ADR-0169, P18.96-T2): the date a leader gave, and — for a path that
+ * What a placement says about a person's join (ADR-0169, P18.8-T2): the date a leader gave, and — for a path that
  * is never a new hire's — the classification it forces.
  */
 export interface JoiningInput {
@@ -83,6 +84,11 @@ export class HierarchyService {
     private readonly clock: Clock,
     // No cycle: OrgLevelService knows nothing about the hierarchy.
     private readonly orgLevels: OrgLevelService,
+    /**
+     * P19.5-T2 (ADR-0214 §8): a code made active in the KPM takes the Data upload's *Belum terdaftar* months held for it.
+     * A port the production module answers; optional, so the specs built before it keep their constructor.
+     */
+    @Optional() @Inject(HeldRowsPort) private readonly heldRows: HeldRowsPort | null = null,
   ) {}
 
   /**
@@ -167,7 +173,7 @@ export class HierarchyService {
   }
 
   /**
-   * **Full-time or part-time, as the person said when they registered** (ADR-0158 §1, P18.8-T4).
+   * **Full-time or part-time, as the person said when they registered** (ADR-0158 §1, P18.5-T4).
    *
    * Work status is the membership's, but a person registers before any office has them, so their
    * answer waits on the account (`users.registeredWorkStatus`) and is carried onto the membership they
@@ -305,7 +311,7 @@ export class HierarchyService {
   }
 
   /**
-   * **The join date and the classification a membership made active now is written with** (ADR-0169, P18.96-T2).
+   * **The join date and the classification a membership made active now is written with** (ADR-0169, P18.8-T2).
    *
    * The date is the one given — a leader's, on an approval or a tag — or the **office's today** in `kpms.timezone`,
    * read through the injected clock (invariant §9). A given date is refused `400 VALIDATION_FAILED` naming
@@ -320,7 +326,7 @@ export class HierarchyService {
   async joining(ctx: RequestContext, given: JoiningInput = {}): Promise<JoiningFields> {
     const today = await this.officeToday(ctx);
     if (given.joinDate !== undefined) {
-      // A sentence in both languages (`joining.messages.ts`), refused in the shared envelope (P18.98-T5 AC-3).
+      // A sentence in both languages (`joining.messages.ts`), refused in the shared envelope (P18.10-T5 AC-3).
       const violation = joinDateViolation(given.joinDate, today);
       if (violation) refuseWith([violation]);
     }
@@ -356,10 +362,14 @@ export class HierarchyService {
     const write = () => this.members.updateById(ctx, membershipId, { $set: { ...fields, status: 'active' } });
     // `options`: an approval refused here may be asked about, and comes back approved (ADR-0157 §1, §3).
     // Assigning an Owner passes none: it cannot wait.
-    await withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
+    const written = await withLeaderSeat(this.leaderLimit(), ctx, write, async () => {
       const member = await this.members.findById(ctx, membershipId);
       return member !== null && member.status !== 'active' && isLeaderClass(member.role);
     }, options);
+    // P19.5-T2 (ADR-0214 §8): their code is registered in the KPM now; its held months move onto them.
+    const code = (written as { agentCode?: string } | null)?.agentCode
+      ?? ((await this.members.findById(ctx, membershipId)) as { agentCode?: string } | null)?.agentCode;
+    await signalCodeRegistered(this.heldRows, ctx, membershipId, code);
   }
 
   /** What the leader limit's check reads and holds (`leader-limit.ts`). */
@@ -501,6 +511,8 @@ export class HierarchyService {
     });
 
     if (membership.status === 'active') await this.refreshCounts(ctx, membership.leaderId);
+    // P19.5-T2 (ADR-0214 §8): an active member's code registers in the KPM; its *Belum terdaftar* months move onto them.
+    if (membership.status === 'active') await signalCodeRegistered(this.heldRows, ctx, String(membership._id), agentCode);
     return membership;
   }
 
@@ -729,7 +741,7 @@ const LEADER_EVENTS: EdgeEvent[] = ['joined', 're_parented', 'removed', 'reinsta
 
 /**
  * **The class a rung gives whoever stands on it** (ADR-0156 §2): its tier's — `senior` → `ab`, `associate` → `aab`,
- * none → `agent` — never its code lower-cased, which is what it was until P18.8-T1 and what made a rung a company
+ * none → `agent` — never its code lower-cased, which is what it was until P18.5-T1 and what made a rung a company
  * named itself work for nothing.
  */
 function classOfRung(level: { code: string; leaderTier?: LeaderTier | null }): HierarchyRole {

@@ -28,7 +28,7 @@ export class CoachingItemDoneResponseDto implements CoachingItemDoneView {
  * **A coachee's tick on an action item** (UI V1, UI-104 point 4; `functional/coaching.md`, *UI V1*). Its own controller
  * beside `CoachingController`: the calendar's *Tugas* is its one caller, and the session's own routes stay the coach's.
  * Held to `calendar_entry:update` — the coachee's write on their own calendar, `own` for an AB, an AAB and an Agent —
- * and **refused in every support session, an elevated one included** (the Phase 18.99 exit review, L3): ticking an item
+ * and **refused in every support session, an elevated one included** (the Phase 18.11 exit review, L3): ticking an item
  * done is the coachee's own declaration that they did it, as `training_progress:update` and `event:rsvp` are, and
  * nobody acting as them makes it.
  */
@@ -47,7 +47,8 @@ export class CoachingActionDoneController {
       'Your own action item — one a finalized session you were coached in agreed — ticked done from your Calendar, or '
       + 'the tick taken back. It leaves your Calendar while ticked, and the next session with you starts with it ticked '
       + 'in its review. Nothing that was agreed changes and no version moves. Sending what is stored changes nothing. '
-      + '**Refused `403 PERM_DENIED` in any support session**, an elevated one included: the tick is the coachee’s own.',
+      + '**Refused in any support session**, `403 IMPERSONATION_READ_ONLY` as every write of one is (ADR-0206): the tick '
+      + 'is the coachee’s own.',
   })
   @ApiResponse({
     status: 404,

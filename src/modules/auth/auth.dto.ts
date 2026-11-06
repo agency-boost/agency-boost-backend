@@ -20,7 +20,7 @@ import { IMPERSONATION_PURPOSES, type ImpersonationPurpose } from './impersonati
  */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them to the pipe. */
+/** The DTOs' own sentences, in both languages (P18.10-T5 AC-3): `field` carries them to the pipe. */
 const SAY = AUTH_REFUSALS.VALIDATION_FAILED;
 const MONTH_SHAPE = /^\d{4}-\d{2}$/;
 
@@ -66,7 +66,7 @@ export class RegisterDto {
   agentCode!: string;
 
   /**
-   * **Registering on a leader's invite** (ADR-0170 §3, P18.96-T3 AC-4): the token from `/register?invite=`. The
+   * **Registering on a leader's invite** (ADR-0170 §3, P18.8-T3 AC-4): the token from `/register?invite=`. The
    * account takes the invite's insurer and agent code, and its membership in the office is made active under the
    * leader at once, with the invite's join date. A link that opens nothing is refused `404` before any account is made.
    */
@@ -77,7 +77,7 @@ export class RegisterDto {
   inviteToken?: string;
 
   /*
-   * What a person records (ADR-0158, P18.8-T4 AC-3), all four required at registration.
+   * What a person records (ADR-0158, P18.5-T4 AC-3), all four required at registration.
    */
 
   @ApiProperty({ example: '1990-03-15', description: '`YYYY-MM-DD`. In the past, and at least 18 years ago.' })
@@ -177,6 +177,46 @@ export class ChangeEmailDto {
   currentPassword!: string;
 }
 
+/** *Tambah akun* (UI-169 item 5; ADR-0199 §2): the other login's address, and the caller's own password again. */
+export class StartLinkDto {
+  @ApiProperty({ example: 'wilson@agencyboost.test', description: 'The address of the other login to link.' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+
+  @ApiProperty({ description: 'The password the caller signs in with now.' })
+  @IsString()
+  currentPassword!: string;
+}
+
+/** The link's page (`/link-account/[token]`, ADR-0199 §2): the token from the email, and the other login's password. */
+export class ConfirmLinkDto {
+  @ApiProperty({ description: 'The token from the link sent to the other login\'s address.' })
+  @IsString()
+  @MaxLength(256)
+  token!: string;
+
+  @ApiProperty({ description: 'The password of the login the link was sent to.' })
+  @IsString()
+  password!: string;
+}
+
+/** A switch to the other login (ADR-0199 §4): which login, and its password where this browser holds no session of it. */
+export class SwitchLinkDto {
+  @ApiProperty({ description: 'The linked login to switch to: `linkedLogin.userId` on `GET /auth/me`.' })
+  @IsMongoId()
+  userId!: string;
+
+  @ApiPropertyOptional({
+    description: 'That login\'s password — only after `409 AUTH_LINK_SIGN_IN_REQUIRED`, when this browser holds no live '
+      + 'session of it.',
+  })
+  @IsOptional()
+  @IsString()
+  password?: string;
+}
+
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Rina Wijaya' })
   @IsOptional()
@@ -204,7 +244,7 @@ export class UpdateProfileDto {
   pronoun?: 'she' | 'he' | 'they';
 
   /*
-   * **What a person records** (ADR-0158 §3, P18.8-T4 AC-6): yours to complete or correct, each on its
+   * **What a person records** (ADR-0158 §3, P18.5-T4 AC-6): yours to complete or correct, each on its
    * own. Not clearable — a `null` is refused, since each is required of everybody who arrives now.
    * **Refused in any support session**, read-only or elevated: these are the person's own word.
    */
@@ -235,7 +275,7 @@ export class UpdateProfileDto {
   gender?: Gender;
 
   /*
-   * **The language you read AgencyBoost in** (ADR-0179 §2; P18.98-T2 AC-1): the *ID | EN* switch and *Language* on
+   * **The language you read AgencyBoost in** (ADR-0179 §2; P18.10-T2 AC-1): the *ID | EN* switch and *Language* on
    * *Your account* both send it, on its own. One of the two; **not clearable** — `null` is refused like any other value,
    * because a person who has chosen once has chosen, and the default only stands for somebody who never has.
    */
@@ -281,34 +321,17 @@ export class ImpersonateDto {
   durationMinutes?: number;
 
   @ApiPropertyOptional({
-    enum: IMPERSONATION_PURPOSES,
+    enum: ['support'],
     default: 'support',
     description:
-      '`support` looks and changes nothing. `setup` may also change the office\'s settings, import people and '
-      + 'upload its production file, and nothing else — for an active office\'s Owner or one of its Admins '
-      + 'only, else `409 IMPERSONATION_SETUP_TARGET`.',
+      '**A session only looks** (ADR-0206 §3): `support`, or left out. `setup` is `400 VALIDATION_FAILED` with '
+      + '`details.field: \'purpose\'`, and nothing is written — the setup session is retired. Any other value is '
+      + '`400 VALIDATION_FAILED` with `details.violations`.',
   })
   @IsOptional()
+  // The shape a row may hold; `setup` passes here so the service refuses it naming the field (P19.4-T2 AC-1).
   @IsIn(IMPERSONATION_PURPOSES)
   purpose?: ImpersonationPurpose;
 }
 
 
-/**
- * Approving a support session to write (P4-T10, §3.13).
- *
- * The reason is typed **again** rather than carried over from the session's own: the
- * approver is a different person answering a different question — not "why look at this
- * office" but "why is looking not enough". The office's Owner reads both.
- */
-export class ElevateImpersonationDto {
-  @ApiProperty({
-    example: 'Their activity types were saved with a duplicate code and cannot be fixed from the screen.',
-    minLength: 10,
-    maxLength: 500,
-  })
-  @IsString()
-  @MinLength(10)
-  @MaxLength(500)
-  reason!: string;
-}

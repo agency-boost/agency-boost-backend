@@ -11,12 +11,12 @@ import { TrainingProgressController } from './training-progress.controller';
 /** The read's fields, exactly: the contract the frontend builds against (`scratchpad/p185/contract-training.md`). */
 const VIEW_KEYS = ['allOfferedDone', 'categories', 'done', 'membershipId', 'pct', 'total'];
 const CATEGORY_KEYS = ['code', 'description', 'done', 'label', 'offered', 'pct', 'skills', 'total'];
-const SKILL_KEYS = ['archived', 'code', 'done', 'label', 'modules', 'offered', 'pct', 'total'];
-const ROW_KEYS = ['code', 'completedAt', 'formats', 'status', 'title'];
-const PAGE_KEYS = ['can', 'category', 'code', 'completedAt', 'items', 'openedItemIds', 'skill', 'startedAt', 'status', 'title'];
+const SKILL_KEYS = ['archived', 'code', 'description', 'done', 'label', 'modules', 'offered', 'pct', 'total'];
+const ROW_KEYS = ['code', 'completedAt', 'description', 'formats', 'status', 'title'];
+const PAGE_KEYS = ['can', 'category', 'code', 'completedAt', 'description', 'items', 'openedItemIds', 'skill', 'startedAt', 'status', 'title'];
 
-type Row = { code: string; title: string; status: string; completedAt: string | null; formats: string[] };
-type Skill = { code: string; label: string; offered: boolean; done: number; total: number; modules: Row[]; archived: Row[] };
+type Row = { code: string; title: string; description?: string | null; status: string; completedAt: string | null; formats: string[] };
+type Skill = { code: string; label: string; description?: string | null; offered: boolean; done: number; total: number; modules: Row[]; archived: Row[] };
 type Category = { code: string; label: string; offered: boolean; done: number; total: number; pct: number | null; skills: Skill[] };
 type View = { membershipId: string; done: number; total: number; pct: number | null; categories: Category[]; allOfferedDone: boolean };
 
@@ -29,11 +29,11 @@ const counts = (view: View) => ({
 });
 
 /**
- * **The learner's training over HTTP** (P18.5-T1 to T4): the four routes, the settings reads, and the activation
+ * **The learner's training over HTTP** (P18.2-T1 to T4): the four routes, the settings reads, and the activation
  * routes a training-linked item is read and ticked through — with the decorators, the production pipe and the
  * permission guard in front of the real services, over `test/training-office.ts`'s two offices.
  */
-describe('training progress over HTTP (P18.5-T1 to T4)', () => {
+describe('training progress over HTTP (P18.2-T1 to T4)', () => {
   let h: TrainingHarness;
   const id = (who: Who) => h.id(who);
   const reads = () => h.col('auditLog').find({ action: 'activity_log.read_raw' }).toArray();
@@ -45,7 +45,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   afterAll(async () => { await stopTrainingHarness(h); });
   beforeEach(async () => { await h.reset(); });
 
-  it('P18.5-T1 AC-1 declares a permission on every route, and the right one', () => {
+  it('P18.2-T1 AC-1 declares a permission on every route, and the right one', () => {
     expect(declaredPermissions(TrainingProgressController)).toEqual({
       read: 'training_progress:read',
       module: 'training_progress:read',
@@ -59,11 +59,11 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
 
   describe('GET /training/progress (T1, T2)', () => {
     /*
-     * *Amended 2026-10-28 (P18.97-T4 AC-9, ADR-0176 §9; UI-031):* the five categories the seed leaves empty were in the
+     * *Amended 2026-10-28 (P18.9-T4 AC-9, ADR-0176 §9; UI-031):* the five categories the seed leaves empty were in the
      * answer, each at *(0/0)*, and an agent opened their tabs onto *coming soon*. A category with no published module
      * is not offered now, so the answer holds Sales alone; the Owner's settings still list the five.
      */
-    it('P18.5-T1 AC-4 answers the offered catalog in the contract’s shape: Sales, its six skills, its ten modules', async () => {
+    it('P18.2-T1 AC-4 answers the offered catalog in the contract’s shape: Sales, its six skills, its ten modules', async () => {
       h.as('RINA');
       const view: View = (await h.http().get('/training/progress').expect(200)).body;
 
@@ -80,7 +80,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(sales(view).skills[2].modules.map((m) => m.code)).toEqual(['OBJECTION_FUNDAMENTALS', 'PRICE_OBJECTIONS']);
     });
 
-    it('P18.5-T1 AC-4 the Format column is the kinds a module’s content holds now, File · Video · Link order', async () => {
+    it('P18.2-T1 AC-4 the Format column is the kinds a module’s content holds now, File · Video · Link order', async () => {
       h.as('RINA');
       const view: View = (await h.http().get('/training/progress').expect(200)).body;
       expect(row(view, 'PROSPECT_LIST')!.formats).toEqual(['file', 'link']);
@@ -88,7 +88,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row(view, 'CLOSING_TECHNIQUES')!.formats).toEqual([]);
     });
 
-    it('P18.5-T2 AC-2 counts done over offered at every scope; in progress is not done', async () => {
+    it('P18.2-T2 AC-2 counts done over offered at every scope; in progress is not done', async () => {
       h.as('RINA');
       await mark('PROSPECT_LIST', 'done').expect(200);
       await mark('REFERRAL_GENERATION', 'done').expect(200);
@@ -103,7 +103,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row(view, 'FINANCIAL_NEEDS_ANALYSIS')).toMatchObject({ status: 'in_progress', completedAt: null });
     });
 
-    it('P18.5-T2 AC-3 every offered module done is all offered done', async () => {
+    it('P18.2-T2 AC-3 every offered module done is all offered done', async () => {
       h.as('RINA');
       const all = (sales((await h.http().get('/training/progress').expect(200)).body as View)).skills.flatMap((s) => s.modules);
       for (const m of all) await mark(m.code, 'done').expect(200);
@@ -112,7 +112,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
     });
 
     it.each([['the Owner (an AB)', 'OWNER'], ['the Admin (an AB)', 'ADMIN'], ['an AB', 'AGUS'], ['an AAB', 'SARI'], ['an agent', 'RINA']] as const)(
-      'P18.5-T1 AC-1 positive: %s reads their own',
+      'P18.2-T1 AC-1 positive: %s reads their own',
       async (_name, who) => {
         h.as(who);
         const view: View = (await h.http().get('/training/progress').expect(200)).body;
@@ -120,7 +120,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       },
     );
 
-    it('P18.5-T1 AC-1 an Owner standing on no rung reads their own; a Super Admin outside a session belongs to no office', async () => {
+    it('P18.2-T1 AC-1 an Owner standing on no rung reads their own; a Super Admin outside a session belongs to no office', async () => {
       h.as(h.officeOnly('OWNER'));
       await h.http().get('/training/progress').expect(200);
       h.as(SUPER_ADMIN);
@@ -128,7 +128,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
-    it('P18.5-T1 AC-1 negative: a removed or pending member is refused', async () => {
+    it('P18.2-T1 AC-1 negative: a removed or pending member is refused', async () => {
       for (const status of ['removed', 'pending'] as const) {
         const base = h.office.as('RINA');
         h.as(new RequestContext(base.userId, 'none', { ...base.membership!, status }));
@@ -136,7 +136,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       }
     });
 
-    it('P18.5-T1 AC-1 a read-only support session reads its member’s', async () => {
+    it('P18.2-T1 AC-1 a read-only support session reads its member’s', async () => {
       h.as(h.supporting('RINA'));
       const view: View = (await h.http().get('/training/progress').expect(200)).body;
       expect(view.membershipId).toBe(id('RINA'));
@@ -155,7 +155,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   describe('offered = the published snapshot (T1 AC-3)', () => {
     beforeEach(() => { h.as('RINA'); });
 
-    it('P18.5-T1 AC-3 a draft module is not offered: 404, and absent from the list', async () => {
+    it('P18.2-T1 AC-3 a draft module is not offered: 404, and absent from the list', async () => {
       await h.wired.training.createModule(h.office.as('OWNER'), {
         code: 'DRAFT_CLOSE', skillCode: 'CLOSING', title: 'Not yet', publishState: 'draft',
       });
@@ -165,7 +165,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row((await h.http().get('/training/progress')).body, 'DRAFT_CLOSE')).toBeUndefined();
     });
 
-    it('P18.5-T1 AC-3 a module archived and published since is not offered', async () => {
+    it('P18.2-T1 AC-3 a module archived and published since is not offered', async () => {
       const module = await h.moduleRow('CLIENT_RETENTION');
       await h.wired.training.archiveModule(h.office.as('OWNER'), module.id);
       // Until the office publishes, agents are still offered it (the snapshot is what they read).
@@ -175,14 +175,14 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await mark('CLIENT_RETENTION', 'done').expect(404);
     });
 
-    it('P18.5-T1 AC-3 a module unpublished and published since is not offered', async () => {
+    it('P18.2-T1 AC-3 a module unpublished and published since is not offered', async () => {
       const module = await h.moduleRow('CROSS_SELL_OPPORTUNITIES');
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { publishState: 'draft' });
       await h.publish();
       await h.http().get('/training/modules/CROSS_SELL_OPPORTUNITIES').expect(404);
     });
 
-    it('P18.5-T1 AC-3 a module published in the working copy but not yet by the office is not offered', async () => {
+    it('P18.2-T1 AC-3 a module published in the working copy but not yet by the office is not offered', async () => {
       await h.wired.training.createModule(h.office.as('OWNER'), {
         code: 'NEW_CLOSE', skillCode: 'CLOSING', title: 'Coming', publishState: 'published',
       });
@@ -192,7 +192,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.http().get('/training/modules/NEW_CLOSE').expect(200);
     });
 
-    it('P18.5-T1 AC-3 an unknown code and another office’s module are 404, answered alike', async () => {
+    it('P18.2-T1 AC-3 an unknown code and another office’s module are 404, answered alike', async () => {
       await h.wired.training.createModule(h.office.as('B_AB'), {
         code: 'GADING_ONLY', skillCode: 'CLOSING', title: 'Only in 0555', publishState: 'published',
       });
@@ -204,7 +204,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.http().post('/training/modules/GADING_ONLY/items/x/open').send({}).expect(404);
     });
 
-    it('P18.5 exit review (docs) a material save and a reset reach agents at once and leave the publish bar silent', async () => {
+    it('P18.2 exit review (docs) a material save and a reset reach agents at once and leave the publish bar silent', async () => {
       const owner = h.office.as('OWNER');
       const before = await h.moduleRow('CLOSING_TECHNIQUES');
       expect((await h.wired.config.state(owner)).hasUnpublishedChanges).toBe(false);
@@ -228,7 +228,27 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect((await h.wired.config.state(owner)).hasUnpublishedChanges).toBe(true);
     });
 
-    it('P18.5-T1 AC-3 a title waits for the office’s publish; content reaches agents at once', async () => {
+    it('P19.6-T4 AC-1 a skill’s and a module’s description reach the learner’s list and module page once the office publishes', async () => {
+      const owner = h.office.as('OWNER');
+      const module = await h.moduleRow('PROSPECT_LIST');
+      const skill = (await h.wired.training.list(owner, true)).flatMap((c) => c.skills).find((s) => s.code === 'PROSPECTING')!;
+      await h.wired.training.updateSkill(owner, skill.id, { description: '8 cara mendapat calon nasabah' });
+      await h.wired.training.updateModule(owner, module.id, { description: 'Daftar 100 nama untuk dihubungi' });
+      h.as('RINA');
+      // Not before the office publishes: the snapshot is what agents read.
+      expect(row((await h.http().get('/training/progress').expect(200)).body, 'PROSPECT_LIST')!.description).toBeNull();
+      await h.publish();
+      const view: View = (await h.http().get('/training/progress').expect(200)).body;
+      expect(sales(view).skills.find((s) => s.code === 'PROSPECTING')).toMatchObject({
+        label: 'Pencarian prospek', description: '8 cara mendapat calon nasabah',
+      });
+      expect(row(view, 'PROSPECT_LIST')).toMatchObject({ title: 'Menyusun daftar prospek Anda', description: 'Daftar 100 nama untuk dihubungi' });
+      expect(row(view, 'REFERRAL_GENERATION')!.description).toBeNull();
+      const page = (await h.http().get('/training/modules/PROSPECT_LIST').expect(200)).body;
+      expect(page.description).toBe('Daftar 100 nama untuk dihubungi');
+    });
+
+    it('P18.2-T1 AC-3 a title waits for the office’s publish; content reaches agents at once', async () => {
       const module = await h.moduleRow('CLOSING_TECHNIQUES');
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { title: 'Closing, renamed' });
       await h.col('trainingModules').updateOne({ kpmId: KPM_A, code: 'CLOSING_TECHNIQUES' }, {
@@ -243,7 +263,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   // ------------------------------------------------------------------ T1: the module page
 
   describe('GET /training/modules/:code (T1 AC-5)', () => {
-    it('P18.5-T1 AC-5 answers the module as offered, its items files → videos → links, in the contract’s shape', async () => {
+    it('P18.2-T1 AC-5 answers the module as offered, its items files → videos → links, in the contract’s shape', async () => {
       h.as('RINA');
       const page = (await h.http().get('/training/modules/prospect_list').expect(200)).body;
       expect(Object.keys(page).sort()).toEqual(PAGE_KEYS);
@@ -260,12 +280,12 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(JSON.stringify(page)).not.toContain(COMPANY_FILE.storageKey);
     });
 
-    it('P18.5-T1 AC-5 a module with nothing in it answers no items', async () => {
+    it('P18.2-T1 AC-5 a module with nothing in it answers no items', async () => {
       h.as('RINA');
       expect((await h.http().get('/training/modules/CLOSING_TECHNIQUES').expect(200)).body.items).toEqual([]);
     });
 
-    it('P18.5-T1 AC-7 no toggle in a support session, nor for an Owner on no rung: can.update is false', async () => {
+    it('P18.2-T1 AC-7 no toggle in a support session, nor for an Owner on no rung: can.update is false', async () => {
       for (const who of [h.supporting('RINA'), h.supporting('RINA', false), h.officeOnly('OWNER')]) {
         h.as(who);
         expect((await h.http().get('/training/modules/PROSPECT_LIST').expect(200)).body.can).toEqual({ update: false });
@@ -285,7 +305,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   describe('POST /training/modules/:code/items/:itemId/open (T1 AC-6)', () => {
     const open = (itemId: string, code = 'PROSPECT_LIST') => h.http().post(`/training/modules/${code}/items/${itemId}/open`).send({});
 
-    it('P18.5-T1 AC-6 a company file is answered a signed address, and its first open is recorded once', async () => {
+    it('P18.2-T1 AC-6 a company file is answered a signed address, and its first open is recorded once', async () => {
       h.as('RINA');
       const first = (await open(COMPANY_FILE.id).expect(200)).body;
       expect(first).toEqual({ url: `https://cdn.test/${COMPANY_FILE.storageKey}?sig=abc`, openedItemIds: [COMPANY_FILE.id], recorded: true });
@@ -303,14 +323,14 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect((await h.http().get('/training/modules/PROSPECT_LIST').expect(200)).body.openedItemIds).toEqual([COMPANY_FILE.id]);
     });
 
-    it('P18.5-T1 AC-6 a link is answered its own address', async () => {
+    it('P18.2-T1 AC-6 a link is answered its own address', async () => {
       h.as('SARI');
       expect((await open(COMPANY_LINK.id).expect(200)).body).toEqual({
         url: COMPANY_LINK.url, openedItemIds: [COMPANY_LINK.id], recorded: true,
       });
     });
 
-    it('P18.5-T1 AC-6 an office’s own upload is answered from the office’s registry', async () => {
+    it('P18.2-T1 AC-6 an office’s own upload is answered from the office’s registry', async () => {
       const ownerCtx = h.office.as('OWNER');
       const signed = await h.wired.training.requestContentUpload(ownerCtx, { filename: 'own.pdf', mimeType: 'application/pdf', bytes: 1024 });
       await h.wired.training.confirmContentUpload(ownerCtx, signed.storageKey);
@@ -322,14 +342,14 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(res.url).toBe(`https://cdn.test/${signed.storageKey}?sig=abc`);
     });
 
-    it('P18.5-T1 AC-6 a file whose upload never finished is 409 ASSET_NOT_CONFIRMED, and nothing is recorded', async () => {
+    it('P18.2-T1 AC-6 a file whose upload never finished is 409 ASSET_NOT_CONFIRMED, and nothing is recorded', async () => {
       h.as('RINA');
       const res = await open(UNCONFIRMED_FILE.id, 'REFERRAL_GENERATION').expect(409);
       expect(res.body.error.code).toBe('ASSET_NOT_CONFIRMED');
       expect(await stored('RINA', 'REFERRAL_GENERATION')).toBeNull();
     });
 
-    it('P18.5-T1 AC-6 an item the module does not hold is 404', async () => {
+    it('P18.2-T1 AC-6 an item the module does not hold is 404', async () => {
       h.as('RINA');
       await open('NOT_AN_ITEM').expect(404);
       // Another module's item, named under this one.
@@ -337,7 +357,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
     });
 
     it.each([['read-only', true], ['elevated', false]] as const)(
-      'P18.5-T1 AC-6 a %s support session is answered the address and records nothing (D-support)',
+      'P18.2-T1 AC-6 a %s support session is answered the address and records nothing (D-support)',
       async (_kind, readOnly) => {
         h.as(h.supporting('RINA', readOnly));
         expect((await open(COMPANY_FILE.id).expect(200)).body).toMatchObject({ openedItemIds: [], recorded: false });
@@ -345,7 +365,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       },
     );
 
-    it('P18.5-T1 AC-6 an Owner on no rung opens and records nothing', async () => {
+    it('P18.2-T1 AC-6 an Owner on no rung opens and records nothing', async () => {
       h.as(h.officeOnly('OWNER'));
       expect((await open(COMPANY_LINK.id).expect(200)).body.recorded).toBe(false);
       expect(await stored('OWNER', 'PROSPECT_LIST')).toBeNull();
@@ -360,7 +380,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   // ------------------------------------------------------------------ T1: the status
 
   describe('PUT /training/modules/:code/progress (T1 AC-7)', () => {
-    it('P18.5-T1 AC-7 sets the status, never toggles; startedAt kept from the first move, completedAt on each move to done', async () => {
+    it('P18.2-T1 AC-7 sets the status, never toggles; startedAt kept from the first move, completedAt on each move to done', async () => {
       h.as('RINA');
       const started = (await mark('DISCOVERY_QUESTIONS', 'in_progress').expect(200)).body;
       expect(started).toMatchObject({ status: 'in_progress', startedAt: '2026-09-14T03:00:00.000Z', completedAt: null });
@@ -378,7 +398,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(await h.col('trainingProgress').countDocuments({ membershipId: id('RINA') })).toBe(1);
     });
 
-    it('P18.5-T1 AC-7 one audit row per change, with before and after; none for a write that changes nothing', async () => {
+    it('P18.2-T1 AC-7 one audit row per change, with before and after; none for a write that changes nothing', async () => {
       h.as('RINA');
       await mark('PROSPECT_LIST', 'not_started').expect(200); // no row, nothing to change
       await mark('PROSPECT_LIST', 'in_progress').expect(200);
@@ -395,7 +415,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
     });
 
     it.each([['the Owner (an AB)', 'OWNER'], ['the Admin (an AB)', 'ADMIN'], ['an AB', 'AGUS'], ['an AAB', 'SARI'], ['an agent', 'RINA']] as const)(
-      'P18.5-T1 AC-1 positive: %s sets their own status — every field rung learns',
+      'P18.2-T1 AC-1 positive: %s sets their own status — every field rung learns',
       async (_name, who) => {
         h.as(who);
         expect((await mark('CLOSING_TECHNIQUES', 'done').expect(200)).body.status).toBe('done');
@@ -403,7 +423,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       },
     );
 
-    it('P18.5-T1 AC-1 negative: an Owner or Admin on no rung, and a Super Admin, are refused', async () => {
+    it('P18.2-T1 AC-1 negative: an Owner or Admin on no rung, and a Super Admin, are refused', async () => {
       for (const who of [h.officeOnly('OWNER'), h.officeOnly('ADMIN'), SUPER_ADMIN]) {
         h.as(who);
         const res = await mark('CLOSING_TECHNIQUES', 'done').expect(403);
@@ -412,7 +432,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
     });
 
     it.each([['read-only', true], ['elevated', false]] as const)(
-      'P18.5-T1 AC-1 D-support: a %s support session is refused, and nothing is written',
+      'P18.2-T1 AC-1 D-support: a %s support session is refused, and nothing is written',
       async (_kind, readOnly) => {
         h.as(h.supporting('RINA', readOnly));
         await mark('CLOSING_TECHNIQUES', 'done').expect(403);
@@ -433,7 +453,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
   // ------------------------------------------------------------------ T2: history, leavers
 
   describe('history and re-joins (T2)', () => {
-    it('P18.5-T2 AC-4 D-history: a module done and then archived stays on the record, under its skill, outside the counts', async () => {
+    it('P18.2-T2 AC-4 D-history: a module done and then archived stays on the record, under its skill, outside the counts', async () => {
       h.as('RINA');
       await mark('CLIENT_RETENTION', 'done').expect(200);
       await mark('PROSPECT_LIST', 'done').expect(200);
@@ -453,7 +473,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(await stored('RINA', 'CLIENT_RETENTION')).toMatchObject({ status: 'done' });
     });
 
-    it('P18.5 exit review (training review 2) a done module set back to draft is not history: shown nowhere until published again', async () => {
+    it('P18.2 exit review (training review 2) a done module set back to draft is not history: shown nowhere until published again', async () => {
       h.as('RINA');
       await mark('PROSPECT_LIST', 'done').expect(200);
       await h.wired.training.updateModule(h.office.as('OWNER'), (await h.moduleRow('PROSPECT_LIST')).id, { publishState: 'draft' });
@@ -468,7 +488,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row((await h.http().get('/training/progress').expect(200)).body, 'PROSPECT_LIST')!.status).toBe('done');
     });
 
-    it('P18.5-T2 AC-4 D-history carries the withdrawn module’s formats, as an offered row does', async () => {
+    it('P18.2-T2 AC-4 D-history carries the withdrawn module’s formats, as an offered row does', async () => {
       h.as('RINA');
       await mark('PROSPECT_LIST', 'done').expect(200);
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('PROSPECT_LIST')).id);
@@ -479,7 +499,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       ]);
     });
 
-    it('P18.5-T2 AC-4 D-history under a skill and a category no longer offered: drawn after the offered ones', async () => {
+    it('P18.2-T2 AC-4 D-history under a skill and a category no longer offered: drawn after the offered ones', async () => {
       h.as('RINA');
       await mark('CLIENT_RETENTION', 'done').expect(200);
       const owner = h.office.as('OWNER');
@@ -494,13 +514,13 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.wired.training.archiveCategory(owner, salesRow.id);
       await h.publish();
       view = (await h.http().get('/training/progress').expect(200)).body;
-      // The five empty categories offer nothing (P18.97-T4 AC-9) and hold no history, so only Sales's history is drawn.
+      // The five empty categories offer nothing (P18.9-T4 AC-9) and hold no history, so only Sales's history is drawn.
       expect(view.categories.map((c) => [c.code, c.offered])).toEqual([['SALES', false]]);
       expect(view.categories.at(-1)).toMatchObject({ done: 0, total: 0, pct: null, skills: [{ code: 'RETENTION', archived: [{ code: 'CLIENT_RETENTION' }] }] });
       expect([view.done, view.total]).toEqual([0, 0]);
     });
 
-    it('P18.5-T2 AC-5 a re-join starts at nothing done; the old rows stay with the old membership', async () => {
+    it('P18.2-T2 AC-5 a re-join starts at nothing done; the old rows stay with the old membership', async () => {
       // LEFT left; their rows are theirs. A new membership for the same person reads nothing done.
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('LEFT'), moduleCode: 'PROSPECT_LIST', status: 'done', startedAt: new Date('2026-03-01'),
@@ -520,19 +540,19 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
     });
   });
 
-  // ------------------------------------------------------------------ P18.97-T4: an empty category is not offered
+  // ------------------------------------------------------------------ P18.9-T4: an empty category is not offered
 
   /*
-   * **A training category with no published module is not offered to a field member** (P18.97-T4 AC-9, ADR-0176 §9;
+   * **A training category with no published module is not offered to a field member** (P18.9-T4 AC-9, ADR-0176 §9;
    * the client's UI-031: *Product, Recruiting, Team Management, Soft Skills, Company and KPM are EMPTY but appear as
    * tabs for agents*). `GET /training/progress` leaves it out, for an agent and for the Owner reading their own; the
    * Owner's settings still list it, and a member's history under one is still read, as a category no longer offered.
    */
-  describe('a category with nothing published (P18.97-T4 AC-9)', () => {
+  describe('a category with nothing published (P18.9-T4 AC-9)', () => {
     const EMPTY = ['PRODUCT', 'RECRUITING', 'TEAM_MANAGEMENT', 'MOTIVATION', 'SOFT_SKILLS', 'COMPANY_AND_KPM'];
     const codes = (view: View) => view.categories.map((c) => c.code);
 
-    it('P18.97-T4 AC-9 a field member’s read leaves out every category with no published module', async () => {
+    it('P18.9-T4 AC-9 a field member’s read leaves out every category with no published module', async () => {
       for (const who of ['RINA', 'SARI', 'AGUS'] as const) {
         h.as(who);
         const view: View = (await h.http().get('/training/progress').expect(200)).body;
@@ -540,7 +560,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       }
     });
 
-    it('P18.97-T4 AC-9 the Owner’s own read leaves them out too, and the Owner’s settings still list all six', async () => {
+    it('P18.9-T4 AC-9 the Owner’s own read leaves them out too, and the Owner’s settings still list all six', async () => {
       h.as('OWNER');
       const own: View = (await h.http().get('/training/progress').expect(200)).body;
       expect(codes(own)).toEqual(['SALES']);
@@ -551,7 +571,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(settings.filter((c) => EMPTY.includes(c.code)).every((c) => c.skills.length === 0)).toBe(true);
     });
 
-    it('P18.97-T4 AC-9 a category whose skill holds only drafts is not offered either; publishing one offers it', async () => {
+    it('P18.9-T4 AC-9 a category whose skill holds only drafts is not offered either; publishing one offers it', async () => {
       const owner = h.office.as('OWNER');
       const product = (await h.wired.training.list(owner, true)).find((c) => c.code === 'PRODUCT')!;
       await h.wired.training.createSkill(owner, { code: 'PRODUCT_BASICS', categoryCode: product.code, label: 'Product Basics' });
@@ -568,7 +588,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(view.categories.map((c) => [c.code, c.offered, c.total])).toEqual([['SALES', true, 10], ['PRODUCT', true, 1]]);
     });
 
-    it('P18.97-T4 AC-9 a member’s history under a category that has nothing published is read as no longer offered', async () => {
+    it('P18.9-T4 AC-9 a member’s history under a category that has nothing published is read as no longer offered', async () => {
       h.as('RINA');
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('RINA'), moduleCode: 'OLD_PRODUCT_TALK', status: 'done', startedAt: new Date('2026-03-01'),
@@ -591,7 +611,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect([view.done, view.total]).toEqual([0, 10]);
     });
 
-    it('P18.97-T4 AC-9 a coach’s read is the same answer, and another office’s member is 404', async () => {
+    it('P18.9-T4 AC-9 a coach’s read is the same answer, and another office’s member is 404', async () => {
       h.as('SARI');
       expect(codes((await h.http().get(`/training/progress?for=${id('RINA')}`).expect(200)).body)).toEqual(['SALES']);
       const res = await h.http().get(`/training/progress?for=${id('B_AGENT')}`).expect(404);
@@ -613,7 +633,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.col('auditLog').deleteMany({});
     });
 
-    it('P18.5-T4 AC-1 a coach reads a coachee’s, and one §3.5 entry is written, surface training', async () => {
+    it('P18.2-T4 AC-1 a coach reads a coachee’s, and one §3.5 entry is written, surface training', async () => {
       h.as('SARI');
       const view: View = (await forOf('RINA').expect(200)).body;
       expect(view).toMatchObject({ membershipId: id('RINA'), done: 1, total: 10 });
@@ -626,7 +646,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       });
     });
 
-    it('P18.5-T4 AC-1 reaches the whole downline: an AB two levels up, and the Owner standing above everybody', async () => {
+    it('P18.2-T4 AC-1 reaches the whole downline: an AB two levels up, and the Owner standing above everybody', async () => {
       for (const who of ['AGUS', 'OWNER'] as const) {
         h.as(who);
         expect((await forOf('RINA').expect(200)).body.membershipId).toBe(id('RINA'));
@@ -638,7 +658,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
      * Permission review B5: the matrix's `own-kpm` for the Owner and the Admin (roles §3.7), through `CoachResolver.subject`
      * as campaigns and the Unit Dashboard read — the office, a member who has left included; the field rungs their COACH.
      */
-    it('P18.5-T4 AC-1 the Owner and the Admin reach the office, a leaver included, as the office’s administration', async () => {
+    it('P18.2-T4 AC-1 the Owner and the Admin reach the office, a leaver included, as the office’s administration', async () => {
       for (const who of [h.officeOnly('ADMIN'), h.officeOnly('OWNER'), h.office.as('ADMIN')]) {
         h.as(who);
         expect((await forOf('PEER_AGENT').expect(200)).body.membershipId).toBe(id('PEER_AGENT'));
@@ -657,20 +677,20 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       ['an Agent’s colleague (own reaches nobody)', 'RINA', 'BUDI'],
       ['an Agent who leads, on an own grant', 'LUKAS', 'TARI'],
       ['a leader who leads nobody', 'DEWI', 'RINA'],
-    ] as const)('P18.5-T4 AC-1 404 for %s, and no entry written', async (_name, reader, subject) => {
+    ] as const)('P18.2-T4 AC-1 404 for %s, and no entry written', async (_name, reader, subject) => {
       h.as(reader);
       const res = await forOf(subject).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
       expect(await reads()).toEqual([]);
     });
 
-    it('P18.5-T4 AC-1 an id that names nobody is 404, a malformed one too', async () => {
+    it('P18.2-T4 AC-1 an id that names nobody is 404, a malformed one too', async () => {
       h.as('AGUS');
       await h.http().get(`/training/progress?for=${new mongoose.Types.ObjectId().toString()}`).expect(404);
       await h.http().get('/training/progress?for=not-an-id').expect(404);
     });
 
-    it('P18.5-T4 AC-3 the reader’s own read writes no entry', async () => {
+    it('P18.2-T4 AC-3 the reader’s own read writes no entry', async () => {
       h.as('RINA');
       await h.http().get('/training/progress').expect(200);
       expect(await reads()).toEqual([]);
@@ -681,7 +701,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
      * own. The phase file's AC-1 listed *"the reader named as their own coachee"* among the 404s; aligned with the
      * convention by the lead on 2026-10-10 — it is the reader's own record, so no §3.5 entry either.
      */
-    it('P18.5-T4 AC-1 for naming the reader reads their own, and writes no entry', async () => {
+    it('P18.2-T4 AC-1 for naming the reader reads their own, and writes no entry', async () => {
       h.as('SARI');
       const own = (await h.http().get('/training/progress').expect(200)).body;
       const named = (await forOf('SARI').expect(200)).body;
@@ -693,7 +713,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(await reads()).toEqual([]);
     });
 
-    it('P18.5-T4 AC-1 a read-only support session as the coach reads, and the entry names both actors', async () => {
+    it('P18.2-T4 AC-1 a read-only support session as the coach reads, and the entry names both actors', async () => {
       h.as(h.supporting('SARI'));
       await forOf('RINA').expect(200);
       const [entry] = await reads();
@@ -701,7 +721,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(entry.actorUserId).not.toBe(entry.effectiveUserId);
     });
 
-    it('P18.5-T4 AC-4 exit test 3: the coach’s tab, /coaching/me/training and the learner’s read count alike after each kind of write', async () => {
+    it('P18.2-T4 AC-4 exit test 3: the coach’s tab, /coaching/me/training and the learner’s read count alike after each kind of write', async () => {
       const learner = async () => counts((await (h.as('RINA'), h.http().get('/training/progress')).expect(200)).body);
       const coach = async () => counts((await (h.as('SARI'), forOf('RINA')).expect(200)).body);
       const writes: [string, string][] = [
@@ -735,7 +755,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.bind(activation, 'MANDATORY_TRAINING', 'training:CLOSING_TECHNIQUES');
     });
 
-    it('P18.5-T3 AC-1 AC-5 the item is served live, Auto, going to the module’s own page', async () => {
+    it('P18.2-T3 AC-1 AC-5 the item is served live, Auto, going to the module’s own page', async () => {
       const view = await mine('BUDI');
       expect(itemOf(view, 'MANDATORY_TRAINING')).toMatchObject({
         done: false,
@@ -746,7 +766,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       });
     });
 
-    it('P18.5-T3 AC-2 marking the module done completes the item: source link, by the hire, at completedAt, the record trainingProgress', async () => {
+    it('P18.2-T3 AC-2 marking the module done completes the item: source link, by the hire, at completedAt, the record trainingProgress', async () => {
       h.as('BUDI');
       h.clock.set(new Date('2026-09-14T04:30:00Z'));
       await mark('CLOSING_TECHNIQUES', 'done').expect(200);
@@ -765,7 +785,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       });
     });
 
-    it('P18.5-T3 AC-2 sticky: moving the module back does not untick the item', async () => {
+    it('P18.2-T3 AC-2 sticky: moving the module back does not untick the item', async () => {
       h.as('BUDI');
       await mark('CLOSING_TECHNIQUES', 'done').expect(200);
       await mark('CLOSING_TECHNIQUES', 'in_progress').expect(200);
@@ -773,7 +793,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link' });
     });
 
-    it('P18.5-T3 AC-2 a done record made before the item was read completes it on the next read (a missed signal heals)', async () => {
+    it('P18.2-T3 AC-2 a done record made before the item was read completes it on the next read (a missed signal heals)', async () => {
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('BUDI'), moduleCode: 'CLOSING_TECHNIQUES', status: 'done',
         startedAt: new Date('2026-09-01T03:00:00Z'), completedAt: new Date('2026-09-02T03:00:00Z'), opened: [], version: 2,
@@ -782,7 +802,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link', doneAt: '2026-09-02T03:00:00.000Z' });
     });
 
-    it('P18.5-T3 AC-2 a read-only session is shown it from memory, and writes nothing (N3)', async () => {
+    it('P18.2-T3 AC-2 a read-only session is shown it from memory, and writes nothing (N3)', async () => {
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('BUDI'), moduleCode: 'CLOSING_TECHNIQUES', status: 'done',
         startedAt: new Date('2026-09-01T03:00:00Z'), completedAt: new Date('2026-09-02T03:00:00Z'), opened: [], version: 2,
@@ -795,7 +815,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row.items.find((i: { code: string }) => i.code === 'MANDATORY_TRAINING').done).toBe(false);
     });
 
-    it('P18.5-T3 AC-3 nobody ticks it: 409 for the hire, every leader, and an elevated support session', async () => {
+    it('P18.2-T3 AC-3 nobody ticks it: 409 for the hire, every leader, and an elevated support session', async () => {
       h.as('BUDI');
       let res = await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done: true }).expect(409);
       expect(res.body.error.code).toBe('ACTIVATION_ITEM_AUTOMATIC');
@@ -809,7 +829,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(res.body.error.code).toBe('ACTIVATION_ITEM_AUTOMATIC');
     });
 
-    it('P18.5-T3 AC-3 a hand tick recorded before go-live stays done, and can no longer be unticked', async () => {
+    it('P18.2-T3 AC-3 a hand tick recorded before go-live stays done, and can no longer be unticked', async () => {
       await h.col('activationProgress').updateOne(
         { _id: activation._id },
         { $set: { 'items.$[i].done': true, 'items.$[i].source': 'hire', 'items.$[i].doneByMembershipId': id('BUDI'), 'items.$[i].doneAt': new Date('2026-08-01T03:00:00Z') } },
@@ -820,7 +840,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'hire' });
     });
 
-    it('P18.5-T3 AC-4 D-orphan: a bound module archived and published since is ticked by hand, served not live, its title kept, no route', async () => {
+    it('P18.2-T3 AC-4 D-orphan: a bound module archived and published since is ticked by hand, served not live, its title kept, no route', async () => {
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('CLOSING_TECHNIQUES')).id);
       await h.publish();
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({
@@ -836,7 +856,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.http().put(`/new-hires/${id('BUDI')}/items/MANDATORY_TRAINING`).send({ done: true }).expect(200);
     });
 
-    it('P18.5-T3 AC-4 D-orphan: a done record made before the module was withdrawn still completes it', async () => {
+    it('P18.2-T3 AC-4 D-orphan: a done record made before the module was withdrawn still completes it', async () => {
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('BUDI'), moduleCode: 'CLOSING_TECHNIQUES', status: 'done',
         startedAt: new Date('2026-09-01T03:00:00Z'), completedAt: new Date('2026-09-02T03:00:00Z'), opened: [], version: 2,
@@ -847,7 +867,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link' });
     });
 
-    it('P18.5-T3 AC-4 a link to a module the office has never had reads as its code, goes to the catalog, and is ticked by hand', async () => {
+    it('P18.2-T3 AC-4 a link to a module the office has never had reads as its code, goes to the catalog, and is ticked by hand', async () => {
       await h.bind(activation, 'MANDATORY_TRAINING', 'training:NO_SUCH_MODULE');
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING').link).toMatchObject({
         kind: 'training:NO_SUCH_MODULE', label: 'NO_SUCH_MODULE', route: null, live: false,
@@ -856,7 +876,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       await h.http().put('/activation/me/items/MANDATORY_TRAINING').send({ done: true }).expect(200);
     });
 
-    it('P18.5-T3 AC-2 a done row with no completion date completes the item now', async () => {
+    it('P18.2-T3 AC-2 a done row with no completion date completes the item now', async () => {
       await h.col('trainingProgress').insertOne({
         kpmId: KPM_A, membershipId: id('BUDI'), moduleCode: 'CLOSING_TECHNIQUES', status: 'done',
         startedAt: null, completedAt: null, opened: [], version: 2, deletedAt: null, createdBy: id('BUDI'), updatedBy: id('BUDI'),
@@ -864,12 +884,12 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link', doneAt: '2026-09-14T03:00:00.000Z' });
     });
 
-    it('P18.5-T2 AC-3 the readings serve the offered catalog beside the rows, for 18.6', async () => {
+    it('P18.2-T2 AC-3 the readings serve the offered catalog beside the rows, for 18.3', async () => {
       const catalog = await h.wired.trainingReadings.catalog(h.office.as('RINA'));
       expect(catalog.modules.get('CLOSING_TECHNIQUES')).toMatchObject({ skill: { code: 'CLOSING' }, category: { code: 'SALES' } });
     });
 
-    it('P18.5 exit review (training review 1) D-orphan: an item its link completed stays the link’s — 409 for the hire and a leader, no audit, served live', async () => {
+    it('P18.2 exit review (training review 1) D-orphan: an item its link completed stays the link’s — 409 for the hire and a leader, no audit, served live', async () => {
       h.as('BUDI');
       await mark('CLOSING_TECHNIQUES', 'done').expect(200);
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('CLOSING_TECHNIQUES')).id);
@@ -896,7 +916,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(itemOf(await mine('BUDI'), 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link', doneBy: { membershipId: id('BUDI') } });
     });
 
-    it('P18.5 exit review (training review 1) D-orphan: a done progress row for the withdrawn module completes the item on the write’s own read, and the hand write is refused', async () => {
+    it('P18.2 exit review (training review 1) D-orphan: a done progress row for the withdrawn module completes the item on the write’s own read, and the hand write is refused', async () => {
       await h.wired.training.archiveModule(h.office.as('OWNER'), (await h.moduleRow('CLOSING_TECHNIQUES')).id);
       await h.publish();
       await h.col('trainingProgress').insertOne({
@@ -911,7 +931,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       expect(row.items.find((i: { code: string }) => i.code === 'MANDATORY_TRAINING')).toMatchObject({ done: true, source: 'link' });
     });
 
-    it('P18.5 exit review B2 a field reader’s link is named from what the office offers, never a working title', async () => {
+    it('P18.2 exit review B2 a field reader’s link is named from what the office offers, never a working title', async () => {
       const module = await h.moduleRow('CLOSING_TECHNIQUES');
       await h.wired.training.updateModule(h.office.as('OWNER'), module.id, { title: 'Closing, renamed in the draft' });
       // Not yet published: the hire and the leader read the offered title.
@@ -929,13 +949,13 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       });
     });
 
-    it('P18.5-T3 AC-5 the leader’s detail shows the same item, live, to the same page', async () => {
+    it('P18.2-T3 AC-5 the leader’s detail shows the same item, live, to the same page', async () => {
       h.as('SARI');
       const detail = (await h.http().get(`/new-hires/${id('BUDI')}`).expect(200)).body;
       expect(itemOf(detail, 'MANDATORY_TRAINING').link).toMatchObject({ live: true, route: '/training/SALES/CLOSING_TECHNIQUES' });
     });
 
-    it('P18.5-T3 AC-7 bounded: one progress query for every training item waiting, none when nothing waits', async () => {
+    it('P18.2-T3 AC-7 bounded: one progress query for every training item waiting, none when nothing waits', async () => {
       const second = await h.start('RINA', '2026-07-20');
       await h.bind(second, 'MANDATORY_TRAINING', 'training:CLOSING_TECHNIQUES');
       const spy = jest.spyOn(h.wired.trainingReadings, 'rowsOf');
@@ -955,7 +975,7 @@ describe('training progress over HTTP (P18.5-T1 to T4)', () => {
       }
     });
 
-    it('P18.5 exit review (training review 3) asks what is offered only while an open activation has a training item undone', async () => {
+    it('P18.2 exit review (training review 3) asks what is offered only while an open activation has a training item undone', async () => {
       const spy = jest.spyOn(h.wired.offeredTraining, 'moduleCodes');
       const ctx = h.office.as('BUDI');
       const office = await new TenantDay(h.wired.kpms as never, h.clock).office(ctx);

@@ -5,7 +5,7 @@ import { english, indonesian } from '../../../test/i18n';
 
 /**
  * The function, each dropped setting's reason read as the API's English writes it: a reason is a sentence in both
- * languages, written for the person who saved where the answer is made (P18.98-T5 AC-4).
+ * languages, written for the person who saved where the answer is made (P18.10-T5 AC-4).
  */
 const templateKindsFromOffice = (settings: OfficeSettings) => {
   const made = kindsWithSentences(settings);
@@ -211,6 +211,63 @@ describe('templateKindsFromOffice (P13.2-T7 AC-2)', () => {
     expect(old.kinds).not.toHaveProperty('capability_ladder');
     expect(templateKindsFromOffice(settings({ checklist: { aspects: [] } })).kinds).not.toHaveProperty('activation_checklist');
   });
+
+  it('P13.2-T7 AC-2 reads a snapshot row written before a field existed as empty, never as a refusal', () => {
+    const { kinds, dropped } = templateKindsFromOffice(withSnapshot({
+      activity: [
+        ...(settings().snapshot!.activity as Rows),
+        // A section the snapshot wrote with no types list.
+        { code: 'COACHING', label: 'Coaching', displayOrder: 3, status: 'active' },
+      ],
+      // A pipeline the snapshot wrote with no statuses list.
+      leadPipelines: [...(settings().snapshot!.leadPipelines as Rows), { pipeline: 'service' }],
+      ratios: [{
+        code: 'CLOSING', label: 'Closing', numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION'],
+        benchmark: 0.3, comparison: 'gte', displayUnit: 'ratio', displayOrder: 1, status: 'active',
+      }],
+      eventTypes: [{ code: 'MEETING', label: 'Rapat', displayOrder: 1 }],
+      training: [
+        {
+          code: 'CAT', label: 'Cat', displayOrder: 1, status: 'active',
+          skills: [
+            // A skill with no category code, and a module with no skill code: each the row it sits under.
+            { code: 'SK', label: 'Skill', displayOrder: 1, status: 'active', modules: [
+              { code: 'MOD_A', title: 'A', publishState: 'published', displayOrder: 1, status: 'active' },
+            ] },
+            { code: 'SK_EMPTY', categoryCode: 'CAT', label: 'No modules', displayOrder: 2, status: 'active' },
+          ],
+        },
+        { code: 'CAT_EMPTY', label: 'No skills', displayOrder: 2, status: 'active' },
+      ],
+    }));
+    const taxonomy = kinds.activity_taxonomy as { categories: { code: string }[]; types: { categoryCode: string }[] };
+    expect(taxonomy.categories.map((c) => c.code)).toEqual(['LEADS_GENERATION', 'SELLING', 'COACHING']);
+    expect(taxonomy.types.filter((t) => t.categoryCode === 'COACHING')).toEqual([]);
+    expect((kinds.lead_pipeline as { statuses: Rows }).statuses.map((s) => s.code)).toEqual(['NEW']);
+    expect((kinds.ratio_set as { ratios: Rows }).ratios[0].appliesToOrgLevelCodes).toEqual([]);
+    expect(kinds.event_types).toEqual({ types: [{ code: 'MEETING', label: 'Rapat', description: null, emoji: null, color: null }] });
+    expect(kinds.training_taxonomy).toMatchObject({
+      categories: [{ code: 'CAT' }, { code: 'CAT_EMPTY' }],
+      skills: [{ code: 'SK', categoryCode: 'CAT' }, { code: 'SK_EMPTY', categoryCode: 'CAT' }],
+      modules: [{ code: 'MOD_A', skillCode: 'SK' }],
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  it('P13.2-T7 AC-2 copies a module’s content whichever of files, videos and links it holds', () => {
+    const { kinds, files } = templateKindsFromOffice(settings({
+      moduleContent: [
+        { code: 'MOD_A', companyContent: { videos: [file('co/v')] }, officeContent: null },
+        { code: 'MOD_B', companyContent: { links: [{ id: 'l', label: 'Baca', url: 'https://x.test' }] }, officeContent: null },
+      ],
+    }));
+    const modules = (kinds.training_taxonomy as { modules: { code: string; content?: unknown }[] }).modules;
+    expect(modules.map((m) => [m.code, m.content])).toEqual([
+      ['MOD_A', { files: [], videos: [file('co/v')], links: [] }],
+      ['MOD_B', { files: [], videos: [], links: [{ id: 'l', label: 'Baca', url: 'https://x.test' }] }],
+    ]);
+    expect(files).toEqual([{ storageKey: 'co/v', label: 'co/v', moduleCode: 'MOD_A', owner: 'company' }]);
+  });
 });
 
 /**
@@ -266,7 +323,7 @@ describe('what archiving left behind is dropped, and listed (exit review, findin
     }]);
   });
 
-  it('P18.98-T5 AC-4 says why in Indonesian too, the codes as they are', () => {
+  it('P18.10-T5 AC-4 says why in Indonesian too, the codes as they are', () => {
     const { dropped } = kindsWithSentences(withSnapshot({
       ratios: [
         ratio('CLOSING', ['SELL_SUBMISSION', 'OLD_VISIT'], ['SELL_PRESENTATION']),
@@ -298,6 +355,54 @@ describe('what archiving left behind is dropped, and listed (exit review, findin
     const { kinds, dropped } = templateKindsFromOffice(s);
     expect((kinds.ratio_set as { ratios: Rows }).ratios[0]).toMatchObject({ numerator: ['LEADS_CONTACTED'] });
     expect(dropped).toEqual([]);
+  });
+
+  it('P18.10-T5 AC-4 names the side a ratio was left out for: its denominator, or both', () => {
+    const { kinds, dropped } = templateKindsFromOffice(withSnapshot({
+      ratios: [
+        ratio('GONE_DOWN', ['SELL_SUBMISSION'], ['OLD_VISIT']),
+        ratio('GONE_BOTH', ['OLD_CALL'], ['OLD_VISIT']),
+      ],
+    }));
+    expect(kinds).not.toHaveProperty('ratio_set');
+    expect(dropped).toEqual([
+      {
+        kind: 'ratio_set', code: 'GONE_DOWN',
+        reason: 'Ratio GONE_DOWN was left out: its denominator counts only OLD_VISIT, which is not an active activity type in this office.',
+      },
+      {
+        kind: 'ratio_set', code: 'GONE_BOTH',
+        reason: 'Ratio GONE_BOTH was left out: its numerator and its denominator count only OLD_CALL, OLD_VISIT, which are '
+          + 'not active activity types in this office.',
+      },
+    ]);
+  });
+
+  it('leaves out a grid the snapshot wrote with no items, and the ladder when it is left with no milestone', () => {
+    const { kinds, dropped } = templateKindsFromOffice(withSnapshot({
+      capability: {
+        stages: [{ code: 'S1', label: 'One', requiredMilestoneCodes: [], stageOrder: 1, displayOrder: 1, status: 'active' }],
+        milestones: [{ code: 'M_OLD', label: 'M old', displayOrder: 1, status: 'archived' }],
+        grids: [{ code: 'G_BARE', label: 'G', displayOrder: 1, status: 'active' }],
+      },
+    }));
+    expect(kinds).not.toHaveProperty('capability_ladder');
+    expect(dropped).toEqual([
+      { kind: 'capability_ladder', code: 'G_BARE', reason: 'Grid G_BARE was left out: every item in it is archived in this office.' },
+      {
+        kind: 'capability_ladder', code: null,
+        reason: 'The capability ladder was left out: it has no active milestone left, so it could place nobody. '
+          + 'An office made from the template starts with AgencyBoost’s standard capability ladder instead.',
+      },
+    ]);
+  });
+
+  it('leaves out a catalog with nothing in it, saying nothing: the office never had a ladder of its own', () => {
+    for (const capability of [{}, { stages: [], milestones: [], grids: [] }]) {
+      const { kinds, dropped } = templateKindsFromOffice(withSnapshot({ capability }));
+      expect(kinds).not.toHaveProperty('capability_ladder');
+      expect(dropped).toEqual([]);
+    }
   });
 
   it('takes a stage’s archived milestones out of its requirement, and the stage out when none is left', () => {
@@ -397,6 +502,21 @@ describe('the files and rungs a template names (P13.2-T7 AC-3, AC-4)', () => {
     expect(copied.modules[1]).toEqual(training.modules[1]);
     // The source payload is not touched.
     expect(training.modules[0].content!.files[0].storageKey).toBe('a');
+  });
+
+  it('P13.2-T7 AC-3 gives a module content holding only links, or only files, the lists it lacks as empty', () => {
+    const partial = {
+      categories: [], skills: [],
+      modules: [
+        { code: 'M1', skillCode: 'S', title: 'x', content: { links: [{ id: 'l', label: 'L', url: 'u' }] } },
+        { code: 'M2', skillCode: 'S', title: 'y', content: { files: [file('a')] } },
+      ],
+    };
+    const copied = withCopiedFiles(partial, new Map([['a', { storageKey: 'b', mimeType: 'image/png', bytes: 99 }]])) as typeof training;
+    expect(copied.modules[0].content).toEqual({ files: [], videos: [], links: [{ id: 'l', label: 'L', url: 'u' }] });
+    expect(copied.modules[1].content).toEqual({
+      files: [{ ...file('a'), storageKey: 'b', mimeType: 'image/png', bytes: 99 }], videos: [], links: [],
+    });
   });
 
   it('collects every rung a ratio or a section is shown to, once, upper-cased', () => {

@@ -30,7 +30,7 @@ export function defaultActivationChecklist(): ActivationChecklistPayload {
 
 /**
  * What would make an `activation_checklist` payload produce a broken office — one sentence each, in both languages
- * (P18.98-T5 AC-3), empty when there is nothing.
+ * (P18.10-T5 AC-3), empty when there is nothing.
  *
  * **The same checker an office's own save meets** (ADR-0030), so a template cannot publish a
  * checklist an office could not have written. What it cannot check is whether a training link names

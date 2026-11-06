@@ -13,7 +13,7 @@ const phase5 = (kpmId: string, code: string) => ({
 });
 
 /**
- * P18.5-T7 AC-9 (D-fields). Every campaign written before the agent's card becomes what it was — seasonal, over its
+ * P18.2-T7 AC-9 (D-fields). Every campaign written before the agent's card becomes what it was — seasonal, over its
  * own dates, open to everybody, the default poster, no blurb — and nothing else of it changes. Recorded (its counts)
  * and idempotent: a second run changes nothing, and a field an Owner set is never overwritten.
  */
@@ -29,7 +29,7 @@ describe('0027 — the campaign card’s fields, for the campaigns that predate 
     await campaigns().deleteMany({});
   });
 
-  it('P18.5-T7 AC-9 gives every old campaign the seasonal defaults, and touches nothing else', async () => {
+  it('P18.2-T7 AC-9 gives every old campaign the seasonal defaults, and touches nothing else', async () => {
     await campaigns().insertMany([phase5('kpm-a', 'YEAR_END_DRIVE'), phase5('kpm-b', 'GADING_PUSH')]);
     const before = await campaigns().findOne({ code: 'YEAR_END_DRIVE' });
 
@@ -48,7 +48,7 @@ describe('0027 — the campaign card’s fields, for the campaigns that predate 
     expect(CAMPAIGN_POSTER_COLORS).toContain(after!.poster.color);
   });
 
-  it('P18.5-T7 AC-9 is idempotent: a second run changes nothing', async () => {
+  it('P18.2-T7 AC-9 is idempotent: a second run changes nothing', async () => {
     await campaigns().insertOne(phase5('kpm-a', 'YEAR_END_DRIVE'));
     await up(db(), NOW);
     const once = await campaigns().findOne({ code: 'YEAR_END_DRIVE' });
@@ -57,7 +57,7 @@ describe('0027 — the campaign card’s fields, for the campaigns that predate 
     expect(await campaigns().findOne({ code: 'YEAR_END_DRIVE' })).toEqual(once);
   });
 
-  it('P18.5-T7 AC-9 never overwrites a field already set, and fills only what is missing', async () => {
+  it('P18.2-T7 AC-9 never overwrites a field already set, and fills only what is missing', async () => {
     await campaigns().insertOne({
       ...phase5('kpm-a', 'MDRT_QUALIFICATION'), kind: 'structural', subtype: 'ongoing', window: 'calendar_year',
       poster: { emoji: '🏆', color: 'gold' }, endsAt: null,

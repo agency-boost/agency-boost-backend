@@ -10,7 +10,7 @@ import { SummaryService } from './summary.service';
 import { SUMMARY_REFUSALS } from './summary.messages';
 
 /**
- * **`for`** (P11-T4): whose Summary; **`month` or `year`** (P18.8-T11, ADR-0161 §4): which period. The validation
+ * **`for`** (P11-T4): whose Summary; **`month` or `year`** (P18.5-T11, ADR-0161 §4): which period. The validation
  * pipe refuses a parameter of any other name by name — a `membershipId` included — rather than ignoring it, and
  * a malformed month or year. Which months and years there are is the service's to decide (`summaryPeriod`).
  */

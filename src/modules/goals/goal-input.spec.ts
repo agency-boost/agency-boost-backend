@@ -141,7 +141,7 @@ describe('a goal’s fields', () => {
     }
   });
 
-  it('P18.98-T5 AC-3 says every violation in Indonesian too, a decimal written the Indonesian way', () => {
+  it('P18.10-T5 AC-3 says every violation in Indonesian too, a decimal written the Indonesian way', () => {
     try {
       const { period: _period, ...rest } = ok;
       checkGoal({ ...rest, caseSizeMinor: 1_000.5, closingRatePct: 'thirty' });

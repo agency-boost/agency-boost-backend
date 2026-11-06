@@ -7,7 +7,8 @@ import type {
 } from './leader-meeting.view';
 import type { ScorecardAsOf } from './scorecard/scorecard-record';
 import {
-  COLUMN_KEYS, ROW_KEYS, type ColumnKey, type ColumnPeriod, type RowKey, type ScorecardCell, type ScorecardUnit,
+  COLUMN_KEYS, ROW_KEYS, SCORECARD_DEFINITIONS, type ColumnKey, type ColumnPeriod, type RowKey, type ScorecardCell,
+  type ScorecardDefinitions, type ScorecardUnit,
 } from './scorecard/scorecard.types';
 
 /** Declared for OpenAPI. The wire shapes live on `leader-meeting.view.ts`, as `frontend/src/lib/leader-meetings.ts` reads them. */
@@ -94,10 +95,11 @@ export class MeetingListViewDto implements MeetingListView {
 
 class ScorecardCellDto {
   @ApiProperty({
-    enum: ['figure', 'pending', 'none', 'blocked', 'unrecorded'],
+    enum: ['figure', 'pending', 'none', 'blocked', 'unrecorded', 'not_uploaded'],
     description: '`figure` a value; `pending` *pending data* — no source holds it for its period, never 0; `none` *—*, a '
       + 'ratio over nothing; `blocked` *Not tracked*, a row the table leaves empty in this column; `unrecorded` *—*, a '
-      + 'column or a row a scorecard kept before it existed does not hold — never computed for it.',
+      + 'column or a row a scorecard kept before it existed does not hold — never computed for it; `not_uploaded` *—*, '
+      + '*Not uploaded yet*: a *Full Year* or *YTD* column of last year with no month of its period uploaded.',
   })
   kind!: ScorecardCell['kind'];
 
@@ -192,7 +194,10 @@ class ScorecardPeriodsDto {
 class ScorecardChipsDto {
   @ApiProperty() manpower!: number;
   @ApiProperty() agents!: number;
-  @ApiProperty({ description: '*# of units*: *# of AB* + *# of AAB* — or, on a scorecard kept before that, the number it was kept with.' })
+  @ApiProperty({
+    description: '*# of units*: the AB and AAB who lead at least one member — or, on a scorecard kept before that, the '
+      + 'number it was kept with. The *Monthly Target*’s multiplier.',
+  })
   units!: number;
 
   @ApiProperty() ab!: number;
@@ -231,6 +236,14 @@ class ScorecardDto implements Scorecard {
     description: '`null` while the scorecard is computed on every read; the instant it was written onto the meeting otherwise.',
   })
   frozenAt!: string | null;
+
+  @ApiProperty({
+    enum: SCORECARD_DEFINITIONS,
+    description: 'Which definitions the rows follow, so the footnotes describe them: `data_sources` — live, or kept since the '
+      + 'data sources of 3 November (*3M new agent %* a first policy in the file in the join month or the three after; '
+      + '*FLC* the file’s recruitment; *Cases/producing agents* per active agent per month); `reference_slide` — kept before.',
+  })
+  definitions!: ScorecardDefinitions;
 }
 
 // ------------------------------------------------------------------ the minutes

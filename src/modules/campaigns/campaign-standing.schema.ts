@@ -14,7 +14,7 @@ export interface FrozenRequirement {
 }
 
 /**
- * **An override of a final standing** (P18.6-T2 AC-5; ADR-0144 §4, D-override): the Owner's or an Admin's correction
+ * **An override of a final standing** (P18.3-T2 AC-5; ADR-0144 §4, D-override): the Owner's or an Admin's correction
  * of a result the evaluator could not see, with its reason. The frozen `status` beside it is never rewritten, so
  * clearing the override restores it. `previousStatus` is what the standing read just before this override was set.
  */
@@ -43,12 +43,12 @@ const FROZEN_REQUIREMENT = new MongooseSchema({
 }, { _id: false });
 
 /**
- * **A member's final result in one campaign's window** (P18.5-T8 AC-5; OD-153, OD-154).
+ * **A member's final result in one campaign's window** (P18.2-T8 AC-5; OD-153, OD-154).
  *
  * **Written once, when the result is final, and never again**: on the first read after the last month the
  * window reads has locked (ADR-0050) — for a window of activity alone, after its last day's backdating grace — and
  * frozen there. A reopen and a correction afterwards change nothing in it: a rewarded result cannot silently flip
- * (OD-154). The correction is the override (`override`, P18.6-T2), set and cleared with a reason beside the frozen
+ * (OD-154). The correction is the override (`override`, P18.3-T2), set and cleared with a reason beside the frozen
  * `status`, which it never rewrites. **A running standing is never stored**: it is computed on every read, through the production and
  * activity modules' own functions, so an import, a correction or a revert needs no trigger.
  *
@@ -95,7 +95,7 @@ export class CampaignStanding {
   finalisedAt!: Date;
 
   /**
-   * **The override, or `null`** (P18.6-T2 AC-5, D-override) — additive: a row frozen before it existed reads the
+   * **The override, or `null`** (P18.3-T2 AC-5, D-override) — additive: a row frozen before it existed reads the
    * default, so no migration. Written only by `CampaignStandingRepository.setOverride`; applied in one place,
    * `fromFrozen`, so every reader of a standing reads the overridden status.
    */
@@ -112,5 +112,5 @@ CampaignStandingSchema.index(
   { kpmId: 1, campaignCode: 1, windowKey: 1, membershipId: 1 },
   { unique: true, partialFilterExpression: { deletedAt: null } },
 );
-/** A member's standings — the leaver's cascade (P19-T1) and a member's own reads. */
+/** A member's standings — the leaver's cascade (P20-T1) and a member's own reads. */
 CampaignStandingSchema.index({ kpmId: 1, membershipId: 1 });

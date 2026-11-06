@@ -2,7 +2,7 @@ import { formatMonth } from '@/common/format/format';
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The Summary's refusals, in both languages** (P18.98-T5 AC-2, AC-3): the period a reader asks for, and the
+ * **The Summary's refusals, in both languages** (P18.10-T5 AC-2, AC-3): the period a reader asks for, and the
  * query's shapes. **A month is written in the reader's figures** — *Okt 2026*, *Oct 2026* for a reader who chose
  * English — and a year as the name it is, *2026*. The words name no office (ADR-0084): a coachee's *Personal Summary*
  * tab shows a refusal as its banner, so the Indonesian says no *KPM* either.

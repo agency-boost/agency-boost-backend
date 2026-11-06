@@ -26,6 +26,7 @@ import { config as loadEnv } from 'dotenv';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { addDays as addLocalDays } from '@/common/time/local-day';
 import { PasswordService } from '@/modules/auth/password.service';
+import { AccountLink, AccountLinkSchema, linkPair } from '@/modules/auth/account-link.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
@@ -47,7 +48,7 @@ import {
   capabilitySeedDocument, defaultCapabilityLadder,
 } from '@/modules/capability/capability-payload';
 import {
-  CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE, FIRST_SALE_STAGE_CODE,
+  CASCADE_ACTIVITY_CODES, DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE, FIRST_SALE_STAGE_CODE, LEADER_CLASSES,
 } from '@/domain/constants';
 import { annualTargetOf, computeCascade, defaultMonthsLeft } from '@/modules/goals/goal-cascade';
 import { monthlyApeTarget } from '@/modules/summary/summary-figures';
@@ -68,20 +69,30 @@ import { seedSubscriptionFixture } from './subscription-fixture';
 import { seedPersonalFor } from './personal-fixture';
 import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
+import { seedAnalyticsTemplateFixture } from './analytics-template-fixture';
 import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
+import { seedPotensiFixture } from './potensi-fixture';
+import { seedProposalFixture } from './proposal-fixture';
+import { seedBrandingFixture } from './branding-fixture';
+import { seedTugasFixture } from './tugas-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
-import { monthField, seedMonthFigures } from './production-figures';
+import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
 import {
-  placeReportingCast, reportingMonthFigures, seedReportingFixture, type ReportingKey,
+  placeReportingCast, reportingMonthFigures, reportingUnitPersistency, seedReportingFixture, type ReportingKey,
 } from './reporting-fixture';
+import { seedSetupMarks } from './setup-fixture';
 import { seedActivationCohort } from './cohort-fixture';
 import { seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
 import { markNewHires } from './join-dates';
 import { buildFirstSaleFixture, type FirstSaleFixture } from './first-sale-fixture';
 import { up as backfillFirstSales } from '../migrations/0042-membership-first-sale';
 import { seedLeaderForumFixture, type LeaderForumFixture } from './leader-forum-fixture';
+import { seedSurveysFixture, type SurveyPerson, type SurveysFixture } from './surveys-fixture';
+import { seedAdvancedAnalyticsFixture, type AdvancedAnalyticsFixture } from './advanced-analytics-fixture';
 import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
+import { lessonsFolderFrom, seedLessonsFixture, type LessonsFixture } from './lessons-fixture';
+import { seedTrainingNamesFixture, type TrainingNamesFixture } from './training-names-fixture';
 import { CONFIGURED_EVENTS, seedEventsFixture, type EventsFixture } from './events-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
@@ -112,7 +123,7 @@ import { Notification, NotificationSchema } from '@/modules/notifications/notifi
 import { IN_APP_TEMPLATES } from '@/modules/notifications/inbox-copy';
 import {
   SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_EVENT_TYPES, SEED_LEAD_STATUSES,
-  SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, SEED_PRODUCTS, SEED_RATIO_DEFINITIONS,
+  SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, SEED_PRODUCTS, SEED_RATIO_DEFINITIONS, seedObjectionsOf,
   metricByKey,
 } from '@/domain/constants';
 import {
@@ -149,6 +160,7 @@ import { DataUploadRow, DataUploadRowSchema } from '@/modules/production/data-up
 import { MonthlyAgentData, MonthlyAgentDataSchema, PRODUCTION_METRICS } from '@/modules/production/monthly-agent-data.schema';
 import { ProductionMonth, ProductionMonthSchema } from '@/modules/production/production-month.schema';
 import { templateFilename } from '@/modules/production/production-template';
+import { byKode, rekeyByKode } from '@/modules/production/upload-columns';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -167,6 +179,12 @@ export type SeedPronoun = Exclude<User['pronoun'], 'they'>;
  * so no real person registers one. An account at such an address is the seed's to amend on a re-run.
  */
 const SEED_OWNED_EMAIL = /@[a-z0-9.-]+\.test$/i;
+
+/**
+ * **The *Belum terdaftar* code on 0417's last month** (P19.5-T2; ADR-0214 §8): an agent code last month's file named that
+ * no member of the office holds — held apart until somebody here is given it.
+ */
+export const SEED_HELD_CODE = '80999';
 
 /** The three a person records on the account (ADR-0158); work status is the membership's (`place`). */
 function seedPersonalAccount(email: string, pronoun?: 'she' | 'he' | 'they') {
@@ -191,7 +209,7 @@ const BUDI_JOINED_DAYS_AGO = 61;
 const OFFICE_0555_JOINED_DAYS_AGO = 60;
 
 /*
- * **What the office types, in Bahasa Indonesia** (P18.98-T7, OD-238): the demo reads as an Indonesian office. Content an
+ * **What the office types, in Bahasa Indonesia** (P18.10-T7, OD-238): the demo reads as an Indonesian office. Content an
  * office typed is shown as typed in both languages (ADR-0179 §5), so this is the seed's own text, never a translation.
  * Each row below is written once and then left as it is, so a database seeded before keeps the English it was given:
  * where a writer keys on what a row says (a notice's payload, an audit row's fields, a group's name), the English it
@@ -209,7 +227,7 @@ export const DEMO_REASONS = {
   impersonation: 'Tiket dukungan 118 — tidak bisa melihat unitnya',
 } as const;
 
-/** The English the seed typed before P18.98-T7, by the same keys: what a re-run over an older database finds. */
+/** The English the seed typed before P18.10-T7, by the same keys: what a re-run over an older database finds. */
 const FORMER_REASONS: Readonly<Record<keyof typeof DEMO_REASONS, string>> = {
   sariPromoted: 'Ready to lead a unit of her own',
   dewiPromoted: 'Took the AAB track after Q2',
@@ -228,7 +246,7 @@ const FORMER_REASONS: Readonly<Record<keyof typeof DEMO_REASONS, string>> = {
 const DEMO_EVENTS = CONFIGURED_EVENTS;
 type DemoEventCode = keyof typeof DEMO_EVENTS;
 
-/** The two informal groups in 0417, and the name the first had before P18.98-T7. */
+/** The two informal groups in 0417, and the name the first had before P18.10-T7. */
 export const DEMO_GROUPS = {
   mentoring: { name: 'Mentoring Agen Baru', formerly: 'New Agent Mentoring Circle' },
   topProducers: { name: 'Top Producers 2026' },
@@ -258,7 +276,7 @@ const OWNED_COLLECTIONS = [
   // across two different offices.
   'activityCategories', 'activityTypes', 'leadStatuses', 'ratioDefinitions',
   'configSnapshots',
-  // P18.9-T2 (ADR-0163): which activity types each cascade role counts, one row per office.
+  // P18.6-T2 (ADR-0163): which activity types each cascade role counts, one row per office.
   'activityBindings',
   // Phase 5. `products` is the company's rather than the office's, and it is cleared for
   // the same reason: a previous run's shelf orphaned against a company id that no longer
@@ -290,18 +308,28 @@ const OWNED_COLLECTIONS = [
   'recruitmentPlaybooks', 'kpmRecruitmentPitchDocuments',
   // Phase 18, with the writer that fills it (`reporting-fixture.ts`): an office's recruitment target per month.
   'kpmRecruitTargets',
+  // P19.3-T2, with the writer that fills it (`setup-fixture.ts`): the KPM setup card's marks.
+  'kpmSetupMarks',
   // Phase 18.1, with the writer that fills them (`leader-forum-fixture.ts`): the offices' leader meetings and their links.
   'leaderMeetings', 'leaderMeetingShareLinks',
-  // Phase 18.5, with the writer that fills it (`training-fixture.ts`): each member's progress on each module.
+  // Phase 18.2, with the writer that fills it (`training-fixture.ts`): each member's progress on each module.
   'trainingProgress',
-  // Phase 18.5, with the writer that fills them (`events-fixture.ts`): members' RSVPs, claims, confirmations and answers.
+  // Phase 18.2, with the writer that fills them (`events-fixture.ts`): members' RSVPs, claims, confirmations and answers.
   'eventRsvps', 'eventFeedback',
-  // Phase 18.5, with the writer that fills them (`campaigns-fixture.ts`): members' chases, and the standings frozen once final.
+  // Phase 18.2, with the writer that fills them (`campaigns-fixture.ts`): members' chases, and the standings frozen once final.
   'campaignChases', 'campaignStandings',
-  // Phase 18.8, with the writer that fills it (`subscription-fixture.ts`): 0603's leaders past its limit (ADR-0157).
+  // Phase 18.5, with the writer that fills it (`subscription-fixture.ts`): 0603's leaders past its limit (ADR-0157).
   'leaderLimitRequests',
-  // P18.96-T3, with the writer that fills them (`joining-fixture.ts`): Agus's invites and his transfer request (ADR-0170).
+  // P18.8-T3, with the writer that fills them (`joining-fixture.ts`): Agus's invites and his transfer request (ADR-0170).
   'memberInvites', 'transferRequests',
+  // P19.2-T1 AC-8, with the writer that fills it: the Owner's two logins, linked (ADR-0199).
+  'accountLinks',
+  // P19.5-T4, with the writer that fills them (`surveys-fixture.ts`): the survey runs, who was invited, the sent forms.
+  'surveyRuns', 'surveyParticipation', 'surveyResponses',
+  // P19.5-T3, with the writer that fills them (`advanced-analytics-fixture.ts`): MAPA and sub-group targets, frozen Quant runs.
+  'analyticsTargets', 'quantRuns',
+  // P19.6-T1, with the writer that fills it (`branding-fixture.ts`): 0555's own logo, colours and mascot (ADR-0218).
+  'kpmBranding',
 ] as const;
 
 /**
@@ -327,6 +355,11 @@ export interface SeedOptions {
    * the brochure are skipped, and the run says so.
    */
   storage?: StoragePort | null;
+  /**
+   * P19.6-T3: the owner's lessons' folder (`training-modules`), which the command finds beside this repository or in
+   * `SEED_LESSONS_DIR`. Absent or `null`, the lessons are skipped and the run says so (`lessons-fixture.ts`).
+   */
+  lessons?: string | null;
 }
 
 export interface SeedResult {
@@ -344,20 +377,28 @@ export interface SeedResult {
   recruitment: RecruitmentFixture;
   /** The Strategic Leader Forum's meetings and links (`leader-forum-fixture.ts`). */
   forum: LeaderForumFixture;
-  /** Phase 18.5: training progress, the company's material, 0555's bound item 9 (`training-fixture.ts`). */
+  /** Phase 18.2: training progress, the company's material, 0555's bound item 9 (`training-fixture.ts`). */
   training: TrainingFixture;
-  /** Phase 18.5: the events' RSVPs, claims, confirmations and answers (`events-fixture.ts`). */
+  /** Phase 18.2: the events' RSVPs, claims, confirmations and answers (`events-fixture.ts`). */
   events: EventsFixture;
-  /** Phase 18.5: the campaigns' new rows and the chases across the cast (`campaigns-fixture.ts`). */
+  /** Phase 18.2: the campaigns' new rows and the chases across the cast (`campaigns-fixture.ts`). */
   campaigns: CampaignsFixture;
-  /** Phase 18.6: training for Phase 18's cast and D-seed's override (`compliance-fixture.ts`). */
+  /** Phase 18.3: training for Phase 18's cast and D-seed's override (`compliance-fixture.ts`). */
   compliance: ComplianceFixture;
-  /** P18.96-T3: Agus's pending and cancelled invites, and his transfer request for Raka (`joining-fixture.ts`). */
+  /** P18.8-T3: Agus's pending and cancelled invites, and his transfer request for Raka (`joining-fixture.ts`). */
   joining: JoiningFixture;
-  /** P18.96-T4: the first sales on day 20 and day 120, Rina's fourth 1:1 (`first-sale-fixture.ts`). */
+  /** P18.8-T4: the first sales on day 20 and day 120, Rina's fourth 1:1 (`first-sale-fixture.ts`). */
   firstSales: FirstSaleFixture;
-  /** P18.96-T6, UI-023: Lukman, Teraktivasi late by a sale on day 96, and Tari, marked left (`activation-3m-fixture.ts`). */
+  /** P18.8-T6, UI-023: Lukman, Teraktivasi late by a sale on day 96, and Tari, marked left (`activation-3m-fixture.ts`). */
   activation3M: Activation3MSeed;
+  /** P19.5-T4 AC-20: the survey runs, their invitations and forms (`surveys-fixture.ts`). */
+  surveys: SurveysFixture;
+  /** P19.5-T3: the Advanced analytics page's targets and Quant runs (`advanced-analytics-fixture.ts`). */
+  advancedAnalytics: AdvancedAnalyticsFixture;
+  /** P19.6-T3: the owner's lessons in Prudential's and the Template company's templates (`lessons-fixture.ts`). */
+  lessons: LessonsFixture;
+  /** P19.6-T4: 0417's skills' descriptions, and Prudential template's newer names (`training-names-fixture.ts`). */
+  trainingNames: TrainingNamesFixture;
 }
 
 async function countRows(): Promise<Record<string, number>> {
@@ -425,6 +466,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const KpmRequests = mongoose.model(KpmRequest.name, KpmRequestSchema, undefined, RECOMPILE);
   const Audit = mongoose.model(AuditLog.name, AuditLogSchema, undefined, RECOMPILE);
   const Notifications = mongoose.model(Notification.name, NotificationSchema, undefined, RECOMPILE);
+  const AccountLinks = mongoose.model(AccountLink.name, AccountLinkSchema, undefined, RECOMPILE);
 
   if (options.reset) {
     // Empty the collections rather than drop the database. An Atlas user with ordinary
@@ -479,6 +521,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
        * for the two operator accounts, which are not people anybody coaches: they keep `they`.
        */
       pronoun?: SeedPronoun;
+      /**
+       * **An address not verified yet** (P19-T1 AC-4, ADR-0190 §4): registered and never opened the link — `invited`,
+       * no `emailVerifiedAt` — who signs in all the same and reads *Verifikasi email Anda · Kirim ulang* on every page.
+       */
+      unverified?: boolean;
+      /**
+       * **Leaves the code count where it is** (P19.2-T1 AC-8): an account added among the others after they were given
+       * their codes — every code after it would move by one, and the production rows already imported join on them.
+       * A Super Admin carries no code, so nothing is lost.
+       */
+      uncounted?: boolean;
     } = {},
   ) {
     const existing = await Users.findOne({ email }).exec();
@@ -515,7 +568,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     const sellsForSomebody = platformRole !== 'super_admin';
     // Only a counted code advances the count: an account that brings its own (the coaching cast)
     // leaves everybody after it on the number a fresh seed has always given them.
-    if (!opts.agentCode) issued += 1;
+    if (!opts.agentCode && !opts.uncounted) issued += 1;
     return Users.create({
       email,
       passwordHash: await passwords.hash(opts.password ?? FIELD_PASSWORD),
@@ -528,10 +581,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         : null,
       // What a person records (ADR-0158). A Super Admin sells for nobody, and records none of it.
       ...(sellsForSomebody ? seedPersonalAccount(email, opts.pronoun) : {}),
-      status: opts.status ?? 'active',
+      status: opts.unverified ? 'invited' : (opts.status ?? 'active'),
       pronoun: opts.pronoun ?? 'they',
-      // Pre-verified: the point of a demo tenant is to sign in, not to chase an inbox.
-      emailVerifiedAt: clock.now(),
+      // Pre-verified: the point of a demo tenant is to sign in, not to chase an inbox — but for the one who shows the
+      // banner an unverified address draws (P19-T1).
+      emailVerifiedAt: opts.unverified ? null : clock.now(),
     });
   }
 
@@ -627,6 +681,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     if (await Products.exists({ companyId })) return;
     await Products.insertMany(SEED_PRODUCTS.map((product) => ({
       ...product,
+      // The seed's one pair, as the objection card a product stores (P19.4-T4, ADR-0209 §9).
+      defaultAttackPlan: { ...product.defaultAttackPlan, objections: seedObjectionsOf(product.defaultAttackPlan) },
       companyId,
       // Never seeded: a company states its own rates (parity F-15).
       commissionSchedule: [],
@@ -763,7 +819,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * phase badge — the thing this task exists to get right — would stop being demonstrable.
      */
     /*
-     * *Phase 18.5 (the exit review):* at plausible hours of the office's day — Kickoff 09:00–13:00, PRULink 10:00–13:00
+     * *Phase 18.2 (the exit review):* at plausible hours of the office's day — Kickoff 09:00–13:00, PRULink 10:00–13:00
      * in Jakarta — where they were the run's own minute plus whole hours. Only the running huddle stays relative to the
      * run: from an hour before it to six hours after, so a walk finds it still running (it ended two hours in).
      */
@@ -809,7 +865,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
      * what agents actually read) and **sent back** with a reason. The first product's row is the one
      * `sales-tools-fixture.ts` lays 0417's approved description onto.
      *
-     * *Changed 2026-10-26 (P18.95-T6, UI-023):* that first row no longer renames the product. It read
+     * *Changed 2026-10-26 (P18.7-T6, UI-023):* that first row no longer renames the product. It read
      * *"PRUMapan (nama kami)"* — "our name" — which the client took, rightly, for a placeholder on the
      * catalog; migration `0039-product-name-placeholder` gives a database seeded before this the
      * company's name back. An office's rename is walked by renaming one on `/kpm/settings/products`.
@@ -1329,7 +1385,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await user('root@agencyboost.test', 'Second Operator', { platformRole: 'super_admin' });
 
   /**
-   * Prudential's ladder (P3.5-T7 AC-5), junior first, exactly as the prototype writes it:
+   * Prudential's ladder (P3.1-T7 AC-5), junior first, exactly as the prototype writes it:
    * *"Role ladder: Agent → AAB → AB"* (`Superadmin.html:311`).
    *
    * The codes are what `memberships.orgLevelId` will resolve to in T8, and they match the
@@ -1347,10 +1403,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   }
 
   /*
-   * **Allianz Life's own ladder, with rungs it named itself** (P18.8-T1, ADR-0156): *Unit Manager* marked
+   * **Allianz Life's own ladder, with rungs it named itself** (P18.5-T1, ADR-0156): *Unit Manager* marked
    * *Associate Leader* and *Senior Manager* marked *Senior Leader*, so `/admin/org-levels` shows a ladder whose
    * leaders are not called AB or AAB. Allianz has no office yet, so nobody stands on them and the tiers can still
-   * be changed there; the members who hold a custom rung's rights are the seed task's (P18.8-T14).
+   * be changed there; the members who hold a custom rung's rights are the seed task's (P18.5-T14).
    */
   for (const rung of [
     { code: 'AGENT', label: 'Agent', displayOrder: 1, leaderTier: null },
@@ -1363,10 +1419,40 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       });
     }
   }
+  /*
+   * **An archived rung nothing names** (P19.4-T5 AC-2, ADR-0213 §2; the 11-03 handover's B1-6): *Associate Business
+   * Partner*, archived the day it was added, as Manulife and Sequis archived AAB and AB. No membership, setting or template
+   * names `ABP`, so `/admin/org-levels` → *Allianz Life* offers *Hapus* on it, and it goes; Prudential's
+   * AB and AAB, which members stand on, would be refused even archived, with the reason. Written once: a delete in a
+   * walk stands.
+   */
+  if (!(await OrgLevels.exists({ companyId: String(allianz._id), code: 'ABP' }))) {
+    await OrgLevels.create({
+      companyId: String(allianz._id), code: 'ABP', label: 'Associate Business Partner', displayOrder: 4,
+      leaderTier: null, status: 'archived', archivedAt: clock.now(), deletedAt: null,
+    });
+  }
 
   // ---------------------------------------------------------- KPM 0417, the main office
 
   const ownerUser = await user('owner@kpm0417.test', 'Wilson Tanoto', { password: 'demo password 0417', pronoun: 'he' });
+  /*
+   * **The Owner's Super Admin login, linked to his field login** (P19.2-T1 AC-8; UI-169 item 5; ADR-0199): the owner's own
+   * case — *"a normal account and the superadmin account"* — so the switcher can be seen. Signed in as
+   * `owner@kpm0417.test`, the avatar menu reads *Akun saya ✓ · KPM Owner · BSD City Branch · Superadmin*; choosing
+   * *Superadmin* asks this login's password once on a browser that holds no session of it, then lands on `/admin`. Signed
+   * in here, the menu reads the same the other way round. **A separate Super Admin login**, not `superadmin@`: a Super
+   * Admin may not start a support session as a login linked to their own (§7), and the fixtures' support sessions into
+   * 0417's Owner are `superadmin@`'s. Linked once: a second run finds the link and writes nothing.
+   */
+  const ownersOperatorLogin = await user('wilson@agencyboost.test', 'Wilson Tanoto', {
+    platformRole: 'super_admin', uncounted: true,
+  });
+  {
+    const pair = linkPair(String(ownerUser._id), String(ownersOperatorLogin._id));
+    const linked = await AccountLinks.exists({ userIds: { $in: pair }, deletedAt: null }).exec();
+    if (!linked) await AccountLinks.create({ userIds: pair, requestedBy: String(ownerUser._id) });
+  }
   const kpm0417 = await office(String(prudential._id), '0417', 'BSD City Branch', {
     ownerUserId: String(ownerUser._id),
     address: 'Jl. Raya Serpong, Tangerang Selatan',
@@ -1378,7 +1464,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   };
   const id0417 = String(kpm0417._id);
   /*
-   * **Open since January last year** (P18.8-T11, ADR-0161 §4): the Personal Summary's month and year selects run
+   * **Open since January last year** (P18.5-T11, ADR-0161 §4): the Personal Summary's month and year selects run
    * from the office's first month, the month its record was created, and the production files begin then
    * (`reporting-fixture.ts`). Written to the collection, as `createdAt` is immutable to the model; only ever moved
    * earlier, so a later run leaves an office opened earlier still is.
@@ -1545,7 +1631,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     { ...DEMO_GROUPS.topProducers, owner: owner.id, members: [ab.id, sari.id] },
   ];
   for (const seed of groupSeeds) {
-    // Found under the name an earlier run gave it too, so a database seeded before P18.98-T7 gets no second group.
+    // Found under the name an earlier run gave it too, so a database seeded before P18.10-T7 gets no second group.
     const names = 'formerly' in seed ? [seed.name, seed.formerly] : [seed.name];
     const existing = await Groups.findOne({ kpmId: id0417, name: { $in: names } }).exec();
     const group =
@@ -1577,7 +1663,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * one thing it does differently from the API, and it is why they are quotable.
    *
    * There is nothing else to seed here. Invites used to have four states — working, spent,
-   * withdrawn, expired — and each needed a fixture. A leader code has one (P3.6-T1).
+   * withdrawn, expired — and each needed a fixture. A leader code has one (P3.2-T1).
    */
   for (const [membershipId, code] of [[sari.id, 'SARI01'], [ab.id, 'AGUS01']] as const) {
     await Memberships.updateOne({ _id: membershipId }, { $set: { leaderCode: code } });
@@ -2124,7 +2210,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const writeThisMonth = !(await held(thisMonth));
 
   if (writeLastMonth || writeThisMonth) {
-    type RosterRow = { _id: unknown; agentCode: string };
+    type RosterRow = { _id: unknown; agentCode: string; role?: string };
     const roster = await Memberships.find({ kpmId: id0417, status: 'active', deletedAt: null })
       .sort({ agentSeq: 1 }).lean().exec() as unknown as RosterRow[];
     const castKeyOf = new Map<string, CastKey>(
@@ -2143,7 +2229,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     // Everybody else's month: `production-figures.ts`, which the reporting fixture's history months read too.
     const figures = seedMonthFigures;
     /*
-     * **Yanti's first weeks back sold nothing** (P18.96-T5; ADR-0172, `functional/unit-dashboard.md`, *Seed*): last
+     * **Yanti's first weeks back sold nothing** (P18.8-T5; ADR-0172, `functional/unit-dashboard.md`, *Seed*): last
      * month's file lists her live membership with no APE and no policy, and this month's leaves her out (below), so
      * she is a new hire with no first sale — the roster's *New hire*, in Agus's and Sari's team and in neither total's
      * production nor *On pace to be active*. Her year to date is the carrier's, from before she left.
@@ -2161,11 +2247,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       const year = month.slice(0, 4);
       const m = Number(month.slice(5));
       const goal = await Goals.findOne({ kpmId: id0417, membershipId, period: year, deletedAt: null }).lean().exec();
-      const [before] = await MonthRows.find({
+      // The year to date the office holds before the month, as the product reads it (R4): the APE of the months held.
+      const before = await MonthRows.find({
         kpmId: id0417, membershipId, deletedAt: null,
-        month: { $gte: `${year}-01`, $lt: month }, 'apeYtd.value': { $ne: null },
-      }).sort({ month: -1 }).limit(1).lean().exec();
-      const ytdBefore = m === 1 ? 0 : ((before?.apeYtd?.value as number | null | undefined) ?? plan.baseMonthly * (m - 1));
+        month: { $gte: `${year}-01`, $lt: month }, 'values.APE.value': { $ne: null },
+      }).lean().exec();
+      const heldBefore = before.reduce((sum, row) => sum + ((row.values?.APE?.value as number | null | undefined) ?? 0), 0);
+      const ytdBefore = m === 1 ? 0 : (before.length > 0 ? heldBefore : plan.baseMonthly * (m - 1));
       const annual = goal ? annualTargetOf({
         mode: goal.mode, annualApeTargetMinor: goal.annualApeTargetMinor, savingsTargetMinor: goal.savingsTargetMinor,
         commissionRatePct: goal.commissionRatePct, monthsLeft: 1, apeAchievedMinor: goal.apeAchievedMinor,
@@ -2191,7 +2279,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       ]));
     };
 
-    const figuresFor = async (member: RosterRow, month: string, scale = 1): Promise<Record<string, number> | null> => {
+    const ownFiguresFor = async (member: RosterRow, month: string, scale = 1): Promise<Record<string, number> | null> => {
       const key = castKeyOf.get(String(member._id));
       const reporting = reportingKeyOf.get(String(member._id));
       if (reporting) {
@@ -2201,6 +2289,20 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       return key
         ? castFigures(key, String(member._id), month, scale)
         : figures(earlier.indexOf(member), month, scale, { quiet: month === lastMonth && quietLastMonth.has(String(member._id)) });
+    };
+    /*
+     * **A leader's row carries the unit's persistency** (P19.3-T1; ADR-0201 §2, D6): every AB and AAB on a file — the
+     * Owner on the AB rung included — has `UNIT_PERSISTENCY` beside their own figures, so MOC's persistency criterion and
+     * the Unit comparison read the insurer's figure on a fresh seed. A percentage, never scaled with the money of the
+     * file typed in thousands. The reporting cast's leaders keep their story (`reportingUnitPersistency`): Winda's is not
+     * on this month's file. An agent's row carries none.
+     */
+    const figuresFor = async (member: RosterRow, month: string, scale = 1): Promise<Record<string, number> | null> => {
+      const values = await ownFiguresFor(member, month, scale);
+      if (!values || !(LEADER_CLASSES as readonly string[]).includes(member.role ?? '')) return values;
+      const reporting = reportingKeyOf.get(String(member._id));
+      const unit = reporting ? reportingUnitPersistency(reporting, month, thisMonth) : seedUnitPersistency(roster.indexOf(member), month);
+      return unit === null ? values : { ...values, unitPersistencyMonthly: unit };
     };
     // A member a month's file leaves out is not on it: no row (`reportingMonthFigures`).
     const rowsFor = async (members: readonly RosterRow[], month: string, scale = 1) => {
@@ -2217,13 +2319,16 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       rows: { member: RosterRow; values: Record<string, number> }[];
       previous: (field: string) => typeof EMPTY | null;
       reverted?: Date;
+      /** D8: an upload into the running month stands at a day. */
+      asOf?: string;
     }) => {
-      const cells = spec.rows.length * 12;
+      // Each cell the rows hold: the twelve, and a leader row's unit persistency since P19.3-T1 — a version 2 file.
+      const cells = spec.rows.reduce((n, r) => n + Object.keys(r.values).length, 0);
       const batch = await Batches.create({
         kpmId: id0417, month: spec.month, status: spec.reverted ? 'reverted' : 'committed',
         filename: spec.filename,
         fileSha256: createHash('sha256').update(`${spec.filename}:${spec.month}`).digest('hex'),
-        templateVersion: 1, encoding: 'utf-8', delimiter: ',',
+        analyticsConfig: { templateId: null, version: 1 }, asOf: spec.asOf ?? null, encoding: 'utf-8', delimiter: ',',
         basedOnRevision: spec.revision - 1, monthRevision: spec.revision,
         rowCount: spec.rows.length, writtenRowCount: spec.rows.length, cellCount: cells, issueCount: 0,
         startedAt: spec.at, committedAt: spec.at, committedBy: owner.id,
@@ -2234,8 +2339,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       const batchId = String(batch._id);
       await UploadRows.insertMany(spec.rows.map((r, n) => ({
         kpmId: id0417, batchId, month: spec.month, line: n + 2, agentCode: r.member.agentCode,
-        membershipId: String(r.member._id), status: 'ready', values: r.values,
-        previousValues: Object.fromEntries(Object.keys(r.values).map((k) => [k, spec.previous(k)])),
+        // Keyed by kode since P19.5-T2 (`APE`, `APE_YTD`), as an import writes them.
+        membershipId: String(r.member._id), status: 'ready', values: rekeyByKode(r.values),
+        previousValues: rekeyByKode(Object.fromEntries(Object.keys(r.values).map((k) => [k, spec.previous(k)]))),
         issues: [], deletedAt: null, createdBy: owner.id, updatedBy: owner.id,
       })));
       await Audit.create({
@@ -2253,14 +2359,41 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       return batchId;
     };
 
-    const monthRow = (member: RosterRow, month: string, cells: Record<string, unknown>) => ({
+    /*
+     * By kode since P19.5-T2 (ADR-0214 §9): each cell the plan names moved whole into `values` or `ytdValues`. **This
+     * month's upload stands at yesterday** (D8): the month is still running, so its rows, its batch and its month carry
+     * an *as of* day — never before the month's first.
+     */
+    const runningAsOf = (() => {
+      const day = clock.localDateFor(DEFAULT_TENANT_TIMEZONE, daysAgo(1));
+      return day.slice(0, 7) === thisMonth ? day : `${thisMonth}-01`;
+    })();
+    const monthRow = (member: RosterRow, month: string, cells: Record<string, { value: unknown; provenance: unknown } | undefined>) => ({
       kpmId: id0417, membershipId: String(member._id), agentCode: member.agentCode, month,
-      ...Object.fromEntries(PRODUCTION_METRICS.flatMap((metric) => (['monthly', 'ytd'] as const)
-        .map((c) => [field(metric, c), cells[field(metric, c)] ?? EMPTY]))),
+      ...byKode(cells), templateVersion: 1, asOf: month === thisMonth ? runningAsOf : null,
       deletedAt: null, createdBy: owner.id, updatedBy: owner.id,
     });
 
     if (writeLastMonth) {
+      /*
+       * **The coaching cast's year so far, as a January balance** (P19.5-T2 AC-15; R4): the cast joined three months ago
+       * and is on no history file, and a year to date is now the sum of the months held — so the APE they brought with
+       * them before last month is one January row, and their summed year to date is what the file's YTD always said
+       * (`baseMonthly` a month before last month). Nothing else is on it; a month before last needs none.
+       */
+      // From March: January is never the month before last, which the seed leaves empty (`reporting-fixture.ts`).
+      const m = Number(lastMonth.slice(5));
+      const january = `${lastMonth.slice(0, 4)}-01`;
+      if (m >= 3) {
+        const balance = roster.filter((member) => castKeyOf.has(String(member._id)));
+        const already = new Set((await MonthRows.find({ kpmId: id0417, month: january, deletedAt: null }).lean().exec())
+          .map((row) => String(row.membershipId)));
+        const rows = balance.filter((member) => !already.has(String(member._id))).map((member) => {
+          const plan = COACHING_PRODUCTION.find((p) => p.key === castKeyOf.get(String(member._id)))!;
+          return monthRow(member, january, { apeMonthly: { value: plan.baseMonthly * (m - 1), provenance: 'imported' } });
+        });
+        if (rows.length) await MonthRows.insertMany(rows);
+      }
       // Last month: one import, standing.
       const lastRows = await rowsFor(roster, lastMonth);
       const lastId = await batchOf({
@@ -2271,6 +2404,27 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
         Object.entries(r.values).map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: lastId }]),
       ))));
       await Months.create({ kpmId: id0417, month: lastMonth, revision: 1, deletedAt: null, createdBy: owner.id, updatedBy: owner.id });
+      /*
+       * **A code no member holds yet, held as *Belum terdaftar*** (P19.5-T2 AC-5; ADR-0214 §8): last month's file named
+       * one more agent, whose code the office has not registered. Listed after the members on the month table,
+       * read-only, counted in nothing; it moves onto the membership the day somebody here is given 80999.
+       */
+      await mongoose.connection.db!.collection('unregisteredAgentData').updateOne(
+        { kpmId: id0417, agentCode: SEED_HELD_CODE, month: lastMonth, deletedAt: null },
+        {
+          $setOnInsert: {
+            kpmId: id0417, agentCode: SEED_HELD_CODE, fileName: 'Dewi Anggraini', month: lastMonth,
+            values: byKode({
+              apeMonthly: { value: 12 * 1_000_000 * 100, provenance: 'imported', sourceBatchId: lastId },
+              policyCountMonthly: { value: 1, provenance: 'imported', sourceBatchId: lastId },
+            }).values,
+            ytdValues: {}, templateId: null, templateVersion: 1, asOf: null, sourceBatchId: lastId, status: 'held',
+            movedToMembershipId: null, movedAt: null, deletedAt: null, createdBy: owner.id, updatedBy: owner.id,
+            createdAt: daysAgo(20), updatedAt: daysAgo(20),
+          },
+        },
+        { upsert: true },
+      );
     }
 
     if (writeThisMonth) {
@@ -2285,7 +2439,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       const right = await rowsFor(roster.filter((member) => !leftOut.has(String(member._id))), thisMonth);
       const rightId = await batchOf({
         month: thisMonth, filename: templateFilename('0417', thisMonth).replace('.csv', '-corrected.csv'), revision: 3, at: daysAgo(1),
-        rows: right, previous: () => ({ ...EMPTY }),
+        rows: right, previous: () => ({ ...EMPTY }), asOf: runningAsOf,
       });
       const written = new Map(right.map((r) => [String(r.member._id), r.values]));
       // … and one figure corrected by hand over it (P9-T5): the first member's APE, which the carrier
@@ -2308,11 +2462,13 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
           kpmId: id0417, actorUserId: String(adminUser._id), actorMembershipId: admin.id,
           action: 'upload.cell_corrected', targetCollection: 'monthlyAgentData',
           targetMembershipId: String(right[0].member._id),
-          before: { month: thisMonth, field: 'apeMonthly', value: right[0].values.apeMonthly, provenance: 'imported', sourceBatchId: rightId },
-          after: { month: thisMonth, field: 'apeMonthly', value: firstApe, provenance: 'corrected', reason: correction.reason },
+          before: { month: thisMonth, field: 'APE', value: right[0].values.apeMonthly, provenance: 'imported', sourceBatchId: rightId },
+          after: { month: thisMonth, field: 'APE', value: firstApe, provenance: 'corrected', reason: correction.reason },
         });
       }
-      await Months.create({ kpmId: id0417, month: thisMonth, revision: 4, deletedAt: null, createdBy: owner.id, updatedBy: admin.id });
+      await Months.create({
+        kpmId: id0417, month: thisMonth, revision: 4, asOf: runningAsOf, deletedAt: null, createdBy: owner.id, updatedBy: admin.id,
+      });
     }
   }
 
@@ -2486,6 +2642,28 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     sari: { membershipId: sari.id, userId: String(sariUser._id) },
   });
 
+  // ------------------- the Potensi switch and tab: a green ✓, a kandidat, two rekrut, last month (P19.1-T2, T6; `potensi-fixture.ts`)
+
+  const potensi = await seedPotensiFixture({
+    clock, kpm0417: id0417, rina: rina.id, indah: cast.indah.id, arief: cast.arief.id, wahyu: cast.wahyu.id,
+    siti: cast.siti.id, dimas: cast.dimas.id,
+  });
+
+  // ------------------- the proposal's fields: the Prudential draft, two products' plans and FAQ, two leads' ages (P19.7-T1; `proposal-fixture.ts`)
+
+  const proposal = await seedProposalFixture({
+    clock, companyId: String(prudential._id), kpm0417: id0417, rina: rina.id, superAdminUserId: String(superAdmin._id),
+  });
+
+  // ------------------- 0555 in its own colours, logo and mascot, beside 0417's AgencyBoost look (P19.6-T1; `branding-fixture.ts`)
+
+  const branding = await seedBrandingFixture({ clock, storage: options.storage ?? null, kpmId: id0555 });
+  log(`0555 shows its own branding (${branding.images}): sign in as owner@kpm0555.test or agent@kpm0555.test.`);
+
+  // ------------------- this week's Tugas, anchored to Monday, for Agus and Rina (P19.1-T3 AC-12; `tugas-fixture.ts`)
+
+  const tugas = await seedTugasFixture({ clock, kpm0417: id0417, agus: ab.id, rina: rina.id });
+
   // ------------------- recruitment tools: the playbooks, the pitch, 0417's brochure (Phase 17; `recruitment-fixture.ts`)
 
   const recruitment = await seedRecruitmentFixture({
@@ -2518,11 +2696,40 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     office0555: { kpmId: id0555, owner: owner0555.id, agent: agent0555.id },
   });
 
-  // ------------------- a lead list in a dragged order (P18.8-T7; ADR-0161 §1)
+  /*
+   * ------------------- every template's Advanced analytics section (P19.5-T1; `analytics-template-fixture.ts`) — after
+   * every production file the seed writes (P19.5-T2), so version 1's columns start at the earliest month held, as the
+   * migration gives a database that already holds them (ADR-0214 §9).
+   */
+  const analyticsTemplates = await seedAnalyticsTemplateFixture({ clock });
+
+  // ------------------- the KPM setup card: 0417 running, 0701 two steps in (P19.3-T2; UI-149, `setup-fixture.ts`)
+
+  await seedSetupMarks(clock.now());
+
+  // ------------------- the member's own estimate of the APE produced (P19.1-T4 AC-15; UI-157, ADR-0195)
 
   /*
-   * **Every lead above gets its place in its owner's list, and Rina's list is one she has dragged** (P18.8-T7
-   * AC-1, P18.8-T14 AC-1). `GET /leads` without a sort reads `position`, so a lead with none would sort first,
+   * **Raka holds an estimate and no upload**: no file this year names him (`reporting-fixture.ts`, `apeMillions: null`),
+   * so his own Summary and Goal Settings read *Rp 120 jt · perkiraan Anda*, while Satria's Unit Dashboard and the
+   * Owner's screens say *Belum diunggah* (`officialGoalFigures`). **Rina's estimate was replaced**: she typed her
+   * Rp 120 jt before the office's files, which now hold her year to date, so her Summary reads the office's figure and
+   * *Diganti data produksi resmi (diunggah …)*. Each written only while it is not there yet, so a re-run changes nothing.
+   */
+  await Goals.updateOne(
+    { kpmId: id0417, membershipId: reportingCast.raka.id, period: thisYear, apeAchievedMinor: 0, deletedAt: null },
+    { $set: { apeAchievedMinor: 120_000_000_00, apeAchievedTypedBy: null, apeAchievedTypedAt: daysAgo(2) } },
+  ).exec();
+  await Goals.updateOne(
+    { kpmId: id0417, membershipId: rina.id, period: thisYear, apeAchievedTypedAt: null, deletedAt: null },
+    { $set: { apeAchievedTypedAt: daysAgo(30) } },
+  ).exec();
+
+  // ------------------- a lead list in a dragged order (P18.5-T7; ADR-0161 §1)
+
+  /*
+   * **Every lead above gets its place in its owner's list, and Rina's list is one she has dragged** (P18.5-T7
+   * AC-1, P18.5-T14 AC-1). `GET /leads` without a sort reads `position`, so a lead with none would sort first,
    * and a list in registration order cannot show that the order is kept: every lead of Rina's is registered
    * on one day. Here, after the last fixture that writes a lead.
    *
@@ -2592,6 +2799,30 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     reason: 'Terlalu dekat dengan kantor yang sudah ada. Silakan ajukan lagi setelah pembagian wilayah selesai.',
     createdAt: daysAgo(12),
   });
+  /*
+   * **Production's request, in its shape** (P19-T3; UI-165, UI-168): an applicant who signed up with Allianz Life and
+   * whose request arrived as Prudential — what the old *Daftar KPM* filed for a newcomer whose first search result was
+   * another company's. The card shows his company beside the request's, so the Super Admin picks *Allianz Life* and
+   * approves; approving it as Prudential is refused, naming both. Verified, with a phone, as the card shows them.
+   */
+  {
+    const rudi = await user('rudi@agencyboost.test', 'Rudi Hartono', {
+      pronoun: 'he', companyId: String(allianz._id),
+      // His own code, so every account the seed numbers after him keeps the number it always had.
+      agentCode: '81911',
+    });
+    await Users.updateOne({ _id: rudi._id, phone: null }, { $set: { phone: '+62 812 7788 1001' } }).exec();
+    if (!(await KpmRequests.findOne({ branchName: 'Bekasi Utara Branch' }).exec())) {
+      await KpmRequests.create({
+        companyId: String(prudential._id),
+        branchName: 'Bekasi Utara Branch',
+        requestedByUserId: String(rudi._id),
+        note: 'Saya mendaftar sebagai agen Allianz; cabang ini belum ada di AgencyBoost.',
+        status: 'pending',
+        createdAt: daysAgo(0),
+      });
+    }
+  }
   await kpmRequest('owner@kpm0555.test', 'Hendra Wijaya', 'he', 'Kelapa Gading Branch', {
     status: 'approved',
     decidedAt: daysAgo(40),
@@ -2622,7 +2853,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     payload: Record<string, unknown>,
     opts: {
       readDaysAgo?: number; readAt?: Date;
-      /** The payload an earlier run wrote this notice with, before its words were Indonesian (P18.98-T7). */
+      /** The payload an earlier run wrote this notice with, before its words were Indonesian (P18.10-T7). */
       formerly?: Record<string, unknown>;
     } & ({ sentDaysAgo: number } | { sentAt: Date }),
   ) {
@@ -2732,7 +2963,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     action: string,
     targetCollection: string,
     fields: Record<string, unknown>,
-    /** The fields an earlier run wrote this row with, before its words were Indonesian (P18.98-T7). */
+    /** The fields an earlier run wrote this row with, before its words were Indonesian (P18.10-T7). */
     formerly?: Record<string, unknown>,
   ) {
     /*
@@ -2968,7 +3199,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   /*
    * Her prospecting is her strength: about two new prospects for every lead-generation activity, so *Leads per
    * activity* stands well past its benchmark of 1.00 (ADR-0160 §2) — `INSIGHTS.STRENGTH_FACTOR` times it — and
-   * the Summary has a strength card beside the ratio she is below on (P18.8-T14).
+   * the Summary has a strength card beside the ratio she is below on (P18.5-T14).
    */
   const rinaWeek = new Map<number, DayCounts>([
     [0, { LEADS_GEN_ACTIVITY: 2, LEADS_NEW_PROSPECT: 3, LEADS_CONTACTED: 5, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 }],
@@ -3005,7 +3236,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   /*
    * Sari leads a unit: a month of recruitment and team development, most days — and, every few days, a
    * referral drive that brings in two or three prospects, so her *Leads per activity* stands well past its
-   * benchmark of 1.00 and her Summary shows a strength beside the ratio she is below on (P18.8-T14). Neither
+   * benchmark of 1.00 and her Summary shows a strength beside the ratio she is below on (P18.5-T14). Neither
    * code is the cascade's, so her goal activities on the Unit Dashboard are unchanged.
    */
   for (let back = 0; back <= 34; back += 1) {
@@ -3063,6 +3294,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // ---------------------------------------------------------- in no office at all
 
   await user('newcomer@agencyboost.test', 'Nadia Safitri', { pronoun: 'she' });
+  // P19-T1 AC-4: signed in before verifying — every page says *Verifikasi email Anda · Kirim ulang* (ADR-0190 §4).
+  // Its own code, so the counted codes of everybody after it stay as a fresh seed has always given them.
+  await user('unverified@agencyboost.test', 'Yoga Pratama', { pronoun: 'he', unverified: true, agentCode: '81901' });
 
   void superAdmin;
 
@@ -3128,7 +3362,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    */
   const CoachingSessions = mongoose.model(CoachingSession.name, CoachingSessionSchema, undefined, RECOMPILE);
   /*
-   * **P18.96-T4: the first sales and the data-backed items' rows** (`first-sale-fixture.ts`): Novi's closing on day 20,
+   * **P18.8-T4: the first sales and the data-backed items' rows** (`first-sale-fixture.ts`): Novi's closing on day 20,
    * Raka's on day 120, and Rina's fourth 1:1 — inserted here, before the sessions' snapshots are taken, so hers carries
    * one as every finalized session does. Each under its derived `_id`, and only when absent.
    */
@@ -3149,7 +3383,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     await doc.validate();
     await Leads.collection.insertOne({ ...doc.toObject(), createdAt: seed.createdAt, updatedAt: seed.updatedAt });
   }
-  // Their places in their owners' lists, as every seeded lead has one (P18.8-T7): migration 0031, which places none twice.
+  // Their places in their owners' lists, as every seeded lead has one (P18.5-T7): migration 0031, which places none twice.
   await leadPosition(mongoose.connection.db!);
   for (const seed of firstSales.sessions) {
     const _id = new mongoose.Types.ObjectId(seed._id);
@@ -3294,7 +3528,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    *   (`/calendar?date=`, the week it was in — the entry is gone, which is what a cancellation says) and the
    *   office's event reminders (no link). Payloads are ids, names and dates, never anything typed, as every
    *   notice's is.
-   * - **No *set your goal* among them** (P18.8-T15 AC-3, the client's UI review, UI-003). The run had their leader
+   * - **No *set your goal* among them** (P18.5-T15 AC-3, the client's UI review, UI-003). The run had their leader
    *   setting their goal every fifth row, so Agus's inbox said *Wilson Tanoto set your goal* seven times beside a
    *   Summary that says he has none. That notice is written below for each goal a leader actually saved, and for
    *   nothing else.
@@ -3307,7 +3541,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const officeDate = (at: Date) => clock.localDateFor(DEFAULT_TENANT_TIMEZONE, at);
   /**
    * When the office's seeded events start, in days from the run (the `Events` rows above), by code: a reminder precedes
-   * its event. By code, not by title, since P18.98-T7 — a database seeded before holds the English titles.
+   * its event. By code, not by title, since P18.10-T7 — a database seeded before holds the English titles.
    */
   const EVENT_STARTS_IN_DAYS: Record<DemoEventCode, number> = { PRULINK_BRIEFING: -21, LEADERS_HUDDLE: 0, KICKOFF: 14 };
   const historyCast = [
@@ -3331,7 +3565,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     return upcoming[i % upcoming.length];
   };
   /*
-   * **A reminder names its event's time and place** (P18.95-T7 AC-4; the client's UI review, UI-030): its payload is
+   * **A reminder names its event's time and place** (P18.7-T7 AC-4; the client's UI review, UI-030): its payload is
    * the event as the office holds it — its id, title, start and the zone that start is read in, and its location —
    * read back from the three events above, so a database whose events an earlier run dated keeps that run's dates.
    */
@@ -3395,7 +3629,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     }
   }
   /*
-   * **Three in a row, the inbox's repeats** (P18.95-T7 AC-4; the client's UI review, UI-030 — *Wilson updated your
+   * **Three in a row, the inbox's repeats** (P18.7-T7 AC-4; the client's UI review, UI-030 — *Wilson updated your
    * goal · 7×*): the office's *Kickoff 2026* reminder sent three times, a quarter of an hour apart, as the newest of
    * each of the three inboxes and unread. `/notifications` and the bell draw them as one line, *Kickoff 2026 is
    * coming up · 3×*, that opens to the three. Derived ids, so a re-run writes none, and a database seeded before
@@ -3418,7 +3652,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   for (const row of historyRows) {
     if (await Notifications.exists({ _id: row._id })) {
       /*
-       * A reminder an earlier run wrote with its title alone takes its event's time and place (P18.95-T7 AC-4): its
+       * A reminder an earlier run wrote with its title alone takes its event's time and place (P18.7-T7 AC-4): its
        * payload only, so whether somebody read it in a walk stays as they left it.
        */
       if (row.templateId === NotificationTemplate.EVENT_REMINDER && (row.payload as { startsAt?: unknown }).startsAt) {
@@ -3432,7 +3666,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     await Notifications.collection.insertOne(row);
   }
   /*
-   * **A *set your goal* notice for each goal a leader saved, and only those** (P18.8-T15 AC-3, UI-003): read back
+   * **A *set your goal* notice for each goal a leader saved, and only those** (P18.5-T15 AC-3, UI-003): read back
    * from the goals this run holds — this year's whose current plan somebody other than its owner saved (ADR-0046),
    * Dewi's by Agus and Novi's by Arief among them — with the payload `GoalService.announce` sends, on the day it was
    * saved, read a few hours later. Keyed on its payload, as every notice here is, so a re-run writes none.
@@ -3516,7 +3750,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const cohort = await seedActivationCohort({ clock, kpmId: id0417, cast: reportingCast });
 
-  // ------------------- P18.96-T6 — 3M activation (`activation-3m-fixture.ts`): the two results nobody under Agus had —
+  // ------------------- P18.8-T6 — 3M activation (`activation-3m-fixture.ts`): the two results nobody under Agus had —
   // Lukman, Teraktivasi late (amber) by a sale on day 96, and Tari, marked left before one — which decides nothing.
   // Placed after every other 0417 member, so nobody's agent sequence moves; before the forum, so #12's and #13's frozen scorecards count them as a read would.
   const activation3M = await seedActivation3MFixture({
@@ -3527,7 +3761,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   });
 
   /*
-   * P18.96-T6: the first sales the seed holds so far — every lead and production month above — computed before the forum
+   * P18.8-T6: the first sales the seed holds so far — every lead and production month above — computed before the forum
    * freezes #12's and #13's scorecards, whose *3M new agent %* reads them (`ACTIVATION_3M_PCT`). Migration 0042's own
    * backfill, run again over the finished seed below; it writes only what is earlier, so the second finds nothing.
    */
@@ -3547,7 +3781,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     },
     '0555': { kpmId: String(kpm0555._id), owner: { membershipId: owner0555.id, userId: String(owner0555User._id) } },
   });
-  // ------------------- Phase 18.5 — training, as its learners live it (`training-fixture.ts`): 0417's coaching cast's
+  // ------------------- Phase 18.2 — training, as its learners live it (`training-fixture.ts`): 0417's coaching cast's
   // progress, the company's material by reference, and 0555's item 9 bound for Lina (D-seed-link a). After the
   // activations, whose 0555 version it repins Lina from; before events and campaigns.
 
@@ -3570,7 +3804,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     office0555: { kpmId: String(kpm0555._id), lina: agent0555.id },
   });
   if (training.files !== 'stored') log(`Training: Prudential's demonstration PDFs ${training.files}.`);
-  // ------------------- Phase 18.5 — events, as their audience lives them (`events-fixture.ts`): 0417's RSVPs, claims,
+  // ------------------- P19.6-T3 — the owner's 23 lessons in the templates' modules (`lessons-fixture.ts`), after the
+  // template's demonstration material, which they go before.
+  const lessons = await seedLessonsFixture({
+    clock, storage: options.storage ?? null, folder: options.lessons ?? null, prudential: String(prudential._id),
+  });
+  // ------------------- P19.6-T4 — short names with a description, and *Sinkron dari template*
+  // (`training-names-fixture.ts`): after the lessons, so the template's newer version keeps their material.
+  const trainingNames = await seedTrainingNamesFixture({ clock, companyId: String(prudential._id), kpmId: id0417 });
+  // ------------------- Phase 18.2 — events, as their audience lives them (`events-fixture.ts`): 0417's RSVPs, claims,
   // confirmations and answers over configure()'s three events and four new ones. After the forum; before campaigns.
 
   const yantiFirst = await Memberships.findOne({
@@ -3585,7 +3827,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       indah: cast.indah.id, dimas: cast.dimas.id, siti: cast.siti.id, novi: cast.novi.id, yantiFirst: String(yantiFirst._id),
     },
   });
-  // ------------------- Phase 18.5 — campaigns, as their chasers live them (`campaigns-fixture.ts`): 0417's seasonal and
+  // ------------------- Phase 18.2 — campaigns, as their chasers live them (`campaigns-fixture.ts`): 0417's seasonal and
   // structural campaigns and the chases across the coaching cast, 0555's one. After training and events.
 
   const campaigns = await seedCampaignsFixture({
@@ -3593,7 +3835,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     office0417: { kpmId: id0417, cast: { rina: rina.id, budi: budi.id, agus: ab.id, dimas: cast.dimas.id, sari: sari.id } },
     office0555: { kpmId: String(kpm0555._id) },
   });
-  // ------------------- Phase 18.6 — the Owner's compliance tree (`compliance-fixture.ts`): training for Phase 18's
+  // ------------------- Phase 18.3 — the Owner's compliance tree (`compliance-fixture.ts`): training for Phase 18's
   // cast, and D-seed's override of Budi's final persistency standing as the Owner. After campaigns, whose push it reads.
 
   const compliance = await seedComplianceFixture({
@@ -3603,7 +3845,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     budi: budi.id,
     cast: Object.fromEntries((Object.entries(reportingCast) as [ReportingKey, Placed][]).map(([key, placed]) => [key, placed.id])),
   });
-  // ------------------- P18.96-T3 — adding an agent (`joining-fixture.ts`): Agus's invite waiting to join, one he
+  // ------------------- P18.8-T3 — adding an agent (`joining-fixture.ts`): Agus's invite waiting to join, one he
   // cancelled, and his transfer request for Raka Aditama, who reports to Satria — the Owner's and the Admin's to decide.
   const joining = await seedJoiningFixture({
     clock,
@@ -3618,7 +3860,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     ],
     notify,
   });
-  // P18.96-T2: migration 0040 after the fixtures, as a deploy runs it. On a fresh seed every membership has its join
+  // P18.8-T2: migration 0040 after the fixtures, as a deploy runs it. On a fresh seed every membership has its join
   // date and classification already, so it leaves only the pending ones, waiting; on a re-seed over an older
   // database it classifies the rows `place()` adopted, as it would have on that database's deploy.
   await membershipJoinDate(mongoose.connection.db!);
@@ -3653,6 +3895,9 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
   PLATFORM
     superadmin@agencyboost.test   demo super admin     Super Admin
     root@agencyboost.test                              Super Admin — a second, so SA-on-SA can be refused
+    wilson@agencyboost.test                            Super Admin — the Owner's own second login, linked
+                                                       to owner@kpm0417.test: both logins' views in one
+                                                       avatar menu (Akun saya · KPM Owner · Superadmin)
 
   KPM 0417 · BSD City Branch  (${id0417})
     owner@kpm0417.test           demo password 0417    KPM Owner, AB at the root
@@ -3661,7 +3906,9 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
     agus@kpm0417.test                                  AB with a unit, neither Owner nor Admin: three
                                                        agents of his own and three AABs under him
     sari@kpm0417.test                                  AAB leading two agents
-    dewi@kpm0417.test                                  AAB leading nobody — the OD-23 case
+    dewi@kpm0417.test                                  AAB leading nobody: every leader item in the
+                                                       menu, Home's Tim saya at zero, and each empty
+                                                       leader page's Contoh (P19-T4)
                                                        Sari, Dewi and Arief were promoted from Agent,
                                                        so /people/members Role change log has rows
     rina@kpm0417.test            demo password rina    Agent under Sari; /leads in the order she dragged
@@ -3691,9 +3938,11 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${salesTools.guide}${unitDashboard.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${events.guide}${campaigns.guide}${compliance.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
-    newcomer@agencyboost.test                          Brand new — starts at Register KPM
+    newcomer@agencyboost.test                          Brand new — starts at Register KPM; every Agent
+                                                       item opens its Contoh with Cari / Daftar KPM and
+                                                       Cari leader, and Profile opens (P19-T4)
 
   GROUPS in KPM 0417, at /people/members → Groups
     ${DEMO_GROUPS.mentoring.name.padEnd(28)} owned by Sari · Rina and Budi tagged
@@ -3890,12 +4139,52 @@ Sign in at POST /api/v1/auth/login, then send the access token as
    * without `--reset` on the same day prints zero; a run on a later day writes that day's activity.
    */
   /*
-   * **P18.96-T4: every member's first sale, computed from what the seed holds** — the leads, the production file — by
+   * **P18.8-T4: every member's first sale, computed from what the seed holds** — the leads, the production file — by
    * migration 0042's own backfill, which is `firstSaleOf`: a fresh seed and a migrated database say the same thing, and
    * a re-run, or the migration after it, finds nothing earlier to write (`first-sale-fixture.ts`).
    */
   await backfillFirstSales(mongoose.connection.db!);
   log(firstSales.guide);
+
+  // ------------------------------------------------------------------- P19.5-T4 AC-20: the surveys (`surveys-fixture.ts`):
+  // 0417's open NPS to walk the reminder, last quarter's, the June qualitative run the coaching tab reads, and 0555's
+  // anonymous one. Last, over everybody the seed placed.
+  const personOf = async (membershipId: string): Promise<SurveyPerson> => {
+    const row = await Memberships.findById(membershipId, { role: 1 }).lean().exec() as { role: SurveyPerson['roleClass'] } | null;
+    if (!row) throw new Error(`the survey fixture's member ${membershipId} is missing`);
+    return { membershipId, roleClass: row.role };
+  };
+  const everyone0417 = (await Memberships.find({ kpmId: id0417, status: 'active', deletedAt: null }, { role: 1 }).lean().exec())
+    .map((row) => ({ membershipId: String(row._id), roleClass: (row as { role: SurveyPerson['roleClass'] }).role }));
+  const surveys = await seedSurveysFixture({
+    clock,
+    office0417: {
+      kpmId: id0417,
+      everyone: everyone0417,
+      people: {
+        owner: await personOf(owner.id), admin: await personOf(admin.id), agus: await personOf(ab.id),
+        sari: await personOf(sari.id), indah: await personOf(cast.indah.id), arief: await personOf(cast.arief.id),
+        dimas: await personOf(cast.dimas.id), siti: await personOf(cast.siti.id), rina: await personOf(rina.id),
+        yosef: await personOf(reportingCast.yosef.id), winda: await personOf(reportingCast.winda.id),
+      },
+    },
+    office0555: { kpmId: String(kpm0555._id), lina: await personOf(agent0555.id), owner: await personOf(owner0555.id) },
+  });
+  log(surveys.guide);
+
+  // ------------------------------------------------------- P19.5-T3: the Advanced analytics page (`advanced-analytics-fixture.ts`):
+  // 0417's MAPA and sub-group targets, the company's other KPMs' latest Quant runs, and 0417's earlier run, frozen.
+  const peerOffices = await Promise.all(['0555', '0601', '0602', '0603'].map(async (code) => {
+    const row = await Kpms.findOne({ companyId: String(prudential._id), code }, { _id: 1 }).lean().exec();
+    return row ? { code, kpmId: String(row._id) } : null;
+  }));
+  const advancedAnalytics = await seedAdvancedAnalyticsFixture({
+    clock,
+    companyId: String(prudential._id),
+    office0417: { kpmId: id0417, agus: ab.id, owner: owner.id },
+    peers: peerOffices.filter((p): p is { code: string; kpmId: string } => p !== null),
+  });
+  log(advancedAnalytics.guide);
   log(activation3M.guide);
 
   const after = await countRows();
@@ -3910,14 +4199,14 @@ Sign in at POST /api/v1/auth/login, then send the access token as
 
   return {
     written, pronounsSet, coaching, calendar, activation, recruitment, forum, training, events, campaigns, compliance, joining,
-    firstSales, activation3M,
+    firstSales, activation3M, surveys, advancedAnalytics, lessons, trainingNames,
   };
 }
 
 async function main(): Promise<void> {
   loadEnv();
   const reset = process.argv.includes('--reset');
-  // P18.7-T1: never in production, and the target named before a row is written (`seed-guard.ts`).
+  // P18.4-T1: never in production, and the target named before a row is written (`seed-guard.ts`).
   const plan = planSeed(process.env, reset);
   if ('refusal' in plan) {
     console.error(plan.refusal);
@@ -3926,7 +4215,10 @@ async function main(): Promise<void> {
   console.log(plan.banner);
   await mongoose.connect(plan.target.uri, { dbName: plan.target.dbName });
   // The storage the demonstration PDFs go through, where one is configured (D-seed); none, and they are skipped.
-  await seedDemo({ reset, storage: storageFromEnvironment(process.env, new SystemClock()) });
+  // P19.6-T3: the owner's lessons, from the superproject's folder beside this repository or SEED_LESSONS_DIR.
+  await seedDemo({
+    reset, storage: storageFromEnvironment(process.env, new SystemClock()), lessons: lessonsFolderFrom(process.env),
+  });
   await mongoose.disconnect();
 }
 

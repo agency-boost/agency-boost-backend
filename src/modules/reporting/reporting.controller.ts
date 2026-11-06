@@ -109,7 +109,8 @@ const ANALYTICS_REFUSALS = [
   refusal(
     404,
     '`NOT_FOUND` — an AB or an AAB who is not a Core Leader (tagged, on a leader rung; ADR-0159 §2), read on every '
-    + 'request: the forum’s rule. Indistinguishable from another office’s.',
+    + 'request: the forum’s rule; or a `group` this office does not hold — unknown, archived or another office’s. '
+    + 'Indistinguishable from another office’s.',
   ),
 ] as const;
 
@@ -131,9 +132,12 @@ export class KpmAnalyticsController {
       + 'coached in the last 7 days, active agents for the period’s month, total and promised leads, and '
       + 'manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, '
       + 'criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s '
-      + 'production club. The total row, and the agency’s production for the six months before this one. '
-      + 'Computed on the read, not paginated; nothing is recorded. Read by the Owner, an Admin and a Core Leader '
-      + '(ADR-0159 §2), the whole office, read-only.',
+      + 'production club. **Every leader** (UI-152): each AB and AAB with APE this month against target, *Active* '
+      + 'with its Unit and AAB halves, coached in 7 days, the Group and Unit sizes, the leader above, the club and MOC, '
+      + 'lowest APE % first. The KPM’s totals — the year to date a leaver’s production included, as the Overview’s — '
+      + 'and the agency’s production for the six months ending with this one. With `group`, every figure and list over '
+      + 'one custom group’s members today. Computed on the read, not paginated; nothing is recorded. Read by the Owner, '
+      + 'an Admin and a Core Leader (ADR-0159 §2), the whole office, read-only.',
   })
   @ApiResponse({ status: 200, type: KpmAnalyticsDto })
   @ApiResponse(ANALYTICS_REFUSALS[0])

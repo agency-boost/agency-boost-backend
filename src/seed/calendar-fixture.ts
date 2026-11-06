@@ -38,7 +38,7 @@ import { mondayOf, timingOf } from '@/modules/calendar/calendar-time';
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **The entries' words**, as their organisers typed them — in Bahasa Indonesia since P18.98-T7 (OD-238). Every row is
+ * **The entries' words**, as their organisers typed them — in Bahasa Indonesia since P18.10-T7 (OD-238). Every row is
  * keyed by its derived `_id`, never by what it says, so a database seeded before keeps its English and gets no second
  * row; the seed's spec reads its titles from here.
  */

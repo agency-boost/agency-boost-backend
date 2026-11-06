@@ -47,12 +47,12 @@ describe('who reads the forum, and who edits it (P18.1-T2 AC-1, D-coeditors)', (
     expect(await people({ reader: null }).reader(ctx())).toMatchObject({ office: false, tagged: false });
   });
 
-  it('P18.8-T5 AC-1 a tagged member off a leader rung is no Core Leader: 404, as any untagged member (ADR-0159 §1)', async () => {
+  it('P18.5-T5 AC-1 a tagged member off a leader rung is no Core Leader: 404, as any untagged member (ADR-0159 §1)', async () => {
     await expect(people({ reader: { isCoreLeader: true, role: 'agent' } }).editor(ctx())).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(await people({ reader: { isCoreLeader: true, role: 'agent' } }).reader(ctx())).toMatchObject({ tagged: false });
   });
 
-  it('P18.8-T5 AC-1 the live editors leave out a tagged member off a leader rung', async () => {
+  it('P18.5-T5 AC-1 the live editors leave out a tagged member off a leader rung', async () => {
     const editors = await people({
       rows: [
         { _id: 'm-lead', userId: 'u-l', orgLevelCode: 'AAB', role: 'aab', isCoreLeader: true, adminAccess: null },

@@ -23,7 +23,7 @@ export function defaultEventTypes(): EventTypesPayload {
 
 /**
  * What would make an `event_types` payload produce a broken office — one sentence each, empty
- * when there is nothing (P5-T9 AC-4). **Each in both languages** (P18.98-T5 AC-3): the caller writes
+ * when there is nothing (P5-T9 AC-4). **Each in both languages** (P18.10-T5 AC-3): the caller writes
  * them for its reader, or joins them into the refusal it raises.
  *
  * **An office with no event type cannot file an event at all**, so an empty list is refused here

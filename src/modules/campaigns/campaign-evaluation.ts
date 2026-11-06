@@ -40,7 +40,7 @@ export interface EvaluatedCampaignInput {
   frozenWindows: readonly string[];
 }
 
-/** A final standing's override as a reader sees it: who set what, when, and why (P18.6-T2 AC-7). */
+/** A final standing's override as a reader sees it: who set what, when, and why (P18.3-T2 AC-7). */
 export interface AppliedOverride {
   status: 'qualified' | 'not_met';
   reason: string;
@@ -96,7 +96,7 @@ function countedOf(
 }
 
 /**
- * **A campaign's requirements, read for many members at once** (P18.5-T8; D-evaluable, D-windows, OD-153, OD-154).
+ * **A campaign's requirements, read for many members at once** (P18.2-T8; D-evaluable, D-windows, OD-153, OD-154).
  *
  * **Through the owning modules' functions, never a second copy** (AC-3): the file's cells as the month table reads
  * them (`ProductionReadings.campaignFiguresFor`, `readCell`), which months the office holds
@@ -175,7 +175,7 @@ export class CampaignEvaluation {
       // The window's last instant (exclusive): what a chase must have stood at to count once final (ADR-0143 §2).
       end: this.clock.endOfLocalDay(office.timezone, window.lastDay),
     });
-    // The window's label is in the reader's figures (P18.98-T5 AC-4): the dialog and the tree print it as it is.
+    // The window's label is in the reader's figures (P18.10-T5 AC-4): the dialog and the tree print it as it is.
     const labelIn = ctx.reader.figures;
     for (const campaign of campaigns) {
       jobs.push(job(campaign, resolveWindow(campaign, where, undefined, labelIn), true));
@@ -495,7 +495,7 @@ function frozenRow(s: MemberStanding): CampaignStanding {
 
 /**
  * A standing read back as frozen: each row's state from its verdict, a requirement outside the set as it was — and
- * **its override applied, here and nowhere else** (P18.6-T2 AC-7; D-override): the status read is the override's
+ * **its override applied, here and nowhere else** (P18.3-T2 AC-7; D-override): the status read is the override's
  * when there is one, so `ofOffice`, the compliance tree and every evaluating reader read the corrected result, while
  * the frozen `status` stays as it was frozen. The requirement rows are the frozen ones either way: the agent's
  * dialog, which reads only them (ADR-0147), does not change.

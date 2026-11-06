@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_DOCUMENT_SLOTS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS,
+  PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES, PRODUCT_DOCUMENT_SLOTS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS,
 } from '@/domain/constants';
+import { ObjectionDto } from './product.dto';
 
 /**
  * **What a field member is answered about the office's products** (`functional/sales-tools.md`, the
@@ -50,6 +51,14 @@ export class CatalogCardDto {
 
   @ApiProperty({ enum: PRODUCT_NEEDS, isArray: true, description: 'The customer needs it serves.' })
   needs!: string[];
+
+  @ApiProperty({
+    enum: PRODUCT_CURRENCIES,
+    isArray: true,
+    description: 'The currencies it is sold in, `IDR` first: shown on the card as *IDR*, *USD* or *IDR + USD* '
+      + '(ADR-0209 §8). A label, not money.',
+  })
+  currencies!: string[];
 }
 
 export class CatalogListDto {
@@ -84,14 +93,23 @@ export class CatalogScriptDto {
   @ApiProperty({ type: String, description: '3 · Full script. Blank for a product with no authored script.' })
   fullScript!: string;
 
-  @ApiProperty({ type: String, description: '4 · If they push back — they say' })
-  objectionTheySay!: string;
-
-  @ApiProperty({ type: String, description: '4 · If they push back — you say' })
-  objectionYouSay!: string;
+  @ApiProperty({
+    type: [ObjectionDto],
+    description: '4 · If they push back: every objection and its reply, in order (ADR-0209 §9).',
+  })
+  objections!: ObjectionDto[];
 
   @ApiProperty({ type: String, description: '5 · Next action' })
   nextAction!: string;
+}
+
+/** A rider an agent may add to a base (ADR-0209 §3). */
+export class CatalogRiderDto {
+  @ApiProperty({ type: String, example: 'CI_COVERAGE_PLUS' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'CI Coverage+ Insurance', description: 'The company’s name for it.' })
+  name!: string;
 }
 
 export class CatalogDocumentDto {
@@ -106,6 +124,15 @@ export class CatalogDocumentDto {
     description: 'Whether the office’s file, or else the company’s, is in this slot — so *Open link →* can be asked for.',
   })
   available!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'application/pdf',
+    description: 'What the slot holds: `application/pdf`, or `text/html`, which the app draws only inside a sandboxed '
+      + 'frame and never opens on its own (ADR-0217 §4). Null for an empty slot.',
+  })
+  mimeType!: string | null;
 }
 
 export class CatalogProductDto extends CatalogCardDto {
@@ -140,12 +167,19 @@ export class CatalogProductDto extends CatalogCardDto {
 
   @ApiProperty({
     type: CatalogScriptDto,
-    description: 'The seven script fields: the office’s approved words field by field, else the company’s.',
+    description: 'The script fields: the office’s approved words field by field, else the company’s.',
   })
   script!: CatalogScriptDto;
 
   @ApiProperty({ type: [CatalogDocumentDto], description: 'The three slots, in their order.' })
   documents!: CatalogDocumentDto[];
+
+  @ApiProperty({
+    type: [CatalogRiderDto],
+    description: '*"Bisa ditambah: …"* — the riders on sale attached to this base, in the company’s order; empty for '
+      + 'a base with none (ADR-0209 §3). A rider is never listed, filtered, recommended or opened on its own.',
+  })
+  riders!: CatalogRiderDto[];
 }
 
 export class CatalogDocumentUrlDto {

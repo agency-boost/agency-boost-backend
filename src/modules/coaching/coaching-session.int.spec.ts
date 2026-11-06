@@ -798,12 +798,12 @@ describe('the coaching session over HTTP (P11-T5)', () => {
   // ------------------------------------------------------------------ who reads a session
 
   /*
-   * **The session in Indonesian** (P18.98-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
+   * **The session in Indonesian** (P18.10-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
    * `Accept-Language`, its code and details the same in both; *From leads (automatic)*'s *Follow up with {name}* is
    * written for the reader while the session is open, and stored at finalize in the language of the leader finalizing.
    */
-  describe('P18.98-T5 AC-7 in Indonesian', () => {
-    it('P18.98-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
+  describe('P18.10-T5 AC-7 in Indonesian', () => {
+    it('P18.10-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
       const started = (await start('AGUS', 'LUKAS').expect(201)).body;
       const res = await finalize(started.sessionId, started.version).set('Accept-Language', 'id').expect(422);
       expect(res.body.error).toMatchObject({
@@ -813,7 +813,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       });
     });
 
-    it('P18.98-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
+    it('P18.10-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
       const promised = await lead('LUKAS', { name: 'Pak Fauzan Akbar', nextActionDate: '2026-09-16' });
       const started = (await start('AGUS', 'LUKAS').expect(201)).body;
       const line = (text: string) => [{ leadId: promised, leadName: 'Pak Fauzan Akbar', dueDate: '2026-09-16', text }];
@@ -831,7 +831,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
     });
 
-    it('P18.98-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
+    it('P18.10-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
       const closed = await finalized('AGUS', 'DIMAS');
       as('AGUS');
       clock.set(new Date('2026-09-21T17:00:00Z')); // 00:00 on the 22nd in Jakarta.

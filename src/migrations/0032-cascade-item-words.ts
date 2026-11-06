@@ -43,7 +43,7 @@ function setting(rewrite: Rewrite, path: string): Record<string, unknown> {
 }
 
 /**
- * **Items 3, 7 and 8 in the client's words** (ADR-0160 §1, OD-180; P18.8-T8 AC-3).
+ * **Items 3, 7 and 8 in the client's words** (ADR-0160 §1, OD-180; P18.5-T8 AC-3).
  *
  * *Menghubungi prospek yang sudah ada* becomes *Set Appointment*; item 7 — *Presentasi NBO ke calon agen* in every
  * office provisioned before P13.1-T3, *Proses pendaftaran kode agen* since — becomes *Melakukan presentasi

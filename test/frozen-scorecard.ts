@@ -3,7 +3,7 @@ const M = 1_000_000 * 100;
 /**
  * **A scorecard frozen before 2026-10-28, exactly as the freeze wrote it then** (ADR-0129 §7): five columns, *FY* and
  * *YTD* named by their years, nine rows with *Producing agents* and *New AA*, *# of units* the AB agencies (5, equal to
- * *# of AB*), no *AS OF*. Meeting #12 of 0417 on staging, and the seed's #12 (P18.97-T1 AC-20).
+ * *# of AB*), no *AS OF*. Meeting #12 of 0417 on staging, and the seed's #12 (P18.9-T1 AC-20).
  */
 export function frozenBeforeTheSlide(): Record<string, unknown> {
   const year = (fy: unknown, ytd: unknown) => ({ fy, ytd, thisMonthLastYear: { kind: 'blocked' }, lastMonth: { kind: 'blocked' }, thisMonth: { kind: 'blocked' } });

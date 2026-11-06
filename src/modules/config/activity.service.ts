@@ -18,7 +18,7 @@ import { BINDING_ROLE_LABEL, defaultBinding, roleOfCode, type CascadeBinding } f
 import { ActivityBindingService } from './activity-binding.service';
 import { CONFIG_REFUSALS } from './config.messages';
 
-/** The taxonomy's own refusals, in both languages (P18.98-T5 AC-3). */
+/** The taxonomy's own refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**

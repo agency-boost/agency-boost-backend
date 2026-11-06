@@ -116,7 +116,7 @@ describe('a playbook’s save, checked whole (P17-T8 AC-2)', () => {
     ]));
   });
 
-  it('P18.98-T5 AC-3 every violation in Bahasa Indonesia, the field’s path as the API names it; the message them all', () => {
+  it('P18.10-T5 AC-3 every violation in Bahasa Indonesia, the field’s path as the API names it; the message them all', () => {
     const e = refusalOf(edited((b) => {
       b.profiles['career-switch'].tagline = '';
       b.profiles.retiree.benefits = 'many';
@@ -133,8 +133,8 @@ describe('a playbook’s save, checked whole (P17-T8 AC-2)', () => {
     ];
     expect(e.detailsFor(readerIn('id'))).toEqual({ violations });
     expect(e.messageFor(readerIn('id')))
-      .toBe(`Playbook ini tidak dapat disimpan: ${violations.map((v) => `${v.field} — ${v.message}`).join('; ')}`);
-    expect(e.message).toMatch(/^This playbook cannot be saved: body\.profiles\.career-switch\.tagline — Must not be empty\.; /);
+      .toBe(`Playbook ini tidak dapat diterbitkan: ${violations.map((v) => `${v.field} — ${v.message}`).join('; ')}`);
+    expect(e.message).toMatch(/^This playbook cannot be published: body\.profiles\.career-switch\.tagline — Must not be empty\.; /);
     expect(refusalOf('words')!.detailsFor(readerIn('id'))).toMatchObject({
       violations: expect.arrayContaining([{ field: 'body', message: 'Harus berupa objek berisi kolom.' }]),
     });

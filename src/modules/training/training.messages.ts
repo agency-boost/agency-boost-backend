@@ -30,7 +30,7 @@ const ITEM = {
 const itemAt = ({ kind, n }: ContentItem) => ({ en: `${ITEM[kind].en} ${n}`, id: `${ITEM[kind].id} ${n}` });
 
 /**
- * **The training module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): an office's taxonomy — categories,
+ * **The training module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): an office's taxonomy — categories,
  * skills and modules — a module's content, and a company template's taxonomy. *Training* and *Skill* stay as the
  * glossary keeps them (§A.6); a module is a *modul* in a sentence; a link is a *tautan* (§B.0). A field is named as
  * the API names it — `url`, `files` — in both languages.

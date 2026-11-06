@@ -37,14 +37,14 @@ function member(role: 'owner' | 'admin' | 'ab' | 'aab' | 'agent', kpmId = 'kpm-x
 }
 
 /**
- * **P18.9-T3 — the *Template* company, hidden as an insurer and copied by setup** (ADR-0164 §3–§6).
+ * **P18.6-T3 — the *Template* company, hidden as an insurer and copied by setup** (ADR-0164 §3–§6).
  *
  * The services as the application wires them, over a real database that holds what migration `0037` makes:
  * registration, the platform overview and platform analytics never see the Template library; registration and
  * KPM creation refuse it; a new company copies it, *Empty* aside; a new office may start from its Default
  * template, the rung check made; and a change to the Template afterwards reaches nothing already made from it.
  */
-describe('P18.9-T3 the Template library (ADR-0164)', () => {
+describe('P18.6-T3 the Template library (ADR-0164)', () => {
   let wired: ReturnType<typeof configModule>;
   let tenants: TenantService;
   let auth: AuthService;
@@ -75,8 +75,6 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
       wired.products,
       wired.campaigns,
       wired.namedTemplates,
-      wired.recruitmentPlaybooks,
-      wired.templateCopies,
     );
     kpmRequests = new KpmRequestService(
       mongoose.model(KpmRequest.name, KpmRequestSchema) as never, wired.companies as never, users, tenants,
@@ -184,35 +182,68 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
     });
   });
 
-  describe('AC-4: a new company copies the Template', () => {
-    it('AC-4 its first template, its default, is the Default template copied, the origin naming the source', async () => {
-      const company = await prudential();
-      const companyId = String(company._id);
-      const templates = await wired.namedTemplates.list(companyId);
-      expect(templates).toHaveLength(1);
-      expect(templates[0]).toMatchObject({
-        name: 'Prudential template', isDefault: true, status: 'active',
-        origin: { kind: 'copy', templateId: LIBRARY_DEFAULT, companyId: LIBRARY },
-      });
-      expect(Object.values(templates[0].publishedVersions)).toEqual(Array(OFFICE_TEMPLATE_KINDS.length).fill(1));
+  /**
+   * **P19.4-T3 AC-12 (SA UI-017): *"Dimulai kosong"* goes once the default template has one published section.** Worked
+   * out by the list, so the companies page holds no rule: a blank company's tag while its template has nothing, and none
+   * once a section is published — the platform's own *Advanced analytics* version 1 not counting.
+   */
+  describe('P19.4-T3 AC-12 the started-blank tag', () => {
+    it('P19.4-T3 AC-12 reads started blank until the default template has a published section, then not', async () => {
+      const blank = await tenants.createCompany(SA, { name: 'Manulife', slug: 'manulife', usesPlatformDefaults: false });
+      const full = await prudential();
+      const blankId = String(blank._id);
+      const tagOf = async (id: string) => (await tenants.listCompanies(SA)).find((c) => String(c._id) === id)?.startedBlank;
 
-      const copied = await wired.namedTemplates.publishedKindsOf(companyId, templates[0].id);
-      const source = await wired.namedTemplates.publishedKindsOf(LIBRARY, LIBRARY_DEFAULT);
-      expect(copied.kinds).toEqual(source.kinds);
-      expect(company).toMatchObject({ kind: 'insurer', usesPlatformDefaults: true });
+      // No template at all (ADR-0213 §3), then an empty one: the platform's *Advanced analytics* v1 says nothing.
+      expect(await tagOf(blankId)).toBe(true);
+      const made = await wired.namedTemplates.create(SA, blankId, { name: 'Manulife template', from: 'empty' });
+      expect(await tagOf(blankId)).toBe(true);
+      // A company that took the presets never carries it.
+      expect(await tagOf(String(full._id))).toBe(false);
+
+      await col('companyTemplates').insertOne({
+        companyId: blankId, templateId: made.id, kind: 'activity_taxonomy', version: 1, status: 'published',
+        payload: {}, publishedAt: NOW, deletedAt: null, createdBy: 'sa-1', updatedBy: 'sa-1', createdAt: NOW, updatedAt: NOW,
+      });
+      expect(await tagOf(blankId)).toBe(false);
     });
 
-    it('AC-4 copies what the Template holds now, not the code: its ladder with tiers, products, carrier rules and playbook', async () => {
-      // The Super Admin's edits of the Template: a rung renamed and one added, a product renamed, the playbook
-      // reworded, item 3 renamed and published as version 2, and the carrier rules' tab published.
+    it('P19.4-T3 AC-12 reads a published section of a template that is not the default as no reason to drop the tag', async () => {
+      const blank = await tenants.createCompany(SA, { name: 'Manulife', slug: 'manulife', usesPlatformDefaults: false });
+      const blankId = String(blank._id);
+      await wired.namedTemplates.create(SA, blankId, { name: 'Manulife template', from: 'empty' });
+      const second = await wired.namedTemplates.create(SA, blankId, { name: 'Draft copy', from: 'empty' });
+      await col('companyTemplates').insertOne({
+        companyId: blankId, templateId: second.id, kind: 'lead_pipeline', version: 1, status: 'published',
+        payload: {}, publishedAt: NOW, deletedAt: null, createdBy: 'sa-1', updatedBy: 'sa-1', createdAt: NOW, updatedAt: NOW,
+      });
+      expect((await tenants.listCompanies(SA)).find((c) => String(c._id) === blankId)?.startedBlank).toBe(true);
+    });
+  });
+
+  describe('AC-4: a new company copies the Template (amended by ADR-0213 §3: no template)', () => {
+    it('P19.4-T5 AC-5 makes no first template: the company holds none until the Super Admin makes one', async () => {
+      const company = await prudential();
+      const companyId = String(company._id);
+      expect(await wired.namedTemplates.list(companyId)).toEqual([]);
+      expect(company).toMatchObject({ kind: 'insurer', usesPlatformDefaults: true, playbookInTemplates: true });
+      // Salin dari… the built-in Default template is how it gets one, and the first it makes is its default.
+      const made = await wired.templateCopies.importFrom(SA, companyId, {
+        fromCompanyId: LIBRARY, templateId: LIBRARY_DEFAULT, name: 'Prudential — utama',
+      });
+      expect(made).toMatchObject({ isDefault: true, origin: { kind: 'import', templateId: LIBRARY_DEFAULT } });
+      expect(Object.values(made.publishedVersions).filter((v) => v === 1).length).toBeGreaterThanOrEqual(OFFICE_TEMPLATE_KINDS.length);
+    });
+
+    it('AC-4 copies what the Template holds now, not the code: its ladder with tiers, products and carrier rules — no playbook', async () => {
+      // The Super Admin's edits of the Template: a rung renamed and one added, a product renamed, and the carrier
+      // rules' tab published.
       await col('companyOrgLevels').updateOne({ companyId: LIBRARY, code: 'AB' }, { $set: { label: 'Agency Builder' } });
       await col('companyOrgLevels').insertOne({
         companyId: LIBRARY, code: 'SM', label: 'Senior Manager', displayOrder: 4, leaderTier: 'senior',
         status: 'active', archivedAt: null, deletedAt: null, createdAt: NOW, updatedAt: NOW, version: 0,
       });
       await col('products').updateOne({ companyId: LIBRARY, code: SEED_PRODUCTS[0].code }, { $set: { name: 'Renamed in the Template' } });
-      await col('recruitmentPlaybooks').updateOne({ companyId: LIBRARY }, { $set: { 'body.nextAction': 'The Template’s words.', version: 2 } });
-      await publishInLibrary('activity_taxonomy', renamedTaxonomy('Janji temu'));
       await col('companyTemplates').insertOne({
         companyId: LIBRARY, templateId: null, kind: 'campaign_kinds', version: 1, status: 'published',
         payload: platformDefaultPayload('campaign_kinds'), publishedAt: NOW, deletedAt: null, createdAt: NOW, updatedAt: NOW,
@@ -238,50 +269,35 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
       expect(await col('companyTemplates').findOne({ companyId, kind: 'campaign_kinds' }))
         .toMatchObject({ templateId: null, version: 1, status: 'published' });
 
-      expect(await col('recruitmentPlaybooks').findOne({ companyId }))
-        .toMatchObject({ version: 1, body: { nextAction: 'The Template’s words.' } });
-
-      const [template] = await wired.namedTemplates.list(companyId);
-      // The library's newest published version, as the copy's version 1.
-      expect(template.publishedVersions.activity_taxonomy).toBe(1);
-      const { kinds } = await wired.namedTemplates.publishedKindsOf(companyId, template.id);
-      expect((kinds.activity_taxonomy!.types as { code: string; label: string }[])
-        .find((t) => t.code === 'LEADS_CONTACTED')!.label).toBe('Janji temu');
+      // ADR-0210 §6: no company-level playbook, and (ADR-0213 §3) no template to hold one.
+      expect(await col('recruitmentPlaybooks').countDocuments({ companyId })).toBe(0);
+      expect(await col('templates').countDocuments({ companyId })).toBe(0);
     });
 
-    it('AC-4 records what it copied: company.created names the library’s template, and one template.created', async () => {
+    it('AC-4 records what it copied: company.created names the library, and no template.created', async () => {
       const companyId = String((await prudential())._id);
       const created = await col('auditLog').findOne({ action: 'company.created', targetId: companyId });
       expect(created?.after).toMatchObject({
-        usesPlatformDefaults: true, startedFrom: 'template_library',
-        source: { companyId: LIBRARY, templateId: LIBRARY_DEFAULT, name: 'Default template' },
+        usesPlatformDefaults: true, startedFrom: 'template_library', source: { companyId: LIBRARY },
       });
-      const template = await col('auditLog').findOne({ action: 'template.created', 'after.companyId': companyId });
-      expect(template?.after).toMatchObject({
-        from: 'copy', isDefault: true, filesDuplicated: 0,
-        source: { companyId: LIBRARY, templateId: LIBRARY_DEFAULT, name: 'Default template' },
-      });
+      expect(await col('auditLog').countDocuments({ action: 'template.created', 'after.companyId': companyId })).toBe(0);
     });
 
-    it('AC-4 Empty stays the alternative: the default ladder, and nothing else', async () => {
+    it('AC-4 Empty stays the alternative: the default ladder, and nothing else — no template either', async () => {
       const company = await tenants.createCompany(SA, { name: 'Sejahtera Baru Life', slug: 'sejahtera', usesPlatformDefaults: false });
       const companyId = String(company._id);
       expect(company).toMatchObject({ kind: 'insurer', usesPlatformDefaults: false });
       const ladder = await col('companyOrgLevels').find({ companyId }).sort({ displayOrder: 1 }).toArray();
       expect(ladder.map((r) => [r.code, r.leaderTier])).toEqual(DEFAULT_ORG_LADDER.map((r) => [r.code, r.leaderTier]));
-      for (const name of ['products', 'qualificationRules', 'recruitmentPlaybooks']) {
+      for (const name of ['products', 'qualificationRules', 'recruitmentPlaybooks', 'templates']) {
         expect([name, await col(name).countDocuments({ companyId })]).toEqual([name, 0]);
       }
-      const [template] = await wired.namedTemplates.list(companyId);
-      expect(template).toMatchObject({ name: 'Sejahtera Baru Life template', isDefault: true, origin: { kind: 'empty' } });
-      expect(Object.values(template.publishedVersions).every((v) => v === null)).toBe(true);
     });
 
-    it('AC-4 where no Template library exists, gives the AgencyBoost defaults from the code, as before', async () => {
+    it('AC-4 where no Template library exists, gives the AgencyBoost defaults from the code, as before — and no template', async () => {
       await col('companies').deleteMany({ kind: 'template' });
       const companyId = String((await prudential())._id);
-      const [template] = await wired.namedTemplates.list(companyId);
-      expect(template).toMatchObject({ isDefault: true, origin: { kind: 'defaults' } });
+      expect(await wired.namedTemplates.list(companyId)).toEqual([]);
       expect(await col('products').countDocuments({ companyId })).toBe(SEED_PRODUCTS.length);
       expect((await col('auditLog').findOne({ action: 'company.created', targetId: companyId }))?.after)
         .toMatchObject({ startedFrom: 'defaults' });
@@ -291,6 +307,7 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
   describe('AC-5: a new office may start from Template · Default template', () => {
     it('AC-5 copies the library’s kinds, and its record names the library; the company’s default stays the default', async () => {
       const companyId = String((await prudential())._id);
+      const own = await wired.namedTemplates.create(SA, companyId, { name: 'Prudential template', from: 'defaults' });
       await publishInLibrary('activity_taxonomy', renamedTaxonomy('Janji temu'));
 
       const kpm = await office(companyId, { kind: 'template', templateLibrary: true });
@@ -303,20 +320,28 @@ describe('P18.9-T3 the Template library (ADR-0164)', () => {
         .toMatchObject({ label: 'Janji temu' });
 
       // Absent, the company's own default — what approving a KPM request starts from.
-      const [own] = await wired.namedTemplates.list(companyId);
+      expect(own.isDefault).toBe(true);
       const second = await tenants.createKpm(SA, { companyId, code: '0555', branchName: 'Kelapa Gading' });
       expect((await col('kpms').findOne({ _id: new mongoose.Types.ObjectId(second._id) }))!.startedFrom)
         .toEqual({ source: 'template', templateId: own.id, templateName: 'Prudential template' });
     });
 
+    it('P19.4-T5 AC-5 a company with no template: absent, the office starts from the built-in default (ADR-0213 §3)', async () => {
+      const companyId = String((await prudential())._id);
+      const kpm = await tenants.createKpm(SA, { companyId, code: '0418', branchName: 'Serpong' });
+      expect((await col('kpms').findOne({ _id: new mongoose.Types.ObjectId(kpm._id) }))!.startedFrom).toEqual({
+        source: 'template', templateId: LIBRARY_DEFAULT, templateName: 'Default template', companyId: LIBRARY,
+      });
+    });
+
     it('AC-5 may name another of the library’s templates; a template of the company’s own is not the library’s, 404', async () => {
       const companyId = String((await prudential())._id);
+      const own = await wired.namedTemplates.create(SA, companyId, { name: 'Prudential template', from: 'empty' });
       const lean = await wired.namedTemplates.create(SA, LIBRARY, { name: 'Lean start', from: 'empty' });
       const kpm = await office(companyId, { kind: 'template', templateLibrary: true, templateId: lean.id });
       expect((await col('kpms').findOne({ _id: new mongoose.Types.ObjectId(kpm._id) }))!.startedFrom)
         .toMatchObject({ templateId: lean.id, templateName: 'Lean start', companyId: LIBRARY });
 
-      const [own] = await wired.namedTemplates.list(companyId);
       await expect(tenants.createKpm(SA, {
         companyId, code: '0556', branchName: 'Serpong', startFrom: { kind: 'template', templateLibrary: true, templateId: own.id },
       })).rejects.toMatchObject({ status: 404 });

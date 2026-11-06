@@ -76,7 +76,7 @@ export async function up(db: mongoose.mongo.Db, now: Date): Promise<NamedTemplat
    * a kind the first template has, and this run's own version 1s would collide with nothing — but the
    * next `New template` would.
    */
-  // A fresh database has no such collection yet: no index to drop. Any other failure is thrown (P18.7-T1).
+  // A fresh database has no such collection yet: no index to drop. Any other failure is thrown (P18.4-T1).
   const indexes: { name?: string }[] = await emptyIfMissing(rows.indexes());
   if (indexes.some((i) => i.name === 'companyId_1_kind_1_version_1')) {
     await rows.dropIndex('companyId_1_kind_1_version_1');

@@ -21,11 +21,11 @@ const M = 1_000_000 * 100;
 const wib = (local: string) => new Date(`${local}+07:00`).toISOString();
 
 /**
- * **The agent's campaigns over HTTP** (P18.5-T7 AC-1, AC-5; P18.5-T8 AC-6; P18.5-T9 AC-2), with the real
+ * **The agent's campaigns over HTTP** (P18.2-T7 AC-1, AC-5; P18.2-T8 AC-6; P18.2-T9 AC-2), with the real
  * `PermissionsGuard`, the production pipe and the real services over `test/coaching-office.ts`'s office — 10:00 on
  * Monday 14 September 2026 in Jakarta, August on file and locked, September open.
  */
-describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
+describe('the agent’s campaigns over HTTP (P18.2-T7, T8, T9)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
@@ -101,7 +101,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
     await db().collection('campaignChases').deleteMany({});
   });
 
-  it('P18.5-T7 AC-1 declares a permission on every route, and the right one', () => {
+  it('P18.2-T7 AC-1 declares a permission on every route, and the right one', () => {
     expect(declaredPermissions(CampaignAgentController)).toEqual({
       list: 'campaign:read_list',
       chasing: 'campaign_qualification:read',
@@ -112,7 +112,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
   });
 
   describe('the list (T7 AC-1, AC-2)', () => {
-    it.each(['OWNER', 'ADMIN', 'AGUS', 'SARI', 'RINA'] as const)('P18.5-T7 AC-1 positive: %s reads the office’s active campaigns, in D-lists’ order', async (who) => {
+    it.each(['OWNER', 'ADMIN', 'AGUS', 'SARI', 'RINA'] as const)('P18.2-T7 AC-1 positive: %s reads the office’s active campaigns, in D-lists’ order', async (who) => {
       as(who);
       const res = await http().get('/campaigns').expect(200);
       expect(res.body.campaigns.map((c: { code: string }) => c.code)).toEqual([
@@ -121,12 +121,12 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect(res.body.can).toEqual({ chase: true });
     });
 
-    it('P18.5-T7 AC-3 each card carries what the card draws, composed in Jakarta, and why a chase is blocked', async () => {
+    it('P18.2-T7 AC-3 each card carries what the card draws, composed in Jakarta, and why a chase is blocked', async () => {
       as('RINA');
       const cards = (await http().get('/campaigns').expect(200)).body.campaigns as Record<string, unknown>[];
       const byCode = (code: string) => cards.find((c) => c.code === code)!;
       // The suite reads in English (`test/setup.ts`); since the default went live an English reader's dates are English
-      // too (P18.98-T5 AC-1) — Aug, where nobody's choice read Agu. The Indonesian reader's are pinned below.
+      // too (P18.10-T5 AC-1) — Aug, where nobody's choice read Agu. The Indonesian reader's are pinned below.
       expect(byCode('APE_SPRINT')).toMatchObject({
         kind: 'seasonal', subtype: null, window: 'campaign_dates', phase: 'running', duration: '1 Aug – 30 Sep 2026',
         poster: { emoji: '🚀', color: 'amber' }, blurb: 'Push for APE.', reward: 'Cash bonus', chasing: false, eligible: true,
@@ -145,13 +145,13 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect(byCode('PROMOTION_AAB_AB')).toMatchObject({ eligible: false, chaseBlocked: 'not_eligible', duration: 'Rolling 12-month window' });
     });
 
-    it('P18.5-T7 AC-2 refuses a parameter the read does not know, by name', async () => {
+    it('P18.2-T7 AC-2 refuses a parameter the read does not know, by name', async () => {
       as('RINA');
       const res = await http().get('/campaigns').query({ status: 'archived' }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('P18.5-T7 AC-1 a Super Admin outside a support session reads nothing: no office', async () => {
+    it('P18.2-T7 AC-1 a Super Admin outside a support session reads nothing: no office', async () => {
       session.current = SUPER_ADMIN;
       expect((await http().get('/campaigns').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
       expect((await http().get('/campaigns/APE_SPRINT').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
@@ -161,7 +161,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
   });
 
   describe('one campaign, and its progress (T7 AC-4, T8 AC-6)', () => {
-    it('P18.5-T8 AC-6 the dialog carries the reader’s progress in each requirement row, and the window in words', async () => {
+    it('P18.2-T8 AC-6 the dialog carries the reader’s progress in each requirement row, and the window in words', async () => {
       as('RINA');
       const res = await http().get('/campaigns/APE_SPRINT').expect(200);
       expect(res.body).toMatchObject({ code: 'APE_SPRINT', description: '', can: { chase: true } });
@@ -175,12 +175,12 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       });
     });
 
-    it('P18.5-T8 AC-6 an upcoming campaign has no progress yet; a lower-case address finds it', async () => {
+    it('P18.2-T8 AC-6 an upcoming campaign has no progress yet; a lower-case address finds it', async () => {
       as('RINA');
       expect((await http().get('/campaigns/next_push').expect(200)).body).toMatchObject({ code: 'NEXT_PUSH', progress: null });
     });
 
-    it.each(['ARCHIVED_DRIVE', 'GADING_PUSH', 'NOPE'])('P18.5-T7 AC-1 %s — archived, another office’s, unknown — is 404', async (code) => {
+    it.each(['ARCHIVED_DRIVE', 'GADING_PUSH', 'NOPE'])('P18.2-T7 AC-1 %s — archived, another office’s, unknown — is 404', async (code) => {
       as('RINA');
       expect((await http().get(`/campaigns/${code}`).expect(404)).body.error.code).toBe('NOT_FOUND');
       expect((await http().put(`/campaigns/${code}/chase`).expect(404)).body.error.code).toBe('NOT_FOUND');
@@ -190,7 +190,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
   describe('chasing (T7 AC-5)', () => {
     const audits = (action: string) => db().collection('auditLog').countDocuments({ action });
 
-    it('P18.5-T7 AC-5 chase and stop, idempotent, keyed by the membership and the code, audited once each', async () => {
+    it('P18.2-T7 AC-5 chase and stop, idempotent, keyed by the membership and the code, audited once each', async () => {
       as('RINA');
       const before = await audits('campaign.chased');
       expect((await http().put('/campaigns/APE_SPRINT/chase').expect(200)).body).toMatchObject({ code: 'APE_SPRINT', chasing: true });
@@ -206,7 +206,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect(unchased.at(-1)).toMatchObject({ before: { chasing: true }, after: { chasing: false } });
     });
 
-    it('P18.5-T8 review item 6 a double tap chases once: both answer 200, one row, one audit', async () => {
+    it('P18.2-T8 review item 6 a double tap chases once: both answer 200, one row, one audit', async () => {
       as('RINA');
       const before = await audits('campaign.chased');
       const [a, b] = await Promise.all([http().put('/campaigns/APE_SPRINT/chase'), http().put('/campaigns/APE_SPRINT/chase')]);
@@ -215,7 +215,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect(await audits('campaign.chased')).toBeLessThanOrEqual(before + 2);
     });
 
-    it('P18.5-T8 review item 6 a write refused by the unique index is retried once; any other failure is not', async () => {
+    it('P18.2-T8 review item 6 a write refused by the unique index is retried once; any other failure is not', async () => {
       as('RINA');
       const upsert = jest.spyOn(wired.campaignChases, 'upsertOne');
       upsert.mockRejectedValueOnce(Object.assign(new Error('E11000 duplicate key'), { code: 11000 }));
@@ -225,7 +225,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       upsert.mockRestore();
     });
 
-    it('P18.5-T7 AC-5, P18.95-T10 AC-2 an ended campaign is 409 CAMPAIGN_NOT_OPEN both ways; an upcoming one is chaseable', async () => {
+    it('P18.2-T7 AC-5, P18.7-T10 AC-2 an ended campaign is 409 CAMPAIGN_NOT_OPEN both ways; an upcoming one is chaseable', async () => {
       as('RINA');
       for (const verb of ['put', 'delete'] as const) {
         expect((await http()[verb]('/campaigns/OLD_PUSH/chase').expect(409)).body.error.code).toBe('CAMPAIGN_NOT_OPEN');
@@ -233,19 +233,19 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       await http().put('/campaigns/NEXT_PUSH/chase').expect(200);
     });
 
-    it('P18.5-T7 AC-5 a rung outside the campaign is 403 CAMPAIGN_NOT_ELIGIBLE; the AAB it is for chases it', async () => {
+    it('P18.2-T7 AC-5 a rung outside the campaign is 403 CAMPAIGN_NOT_ELIGIBLE; the AAB it is for chases it', async () => {
       as('RINA');
       expect((await http().put('/campaigns/PROMOTION_AAB_AB/chase').expect(403)).body.error.code).toBe('CAMPAIGN_NOT_ELIGIBLE');
       as('SARI');
       await http().put('/campaigns/PROMOTION_AAB_AB/chase').expect(200);
     });
 
-    it.each(['AGUS', 'SARI', 'RINA', 'OWNER', 'ADMIN'] as const)('P18.5-T7 AC-1 positive: %s chases by the rung they hold', async (who) => {
+    it.each(['AGUS', 'SARI', 'RINA', 'OWNER', 'ADMIN'] as const)('P18.2-T7 AC-1 positive: %s chases by the rung they hold', async (who) => {
       as(who);
       await http().put('/campaigns/MDRT_QUALIFICATION/chase').expect(200);
     });
 
-    it('P18.5-T7 AC-1 a support session reads and draws no chase, and is refused one — read-only or elevated (ADR-0143)', async () => {
+    it('P18.2-T7 AC-1 a support session reads and draws no chase, and is refused one — read-only or elevated (ADR-0143)', async () => {
       for (const readOnly of [true, false]) {
         supporting('RINA', readOnly);
         expect((await http().get('/campaigns').expect(200)).body.can).toEqual({ chase: false });
@@ -268,7 +268,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       });
     });
 
-    it('P18.5-T7 AC-6, P18.95-T7 AC-1 the reader’s own chases, not ended, in order — the Summary card’s rows, each with the months it runs', async () => {
+    it('P18.2-T7 AC-6, P18.7-T7 AC-1 the reader’s own chases, not ended, in order — the Summary card’s rows, each with the months it runs', async () => {
       as('RINA');
       const res = await chasing().expect(200);
       expect(res.body.membershipId).toBe(office.id.RINA);
@@ -281,7 +281,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect((await chasing({ for: office.id.RINA }).expect(200)).body).toEqual(res.body);
     });
 
-    it.each(['SARI', 'AGUS', 'OWNER', 'ADMIN'] as const)('P18.5-T9 AC-2 positive, exit test 3: %s reads the same chases Rina’s own Summary lists', async (who) => {
+    it.each(['SARI', 'AGUS', 'OWNER', 'ADMIN'] as const)('P18.2-T9 AC-2 positive, exit test 3: %s reads the same chases Rina’s own Summary lists', async (who) => {
       as('RINA');
       const own = (await chasing().expect(200)).body;
       as(who);
@@ -289,32 +289,32 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
     });
 
     it.each([['BUDI', 'an agent, about a peer'], ['PEER_AB', 'a peer AB'], ['DEWI', 'an AAB leading nobody'], ['B_AB', 'another office']] as const)(
-      'P18.5-T9 AC-2 negative: %s (%s) is answered 404 for Rina', async (who, _what) => {
+      'P18.2-T9 AC-2 negative: %s (%s) is answered 404 for Rina', async (who, _what) => {
         as(who);
         expect((await chasing({ for: office.id.RINA }).expect(404)).body.error.code).toBe('NOT_FOUND');
       },
     );
 
-    it('P18.5-T9 AC-2 another office’s member and an invented id are 404 alike; any other parameter 400', async () => {
+    it('P18.2-T9 AC-2 another office’s member and an invented id are 404 alike; any other parameter 400', async () => {
       as('OWNER');
       expect((await chasing({ for: office.id.B_AGENT }).expect(404)).body.error.code).toBe('NOT_FOUND');
       expect((await chasing({ for: 'not-an-id' }).expect(404)).body.error.code).toBe('NOT_FOUND');
       expect((await chasing({ membershipId: office.id.RINA }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('P18.5-T9 AC-2 a read-only support session reads them; nothing is recorded', async () => {
+    it('P18.2-T9 AC-2 a read-only support session reads them; nothing is recorded', async () => {
       const before = await db().collection('auditLog').countDocuments({});
       supporting('SARI', true);
       expect((await chasing({ for: office.id.RINA }).expect(200)).body.campaigns).toHaveLength(3);
       expect(await db().collection('auditLog').countDocuments({})).toBe(before);
     });
 
-    it('P18.5-T8 review item 11 a member who has left is not found, even by the Owner', async () => {
+    it('P18.2-T8 review item 11 a member who has left is not found, even by the Owner', async () => {
       as('OWNER');
       expect((await chasing({ for: office.id.LEFT }).expect(404)).body.error.code).toBe('NOT_FOUND');
     });
 
-    it('P18.5-T7 AC-6 somebody chasing nothing reads an empty list', async () => {
+    it('P18.2-T7 AC-6 somebody chasing nothing reads an empty list', async () => {
       as('BUDI');
       expect((await chasing().expect(200)).body).toEqual({ membershipId: office.id.BUDI, campaigns: [] });
       expect(KPM_B).toBeTruthy();
@@ -322,13 +322,13 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
   });
 
   /**
-   * **The agent's campaigns for an Indonesian reader, and an English one's figures** (P18.98-T5 AC-4, AC-7): the
+   * **The agent's campaigns for an Indonesian reader, and an English one's figures** (P18.10-T5 AC-4, AC-7): the
    * window's words and a refusal in Bahasa Indonesia, every date the reader's; the codes and the data as in English.
    */
-  describe('P18.98-T5 AC-7 the agent’s campaigns, in both languages', () => {
+  describe('P18.10-T5 AC-7 the agent’s campaigns, in both languages', () => {
     afterEach(() => { savedLanguage.current = null; });
 
-    it('P18.98-T5 AC-4 the cards, the dialog and the chases in Indonesian', async () => {
+    it('P18.10-T5 AC-4 the cards, the dialog and the chases in Indonesian', async () => {
       as('RINA');
       const cards = (await http().get('/campaigns').set(...IN_INDONESIAN).expect(200)).body.campaigns as Record<string, unknown>[];
       const byCode = (code: string) => cards.find((c) => c.code === code)!;
@@ -345,7 +345,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-4 an English reader who chose English reads English figures: Aug, Dec', async () => {
+    it('P18.10-T5 AC-4 an English reader who chose English reads English figures: Aug, Dec', async () => {
       as('RINA');
       savedLanguage.current = 'en';
       const cards = (await http().get('/campaigns').expect(200)).body.campaigns as Record<string, unknown>[];
@@ -355,7 +355,7 @@ describe('the agent’s campaigns over HTTP (P18.5-T7, T8, T9)', () => {
       expect((await http().get('/campaigns/APE_SPRINT').expect(200)).body.progress).toMatchObject({ windowLabel: 'Aug – Sep 2026' });
     });
 
-    it('P18.98-T5 AC-7 an ended campaign and a rung it is not for are refused in Indonesian, the codes unchanged', async () => {
+    it('P18.10-T5 AC-7 an ended campaign and a rung it is not for are refused in Indonesian, the codes unchanged', async () => {
       as('RINA');
       const ended = await http().put('/campaigns/OLD_PUSH/chase').set(...IN_INDONESIAN).expect(409);
       expect(ended.body.error).toMatchObject({

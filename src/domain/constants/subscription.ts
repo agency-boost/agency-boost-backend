@@ -32,7 +32,7 @@ export const SUBSCRIPTION = {
 } as const;
 
 /*
- * `LEADER_RUNG_CODES` (`['AB', 'AAB']`) stood here until P18.8-T1. What the leader limit counts is now a
+ * `LEADER_RUNG_CODES` (`['AB', 'AAB']`) stood here until P18.5-T1. What the leader limit counts is now a
  * class, not a code — `LEADER_CLASSES` in `leader-tier.ts` (ADR-0156 §4) — so a leader on a rung a company
  * named itself is counted too.
  */

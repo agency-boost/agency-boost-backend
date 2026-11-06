@@ -14,7 +14,7 @@ export interface MongoTarget {
 
 /**
  * **Where the commands connect: the migrations, the demo seed and `create-super-admin`**
- * (P18.7-T1). They run without the API's configuration module, so they read the two keys
+ * (P18.4-T1). They run without the API's configuration module, so they read the two keys
  * themselves, here, the way the API reads them. `null` when `MONGODB_URI` is not set: each
  * command says so in its own words.
  *

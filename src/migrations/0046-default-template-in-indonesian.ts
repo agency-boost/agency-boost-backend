@@ -52,7 +52,7 @@ function find<T extends { code: string }>(rows: readonly T[], code: string): T {
 }
 
 /**
- * **What each kind rewrites**, read from the constants: the English the seed gave before P18.98-T7 and the words it
+ * **What each kind rewrites**, read from the constants: the English the seed gave before P18.10-T7 and the words it
  * gives now. Nothing is retyped here, so this cannot disagree with what a new office is given.
  */
 function rewrites(): Record<string, ListRewrite[]> {
@@ -142,7 +142,7 @@ function seeded(node: unknown, path: readonly string[], at: string, rewrite: Lis
 }
 
 /**
- * **The platform's Default template in Bahasa Indonesia** (OD-238, option 1; ADR-0179 §5; P18.98-T7).
+ * **The platform's Default template in Bahasa Indonesia** (OD-238, option 1; ADR-0179 §5; P18.10-T7).
  *
  * The Template company's *Default template* (ADR-0164) is what every new office may start from, and it was mixed:
  * English activity sections, lead statuses, activation checklist, training, capability ladder and event types beside

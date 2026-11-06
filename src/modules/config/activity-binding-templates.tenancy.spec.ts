@@ -8,7 +8,7 @@ import { templateKindsFromOffice as kindsWithSentences, type OfficeSettings } fr
 import { english } from '../../../test/i18n';
 import { platformDefaultPayload } from './template-defaults';
 
-/** The function, each dropped reason read as the API's English writes it (P18.98-T5 AC-4: a sentence in both languages). */
+/** The function, each dropped reason read as the API's English writes it (P18.10-T5 AC-4: a sentence in both languages). */
 const templateKindsFromOffice = (settings: OfficeSettings) => {
   const made = kindsWithSentences(settings);
   return { ...made, dropped: made.dropped.map((d) => ({ ...d, reason: english(d.reason) })) };
@@ -31,11 +31,11 @@ const taxonomy = (bindings?: unknown) => ({
 });
 
 /**
- * **A template's activity binding** (P18.9-T2 AC-1, AC-3; ADR-0163 §1, §3): carried in its `activity_taxonomy`
+ * **A template's activity binding** (P18.6-T2 AC-1, AC-3; ADR-0163 §1, §3): carried in its `activity_taxonomy`
  * payload, checked when it is published against the taxonomy it publishes, copied into every office made from it,
  * and carried by *Save as template* from an office's own binding.
  */
-describe('the activity binding in a template (P18.9-T2)', () => {
+describe('the activity binding in a template (P18.6-T2)', () => {
   let wired: ReturnType<typeof configModule>;
 
   beforeAll(async () => {
@@ -60,12 +60,12 @@ describe('the activity binding in a template (P18.9-T2)', () => {
   };
   const bindingOf = (kpmId: string) => mongoose.connection.db!.collection('activityBindings').findOne({ kpmId, deletedAt: null });
 
-  it('P18.9-T2 AC-1 the AgencyBoost defaults carry the default binding: today’s three codes', () => {
+  it('P18.6-T2 AC-1 the AgencyBoost defaults carry the default binding: today’s three codes', () => {
     expect(platformDefaultPayload('activity_taxonomy').bindings).toEqual(TODAY);
     expect(defaultBinding()).toEqual(TODAY);
   });
 
-  it('P18.9-T2 AC-1 an office made from a template is given the template’s binding', async () => {
+  it('P18.6-T2 AC-1 an office made from a template is given the template’s binding', async () => {
     await publish(taxonomy({ ...TODAY, appointments: ['SELL_PRESENTATION', 'SALES_MEETING'] }));
     const provisioned = await provisionFrom(wired, KPM_A, COMPANY);
     expect(provisioned.seededFrom.activity_taxonomy.version).toBe(1);
@@ -74,7 +74,7 @@ describe('the activity binding in a template (P18.9-T2)', () => {
     });
   });
 
-  it('P18.9-T2 AC-1 a template with none, and Empty, give the default binding with its three types', async () => {
+  it('P18.6-T2 AC-1 a template with none, and Empty, give the default binding with its three types', async () => {
     await publish(taxonomy());
     await provisionFrom(wired, KPM_A, COMPANY);
     expect(await bindingOf(KPM_A)).toMatchObject({ ...TODAY, version: 1 });
@@ -85,7 +85,7 @@ describe('the activity binding in a template (P18.9-T2)', () => {
     expect(types.map((t) => t.code).sort()).toEqual(['LEADS_CONTACTED', 'SELL_PRESENTATION', 'SELL_SUBMISSION']);
   });
 
-  it('P18.9-T2 AC-4 an office whose template binds a replacement is not given the platform code it no longer needs', async () => {
+  it('P18.6-T2 AC-4 an office whose template binds a replacement is not given the platform code it no longer needs', async () => {
     const payload = taxonomy({ ...TODAY, appointments: ['SALES_MEETING'] });
     payload.types = payload.types.filter((t) => t.code !== 'SELL_PRESENTATION');
     await publish(payload);
@@ -96,7 +96,7 @@ describe('the activity binding in a template (P18.9-T2)', () => {
     expect(codes).not.toContain('SELL_PRESENTATION');
   });
 
-  it('P18.9-T2 AC-3 the template’s publish refuses a binding its taxonomy cannot honour, and publishes one it can', async () => {
+  it('P18.6-T2 AC-3 the template’s publish refuses a binding its taxonomy cannot honour, and publishes one it can', async () => {
     for (const bindings of [
       { ...TODAY, appointments: ['NOT_IN_THE_TEMPLATE'] },
       { ...TODAY, closings: [] },
@@ -113,7 +113,7 @@ describe('the activity binding in a template (P18.9-T2)', () => {
     await expect(publish(without)).resolves.toMatchObject({ status: 'published' });
   });
 
-  describe('P18.9-T2 AC-1 Save as template carries the office’s own binding', () => {
+  describe('P18.6-T2 AC-1 Save as template carries the office’s own binding', () => {
     const snapshot = {
       activity: [{
         code: 'SELLING', label: 'Selling', displayOrder: 1, status: 'active',

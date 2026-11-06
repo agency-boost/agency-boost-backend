@@ -1,4 +1,4 @@
-# AgencyBoost's staging and production on one VM (P18.7, ADR-0155; ADR-0152 in part): Caddy in front,
+# AgencyBoost's staging and production on one VM (P18.4, ADR-0155; ADR-0152 in part): Caddy in front,
 # one API per environment behind it, one MongoDB beside them.
 #
 # This directory mirrors /opt/agencyboost on the VM: this file is /opt/agencyboost/compose.yml and
@@ -37,7 +37,7 @@ x-logging: &logging
 # What the two APIs share. Each service below adds its image, its env file and its profile.
 x-api: &api
   restart: unless-stopped
-  # tini as PID 1: SIGTERM reaches Node, which drains in-flight work before it exits (P18.7-T1).
+  # tini as PID 1: SIGTERM reaches Node, which drains in-flight work before it exits (P18.4-T1).
   init: true
   environment:
     # Under the container's limit with room for Node's own memory beside the heap. Set here, not in the
@@ -60,7 +60,7 @@ x-api: &api
   mem_limit: ${API_MEM_LIMIT:-512m}
   # A stop spends up to 15 s closing the HTTP server and waiting for open requests
   # (HTTP_CLOSE_TIMEOUT_MS), then up to 10 s draining in-flight email (NOTIFICATION_DRAIN_TIMEOUT_MS),
-  # before Mongo's connection closes (P18.7-T1). 40 s leaves margin over those 25, so a stop never
+  # before Mongo's connection closes (P18.4-T1). 40 s leaves margin over those 25, so a stop never
   # ends in SIGKILL mid-send.
   stop_grace_period: 40s
   logging: *logging

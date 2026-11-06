@@ -227,7 +227,7 @@ describe('0021 — the summary tiles for offices and templates that already exis
       } as never);
 
       // Built from the template itself, as provisioning hands it a source: the platform's defaults say *Pengembangan*
-      // since P18.98-T7, so only the template's own tile reads *Development*.
+      // since P18.10-T7, so only the template's own tile reads *Development*.
       const template = await templates().findOne({ kind: 'activity_taxonomy' });
       await wired.provisioning.seedActivityTaxonomy(KPM_A, {
         payload: template!.payload as Record<string, unknown>, seededFrom: { templateId: null, version: 1 },

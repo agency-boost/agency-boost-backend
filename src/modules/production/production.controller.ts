@@ -2,13 +2,11 @@ import {
   Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, StreamableFile, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiResponse, ApiTags,
+  ApiBearerAuth, ApiBody, ApiConsumes, ApiExtraModels, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
 import {
-  IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateIf,
+  IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf,
 } from 'class-validator';
-import { PRODUCTION_METRICS, type ProductionMetric } from './monthly-agent-data.schema';
-import { CADENCES, type Cadence } from './production-preview';
 import { ProductionCorrections } from './production-correction.service';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -16,7 +14,7 @@ import { XLSX_MIME_TYPE } from '@/domain/constants';
 import { field } from '@/common/validation/violations';
 import { PRODUCTION_REFUSALS } from './production.messages';
 import {
-  CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
+  CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, PRODUCTION_CELL_DTOS, TemplateFileDto,
   UploadPreviewDto,
 } from './production.response.dto';
 import { ProductionImportService } from './production-import.service';
@@ -54,12 +52,20 @@ class CommitUploadDto {
   revision!: string;
 
   /**
-   * The corrections by hand to replace with the file's figure, as `membershipId:field` joined by
-   * commas — `66f…101:apeMonthly`. Absent, every correction stays (ADR-0053).
+   * The corrections by hand to replace with the file's figure, as `membershipId:KODE` joined by commas —
+   * `66f…101:APE`, `66f…101:KOMISI_YTD`; a held code's as `held:<CODE>:KODE`. Absent, every correction stays (ADR-0053).
    */
   @IsOptional()
   @IsString()
   replace?: string;
+
+  /**
+   * D8 (P19.5-T2): the office day an upload into the current month stands at, `YYYY-MM-DD` — today when absent. Ignored
+   * for a month that has ended, whose upload is final.
+   */
+  @IsOptional()
+  @IsString()
+  asOf?: string;
 }
 
 class RevertDto {
@@ -75,11 +81,14 @@ class CorrectCellDto {
   @IsString()
   membershipId!: string;
 
-  @IsIn(PRODUCTION_METRICS)
-  metric!: ProductionMetric;
+  /** The column's kode in the KPM's template (ADR-0214 §9). */
+  @IsString()
+  @Matches(/^[A-Z][A-Z0-9_]{0,39}$/)
+  kode!: string;
 
-  @IsIn(CADENCES)
-  cadence!: Cadence;
+  /** `true` for a `ytd: 'upload'` column's uploaded year to date; a summed one is calculated and refused (R4). */
+  @IsBoolean()
+  ytd!: boolean;
 
   /** Required, and `null` to clear: an absent value is not a request to empty a figure. */
   @ValidateIf((o: CorrectCellDto) => o.value !== null)
@@ -104,6 +113,7 @@ class CorrectCellDto {
  */
 @ApiTags('production')
 @ApiBearerAuth()
+@ApiExtraModels(...PRODUCTION_CELL_DTOS)
 @Controller('kpm/data-upload')
 export class ProductionController {
   constructor(
@@ -124,19 +134,19 @@ export class ProductionController {
   @ApiOperation({
     summary: 'The file to fill in for a month',
     description:
-      'The header that is the contract — code, name, six metrics monthly, the same six YTD, in the '
-      + 'prototype’s own order — and one row per active agent with twelve empty fields. A name is '
-      + 'one quoted field: a quote inside it is doubled, a line break becomes a space, and a name '
-      + 'that starts like a formula is written as text. The agent code is written exactly as '
-      + 'stored. **The header is the version**: there is no version line, and an importer '
-      + 'identifies a file by its header cells.',
+      'The header of the KPM’s template, read live (ADR-0214 §5): `Agent Code`, `Agent Name`, each column '
+      + 'as `<label> (<unit>) [KODE]` in the reader’s language, then `<label> YTD [KODE_YTD]` for a column whose year to '
+      + 'date is uploaded — and one row per active agent with an empty field per column. Named '
+      + '`<kpmCode>-agent-data-<YYYY-MM>.csv`. A name is one quoted field: a quote inside it is doubled, a line break '
+      + 'becomes a space, and a name that starts like a formula is written as text. The agent code is written exactly '
+      + 'as stored. `version` is the template’s published version.',
   })
   @ApiQuery({ name: 'month', type: String, example: '2026-09', description: '`YYYY-MM`, the office’s calendar month. Names the file; the rows are the same for every month.' })
   @ApiQuery({
     name: 'format', required: false, enum: ['xlsx'],
     description: 'Absent: the JSON below, whose `file` is the CSV. `xlsx`: the same header and rows as an Excel workbook '
       + '(ADR-0184) — its *Data* sheet, with the guide on a sheet of its own in the reader’s language — answered as the '
-      + 'file itself, `attachment; filename="KPM0417-agent-data-Sep-2026.xlsx"`. Anything else is `400 VALIDATION_FAILED`.',
+      + 'file itself, `attachment; filename="0417-agent-data-2026-09.xlsx"`. Anything else is `400 VALIDATION_FAILED`.',
   })
   @ApiProduces('application/json', XLSX_MIME_TYPE)
   @ApiResponse({ status: 200, type: TemplateFileDto })
@@ -171,12 +181,13 @@ export class ProductionController {
       + 'declares them, are checked to unpack to at most 25 MiB in at most 1,000 parts (`ASSET_TOO_LARGE`, 413, '
       + 'otherwise), and its *Data* sheet is read, at most 10,000 rows (`format: \'xlsx\'`). **A CSV** is read as UTF-8, '
       + 'or Windows-1252 when it is not valid UTF-8, with a comma, semicolon or tab delimiter. Either way the header is '
-      + 'checked cell by cell against every template ever issued (ADR-0052). **Writes nothing.** Answers every data row against the roster and what is '
-      + 'stored: a row is `refused` when it cannot be attributed to exactly one active member; a ready '
-      + 'row carries twelve cells, each `new`, `changed`, `unchanged`, `not_provided` or `refused`, '
-      + 'with the reason on the row. A blank cell is not provided and would change nothing (ADR-0051). '
-      + '`UPLOAD_TEMPLATE_MISMATCH` and `UPLOAD_MALFORMED_CSV` (422) refuse the whole file; '
-      + '`ASSET_TOO_LARGE` (413) above 1 MiB.',
+      + 'matched column by column against the KPM’s template — `[KODE]`, then the ID label, the EN label and the aliases '
+      + '(ADR-0214 §5) — and `notes` say what the file lacks or carries that is not stored. **Writes nothing.** Answers '
+      + 'every data row against the roster and what is stored: `refused` with its reason, `held` for a code no member '
+      + 'holds under the template’s `unknownAgent: flag`, else `ready`, its cells — one per `columns` entry — each `new`, '
+      + '`changed`, `unchanged`, `not_provided` or `refused`. A blank cell is not provided and would change nothing '
+      + '(ADR-0051). `UPLOAD_TEMPLATE_MISMATCH` (422) for a file with no Agent Code column, no column read, or two '
+      + 'headers on one kode; `UPLOAD_MALFORMED_CSV` (422); `ASSET_TOO_LARGE` (413) above 1 MiB.',
   })
   @ApiResponse({ status: 200, type: UploadPreviewDto })
   async preview(
@@ -198,7 +209,8 @@ export class ProductionController {
       properties: {
         month: { type: 'string', example: '2026-09' },
         revision: { type: 'string', example: '4', description: 'The `revision` the preview answered with.' },
-        replace: { type: 'string', example: '66f000000000000000000101:apeMonthly', description: 'Corrections by hand to replace, `membershipId:field`, comma-separated. Absent: every correction stays (ADR-0053).' },
+        replace: { type: 'string', example: '66f000000000000000000101:APE', description: 'Corrections by hand to replace, `membershipId:KODE` (`KODE_YTD` for an uploaded year to date; `held:<CODE>:KODE` for a held code), comma-separated. Absent: every correction stays (ADR-0053).' },
+        asOf: { type: 'string', example: '2026-11-03', description: 'D8: the office day an upload into the current month stands at; today when absent. Ignored for a month that has ended. `VALIDATION_FAILED` (400) outside the month or after today.' },
         file: { type: 'string', format: 'binary', description: 'The same file that was previewed.' },
       },
     },
@@ -220,7 +232,7 @@ export class ProductionController {
     @Body() body: CommitUploadDto,
     @UploadedFile() file?: FileUpload,
   ) {
-    return this.imports.commit(ctx, body.month, body.revision, file, body.replace);
+    return this.imports.commit(ctx, body.month, body.revision, file, body.replace, body.asOf);
   }
 
   @Post('revert')
@@ -282,12 +294,13 @@ export class ProductionController {
   @ApiOperation({
     summary: 'Correct one figure by hand',
     description:
-      'Writes the figure as `corrected`, with who, when and the reason, and an audit entry carrying the '
-      + 'figure before and after. `value: null` clears it — the only way a figure is cleared '
-      + '(ADR-0051). The same range rules as the import: `UPLOAD_VALUE_OUT_OF_RANGE` (422) names the '
-      + 'figure and what is wrong. `UPLOAD_MONTH_LOCKED` / `VERSION_CONFLICT` (409); `NOT_FOUND` (404) '
-      + 'for somebody who is not an active member of the office; `VALIDATION_FAILED` (400) without a '
-      + 'reason. A figure already holding that value is answered `changed: false`, and nothing is written.',
+      'One cell by `{ kode, ytd }` (ADR-0214 §9): a column of the KPM’s template in force in the month; `ytd: true` only '
+      + 'for a column whose year to date is uploaded — a summed one is `VALIDATION_FAILED` (400). Writes the figure as '
+      + '`corrected`, with who, when and the reason, and an audit entry carrying the figure before and after. '
+      + '`value: null` clears it — the only way a figure is cleared (ADR-0051). The column’s own limits, as the import '
+      + 'checks them: `UPLOAD_VALUE_OUT_OF_RANGE` (422). `UPLOAD_MONTH_LOCKED` / `VERSION_CONFLICT` (409); `NOT_FOUND` '
+      + '(404) for somebody who is not an active member of the office; `VALIDATION_FAILED` (400) without a reason or for '
+      + 'a kode not in the template. A figure already holding that value is answered `changed: false`.',
   })
   @ApiResponse({ status: 200, type: CorrectionResultDto })
   async correct(@Ctx() ctx: RequestContext, @Body() body: CorrectCellDto) {
@@ -299,10 +312,11 @@ export class ProductionController {
   @ApiOperation({
     summary: 'The office’s production for a month',
     description:
-      'Every active member, with the six metrics in their monthly and year-to-date figures and '
-      + 'the provenance of each cell. **`null` is not zero**: a cell nothing has written says the '
-      + 'carrier has not reported this person, where `0` says it reported nothing. Reads only — '
-      + 'the file, the correction and the revert each have their own route.',
+      'Every active member, with each column of the KPM’s template (ADR-0214 §14): this month’s figure by '
+      + 'kode, and its year to date — summed from the months for a `ytd: sum` column, never stored. `config` names the '
+      + 'template, its version, its columns (each with the months its year to date lacks), the history’s first month and '
+      + '`completePct`; `months` is the grid from the history’s first month; `unregistered` lists the *Belum terdaftar* '
+      + 'rows. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person.',
   })
   @ApiParam({ name: 'month', example: '2026-09', description: '`YYYY-MM`, the office’s calendar month.' })
   @ApiResponse({ status: 200, type: MonthViewDto })

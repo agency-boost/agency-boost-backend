@@ -46,12 +46,12 @@ class SavedLanguages extends RecipientLanguages {
 }
 
 /**
- * **P18.98-T5 AC-5 — an email in its recipient's language** (ADR-0179 §7): their saved `users.locale`; for one with
+ * **P18.10-T5 AC-5 — an email in its recipient's language** (ADR-0179 §7): their saved `users.locale`; for one with
  * none, the language of the request that caused it where that was theirs (the verification and reset emails); else a
- * reader who has chosen nothing — Bahasa Indonesia, since the default went live at P18.98-T4's exit. Read when the email
+ * reader who has chosen nothing — Bahasa Indonesia, since the default went live at P18.10-T4's exit. Read when the email
  * is rendered, off the request.
  */
-describe('P18.98-T5 AC-5 the email in its recipient’s language', () => {
+describe('P18.10-T5 AC-5 the email in its recipient’s language', () => {
   const renderer = new EmailTemplateRenderer({ getOrThrow: () => 'https://app.agencyboost.test' } as unknown as ConfigService);
   let email: CapturingEmail;
   let languages: SavedLanguages;

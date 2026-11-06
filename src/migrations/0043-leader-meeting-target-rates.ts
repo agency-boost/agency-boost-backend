@@ -25,7 +25,7 @@ export interface RateCell {
 }
 
 /**
- * **One typed target, read as a rate** (P18.97-T1 AC-11): *"{n} ({r} @ unit)"* is the rate *r* — in sen for *APE*, a
+ * **One typed target, read as a rate** (P18.9-T1 AC-11): *"{n} ({r} @ unit)"* is the rate *r* — in sen for *APE*, a
  * count to two places for the others, the places a rate is typed to — *TBD* and an empty cell are no target, and any
  * other text is kept as typed (`typed`), shown so until an editor enters a rate. The *n* a leader typed is not kept:
  * it is the rate times the units, which the table computes now, and where they disagreed (UI-008) it was the wrong half.
@@ -44,7 +44,7 @@ export function rateCellOf(row: string, value: string, version: number): { cell:
 
 /**
  * **The forum's typed targets, as rates** (ADR-0175 §4, reversing ADR-0129 §5's free text; the client's KPM Owner
- * findings of 2026-10-27, UI-008; P18.97-T1 AC-11, parity I-487).
+ * findings of 2026-10-27, UI-008; P18.9-T1 AC-11, parity I-487).
  *
  * A *Monthly Target* was free text, and the leaders typed *"8 (1 @ unit)"* beside 5 units, with nothing to check the
  * sum. It is a rate per unit now, shown as the rate times the meeting's *# of units*. This reads each meeting's cells

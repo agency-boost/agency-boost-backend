@@ -21,7 +21,7 @@ export class RequirementViewDto {
   unit!: string;
 }
 
-/** A campaign requirement, as the Owner's list reads it (P18.5-T8, D-evaluable). */
+/** A campaign requirement, as the Owner's list reads it (P18.2-T8, D-evaluable). */
 export class CampaignRequirementDto extends RequirementViewDto {
   @ApiProperty({
     type: Boolean,
@@ -156,13 +156,14 @@ export class MetricDefinitionDto {
   unit!: string;
 
   @ApiProperty({
-    type: Number,
+    type: String,
+    example: '18.11',
     description:
-      'The roadmap phase that computes it. No screen shows it: `computed` says whether it is '
-      + 'measured by the time campaigns are evaluated, and a phase number is a schedule a customer '
-      + 'can do nothing with.',
+      'The roadmap phase that computes it, written as the roadmap writes it and ordered like a version '
+      + '(`18.10` after `18.9`). No screen shows it: `computed` says whether it is measured by the time '
+      + 'campaigns are evaluated, and a phase number is a schedule a customer can do nothing with.',
   })
-  phase!: number;
+  phase!: string;
 
   @ApiProperty({
     type: Boolean,
@@ -191,7 +192,7 @@ export class StandingOverrideByDto {
   name!: string;
 }
 
-/** A final standing's override — the *Achieved* cell's icon names who, when and why (P18.6-T2 AC-8). */
+/** A final standing's override — the *Achieved* cell's icon names who, when and why (P18.3-T2 AC-8). */
 export class StandingOverrideViewDto implements StandingOverrideView {
   @ApiProperty({ enum: ['qualified', 'not_met'] })
   status!: 'qualified' | 'not_met';
@@ -206,7 +207,7 @@ export class StandingOverrideViewDto implements StandingOverrideView {
   at!: string;
 }
 
-/** What setting or clearing an override answers (P18.6-T2 AC-5). The screen reads the tree again after either. */
+/** What setting or clearing an override answers (P18.3-T2 AC-5). The screen reads the tree again after either. */
 export class StandingOverrideResultDto implements StandingOverrideResult {
   @ApiProperty({ type: String })
   campaignCode!: string;

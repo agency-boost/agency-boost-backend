@@ -27,13 +27,13 @@ const READ_ONLY_OWNER = new RequestContext(
 
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
-  // The Phase 18.5 exit review (B1): archived types and per-type counts are the office's administration's.
+  // The Phase 18.2 exit review (B1): archived types and per-type counts are the office's administration's.
   listTypes: 'event_settings:read',
   createType: 'tenant_config:write',
   updateType: 'tenant_config:write',
   archiveType: 'tenant_config:write',
   restoreType: 'tenant_config:write',
-  // P18.5-T5 AC-2: the list is the office's administration's (the leak), with the roll call and the picker's people.
+  // P18.2-T5 AC-2: the list is the office's administration's (the leak), with the roll call and the picker's people.
   list: 'event_settings:read',
   create: 'tenant_config:write',
   update: 'tenant_config:write',
@@ -116,11 +116,11 @@ describe('an office’s events over HTTP (P5-T6)', () => {
     );
 
     /*
-     * The Phase 18.5 exit review (B1): every member read archived types and how many events — leader-only and
+     * The Phase 18.2 exit review (B1): every member read archived types and how many events — leader-only and
      * chosen-people ones included — named each. Members read the active types, with no counts, in `/kpm/config`.
      */
     it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
-      'P18.5-T5 AC-2 refuses %s the types, archived ones and counts included', async (_name, who) => {
+      'P18.2-T5 AC-2 refuses %s the types, archived ones and counts included', async (_name, who) => {
         session.current = who;
         const res = await request(app.getHttpServer()).get(`${url}/types?includeArchived=true`).expect(403);
         expect(res.body.error.code).toBe('PERM_DENIED');
@@ -129,11 +129,11 @@ describe('an office’s events over HTTP (P5-T6)', () => {
     );
 
     /*
-     * P18.5-T5 AC-2 — **the leak, closed.** This test asserted the opposite until Phase 18.5: every member read the
+     * P18.2-T5 AC-2 — **the leak, closed.** This test asserted the opposite until Phase 18.2: every member read the
      * office's events, leader-only ones and their invitee lists included, against ADR-0039 and the Owner's own manual.
      */
     it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
-      'P18.5-T5 AC-2 refuses %s the events list, 403 with no event in the body', async (_name, who) => {
+      'P18.2-T5 AC-2 refuses %s the events list, 403 with no event in the body', async (_name, who) => {
         session.current = OWNER;
         await request(app.getHttpServer()).post(url).send(anEvent({
           audience: { issuer: 'kpm', scope: 'leaders' },
@@ -149,7 +149,7 @@ describe('an office’s events over HTTP (P5-T6)', () => {
     );
 
     it.each([['the Owner', OWNER], ['the Admin', ADMIN], ['a read-only session as the Owner', READ_ONLY_OWNER]])(
-      'P18.5-T5 AC-2 shows %s the events list', async (_name, who) => {
+      'P18.2-T5 AC-2 shows %s the events list', async (_name, who) => {
         session.current = who;
         await request(app.getHttpServer()).get(url).expect(200);
       },
@@ -271,13 +271,13 @@ describe('an office’s events over HTTP (P5-T6)', () => {
   });
 
   /**
-   * **The Owner's refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): a code taken and an archived type — Nest's
+   * **The Owner's refusals, in Bahasa Indonesia** (P18.10-T5 AC-7): a code taken and an archived type — Nest's
    * `BadRequestException` once, the same `400 VALIDATION_FAILED` now — and a malformed event's field sentences.
    */
-  describe('P18.98-T5 AC-7 the Owner’s refusals in Indonesian', () => {
+  describe('P18.10-T5 AC-7 the Owner’s refusals in Indonesian', () => {
     const post = (body: Record<string, unknown>) => request(app.getHttpServer()).post(url).set(...IN_INDONESIAN).send(body);
 
-    it('P18.98-T5 AC-7 a code taken and an archived type answer 400 VALIDATION_FAILED, the words Indonesian', async () => {
+    it('P18.10-T5 AC-7 a code taken and an archived type answer 400 VALIDATION_FAILED, the words Indonesian', async () => {
       await request(app.getHttpServer()).post(url).send(anEvent()).expect(201);
       const taken = await post(anEvent()).expect(400);
       expect(taken.body.error).toEqual({
@@ -299,7 +299,7 @@ describe('an office’s events over HTTP (P5-T6)', () => {
       expect(typeTaken.body.error.message).toBe('KPM ini sudah memiliki jenis event dengan kode TRAINING.');
     });
 
-    it('P18.98-T5 AC-7 a malformed event: every field sentence in Indonesian, joined as in English', async () => {
+    it('P18.10-T5 AC-7 a malformed event: every field sentence in Indonesian, joined as in English', async () => {
       const res = await post(anEvent({
         endsAt: '2026-10-01T01:00:00Z', locationUrl: 'javascript:alert(1)', audience: { issuer: 'x', scope: 'all_agents' },
       })).expect(400);

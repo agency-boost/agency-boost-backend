@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { SeedRecord } from './company-template.schema';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
@@ -169,7 +169,7 @@ type TemplateCategory = SeedActivityCategory & {
   appliesToOrgLevelCodes?: string[];
 };
 
-/** The whole-source check's refusals, in both languages (P18.98-T5 AC-3). */
+/** The whole-source check's refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = TEMPLATE_REFUSALS.VALIDATION_FAILED;
 
 /** What would make a lead pipeline payload produce a broken office — one sentence each, in both languages. */
@@ -255,19 +255,36 @@ export class ProvisioningService {
      * without them that one source is refused rather than copied unchecked.
      */
     @Optional() @InjectModel(Company.name) private readonly companies: Model<CompanyDocument> | null = null,
-    @Optional() private readonly orgLevels: OrgLevelService | null = null,
+    /*
+     * *Named with `@Inject`* (P19.4-T5): the union type `OrgLevelService | null` emits no class to resolve by, so the
+     * application injected nothing here and an office started from the Template library — and, since ADR-0213 §3, one
+     * for a company with no template — was refused as a server fault. The token is the class, said outright.
+     */
+    @Optional() @Inject(OrgLevelService) private readonly orgLevels: OrgLevelService | null = null,
   ) {}
 
   /**
    * **Resolve and check the whole source** an office will be built from (ADR-0115 §4), before the
    * office row is written — so a refusal leaves no half-made office.
    *
-   * `startFrom` absent means the company's default template: what approving a KPM request uses. A
-   * template must be the company's and active (an archived one is kept to be read, not offered).
+   * `startFrom` absent means the company's default template: what approving a KPM request uses — or, for a company
+   * with no template yet (ADR-0213 §3), the Template library's default. A template must be the company's and active (an
+   * archived one is kept to be read, not offered).
    * Each of its seven kinds is its newest **published** version, or nothing: a draft is somebody's
    * work in progress, and a kind never published is empty in the office (ADR-0115 §3).
    */
-  async planFor(companyId: string, startFrom?: StartFrom): Promise<ProvisioningPlan> {
+  async planFor(companyId: string, requested?: StartFrom): Promise<ProvisioningPlan> {
+    /*
+     * **A company with no template starts its office from the built-in default** (ADR-0213 §3; ADR-0168 §2, ADR-0185 §5):
+     * a new company is made with no template, and approving a KPM request for it before it has one — `startFrom` absent —
+     * must still make an office. Where there is no Template library either — a database migration `0037` has not run
+     * on — from the AgencyBoost defaults it would hold (ADR-0164 §4). With a template of its own, its default, as always.
+     */
+    let startFrom = requested;
+    if (!startFrom && !(await this.named.exists({ companyId, isDefault: true, deletedAt: null }).exec())) {
+      const library = this.companies ? await this.companies.exists({ kind: 'template', deletedAt: null }).exec() : null;
+      startFrom = library ? { kind: 'template', templateLibrary: true } : { kind: 'defaults' };
+    }
     let plan: ProvisioningPlan;
     if (startFrom?.kind === 'defaults') {
       plan = {
@@ -412,7 +429,7 @@ export class ProvisioningService {
    */
   private refuseBrokenPlan(plan: ProvisioningPlan, named?: BrokenSource): void {
     const { kinds } = plan;
-    // Each problem after its section's name, in both languages (P18.98-T5 AC-3): *Activity binding: …*.
+    // Each problem after its section's name, in both languages (P18.10-T5 AC-3): *Activity binding: …*.
     const problems: FieldSentence[] = [];
     const say = (section: TemplateSection, found: readonly FieldSentence[]) => problems.push(
       ...found.map((inner) => SAY.inSection({ section, inner })),
@@ -493,6 +510,40 @@ export class ProvisioningService {
    * that simply works. The payload is rendered here from what was just copied, so it is
    * consistent by construction.
    */
+  /**
+   * **Retire everything provisioning wrote for an office** (ADR-0191 §5, P19-T3 AC-6, AC-7): soft-delete each of its
+   * configuration rows and snapshots — never a delete (invariants §3, §6) — so it can be provisioned again from another
+   * company's template when it moves, or put away with the office when an empty one is deleted or an approval is undone.
+   * Every unique index on these collections counts live rows only, so the codes are free again for `provision`.
+   *
+   * Raw writes, like the seeds above, each scoped by `kpmId` (`raw-writes.tenancy.spec.ts`). Answers how many rows of
+   * each collection it retired, for the audit row.
+   */
+  async retireConfigFor(kpmId: string, at: Date): Promise<Record<string, number>> {
+    // One shape for all twelve: each is written with `kpmId` and `deletedAt`, and nothing else is touched here.
+    type Retirable = Model<{ kpmId: string; deletedAt: Date | null }>;
+    const owned: Array<[string, Retirable]> = [
+      ['activityCategories', this.categories as unknown as Retirable],
+      ['activityTypes', this.types as unknown as Retirable],
+      ['leadStatuses', this.leadStatuses as unknown as Retirable],
+      ['ratioDefinitions', this.ratios as unknown as Retirable],
+      ['configSnapshots', this.snapshots as unknown as Retirable],
+      ['trainingCategories', this.trainingCategories as unknown as Retirable],
+      ['trainingSkills', this.trainingSkills as unknown as Retirable],
+      ['trainingModules', this.trainingModules as unknown as Retirable],
+      ['activationTemplates', this.activationTemplates as unknown as Retirable],
+      ['eventTypes', this.eventTypes as unknown as Retirable],
+      ['capabilityCatalogs', this.capabilityCatalogs as unknown as Retirable],
+      ...(this.bindings ? [['activityBindings', this.bindings as unknown as Retirable] as [string, Retirable]] : []),
+    ];
+    const retired: Record<string, number> = {};
+    for (const [name, model] of owned) {
+      const result = await model.updateMany({ kpmId, deletedAt: null }, { $set: { deletedAt: at } }).exec();
+      retired[name] = result.modifiedCount;
+    }
+    return retired;
+  }
+
   async publishInitialSnapshotFor(kpmId: string, ctx: RequestContext): Promise<void> {
     const payload = await this.renderer.read(ctx);
     await this.snapshots.create({

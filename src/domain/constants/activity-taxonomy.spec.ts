@@ -24,7 +24,7 @@ import { RATIO_BENCHMARKS } from './benchmarks';
 const PROTOTYPE = join(__dirname, '../../../../prototype/AgencyBoost_KPM_Owner.html');
 
 /**
- * **The seed in the English it gave before P18.98-T7** (OD-238): the platform's Default template is written in
+ * **The seed in the English it gave before P18.10-T7** (OD-238): the platform's Default template is written in
  * Bahasa Indonesia, so the prototype is compared against the words recorded for migration 0046 — and the Indonesian is
  * pinned word for word in its own test below.
  */
@@ -59,13 +59,13 @@ describe('the seeded activity taxonomy matches the prototype', () => {
   });
 
   /*
-   * **Three named exceptions, the client's** (2026-10-26, ADR-0160 §1, P18.8-T8 AC-4; registered in
+   * **Three named exceptions, the client's** (2026-10-26, ADR-0160 §1, P18.5-T8 AC-4; registered in
    * `prototype-parity.md`): item 3 reads *Set Appointment*, item 7 *Melakukan presentasi recruitment* — the
    * second time it is renamed, after P13.1-T3's *Proses pendaftaran kode agen* — and item 8 says
    * *recruitment* where the prototype says *NBO*. Pinned by code and by both wordings, so the prototype still
    * has to say what it said, and a fourth label drifting from it fails here rather than joining these.
    *
-   * **And a fourth, the approved glossary's §C1** (OD-237; P18.98-T7): item 10 says *the company* where the
+   * **And a fourth, the approved glossary's §C1** (OD-237; P18.10-T7): item 10 says *the company* where the
    * prototype names *Prudential* — our own words name no company.
    */
   const RENAMED: Readonly<Record<string, { prototype: string; ours: string }>> = {
@@ -81,7 +81,7 @@ describe('the seeded activity taxonomy matches the prototype', () => {
     },
   };
 
-  it('P18.8-T8 AC-4 carries the same twelve labels, verbatim but for items 3, 7 and 8, renamed at the client’s request, and 10', () => {
+  it('P18.5-T8 AC-4 carries the same twelve labels, verbatim but for items 3, 7 and 8, renamed at the client’s request, and 10', () => {
     for (const [code, { prototype, ours }] of Object.entries(RENAMED)) {
       const index = SEED_ACTIVITY_TYPES.findIndex((t) => t.code === code);
       expect({ code, title: items[index].title }).toEqual({ code, title: prototype });
@@ -95,7 +95,7 @@ describe('the seeded activity taxonomy matches the prototype', () => {
       .toEqual(items.map((i, index) => RENAMED[SEED_ACTIVITY_TYPES[index].code]?.ours ?? i.title));
   });
 
-  it('P18.8-T8 AC-3 keeps the earlier seeded wordings, for the migration to recognise', () => {
+  it('P18.5-T8 AC-3 keeps the earlier seeded wordings, for the migration to recognise', () => {
     // Item 7 was seeded with the prototype's words and then with P13.1-T3's; an office may hold either.
     expect(SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160).toEqual({
       LEADS_CONTACTED: { labels: [RENAMED.LEADS_CONTACTED.prototype] },
@@ -107,7 +107,7 @@ describe('the seeded activity taxonomy matches the prototype', () => {
     });
   });
 
-  it('P18.8-T8 AC-2 carries the same descriptions but item 7’s, dropped with its rename', () => {
+  it('P18.5-T8 AC-2 carries the same descriptions but item 7’s, dropped with its rename', () => {
     // Item 7's note, *secara mandiri atau melalui BOP*, described registering an agent code (ADR-0160 §1).
     const seven = SEED_ACTIVITY_TYPES.findIndex((t) => t.code === 'RECRUIT_PRESENTATION');
     expect(items[seven].description).toBe('secara mandiri atau melalui BOP');
@@ -155,12 +155,12 @@ describe('the seeded lead pipelines against the prototype', () => {
   });
 
   /*
-   * **One named exception, the client's** (2026-10-26, ADR-0167 §10, OD-205, UI-027; P18.95-T9 AC-6; registered in
+   * **One named exception, the client's** (2026-10-26, ADR-0167 §10, OD-205, UI-027; P18.7-T9 AC-6; registered in
    * `prototype-parity.md`): the recruitment pipeline's first status reads *Not yet approached*, the sales pipeline's
    * words, where both prototypes say *Not approached*. Pinned by code and by both wordings, so the prototype still
    * has to say what it said, and another stage drifting from it fails here rather than joining this one.
    */
-  it('P18.95-T9 AC-6 starts the recruitment pipeline in the sales pipeline’s words, renamed at the client’s request', () => {
+  it('P18.7-T9 AC-6 starts the recruitment pipeline in the sales pipeline’s words, renamed at the client’s request', () => {
     const overall = readFileSync(join(__dirname, '../../../../prototype/AgencyBoost_Overall.html'), 'utf8');
     /** One of the agent app's status orders (`Overall.html:5366-5367`), read rather than retyped. */
     const order = (name: string): string[] =>
@@ -181,7 +181,7 @@ describe('the seeded lead pipelines against the prototype', () => {
     expect(englishStatus(recruitment[0])).toBe('Not yet approached');
     expect(englishStatus(recruitment[0])).toBe(order('SALES_STATUS_ORDER')[0]);
     expect(englishStatus(recruitment[0])).toBe(labelsIn('leadstatuses-sales')[0]);
-    // In Bahasa Indonesia since P18.98-T7, still the sales pipeline's first words.
+    // In Bahasa Indonesia since P18.10-T7, still the sales pipeline's first words.
     expect(recruitment[0].label).toBe(SEED_LEAD_STATUSES[0].label);
 
     // Every other stage keeps the agent app's words (ADR-0043's seven).
@@ -239,7 +239,7 @@ describe('the seeded lead pipelines against the prototype', () => {
 describe('the seeded ratios against the prototype', () => {
   const html = readFileSync(PROTOTYPE, 'utf8');
 
-  it('P18.8-T9 AC-3 carries the five, with the benchmarks the prototype shows raised at the client’s request', () => {
+  it('P18.5-T9 AC-3 carries the five, with the benchmarks the prototype shows raised at the client’s request', () => {
     const shown = [...html.matchAll(/class="ratio-benchmark-input" value="([\d.]+)"/g)]
       .map((m) => Number(m[1]));
     expect(shown).toEqual([30, 15.0, 15.0, 0.30, 1.50]);
@@ -260,7 +260,7 @@ describe('the seeded ratios against the prototype', () => {
     ]);
   });
 
-  it('P18.8-T9 AC-1 names them the way the prototype’s rows do, but for the client’s Set appointment to meeting', () => {
+  it('P18.5-T9 AC-1 names them the way the prototype’s rows do, but for the client’s Set appointment to meeting', () => {
     const rows = [...html.matchAll(/<div class="cfg-label">([^<\n]+)\n\s*<div id="ratio-builder-/g)]
       .map((m) => m[1].trim());
     expect(rows).toEqual([
@@ -281,7 +281,7 @@ describe('the seeded ratios against the prototype', () => {
     ]);
   });
 
-  it('P18.8-T9 AC-1 says what each measures in the prototype’s words, but for Set appointment to meeting', () => {
+  it('P18.5-T9 AC-1 says what each measures in the prototype’s words, but for Set appointment to meeting', () => {
     // `Overall.html:5215-5268`, in the ratios' order. The fifth says *set appointment* where the prototype says
     // *pendekatan prospek*, with its name (ADR-0160 §2).
     const overall = readFileSync(join(__dirname, '../../../../prototype/AgencyBoost_Overall.html'), 'utf8');
@@ -293,7 +293,7 @@ describe('the seeded ratios against the prototype', () => {
     expect(ours[4]).toBe('Mengukur efektivitas set appointment dalam menghasilkan pertemuan');
   });
 
-  it('P18.8-T9 AC-1 shows Set appointment to meeting as a percent, its formula unchanged', () => {
+  it('P18.5-T9 AC-1 shows Set appointment to meeting as a percent, its formula unchanged', () => {
     const mpa = SEED_RATIO_DEFINITIONS.find((r) => r.code === 'MEETING_PER_APPROACH')!;
     expect(mpa).toMatchObject({
       numerator: ['SELL_PRESENTATION', 'RECRUIT_PRESENTATION'],
@@ -365,12 +365,12 @@ describe('the seeded summary tiles against the prototype’s strip (ADR-0064)', 
 });
 
 /*
- * **The platform's Default template in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5). The words every
+ * **The platform's Default template in Bahasa Indonesia** (P18.10-T7; OD-238, option 1; ADR-0179 §5). The words every
  * new office starts with, pinned word for word: *Recruitment*, *Follow-up* and *AAJI* kept English by the approved
  * glossary (§A.6, §C11), *Dibayar dan diterbitkan* and *Agen aktif baru* its §B.10 words. The English recorded for
  * migration 0046 is exactly what changed — a code the seed no longer has, or a word it never changed, fails here.
  */
-describe('P18.98-T7 the seeded taxonomy and pipelines in Bahasa Indonesia (OD-238)', () => {
+describe('P18.10-T7 the seeded taxonomy and pipelines in Bahasa Indonesia (OD-238)', () => {
   it('names the five sections and the Development tile in Bahasa Indonesia', () => {
     expect(SEED_ACTIVITY_CATEGORIES.map((c) => [c.label, c.summaryGroupLabel])).toEqual([
       ['Pencarian leads', null],
@@ -414,11 +414,11 @@ describe('P18.98-T7 the seeded taxonomy and pipelines in Bahasa Indonesia (OD-23
 });
 
 /*
- * **`metrics-and-definitions.md` Part 0 says what the seed gives** (P18.98-T7): its table of the twelve, read rather than
+ * **`metrics-and-definitions.md` Part 0 says what the seed gives** (P18.10-T7): its table of the twelve, read rather than
  * retyped, names each item by the seed's label (a note may follow it) and its section by the seed's section. The row
  * for item 10 changed with §C1, and the sections with OD-238: the document and the seed move together, or this fails.
  */
-describe('P18.98-T7 metrics-and-definitions.md’s activity table against the seed', () => {
+describe('P18.10-T7 metrics-and-definitions.md’s activity table against the seed', () => {
   const doc = readFileSync(join(__dirname, '../../../../docs/00-product/metrics-and-definitions.md'), 'utf8');
   const rows = [...doc.matchAll(/^\| (\d+) \| `([A-Z_]+)` \| (.+?) \| [^|]+ \| ([^|]+) \|$/gm)]
     .map(([, num, code, label, category]) => ({ num: Number(num), code, label, category: category.trim() }))

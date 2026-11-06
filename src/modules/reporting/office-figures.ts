@@ -33,7 +33,7 @@ export function shiftMonth(month: string, by: number): string {
 
 /*
  * The periods the Owner's figures name, through the shared formatters (ADR-0167 §1) — **written for the reader**
- * (P18.98-T5 AC-4): months and days in their figures, the words between them in their language (`REPORTING_MESSAGES`).
+ * (P18.10-T5 AC-4): months and days in their figures, the words between them in their language (`REPORTING_MESSAGES`).
  */
 
 /** *Sep 2026*. */
@@ -41,14 +41,28 @@ export function monthLabel(month: string, reader: Reader): string {
   return formatMonth(month, reader.figures);
 }
 
-/** *Agu and Sep 2026*, or *Des 2025 and Jan 2026*: the two months a `MONTHLY2_AA` count read — *Agu dan Sep 2026*. */
-export function twoMonthsLabel(first: string, second: string, reader: Reader): string {
-  return render(REPORTING_MESSAGES.twoMonths({ first, second }), reader);
-}
-
 /** *Jan – Sep 2026*: a year to date through the month it runs to, a month range; the month alone in January. */
 export function yearToDateLabel(through: string, reader: Reader): string {
   return formatMonthRange(`${through.slice(0, 4)}-01`, through, reader.figures);
+}
+
+/**
+ * **The months a figure read, as they are** (P19.3-T1; ADR-0201 §4, *"the dialog names the months it read"*): a run of
+ * consecutive months as a range (*Jan – Sep 2026*, the month alone for one), and months with a gap between them each
+ * run in turn (*Jan – Jul, Sep 2026*), so a month the office holds no file for is never named as read. Ascending
+ * `YYYY-MM`, at least one.
+ */
+export function monthsLabel(months: readonly string[], reader: Reader): string {
+  const sorted = [...months].sort();
+  const runs: [string, string][] = [];
+  for (const m of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && shiftMonth(last[1], 1) === m) last[1] = m;
+    else runs.push([m, m]);
+  }
+  return runs
+    .map(([from, to]) => (from === to ? formatMonth(from, reader.figures) : formatMonthRange(from, to, reader.figures)))
+    .join(', ');
 }
 
 /** *As of 9 Okt 2026* — *Per 9 Okt 2026*: a count read today. */

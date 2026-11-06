@@ -19,10 +19,11 @@ const owner = (kpmId = KPM_A) => new RequestContext('u-owner', 'none', {
 
 const cell = (value: number | null, provenance: 'imported' | 'corrected' | null = value === null ? null : 'imported') =>
   ({ value, provenance, sourceBatchId: null });
+/** A row by kode (P19.5-T2): the month's own APE — corrected or not — and the YTD the file carried, kept as a check. */
 const row = (kpmId: string, membershipId: string, month: string, ytd: number | null, monthly: number | null, corrected = false) => ({
-  kpmId, membershipId, month, agentCode: membershipId.slice(-3), deletedAt: null,
-  apeYtd: cell(ytd === null ? null : ytd * M, ytd === null ? null : corrected ? 'corrected' : 'imported'),
-  apeMonthly: cell(monthly === null ? null : monthly * M),
+  kpmId, membershipId, month, agentCode: membershipId.slice(-3), deletedAt: null, templateVersion: 1,
+  values: { APE: cell(monthly === null ? null : monthly * M, monthly === null ? null : corrected ? 'corrected' : 'imported') },
+  ytdValues: { APE: cell(ytd === null ? null : ytd * M) },
 });
 
 /**
@@ -43,9 +44,9 @@ describe('production readings, for many members at once (P11-T6)', () => {
     await mongoose.connection.db!.collection('monthlyAgentData').insertMany([
       // Rina: July and August on file, September's own APE with its year to date.
       row(KPM_A, RINA, '2026-07', 140, 20), row(KPM_A, RINA, '2026-08', 160, 20), row(KPM_A, RINA, '2026-09', 240, 80),
-      // Budi: August's year to date corrected by hand, then emptied September's; last year's December.
+      // Budi: August's own APE corrected by hand; September's; last year's December.
       row(KPM_A, BUDI, '2025-12', 300, 30), row(KPM_A, BUDI, '2026-08', 90, 10, true), row(KPM_A, BUDI, '2026-09', null, 15),
-      // Dewi: a September row with a year to date and no monthly figure.
+      // Dewi: a September row with a year to date the file carried and no monthly figure — a check, summed by nothing.
       row(KPM_A, DEWI, '2026-09', 50, null),
       // Another office, filed against Rina's membership id: never hers here.
       row(KPM_B, RINA, '2026-09', 999, 999),
@@ -68,18 +69,19 @@ describe('production readings, for many members at once (P11-T6)', () => {
     const batch = await wired.productionReadings.standingsFor(owner(), ids, '2026-09');
 
     for (const id of ids) expect({ id, standing: batch.get(id) }).toEqual({ id, standing: await single(id, '2026-09') });
+    // P19.5-T2 AC-7 (R4): the year to date is the months' sum — July, August and September — never the file's 240.
     expect(batch.get(RINA)).toEqual({
-      yearToDate: { minor: 240 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
-      throughLastMonth: { minor: 160 * M, provenance: 'imported', month: '2026-08', correctedBy: null, correctedAt: null },
+      yearToDate: { minor: 120 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
+      throughLastMonth: { minor: 40 * M, provenance: 'imported', month: '2026-08', correctedBy: null, correctedAt: null },
       thisMonth: { minor: 80 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
     });
   });
 
-  it('P11-T6 AC-9 falls back past a year to date emptied by hand, and keeps a correction’s provenance', async () => {
+  it('P19.5-T2 AC-7 a sum with a corrected month keeps the correction’s provenance; last year is not this year', async () => {
     const budi = (await wired.productionReadings.standingsFor(owner(), [BUDI], '2026-09')).get(BUDI);
     expect(budi).toEqual({
-      yearToDate: { minor: 90 * M, provenance: 'corrected', month: '2026-08', correctedBy: null, correctedAt: null },
-      throughLastMonth: { minor: 90 * M, provenance: 'corrected', month: '2026-08', correctedBy: null, correctedAt: null },
+      yearToDate: { minor: 25 * M, provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: null },
+      throughLastMonth: { minor: 10 * M, provenance: 'corrected', month: '2026-08', correctedBy: null, correctedAt: null },
       thisMonth: { minor: 15 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
     });
   });
@@ -90,18 +92,17 @@ describe('production readings, for many members at once (P11-T6)', () => {
     expect(january.get(BUDI)?.throughLastMonth).toBeNull();
   });
 
-  it('P11-T6 AC-9 a month with no year to date of its own reads the latest one before it', async () => {
+  it('P19.5-T2 AC-15 a year to date the file carried with no month of its own is summed by nothing — nothing held', async () => {
     const august = await wired.productionReadings.standingsFor(owner(), [RINA, DEWI], '2026-08');
     expect(august.get(RINA)).toEqual(await single(RINA, '2026-08'));
-    // Dewi's only figure is September's: nothing through July, and nothing of August's own.
-    expect(august.get(DEWI)).toEqual({ yearToDate: { minor: 50 * M, provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null }, throughLastMonth: null, thisMonth: null });
+    expect(august.get(DEWI)).toEqual({ yearToDate: null, throughLastMonth: null, thisMonth: null });
   });
 
   it('Phase 15 ledgersFor: the same standing from the same read, the month’s two cells, and who corrected each figure', async () => {
     const at = new Date('2026-09-10T04:00:00Z');
     await mongoose.connection.db!.collection('monthlyAgentData').updateOne(
       { kpmId: KPM_A, membershipId: RINA, month: '2026-09' },
-      { $set: { 'apeMonthly.provenance': 'corrected', 'apeMonthly.correctedBy': BUDI, 'apeMonthly.correctedAt': at, 'apeMonthly.reason': 'Report' } },
+      { $set: { 'values.APE.provenance': 'corrected', 'values.APE.correctedBy': BUDI, 'values.APE.correctedAt': at, 'values.APE.reason': 'Report' } },
     );
     const ledgers = await wired.productionReadings.ledgersFor(owner(), [RINA, NOBODY], '2026-09');
     const standings = await wired.productionReadings.standingsFor(owner(), [RINA, NOBODY], '2026-09');
@@ -110,9 +111,10 @@ describe('production readings, for many members at once (P11-T6)', () => {
     expect(ledgers.get(RINA)!.standing.thisMonth).toEqual({
       minor: 80 * M, provenance: 'corrected', month: '2026-09', correctedBy: BUDI, correctedAt: at,
     });
+    // The year to date cell is the sum through the month, corrected because a month in it was (R4).
     expect(ledgers.get(RINA)!.thisMonthCells).toEqual({
       monthly: { value: 80 * M, provenance: 'corrected', correctedBy: BUDI, correctedAt: at, reason: 'Report' },
-      ytd: { value: 240 * M, provenance: 'imported', correctedBy: null, correctedAt: null, reason: null },
+      ytd: { value: 120 * M, provenance: 'corrected', correctedBy: BUDI, correctedAt: at, reason: 'Report' },
     });
     // The single reading names the corrector too.
     expect(await wired.productionReadings.apeForMonth(owner(), RINA, '2026-09')).toEqual(ledgers.get(RINA)!.standing.thisMonth);

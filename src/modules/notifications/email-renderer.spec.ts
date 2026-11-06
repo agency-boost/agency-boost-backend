@@ -2,14 +2,14 @@ import { ConfigService } from '@nestjs/config';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { EmailTemplateRenderer } from './email-renderer';
 import { escapeHtml, toHtml } from './email-html';
-import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
+import { AUTH_TEMPLATES, NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 const config = { getOrThrow: () => 'https://app.agencyboost.test' } as unknown as ConfigService;
 const renderer = new EmailTemplateRenderer(config);
 
 /*
  * The P4-T14 copy below is the English the API writes (`SOURCE_READER`), named as its reader: a recipient who has chosen
- * nothing reads Bahasa Indonesia since the default went live (P18.98-T4's exit), and P18.98-T5 AC-5 below pins that.
+ * nothing reads Bahasa Indonesia since the default went live (P18.10-T4's exit), and P18.10-T5 AC-5 below pins that.
  */
 
 describe('what the transactional mail says (P4-T14)', () => {
@@ -23,7 +23,9 @@ describe('what the transactional mail says (P4-T14)', () => {
       expect(subject).toBe('[AgencyBoost] Verify your email address');
       expect(body).toContain('Hello Rina Wijaya,');
       expect(body).toContain('https://app.agencyboost.test/verify-email/tok-123');
-      expect(body).toContain('cannot sign in until');
+      // P19-T1 (ADR-0190 §1, §4): the link opens a page with one button, and signing in no longer waits for it.
+      expect(body).toContain('press Verify my email');
+      expect(body).not.toContain('cannot sign in');
     });
 
     it('gives reset a link, and tells somebody who did not ask that nothing has changed', () => {
@@ -47,6 +49,20 @@ describe('what the transactional mail says (P4-T14)', () => {
         .render(NotificationTemplate.PASSWORD_RESET, { token: 't' }, SOURCE_READER);
       expect(body).toContain('https://app.test/reset-password/t');
       expect(body).not.toContain('app.test//');
+    });
+
+    it('P19.4-T3 AC-6 invites a new KPM’s Owner by email: the KPM named, the set-password link, how long it works (ADR-0212 §2)', () => {
+      const payload = { token: 'tok-789', fullName: 'Wulan Kartika', office: 'KPM 0602 · Bandung Dago', days: 7 };
+      const en = renderer.render(NotificationTemplate.OWNER_INVITATION, payload, SOURCE_READER);
+      expect(en.subject).toBe('[AgencyBoost] You are the Owner of KPM 0602 · Bandung Dago on AgencyBoost');
+      expect(en.body).toContain('https://app.agencyboost.test/reset-password/tok-789');
+      expect(en.body).toContain('for 7 days');
+      const id = renderer.render(NotificationTemplate.OWNER_INVITATION, payload, readerIn('id'));
+      expect(id.subject).toBe('[AgencyBoost] Anda pemilik KPM 0602 · Bandung Dago di AgencyBoost');
+      expect(id.body).toContain('menjadikan Anda pemilik KPM 0602 · Bandung Dago');
+      // Email only (ADR-0010, ADR-0212 §4): no inbox row, and nothing by WhatsApp.
+      expect(TEMPLATE_CHANNELS[NotificationTemplate.OWNER_INVITATION]).toEqual(['email']);
+      expect(en.body).not.toMatch(/whatsapp/i);
     });
 
     it('greets somebody whose name it does not have, without a hole in the sentence', () => {
@@ -84,7 +100,7 @@ describe('what the transactional mail says (P4-T14)', () => {
       expect(cancelled.body).not.toContain('/notifications');
     });
 
-    it('P18.95-T7 AC-4 an event reminder’s email names its time and place, as its inbox row does', () => {
+    it('P18.7-T7 AC-4 an event reminder’s email names its time and place, as its inbox row does', () => {
       const { subject, body } = renderer.render(NotificationTemplate.EVENT_REMINDER, {
         title: 'Kickoff 2026', startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
       }, SOURCE_READER);
@@ -111,11 +127,11 @@ describe('what the transactional mail says (P4-T14)', () => {
 });
 
 /**
- * **P18.98-T5 AC-5 — the email in its recipient's language** (ADR-0179 §7): the subject, the greeting, the body and the
+ * **P18.10-T5 AC-5 — the email in its recipient's language** (ADR-0179 §7): the subject, the greeting, the body and the
  * sign-off, for the reader `NotificationService` hands the renderer; with none, a reader who has chosen nothing —
- * Bahasa Indonesia, since the default went live at P18.98-T4's exit.
+ * Bahasa Indonesia, since the default went live at P18.10-T4's exit.
  */
-describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
+describe('P18.10-T5 AC-5 the email in the recipient’s language', () => {
   const ID = readerIn('id');
 
   it('AC-5 writes the verification email in Indonesian, the link and the name as they are', () => {
@@ -126,7 +142,8 @@ describe('P18.98-T5 AC-5 the email in the recipient’s language', () => {
     expect(body).toBe([
       'Halo Rina Wijaya,',
       '',
-      'Buka tautan ini untuk memverifikasi alamat Anda. Anda tidak dapat masuk sebelum melakukannya.',
+      // P19-T1 (ADR-0190 §1, §4): it said *Anda tidak dapat masuk sebelum melakukannya.* until 2026-11-04.
+      'Buka tautan ini, lalu tekan Verifikasi email saya untuk memverifikasi alamat Anda.',
       '',
       'https://app.agencyboost.test/verify-email/tok-123',
       '',
@@ -219,15 +236,15 @@ describe('UI-111 the email change’s emails (ADR-0181)', () => {
 });
 
 /**
- * **P18.99-T18 — the HTML alternative** (ADR-0182): every email is multipart, its HTML derived from the rendered text,
+ * **P18.11-T18 — the HTML alternative** (ADR-0182): every email is multipart, its HTML derived from the rendered text,
  * so the text stays the one source of the words. Escaped before it is shaped, so nothing a person typed becomes markup.
  */
-describe('P18.99-T18 the HTML alternative, derived from the text', () => {
-  it('P18.99-T18 escapes every character that could open markup or close an attribute', () => {
+describe('P18.11-T18 the HTML alternative, derived from the text', () => {
+  it('P18.11-T18 escapes every character that could open markup or close an attribute', () => {
     expect(escapeHtml(`Tom & Jerry <b>"hi"</b> it's`)).toBe('Tom &amp; Jerry &lt;b&gt;&quot;hi&quot;&lt;/b&gt; it&#39;s');
   });
 
-  it('P18.99-T18 a <script> somebody typed arrives as text, never as a tag', () => {
+  it('P18.11-T18 a <script> somebody typed arrives as text, never as a tag', () => {
     const html = toHtml('Hello <script>alert("x")</script>,\n\n<img src=x onerror=alert(1)>');
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('<img');
@@ -235,7 +252,7 @@ describe('P18.99-T18 the HTML alternative, derived from the text', () => {
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 
-  it('P18.99-T18 a link becomes an anchor to itself, its text the URL, with the sentence\'s full stop left outside', () => {
+  it('P18.11-T18 a link becomes an anchor to itself, its text the URL, with the sentence\'s full stop left outside', () => {
     const html = toHtml('Open https://app.agencyboost.test/verify-email/tok-1. Or https://app.test/a?x=1&y=2');
     expect(html).toContain(
       '<a href="https://app.agencyboost.test/verify-email/tok-1" style="word-break:break-all">https://app.agencyboost.test/verify-email/tok-1</a>.',
@@ -244,12 +261,12 @@ describe('P18.99-T18 the HTML alternative, derived from the text', () => {
     expect(html).toContain('<a href="https://app.test/a?x=1&amp;y=2" style="word-break:break-all">https://app.test/a?x=1&amp;y=2</a>');
   });
 
-  it('P18.99-T18 only http and https are links: a javascript: URL somebody typed stays text', () => {
+  it('P18.11-T18 only http and https are links: a javascript: URL somebody typed stays text', () => {
     const html = toHtml('javascript:alert(1) and ftp://files.test/x');
     expect(html).not.toContain('<a ');
   });
 
-  it('P18.99-T18 a blank line starts a paragraph, a single newline is a line break, and Windows line ends read the same', () => {
+  it('P18.11-T18 a blank line starts a paragraph, a single newline is a line break, and Windows line ends read the same', () => {
     const html = toHtml('Hello Rina,\r\n\r\nLine one\nline two\n\n\n\n— AgencyBoost\n');
     const paragraphs = html.match(/<p style="[^"]*">[\s\S]*?<\/p>/g) ?? [];
     expect(paragraphs).toHaveLength(3);
@@ -258,18 +275,113 @@ describe('P18.99-T18 the HTML alternative, derived from the text', () => {
     expect(paragraphs[2]).toContain('>— AgencyBoost</p>');
   });
 
-  it('P18.99-T18 is a small, whole document: UTF-8, no image, nothing that tracks an open', () => {
+  it('P18.11-T18 is a small, whole document: UTF-8, no image, nothing that tracks an open', () => {
     const html = toHtml('Hi');
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toContain('<meta charset="utf-8">');
     expect(html).not.toMatch(/<img|<script|<link|url\(/i);
   });
 
-  it('P18.99-T18 the verification email\'s HTML says what its text says, its link an anchor', () => {
+  it('P18.11-T18 the verification email\'s HTML says what its text says, its link an anchor', () => {
     const { body } = renderer.render(NotificationTemplate.EMAIL_VERIFICATION, { token: 'tok-123', fullName: 'Rina Wijaya' }, SOURCE_READER);
     const html = toHtml(body);
     expect(html).toContain('>Hello Rina Wijaya,</p>');
     expect(html).toContain('<a href="https://app.agencyboost.test/verify-email/tok-123"');
     expect(html).toContain('— AgencyBoost');
+  });
+});
+
+/**
+ * **P19-T1 — the password changed, and every auth link pointing home** (UI-163, ADR-0190 §5–§6): *"Kata sandi Anda
+ * diubah"* after a reset or a change, with no token; and each auth mail's link built on the issuing environment's
+ * `APP_ORIGIN`, so a staging mail never opens production's page, or the other way round.
+ */
+describe('P19-T1 the auth mail', () => {
+  it('P19-T1 AC-5 says the password changed, in Indonesian as the owner asked, and links to a reset — no token', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.PASSWORD_CHANGED, { fullName: 'Rina Wijaya' }, readerIn('id'));
+    expect(subject).toBe('[AgencyBoost] Kata sandi Anda diubah');
+    expect(body).toBe([
+      'Halo Rina Wijaya,',
+      '',
+      'Kata sandi akun AgencyBoost Anda baru saja diubah, dan semua perangkat yang masuk dengan kata sandi lama sudah '
+        + 'dikeluarkan.',
+      '',
+      'Jika ini bukan Anda, segera atur ulang kata sandi Anda lewat tautan ini:',
+      'https://app.agencyboost.test/forgot-password',
+      '',
+      '— AgencyBoost',
+    ].join('\n'));
+  });
+
+  it('P19-T1 AC-5 says it in English to an English reader', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.PASSWORD_CHANGED, { fullName: 'Rina' }, SOURCE_READER);
+    expect(subject).toBe('[AgencyBoost] Your password was changed');
+    expect(body).toContain('If this was not you, reset your password now with this link:');
+  });
+
+  it.each([
+    ['production', 'https://agencyboost.id'],
+    ['staging', 'https://staging.agencyboost.id'],
+  ])('P19-T1 AC-8 every auth mail’s link starts with %s’s APP_ORIGIN', (_env, origin) => {
+    const issued = new EmailTemplateRenderer({ getOrThrow: () => origin } as unknown as ConfigService);
+    const links: Record<string, string[]> = {};
+    for (const id of AUTH_TEMPLATES) {
+      const { body } = issued.render(id, { token: 'tok-1', fullName: 'Rina', newEmail: 'rina.baru@kpm.test' }, readerIn('id'));
+      links[id] = body.match(/https?:\/\/\S+/g) ?? [];
+    }
+    expect(links).toEqual({
+      'auth.email_verification': [`${origin}/verify-email/tok-1`],
+      'auth.password_reset': [`${origin}/reset-password/tok-1`],
+      'auth.password_changed': [`${origin}/forgot-password`],
+      'auth.email_change_verification': [`${origin}/verify-email-change/tok-1`],
+      // The notice to the old address has no link at all (ADR-0181).
+      'auth.email_change_requested': [],
+      // A linked login's (ADR-0199 §2): the link to the other login's page; the notice none; the linked notice *Profil saya*.
+      'auth.account_link_request': [`${origin}/link-account/tok-1`],
+      'auth.account_link_requested': [],
+      'auth.account_linked': [`${origin}/profile`],
+    });
+  });
+});
+
+/**
+ * **UI-169 item 5 — a linked login's three emails** (ADR-0199 §2): the link, to the other login's address, naming who asked;
+ * the notice to the starting login's, with no link that applies anything; and the notice to both once it is linked.
+ */
+describe('P19.2-T1 AC-8 a linked login’s emails (ADR-0199)', () => {
+  it('P19.2-T1 AC-8 the link names who asked and opens the app’s link-account page', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.ACCOUNT_LINK_REQUEST, {
+      token: 'tok-link', fullName: 'Wilson Tanoto', requesterName: 'Wilson Tanoto', requesterEmail: 'owner@kpm0417.test',
+    }, SOURCE_READER);
+    expect(subject).toBe('[AgencyBoost] Link this login to another');
+    expect(body).toContain('Wilson Tanoto (owner@kpm0417.test) asked to link their AgencyBoost login to this one');
+    expect(body).toContain('https://app.agencyboost.test/link-account/tok-link');
+    expect(body).toContain('Nothing is linked until the link is opened');
+  });
+
+  it('P19.2-T1 AC-8 the notice to the starting login names the other address, says what to do, and has no link', () => {
+    const { subject, body } = renderer.render(NotificationTemplate.ACCOUNT_LINK_REQUESTED, {
+      fullName: 'Wilson Tanoto', linkEmail: 'wilson@agencyboost.test',
+    }, SOURCE_READER);
+    expect(subject).toBe('[AgencyBoost] Your login is being linked');
+    expect(body).toContain('asked to link it to the login wilson@agencyboost.test.');
+    expect(body).toContain('If this was not you, change your password now');
+    expect(body).not.toMatch(/https?:\/\//);
+  });
+
+  it('P19.2-T1 AC-8 the linked notice names the other login and points at Profil saya to remove it, in Indonesian too', () => {
+    const en = renderer.render(NotificationTemplate.ACCOUNT_LINKED, { fullName: 'Wilson', otherEmail: 'a@b.test' }, SOURCE_READER);
+    expect(en.subject).toBe('[AgencyBoost] Two logins were linked');
+    expect(en.body).toContain('now linked to the login a@b.test');
+    expect(en.body).toContain('remove the link in My profile');
+    const id = renderer.render(NotificationTemplate.ACCOUNT_LINKED, { fullName: 'Wilson', otherEmail: 'a@b.test' }, readerIn('id'));
+    expect(id.subject).toBe('[AgencyBoost] Dua akun telah ditautkan');
+    expect(id.body).toContain('sekarang tertaut ke akun a@b.test');
+    expect(id.body).toContain('hapus tautan itu di Profil saya');
+    const link = renderer.render(NotificationTemplate.ACCOUNT_LINK_REQUEST, {
+      token: 't', fullName: 'B', requesterName: 'Wilson', requesterEmail: 'owner@kpm0417.test',
+    }, readerIn('id'));
+    expect(link.subject).toBe('[AgencyBoost] Tautkan akun ini ke akun lain');
+    expect(link.body).toContain('meminta akun AgencyBoost-nya ditautkan ke akun ini');
   });
 });

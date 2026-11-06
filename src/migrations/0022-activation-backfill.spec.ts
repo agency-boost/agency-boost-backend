@@ -79,7 +79,7 @@ describe('0022 — the activation backfill (OD-119)', () => {
       expect((await col('activationProgress').find({}).toArray()).map((r) => [r.membershipId, r.origin])).toEqual([[placed, 'backfill']]);
     });
 
-    it('P18.96-T2 AC-1 passes over an existing agent on every run, and starts a new hire on their join date, not their stamp', async () => {
+    it('P18.8-T2 AC-1 passes over an existing agent on every run, and starts a new hire on their join date, not their stamp', async () => {
       const kpmId = await office();
       await checklist(kpmId, 1, ['ONE']);
       // Classified by 0040, or written so by an import: an existing agent is never given an activation.
@@ -139,7 +139,7 @@ describe('0022 — the activation backfill (OD-119)', () => {
         .map((u) => u.email).sort();
       expect(emails).toEqual([
         'agent@kpm0555.test', 'budi@kpm0417.test', 'dimas@kpm0417.test', 'indah@kpm0417.test',
-        // P18.96-T6's Lukman (`activation-3m-fixture.ts`); Tari, marked left and so removed, has none here.
+        // P18.8-T6's Lukman (`activation-3m-fixture.ts`); Tari, marked left and so removed, has none here.
         'lukman@kpm0417.test', 'novi@kpm0417.test',
         // Yanti's second membership: her first, removed, has none.
         'removed@kpm0417.test', 'rina@kpm0417.test', 'siti@kpm0417.test', 'wahyu@kpm0417.test',

@@ -5,16 +5,12 @@ import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { RequestDocumentUploadDto } from '@/modules/assets/asset.dto';
 import { SignedUploadDto } from '@/modules/assets/asset.response.dto';
+import { AttachPitchDocumentDto, RecruitmentBriefQueryDto, SetPitchConfirmationDto } from './recruitment.dto';
 import {
-  AttachPitchDocumentDto, RecruitmentBriefQueryDto, SaveRecruitmentPlaybookDto, SetPitchConfirmationDto,
-} from './recruitment.dto';
-import {
-  PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto, RecruitmentPlaybookAdminDto,
-  RecruitmentPlaybookDto,
+  PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto,
 } from './recruitment.response.dto';
 import { RecruitmentPitchService } from './recruitment-pitch.service';
 import { RecruitmentPlanService } from './recruitment-plan.service';
-import { RecruitmentPlaybookService } from './recruitment-playbook.service';
 
 /** A refusal the derived descriptions cannot know, in the shared envelope. */
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
@@ -45,12 +41,14 @@ export class RecruitmentController {
   @ApiOperation({
     summary: 'The Recruitment Attack Plan for a candidate brief',
     description:
-      'The brief’s three questions as chips, whether the office’s company has a recruitment playbook, and — '
+      'The brief’s three questions as chips, whether the office’s template has a recruitment playbook, and — '
       + 'with a brief — the plan built from that playbook: the profile, an opening per motivation, an '
       + 'objection per hesitation (the profile’s own where it has one, else the base), and the next action, '
       + 'each list in the chips’ order. No brief, or no playbook: `plan: null`. All three parameters or none; '
       + 'an unknown or repeated code, an empty list, a missing parameter or any other parameter is `400`. '
-      + `The words are the company’s, read live. Nothing about the candidate is stored. ${READERS}`,
+      + 'The words are the published playbook of the template the office was made from — else its company\'s default '
+      + 'template — read live (ADR-0210 §4); a template with none published is `hasPlaybook: false`. Nothing about the '
+      + `candidate is stored. ${READERS}`,
   })
   @ApiResponse({ status: 200, type: RecruitmentAttackPlanDto })
   async attackPlan(@Ctx() ctx: RequestContext, @Query() query: RecruitmentBriefQueryDto) {
@@ -162,57 +160,5 @@ export class RecruitmentPitchController {
     @Body() dto: SetPitchConfirmationDto,
   ) {
     return this.pitch.confirm(ctx, slot, item, dto);
-  }
-}
-
-/**
- * **A company's recruitment playbook, on the console** (OD-88 → option 5, ADR-0125; the Company template's
- * *Recruitment* tab). The company's own, shared by every template and read live by every office of the
- * company. Read under `company_template:read`; saved under **`recruitment_playbook:write`** — the Super
- * Admin's alone, apart from `company_template:write` because the words reach every office at once, as a
- * product does.
- */
-@ApiTags('recruitment')
-@ApiBearerAuth()
-@Controller('admin/companies/:companyId/recruitment-playbook')
-export class RecruitmentPlaybookController {
-  constructor(private readonly playbooks: RecruitmentPlaybookService) {}
-
-  @Get()
-  @RequirePermission('company_template:read')
-  @ApiOperation({
-    summary: 'A company’s recruitment playbook',
-    description:
-      'The company’s playbook with its version, or `null` for a company with none; the AgencyBoost words, to '
-      + 'start one from; the brief’s vocabulary its words are keyed by; and the bounds a save is held to '
-      + '(`limits`).',
-  })
-  @ApiResponse({ status: 200, type: RecruitmentPlaybookAdminDto })
-  async read(@Ctx() ctx: RequestContext, @Param('companyId') companyId: string) {
-    return this.playbooks.readForAdmin(companyId, ctx.reader);
-  }
-
-  @Put()
-  @RequirePermission('recruitment_playbook:write')
-  @ApiOperation({
-    summary: 'Save a company’s recruitment playbook',
-    description:
-      'The whole playbook in one write, pinned to `version` — `null` only to create the first. Every profile '
-      + 'and every hesitation answered, an opening for every motivation, each text 1 to 600 characters, 1 to 6 '
-      + 'benefits a profile, no key the playbook does not have: otherwise `400 VALIDATION_FAILED` with every '
-      + 'violation in `details.violations`, each `{ field, message }`, the field a path into the request — '
-      + '`body.profiles.retiree.benefits[1]`, `body.objections.time.youSay`, `body.nextAction`. Audited with '
-      + 'the words before and after. Every office of the company reads it on its next plan.',
-  })
-  @ApiResponse({ status: 200, type: RecruitmentPlaybookDto })
-  @ApiResponse(refusal(
-    409,
-    '`VERSION_CONFLICT` — the playbook changed since it was read, or `version: null` for a company that has '
-    + 'one. Nothing is written.',
-  ))
-  async save(
-    @Ctx() ctx: RequestContext, @Param('companyId') companyId: string, @Body() dto: SaveRecruitmentPlaybookDto,
-  ) {
-    return this.playbooks.save(ctx, companyId, { version: dto.version, body: dto.body });
   }
 }

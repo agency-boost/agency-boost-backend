@@ -107,16 +107,16 @@ describe('0002 — moving the agent code onto the account', () => {
     const result = await run();
     expect(result.users).toBe(1);
     expect(result.collisions).toBe(1);
-    // Counted, never named: the result is printed to the deploy log (P18.7-T1).
+    // Counted, never named: the result is printed to the deploy log (P18.4-T1).
     expect(JSON.stringify(result)).not.toMatch(/@kpm\.test/);
   });
 
   /*
-   * P18.7-T1 (the security review's L5): there is no ledger, so every deploy runs this again. The account
+   * P18.4-T1 (the security review's L5): there is no ledger, so every deploy runs this again. The account
    * reported as a collision on the first run must not claim the pair on the second: with the users' unique
    * index standing, that was an E11000, and every deploy from then on stopped at this migration.
    */
-  it('P18.7-T1 runs again over a collision without claiming the taken pair, and without throwing', async () => {
+  it('P18.4-T1 runs again over a collision without claiming the taken pair, and without throwing', async () => {
     // The index the users schema builds, as a deployed database has it.
     await db().collection('users').createIndex(
       { companyId: 1, agentCode: 1 },

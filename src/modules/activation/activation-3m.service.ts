@@ -21,7 +21,7 @@ export type Activation3MMember = Pick<Membership, 'joinedAs' | 'joinDate' | 'fir
 export const ACTIVATION_3M_FIELDS = { joinedAs: 1, joinDate: 1, firstSaleDate: 1, leftAt: 1, activation3M: 1 } as const;
 
 /**
- * **3M activation, kept once decided** (ADR-0171 §2, ADR-0173 §3; P18.96-T6 AC-1, AC-4; `metrics-and-definitions.md`,
+ * **3M activation, kept once decided** (ADR-0171 §2, ADR-0173 §3; P18.8-T6 AC-1, AC-4; `metrics-and-definitions.md`,
  * *3M activation*). The result is `activation3MOf`'s (`domain/metrics/activation-3m.ts`); this keeps it.
  *
  * **The lock.** The result the records give once day 90 of the join date is over — *activated* or *not activated* — is

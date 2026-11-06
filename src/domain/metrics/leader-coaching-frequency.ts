@@ -13,8 +13,8 @@ import { rateOver } from './rate';
  * the seven days before it, as `COACHED_7D` does.
  *
  * Pure. `null` over a downline of nobody, never 0% (roles §6.11). The share is a whole percent rounded half up **in
- * integers** (`rateOver`; P18.97-T3, parity F-254): 23 of 40 is 58%, which `Math.round(23 / 40 * 100)` read 57.
- * *Amended 2026-10-28 (P18.97-T3 AC-5; ADR-0176 §2, UI-017):* the leaderboard lists **every** AB, so an AB who leads
+ * integers** (`rateOver`; P18.9-T3, parity F-254): 23 of 40 is 58%, which `Math.round(23 / 40 * 100)` read 57.
+ * *Amended 2026-10-28 (P18.9-T3 AC-5; ADR-0176 §2, UI-017):* the leaderboard lists **every** AB, so an AB who leads
  * nobody is a row — *No team*, its `null` drawn as no rate — where it used to be left out.
  */
 export interface FrequencySession {

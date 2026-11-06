@@ -1,5 +1,5 @@
 /**
- * What a person records about themselves (ADR-0158, P18.8-T4): a birth date, a gender, the month they
+ * What a person records about themselves (ADR-0158, P18.5-T4): a birth date, a gender, the month they
  * joined their insurer, and how they work in an office — and the shape of the agent code they are given.
  *
  * Documented once in `docs/00-product/metrics-and-definitions.md` and pinned by `personal-data.spec.ts`.

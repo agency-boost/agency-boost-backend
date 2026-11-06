@@ -1,7 +1,8 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The two guards' refusals** (P18.98-T5 AC-2): who is signed in (`AuthGuard`), and whether they may (`PermissionsGuard`).
+ * **The guards' refusals** (P18.10-T5 AC-2): who is signed in (`AuthGuard`), whether a support session is writing
+ * (`ViewOnlySessionGuard`, P19.4-T2), and whether they may (`PermissionsGuard`).
  * The Indonesian is the approved glossary's §B.6 where it holds the sentence; a support session is a *sesi dukungan*
  * (§A.2).
  */
@@ -37,22 +38,20 @@ export const AUTH_GUARD_REFUSALS = refusals('common/auth', {
       id: 'Sesi dukungan tidak dapat mengubah akun milik siapa pun: profilnya, kata sandinya, atau tempat ia masuk. '
         + 'Hanya pemilik akun yang dapat melakukannya.',
     },
-    setupScope: {
-      en: 'This setup session can change the office\'s settings, import people and upload production '
-        + 'files, and nothing else. Ask the office to make this change, or request write access from '
-        + 'a second Super Admin.',
-      id: 'Sesi penyiapan ini hanya dapat mengubah pengaturan KPM, mengimpor anggota, dan mengunggah file produksi. '
-        + 'Minta KPM melakukan perubahan ini, atau minta akses ubah data dari Super Admin kedua.',
-    },
-    readOnly: {
-      en: 'This is a read-only support session. Ask the office to make the change, or '
-        + 'request write access from a second Super Admin.',
-      id: 'Sesi dukungan ini hanya untuk melihat. Minta KPM melakukan perubahan ini, atau minta akses ubah data dari '
-        + 'Super Admin kedua.',
-    },
     noPermission: {
       en: 'You do not have permission to perform this action.',
       id: 'Anda tidak memiliki izin untuk melakukan tindakan ini.',
+    },
+  },
+  /*
+   * **A session only looks** (P19.4-T2; ADR-0206 §4, the message it proposed for the catalogue): `ViewOnlySessionGuard`'s
+   * one refusal, for every write made in a support session. It replaces the read-only session's *"request write access
+   * from a second Super Admin"* and the setup session's scope, both retired with what they named.
+   */
+  IMPERSONATION_READ_ONLY: {
+    viewOnly: {
+      en: 'This is a view-only session. Nothing can be changed while you view as somebody else.',
+      id: 'Ini sesi hanya melihat. Tidak ada yang bisa diubah selama Anda melihat sebagai orang lain.',
     },
   },
   PERM_OWNER_ONLY: {

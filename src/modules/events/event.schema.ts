@@ -96,7 +96,7 @@ export const EventAudienceSchema = SchemaFactory.createForClass(EventAudience);
  * **Nothing per-person is stored here** (AC-6). The prototype keeps `joined`, `feedbackSubmitted`,
  * `myScore` and `myWhy` on the shared event object, so with two users the second overwrites the
  * first's RSVP and reads the first's feedback as their own. RSVP, attendance and feedback are
- * their own per-member records in Phase 18.5 (P18.5-T5, P18.5-T6; were P14-T3, P14-T4).
+ * their own per-member records in Phase 18.2 (P18.2-T5, P18.2-T6; were P14-T3, P14-T4).
  *
  * **`startsAt` and `endsAt` are UTC instants, and nothing stores whether an event is past**
  * (AC-3). The prototype hardcodes a status beside a date it is never checked against.

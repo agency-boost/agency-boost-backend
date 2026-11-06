@@ -16,7 +16,7 @@ import {
  * every item not done, and `origin: 'backfill'` — the record that this migration, and not a placement,
  * wrote it. The rung is the current one: somebody promoted since joining has none.
  *
- * **Never an existing agent** (ADR-0169, P18.96-T2): this runs on every deploy, so once 0040 has classified a
+ * **Never an existing agent** (ADR-0169, P18.8-T2): this runs on every deploy, so once 0040 has classified a
  * membership, one whose `joinedAs` is `existing_agent` is passed over — an activation is a new hire's alone — and a
  * new hire's starts on their `joinDate`. A row 0040 has not reached yet (the deploy that brings both runs this first)
  * is read as it always was, from `joinedAt`.

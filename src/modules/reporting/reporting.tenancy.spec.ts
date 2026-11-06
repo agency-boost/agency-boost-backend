@@ -1,10 +1,12 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
+import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { KPM_A, KPM_B, ROSTER_NOW } from '../../../test/coaching-office';
 import { buildReportingOffice, type ReportingOffice } from '../../../test/reporting-office';
+import { OfficePhones } from './office-phones';
 
 const M = 1_000_000 * 100;
 
@@ -61,7 +63,11 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
     const cell = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
     await db().collection('monthlyAgentData').insertMany([bAb, ...people].flatMap((id) => ['2026-03', '2026-08', '2026-09'].map((month) => ({
       kpmId: KPM_B, membershipId: id, month, agentCode: 'B', deletedAt: null,
-      apeMonthly: cell(500 * M), apeYtd: cell(5000 * M), persistencyMonthly: cell(99), policyCountMonthly: cell(9),
+      ...byKode({
+        apeMonthly: cell(500 * M), apeYtd: cell(5000 * M), persistencyMonthly: cell(99), policyCountMonthly: cell(9),
+        // P19.3-T1: the upload's recruitment and a unit persistency, which no figure of 0417 may read.
+        recruitmentMonthly: cell(1), unitPersistencyMonthly: cell(99),
+      }),
     }))));
     await db().collection('coachingSessions').insertMany(people.map((id) => ({
       kpmId: KPM_B, coachMembershipId: bAb, coacheeMembershipId: id, status: 'finalized', date: '2026-09-13',
@@ -94,7 +100,10 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
     const overview = await wired.kpmOverview.read(b);
     expect(overview.office.code).toBe('0555');
     expect(overview.composition.total).toBe(22);
-    expect(overview.recruitment).toMatchObject({ target: 99, closedLastMonth: 5, expectedToClose: 15 });
+    // P19.3-T1 AC-3: August's upload of 0555 — 21 rows recruiting 1 each — and never its five leads closed won.
+    expect(overview.recruitment).toMatchObject({ target: 99, closedLastMonth: 21, expectedToClose: 15 });
+    // P19.3-T1 AC-1: 0555's own September file, its 21 producers over its 22 members.
+    expect(overview.engagement.activeThisMonth).toMatchObject({ count: 21, of: 22, month: '2026-09' });
     const analytics = await wired.kpmAnalytics.read(b);
     expect(analytics.agencies.map((a) => a.head.membershipId)).toEqual([office.id.B_AB]);
     const ids = new Set(Object.values(office.id));
@@ -106,7 +115,7 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
       .toEqual([{ kpmId: KPM_B, target: 99 }]);
   });
 
-  it('P18.97-T3 AC-5, AC-10 every AB on a board is the reader’s office’s own; another office’s AB who leads nobody is never listed', async () => {
+  it('P18.9-T3 AC-5, AC-10 every AB on a board is the reader’s office’s own; another office’s AB who leads nobody is never listed', async () => {
     // 0555 gains an AB under its root who leads nobody: a *No team* row of 0555's.
     const lonely = new mongoose.Types.ObjectId();
     await db().collection('memberships').insertOne({
@@ -156,5 +165,22 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
     expect(new Set(adoption.byRung.map((r) => r.kpmId))).toEqual(new Set([KPM_A, KPM_B]));
     expect(adoption.joined.get(KPM_B)).toBe(20);
     expect(adoption.joined.get(KPM_A)).toBeUndefined();
+  });
+
+  it('P19.3-T2 AC-2 a WhatsApp number is read only for a member of the reader’s office — another’s, a malformed id or nobody reads none', async () => {
+    const phones = new OfficePhones(wired.memberships, wired.users as never);
+    const userId = new mongoose.Types.ObjectId(String(
+      (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.B_AGENT) }))!.userId,
+    ));
+    const { phone } = (await db().collection('users').findOne({ _id: userId }))!;
+    await db().collection('users').updateOne({ _id: userId }, { $set: { phone: '+6281299990001' } });
+    try {
+      expect(await phones.of(office.ownerOfB(), [office.id.B_AGENT])).toEqual(new Map([[office.id.B_AGENT, '+6281299990001']]));
+      expect(await phones.of(office.as('OWNER'), [office.id.B_AGENT])).toEqual(new Map());
+      expect(await phones.of(office.as('OWNER'), ['not-an-id'])).toEqual(new Map());
+      expect(await phones.of(office.as('OWNER'), [])).toEqual(new Map());
+    } finally {
+      await db().collection('users').updateOne({ _id: userId }, phone === undefined ? { $unset: { phone: '' } } : { $set: { phone } });
+    }
   });
 });

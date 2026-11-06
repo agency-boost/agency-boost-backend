@@ -1,5 +1,5 @@
 import { ACTIVATION, ACTIVATION_3M, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
-import { METRIC_REGISTRY as SERVED, type MetricUnit } from '@/domain/constants/metrics';
+import { METRIC_REGISTRY as SERVED, type MetricUnit, type Phase } from '@/domain/constants/metrics';
 
 /**
  * The metric registry (P4-T4) — one definition per metric, and one place to find it.
@@ -59,7 +59,7 @@ export interface MetricDefinition {
    * coaching phase; 11 since P10.1-T2 AC-6), and a campaign asking which is true got the answer
    * from whichever list it happened to read.
    */
-  readonly phase: number;
+  readonly phase: Phase;
 }
 
 /** What a computation needs beyond the served entry. */
@@ -93,7 +93,7 @@ export function define(entries: readonly MetricDefinition[]): ReadonlyMap<string
  * throws at load, naming the metric. Exported so the refusal itself is tested.
  */
 export function join(
-  served: readonly { key: string; name: string; unit: MetricUnit; phase: number }[],
+  served: readonly { key: string; name: string; unit: MetricUnit; phase: Phase }[],
   computations: Readonly<Record<string, MetricComputation>>,
 ): MetricDefinition[] {
   const keys = new Set(served.map((m) => m.key));
@@ -223,7 +223,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   ACTIVATION_DAY_INDEX: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION.WINDOW_DAYS },
   TRAINING_COMPLETION_PCT: { period: 'POINT_IN_TIME', threshold: null },
   /*
-   * P18.5-T5, T6 — **per event, never per member**, so none of the three is campaign-evaluable (D-evaluable). Each is
+   * P18.2-T5, T6 — **per event, never per member**, so none of the three is campaign-evaluable (D-evaluable). Each is
    * computed in one place: the status (with D-status's `unconfirmed`; only a confirmation makes `attended`, OD-31) and
    * the rate over the audience as at the start in `event-attendance.ts`; the NPS — the prototype's single rounding over
    * confirmed attendees, `null` with none — in `event-nps.ts`. `EventReadings` is their one reader.
@@ -232,7 +232,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   EVENT_ATTENDANCE_RATE: { period: 'POINT_IN_TIME', threshold: null },
   EVENT_NPS: { period: 'POINT_IN_TIME', threshold: null },
   /*
-   * **The campaign's own window** (§A.6's definition; D-period, carry #3): it read `CALENDAR_MONTH` until P18.5-T8, the
+   * **The campaign's own window** (§A.6's definition; D-period, carry #3): it read `CALENDAR_MONTH` until P18.2-T8, the
    * first task to compute it, against its own definition. A campaign's window is its dates, a calendar year, or the
    * last twelve months held (D-windows) — `campaign-window.ts`.
    */
@@ -253,7 +253,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   SALES_LEADS_CLOSING_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   RECRUITMENT_NOMINATED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   /*
-   * UI V1 (Phase 18.99 T4; UI-028, O-4): the roster's *Closing* — sales leads whose first move to *Paid and issued*
+   * UI V1 (Phase 18.11 T4; UI-028, O-4): the roster's *Closing* — sales leads whose first move to *Paid and issued*
    * falls in the period the screen shows: the calendar month by default, `ROLLING_7D` and the year to date as its other
    * views, as `CASCADE_ACTIVITY_TOUCHES`. Counted by `closingsIn` (`unit-dashboard/unit-figures.ts`).
    */
@@ -271,7 +271,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   CASCADE_ACTIVITY_TOUCHES: { period: 'CALENDAR_MONTH', threshold: null },
   NEW_ACTIVE_AGENTS: { period: 'CALENDAR_MONTH', threshold: null },
   ROLLING_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
-  // OD-152 → option 3: the file's `recruitment` column, monthly and year to date, as `NEW_ACTIVE_AGENTS` (P18.5-T8).
+  // OD-152 → option 3: the file's `recruitment` column, monthly and year to date, as `NEW_ACTIVE_AGENTS` (P18.2-T8).
   NEW_HIRES: { period: 'CALENDAR_MONTH', threshold: null },
 
   // ---- The office (P13.2-T4, ADR-0113) ----
@@ -290,8 +290,8 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    */
   OFFICE_HEADCOUNT: { period: 'POINT_IN_TIME', threshold: null },
   OFFICE_NEW_MEMBERS_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
-  // OD-142 → option 2: `ACTIVITY_COMPLIANCE_MONTH`, counted over the office (`activity-logged.ts`).
-  ACTIVITY_LOGGED_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  // `ACTIVITY_LOGGED_THIS_MONTH` retired (ADR-0200 §3, P19.3-T1): the Overview's first tile counts production now.
+  // P19.3-T1 (ADR-0200 §5, D2): the upload's `RECRUITMENT` for the previous calendar month (`recruitment-closed.ts`).
   RECRUITMENT_CLOSED_LAST_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
   // The year to date over the months it covers, run to twelve (D-figures; `ape-year-projection.ts`).
   APE_YEAR_PROJECTION: { period: 'CALENDAR_YEAR', threshold: null },
@@ -299,10 +299,14 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    * MOC's inputs, OD-22's stated reading (`moc-status.ts`). Their thresholds are the company's carrier rules,
    * read live (ADR-0026) — never a platform constant here — so none has one of its own.
    */
-  NET_APE: { period: 'CALENDAR_YEAR', threshold: null },
-  MONTHLY2_AA: { period: 'CALENDAR_MONTH', threshold: null },
-  MONTHLY2_AA_DU: { period: 'CALENDAR_MONTH', threshold: null },
-  MONTHLY2_AA_DG: { period: 'CALENDAR_MONTH', threshold: null },
+  // `NET_APE` retired (ADR-0201 §1, P19.3-T1): its definition is `MOC_APE`'s, below.
+  /*
+   * P19.3-T1 (ADR-0201 §4, Q6): the mean over the calendar year's months held, up to the latest — the APE criterion's
+   * months — of the scope's monthly active agents, where it was the two latest months held (`CALENDAR_MONTH` twice).
+   */
+  MONTHLY2_AA: { period: 'CALENDAR_YEAR', threshold: null },
+  MONTHLY2_AA_DU: { period: 'CALENDAR_YEAR', threshold: null },
+  MONTHLY2_AA_DG: { period: 'CALENDAR_YEAR', threshold: null },
   DIRECT_AB_COUNT: { period: 'POINT_IN_TIME', threshold: null },
   MOC_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
 
@@ -313,21 +317,21 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
    * by its start day in the office's calendar (`activation-cohort.ts`).
    */
   ACTIVATION_COHORT: { period: 'CALENDAR_YEAR', threshold: null },
-  // `NEW_AGENT_3M_ACTIVE_PCT` retired (ADR-0171 §2, P18.96-T6): the row reads `ACTIVATION_3M_PCT`, below.
+  // `NEW_AGENT_3M_ACTIVE_PCT` retired (ADR-0171 §2, P18.8-T6): the row reads `ACTIVATION_3M_PCT`, below.
   PRODUCING_AGENTS: { period: 'CALENDAR_YEAR', threshold: null },
   AVERAGE_CASE_SIZE_REALISED: { period: 'CALENDAR_YEAR', threshold: null },
-  // P18.97-T1 AC-5 (ADR-0175 §2): over the same periods as `PRODUCING_AGENTS`, its denominator — *Full Year* and *YTD*.
+  // P18.9-T1 AC-5 (ADR-0175 §2): over the same periods as `PRODUCING_AGENTS`, its denominator — *Full Year* and *YTD*.
   CASES_PER_PRODUCING_AGENT: { period: 'CALENDAR_YEAR', threshold: null },
   /*
    * **The two drawn in every column** are `CALENDAR_MONTH`: each month's figure from the office's file, and over
    * *Full Year* or *YTD* the months held summed or averaged — the same definition over a year, as
    * `SUMMARY_ACTIVITY_TARGET`'s *Yearly* view is (`held-months.ts`).
    */
-  // `NEW_ACTIVE_AGENTS_MONTHLY_AVG` retired (ADR-0175 §2, P18.97-T1 AC-6): no table draws *New AA (avg. monthly)*.
+  // `NEW_ACTIVE_AGENTS_MONTHLY_AVG` retired (ADR-0175 §2, P18.9-T1 AC-6): no table draws *New AA (avg. monthly)*.
   MAA_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
   CASE_SUBMISSIONS: { period: 'CALENDAR_MONTH', threshold: null },
 
-  // ---- The Owner's compliance tree (Phase 18.6, P18.6-T1; OD-159, OD-160) ----
+  // ---- The Owner's compliance tree (Phase 18.3, P18.3-T1; OD-159, OD-160) ----
   /*
    * **Graduated now, over the activations of a set** (OD-159): each activation's state as `activationState` derives it
    * on the read, so `POINT_IN_TIME`. The PRD's figure is the same definition over `ACTIVATION_COHORT`'s calendar year
@@ -338,19 +342,72 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // A goal saved for the office's calendar year with an annual target above zero (OD-160; `goal-set.ts`).
   GOAL_SET_RATE: { period: 'CALENDAR_YEAR', threshold: null },
 
-  // ---- New hire activation (Phase 18.96, P18.96-T4; ADR-0171 §1) ----
+  // ---- New hire activation (Phase 18.8, P18.8-T4; ADR-0171 §1) ----
   // The day of the first paid and issued case, kept on the membership and moved only earlier (`first-sale.ts`).
   FIRST_SALE_DATE: { period: 'POINT_IN_TIME', threshold: null },
-  // P18.96-T5 (ADR-0172 §2): on the office's day, an existing agent, or a new hire on or after their first sale
+  // P18.8-T5 (ADR-0172 §2): on the office's day, an existing agent, or a new hire on or after their first sale
   // (`counts-for-production.ts`) — the people a unit's production and *on pace* read.
   COUNTS_FOR_PRODUCTION: { period: 'POINT_IN_TIME', threshold: null },
   /*
-   * P18.96-T6 (ADR-0171 §2; `activation-3m.ts`): **a new hire's result over their first 90 days**, the programme's own
+   * P18.8-T6 (ADR-0171 §2; `activation-3m.ts`): **a new hire's result over their first 90 days**, the programme's own
    * window — its threshold the day it locks on — and **the share activated, by join month**: a month's new hires are
    * its cohort, and a year's or a unit's figure is the same definition over theirs.
    */
   ACTIVATION_3M: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION_3M.DAYS },
   ACTIVATION_3M_PCT: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- The Unit Dashboard's *Potensi* tab (Phase 19.1, P19.1-T6; ADR-0193; `potensi.ts`) ----
+  // Each over the office's calendar month, Asia/Jakarta: a new month reads off at 00:00 WIB on the 1st, nothing having run.
+  LEAD_POTENSI_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  AA_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  REKRUT_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- The owner's data sources of 3 November (Phase 19.3, P19.3-T1; ADR-0201 to ADR-0203) ----
+  // `NET_APE`'s definition under its own name: the calendar year to date, through the latest month held (`moc-inputs.ts`).
+  MOC_APE: { period: 'CALENDAR_YEAR', threshold: null },
+  // The insurer's figure on a leader's row, a month's; the carrier's own rolling window, as `MOC_PERSISTENCY`'s.
+  UNIT_PERSISTENCY: { period: 'ROLLING_12M', threshold: null },
+  // D7 over the forum's year columns: the hires whose join month is in the year (`new-agent-activation-3m.ts`).
+  NEW_AGENT_ACTIVATION_3M_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  // D2: each month's office sum, averaged over a column's months held (`held-months.ts`).
+  RECRUITMENT_MONTHLY_AVG: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- The surveys (Phase 19.5, P19.5-T4; ADR-0216 §4) ----
+  // Each over one survey run — its own dates and its snapshot's cut-offs (R6): the programme's window, not a calendar's.
+  NPS_SCORE: { period: 'PROGRAMME_WINDOW', threshold: null },
+  // ---- The Data upload (Phase 19.5, P19.5-T2; ADR-0214 §10, §11): a month's state, and a year to date through a month.
+  UPLOAD_MONTH_COMPLETE: { period: 'CALENDAR_MONTH', threshold: null },
+  COLUMN_YEAR_TO_DATE: { period: 'CALENDAR_YEAR', threshold: null },
+  // ---- The KPM's *Advanced analytics* page (Phase 19.5, P19.5-T3; ADR-0215): a run's period is January to June or to
+  // December (`CALENDAR_YEAR`, through its last month); A2 and C3 the 12 months to it; Sub-group's adoption 30 days.
+  MANPOWER_BY_DIMENSION: { period: 'CALENDAR_MONTH', threshold: null },
+  EVENT_NPS_FOR_PERIOD: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_RECRUITS_PER_LEADER: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_ANNUAL_ACTIVE_NET_GROWTH: { period: 'ROLLING_12M', threshold: null },
+  QUANT_ACTIVE_PER_LEADER: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_ACTIVATION_12M_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_TENURED_ACTIVE_PCT: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_AVG_MAA_PER_LEADER: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_AVG_ACTIVE_MONTHS: { period: 'ROLLING_12M', threshold: null },
+  QUANT_PEER_MEDIAN: { period: 'CALENDAR_YEAR', threshold: null },
+  QUANT_PEER_STATUS: { period: 'CALENDAR_YEAR', threshold: null },
+  SUBGROUP_MAA_BASELINE: { period: 'CALENDAR_YEAR', threshold: null },
+  SUBGROUP_HEAD_ACTIVE_DAYS: { period: 'ROLLING_30D', threshold: null },
+  SUBGROUP_DOWNLINE_ADOPTION_PCT: { period: 'ROLLING_30D', threshold: null },
+  POWER_USER_COUNT: { period: 'ROLLING_30D', threshold: null },
+  SUBGROUP_ONE_ON_ONES_PER_WEEK: { period: 'ROLLING_30D', threshold: null },
+  SUBGROUP_WEEKLY_ACTIVITY_TARGET: { period: 'POINT_IN_TIME', threshold: null },
+  SUBGROUP_RECRUITMENT_BASELINE: { period: 'CALENDAR_YEAR', threshold: null },
+  SUBGROUP_TARGET_ATTAINMENT_PCT: { period: 'CALENDAR_MONTH', threshold: null },
+  SURVEY_RESPONSE_RATE: { period: 'PROGRAMME_WINDOW', threshold: null },
+  QUAL_ITEM_ISSUE_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
+  QUAL_PERSON_ISSUE_COUNT: { period: 'PROGRAMME_WINDOW', threshold: null },
+  QUAL_LEADER_SUPPORT: { period: 'PROGRAMME_WINDOW', threshold: null },
+  QUAL_COACHING_DOWNLINE_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
+
+  // ---- The proposal (Phase 19.7, P19.7-T2; ADR-0221 §7; `proposals-made.ts`) ----
+  // Over the Unit Dashboard's window (`7d`, `month`, `year`), the office's calendar; its default period is the month.
+  PROPOSALS_MADE: { period: 'CALENDAR_MONTH', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

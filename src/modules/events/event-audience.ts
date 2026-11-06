@@ -7,7 +7,7 @@ import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import type { EdgeEvent } from '@/modules/org/membership-history.schema';
 
 /**
- * **An event's audience, as at its start** (P18.5-T5 AC-3; ADR-0039, ADR-0135, invariant §5).
+ * **An event's audience, as at its start** (P18.2-T5 AC-3; ADR-0039, ADR-0135, invariant §5).
  *
  * The audience is three structured facts (Phase 5): a scope and, for a *select* scope, a list of memberships. Who
  * they hold is resolved **as the office stood when the event began**, so a member who joined later never sees,
@@ -21,7 +21,7 @@ import type { EdgeEvent } from '@/modules/org/membership-history.schema';
  * **An event that has not started yet** reads the office as it is now — nobody can know who will be here — which is
  * the risk register's fallback (*the current graph for an upcoming event only*).
  *
- * **By `joinedAt`, the system's stamp — not the join date** (P18.96-T5 AC-1, kept deliberately): every count of people
+ * **By `joinedAt`, the system's stamp — not the join date** (P18.8-T5 AC-1, kept deliberately): every count of people
  * reads the join date (ADR-0172 §1), but an audience is who the office could invite when the event began, which is who
  * was *in the system* then. Read by a join date a leader typed later, an existing agent added today with a join date
  * years back would join every past event's audience, and a past attendance rate would move — the thing this reading

@@ -2,10 +2,10 @@ import mongoose from 'mongoose';
 import { defaultBinding } from '@/modules/config/activity-binding';
 
 /**
- * **Every office and every template binds today's codes** (ADR-0163 §1, P18.9-T2 AC-1).
+ * **Every office and every template binds today's codes** (ADR-0163 §1, P18.6-T2 AC-1).
  *
  * The goal cascade, the summary, the pace, the Unit Dashboard, the measured rates and the campaigns' touches read
- * the office's activity binding from P18.9-T2 on — and until then they counted `LEADS_CONTACTED`,
+ * the office's activity binding from P18.6-T2 on — and until then they counted `LEADS_CONTACTED`,
  * `SELL_PRESENTATION` and `SELL_SUBMISSION` by constant. So the binding every office and template is given here is
  * exactly those three, one per role (`defaultBinding()`), and nothing anybody sees moves on the day it runs.
  *

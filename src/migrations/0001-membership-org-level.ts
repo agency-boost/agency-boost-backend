@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 /**
- * Backfill `memberships.orgLevelId` (P3.5-T8).
+ * Backfill `memberships.orgLevelId` (P3.1-T8).
  *
  * Every membership references the rung it stands on. Rows written before the reference
  * existed have none, and `role` is the only thing that says where those people stand — so

@@ -52,7 +52,7 @@ export interface ResolvedActivation {
   overdue: boolean;
   progress: Progress<ActivationItemView>;
   /**
-   * D-orphan (P18.5-T3 AC-4): whether the module a `training:` link binds is offered now. Always true for any
+   * D-orphan (P18.2-T3 AC-4): whether the module a `training:` link binds is offered now. Always true for any
    * other link. While it is not, the item is ticked by hand and served `live: false`.
    */
   offered: (link: string | null) => boolean;
@@ -65,14 +65,14 @@ export interface ItemChange {
   date?: string | null;
 }
 
-/** The record a hand tick of a data-backed item was saved with (P18.96-T4 AC-3): the closing, or the 1:1. */
+/** The record a hand tick of a data-backed item was saved with (P18.8-T4 AC-3): the closing, or the 1:1. */
 export interface ItemRecord {
   collection: Extract<ActivationRecordCollection, 'leads' | 'coachingSessions'>;
   id: string;
 }
 
 /**
- * **A hand write to one item, checked and not yet made** (P18.96-T4 AC-3): what `setItem` checks before it writes,
+ * **A hand write to one item, checked and not yet made** (P18.8-T4 AC-3): what `setItem` checks before it writes,
  * kept so a data-backed item's record can be saved between the check and the tick — the record only once the tick
  * would be taken, and the tick only once the record is saved.
  */
@@ -93,7 +93,7 @@ const DUPLICATE_KEY = 11000;
 export function activationClosed(state: ActivationState): DomainException {
   return new DomainException(
     ErrorCode.ACTIVATION_CLOSED,
-    // P18.96-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
+    // P18.8-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
     state === 'graduated' ? ACTIVATION_REFUSALS.ACTIVATION_CLOSED.complete : ACTIVATION_REFUSALS.ACTIVATION_CLOSED.ended,
     HttpStatus.CONFLICT,
     { state },
@@ -129,7 +129,7 @@ export class ActivationProgressService {
     private readonly days: TenantDay,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    // P18.5-T3, D-orphan: which training modules are offered now, read once per resolve that binds one.
+    // P18.2-T3, D-orphan: which training modules are offered now, read once per resolve that binds one.
     private readonly training: OfferedTraining,
   ) {}
 
@@ -241,7 +241,7 @@ export class ActivationProgressService {
     return doc;
   }
 
-  /** **The reader's own activation, healed as a read heals it**, or 404 — for the routes that write it (P18.96-T4). */
+  /** **The reader's own activation, healed as a read heals it**, or 404 — for the routes that write it (P18.8-T4). */
   async ownActivation(ctx: RequestContext): Promise<ActivationProgressDocument> {
     return this.requireOwn(ctx);
   }
@@ -365,7 +365,7 @@ export class ActivationProgressService {
             note: own ? state.note : null,
             date: own ? state.date : null,
             /*
-             * P18.96-T4 AC-4: a data-backed item ticked by hand is *waiting for data* until its data confirms it — the
+             * P18.8-T4 AC-4: a data-backed item ticked by hand is *waiting for data* until its data confirms it — the
              * next evaluation then attributes it to the link. Its record, the source line's (AC-2): the lead, the
              * session or the file's month a data-backed item names, done.
              */
@@ -392,7 +392,7 @@ export class ActivationProgressService {
   }
 
   /*
-   * `PUT /activation/me/items/:code` is `ActivationItemRecords.tickMine` since P18.96-T4: a data-backed item's tick
+   * `PUT /activation/me/items/:code` is `ActivationItemRecords.tickMine` since P18.8-T4: a data-backed item's tick
    * carries its record, which this service cannot write without depending on the modules that own it.
    */
 
@@ -401,10 +401,10 @@ export class ActivationProgressService {
    * write **sets** the item rather than toggling it, so two people ticking at once cannot conflict and the
    * last write is the one named. An item the pinned version lacks is 404; one whose link is live is
    * nobody's to tick, by any route (`mayTickByHand`, by the link and never by position) — except a training
-   * link whose module is no longer offered, which is ticked by hand (D-orphan, P18.5-T3 AC-4); a graduated or
+   * link whose module is no longer offered, which is ticked by hand (D-orphan, P18.2-T3 AC-4); a graduated or
    * expired activation refuses every write. One audit row per write, ids only.
    *
-   * **A data-backed item is ticked only with its record** (P18.96-T4 AC-3): a bare tick here is refused,
+   * **A data-backed item is ticked only with its record** (P18.8-T4 AC-3): a bare tick here is refused,
    * `422 ACTIVATION_RECORD_REQUIRED`, and `ActivationItemRecords` is the route's way to tick one — the record and the
    * tick, together. Unticking one ticked by hand is taken; one its data completed is nobody's (`409`).
    */
@@ -418,7 +418,7 @@ export class ActivationProgressService {
   }
 
   /**
-   * **Every check a hand write meets, before anything is written** (P18.96-T4 AC-3): the date's shape, the item in the
+   * **Every check a hand write meets, before anything is written** (P18.8-T4 AC-3): the date's shape, the item in the
    * pinned version (404), the link's rule (`mayTickByHand`, `dataItemHandWrite`: `409 ACTIVATION_ITEM_AUTOMATIC`),
    * and the activation open (`409 ACTIVATION_CLOSED`). The plan says whether the write is a tick taken only with its
    * record, and which form that record is.
@@ -435,7 +435,7 @@ export class ActivationProgressService {
     if (!item) throw new NotFoundException('Activation item');
     // Evaluated first (`resolve`), so a `done` progress row for the bound module has already completed it by its link.
     const byLink = completedByLink(resolved.doc, code);
-    // P18.96-T4: a data-backed item — bound by its code — is ticked with its record, and unticked freely by hand.
+    // P18.8-T4: a data-backed item — bound by its code — is ticked with its record, and unticked freely by hand.
     const dataRule = dataItemHandWrite(item.autoLink, change.done, byLink);
     if (dataRule === null) {
       // D-orphan, asked of this item itself: `resolve` reads what is offered only while a training item waits, and an
@@ -458,7 +458,7 @@ export class ActivationProgressService {
   }
 
   /**
-   * **The write a plan checked** (P18.96-T4 AC-3): done or not, by whom and when, and — for a data-backed item — the
+   * **The write a plan checked** (P18.8-T4 AC-3): done or not, by whom and when, and — for a data-backed item — the
    * record it was saved with, or none. One audit row, ids only, naming the record. The answer is the activation read
    * again, its links evaluated: a tick whose record makes the data complete — the fourth 1:1 — reads as the link's.
    */
@@ -555,7 +555,7 @@ export class ActivationProgressService {
 
   /**
    * **`ActivationEvents`** (P13-T3 AC-5): a goal, a lead or a day was written for this member — or, since
-   * P18.5-T3, they marked a training module *Done*. Their open
+   * P18.2-T3, they marked a training module *Done*. Their open
    * activation, if any, is evaluated now — every kind still waiting, not only this one, so a call missed
    * earlier heals here too.
    */
@@ -564,7 +564,7 @@ export class ActivationProgressService {
   }
 
   /**
-   * **`recorded`, for many members at once** (P18.96-T4): a production file's commit names everybody it gave a policy.
+   * **`recorded`, for many members at once** (P18.8-T4): a production file's commit names everybody it gave a policy.
    * Their open activations are evaluated in one pass — one query per kind for all of them — and nothing is answered.
    */
   async recordedMany(ctx: RequestContext, membershipIds: readonly string[]): Promise<void> {
@@ -594,7 +594,7 @@ export class ActivationProgressService {
   }
 
   /**
-   * Whether the reader coaches a **new hire who joined in the last twelve months** (OD-122; P18.96-T6, ADR-0173 §1) —
+   * Whether the reader coaches a **new hire who joined in the last twelve months** (OD-122; P18.8-T6, ADR-0173 §1) —
    * what `GET /new-hires` answers since it lists the year's new hires by their 3M result, not the open activations.
    */
   private async reachesANewHire(ctx: RequestContext, office: Office): Promise<boolean> {
@@ -620,7 +620,7 @@ function automatic(code: string, link: string): DomainException {
   );
 }
 
-/** Refused (P18.96-T4 AC-3): a bare tick of a data-backed item, which is ticked with its record. */
+/** Refused (P18.8-T4 AC-3): a bare tick of a data-backed item, which is ticked with its record. */
 export function recordRequired(code: string, form: ActivationRecordForm): DomainException {
   return new DomainException(
     ErrorCode.ACTIVATION_RECORD_REQUIRED,
@@ -651,7 +651,7 @@ export function peopleOn(doc: ActivationProgressDocument): string[] {
 
 /**
  * **Where a new hire's activation starts: their join date** (ADR-0169 §2). A membership made active since
- * P18.96-T2 always carries one; a row that predates it and migration 0040 falls back to its `joinedAt` as an office
+ * P18.8-T2 always carries one; a row that predates it and migration 0040 falls back to its `joinedAt` as an office
  * date (ADR-0102's default), and the clock's own now covers one with neither.
  */
 function startOf(member: MembershipDocument, timezone: string, clock: Clock): LocalDate {

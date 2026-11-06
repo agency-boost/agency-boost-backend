@@ -3,7 +3,7 @@ import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0003-membership-leader-code';
 
 /**
- * P3.6-T1. The leader code moved from `inviteCodes` onto the membership, and every row
+ * P3.2-T1. The leader code moved from `inviteCodes` onto the membership, and every row
  * written before that has none.
  *
  * The promise worth pinning is the carry-over: somebody has their code on a card or in a

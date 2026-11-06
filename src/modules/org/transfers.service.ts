@@ -41,7 +41,7 @@ export interface TransferView {
 }
 
 /**
- * **One transfer request as whoever asked for it sees it** (the P18.96 exit review, M3): *+ Add agent*'s answer and
+ * **One transfer request as whoever asked for it sees it** (the P18.8 exit review, M3): *+ Add agent*'s answer and
  * *Transfer requested* on `/new-hires`. Only what they typed and what they asked for — **never the account's own name
  * nor the leader they report to**, which a code typed into the form would otherwise reveal about a peer's unit.
  */
@@ -58,7 +58,7 @@ export interface RequestedTransferView {
 }
 
 /**
- * **Moving a member to another leader** (ADR-0170 §4, P18.96-T3 AC-3): *+ Add agent* for somebody who already reports
+ * **Moving a member to another leader** (ADR-0170 §4, P18.8-T3 AC-3): *+ Add agent* for somebody who already reports
  * to another leader in the office asks for it; the Owner and an Admin decide it. **No leader moves a member directly**
  * — the leader who asked waits, and sees *Transfer requested* on `/new-hires`.
  *
@@ -196,7 +196,7 @@ export class TransfersService {
 
     const previousLeaderId = member.leaderId;
     try {
-      // The edge's reason is stored, so it is written in the decider's language (P18.98-T5 AC-6).
+      // The edge's reason is stored, so it is written in the decider's language (P18.10-T5 AC-6).
       await this.hierarchy.reparent(
         ctx, row.membershipId, row.toLeaderId, render(ORG_MESSAGES.transferApproved, ctx.reader),
       );

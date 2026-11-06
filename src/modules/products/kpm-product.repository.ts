@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, UpdateQuery } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { KpmProductConfig, KpmProductConfigDocument } from './kpm-product-config.schema';
 
@@ -39,5 +40,27 @@ export class KpmProductConfigRepository extends TenantScopedRepository<KpmProduc
       },
       { new: true, upsert: true },
     ).exec())!;
+  }
+
+  /**
+   * **How many offices still name one product** (P19.4-T4 AC-13; ADR-0209 §10): offices that sell it — a row switched
+   * on — and offices with a script for it, drafted, approved or sent back (ADR-0037). What refuses deleting a withdrawn
+   * product, `409 PRODUCT_IN_USE`.
+   *
+   * **Deliberately unscoped, and named so** (invariant §1): a product is the company's, read by every office of it,
+   * and the Super Admin who deletes it is in none of them. The caller must be a Super Admin. **Counts, never a row**:
+   * no office, no name and no word of a script leaves the database.
+   */
+  async referencesToProductAcrossTenants(
+    ctx: RequestContext, productId: string,
+  ): Promise<{ activations: number; scriptApprovals: number }> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'referencesToProductAcrossTenants');
+    }
+    const [activations, scriptApprovals] = await Promise.all([
+      this.model.countDocuments({ productId, active: true, deletedAt: null }).exec(),
+      this.model.countDocuments({ productId, reviewState: { $ne: 'none' }, deletedAt: null }).exec(),
+    ]);
+    return { activations, scriptApprovals };
   }
 }

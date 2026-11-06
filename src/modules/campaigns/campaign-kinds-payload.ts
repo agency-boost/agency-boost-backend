@@ -83,7 +83,7 @@ export function defaultCampaignKinds(): CampaignKindsPayload {
  * screen says so. What is refused is a **misspelling that could have been a real metric**, which
  * is why the check below reports unknown keys as a warning rather than dropping them silently.
  *
- * **Each problem in both languages** (P18.98-T5 AC-3), named by its place — *Rule 2, group 1* — in the reader's words.
+ * **Each problem in both languages** (P18.10-T5 AC-3), named by its place — *Rule 2, group 1* — in the reader's words.
  */
 export function campaignKindsProblems(payload: unknown): FieldSentence[] {
   const problems: FieldSentence[] = [];

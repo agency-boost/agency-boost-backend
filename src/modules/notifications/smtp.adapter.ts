@@ -15,7 +15,7 @@ export abstract class RecipientAddressBook {
 }
 
 /**
- * Delivery over SMTP (P4-T14, ADR-0019), through the provider the environment names (P18.99-T18, ADR-0182).
+ * Delivery over SMTP (P4-T14, ADR-0019), through the provider the environment names (P18.11-T18, ADR-0182).
  *
  * **Own SMTP rather than a vendor API**, decided 2026-09-11. **Which relay is `MAIL_PROVIDER`'s**: Gmail, SendGrid,
  * Mailjet, ClickSend, SES or any relay `SMTP_HOST` names, each a preset of host, port and TLS in `mail-provider.ts`,

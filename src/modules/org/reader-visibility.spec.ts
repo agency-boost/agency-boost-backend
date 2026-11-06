@@ -19,14 +19,14 @@ const ab = () => reader({ hierarchyRole: 'ab', orgLevelCode: 'AB', directCount: 
 const aab = () => reader({ hierarchyRole: 'aab', orgLevelCode: 'AAB', directCount: 1 });
 
 /**
- * **Which memberships a reader may see** (P18.97-T8 L2, the Phase 18.97 exit permission review): the narrowing the
+ * **Which memberships a reader may see** (P18.9-T8 L2, the Phase 18.9 exit permission review): the narrowing the
  * roster, one member's read, their reports, the *Rejoined* mark, the org tree and a removal's destination all go
  * through, held at 100% branch in `jest.config.ts`. Pure: what each reader is answered, as the filter the repository
  * is handed. `org.tenancy.spec.ts` proves the same filters on real hierarchy writes.
  */
-describe('which memberships a reader may see (P18.97-T8 L2)', () => {
+describe('which memberships a reader may see (P18.9-T8 L2)', () => {
   describe('the directory’s permission', () => {
-    it('P18.97-T8 L2 is the one GET /members, /members/:id and /members/:id/reports are gated on', () => {
+    it('P18.9-T8 L2 is the one GET /members, /members/:id and /members/:id/reports are gated on', () => {
       // A route regated on another permission would leave its narrowing resolving this one, silently.
       for (const route of ['list', 'read', 'reports'] as const) {
         expect(Reflect.getMetadata(REQUIRED_PERMISSION, OrgController.prototype[route])).toBe(DIRECTORY_READ);
@@ -36,33 +36,33 @@ describe('which memberships a reader may see (P18.97-T8 L2)', () => {
   });
 
   describe('visibleTo', () => {
-    it('P18.97-T8 L2 gives the office to its Owner and to an Admin, whatever rung either stands on', () => {
+    it('P18.9-T8 L2 gives the office to its Owner and to an Admin, whatever rung either stands on', () => {
       expect(visibleTo(reader({ isKpmOwner: true }), DIRECTORY_READ)).toEqual({});
       expect(visibleTo(reader({ isKpmAdmin: true }), DIRECTORY_READ)).toEqual({});
     });
 
-    it('P18.97-T8 L2 gives the office to a Super Admin acting inside it, who holds no membership there', () => {
+    it('P18.9-T8 L2 gives the office to a Super Admin acting inside it, who holds no membership there', () => {
       expect(visibleTo(new RequestContext('u-sa', 'super_admin', null, null, 'kpm-a'), DIRECTORY_READ)).toEqual({});
     });
 
-    it('P18.97-T8 L2 shows nobody to somebody with no membership: an impossible filter, never an absent one', () => {
+    it('P18.9-T8 L2 shows nobody to somebody with no membership: an impossible filter, never an absent one', () => {
       const unjoined = new RequestContext('u-new', 'none', null, null, 'kpm-a');
       expect(visibleTo(unjoined, DIRECTORY_READ)).toEqual({ _id: null });
     });
 
-    it('P18.97-T8 L2 narrows an AB and an AAB to their subtree (rules 1 and 2) and an Agent to themselves', () => {
+    it('P18.9-T8 L2 narrows an AB and an AAB to their subtree (rules 1 and 2) and an Agent to themselves', () => {
       expect(visibleTo(ab(), DIRECTORY_READ)).toEqual(SUBTREE);
       expect(visibleTo(aab(), DIRECTORY_READ)).toEqual(SUBTREE);
       expect(visibleTo(reader(), DIRECTORY_READ)).toEqual({ _id: SELF });
     });
 
-    it('P18.97-T8 L2 fails closed for a membership the grant does not reach: pending, or removed', () => {
+    it('P18.9-T8 L2 fails closed for a membership the grant does not reach: pending, or removed', () => {
       expect(visibleTo(reader({ status: 'pending' }), DIRECTORY_READ)).toEqual({ _id: null });
       expect(visibleTo(reader({ hierarchyRole: 'ab', orgLevelCode: 'AB', status: 'removed' }), DIRECTORY_READ))
         .toEqual({ _id: null });
     });
 
-    it('P18.97-T8 L2 resolves the permission it is handed, and the directory’s when it is handed none', () => {
+    it('P18.9-T8 L2 resolves the permission it is handed, and the directory’s when it is handed none', () => {
       expect(visibleTo(reader())).toEqual({ _id: SELF });
       expect(visibleTo(ab())).toEqual(SUBTREE);
       // A removal's destination: an AB's `own-unit`, the subtree here. An Agent holds no grant on it at all.
@@ -81,17 +81,17 @@ describe('which memberships a reader may see (P18.97-T8 L2)', () => {
       own: { _id: SELF },
     };
 
-    it.each(Object.entries(ROWS))('P18.97-T8 L2 reads %s as its filter', (scope, filter) => {
+    it.each(Object.entries(ROWS))('P18.9-T8 L2 reads %s as its filter', (scope, filter) => {
       expect(scopeFilter(scope as Scope, SELF)).toEqual(filter);
     });
 
-    it('P18.97-T8 L2 reads no grant at all as nobody, never as everybody', () => {
+    it('P18.9-T8 L2 reads no grant at all as nobody, never as everybody', () => {
       expect(scopeFilter(null, SELF)).toEqual({ _id: null });
     });
   });
 
   describe('withinReach', () => {
-    it('P18.97-T8 L2 composes under $and, so an Agent’s own id narrows the id asked for rather than replacing it', () => {
+    it('P18.9-T8 L2 composes under $and, so an Agent’s own id narrows the id asked for rather than replacing it', () => {
       // Spread, `{ _id: 'mem-peer', ...{ _id: SELF } }` is `{ _id: SELF }`: the caller's own record, under a peer's id.
       expect(withinReach(reader(), { _id: 'mem-peer' })).toEqual({ $and: [{ _id: 'mem-peer' }, { _id: SELF }] });
       expect(withinReach(aab(), { _id: 'mem-peer' })).toEqual({ $and: [{ _id: 'mem-peer' }, SUBTREE] });
@@ -100,13 +100,13 @@ describe('which memberships a reader may see (P18.97-T8 L2)', () => {
   });
 
   describe('siblingsWithinReach', () => {
-    it('P18.97-T8 L2 asks for each person once, narrowed as the page is', () => {
+    it('P18.9-T8 L2 asks for each person once, narrowed as the page is', () => {
       expect(siblingsWithinReach(ab(), ['u-yanti', 'u-dewi', 'u-yanti'])).toEqual({
         $and: [{ userId: { $in: ['u-yanti', 'u-dewi'] } }, SUBTREE],
       });
     });
 
-    it('P18.97-T8 L2 gives an Agent the one membership they hold, so no earlier one of theirs is read', () => {
+    it('P18.9-T8 L2 gives an Agent the one membership they hold, so no earlier one of theirs is read', () => {
       expect(siblingsWithinReach(reader(), ['u-reader'])).toEqual({
         $and: [{ userId: { $in: ['u-reader'] } }, { _id: SELF }],
       });

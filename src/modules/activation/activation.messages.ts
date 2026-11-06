@@ -30,7 +30,7 @@ const RECORD_DAY = {
 } as const;
 
 /**
- * **The activation module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): the checklist an office writes and
+ * **The activation module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): the checklist an office writes and
  * publishes, a hire's ticks and the record a data-backed tick is saved with, graduation, a leader's corrections and
  * note, and *Mark left*. The Indonesian follows the approved glossary: *checklist*, *Activation*, *New hire*, *3M
  * activation*, *Case*, *Closing*, *1:1* and *Leader* stay English (§A.5, §A.6); a field is named as the API names it
@@ -180,7 +180,7 @@ export const ACTIVATION_REFUSALS = refusals('modules/activation', {
     }),
   },
   ACTIVATION_CLOSED: {
-    // P18.96-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
+    // P18.8-T6 AC-5 (ADR-0173 §4): the checklist is complete — never *activation*, which is the 3M result.
     complete: {
       en: 'This checklist is complete. Nothing on it changes now.',
       id: 'Checklist ini sudah selesai. Tidak ada lagi yang dapat diubah.',
@@ -219,7 +219,7 @@ export const ACTIVATION_REFUSALS = refusals('modules/activation', {
 });
 
 /**
- * **The activation module's other sentences** (P18.98-T5 AC-4, AC-6): what completes an item on its own and where a
+ * **The activation module's other sentences** (P18.10-T5 AC-4, AC-6): what completes an item on its own and where a
  * data-backed item's source line says it came from — served with every read of a checklist, for the reader — and the
  * name a pecah telor's closing is logged under (D-26), in the language of whoever records it. Each English is the registry's own
  * (`activation-checklist.ts`), read from it, so the two cannot drift; the feature links' *Goal Settings*, *Leads
@@ -288,7 +288,7 @@ const LINK_WORDS: Readonly<Record<ActivationNamedLink, { completesWhen: Sentence
 };
 
 /**
- * **What completes an item on its own, as a sentence** (P18.98-T5): a link of a kind the registry declares — a
+ * **What completes an item on its own, as a sentence** (P18.10-T5): a link of a kind the registry declares — a
  * `training:<module code>` link reads the training kind's words. What the link view serves, written for its reader,
  * and what `ACTIVATION_ITEM_AUTOMATIC` says.
  */

@@ -76,7 +76,7 @@ describe('activity readings, for many members at once (P11-T6)', () => {
   });
 
   /*
-   * **`perPersonPerDay`: each person's count on each asked day** (UI V1, Phase 18.99 T9: UI-059's *Hari ini* on the
+   * **`perPersonPerDay`: each person's count on each asked day** (UI V1, Phase 18.11 T9: UI-059's *Hari ini* on the
    * Group Tree, O-5; the same read Home's team list takes for yesterday and today, UI-101). The day's `totalCount`,
    * within the office, never a deleted day.
    */

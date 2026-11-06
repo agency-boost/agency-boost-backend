@@ -16,7 +16,7 @@ import { ACTIVATION_MESSAGES, ACTIVATION_REFUSALS } from './activation.messages'
 
 const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
 
-/** The record a hand tick of a data-backed item names, as the request sends it (P18.96-T4 AC-3). */
+/** The record a hand tick of a data-backed item names, as the request sends it (P18.8-T4 AC-3). */
 export interface ItemRecordInput {
   kind: 'closing' | 'one_on_one';
   leadId?: string;
@@ -32,7 +32,7 @@ export type ItemChangeWithRecord = ItemChange & { record?: ItemRecordInput };
 const NOTE_MAX = 500;
 
 /**
- * **A hand tick, with its record** (P18.96-T4 AC-3; ADR-0171 §3): what `PUT /activation/me/items/:code` and
+ * **A hand tick, with its record** (P18.8-T4 AC-3; ADR-0171 §3): what `PUT /activation/me/items/:code` and
  * `PUT /new-hires/:membershipId/items/:code` write. Every item but the three data-backed ones is ticked exactly as
  * before (`ActivationProgressService.setItem`'s checks and write); a data-backed one is ticked **only with its
  * record, and the two are saved together**:

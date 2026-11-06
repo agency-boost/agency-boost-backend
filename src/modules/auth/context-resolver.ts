@@ -34,14 +34,12 @@ export class ContextResolver {
 
   async resolve(
     userId: string,
-    impersonatorUserId: string | null = null,
     /**
-     * Whether the support session may write (P4-T10).
-     *
-     * Passed in by the guard, which has already looked the session up to check it is
-     * live — reading it a second time here would be a second question about the same row.
+     * The Super Admin behind a support session, or `null`. **A session only looks** (ADR-0206 §4; P19.4-T2): the
+     * context is read-only whenever this is set. The guard passed the row's `readOnly` until then, which a second
+     * Super Admin's elevation could turn off.
      */
-    impersonationReadOnly = false,
+    impersonatorUserId: string | null = null,
     /**
      * A support session **leaving** — the one route marked `AllowWhileOfficeUnavailable` (P13.2 exit
      * review): the office's suspension or archive is not refused, so an operator can end a session in
@@ -49,11 +47,7 @@ export class ContextResolver {
      */
     leavingSupport = false,
     /**
-     * A setup session's write scope, off the same session row (ADR-0162 §2). Ignored outside a session.
-     */
-    impersonationWriteScope: readonly string[] = [],
-    /**
-     * **The language the request's `Accept-Language` names** (P18.98-T5 AC-1), read by the guard, or `null`. The
+     * **The language the request's `Accept-Language` names** (P18.10-T5 AC-1), read by the guard, or `null`. The
      * request's reader is it, else the person's saved `users.locale` — off the row read here, no extra read — else a
      * reader who has chosen nothing. **Never the person's own choice in a support session**: it is neither read nor
      * written there (ADR-0179 §2), so the support person's screen's language, or nobody's.
@@ -136,9 +130,8 @@ export class ContextResolver {
     return new RequestContext(
       userId, user.platformRole, membership, impersonatorUserId, null,
       user.mustChangePassword === true,
-      // Never outside a session: somebody acting as themselves is not being restrained.
-      impersonatorUserId !== null && impersonationReadOnly,
-      impersonatorUserId !== null ? Object.freeze([...impersonationWriteScope]) : [],
+      // Every session, and never outside one: somebody acting as themselves is not being restrained.
+      impersonatorUserId !== null,
       reader,
     );
   }

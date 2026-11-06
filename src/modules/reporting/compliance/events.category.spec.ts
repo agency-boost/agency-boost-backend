@@ -12,11 +12,11 @@ import type { ComplianceScope } from './compliance-category';
 import { eventCell, eventOrder, EventsComplianceCategory } from './events.category';
 
 /**
- * **Events in the Owner's compliance tree** (P18.6-T1 AC-3, P18.6-T2 AC-1, AC-2): the picker's catalog over
+ * **Events in the Owner's compliance tree** (P18.3-T1 AC-3, P18.3-T2 AC-1, AC-2): the picker's catalog over
  * D-window, the chip over D-chips, and each member's cell — **equal to the roll call's status** for the same event.
  * Over the events office (`test/events-office.ts`): 10:00 on Monday 14 September 2026 in Jakarta.
  */
-describe('the compliance tree’s Events category (P18.6-T2)', () => {
+describe('the compliance tree’s Events category (P18.3-T2)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: EventsOffice;
   let category: EventsComplianceCategory;
@@ -74,8 +74,8 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
   }, 120_000);
   afterAll(stopMongo);
 
-  describe('the picker (P18.6-T2 AC-1, D-window)', () => {
-    it('P18.6-T2 AC-1 lists this year’s events, archived and other offices’ never, not past soonest first then past latest first', async () => {
+  describe('the picker (P18.3-T2 AC-1, D-window)', () => {
+    it('P18.3-T2 AC-1 lists this year’s events, archived and other offices’ never, not past soonest first then past latest first', async () => {
       const { catalog } = await read(ownerScope(), null, false);
       expect(catalog.map((e) => e.id)).toEqual([
         // Not past: the running one, started an hour ago, then the one in five days.
@@ -91,20 +91,20 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       expect(catalog.find((e) => e.id === idOf('UPCOMING'))).toMatchObject({ phase: 'upcoming', startsOn: '2026-09-19' });
     });
 
-    it('P18.6-T2 AC-1 opens on the picker’s first event without an item, as the prototype does (Owner:3497)', async () => {
+    it('P18.3-T2 AC-1 opens on the picker’s first event without an item, as the prototype does (Owner:3497)', async () => {
       const result = await read(ownerScope());
       expect(result.item).toBe(idOf('RUNNING_LEADERS'));
       expect(result.cells!.size).toBe(ACTIVE.length);
     });
 
-    it('P18.6-T2 AC-1 answers 404 for an event it does not list: another office’s, archived, last year’s, or no id at all', async () => {
+    it('P18.3-T2 AC-1 answers 404 for an event it does not list: another office’s, archived, last year’s, or no id at all', async () => {
       const lastYear = (await wired.events.list(office.as('OWNER'))).find((e) => e.code === 'LAST_YEAR')!.id;
       for (const item of [idOf('B_PAST'), idOf('ARCHIVED'), lastYear, 'not-an-id', '66f0000000000000000000ff']) {
         await expect(read(ownerScope(), item)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
       }
     });
 
-    it('P18.6-T2 AC-1 KPM A never reads KPM B: 0555’s Owner lists 0555’s event alone, and A’s is 404', async () => {
+    it('P18.3-T2 AC-1 KPM A never reads KPM B: 0555’s Owner lists 0555’s event alone, and A’s is 404', async () => {
       const b = scopeOf(office.as('B_OWNER'), [office.id.B_AB, office.id.B_AGENT]);
       const result = await read(b);
       expect(result.catalog.map((e) => e.id)).toEqual([idOf('B_PAST')]);
@@ -112,7 +112,7 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       await expect(read(b, idOf('PAST_ALL'))).rejects.toMatchObject({ status: 404 });
     });
 
-    it('P18.6-T2 AC-1 an office with no event this year: no item, an empty tree, the chip over nobody', async () => {
+    it('P18.3-T2 AC-1 an office with no event this year: no item, an empty tree, the chip over nobody', async () => {
       const nothing = {
         from: '2030-01-01', to: '2030-12-31', start: new Date('2030-01-01T00:00:00+07:00'), end: new Date('2031-01-01T00:00:00+07:00'),
       };
@@ -124,11 +124,11 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
     });
   });
 
-  describe('the rows (P18.6-T2 AC-2)', () => {
+  describe('the rows (P18.3-T2 AC-2)', () => {
     const cellsOf = async (key: EventKey) => (await read(ownerScope(), idOf(key))).cells!;
     const cellOf = async (key: EventKey, who: EventsWho) => (await cellsOf(key)).get(office.id[who]);
 
-    it('P18.6-T2 AC-2 a past event: Attended with its day, Not shared or Shared; — awaiting confirmation; No-show; Not registered', async () => {
+    it('P18.3-T2 AC-2 a past event: Attended with its day, Not shared or Shared; — awaiting confirmation; No-show; Not registered', async () => {
       const cells = await cellsOf('PAST_ALL');
       const of = (who: EventsWho) => cells.get(office.id[who]);
       expect(of('RINA')).toEqual({ status: 'attended', done: true, on: '2026-08-24', second: 'shared' });
@@ -143,31 +143,31 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       expect(of('LATE')).toEqual({ status: null, done: null, on: null, second: null });
     });
 
-    it('P18.6-T2 AC-2 an upcoming event: Registered with its day, or Not registered (a cancelled RSVP included); no feedback yet', async () => {
+    it('P18.3-T2 AC-2 an upcoming event: Registered with its day, or Not registered (a cancelled RSVP included); no feedback yet', async () => {
       expect(await cellOf('UPCOMING', 'TARI')).toEqual({ status: 'registered', done: true, on: '2026-09-19', second: null });
       expect(await cellOf('UPCOMING', 'NINA')).toEqual({ status: 'not_registered', done: false, on: null, second: null });
       expect(await cellOf('UPCOMING', 'LATE')).toEqual({ status: 'not_registered', done: false, on: null, second: null });
     });
 
-    it('P18.6-T2 AC-2 a running event reads as an upcoming one, and its audience is the leaders’', async () => {
+    it('P18.3-T2 AC-2 a running event reads as an upcoming one, and its audience is the leaders’', async () => {
       expect(await cellOf('RUNNING_LEADERS', 'AGUS')).toEqual({ status: 'not_registered', done: false, on: null, second: null });
       expect(await cellOf('RUNNING_LEADERS', 'RINA')).toEqual({ status: null, done: null, on: null, second: null });
     });
 
-    it('P18.6-T2 AC-2 a chosen-people event: — in both for everybody not chosen', async () => {
+    it('P18.3-T2 AC-2 a chosen-people event: — in both for everybody not chosen', async () => {
       const cells = await cellsOf('PAST_CHOSEN');
       expect(cells.get(office.id.BUDI)).toEqual({ status: 'no_show', done: false, on: null, second: null });
       expect(cells.get(office.id.RINA)).toEqual({ status: 'not_registered', done: false, on: null, second: null });
       expect(cells.get(office.id.INDAH)).toEqual({ status: null, done: null, on: null, second: null });
     });
 
-    it('P18.6-T2 AC-2 serves a cell for the tree’s members only', async () => {
+    it('P18.3-T2 AC-2 serves a cell for the tree’s members only', async () => {
       const result = await read(ownerScope(['RINA', 'BUDI']), idOf('PAST_ALL'));
       expect([...result.cells!.keys()].sort()).toEqual([office.id.RINA, office.id.BUDI].sort());
     });
 
     it.each(['UPCOMING', 'RUNNING_LEADERS', 'PAST_ALL', 'PAST_CHOSEN', 'PAST_LEADERS', 'ENDS_NOW'] as EventKey[])(
-      'P18.6-T2 AC-2 reconciliation: every status of %s equals the roll call’s, and nobody it does not list has one',
+      'P18.3-T2 AC-2 reconciliation: every status of %s equals the roll call’s, and nobody it does not list has one',
       async (key) => {
         const [cells, call] = await Promise.all([cellsOf(key), wired.eventRollCalls.rollCall(office.as('ADMIN'), idOf(key))]);
         const fromCall = new Map(call.people.map((p) => [p.membershipId, p.status]));
@@ -179,15 +179,15 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
     );
   });
 
-  describe('the chip (P18.6-T1 AC-3, D-chips)', () => {
-    it('P18.6-T1 AC-3 attended (confirmed) at or registered for one listed event, over those in one listed audience', async () => {
+  describe('the chip (P18.3-T1 AC-3, D-chips)', () => {
+    it('P18.3-T1 AC-3 attended (confirmed) at or registered for one listed event, over those in one listed audience', async () => {
       const { chip } = await read(ownerScope(), null, false);
       // RINA and BUDI attended PAST_ALL; TARI is registered for UPCOMING. INDAH and DIMAS await confirmation: not counted.
       // Everybody is in UPCOMING's audience (the office as it is now), LATE included.
       expect(chip).toEqual({ count: 3, of: ACTIVE.length });
     });
 
-    it('P18.6-T1 AC-3 counts the tree’s members only', async () => {
+    it('P18.3-T1 AC-3 counts the tree’s members only', async () => {
       const { chip } = await read(ownerScope(['RINA', 'INDAH', 'AGUS']), null, false);
       expect(chip).toEqual({ count: 1, of: 3 });
     });
@@ -203,7 +203,7 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       confirmedByMembershipId: null, confirmedAt: null, status, gaveFeedback,
     });
 
-    it('P18.6-T2 AC-2 the done rule is the roll call’s status: attended once ended, registered before', () => {
+    it('P18.3-T2 AC-2 the done rule is the roll call’s status: attended once ended, registered before', () => {
       expect(eventCell(row('attended', true), event({}))).toEqual({ status: 'attended', done: true, on: '2026-09-01', second: 'shared' });
       expect(eventCell(row('unconfirmed'), event({}))).toEqual({ status: 'unconfirmed', done: false, on: null, second: 'not_shared' });
       expect(eventCell(row('no_show', true), event({}))).toEqual({ status: 'no_show', done: false, on: null, second: null });
@@ -214,7 +214,7 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       expect(eventCell(undefined, event({}))).toEqual({ status: null, done: null, on: null, second: null });
     });
 
-    it('P18.6-T2 AC-1 the order: not past before past; ties by id', () => {
+    it('P18.3-T2 AC-1 the order: not past before past; ties by id', () => {
       const at = (iso: string) => new Date(iso);
       const a = { id: 'a', phase: 'past' as const, startsAt: at('2026-08-01T00:00:00Z') };
       const b = { id: 'b', phase: 'past' as const, startsAt: at('2026-08-01T00:00:00Z') };
@@ -242,7 +242,7 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
       expect(result.chip).toEqual({ count: 1, of: 1 });
     });
 
-    it('P18.6-T2 AC-2 an event listed but gone by the time its attendance is read draws nobody in it', async () => {
+    it('P18.3-T2 AC-2 an event listed but gone by the time its attendance is read draws nobody in it', async () => {
       const listed = event({ id: '66f00000000000000000e001' });
       const stub = new EventsComplianceCategory({
         eventsBetween: async () => [listed],
@@ -256,7 +256,7 @@ describe('the compliance tree’s Events category (P18.6-T2)', () => {
     });
   });
 
-  it('P18.6-T2 AC-2 refuses to read without an office', async () => {
+  it('P18.3-T2 AC-2 refuses to read without an office', async () => {
     await expect(read(scopeOf(RequestContext.platform('root'), []))).rejects.toThrow();
     expect(KPM_B).not.toBe(KPM_A);
   });

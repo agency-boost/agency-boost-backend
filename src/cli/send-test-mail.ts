@@ -9,7 +9,7 @@ import {
 } from '@/modules/notifications/mail-provider';
 
 /**
- * **One test email, sent with an environment's own mail settings** (P18.99-T18, ADR-0182).
+ * **One test email, sent with an environment's own mail settings** (P18.11-T18, ADR-0182).
  *
  * After the provider changes (a new version of `api-env-<env>` and a redeploy), this is how the operator learns
  * whether mail leaves, without registering anybody:

@@ -7,6 +7,8 @@ import { defaultActivationChecklist } from '@/modules/activation/activation-payl
 import { defaultCapabilityLadder } from '@/modules/capability/capability-payload';
 import { defaultEventTypes } from '@/modules/events/event-types-payload';
 import { defaultCampaignKinds } from '@/modules/campaigns/campaign-kinds-payload';
+import { defaultPlaybookBody } from '@/modules/recruitment/recruitment-playbook-defaults';
+import { platformAnalyticsConfig } from './analytics-config';
 import type { TemplateKind } from './company-template.schema';
 import { boundCodes, defaultBinding, type CascadeBinding } from './activity-binding';
 
@@ -28,9 +30,29 @@ export const OFFICE_TEMPLATE_KINDS = [
 ] as const satisfies readonly TemplateKind[];
 export type OfficeTemplateKind = (typeof OFFICE_TEMPLATE_KINDS)[number];
 
-/** Is this kind held by a named template, rather than by the company itself? */
+/** Is this kind copied into an office — one of the seven, rather than the company's or the playbook? */
 export function isOfficeTemplateKind(kind: TemplateKind): kind is OfficeTemplateKind {
   return (OFFICE_TEMPLATE_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * **Every kind a named template holds: its sections' kinds** (ADR-0210 §1). The seven office kinds and the recruitment
+ * playbook, which a template holds, drafts, publishes and copies like them, but which **no office copies**: each KPM reads
+ * its template's published playbook live (ADR-0210 §4). So a template's checklist, its copies and *Terbitkan semua* read
+ * this list; provisioning, the push and the offices' standing read {@link OFFICE_TEMPLATE_KINDS}.
+ */
+export const NAMED_TEMPLATE_KINDS = [
+  ...OFFICE_TEMPLATE_KINDS, 'recruitment_playbook',
+  // P19.5-T1 (ADR-0214 §1): the eighth section, read live by every KPM on the template — never copied, never pushed.
+  'advanced_analytics',
+  // P19.6-T1 (ADR-0218 §3): the ninth, *Tampilan* — read live, never copied, never pushed, and no lock.
+  'branding',
+] as const satisfies readonly TemplateKind[];
+export type NamedTemplateKind = (typeof NAMED_TEMPLATE_KINDS)[number];
+
+/** Is this kind held by a named template, rather than by the company itself (`campaign_kinds`)? */
+export function isNamedTemplateKind(kind: TemplateKind): kind is NamedTemplateKind {
+  return (NAMED_TEMPLATE_KINDS as readonly string[]).includes(kind);
 }
 
 /**
@@ -68,6 +90,15 @@ export function platformDefaultPayload(kind: TemplateKind): Record<string, unkno
       return { ...defaultEventTypes() };
     case 'campaign_kinds':
       return { ...defaultCampaignKinds() };
+    case 'recruitment_playbook':
+      // The AgencyBoost words (ADR-0125 §2), what *Mulai dari kata-kata AgencyBoost* starts a template's section from.
+      return defaultPlaybookBody() as unknown as Record<string, unknown>;
+    case 'advanced_analytics':
+      // Version 1's seven columns with the first pattern (ADR-0214 §3, §9): what a KPM reads where nothing is published.
+      return platformAnalyticsConfig() as unknown as Record<string, unknown>;
+    case 'branding':
+      // AgencyBoost's own (ADR-0218 §3): nothing set, so a KPM on the template shows AgencyBoost's logo, colours and Boost.
+      return { logo: null, logoSquare: null, primary: null, secondary: null, mascot: null };
   }
 }
 

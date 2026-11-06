@@ -1,9 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { InviteBanner, InviteView } from './invites.service';
+import { InviteBrandingDto } from '@/modules/branding/branding.response.dto';
 import type { RequestedTransferView, TransferPerson, TransferView } from './transfers.service';
 
 /**
- * The shapes P18.96-T3's routes answer (ADR-0170): an invite, a transfer request, *+ Add agent*'s outcome and an
+ * The shapes P18.8-T3's routes answer (ADR-0170): an invite, a transfer request, *+ Add agent*'s outcome and an
  * invite link's banner. Each `implements` the service's interface, so the document cannot drift from the code.
  */
 
@@ -204,6 +205,12 @@ export class InviteBannerDto implements InviteBanner {
 
   @ApiProperty({ type: String })
   expiresAt!: string;
+
+  @ApiProperty({
+    type: () => InviteBrandingDto, nullable: true,
+    description: 'The KPM’s name, colours and logo for the invitation’s pages (ADR-0218 §9); `null`: AgencyBoost’s.',
+  })
+  branding!: InviteBrandingDto | null;
 }
 
 export class AcceptedInviteDto {

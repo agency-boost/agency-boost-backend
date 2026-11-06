@@ -28,7 +28,7 @@ import { listenOnLoopback } from './listen';
 import { clearCollections, startMongo, stopMongo } from './mongo';
 
 /**
- * **The training office, over HTTP** (P18.5-T1 to T4): `test/coaching-office.ts`'s people behind the real
+ * **The training office, over HTTP** (P18.2-T1 to T4): `test/coaching-office.ts`'s people behind the real
  * `PermissionsGuard`, the production pipe and the real services — the learner's routes, the settings reads, and
  * the activation routes a training-linked item is read and ticked through.
  *

@@ -2,7 +2,7 @@ import { formatNumber } from '@/common/format/format';
 import { messages, refusals } from '@/common/i18n/sentence';
 
 /**
- * **The org module's words, in both languages** (P18.98-T5 AC-2; ADR-0179 §7): the office's members and how they are
+ * **The org module's words, in both languages** (P18.10-T5 AC-2; ADR-0179 §7): the office's members and how they are
  * placed — the hierarchy, removing somebody, changing their role, moving them to another leader, the tree, groups and
  * the Core Leader tag, and who administers the office. Joining an office has its own (`onboarding.messages.ts`), and so
  * does the leader limit (`leader-limit.messages.ts`).
@@ -175,7 +175,7 @@ export const ORG_REFUSALS = refusals('modules/org', {
   ORG_GROUP_NOT_FOUND: {
     notHere: {
       en: 'One of those groups is not in this office, or has been retired.',
-      // A group is retired with *Nonaktifkan grup* on the screen (P18.98-T4), so its refusal says *dinonaktifkan*.
+      // A group is retired with *Nonaktifkan grup* on the screen (P18.10-T4), so its refusal says *dinonaktifkan*.
       id: 'Salah satu grup itu tidak ada di KPM ini, atau sudah dinonaktifkan.',
     },
   },

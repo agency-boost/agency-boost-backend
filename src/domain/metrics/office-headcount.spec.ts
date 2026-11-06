@@ -44,7 +44,7 @@ describe('OFFICE_HEADCOUNT and OFFICE_NEW_MEMBERS_THIS_MONTH (OD-24, OD-74)', ()
   });
 
   /**
-   * **ADR-0172 §1, P18.96-T5 AC-1** — a member counts from their join date, an office date the reader gives as the instant
+   * **ADR-0172 §1, P18.8-T5 AC-1** — a member counts from their join date, an office date the reader gives as the instant
    * its day begins (`joinDateStart`); `joinedAt`, the system's stamp, only where there is none.
    */
   describe('from the join date (ADR-0172 §1)', () => {
@@ -52,7 +52,7 @@ describe('OFFICE_HEADCOUNT and OFFICE_NEW_MEMBERS_THIS_MONTH (OD-24, OD-74)', ()
     const OCT_1 = at('2026-09-30T17:00:00Z');
     const SEP_20 = at('2026-09-19T17:00:00Z');
 
-    it('P18.96-T5 AC-1 a new hire approved after they started counts from the day they started, not the approval', () => {
+    it('P18.8-T5 AC-1 a new hire approved after they started counts from the day they started, not the approval', () => {
       // Started on 20 September, let in on 3 October: in September's headcount.
       const hire = m({ joinDateStart: SEP_20, joinedAt: at('2026-10-03T03:00:00Z') });
       expect(countedFrom(hire)).toEqual(SEP_20);
@@ -61,24 +61,24 @@ describe('OFFICE_HEADCOUNT and OFFICE_NEW_MEMBERS_THIS_MONTH (OD-24, OD-74)', ()
       expect(officeHeadcount([hire, m({})], END_OF_SEP_30)).toBe(2);
     });
 
-    it('P18.96-T5 AC-1 a join date after the day is not a member then, whenever the system let them in', () => {
+    it('P18.8-T5 AC-1 a join date after the day is not a member then, whenever the system let them in', () => {
       expect(memberAt(m({ joinDateStart: OCT_1, joinedAt: at('2026-09-02T03:00:00Z') }), END_OF_SEP_30)).toBe(false);
       expect(memberAt(m({ joinDateStart: OCT_1 }), at('2026-10-01T17:00:00Z'))).toBe(true);
     });
 
-    it('P18.96-T5 AC-1 a row with no join date counts from joinedAt, as before', () => {
+    it('P18.8-T5 AC-1 a row with no join date counts from joinedAt, as before', () => {
       expect(countedFrom(m({ joinDateStart: null }))).toEqual(at('2026-01-02T02:00:00Z'));
       expect(memberAt(m({ joinDateStart: null, joinedAt: at('2026-10-01T03:00:00Z') }), END_OF_SEP_30)).toBe(false);
       expect(memberAt(m({ joinDateStart: undefined, joinedAt: null }), END_OF_SEP_30)).toBe(true);
     });
 
-    it('P18.96-T5 AC-1 a leaver still leaves on their removal, whatever their join date (ADR-0136)', () => {
+    it('P18.8-T5 AC-1 a leaver still leaves on their removal, whatever their join date (ADR-0136)', () => {
       const left = m({ status: 'removed', joinDateStart: SEP_20, removedAt: at('2026-09-25T03:00:00Z') });
       expect(memberAt(left, at('2026-09-24T17:00:00Z'))).toBe(true);
       expect(memberAt(left, END_OF_SEP_30)).toBe(false);
     });
 
-    it('P18.96-T5 AC-1 new this month is by the join date: an existing agent added today with an old one is not new', () => {
+    it('P18.8-T5 AC-1 new this month is by the join date: an existing agent added today with an old one is not new', () => {
       const monthStart = at('2026-08-31T17:00:00Z');
       const rows = [
         m({ joinDateStart: at('2015-03-01T17:00:00Z'), joinedAt: at('2026-09-29T03:00:00Z') }),

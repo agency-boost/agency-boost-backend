@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import { ASSET_LIMITS } from '@/domain/constants';
+import { TRAINING_FILE_MIME_TYPES } from '@/domain/constants';
 
 /** The folders a training upload may land in. Anything else is another module's business. */
 export const TRAINING_UPLOAD_FOLDERS = ['training'] as const;
@@ -10,8 +10,12 @@ export class RequestUploadDto {
   @IsString() @MaxLength(255)
   filename!: string;
 
-  @ApiProperty({ enum: ASSET_LIMITS.ALLOWED_MIME_TYPES })
-  @IsIn(ASSET_LIMITS.ALLOWED_MIME_TYPES as unknown as string[])
+  @ApiProperty({
+    enum: TRAINING_FILE_MIME_TYPES,
+    description: 'A module\u2019s *File* or *Video*: an HTML lesson (`text/html`) among them (ADR-0217 §1), '
+      + 'confirmed by its first bytes and drawn only in a sandboxed frame. Any other type is a `400`.',
+  })
+  @IsIn(TRAINING_FILE_MIME_TYPES as unknown as string[])
   mimeType!: string;
 
   @ApiProperty({

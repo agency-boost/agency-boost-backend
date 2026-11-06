@@ -68,7 +68,7 @@ export function prototypeChips(question: 'type' | 'motivation' | 'hesitation'): 
 }
 
 /**
- * **The client's shorter chip words** (ADR-0167; the client's UI review of 2026-10-26, UI-015; P18.95-T6 AC-2;
+ * **The client's shorter chip words** (ADR-0167; the client's UI review of 2026-10-26, UI-015; P18.7-T6 AC-2;
  * parity I-421), typed here as the client gave them, by the prototype's `data-val`: the one place the shipped
  * vocabulary departs from the file. Every other chip keeps the prototype's text.
  */
@@ -114,7 +114,7 @@ export interface RenderedPlan {
  * shapes — the HTML template replaced by the values it interpolates, so a test can compare them.
  *
  * A motivation's tag is its chip's label, as `renderPlan` reads it from the chip — the chip **as it ships**
- * (`shippedChips`), so the client's shorter words tag an opening as they label its chip (P18.95-T6 AC-2).
+ * (`shippedChips`), so the client's shorter words tag an opening as they label its chip (P18.7-T6 AC-2).
  */
 export function renderPlanPort(
   words: PrototypeWords,

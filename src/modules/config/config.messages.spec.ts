@@ -7,7 +7,7 @@ const R = CONFIG_REFUSALS;
 const V = R.VALIDATION_FAILED;
 
 /**
- * **Every sentence the office's configuration refuses with, in both languages** (P18.98-T5 AC-2, AC-3): each said
+ * **Every sentence the office's configuration refuses with, in both languages** (P18.10-T5 AC-2, AC-3): each said
  * with its values — a code, a label an office typed, an op — kept as they are, both arms of every choice included, and
  * every entry of the catalogue here.
  */
@@ -71,7 +71,7 @@ const CASES: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.bindingUnknownCodes', V.bindingUnknownCodes({ label: 'Sales meeting', codes: ['A', 'B'] }), ['A, B']],
 ];
 
-describe('P18.98-T5 AC-2 the office configuration’s sentences', () => {
+describe('P18.10-T5 AC-2 the office configuration’s sentences', () => {
   it.each(CASES)('%s is said in English and in Indonesian, its values kept as they are', (_entry, sentence, values) => {
     const [en, id] = [english(sentence), indonesian(sentence)];
     expect(en).toBeTruthy();

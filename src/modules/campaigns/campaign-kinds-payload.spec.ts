@@ -2,11 +2,11 @@ import { englishAll, indonesianAll } from '../../../test/i18n';
 import { campaignKindsProblems, defaultCampaignKinds } from './campaign-kinds-payload';
 
 /**
- * **A company's rule set, refused in both languages** (P18.98-T5 AC-3; P5-T9 AC-4): `campaignKindsProblems` answers
+ * **A company's rule set, refused in both languages** (P18.10-T5 AC-3; P5-T9 AC-4): `campaignKindsProblems` answers
  * sentences, each naming its place — *Rule 1, group 2, criterion 1* — in the reader's words (*Aturan 1, grup 2,
  * kriteria 1*). The English is the API's as it always was; `template-payloads.spec.ts` pins each rule's meaning.
  */
-describe('P18.98-T5 AC-3 a campaign kinds payload’s problems, in both languages', () => {
+describe('P18.10-T5 AC-3 a campaign kinds payload’s problems, in both languages', () => {
   const rule = (over: Record<string, unknown> = {}) => ({
     kind: 'production_club',
     code: 'STAR_CLUB',
@@ -16,11 +16,11 @@ describe('P18.98-T5 AC-3 a campaign kinds payload’s problems, in both language
     ...over,
   });
 
-  it('P18.98-T5 AC-3 the platform tiers and MOC have none', () => {
+  it('P18.10-T5 AC-3 the platform tiers and MOC have none', () => {
     expect(campaignKindsProblems(defaultCampaignKinds())).toEqual([]);
   });
 
-  it('P18.98-T5 AC-3 a payload that is not a list, an empty one, and a rule that is wrong in every way', () => {
+  it('P18.10-T5 AC-3 a payload that is not a list, an empty one, and a rule that is wrong in every way', () => {
     expect(indonesianAll(campaignKindsProblems({}))).toEqual(['rules harus berupa daftar.']);
     expect(indonesianAll(campaignKindsProblems({ rules: [] }))).toEqual([
       'Kumpulan aturan tanpa satu aturan pun membuat setiap KPM di perusahaan ini tidak memiliki syarat apa pun untuk dipenuhi.',
@@ -46,7 +46,7 @@ describe('P18.98-T5 AC-3 a campaign kinds payload’s problems, in both language
     ]);
   });
 
-  it('P18.98-T5 AC-3 a code twice, a rank shared, and a kind that is not one', () => {
+  it('P18.10-T5 AC-3 a code twice, a rank shared, and a kind that is not one', () => {
     expect(indonesianAll(campaignKindsProblems({ rules: [rule(), rule({ rank: 2 })] })))
       .toEqual(['Kode STAR_CLUB dipakai dua kali di production_club, sehingga satu aturan akan memiliki dua nama.']);
     const shared = campaignKindsProblems({ rules: [rule(), rule({ code: 'ELITE' })] });
@@ -57,7 +57,7 @@ describe('P18.98-T5 AC-3 a campaign kinds payload’s problems, in both language
       .toEqual(['Aturan 1: bonus_scheme bukan jenis aturan. Salah satu dari moc, production_club, promotion_path.']);
   });
 
-  it('P18.98-T5 AC-3 a group and its criteria, each named by its place', () => {
+  it('P18.10-T5 AC-3 a group and its criteria, each named by its place', () => {
     const problems = campaignKindsProblems({
       rules: [rule({
         criteriaGroups: [

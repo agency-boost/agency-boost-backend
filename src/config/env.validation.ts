@@ -27,7 +27,7 @@ export const envSchema = z.object({
   REFRESH_TOKEN_TTL: z.string().default('30d'),
 
   /**
-   * **The private Cloud Storage bucket every file lives in** (P18.7-T2, ADR-0153): one per environment.
+   * **The private Cloud Storage bucket every file lives in** (P18.4-T2, ADR-0153): one per environment.
    * Required in staging and production (below, in `superRefine`). Unset in development or test, the API
    * still boots, with storage that refuses every upload and file link with `STORAGE_NOT_CONFIGURED`
    * (plan decision D12). An empty value is unset, as `.env.example`'s `GCS_BUCKET=` writes it.
@@ -46,7 +46,7 @@ export const envSchema = z.object({
   STORAGE_KEY_PREFIX: z.enum(['dev', 'staging', 'prod']).default('dev'),
 
   /**
-   * **Which provider sends the mail** (P18.99-T18, ADR-0182): `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`,
+   * **Which provider sends the mail** (P18.11-T18, ADR-0182): `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`,
    * `smtp` (any relay, named by `SMTP_HOST`) or `log`. A preset fills the host, the port and TLS
    * (`mail-provider.ts`); `SMTP_HOST` and `SMTP_PORT`, when written, override it. Unset, `MAIL_TRANSPORT` decides,
    * and with neither it is `smtp`, so an env file written before this key boots as it did.
@@ -76,7 +76,7 @@ export const envSchema = z.object({
     .default(SMTP_TIMEOUT_MS_DEFAULT),
 
   /**
-   * **Read by nothing** (P18.99-T18): every link an email carries is built from `APP_ORIGIN`. Optional since
+   * **Read by nothing** (P18.11-T18): every link an email carries is built from `APP_ORIGIN`. Optional since
    * 2026-11-01 and still checked as a URL when written, so an env file that has it boots as it did.
    */
   APP_BASE_URL: z.preprocess(blankIsUnset, z.string().url().optional()),
@@ -110,7 +110,7 @@ export const envSchema = z.object({
   RATE_LIMIT_LOGIN_PER_15M: z.coerce.number().int().positive().default(5),
 
   /**
-   * **How many proxies stand between the client and this process** (P18.7-T1, ADR-0152), handed to
+   * **How many proxies stand between the client and this process** (P18.4-T1, ADR-0152), handed to
    * Express as `trust proxy`. `false` believes the socket: right when nothing is in front, as in
    * local development. Unset is `false` there, and **refused in staging and production** (below):
    * forgetting the key on a VM brought back the lockout described next, silently.
@@ -157,7 +157,7 @@ export const envSchema = z.object({
   }
 
   /*
-   * Mail (P18.99-T18, ADR-0182): the provider either key chose, and the rules that join two keys — `SMTP_HOST` for a
+   * Mail (P18.11-T18, ADR-0182): the provider either key chose, and the rules that join two keys — `SMTP_HOST` for a
    * plain relay, the credentials for a preset, SendGrid's `apikey` — written once, in `mail-provider.ts`, which the
    * adapter and the test command read too. Each is reported against its key.
    */
@@ -180,7 +180,7 @@ export const envSchema = z.object({
   }
 
   /*
-   * P18.7-T1 (the review's L2): a VM sits behind Caddy, so a missing `TRUST_PROXY` puts every client on
+   * P18.4-T1 (the review's L2): a VM sits behind Caddy, so a missing `TRUST_PROXY` puts every client on
    * Caddy's address and one person's wrong passwords lock everybody out. Written as `false` is a decision
    * somebody took and is accepted; left out is refused.
    */
@@ -194,7 +194,7 @@ export const envSchema = z.object({
     });
   }
 
-  // P18.7-T2 (ADR-0153, D12): storage may be absent only where nobody depends on it.
+  // P18.4-T2 (ADR-0153, D12): storage may be absent only where nobody depends on it.
   if ((env.NODE_ENV === 'staging' || env.NODE_ENV === 'production') && !env.GCS_BUCKET) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

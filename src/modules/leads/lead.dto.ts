@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsMongoId, IsOptional, IsString, MaxLength, Min,
 } from 'class-validator';
+import { LEAD_AGE, LEAD_GENDERS } from '@/domain/constants';
 import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
@@ -56,6 +57,30 @@ export class CreateLeadDto {
   @ApiPropertyOptional({ type: Boolean, description: 'The agent’s own commitment for the month.' })
   @Allow()
   thisMonth?: boolean;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: LEAD_AGE.MIN,
+    maximum: LEAD_AGE.MAX,
+    example: 36,
+    description: '**The client\'s age at the next birthday** (*Umur ulang tahun berikutnya*; ADR-0224 §3): a '
+      + `whole number from ${LEAD_AGE.MIN} to ${LEAD_AGE.MAX}, or \`null\` to clear it. Outside the bounds it is `
+      + '`422 LEAD_AGE_OUT_OF_RANGE` with `details: { min, max }`; not a whole number, `400 VALIDATION_FAILED`. The '
+      + 'server records today as `ageRecordedOn` — **only when the age differs from the one the lead reads today**, so '
+      + 'saving the age shown moves nothing. **No `birthDate`** is taken (minimisation, §6): a body carrying one, or '
+      + '`ageRecordedOn`, is `400 VALIDATION_FAILED` as any unknown field is.',
+  })
+  @Allow()
+  age?: number | null;
+
+  @ApiPropertyOptional({
+    enum: LEAD_GENDERS,
+    nullable: true,
+    description: '*Laki-laki* (`male`) or *Perempuan* (`female`), or `null` to clear it (ADR-0224 §1).',
+  })
+  @Allow()
+  gender?: 'male' | 'female' | null;
 }
 
 /** The same fields, all optional. A patch never carries a status: moving is its own route. */
@@ -156,7 +181,7 @@ export class ListLeadsQueryDto {
       + 'leads your grant reaches and never widens them. The leads screen sends it with `type` and '
       + '`statusCode`; the coaching card with `type`.',
   })
-  // P18.95-T4 (ADR-0167 §4): `/leads` sends all three since the client's UI review of 2026-10-26 (UI-016).
+  // P18.7-T4 (ADR-0167 §4): `/leads` sends all three since the client's UI review of 2026-10-26 (UI-016).
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -197,6 +222,21 @@ export class ListLeadsQueryDto {
   @IsOptional()
   @IsIn(LEAD_FLAGS as unknown as string[])
   attention?: LeadFlag;
+
+  /**
+   * ***Sudah ada proposal* / *Belum ada proposal*** (P19.7-T2 AC-12; ADR-0221 §6): leads with a live proposal of yours,
+   * or without one. Either first narrows the list to your own leads — a proposal is its owner's alone — and works beside
+   * every other filter. A query string, so `true` and `false` as words.
+   */
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description:
+      '`true`: your own leads with at least one live proposal; `false`: your own leads with none. Either narrows the '
+      + 'list to your own leads first (a proposal is answered to its owner alone), beside every other filter.',
+  })
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  hasProposal?: 'true' | 'false';
 
   /**
    * **Validated first, on 2026-09-30, when its neighbours were still only allowed through.** An
@@ -259,7 +299,7 @@ export class CreateLeadQueryDto {
 
 
 /**
- * `PATCH /leads/order` (P18.8-T7, ADR-0161 §1): the caller's open leads, every one, in the order they want them.
+ * `PATCH /leads/order` (P18.5-T7, ADR-0161 §1): the caller's open leads, every one, in the order they want them.
  *
  * **The shape here, the rule in the service.** The pipe refuses what is not a list of ids; whether those
  * are exactly the caller's open leads needs the database, so `LeadService.reorder` answers that — with the

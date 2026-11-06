@@ -15,11 +15,11 @@ const ask = (over: Partial<AudienceQuestion> = {}): AudienceQuestion => ({
 });
 
 /**
- * **The audience as at the start** (P18.5-T5 AC-3; ADR-0039, ADR-0135, invariant §5), as a pure rule.
+ * **The audience as at the start** (P18.2-T5 AC-3; ADR-0039, ADR-0135, invariant §5), as a pure rule.
  * `event-guest.int.spec.ts` walks it through the routes over the coaching office.
  */
-describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
-  it('P18.5-T5 AC-3 all agents: everybody who was a member then — not the latecomer, not the pending, the leaver until they left', () => {
+describe('an event’s audience, as at its start (P18.2-T5 AC-3)', () => {
+  it('P18.2-T5 AC-3 all agents: everybody who was a member then — not the latecomer, not the pending, the leaver until they left', () => {
     const audience = new OfficeAudience([
       person('here'),
       person('late', { joinedAt: D('2026-09-01') }),
@@ -31,14 +31,14 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
     expect(audience.audienceOf(ask())).toEqual(['here', 'left-after', 'old-row']);
   });
 
-  it('P18.5-T5 AC-3 an upcoming event reads the office as it is now: the active members', () => {
+  it('P18.2-T5 AC-3 an upcoming event reads the office as it is now: the active members', () => {
     const audience = new OfficeAudience([
       person('here'), person('late', { joinedAt: D('2026-09-01') }), person('left', { status: 'removed', removedAt: D('2026-08-20') }),
     ], []);
     expect(audience.audienceOf(ask({ upcoming: true, startsAt: D('2026-10-01') }))).toEqual(['here', 'late']);
   });
 
-  it('P18.5-T5 AC-3 leaders: those leading somebody present, by the edges valid then — never the rung', () => {
+  it('P18.2-T5 AC-3 leaders: those leading somebody present, by the edges valid then — never the rung', () => {
     const people = [
       person('ab'), person('aab-alone'), person('agent-who-leads'),
       person('a', { leaderId: 'ab' }), person('b', { leaderId: 'agent-who-leads' }),
@@ -57,7 +57,7 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
     expect(audience.audienceOf(ask({ scope: 'leaders', upcoming: true }))).toEqual(['ab', 'agent-who-leads']);
   });
 
-  it('P18.5-T5 AC-3 a leader whose people had all left by then, or joined after, leads nobody then', () => {
+  it('P18.2-T5 AC-3 a leader whose people had all left by then, or joined after, leads nobody then', () => {
     const audience = new OfficeAudience([
       person('lead'),
       person('gone', { status: 'removed', removedAt: D('2026-08-01') }),
@@ -69,7 +69,7 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
     expect(audience.audienceOf(ask({ scope: 'leaders' }))).toEqual([]);
   });
 
-  it('P18.5-T5 AC-3 two edges in one instant: the later written wins; a row older than the history reads its current leader', () => {
+  it('P18.2-T5 AC-3 two edges in one instant: the later written wins; a row older than the history reads its current leader', () => {
     const audience = new OfficeAudience([
       person('x'), person('y'), person('m', { leaderId: 'y' }), person('old', { leaderId: 'x' }),
     ], [edge('m', 'x', '2026-08-01', '0001'), edge('m', 'y', '2026-08-01', '0002')]);
@@ -78,7 +78,7 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
       .audienceOf(ask({ scope: 'leaders' }))).toEqual(['x']);
   });
 
-  it('P18.5-T5 AC-3 a row older than the history, re-parented after the start, reads the leader it was moved away from', () => {
+  it('P18.2-T5 AC-3 a row older than the history, re-parented after the start, reads the leader it was moved away from', () => {
     // `m` has no `joined` edge (it predates the history) and was re-parented from `x` to `y` on 1 September.
     const audience = new OfficeAudience([
       person('x'), person('y'), person('m', { leaderId: 'y' }),
@@ -87,7 +87,7 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
     expect(audience.audienceOf(ask({ scope: 'leaders', startsAt: D('2026-09-10') }))).toEqual(['y']);
   });
 
-  it('P18.5-T5 AC-3 a chosen list holds its people as far as they were members then', () => {
+  it('P18.2-T5 AC-3 a chosen list holds its people as far as they were members then', () => {
     const audience = new OfficeAudience([
       person('chosen'), person('not-chosen'), person('chosen-late', { joinedAt: D('2026-09-01') }),
     ], []);
@@ -99,10 +99,10 @@ describe('an event’s audience, as at its start (P18.5-T5 AC-3)', () => {
   });
 });
 
-describe('an event’s phase and the one boundary every rule reads (P18.5-T5 AC-5; F-42)', () => {
+describe('an event’s phase and the one boundary every rule reads (P18.2-T5 AC-5; F-42)', () => {
   const event = { startsAt: new Date('2026-09-14T02:00:00Z'), endsAt: new Date('2026-09-14T05:00:00Z') };
 
-  it('P18.5-T5 AC-5 upcoming before the start, running until the end, past from endsAt to the millisecond', () => {
+  it('P18.2-T5 AC-5 upcoming before the start, running until the end, past from endsAt to the millisecond', () => {
     expect(eventPhase(event, new Date('2026-09-14T01:59:59.999Z'))).toBe('upcoming');
     expect(eventPhase(event, new Date('2026-09-14T02:00:00Z'))).toBe('running');
     expect(eventPhase(event, new Date('2026-09-14T04:59:59.999Z'))).toBe('running');
@@ -111,7 +111,7 @@ describe('an event’s phase and the one boundary every rule reads (P18.5-T5 AC-
     expect(hasEnded(event, new Date('2026-09-14T05:00:00Z'))).toBe(true);
   });
 
-  it('P18.5-T5 AC-4 the card’s time is HH:mm in the office’s zone, midnight included', () => {
+  it('P18.2-T5 AC-4 the card’s time is HH:mm in the office’s zone, midnight included', () => {
     expect(localTimeOf(new Date('2026-09-14T02:00:00Z'), 'Asia/Jakarta')).toBe('09:00');
     expect(localTimeOf(new Date('2026-09-14T17:00:00Z'), 'Asia/Jakarta')).toBe('00:00');
     expect(localTimeOf(new Date('2026-09-14T11:05:00Z'), 'Asia/Jakarta')).toBe('18:05');

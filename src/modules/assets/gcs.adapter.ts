@@ -11,7 +11,7 @@ import { AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject } fro
 const UPLOAD_TTL_MS = 10 * 60 * 1000;
 
 /**
- * **The SDK's own clock, and the one place this product reads the process's time on purpose** (P18.7-T2, the
+ * **The SDK's own clock, and the one place this product reads the process's time on purpose** (P18.4-T2, the
  * contract's documented exception to the clock port). The SDK stamps `x-goog-date` from `Date.now()` and refuses
  * an `expires` it judges to be in the past by the same clock, so a signature's lifetime has to be measured from
  * that clock too — a fixed or offset `Clock` would sign a form that is born expired, or that outlives its
@@ -24,9 +24,13 @@ const sdkNow = (): number => Date.now();
  * Types a browser may show in the tab rather than save: what a pitch PDF, a poster and a training video are for.
  * **Everything else is an attachment** — a spreadsheet, a CSV, and any type nobody recorded — so storage never
  * renders a file inline that this product did not decide it can.
+ *
+ * **`text/html` is inline too** (P19.6-T2, ADR-0217 §3): a lesson or a page, served from this bucket's host — never
+ * the app's — and drawn by the app only inside `<iframe sandbox="allow-scripts">`, whose opaque origin keeps it from
+ * the session. The app never links one on its own.
  */
 const INLINE_TYPES: ReadonlySet<string> = new Set([
-  'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'video/mp4',
+  'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'text/html',
 ]);
 
 /** The extension a downloaded attachment is saved with, since a key carries none (`<…>/<ulid>`). */
@@ -36,7 +40,7 @@ const ATTACHMENT_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 /**
- * **What the vendor said, and nothing else it carried** (P18.7-T2). A Cloud Storage `ApiError` keeps the HTTP
+ * **What the vendor said, and nothing else it carried** (P18.4-T2). A Cloud Storage `ApiError` keeps the HTTP
  * status in `code`; a transport or auth failure (gaxios) keeps it in `status` or `response.status`, and also keeps
  * the request it made, **`Authorization` header included**. So the original is never passed on: only a status
  * and a message leave this file, as a plain `Error`. Exported for the demo seed, which reports a refusal in a line.
@@ -53,7 +57,7 @@ const refused = (what: string, err: unknown): Error => {
 };
 
 /**
- * **Google Cloud Storage, foldered per environment and per owner** (P18.7-T2, ADR-0153, replacing Cloudinary).
+ * **Google Cloud Storage, foldered per environment and per owner** (P18.4-T2, ADR-0153, replacing Cloudinary).
  *
  * `<STORAGE_KEY_PREFIX>/<kpmId | company/<companyId>>/<folder>/<ulid>` — the key shape Cloudinary's public ids
  * had, so every key already registered reads the same. One private bucket per environment, uniform access, no
@@ -144,8 +148,8 @@ export class GcsAdapter extends StoragePort {
    * recorded type. Only a link with no recorded type would fall back to the claim, and that one is an attachment,
    * never rendered.
    *
-   * A PDF, an image or a video opens `inline`; a spreadsheet, a CSV and any type not recorded download as an
-   * `attachment`, named with their extension because a key has none.
+   * A PDF, an image, a video or an HTML page (ADR-0217 §3) opens `inline`; a spreadsheet, a CSV and any type not
+   * recorded download as an `attachment`, named with their extension because a key has none.
    */
   async createSignedUrl(
     storageKey: string,
@@ -253,9 +257,32 @@ export class GcsAdapter extends StoragePort {
   }
 
   /**
+   * **An object's bytes** (P19.6-T1; ADR-0218 §2, §4): its size read first, so an object over `maxBytes` throws without
+   * being downloaded; a 404 is `null`; any other refusal throws, as every read here does.
+   */
+  async read(storageKey: string, maxBytes: number): Promise<Buffer | null> {
+    const file = this.bucket.file(storageKey);
+    let metadata: { size?: string | number };
+    try {
+      [metadata] = await file.getMetadata();
+    } catch (err) {
+      if (storageRefusal(err).httpCode === 404) return null;
+      throw refused('the lookup', err);
+    }
+    if (Number(metadata.size ?? 0) > maxBytes) {
+      throw new Error(`Storage holds ${String(metadata.size)} bytes under ${storageKey}, over the ${maxBytes} it may read.`);
+    }
+    const [body] = await file.download().catch((err: unknown) => {
+      if (storageRefusal(err).httpCode === 404) return [null] as [null];
+      throw refused('the read', err);
+    });
+    return body;
+  }
+
+  /**
    * Delete one object; one already gone is not an error. **Nothing calls this at runtime**, and in staging and
    * production it is refused (403): the runtime signer is create-only by design (ADR-0153). Erasure, and the
-   * identity allowed to perform it, belong to P19-T1.
+   * identity allowed to perform it, belong to P20-T1.
    */
   async remove(storageKey: string): Promise<void> {
     await this.bucket.file(storageKey).delete({ ignoreNotFound: true }).catch((err: unknown) => {

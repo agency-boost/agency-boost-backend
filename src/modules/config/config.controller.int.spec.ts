@@ -250,11 +250,49 @@ describe('the configuration controllers', () => {
     });
 
     /*
-     * P18.5-T1 AC-8 (the leak): this asserted the opposite until 2026-10-10 — *"readable by every member"* — and
+     * P18.2-T1 AC-8 (the leak): this asserted the opposite until 2026-10-10 — *"readable by every member"* — and
      * the read answers drafts and archived rows. The settings read is the office's administration's
      * (`training_settings:read`); an agent reads what is offered, at `/training`.
      */
-    it('P18.5-T1 AC-8 refuses a field member the settings read, as the batch refuses them its writes', async () => {
+    it('P19.6-T4 AC-1 an Owner and an Admin write a skill’s and a module’s Deskripsi singkat; over 160 is 400, an agent 403', async () => {
+      await wired.provisioning.seedTrainingTaxonomy(KPM_A);
+      const flat = (await wired.training.list(OWNER, true)).flatMap((c) => c.skills);
+      const skill = flat.find((s) => s.code === 'PROSPECTING')!;
+      const module = flat.flatMap((s) => s.modules).find((m) => m.code === 'PROSPECT_LIST')!;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [
+          { op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version, body: { description: '8 cara mendapat calon nasabah' } },
+          { op: 'trainingSkill.create', body: { code: 'FACT_FINDING', categoryCode: 'SALES', label: 'Fact finding', description: 'Menghitung kebutuhan' } },
+        ] })
+        .expect(201);
+      current = ADMIN;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingModule.update', id: module.id, expectedVersion: module.version, body: { description: 'Daftar 100 nama' } }] })
+        .expect(201);
+      const list = await request(app.getHttpServer()).get('/kpm/settings/training').expect(200);
+      const skills = list.body.flatMap((c: { skills: { code: string; description: string | null; version: number; modules: { code: string; description: string | null }[] }[] }) => c.skills);
+      expect(skills.find((s: { code: string }) => s.code === 'PROSPECTING')).toMatchObject({
+        description: '8 cara mendapat calon nasabah', version: skill.version + 1,
+      });
+      expect(skills.find((s: { code: string }) => s.code === 'FACT_FINDING')).toMatchObject({ description: 'Menghitung kebutuhan' });
+      expect(skills.flatMap((s: { modules: { code: string }[] }) => s.modules).find((m: { code: string }) => m.code === 'PROSPECT_LIST'))
+        .toMatchObject({ description: 'Daftar 100 nama' });
+
+      const refused = await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version + 1, body: { description: 'x'.repeat(161) } }] })
+        .expect(400);
+      expect(refused.body.error.code).toBe('VALIDATION_FAILED');
+      current = AGENT;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version + 1, body: { description: 'Milik saya' } }] })
+        .expect(403);
+    });
+
+    it('P18.2-T1 AC-8 refuses a field member the settings read, as the batch refuses them its writes', async () => {
       current = AGENT;
       await request(app.getHttpServer()).get('/kpm/settings/training').expect(403);
       await request(app.getHttpServer())
@@ -319,7 +357,7 @@ describe('the configuration controllers', () => {
     });
 
     /*
-     * The Phase 18.5 exit review (permission review B2): this asserted *"readable by every member"* until 2026-10-10,
+     * The Phase 18.2 exit review (permission review B2): this asserted *"readable by every member"* until 2026-10-10,
      * and the read answers the draft and names each training link by its working title, a draft module's included. The
      * settings read is the office's administration's (`activation_settings:read`); a field member reads their own
      * activation, named from what the office offers.
@@ -330,7 +368,7 @@ describe('the configuration controllers', () => {
       ['an AAB', new RequestContext('u-aab', 'none', member({
         membershipId: 'mem-e', orgLevelCode: 'AAB', hierarchyRole: 'aab', isKpmOwner: false,
       }) as never)],
-    ])('P18.5 exit review B2 refuses %s the settings read, as it refuses them both writes', async (_name, who) => {
+    ])('P18.2 exit review B2 refuses %s the settings read, as it refuses them both writes', async (_name, who) => {
       current = who;
       const res = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(403);
       expect(res.body.error.code).toBe('PERM_DENIED');
@@ -342,7 +380,7 @@ describe('the configuration controllers', () => {
         .post('/kpm/settings/activation-checklist/publish').expect(403);
     });
 
-    it('P18.5 exit review B2 the Owner, the Admin and a read-only session as the Owner read it; a Super Admin in no office is refused', async () => {
+    it('P18.2 exit review B2 the Owner, the Admin and a read-only session as the Owner read it; a Super Admin in no office is refused', async () => {
       for (const who of [OWNER, ADMIN, new RequestContext(OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true)]) {
         current = who;
         await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
@@ -352,7 +390,7 @@ describe('the configuration controllers', () => {
       expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
-    it('P18.5 exit review B2 names a training link by the module’s working title here, a draft’s included — the settings read alone', async () => {
+    it('P18.2 exit review B2 names a training link by the module’s working title here, a draft’s included — the settings read alone', async () => {
       const module = (await wired.training.list(OWNER, true))
         .flatMap((c) => c.skills.flatMap((s) => s.modules)).find((m) => m.code === 'CLOSING_TECHNIQUES')!;
       const read = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist');
@@ -414,7 +452,7 @@ describe('the configuration controllers', () => {
         .expect(400);
     });
 
-    it('P18.98-T5 AC-7 names the op that failed, its field sentences and a missing row in Indonesian for an Indonesian reader', async () => {
+    it('P18.10-T5 AC-7 names the op that failed, its field sentences and a missing row in Indonesian for an Indonesian reader', async () => {
       const ops = [
         { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
         { op: 'category.create', body: { code: 'x', label: '' } },

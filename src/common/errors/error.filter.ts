@@ -26,7 +26,7 @@ const FRAMEWORK_CODES: Readonly<Partial<Record<number, ErrorCodeValue>>> = {
 };
 
 /**
- * **A framework exception's words, in the reader's language** (P18.98-T5 AC-2): Nest's English as Nest wrote it — every
+ * **A framework exception's words, in the reader's language** (P18.10-T5 AC-2): Nest's English as Nest wrote it — every
  * assertion on *"Cannot GET /x"* stands — and, in Indonesian, what its status means.
  */
 function frameworkSentence(code: ErrorCodeValue, english: string): Sentence {
@@ -64,7 +64,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
     const req = http.getRequest<Request & { id?: string } & ReaderCarrier>();
     const requestId = String(req.id ?? req.headers['x-request-id'] ?? 'unknown');
 
-    // The request's reader (P18.98-T5 AC-1): resolved by `AuthGuard`, or read off the header for a request no guard saw.
+    // The request's reader (P18.10-T5 AC-1): resolved by `AuthGuard`, or read off the header for a request no guard saw.
     const { status, body } = this.render(exception, requestId, readerOfRequest(req));
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
@@ -81,7 +81,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
   private render(exception: unknown, requestId: string, request: Reader): { status: number; body: ErrorEnvelope } {
     if (exception instanceof DomainException) {
       /*
-       * **Written for its reader** (P18.98-T5 AC-2, AC-3): the sentence in their language, and every sentence in
+       * **Written for its reader** (P18.10-T5 AC-2, AC-3): the sentence in their language, and every sentence in
        * `details` — `violations` — with it. `code` and every other detail are the same in both languages.
        */
       const reader = exception.readerOr(request);
@@ -137,7 +137,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
       /*
        * **A list is violations Nest wrote** — a pipe built without `VALIDATION_PIPE_OPTIONS`' factory: each is read as
        * class-validator's and written for the reader, as the factory writes them. A single message is Nest's, and
-       * Indonesian says what its status means (P18.98-T5 AC-2).
+       * Indonesian says what its status means (P18.10-T5 AC-2).
        */
       const violations = Array.isArray(message) ? message.map((text) => render(legacyViolation(String(text)), request)) : null;
       return {

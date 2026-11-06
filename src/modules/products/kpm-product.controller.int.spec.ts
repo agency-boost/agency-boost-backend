@@ -150,12 +150,12 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
     });
 
     /*
-     * P18.97-T4 AC-7 (ADR-0176 §7; the client's UI-028): the shelf's *Waiting for your approval* now carries *Review*,
+     * P18.9-T4 AC-7 (ADR-0176 §7; the client's UI-028): the shelf's *Waiting for your approval* now carries *Review*,
      * for whoever holds `sales_script:approve`. A reader who reads the badge without the permission — a read-only
      * support session as the Owner reads the shelf and the queue — is offered no *Review*, and the decisions it opens
      * are refused by the server, not only left off the screen.
      */
-    it('P18.97-T4 AC-7 refuses Review’s decisions to a reader who sees the badge but does not hold sales_script:approve', async () => {
+    it('P18.9-T4 AC-7 refuses Review’s decisions to a reader who sees the badge but does not hold sales_script:approve', async () => {
       await writeScript();
       session.current = READ_ONLY_OWNER;
       const shelf = await request(app.getHttpServer()).get(url).expect(200);
@@ -506,10 +506,13 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
         expect(res.body.documents.find((d: { slot: string }) => d.slot === 'brochure').filename).toBe('B'.repeat(200));
       });
 
-      it('N5 signs a PDF-only upload: the storage is asked for PDFs alone, and the fields say so', async () => {
+      it('N5 signs a document upload: the storage is asked for a PDF or a page alone, and the fields say so', async () => {
         const res = await sign({ filename: 'x.pdf', mimeType: 'application/pdf', bytes: 10 }).expect(201);
-        expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'products', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf'] });
-        // P18.7-T2: the V4 POST policy pins the Content-Type to the one type the route accepts.
+        // P19.6-T2 (ADR-0217 §1): an HTML page joins the PDF.
+        expect(wired.storage.signedWith.at(-1)).toEqual({
+          folder: 'products', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf', 'text/html'],
+        });
+        // P18.4-T2: the V4 POST policy pins the Content-Type to the one type the route accepts.
         expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
       });
 
@@ -573,7 +576,7 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
         .delete(`${url}/${mapanId}/documents/poster`).expect(400);
     });
 
-    it('P18.98-T5 AC-7 refuses a slot, an empty change and another company’s product in Indonesian for an Indonesian reader', async () => {
+    it('P18.10-T5 AC-7 refuses a slot, an empty change and another company’s product in Indonesian for an Indonesian reader', async () => {
       const slot = await request(app.getHttpServer())
         .delete(`${url}/${mapanId}/documents/poster`).set(...IN_INDONESIAN).expect(400);
       expect(slot.body.error.code).toBe('VALIDATION_FAILED');

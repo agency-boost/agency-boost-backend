@@ -231,6 +231,13 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   savedAt!: string | null;
 
   @ApiProperty({
+    type: String, format: 'date-time', nullable: true,
+    description: 'When `apeAchievedMinor` last changed — a save that changed it, or the member’s own estimate '
+      + '(ADR-0195 §3). `null` on a plan from before it was recorded, and on the office’s defaults.',
+  })
+  apeAchievedTypedAt!: string | null;
+
+  @ApiProperty({
     type: String,
     nullable: true,
     description:
@@ -241,7 +248,7 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
 }
 
 /**
- * **`POST /goals/:period/preview`** (P18.99-T5, UI V1 UI-014): what the inputs a screen holds would mean, worked out
+ * **`POST /goals/:period/preview`** (P18.11-T5, UI V1 UI-014): what the inputs a screen holds would mean, worked out
  * by the formula a save uses and written nowhere — the months in force, the APE produced the plan is measured
  * against, and the cascade.
  */

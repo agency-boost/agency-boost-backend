@@ -17,7 +17,7 @@ import { productionPipe, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
 
 /**
- * **The events office, for the specs that read and write its members' answers** (P18.5-T5, P18.5-T6): the coaching
+ * **The events office, for the specs that read and write its members' answers** (P18.2-T5, P18.2-T6): the coaching
  * office's people (`test/coaching-office.ts`), the company's name, one member who joined after the past events, one
  * leader edge history, and an event in every state, created through the Owner's own service.
  *

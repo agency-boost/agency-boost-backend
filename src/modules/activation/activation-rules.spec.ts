@@ -81,7 +81,7 @@ describe('the activation’s arithmetic (Phase 13)', () => {
       expect(progress.aspects[0].items.map((i) => [i.item.code, i.done])).toEqual([['A1', true], ['A2', true]]);
     });
 
-    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 of 40 items is 58%, which Math.round read 57', () => {
+    it('P18.9-T3 F-254 rounds an exact half up in integers: 23 of 40 items is 58%, which Math.round read 57', () => {
       const forty = [{ code: 'X', label: '1. X', items: Array.from({ length: 40 }, (_, i) => ({ code: `X${i}` })) }];
       const progress = progressOf(forty, new Set(Array.from({ length: 23 }, (_, i) => `X${i}`)));
       expect([progress.done, progress.total, progress.pct]).toEqual([23, 40, 58]);
@@ -145,16 +145,16 @@ describe('the activation’s arithmetic (Phase 13)', () => {
   });
 });
 
-describe('nthOneOnOne — Weekly 1-on-1 check-in (P18.96-T4 AC-2)', () => {
+describe('nthOneOnOne — Weekly 1-on-1 check-in (P18.8-T4 AC-2)', () => {
   const s = (date: string, sessionId: string) => ({ date, sessionId });
 
-  it('P18.96-T4 AC-2 is the fourth 1:1 since the start, oldest first, and null before it', () => {
+  it('P18.8-T4 AC-2 is the fourth 1:1 since the start, oldest first, and null before it', () => {
     const three = [s('2026-08-10', 'b'), s('2026-08-03', 'a'), s('2026-08-17', 'c')];
     expect(nthOneOnOne(three, '2026-08-01', 4)).toBeNull();
     expect(nthOneOnOne([...three, s('2026-08-24', 'd')], '2026-08-01', 4)).toEqual(s('2026-08-24', 'd'));
   });
 
-  it('P18.96-T4 AC-2 counts none before the start, and two on one day as two, by id', () => {
+  it('P18.8-T4 AC-2 counts none before the start, and two on one day as two, by id', () => {
     const sessions = [s('2026-07-31', 'x'), s('2026-08-03', 'a'), s('2026-08-03', 'b'), s('2026-08-04', 'c'), s('2026-08-05', 'd')];
     expect(nthOneOnOne(sessions, '2026-08-01', 4)).toEqual(s('2026-08-05', 'd'));
     expect(nthOneOnOne(sessions, '2026-08-01', 2)).toEqual(s('2026-08-03', 'b'));

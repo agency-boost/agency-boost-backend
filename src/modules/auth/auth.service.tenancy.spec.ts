@@ -63,7 +63,7 @@ describe('AuthService', () => {
       fullName: 'Rina Wijaya',
       companyId,
       agentCode: String(1000 + codeSeq),
-      // What a person records (ADR-0158), required at registration since P18.8-T4.
+      // What a person records (ADR-0158), required at registration since P18.5-T4.
       dateOfBirth: '1990-03-15',
       companyJoinMonth: '2021-07',
       workStatus: 'part_time' as const,
@@ -110,10 +110,10 @@ describe('AuthService', () => {
     });
 
     /*
-     * P18.8-T4 (ADR-0158). The four a person records arrive with the registration; work status waits on
+     * P18.5-T4 (ADR-0158). The four a person records arrive with the registration; work status waits on
      * the account for the membership an office later gives them, which is where it lives.
      */
-    it('P18.8-T4 AC-3: stores the birth date, join month and gender, and keeps the work status for the membership', async () => {
+    it('P18.5-T4 AC-3: stores the birth date, join month and gender, and keeps the work status for the membership', async () => {
       await service.register(reg({ email: 'four@kpm.test' }));
       const user = await mongoose.model(User.name).findOne({ email: 'four@kpm.test' }).lean();
       expect(user).toMatchObject({
@@ -121,7 +121,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('P18.8-T4 AC-4: refuses a birth date under 18 years ago, or not in the past, naming the field', async () => {
+    it('P18.5-T4 AC-4: refuses a birth date under 18 years ago, or not in the past, naming the field', async () => {
       // NOW is 09:00 on 5 September 2026 in Jakarta.
       await expect(service.register(reg({ email: 'young@kpm.test', dateOfBirth: '2008-09-06' })))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'dateOfBirth' } });
@@ -131,14 +131,14 @@ describe('AuthService', () => {
       expect(await mongoose.model(User.name).countDocuments({})).toBe(1);
     });
 
-    it('P18.8-T4 AC-4: refuses a join month in the future, naming the field', async () => {
+    it('P18.5-T4 AC-4: refuses a join month in the future, naming the field', async () => {
       const refusal = await service.register(reg({ email: 'later@kpm.test', companyJoinMonth: '2026-10' })).catch((e) => e);
       expect(refusal).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'companyJoinMonth' } });
       expect(refusal.getResponse().message).toBe('The company join month cannot be in the future.');
       await expect(service.register(reg({ email: 'now@kpm.test', companyJoinMonth: '2026-09' }))).resolves.toBeDefined();
     });
 
-    it('P18.8-T4 AC-4: measures the age in the office calendar, not the server\'s', async () => {
+    it('P18.5-T4 AC-4: measures the age in the office calendar, not the server\'s', async () => {
       // 20:00 UTC on 5 September is already the 6th in Jakarta: born on 6 September 2008, they are 18.
       clock.set(new Date('2026-09-05T20:00:00Z'));
       await expect(service.register(reg({ email: 'birthday@kpm.test', dateOfBirth: '2008-09-06' }))).resolves.toBeDefined();
@@ -204,11 +204,12 @@ describe('AuthService', () => {
       expect(wrong.getResponse().message).toBe(missing.getResponse().message);
     });
 
-    it('refuses an unverified account distinctly', async () => {
+    // P19-T1 AC-4 (UI-163, ADR-0190 §4): it was refused `AUTH_EMAIL_NOT_VERIFIED` until 2026-11-04.
+    it('P19-T1 AC-4 signs in an account whose address is not verified yet, and leaves it unverified', async () => {
       await service.register(reg({ email: 'new@kpm.test', fullName: 'New' }));
-      await expect(service.login('new@kpm.test', PASSWORD)).rejects.toMatchObject({
-        code: 'AUTH_EMAIL_NOT_VERIFIED',
-      });
+      await expect(service.login('new@kpm.test', PASSWORD)).resolves.toMatchObject({ accessToken: expect.any(String) });
+      const user = await mongoose.model(User.name).findOne({ email: 'new@kpm.test' });
+      expect(user?.get('emailVerifiedAt')).toBeNull();
     });
 
     it('refuses a deactivated account distinctly', async () => {
@@ -410,7 +411,7 @@ describe('AuthService', () => {
   });
 
   /*
-   * P3.6-T4. The roster import generates a password, an admin reads it and emails it on,
+   * P3.2-T4. The roster import generates a password, an admin reads it and emails it on,
    * so the person holding the session has demonstrated control of a mailbox and nothing
    * more. `AuthGuard` refuses everything but three routes until it is replaced; these are
    * the two things that replace it.
@@ -467,7 +468,8 @@ describe('AuthService', () => {
   });
 
   describe('email verification', () => {
-    it('activates the account and is single-use', async () => {
+    // The token is still spent once; since P19-T1 (ADR-0190 §2) a second press answers success, not a refusal.
+    it('activates the account, spends the token once, and P19-T1 AC-2 answers a second press as success', async () => {
       await service.register(reg({ email: 'v@kpm.test', fullName: 'V' }));
       const token = sent[0].payload.token as string;
       await service.verifyEmail(token);
@@ -476,7 +478,10 @@ describe('AuthService', () => {
       expect(user?.get('status')).toBe('active');
       expect(user?.get('emailVerifiedAt')).toEqual(NOW);
 
-      await expect(service.verifyEmail(token)).rejects.toBeDefined();
+      clock.set(new Date(NOW.getTime() + 60_000));
+      await expect(service.verifyEmail(token)).resolves.toBeUndefined();
+      // The moment it was first verified stands.
+      expect((await mongoose.model(User.name).findOne({ email: 'v@kpm.test' }))?.get('emailVerifiedAt')).toEqual(NOW);
     });
   });
   describe('resending verification (P4-T13)', () => {
@@ -534,7 +539,7 @@ describe('AuthService', () => {
 
     it('refuses a change that replaces a password with itself', async () => {
       // The guard would otherwise let somebody through on the credential an admin still
-      // has a copy of (P3.6-T4).
+      // has a copy of (P3.2-T4).
       const email = await verifiedUser('same-again@kpm.test');
       const user = await mongoose.model(User.name).findOne({ email }).exec();
 

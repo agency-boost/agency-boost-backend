@@ -63,7 +63,7 @@ describe('AB agencies (D-units)', () => {
     expect(gone.agencies[0]).toMatchObject({ directIds: ['ab', 'aab', 'agent'], units: [] });
   });
 
-  it('P18.8-T1 AC-5 partitions by class, not code: a Senior Leader rung heads an agency, an Associate one a unit', () => {
+  it('P18.5-T1 AC-5 partitions by class, not code: a Senior Leader rung heads an agency, an Associate one a unit', () => {
     // Allianz's ladder, say: SM (senior), UM (associate), FA (none). And an `AB` rung marked *Not a leader*.
     const custom = partitionAgencies(office([
       ['sm', 'SM', null, true, 'ab'], ['um', 'UM', 'sm', true, 'aab'], ['fa', 'FA', 'um', true, 'agent'],

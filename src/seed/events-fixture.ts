@@ -5,7 +5,7 @@ import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **Events, as their audience lives them** (Phase 18.5, P18.5-T5 AC-11, P18.5-T6 AC-8; the phase file's *Seed*):
+ * **Events, as their audience lives them** (Phase 18.2, P18.2-T5 AC-11, P18.2-T6 AC-8; the phase file's *Seed*):
  * 0417's members' RSVPs, claims, the roll call's confirmations and their answers, over the three events `configure()`
  * writes for every office (*Kickoff 2026*, *Rapat leader*, *Briefing PRULink*; their titles in `CONFIGURED_EVENTS`) and four new ones. Every date
  * counts from the run's today in Jakarta. **No member, activity day, goal or production month is added**: every row
@@ -37,7 +37,7 @@ import { seedObjectId } from './coaching-fixture';
  */
 
 /**
- * **The words the office and its members typed** — in Bahasa Indonesia since P18.98-T7 (OD-238): the demo reads as an
+ * **The words the office and its members typed** — in Bahasa Indonesia since P18.10-T7 (OD-238): the demo reads as an
  * Indonesian office. Every row is keyed by code or by its derived id, never by what it says, so a database seeded
  * before keeps its English and gets no second row.
  */
@@ -247,7 +247,7 @@ export async function seedEventsFixture(deps: EventsFixtureDeps): Promise<Events
   }
   // The title as stored: a re-run on a later day prints the month the event was written with, never today's.
   const townHall = String((await db.collection('events').findOne({ _id: oid(ids.TOWN_HALL) }))!.title);
-  // Each event by the title the office holds: a database seeded before P18.98-T7 keeps its English ones.
+  // Each event by the title the office holds: a database seeded before P18.10-T7 keeps its English ones.
   const titleOf = async (code: string) => String((await db.collection('events').findOne({ _id: oid(ids[code]) }))!.title);
   const [refresh, kickoff, huddle, prulink, bootcamp, clinic] = await Promise.all(
     ['PRODUCT_REFRESH', 'KICKOFF', 'LEADERS_HUDDLE', 'PRULINK_BRIEFING', 'NEW_AGENT_BOOTCAMP', 'SALES_CLINIC'].map(titleOf),

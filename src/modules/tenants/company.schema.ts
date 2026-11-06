@@ -61,6 +61,15 @@ export class Company {
   @Prop({ type: String, enum: COMPANY_KINDS, required: true, default: 'insurer' })
   kind!: CompanyKind;
 
+  /**
+   * **Its recruitment playbook lives in its templates, and was never the company's** (ADR-0210 §5, §6): `true` for a
+   * company created since P19.4-T5, which copies no company-level playbook. Migration `0056` moves each older company's
+   * playbook into its templates and leaves a company marked here alone — so the words migration `0025` still writes, on
+   * every deploy, for a company without a record never reach one of its templates. Absent reads `false`.
+   */
+  @Prop({ type: Boolean, default: false })
+  playbookInTemplates!: boolean;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }

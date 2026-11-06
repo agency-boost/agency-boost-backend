@@ -22,12 +22,12 @@ const doc = (over: Record<string, unknown> = {}) => ({
 const DUPLICATE = Object.assign(new Error('E11000'), { code: 11000 });
 
 /**
- * **The writes' races** (P18.5-T1 AC-7, D-opened): the paths an HTTP spec cannot time — a concurrent write that
+ * **The writes' races** (P18.2-T1 AC-7, D-opened): the paths an HTTP spec cannot time — a concurrent write that
  * changes the status between the read and the conditional update, two first writes meeting the unique index, and
  * two first opens of one item. Each is decided again on what is there now, and the audit's `before` is always the
  * value actually replaced.
  */
-describe('TrainingProgressService — races (P18.5-T1)', () => {
+describe('TrainingProgressService — races (P18.2-T1)', () => {
   const build = (rows: Record<string, jest.Mock>) => {
     const audit = { record: jest.fn() };
     const activation = { recorded: jest.fn() };
@@ -45,7 +45,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
     return { service, audit, activation };
   };
 
-  it('P18.5-T1 AC-7 a status changed under the write is decided again, and the audit names what was replaced', async () => {
+  it('P18.2-T1 AC-7 a status changed under the write is decided again, and the audit names what was replaced', async () => {
     const findOne = jest.fn()
       .mockResolvedValueOnce(doc({ status: 'not_started' })) // read
       .mockResolvedValueOnce(doc({ status: 'in_progress', startedAt: NOW })); // read again, after the miss
@@ -66,7 +66,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
     expect(activation.recorded).toHaveBeenCalledWith(agent, ME, 'training');
   });
 
-  it('P18.5-T1 AC-7 a status somebody else already set to the same value writes nothing and audits nothing', async () => {
+  it('P18.2-T1 AC-7 a status somebody else already set to the same value writes nothing and audits nothing', async () => {
     const findOne = jest.fn()
       .mockResolvedValueOnce(doc({ status: 'in_progress' }))
       .mockResolvedValueOnce(doc({ status: 'done', completedAt: NOW }))
@@ -78,7 +78,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
     expect(activation.recorded).not.toHaveBeenCalled();
   });
 
-  it('P18.5-T1 AC-2 two first writes meet the unique index: the loser is decided again as an update', async () => {
+  it('P18.2-T1 AC-2 two first writes meet the unique index: the loser is decided again as an update', async () => {
     const findOne = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(doc({ status: 'in_progress', startedAt: NOW }));
     const create = jest.fn().mockRejectedValueOnce(DUPLICATE);
     const updateWhere = jest.fn().mockResolvedValueOnce(doc({ status: 'done', startedAt: NOW, completedAt: NOW }));
@@ -103,7 +103,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
   });
 
   describe('opening (D-opened)', () => {
-    it('P18.5-T1 AC-6 two first opens: the loser of the create is recorded by the update', async () => {
+    it('P18.2-T1 AC-6 two first opens: the loser of the create is recorded by the update', async () => {
       const findOne = jest.fn().mockResolvedValueOnce(null);
       const create = jest.fn().mockRejectedValueOnce(DUPLICATE);
       const updateWhere = jest.fn().mockResolvedValueOnce(doc({ opened: [{ itemId: 'L1', at: NOW }] }));
@@ -116,7 +116,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
       );
     });
 
-    it('P18.5-T1 AC-6 an open a racing request recorded first is answered, and not recorded twice', async () => {
+    it('P18.2-T1 AC-6 an open a racing request recorded first is answered, and not recorded twice', async () => {
       const findOne = jest.fn()
         .mockResolvedValueOnce(doc())
         .mockResolvedValueOnce(doc({ opened: [{ itemId: 'L1', at: NOW }] }));
@@ -134,7 +134,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
     });
   });
 
-  it('P18.5-T3 AC-2 with no activation wired (a hand-built instance), a move to done still answers', async () => {
+  it('P18.2-T3 AC-2 with no activation wired (a hand-built instance), a move to done still answers', async () => {
     const findOne = jest.fn().mockResolvedValueOnce(null);
     const create = jest.fn().mockResolvedValueOnce(doc({ status: 'done', startedAt: NOW, completedAt: NOW }));
     const service = new TrainingProgressService(
@@ -146,7 +146,7 @@ describe('TrainingProgressService — races (P18.5-T1)', () => {
     expect((await service.setStatus(agent, 'CLOSING_TECHNIQUES', 'done')).status).toBe('done');
   });
 
-  it('P18.5-T1 AC-1 a caller with no membership is refused before anything is read', async () => {
+  it('P18.2-T1 AC-1 a caller with no membership is refused before anything is read', async () => {
     const { service } = build({ findOne: jest.fn(), create: jest.fn(), updateWhere: jest.fn() });
     const platform = RequestContext.platform('root');
     await expect(service.progress(platform)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });

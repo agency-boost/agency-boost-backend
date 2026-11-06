@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import {
@@ -14,6 +14,7 @@ import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from './company.schema';
 import { Kpm, KpmDocument } from './kpm.schema';
 import { CompanyOrgLevel, CompanyOrgLevelDocument } from './company-org-level.schema';
+import { OrgLevelReferenceSearch, type OrgLevelReference } from './org-level-references.port';
 import { TENANTS_REFUSALS } from './tenants.messages';
 
 /** One rung, as the console reads it. */
@@ -27,6 +28,8 @@ export interface OrgLevelRow {
   leaderTier: LeaderTier | null;
   status: 'active' | 'archived';
   archivedAt: string | null;
+  /** Moves on every write of the rung (P19-T6): what `expectedVersion` is checked against. */
+  version: number;
 }
 
 export interface CreateOrgLevelInput {
@@ -45,10 +48,20 @@ export interface UpdateOrgLevelInput {
   /** `null` is *Not a leader*; absent leaves the tier as it is. */
   leaderTier?: LeaderTier | null;
   status?: 'active' | 'archived';
+  /** The rung's `version` as read (P19-T6 AC-2). Sent, one the rung has moved past is `409`; absent, unchecked. */
+  expectedVersion?: number;
 }
 
 /**
- * The company role ladder (P3.5-T7, ADR-0012).
+ * **A rung at one version, as a write's filter** — a rung written raw, as migration 0037 writes the Template's, has
+ * no version key and reads as `0`, so version `0` matches it by the field's absence too.
+ */
+const atVersion = (version: number): Record<string, unknown> => (version === 0
+  ? { $or: [{ version: 0 }, { version: { $exists: false } }] }
+  : { version });
+
+/**
+ * The company role ladder (P3.1-T7, ADR-0012).
  *
  * Platform-level, like tenant provisioning: there is no tenant to scope to, so the
  * permission check is the only gate and it is explicit at the top of every method.
@@ -69,6 +82,11 @@ export class OrgLevelService {
      * people unchecked (`requireHolders`). The application module always provides it.
      */
     @Optional() private readonly members?: MembershipRepository,
+    /**
+     * What names a rung, for its delete (ADR-0213 §2) — and for nothing else. `@Optional` for `members`' reason; the
+     * delete refuses as a server fault without it, rather than removing a rung unchecked.
+     */
+    @Optional() private readonly references?: OrgLevelReferenceSearch,
   ) {}
 
   /**
@@ -146,6 +164,7 @@ export class OrgLevelService {
       leaderTier: tierOfRung(level),
       status: level.status,
       archivedAt: level.archivedAt ? level.archivedAt.toISOString() : null,
+      version: level.version ?? 0,
     };
   }
 
@@ -319,7 +338,9 @@ export class OrgLevelService {
 
     const code = input.code.trim().toUpperCase();
     // Archived rows count. A retired code that could be recreated as a different rung
-    // would change what every membership pointing at the old one means.
+    // would change what every membership pointing at the old one means. A **deleted** one does
+    // not (ADR-0213 §2): it was deleted because nothing named it, so nothing can come to mean the
+    // new rung — and the unique index leaves deleted rows out too.
     const clash = await this.levels
       .findOne({ companyId: input.companyId, code, deletedAt: null })
       .exec();
@@ -369,6 +390,11 @@ export class OrgLevelService {
    * count, before anything is written. Each member's class was derived from the tier when they were placed, so a
    * change would leave them holding rights their rung no longer gives — or re-class all of them at once, which
    * nobody asked for. Move them first, or add a new rung. Setting the tier it already has is no change.
+   *
+   * **Pinned to the version read, when one is sent** (P19-T6 AC-2; the 11-03 handover's B1-10): an `expectedVersion`
+   * the rung has moved past is refused `409 VERSION_CONFLICT`, before anything else is asked and with nothing
+   * written. Every write moves the version, and the write is conditional on the version it started from, so of two
+   * writes racing on one rung exactly one lands; the other is the same `409`.
    */
   async update(
     ctx: RequestContext,
@@ -385,8 +411,14 @@ export class OrgLevelService {
       .catch(() => null);
     if (!level) throw new NotFoundException('Org level');
 
+    const version = level.version ?? 0;
+    if (input.expectedVersion !== undefined && input.expectedVersion !== version) {
+      throw new VersionConflictException(input.expectedVersion, version);
+    }
+
     const tier = tierOfRung(level);
     const before = { label: level.label, displayOrder: level.displayOrder, leaderTier: tier, status: level.status };
+    const set: Partial<CompanyOrgLevel> = { version: version + 1 };
 
     if (input.leaderTier !== undefined && input.leaderTier !== tier) {
       const members = await this.requireHolders().countHoldingRungAcrossTenants(ctx, String(level._id));
@@ -398,29 +430,120 @@ export class OrgLevelService {
           { orgLevelId: String(level._id), code: level.code, members },
         );
       }
-      level.leaderTier = input.leaderTier;
+      set.leaderTier = input.leaderTier;
     }
-    if (input.label !== undefined) level.label = input.label.trim();
-    if (input.displayOrder !== undefined) level.displayOrder = input.displayOrder;
+    if (input.label !== undefined) set.label = input.label.trim();
+    if (input.displayOrder !== undefined) set.displayOrder = input.displayOrder;
     if (input.status !== undefined && input.status !== level.status) {
-      level.status = input.status;
+      set.status = input.status;
       // Archiving stamps the date; un-archiving clears it, so the field always answers
       // "when did this stop being offered" rather than "when was it last touched".
-      level.archivedAt = input.status === 'archived' ? this.clock.now() : null;
+      set.archivedAt = input.status === 'archived' ? this.clock.now() : null;
     }
-    await level.save();
+
+    // Only the fields that change, as `save()` wrote them: a row with no stored tier keeps reading it from its code.
+    const written = await this.levels.findOneAndUpdate(
+      { _id: level._id, deletedAt: null, ...atVersion(version) },
+      { $set: set },
+      { new: true },
+    ).exec();
+    if (!written) {
+      const now = await this.levels.findOne({ _id: level._id, deletedAt: null }).exec();
+      if (!now) throw new NotFoundException('Org level');
+      throw new VersionConflictException(input.expectedVersion ?? version, now.version ?? 0);
+    }
 
     await this.audit.record(ctx, {
       action: input.status === 'archived' ? 'org_level.archived' : 'org_level.updated',
       targetCollection: 'companyOrgLevels',
-      targetId: String(level._id),
+      targetId: String(written._id),
       before,
       after: {
-        label: level.label, displayOrder: level.displayOrder, leaderTier: tierOfRung(level), status: level.status,
+        label: written.label, displayOrder: written.displayOrder, leaderTier: tierOfRung(written), status: written.status,
       },
     });
 
+    return this.list(ctx, written.companyId);
+  }
+
+  /**
+   * **Delete an archived rung that nothing names** (B1-6; ADR-0213 §2; P19.4-T5 AC-2): a soft delete — `deletedAt` —
+   * audited as `org_level.deleted` with its code and label (invariant §6), and the company's ladder answered as it now
+   * stands.
+   *
+   * - **Only an archived rung.** A live one is refused `409 ORG_LEVEL_IN_USE` with no references: it is archived first.
+   * - **Only when nothing in its company names it** (`OrgLevelReferenceSearch`): a membership of any status or its role
+   *   history, a leader-limit request, an office's live or published setting, a campaign, the company's carrier rules,
+   *   any version or draft of its templates. Otherwise `409 ORG_LEVEL_IN_USE`, `details.references` naming each kind
+   *   and how many, and the sentence saying why.
+   * - **Pinned to the version read, when one is sent** (`expectedVersion`), as every write of a rung is (P19-T6).
+   * - **Its code may be used again afterwards**: nothing named it, so nothing can come to mean the new rung.
+   *
+   * The Template library's ladder follows the same rule. `org_level:crud`, the Super Admin's.
+   */
+  async remove(ctx: RequestContext, orgLevelId: string, expectedVersion?: number): Promise<OrgLevelRow[]> {
+    this.require(ctx, 'org_level:crud');
+    const level = await this.levels.findOne({ _id: orgLevelId, deletedAt: null }).exec().catch(() => null);
+    if (!level) throw new NotFoundException('Org level');
+
+    const version = level.version ?? 0;
+    if (expectedVersion !== undefined && expectedVersion !== version) {
+      throw new VersionConflictException(expectedVersion, version);
+    }
+    if (level.status !== 'archived') throw this.inUse(level, [], 'active');
+
+    const references = await this.requireReferences().of(ctx, {
+      orgLevelId: String(level._id), companyId: level.companyId, code: level.code,
+    });
+    if (references.length > 0) throw this.inUse(level, references, 'named');
+
+    const at = this.clock.now();
+    const deleted = await this.levels.findOneAndUpdate(
+      { _id: level._id, status: 'archived', deletedAt: null, ...atVersion(version) },
+      { $set: { deletedAt: at, version: version + 1 } },
+      { new: true },
+    ).exec();
+    if (!deleted) {
+      // Restored, changed or deleted between the read and the write: say what it is now.
+      const now = await this.levels.findOne({ _id: level._id, deletedAt: null }).exec();
+      if (!now) throw new NotFoundException('Org level');
+      throw new VersionConflictException(expectedVersion ?? version, now.version ?? 0);
+    }
+
+    await this.audit.record(ctx, {
+      action: 'org_level.deleted',
+      targetCollection: 'companyOrgLevels',
+      targetId: String(level._id),
+      before: { companyId: level.companyId, code: level.code, label: level.label, status: level.status },
+      after: { companyId: level.companyId, code: level.code, label: level.label, deletedAt: at.toISOString() },
+    });
     return this.list(ctx, level.companyId);
+  }
+
+  /** `409 ORG_LEVEL_IN_USE`: live, or named by the records listed. */
+  private inUse(
+    level: CompanyOrgLevelDocument, references: OrgLevelReference[], why: 'active' | 'named',
+  ): DomainException {
+    return new DomainException(
+      ErrorCode.ORG_LEVEL_IN_USE,
+      why === 'active'
+        ? TENANTS_REFUSALS.ORG_LEVEL_IN_USE.stillActive({ label: level.label })
+        : TENANTS_REFUSALS.ORG_LEVEL_IN_USE.named({ label: level.label, references }),
+      HttpStatus.CONFLICT,
+      { orgLevelId: String(level._id), code: level.code, status: level.status, references },
+    );
+  }
+
+  /** The reference search, or a server fault: never a rung deleted without asking what names it. */
+  private requireReferences(): OrgLevelReferenceSearch {
+    if (!this.references) {
+      throw new DomainException(
+        ErrorCode.INTERNAL_ERROR,
+        TENANTS_REFUSALS.INTERNAL_ERROR.ladderCannotSearch,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    return this.references;
   }
 
   /** The membership repository, or a server fault: never a tier changed without asking who holds the rung. */

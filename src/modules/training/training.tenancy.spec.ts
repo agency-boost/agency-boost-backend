@@ -142,7 +142,7 @@ describe('the office training taxonomy (P5-T1)', () => {
   describe('creating and editing (AC-2, AC-9)', () => {
     it('appends a category, a skill within its category, and a module within its skill', async () => {
       const category = await training.createCategory(ctx(KPM_A), { code: 'onboarding', label: 'Onboarding' });
-      // After the seed's seven (UI V1: Motivation the seventh, P18.99-T10).
+      // After the seed's seven (UI V1: Motivation the seventh, P18.11-T10).
       expect(category).toMatchObject({ code: 'ONBOARDING', displayOrder: SEED_TRAINING_CATEGORIES.length + 1, version: 1, description: null });
 
       const skill = await training.createSkill(ctx(KPM_A), { code: 'FIRST_WEEK', categoryCode: 'onboarding', label: 'First week' });
@@ -297,7 +297,7 @@ describe('the office training taxonomy (P5-T1)', () => {
         .rejects.toThrow('No active training category called SALES');
     });
 
-    it('P18.98-T5 AC-3 refuses in Bahasa Indonesia: a code taken, a parent not active, nothing to change, an archived parent', async () => {
+    it('P18.10-T5 AC-3 refuses in Bahasa Indonesia: a code taken, a parent not active, nothing to change, an archived parent', async () => {
       const said = async (attempt: Promise<unknown>) => {
         const err = await attempt.then(() => null, (e: unknown) => e as DomainException);
         return [err!.code, err!.messageFor(readerIn('id'))];

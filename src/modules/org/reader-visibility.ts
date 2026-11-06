@@ -7,7 +7,7 @@ import type { MembershipDocument } from './membership.schema';
  * **Which memberships a reader may see.** The roster, one member's read, their reports and who came back
  * (`DirectoryService`), the org tree (`OrgTreeService`) and where a removal may send a unit (`RemovalService`) all
  * narrow through this file. It decides who reads whose name, agent code and email, so it is permissions code: moved
- * out of `directory.service.ts` at the Phase 18.97 exit permission review (P18.97-T8 L2), answering exactly what it
+ * out of `directory.service.ts` at the Phase 18.9 exit permission review (P18.9-T8 L2), answering exactly what it
  * answered there, and held at 100% branch in `jest.config.ts` as `coach-resolver.ts` is, apart from the service
  * around it, whose floor is the module's.
  */
@@ -93,7 +93,7 @@ export function scopeFilter(scope: Scope | null, self: string): FilterQuery<Memb
  *
  * The narrowing for `own` is `{ _id: self }`, which is the one filter shape that collides with an id being asked
  * for: spread second, it replaced the id, and the read answered about the caller while claiming to be about somebody
- * else (the Phase 3.5 exit review; `org-hierarchy.md`, *How the narrowing composes, and why it is `$and`*). Under
+ * else (the Phase 3.1 exit review; `org-hierarchy.md`, *How the narrowing composes, and why it is `$and`*). Under
  * `$and` a colliding narrowing can only ever match nothing, which is the direction a visibility filter must fail in.
  */
 export function withinReach(
@@ -105,7 +105,7 @@ export function withinReach(
 
 /**
  * **Every membership of these people that the reader may see, whatever its state** — what `rejoinedOn` reads to say
- * who came back (P18.97-T4 AC-3, ADR-0176 §5), each person asked for once. Narrowed as the page was: a leader's
+ * who came back (P18.9-T4 AC-3, ADR-0176 §5), each person asked for once. Narrowed as the page was: a leader's
  * roster says nothing of a membership outside their unit, and an Agent's, whose reach is the one membership they
  * hold, of no other.
  */

@@ -26,17 +26,21 @@ import { AuditService } from './audit.service';
  * `directory`: `GET /members`, once per active member on the page, whose *Last activity* and *Last coached* it
  * carries — a pending or removed row carries neither and writes nothing (D-directory); `training`: `GET
  * /training/progress?for=`, coaching's *Training* tab, a coachee's training record read whole, once per read,
- * `from: null` (P18.5-T4 AC-1); `kpm_compliance`: `GET /kpm/analytics/compliance?category=activity`, the Owner's
+ * `from: null` (P18.2-T4 AC-1); `kpm_compliance`: `GET /kpm/analytics/compliance?category=activity`, the Owner's
  * compliance tree's *Activity Mgmt*, once per member it lists, `from: null` — the tree's *Training* and *Activation*
- * reads write `training` and `activation`, the surfaces of the same facts (P18.6-T1 AC-9, D-audit-tree); `home`: `GET
- * /home`'s *Laporan tim*, once per person on it, over yesterday and today (UI V1, Phase 18.99 T11; UI-101). Not the
+ * reads write `training` and `activation`, the surfaces of the same facts (P18.3-T1 AC-9, D-audit-tree); `home`: `GET
+ * /home`'s *Laporan tim*, once per person on it, over yesterday and today (UI V1, Phase 18.11 T11; UI-101);
+ * `member_performance`: `GET /members/:membershipId/performance`, the member page's four tiles, once per read, over the
+ * year to date (ADR-0205 §1). Not the
  * retired `compliance`, `GET /activity/compliance`'s, kept for the entries it wrote. The action keeps its
  * name on every one, so a single query on `targetMembershipId` lists every disclosure of a member's data.
  */
 export type SubjectReadSurface =
   | 'log' | 'summary' | 'compliance' | 'personal_summary' | 'leads' | 'ratios' | 'coaching_session'
   | 'coaching_session_print' | 'calendar' | 'activation' | 'activity_dashboard' | 'unit_dashboard'
-  | 'kpm_overview' | 'directory' | 'training' | 'kpm_compliance' | 'home';
+  | 'kpm_overview' | 'directory' | 'training' | 'kpm_compliance' | 'home' | 'member_performance'
+  // P19.5-T4 (ADR-0216 §7): `GET /coaching/:membershipId/survey`, the coaching *Survei* tab, once per read, the run's dates.
+  | 'survey';
 
 /** The days a read disclosed: from a day, or `null` for the whole record, to a day. */
 export interface SubjectReadRange {
@@ -62,7 +66,7 @@ export const SUBJECT_READ_ACTION = 'activity_log.read_raw';
  * - **Called last, once the answer exists**, by the caller: a refused read has thrown before it,
  *   so the log says what was disclosed, never what was asked for.
  * - **It fails open** (the phase file's D-failopen): a read whose entry cannot be written is still
- *   served, and the failure is logged at error level, where Phase 19's alert will read it.
+ *   served, and the failure is logged at error level, where Phase 20's alert will read it.
  *   `AuditService.record` already catches its own write; this catches anything else, so the
  *   guarantee belongs to the seam rather than to how the service under it happens to be written.
  */
@@ -98,7 +102,7 @@ export class SubjectReadAudit {
    * reader's own row writes nothing), and the same guarantee: it fails open.
    *
    * `range` is one range for everybody, or — where each subject's disclosure starts on its own day, as the Owner's
-   * compliance tree reading every hire's activation from its start date does (P18.6-T1 AC-9) — a range per subject.
+   * compliance tree reading every hire's activation from its start date does (P18.3-T1 AC-9) — a range per subject.
    */
   async recordMany(
     ctx: RequestContext,

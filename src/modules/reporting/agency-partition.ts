@@ -6,7 +6,7 @@ import type { HierarchyRole } from '@/common/context/request-context';
  *
  * **"AB" and "AAB" here are classes, not rung codes** (ADR-0156 §4): a member of class `ab` — on any rung marked
  * *Senior Leader* — heads an agency, and one of class `aab` — *Associate Leader* — may head a unit, whatever the
- * company called the rung. By code until P18.8-T1, which left a company whose leaders are `SM` and `UM` with no
+ * company called the rung. By code until P18.5-T1, which left a company whose leaders are `SM` and `UM` with no
  * agency at all.
  *
  * - **One agency per member of the `ab` class**, over their own people: themselves and everybody below them down

@@ -1,7 +1,7 @@
 import { addDays, calendarMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
 
 /*
- * **The Unit Dashboard's UI V1 figures** (Phase 18.99 T4; `functional/unit-dashboard.md`, *UI V1 (2026-10-30)*): the
+ * **The Unit Dashboard's UI V1 figures** (Phase 18.11 T4; `functional/unit-dashboard.md`, *UI V1 (2026-10-30)*): the
  * rules the read and the Activities read apply, pure, so each is a unit test.
  */
 

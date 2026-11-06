@@ -44,8 +44,10 @@ export class ActivityBindingAdminController {
       + 'counts); an unknown code, an empty role or a code in two roles is 400 VALIDATION_FAILED. A stale '
       + '`expectedVersion` is 409 VERSION_CONFLICT. Takes effect when saved: the summary, the pace, the Unit '
       + 'Dashboard, coaching, the measured rates and the campaigns read it from then. A goal’s stored '
-      + '`cascadeMapping` and coaching snapshots are not changed. Super Admin only; audited '
-      + '`activity_binding.updated` with the binding before and after. An unknown office is 404.',
+      + '`cascadeMapping` and coaching snapshots are not changed. **The Owner’s and the Admin’s, for their own office** '
+      + '(ADR-0206 §1: the Super Admin changes no KPM data and is refused, 403, as every field role is); '
+      + 'audited `activity_binding.updated` with the binding before and after. Another office’s id, or an unknown one, '
+      + 'is 404.',
   })
   async update(
     @Ctx() ctx: RequestContext,

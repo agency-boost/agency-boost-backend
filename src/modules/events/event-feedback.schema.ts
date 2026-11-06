@@ -6,14 +6,14 @@ import { NPS } from '@/domain/constants';
 export type EventFeedbackDocument = HydratedDocument<EventFeedback>;
 
 /**
- * **One member's answer about one event** (P18.5-T6): a score from 0 to 10, *Why?* and *How can we improve?*.
+ * **One member's answer about one event** (P18.2-T6): a score from 0 to 10, *Why?* and *How can we improve?*.
  *
  * **Single-submit** (`Overall.html:8758-8763`): one row per (event, membership), never edited or withdrawn.
  * **`improve` is stored** — the prototype draws the field and never reads it, while the Owner's card reads it
  * (`KPM_Owner.html:3768`). Read with the respondent's name by the Owner and the Admins (OD-151); never by a leader.
  *
  * **PDP** (UU 27/2022): the two texts are free text and may name people. The audit log records ids and the score,
- * never the words; the collection is on P19-T1's erasure and export cascade.
+ * never the words; the collection is on P20-T1's erasure and export cascade.
  */
 @Schema({ ...baseSchemaOptions, collection: 'eventFeedback' })
 export class EventFeedback {

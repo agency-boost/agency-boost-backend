@@ -1,7 +1,8 @@
 /**
  * **The forum's figures over the months the office's file holds** (Phase 18.1, P18.1-T1 AC-3, AC-4; OD-144):
- * `MAA_MONTHLY_AVG`, `CASE_SUBMISSIONS` and `AVERAGE_CASE_SIZE_REALISED` (`KPM_Owner.html:2470-2472`).
- * `NEW_ACTIVE_AGENTS_MONTHLY_AVG` (*New AA (avg. monthly)*, `:2467`) was here: retired by ADR-0175 §2 (P18.97-T1 AC-6) —
+ * `MAA_MONTHLY_AVG`, `CASE_SUBMISSIONS` and `AVERAGE_CASE_SIZE_REALISED` (`KPM_Owner.html:2470-2472`), and since
+ * P19.3-T1 `RECRUITMENT_MONTHLY_AVG` (ADR-0203 §2).
+ * `NEW_ACTIVE_AGENTS_MONTHLY_AVG` (*New AA (avg. monthly)*, `:2467`) was here: retired by ADR-0175 §2 (P18.9-T1 AC-6) —
  * not on the client's reference slide — as `NEW_AGENT_3M_ACTIVE_PCT` was. Nothing computes it any more; the scorecards
  * frozen with it keep its figures (ADR-0129 §7), and the file's `NEW_ACTIVE_AGENTS` stays.
  *
@@ -26,6 +27,17 @@ function averageOverHeld(values: readonly (number | null)[]): number | null {
  */
 export function maaMonthlyAvg(counts: readonly (number | null)[]): number | null {
   return averageOverHeld(counts);
+}
+
+/**
+ * `RECRUITMENT_MONTHLY_AVG` — the forum's *FLC (avg. monthly)* (P19.3-T1; ADR-0203 §2, the data sources' D2): the
+ * office's recruitment as its upload reports it, `RECRUITMENT` summed over the office's rows for each month held (a
+ * leaver's row included, ADR-0136 §1; `OfficeMonth.recruitmentMonthly`), averaged over those months. A single month's
+ * column is that month's sum. `null` with no month held — *pending data*, never 0. Not `NEW_ACTIVE_AGENTS` (the
+ * recruits who became productive) and not a lead marked *Berhasil*.
+ */
+export function recruitmentMonthlyAvg(perMonth: readonly (number | null)[]): number | null {
+  return averageOverHeld(perMonth);
 }
 
 /** `CASE_SUBMISSIONS` — *Case submission*: the file's policy count (`policyCountMonthly`) summed over the months held. */

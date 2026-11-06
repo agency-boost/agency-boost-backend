@@ -40,7 +40,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       expect(rollUpGoal([{ targetMinor: 1, actualMinor: 100 * M }]).attainmentPct).toBe(PERFORMANCE.ATTAINMENT_PCT_CAP);
     });
 
-    it('P18.97-T3 F-254 rounds the sums’ attainment half up in integers: Rp 23 jt of Rp 40 jt is 58%, never 57', () => {
+    it('P18.9-T3 F-254 rounds the sums’ attainment half up in integers: Rp 23 jt of Rp 40 jt is 58%, never 57', () => {
       const total = rollUpGoal([{ targetMinor: 25 * M, actualMinor: 15 * M }, { targetMinor: 15 * M, actualMinor: 8 * M }]);
       expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
       expect(total).toEqual({ targetMinor: 40 * M, actualMinor: 23 * M, attainmentPct: 58, missing: 0 });
@@ -63,12 +63,12 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
   });
 
   /*
-   * ADR-0165 §1 (P18.8-T15 AC-6; the client's UI review, UI-004): the Unit Dashboard's totals pair each target with the
+   * ADR-0165 §1 (P18.5-T15 AC-6; the client's UI review, UI-004): the Unit Dashboard's totals pair each target with the
    * production it measures. The client's unit read *5% · Rp 264.666.667 short · Rp 13.000.000 of Rp 277.666.667*: the
    * target held Budi's Rp 37 jt and Yanti's Rp 98 jt, whose production was not uploaded.
    */
   describe('the paired rollup — the Unit Dashboard’s totals (ADR-0165 §1)', () => {
-    it('P18.8-T15 AC-6 counts a member in the target only when their production is held, and works the gap from the pairs', () => {
+    it('P18.5-T15 AC-6 counts a member in the target only when their production is held, and works the gap from the pairs', () => {
       const total = rollUpGoalPaired([
         { targetMinor: 100 * M, actualMinor: 60 * M },
         { targetMinor: 50 * M, actualMinor: null },
@@ -80,7 +80,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       });
     });
 
-    it('P18.8-T15 AC-6 the client’s unit: the two not uploaded no longer make it 5%', () => {
+    it('P18.5-T15 AC-6 the client’s unit: the two not uploaded no longer make it 5%', () => {
       const rows = [
         { targetMinor: 37 * M, actualMinor: null },
         { targetMinor: 98 * M, actualMinor: null },
@@ -93,12 +93,12 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       });
     });
 
-    it('P18.8-T15 AC-6 a pair over its target is over, not short', () => {
+    it('P18.5-T15 AC-6 a pair over its target is over, not short', () => {
       expect(rollUpGoalPaired([{ targetMinor: 20 * M, actualMinor: 25 * M }, { targetMinor: 80 * M, actualMinor: null }]))
         .toEqual({ targetMinor: 20 * M, actualMinor: 25 * M, attainmentPct: 125, missing: 1, gapMinor: 0, overMinor: 5 * M });
     });
 
-    it('P18.8-T15 AC-6 with nobody’s production held reads Not uploaded yet beside the targets, as a row does', () => {
+    it('P18.5-T15 AC-6 with nobody’s production held reads Not uploaded yet beside the targets, as a row does', () => {
       expect(rollUpGoalPaired([{ targetMinor: 37 * M, actualMinor: null }, { targetMinor: 98 * M, actualMinor: null }]))
         .toEqual({ targetMinor: 135 * M, actualMinor: null, attainmentPct: null, missing: 2, gapMinor: null, overMinor: null });
       expect(rollUpGoalPaired([{ targetMinor: null, actualMinor: null }]))
@@ -107,12 +107,12 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
         .toEqual({ targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null });
     });
 
-    it('P18.8-T15 AC-6 production held for people with no goal is production, and measures no target', () => {
+    it('P18.5-T15 AC-6 production held for people with no goal is production, and measures no target', () => {
       expect(rollUpGoalPaired([{ targetMinor: null, actualMinor: 10 * M }, { targetMinor: 40 * M, actualMinor: null }]))
         .toEqual({ targetMinor: null, actualMinor: 10 * M, attainmentPct: null, missing: 1, gapMinor: null, overMinor: null });
     });
 
-    it('P18.8-T15 AC-6 everybody held is the rollup rule unchanged, with its gap', () => {
+    it('P18.5-T15 AC-6 everybody held is the rollup rule unchanged, with its gap', () => {
       const rows = [{ targetMinor: 100 * M, actualMinor: 60 * M }, { targetMinor: 20 * M, actualMinor: 20 * M }];
       expect(rollUpGoalPaired(rows)).toEqual({ ...rollUpGoal(rows), gapMinor: 40 * M, overMinor: 0 });
     });
@@ -147,7 +147,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
   });
 
   /**
-   * **ADR-0172 §2, P18.96-T5 AC-2** — the totals read the people who can sell. A new hire before their first sale is in
+   * **ADR-0172 §2, P18.8-T5 AC-2** — the totals read the people who can sell. A new hire before their first sale is in
    * the team and in neither figure: the seed's Yanti, rejoined 28 days ago, *on pace* and with no sale yet.
    */
   describe('the totals over the people who count for production (ADR-0172 §2)', () => {
@@ -172,13 +172,13 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       expect(rollUpProduction(rows).goal).toMatchObject({ targetMinor: 80 * M, actualMinor: 50 * M, attainmentPct: 63, missing: 0 });
     });
 
-    it('P18.96-T5 AC-2 a new hire with no production held is left out, not counted as missing', () => {
+    it('P18.8-T5 AC-2 a new hire with no production held is left out, not counted as missing', () => {
       const rows = [row({ goal: { targetMinor: 98 * M, actualMinor: null }, newHireBeforeFirstSale: true }), row({})];
       expect(rollUpProduction(rows).goal).toMatchObject({ targetMinor: 50 * M, actualMinor: 20 * M, missing: 0 });
       expect(rollUpProduction(rows).newHires).toBe(1);
     });
 
-    it('P18.96-T5 AC-2 nobody left out is the paired rollup and the potential count unchanged', () => {
+    it('P18.8-T5 AC-2 nobody left out is the paired rollup and the potential count unchanged', () => {
       const rows = [row({}), row({ goal: { targetMinor: 40 * M, actualMinor: null }, pacingToMaa: null })];
       expect(rollUpProduction(rows)).toEqual({
         goal: rollUpGoalPaired(rows.map((r) => r.goal)),

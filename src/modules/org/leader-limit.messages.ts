@@ -4,7 +4,7 @@ import { messages, refusals, render, type Sentence } from '@/common/i18n/sentenc
 import { decidedAs, type DecidedStatus } from './org.messages';
 
 /**
- * **The leader limit, in both languages** (P18.98-T5 AC-2; ADR-0113, ADR-0157): the refusal at the limit, the lease
+ * **The leader limit, in both languages** (P18.10-T5 AC-2; ADR-0113, ADR-0157): the refusal at the limit, the lease
  * that makes two leader writes take turns, and a request for AgencyBoost to approve one leader past it — asked, decided
  * and, when it no longer applies, closed with what changed.
  *

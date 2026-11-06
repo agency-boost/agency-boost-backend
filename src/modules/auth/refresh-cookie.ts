@@ -3,6 +3,20 @@ import type { CookieOptions } from 'express';
 /** Where the refresh cookie is scoped. Nothing outside the auth routes ever needs it. */
 export const REFRESH_COOKIE_PATH = '/api/v1/auth';
 
+/** The active login's refresh token (`AuthController`): `httpOnly`, so no script on the page can read it. */
+export const REFRESH_COOKIE = 'agencyboost_refresh';
+
+/**
+ * **The other login's refresh token, when it is signed in on this browser too** (UI-169 item 5; ADR-0199 §4): a linked
+ * login's session, parked. **The same attributes as the active one** — `refreshCookieOptions`, 30 days — so it is
+ * `httpOnly`, `Secure` and `SameSite=Lax` (or `None` cross-site) wherever that is, and only the auth routes receive it.
+ * A switch swaps the two; *Keluar* ends and clears both.
+ */
+export const LINKED_REFRESH_COOKIE = 'agencyboost_refresh_linked';
+
+/** How long either cookie is kept: the refresh token's own lifetime. */
+export const REFRESH_COOKIE_MAX_AGE_MS = 30 * 86_400_000;
+
 /**
  * The refresh cookie's attributes, derived in one place.
  *

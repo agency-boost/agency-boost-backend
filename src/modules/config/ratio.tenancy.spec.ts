@@ -347,7 +347,7 @@ describe('the office ratio definitions (P4-T2)', () => {
         SELLING_SUCCESS_RATE: 'percent',
         RECRUITMENT_SUCCESS_RATE: 'percent',
         LEADS_PER_ACTIVITY: 'decimal',
-        // *Set appointment to meeting*, a percent since ADR-0160 §2 (P18.8-T9 AC-1).
+        // *Set appointment to meeting*, a percent since ADR-0160 §2 (P18.5-T9 AC-1).
         MEETING_PER_APPROACH: 'percent',
       });
     });

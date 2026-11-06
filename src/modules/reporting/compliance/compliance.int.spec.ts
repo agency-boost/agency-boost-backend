@@ -13,7 +13,7 @@ import type { ComplianceRow, ComplianceSection, ComplianceView } from './complia
 const M = 1_000_000 * 100;
 
 /**
- * **The Owner's compliance tree over HTTP** (P18.6-T1 AC-1 to AC-9; exit tests 2 and 3), with the real
+ * **The Owner's compliance tree over HTTP** (P18.3-T1 AC-1 to AC-9; exit tests 2 and 3), with the real
  * `PermissionsGuard`, the production pipe and the real readers over `test/compliance-office.ts` and its
  * `seedTreeRecords`. Isolation is `compliance.tenancy.spec.ts`; the owning surfaces' figures,
  * `compliance.reconciliation.int.spec.ts`; the query count, `compliance.performance.spec.ts`.
@@ -31,7 +31,7 @@ const M = 1_000_000 * 100;
  * | PEER_AGENT | — | — | 7 Sep: a day before it | open, from today |
  * | ORPHAN (unplaced) | every module *Done* | set | 12 Sep | graduated |
  */
-describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
+describe('the Owner’s compliance tree over HTTP (P18.3-T1)', () => {
   let h: ComplianceHarness;
   const http = () => h.http();
   const db = () => mongoose.connection.db!;
@@ -63,8 +63,8 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     expect(declaredPermissions(ComplianceController)).toEqual({ read: 'kpm_analytics:read' });
   });
 
-  describe('P18.6-T1 AC-1 — who reads', () => {
-    it('P18.6-T1 AC-1 positive: the Owner and the Admin read their office', async () => {
+  describe('P18.3-T1 AC-1 — who reads', () => {
+    it('P18.3-T1 AC-1 positive: the Owner and the Admin read their office', async () => {
       for (const who of ['OWNER', 'ADMIN'] as const) {
         h.as(who);
         const view = await read();
@@ -77,7 +77,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it('P18.6-T1 AC-1 negative: RINA, an Agent, is refused by the guard and writes nothing', async () => {
+    it('P18.3-T1 AC-1 negative: RINA, an Agent, is refused by the guard and writes nothing', async () => {
       h.as('RINA');
       const before = await auditCount();
       const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(403);
@@ -85,7 +85,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
-    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-6 negative: %s, a leader not tagged Core Leader, is answered 404 and writes nothing', async (who) => {
+    it.each(['AGUS', 'SARI'] as const)('P18.5-T5 AC-6 negative: %s, a leader not tagged Core Leader, is answered 404 and writes nothing', async (who) => {
       h.as(who);
       const before = await auditCount();
       const res = await http().get('/kpm/analytics/compliance').query({ category: 'activity' }).expect(404);
@@ -93,7 +93,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
-    it.each(['AGUS', 'SARI'] as const)('P18.8-T5 AC-4 positive: %s, a Core Leader, reads the whole office’s tree, read-only (ADR-0159 §2)', async (who) => {
+    it.each(['AGUS', 'SARI'] as const)('P18.5-T5 AC-4 positive: %s, a Core Leader, reads the whole office’s tree, read-only (ADR-0159 §2)', async (who) => {
       const owners = await read({ category: 'goals' });
       const base = h.ctx(who);
       h.as(new RequestContext(base.userId, 'none', { ...base.membership!, isCoreLeader: true }));
@@ -104,14 +104,14 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(view.can.override).toBe(false);
     });
 
-    it('P18.6-T1 AC-1 negative: a Super Admin outside a support session belongs to no office', async () => {
+    it('P18.3-T1 AC-1 negative: a Super Admin outside a support session belongs to no office', async () => {
       session.current = SUPER_ADMIN;
       const before = await auditCount();
       expect((await http().get('/kpm/analytics/compliance').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
       expect(await auditCount()).toBe(before);
     });
 
-    it('P18.6-T1 AC-1 a read-only support session reads the tree as the Owner: both actors on the entries, no override, no link written', async () => {
+    it('P18.3-T1 AC-1 a read-only support session reads the tree as the Owner: both actors on the entries, no override, no link written', async () => {
       const rina = () => h.col('activationProgress').findOne({ membershipId: h.id('RINA') });
       await h.col('activationProgress').updateOne(
         { membershipId: h.id('RINA') }, { $set: { 'items.$[].done': false, 'items.$[].source': null } },
@@ -135,7 +135,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect((await rina())!.items.filter((i: { done: boolean }) => i.done).length).toBeGreaterThan(0);
     });
 
-    it('P18.6-T1 AC-1 an elevated support session reads as the Owner, both actors on its entries, and may override', async () => {
+    it('P18.3-T1 AC-1 an elevated support session reads as the Owner, both actors on its entries, and may override', async () => {
       h.as(h.supporting('OWNER', false));
       const since = await mark();
       const view = await read({ category: 'activity' });
@@ -155,7 +155,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       ['an item over 100 characters', { item: 'X'.repeat(101) }, 'item'],
       ['two items', { item: ['PROSPECT_LIST', 'CLIENT_RETENTION'] }, 'item'],
       ['a parameter of any other name', { period: 'this_month' }, 'period'],
-    ])('P18.6-T1 AC-1 %s is 400 VALIDATION_FAILED, named in details, and writes nothing', async (_, query, named) => {
+    ])('P18.3-T1 AC-1 %s is 400 VALIDATION_FAILED, named in details, and writes nothing', async (_, query, named) => {
       const before = await auditCount();
       const res = await http().get('/kpm/analytics/compliance').query(query).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
@@ -163,7 +163,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
-    it('P18.98-T5 AC-7 refuses an item on a one-item category in Indonesian, and a module not offered', async () => {
+    it('P18.10-T5 AC-7 refuses an item on a one-item category in Indonesian, and a module not offered', async () => {
       const said = 'item tidak diterima oleh kategori goals: kategori ini hanya memiliki satu item.';
       const refused = await http().get('/kpm/analytics/compliance').set('Accept-Language', 'id')
         .query({ category: 'goals', item: '2026' }).expect(400);
@@ -175,7 +175,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(missing.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Modul training tidak ditemukan.' });
     });
 
-    it('P18.6-T1 AC-1 a module the office does not offer is 404, and writes nothing', async () => {
+    it('P18.3-T1 AC-1 a module the office does not offer is 404, and writes nothing', async () => {
       const before = await auditCount();
       for (const item of ['NOT_A_MODULE', 'prospect_list']) {
         const res = await http().get('/kpm/analytics/compliance').query({ category: 'training', item }).expect(404);
@@ -184,7 +184,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(await auditCount()).toBe(before);
     });
 
-    it('P18.6-T1 AC-1 exit review 5: a refused item is refused before any other chip reads — no link completion written', async () => {
+    it('P18.3-T1 AC-1 exit review 5: a refused item is refused before any other chip reads — no link completion written', async () => {
       // Rina's goal and lead meet two of her activation's links, which the Activation chip writes when it reads.
       await h.col('activationProgress').updateOne(
         { membershipId: h.id('RINA') }, { $set: { 'items.$[].done': false, 'items.$[].source': null } },
@@ -198,7 +198,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect((await rina())!.items.some((i: { done: boolean }) => i.done)).toBe(true);
     });
 
-    it('P18.6-T1 AC-7 exit review 8: a link the Owner’s read completes is attributed to its record’s author — the hire — never to the reader', async () => {
+    it('P18.3-T1 AC-7 exit review 8: a link the Owner’s read completes is attributed to its record’s author — the hire — never to the reader', async () => {
       await h.col('activationProgress').updateOne(
         { membershipId: h.id('RINA') },
         { $set: { 'items.$[].done': false, 'items.$[].source': null, 'items.$[].doneByMembershipId': null } },
@@ -215,10 +215,12 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     });
   });
 
-  describe('P18.6-T1 AC-2, AC-3 — the read’s shape and the summary', () => {
-    it('P18.6-T1 AC-2 the sub-line’s two counts, six chips in order, the catalog, the selection, the tree and what the reader may do', async () => {
+  describe('P18.3-T1 AC-2, AC-3 — the read’s shape and the summary', () => {
+    it('P18.3-T1 AC-2 the sub-line’s two counts, six chips in order, the catalog, the selection, the tree and what the reader may do', async () => {
       const view = await read();
-      expect(Object.keys(view).sort()).toEqual(['can', 'catalog', 'people', 'selected', 'summary', 'thresholds', 'today', 'tree', 'units']);
+      expect(Object.keys(view).sort()).toEqual([
+        'can', 'catalog', 'group', 'groups', 'people', 'selected', 'summary', 'thresholds', 'today', 'tree', 'units',
+      ]);
       expect({ today: view.today, people: view.people, units: view.units }).toEqual({ today: TODAY, people: 16, units: 4 });
       expect(view.summary.map((c) => c.category)).toEqual([...COMPLIANCE_CATEGORIES]);
       expect(view.selected).toEqual({ category: 'training', item: 'PROSPECT_LIST' });
@@ -230,9 +232,10 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(view.tree).toHaveLength(view.units);
     });
 
-    it('P18.6-T1 AC-3 every chip is computed on every read, whatever is selected — done over those it applies to (D-chips)', async () => {
+    it('P18.3-T1 AC-3 every chip is computed on every read, whatever is selected — done over those it applies to (D-chips)', async () => {
+      // P19.3-T3 AC-9: Training counts the first module, PROSPECT_LIST, whichever tab is read — three have done it.
       const expected = {
-        training: { count: 1, of: 16 },
+        training: { count: 3, of: 16 },
         goals: { count: 3, of: 16 },
         activity: { count: 4, of: 16 },
         activation: { count: 1, of: 5 },
@@ -245,7 +248,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it('P18.6-T1 AC-2 the selection survives: the same query reads the same item', async () => {
+    it('P18.3-T1 AC-2 the selection survives: the same query reads the same item', async () => {
       const first = await read({ category: 'training', item: 'CLIENT_RETENTION' });
       const again = await read({ category: 'training', item: 'CLIENT_RETENTION' });
       expect(first.selected).toEqual({ category: 'training', item: 'CLIENT_RETENTION' });
@@ -253,8 +256,8 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     });
   });
 
-  describe('P18.6-T1 AC-8 — the tree', () => {
-    it('P18.6-T1 AC-8 one section per AB agency, A to Z; the AB’s own card, then each AAB who leads somebody; the head first', async () => {
+  describe('P18.3-T1 AC-8 — the tree', () => {
+    it('P18.3-T1 AC-8 one section per AB agency, A to Z; the AB’s own card, then each AAB who leads somebody; the head first', async () => {
       const view = await read({ category: 'goals' });
       const shape = view.tree.map((s: ComplianceSection) => ({
         head: s.head.name,
@@ -284,14 +287,14 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       ]);
     });
 
-    it('P18.6-T1 AC-8 an unplaced member is in no row and no chip; a leaver and another office’s members in none', async () => {
+    it('P18.3-T1 AC-8 an unplaced member is in no row and no chip; a leaver and another office’s members in none', async () => {
       const view = await read();
       const ids = rows(view).map((r) => r.membershipId).sort();
       expect(ids).toEqual(LISTED.map((who) => h.id(who)).sort());
       for (const who of ['ORPHAN', 'LEFT', 'B_AB', 'B_AGENT'] as const) expect(ids).not.toContain(h.id(who));
     });
 
-    it('P18.6-T1 AC-8 `leads` marks who heads anybody — their name opens the Unit Dashboard', async () => {
+    it('P18.3-T1 AC-8 `leads` marks who heads anybody — their name opens the Unit Dashboard', async () => {
       const view = await read();
       const leading = rows(view).filter((r) => r.leads).map((r) => r.name).sort();
       expect(leading).toEqual(['Agus Salim', 'Hendra Gunawan', 'Lukas Hartono', 'Nina Lestari', 'Putu Ayu', 'Sari Puspita', 'Wilson Tanoto']);
@@ -305,7 +308,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(view.thresholds).toEqual({ lowBelowPct: 50, highFromPct: 80 });
     });
 
-    it('P18.6-T1 AC-8 a card counts the rows the item applies to; a section, its cards', async () => {
+    it('P18.3-T1 AC-8 a card counts the rows the item applies to; a section, its cards', async () => {
       const view = await read({ category: 'activation' });
       const agus = view.tree[0];
       // Activation applies to hires only: Tari (expired) on the AB's card, Dodi on Nina's, Rina and Budi on Sari's.
@@ -319,8 +322,8 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     });
   });
 
-  describe('P18.6-T1 AC-4 — Training', () => {
-    it('P18.6-T1 AC-4 the office’s categories in order, an empty one included; the skills holding a module; their modules', async () => {
+  describe('P18.3-T1 AC-4 — Training', () => {
+    it('P18.3-T1 AC-4 the office’s categories in order, an empty one included; the skills holding a module; their modules', async () => {
       const { catalog } = await read();
       expect(catalog.training.map((c) => [c.code, c.skills.length])).toEqual([
         ['SALES', 6], ['PRODUCT', 0], ['RECRUITING', 0], ['TEAM_MANAGEMENT', 0], ['MOTIVATION', 0], ['SOFT_SKILLS', 0], ['COMPANY_AND_KPM', 0],
@@ -336,7 +339,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(catalog.training.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.code)))).toEqual(h.sales);
     });
 
-    it('P18.6-T1 AC-4 Completed with the office day it was marked done — 23:59 and 00:01 in Jakarta — In progress, Not started', async () => {
+    it('P18.3-T1 AC-4 Completed with the office day it was marked done — 23:59 and 00:01 in Jakarta — In progress, Not started', async () => {
       const view = await read({ category: 'training', item: 'PROSPECT_LIST' });
       expect(cellOf(view, 'INDAH')).toEqual({ status: 'done', done: true, on: TODAY });
       expect(cellOf(view, 'RINA')).toEqual({ status: 'done', done: true, on: '2026-09-10' });
@@ -348,13 +351,22 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(rows(other).filter((r) => r.cell.done).map((r) => r.name)).toEqual(['Indah Permatasari']);
     });
 
-    it('P18.6-T1 AC-4 the chip: every offered module done, over the members listed — Oscar’s ten, unplaced, count for nothing', async () => {
-      expect(chip(await read(), 'training')).toEqual({ category: 'training', count: 1, of: 16 });
+    it('P19.3-T3 AC-9 the chip follows the module the list shows — Oscar’s ten, unplaced, count for nothing', async () => {
+      // UI-093: *"Training tile 2 / 28 vs list 12 / 28"*. The tile is the list's sum, module by module.
+      for (const item of ['PROSPECT_LIST', 'CLIENT_RETENTION']) {
+        const view = await read({ category: 'training', item });
+        const done = view.tree.reduce((n, section) => n + section.done, 0);
+        const of = view.tree.reduce((n, section) => n + section.of, 0);
+        expect([item, chip(view, 'training')]).toEqual([item, { category: 'training', count: done, of }]);
+      }
+      expect(chip(await read(), 'training')).toEqual({ category: 'training', count: 3, of: 16 });
+      expect(chip(await read({ category: 'training', item: 'CLIENT_RETENTION' }), 'training'))
+        .toEqual({ category: 'training', count: 1, of: 16 });
     });
   });
 
-  describe('P18.6-T1 AC-5 — Goal Setting', () => {
-    it('P18.6-T1 AC-5 Set with the day it was saved, Not set — a goal saved with a zero target is none (OD-160)', async () => {
+  describe('P18.3-T1 AC-5 — Goal Setting', () => {
+    it('P18.3-T1 AC-5 Set with the day it was saved, Not set — a goal saved with a zero target is none (OD-160)', async () => {
       const view = await read({ category: 'goals' });
       expect(view.selected).toEqual({ category: 'goals', item: null });
       expect(cellOf(view, 'INDAH')).toEqual({ status: 'set', done: true, on: '2026-01-05' });
@@ -363,7 +375,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(rows(view).filter((r) => r.cell.done).map((r) => r.name).sort()).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Rina Wijaya']);
     });
 
-    it('P18.6-T1 AC-5 a goal saved at 00:30 Jakarta time is that day’s, not the UTC day before', async () => {
+    it('P18.3-T1 AC-5 a goal saved at 00:30 Jakarta time is that day’s, not the UTC day before', async () => {
       // Sari's goal was saved at 17:30 UTC on 3 February — 00:30 on 4 February in Jakarta. Given a target, it is set.
       await h.col('goals').updateOne({ membershipId: h.id('SARI') }, { $set: { annualApeTargetMinor: 100 * M } });
       try {
@@ -373,15 +385,15 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it('P18.6-T1 AC-5 writes no §3.5 entry: a goal is no activity record', async () => {
+    it('P18.3-T1 AC-5 writes no §3.5 entry: a goal is no activity record', async () => {
       const before = await auditCount();
       await read({ category: 'goals' });
       expect(await auditCount()).toBe(before);
     });
   });
 
-  describe('P18.6-T1 AC-6 — Activity Mgmt', () => {
-    it('P18.6-T1 AC-6 Logged with the latest day, Missed — over the last 7 days, today included', async () => {
+  describe('P18.3-T1 AC-6 — Activity Mgmt', () => {
+    it('P18.3-T1 AC-6 Logged with the latest day, Missed — over the last 7 days, today included', async () => {
       const view = await read({ category: 'activity' });
       expect(cellOf(view, 'RINA')).toEqual({ status: 'logged', done: true, on: TODAY });
       expect(cellOf(view, 'INDAH')).toEqual({ status: 'logged', done: true, on: '2026-09-10' });
@@ -390,7 +402,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(cellOf(view, 'AGUS')).toEqual({ status: 'missed', done: false, on: null });
     });
 
-    it('P18.6-T1 AC-6 the day boundary is Jakarta’s: at 23:59 on the 14th 8 September is in the window, at 00:01 on the 15th it is not', async () => {
+    it('P18.3-T1 AC-6 the day boundary is Jakarta’s: at 23:59 on the 14th 8 September is in the window, at 00:01 on the 15th it is not', async () => {
       h.clock.set(new Date('2026-09-14T16:59:00Z'));
       let view = await read({ category: 'activity' });
       expect([view.today, cellOf(view, 'PEER_AAB').status]).toEqual(['2026-09-14', 'logged']);
@@ -401,8 +413,8 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     });
   });
 
-  describe('P18.6-T1 AC-7 — Activation (OD-158, OD-159)', () => {
-    it('P18.6-T1 AC-7 Completed with the day, In progress, Overdue — an expired one with its end — and — for nobody’s', async () => {
+  describe('P18.3-T1 AC-7 — Activation (OD-158, OD-159)', () => {
+    it('P18.3-T1 AC-7 Completed with the day, In progress, Overdue — an expired one with its end — and — for nobody’s', async () => {
       const view = await read({ category: 'activation' });
       expect(cellOf(view, 'DODI')).toEqual({ status: 'completed', done: true, on: '2026-05-20', endedOn: null });
       expect(cellOf(view, 'RINA')).toEqual({ status: 'in_progress', done: false, on: null, endedOn: null });
@@ -412,12 +424,12 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(cellOf(view, 'LUKAS')).toEqual({ status: null, done: null, on: null, endedOn: null });
     });
 
-    it('P18.6-T1 AC-7 exit test 3: the chip is ACTIVATION_COMPLETION_RATE over the members with an activation', async () => {
+    it('P18.3-T1 AC-7 exit test 3: the chip is ACTIVATION_COMPLETION_RATE over the members with an activation', async () => {
       // Dodi of Rina, Budi, Dodi, Tari and Yusuf; Oscar's graduation, unplaced, counts for nothing.
       expect(chip(await read({ category: 'activation' }), 'activation')).toEqual({ category: 'activation', count: 1, of: 5 });
     });
 
-    it('P18.6-T1 AC-7 exit test 2: an Admin who leads nobody reads every hire’s status here, and is refused the roster and the detail', async () => {
+    it('P18.3-T1 AC-7 exit test 2: an Admin who leads nobody reads every hire’s status here, and is refused the roster and the detail', async () => {
       h.as('ADMIN');
       const view = await read({ category: 'activation' });
       expect(rows(view).filter((r) => r.cell.status !== null).map((r) => r.name).sort())
@@ -435,11 +447,11 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
     });
   });
 
-  describe('P18.6-T1 AC-9 — the audit (D-audit-tree)', () => {
+  describe('P18.3-T1 AC-9 — the audit (D-audit-tree)', () => {
     const owner = () => ({ actorMembershipId: h.id('OWNER'), actorUserId: h.ctx('OWNER').userId, effectiveUserId: null });
     const others = () => LISTED.filter((who) => who !== 'OWNER');
 
-    it('P18.6-T1 AC-9 Activity: one entry per member listed but the reader, `kpm_compliance`, from the whole record, one insert', async () => {
+    it('P18.3-T1 AC-9 Activity: one entry per member listed but the reader, `kpm_compliance`, from the whole record, one insert', async () => {
       const since = await mark();
       // Exit review 4: one insert, proved at the seam and at the audit service — one call each, carrying every entry.
       const seam = jest.spyOn(h.wired.subjectReads, 'recordMany');
@@ -466,7 +478,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       }
     });
 
-    it('P18.6-T1 AC-9 Activation: one per member listed with an activation, `activation`, from its start date', async () => {
+    it('P18.3-T1 AC-9 Activation: one per member listed with an activation, `activation`, from its start date', async () => {
       const since = await mark();
       await read({ category: 'activation' });
       const entries = await entriesSince(since);
@@ -479,7 +491,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       );
     });
 
-    it('P18.6-T1 AC-9 Training: one per member listed but the reader, `training`, from the whole record', async () => {
+    it('P18.3-T1 AC-9 Training: one per member listed but the reader, `training`, from the whole record', async () => {
       const before = await reads('training');
       const since = await mark();
       await read({ category: 'training', item: 'CLIENT_RETENTION' });
@@ -487,7 +499,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       for (const entry of await entriesSince(since)) expect(entry.after).toEqual({ surface: 'training', from: null, to: TODAY });
     });
 
-    it('P18.6-T1 AC-9 a reader listed is never their own subject: the Admin’s read skips the Admin, not the Owner', async () => {
+    it('P18.3-T1 AC-9 a reader listed is never their own subject: the Admin’s read skips the Admin, not the Owner', async () => {
       h.as('ADMIN');
       const since = await mark();
       await read({ category: 'activity' });
@@ -496,7 +508,7 @@ describe('the Owner’s compliance tree over HTTP (P18.6-T1)', () => {
       expect(targets).toContain(h.id('OWNER'));
     });
 
-    it('P18.6-T1 AC-9 goals, events and campaigns write none: no §3.5 entry, whatever the chips read', async () => {
+    it('P18.3-T1 AC-9 goals, events and campaigns write none: no §3.5 entry, whatever the chips read', async () => {
       const since = await mark();
       for (const category of ['goals', 'events', 'campaigns']) await read({ category });
       expect(await entriesSince(since)).toEqual([]);

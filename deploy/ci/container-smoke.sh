@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The runtime image starts, and its readiness tells the truth about the database (P18.7-T3/T1):
+# The runtime image starts, and its readiness tells the truth about the database (P18.4-T3/T1):
 #
 #   1. beside a running mongo:7.0, /api/health/ready answers 200 and the container turns healthy
 #   2. with mongo stopped, it answers 503 and the container turns unhealthy, which is what makes

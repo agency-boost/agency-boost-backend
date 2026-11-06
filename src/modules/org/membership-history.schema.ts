@@ -61,7 +61,7 @@ export class MembershipHistory {
   toRole!: HierarchyRole | null;
 
   /**
-   * The rungs the role names referred to **at the time** (P3.5-T8 AC-3).
+   * The rungs the role names referred to **at the time** (P3.1-T8 AC-3).
    *
    * `fromRole`/`toRole` are labels, and a label is renameable: a company that renames
    * `AAB` to *Associate Agency Business* would otherwise leave every past promotion

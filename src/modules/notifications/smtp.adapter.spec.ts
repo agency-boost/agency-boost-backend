@@ -43,7 +43,7 @@ describe('SMTP delivery (P4-T14)', () => {
       { userId: 'u1', templateId: NotificationTemplate.EMAIL_VERIFICATION, payload: {} },
       { subject: 'S', body: 'B' },
     );
-    // P18.99-T18: multipart — the text, and the HTML derived from it.
+    // P18.11-T18: multipart — the text, and the HTML derived from it.
     expect(sendMail).toHaveBeenCalledWith({
       from: 'AgencyBoost <no-reply@test>', to: 'rina@kpm.test', subject: 'S', text: 'B', html: toHtml('B'),
     });
@@ -73,21 +73,21 @@ describe('SMTP delivery (P4-T14)', () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
-  describe('the provider the environment names (P18.99-T18, ADR-0182)', () => {
+  describe('the provider the environment names (P18.11-T18, ADR-0182)', () => {
     const transportOptions = () => (createTransport as jest.Mock).mock.calls.at(-1)?.[0] as Record<string, unknown>;
     const gmail = {
       MAIL_TRANSPORT: undefined, MAIL_PROVIDER: 'gmail', SMTP_HOST: undefined, SMTP_PORT: undefined,
       SMTP_USER: 'agencyboostid@gmail.com', SMTP_PASSWORD: 'abcd efgh ijkl mnop', MAIL_FROM: 'AgencyBoost <agencyboostid@gmail.com>',
     };
 
-    it('P18.99-T18 dials the preset: Gmail on 465 with implicit TLS, the App Password without its spaces', () => {
+    it('P18.11-T18 dials the preset: Gmail on 465 with implicit TLS, the App Password without its spaces', () => {
       make(gmail);
       expect(transportOptions()).toMatchObject({
         host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: 'agencyboostid@gmail.com', pass: 'abcdefghijklmnop' },
       });
     });
 
-    it('P18.99-T18 sets Reply-To when MAIL_REPLY_TO is configured', async () => {
+    it('P18.11-T18 sets Reply-To when MAIL_REPLY_TO is configured', async () => {
       await make({ MAIL_REPLY_TO: 'support@agencyboost.id' }).send(
         { userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} },
         { subject: 'S', body: 'B' },
@@ -95,7 +95,7 @@ describe('SMTP delivery (P4-T14)', () => {
       expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ replyTo: 'support@agencyboost.id' }));
     });
 
-    it('P18.99-T18 a log setup needs no SMTP_HOST, builds no transport, and sends nothing if it is ever asked', async () => {
+    it('P18.11-T18 a log setup needs no SMTP_HOST, builds no transport, and sends nothing if it is ever asked', async () => {
       const adapter = make({ MAIL_TRANSPORT: undefined, MAIL_PROVIDER: 'log', SMTP_HOST: undefined });
       expect(createTransport).not.toHaveBeenCalled();
       await adapter.onModuleInit();
@@ -106,7 +106,7 @@ describe('SMTP delivery (P4-T14)', () => {
       )).rejects.toThrow('the mail provider is log: this adapter sends nothing');
     });
 
-    it('P18.99-T18 a real provider refuses a reserved address — the seed\'s .test people — naming the domain kind, not the address', async () => {
+    it('P18.11-T18 a real provider refuses a reserved address — the seed\'s .test people — naming the domain kind, not the address', async () => {
       const adapter = make({ ...gmail }, 'rina@kpm.test');
       const sending = adapter.send(
         { userId: 'u1', templateId: NotificationTemplate.EMAIL_VERIFICATION, payload: {} },
@@ -117,7 +117,7 @@ describe('SMTP delivery (P4-T14)', () => {
       expect(sendMail).not.toHaveBeenCalled();
     });
 
-    it('P18.99-T18 a plain relay still delivers to a reserved address: locally it is a mail catcher', async () => {
+    it('P18.11-T18 a plain relay still delivers to a reserved address: locally it is a mail catcher', async () => {
       await make({}, 'rina@kpm.test').send(
         { userId: 'u1', templateId: NotificationTemplate.EMAIL_VERIFICATION, payload: {} },
         { subject: 'S', body: 'B' },
@@ -125,7 +125,7 @@ describe('SMTP delivery (P4-T14)', () => {
       expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'rina@kpm.test' }));
     });
 
-    it('P18.99-T18 says at start-up which provider and host it sends through, and any warning — never the password', async () => {
+    it('P18.11-T18 says at start-up which provider and host it sends through, and any warning — never the password', async () => {
       const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       try {

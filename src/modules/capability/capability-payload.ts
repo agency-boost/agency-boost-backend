@@ -39,7 +39,7 @@ export function defaultCapabilityLadder(): CapabilityLadderPayload {
 
 /**
  * What would make a `capability_ladder` payload produce a broken office — one sentence each, in both languages
- * (P18.98-T5 AC-3), empty when there is nothing (P5-T8 AC-5).
+ * (P18.10-T5 AC-3), empty when there is nothing (P5-T8 AC-5).
  *
  * **Today a payload of any shape publishes.** A catalog with no stages, or two items sharing a
  * code, or a stage requiring a milestone nobody defined, reaches every office created afterwards

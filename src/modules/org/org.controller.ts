@@ -8,8 +8,8 @@ import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
 import { OrgTreeService } from './org-tree.service';
 import {
-  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, RemoveMemberDto,
-  SetCoreLeaderDto, TagMemberDto,
+  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, OrgTreeQueryDto,
+  RemoveMemberDto, SetCoreLeaderDto, TagMemberDto,
 } from './org.dto';
 import { LeaderLimitRequestService } from './leader-limit-request.service';
 import { RemovalService } from './removal.service';
@@ -187,10 +187,13 @@ export class OrgController {
       'visible, which is the office root plus anybody orphaned by a removal or not yet ' +
       'tagged. Your own leader comes back separately and is not a node, so it cannot be ' +
       'given a layer. Refuses rather than truncates above the cap: a page of a tree is ' +
-      'not a tree.',
+      'not a tree. With `for`, one leader’s tree as that leader sees it, read-only — the ' +
+      'leader as layer 1 and their own leader as the card above: for the Owner and an Admin ' +
+      'any active member of the office, for an AB or an AAB anybody in their downline, `404` ' +
+      'outside that or in another office, and `403` for an Agent.',
   })
-  async orgTree(@Ctx() ctx: RequestContext) {
-    return this.tree.read(ctx);
+  async orgTree(@Ctx() ctx: RequestContext, @Query() query: OrgTreeQueryDto) {
+    return this.tree.read(ctx, query.for);
   }
 
   @Get('admins')

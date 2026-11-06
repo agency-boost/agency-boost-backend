@@ -10,6 +10,7 @@ import { LeadStatusService } from './lead-status.service';
 import { RatioService } from './ratio.service';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { TenantConfigService } from './tenant-config.service';
+import { SavesSetupStep, touchesActivityTypes } from '@/modules/reporting/setup-step-saved';
 
 import { UpdateBranchInfoDto } from '@/modules/tenants/tenant.dto';
 import { CreateRatioDto, UpdateRatioDto } from './ratio.dto';
@@ -66,6 +67,7 @@ export class TenantConfigController {
 
   @Post('changes')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types', touchesActivityTypes)
   @ApiOperation({
     summary: 'Apply a batch of staged changes, or none of them',
     description:
@@ -88,6 +90,7 @@ export class TenantConfigController {
 
   @Post('activity-categories')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Add a category',
     description:
@@ -103,6 +106,7 @@ export class TenantConfigController {
 
   @Patch('activity-categories/reorder')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Reorder the categories',
     description:
@@ -116,6 +120,7 @@ export class TenantConfigController {
 
   @Patch('activity-categories/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Edit a category',
     description:
@@ -138,6 +143,7 @@ export class TenantConfigController {
 
   @Delete('activity-categories/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Archive a category, and everything in it',
     description:
@@ -153,6 +159,7 @@ export class TenantConfigController {
 
   @Post('activity-categories/:id/restore')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Bring a category back',
     description: 'The section returns; its types stay archived until restored one by one.',
@@ -163,6 +170,7 @@ export class TenantConfigController {
 
   @Post('activity-types')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({ summary: 'Add an activity type' })
   async createType(@Ctx() ctx: RequestContext, @Body() dto: CreateActivityTypeDto) {
     return this.activity.createType(ctx, dto);
@@ -170,6 +178,7 @@ export class TenantConfigController {
 
   @Patch('activity-types/reorder')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Reorder the activity types',
     description:
@@ -182,6 +191,7 @@ export class TenantConfigController {
 
   @Patch('activity-types/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Change what an activity type says',
     description:
@@ -199,6 +209,7 @@ export class TenantConfigController {
 
   @Delete('activity-types/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Archive an activity type',
     description:
@@ -213,6 +224,7 @@ export class TenantConfigController {
 
   @Post('activity-types/:id/restore')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({ summary: 'Bring an archived activity type back' })
   async restoreType(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.activity.restoreType(ctx, id);
@@ -336,6 +348,7 @@ export class TenantConfigController {
 
   @Post('ratio-benchmarks')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Add a ratio',
     description:
@@ -349,6 +362,7 @@ export class TenantConfigController {
 
   @Patch('ratio-benchmarks/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({
     summary: 'Change a ratio',
     description: 'Label, benchmark, comparison and either code list. **Not the code**.',
@@ -363,6 +377,7 @@ export class TenantConfigController {
 
   @Delete('ratio-benchmarks/:id')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({ summary: 'Archive a ratio' })
   async archiveRatio(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.ratios.archive(ctx, id);
@@ -370,6 +385,7 @@ export class TenantConfigController {
 
   @Post('ratio-benchmarks/:id/restore')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activity-types')
   @ApiOperation({ summary: 'Bring an archived ratio back' })
   async restoreRatio(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.ratios.restore(ctx, id);
@@ -421,6 +437,7 @@ export class TenantConfigController {
 
   @Patch('branch-info')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('branch-info')
   @ApiOperation({
     summary: 'Change the office\'s identity',
     description:

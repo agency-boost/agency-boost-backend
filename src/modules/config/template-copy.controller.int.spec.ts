@@ -13,6 +13,8 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { listenOnLoopback } from '../../../test/listen';
 import { NamedTemplateController } from './named-template.controller';
+import { TemplateMaterialService } from './template-material.service';
+import { TemplatePushService } from './template-push.service';
 import { NamedTemplateService } from './named-template.service';
 import { OfficeTemplateController } from './office-template.controller';
 import { TemplateCopyService } from './template-copy.service';
@@ -51,6 +53,9 @@ describe('template copies over HTTP (P13.2-T7)', () => {
         { provide: TemplateCopyService, useValue: wired.templateCopies },
         // ADR-0185: the controller publishes a template's kinds together.
         { provide: TemplateService, useValue: wired.templateService },
+        // ADR-0208: the Training section's material and the push, which the controller now also serves.
+        { provide: TemplateMaterialService, useValue: wired.templateMaterial },
+        { provide: TemplatePushService, useValue: wired.templatePush },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -120,7 +125,8 @@ describe('template copies over HTTP (P13.2-T7)', () => {
       expect(res.body).toMatchObject({
         name: 'Jakarta branches', isDefault: false, origin: { kind: 'copy', templateId: prudentialDefault },
       });
-      expect(Object.values(res.body.publishedVersions)).toEqual(Array(7).fill(1));
+      // Seven office kinds, the playbook (ADR-0210 §1) and *Advanced analytics* (ADR-0214 §1).
+      expect(Object.values(res.body.publishedVersions)).toEqual(Array(10).fill(1)); // and *Tampilan* (P19.6-T1)
       // Another company's template is not this company's to copy.
       await http().post(templates(PRUDENTIAL)).send({ name: 'Theirs', from: { templateId: allianzDefault } }).expect(404);
     });

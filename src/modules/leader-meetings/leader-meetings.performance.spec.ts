@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { buildForumServices, type ForumServices } from '../../../test/forum-office';
@@ -107,8 +108,10 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
           const ape = (i % 3 === 0 ? 0 : 10 + (i % 30)) * M;
           ytd += ape;
           months.push({
-            kpmId, membershipId: p.id, month, agentCode: `F${i}`, deletedAt: null, apeMonthly: cell(ape), apeYtd: cell(ytd),
-            policyCountMonthly: cell(i % 4), newActiveAgentsMonthly: cell(i % 7 === 0 ? 1 : 0),
+            kpmId, membershipId: p.id, month, agentCode: `F${i}`, deletedAt: null,
+            ...byKode({
+              apeMonthly: cell(ape), apeYtd: cell(ytd), policyCountMonthly: cell(i % 4), newActiveAgentsMonthly: cell(i % 7 === 0 ? 1 : 0),
+            }),
           });
         }
         // Every tenth a hire: their activation started across last year and this.

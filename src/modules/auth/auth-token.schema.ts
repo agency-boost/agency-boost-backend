@@ -9,7 +9,8 @@ export type AuthTokenKind =
   | 'email_verification'
   | 'password_reset'
   | 'impersonation'
-  | 'email_change';
+  | 'email_change'
+  | 'account_link';
 
 /**
  * Credentials live apart from identity, so rotating one never touches the other.
@@ -32,9 +33,18 @@ export class AuthToken {
   @Prop({
     type: String,
     required: true,
-    enum: ['refresh', 'email_verification', 'password_reset', 'impersonation', 'email_change'],
+    enum: ['refresh', 'email_verification', 'password_reset', 'impersonation', 'email_change', 'account_link'],
   })
   kind!: AuthTokenKind;
+
+  /**
+   * **The login an `account_link` token would link to** (UI-169 item 5; ADR-0199 §2), and `null` on every other kind.
+   * The pending link is this row: `userId` the login that started it (A), `linkUserId` the other (B), the token's hash and
+   * its expiry (`VERIFICATION_TTL_HOURS`). One live row per starting login — a newer start revokes the one before it, and
+   * so does a password change or reset of A. Nothing is linked until B's link is pressed and B's password given.
+   */
+  @Prop({ type: String, default: null })
+  linkUserId!: string | null;
 
   /**
    * **The address an `email_change` token moves the account to** (UI V1, UI-111; ADR-0181), and `null` on every

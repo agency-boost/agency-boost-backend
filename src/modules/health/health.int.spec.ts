@@ -93,13 +93,13 @@ describe('API versioning', () => {
 });
 
 /**
- * **Readiness answers with its status, not only its body** (P18.7-T1, ADR-0152), over a real
+ * **Readiness answers with its status, not only its body** (P18.4-T1, ADR-0152), over a real
  * connection and through the global error filter. A probe reads the status: `200` with `degraded`
  * in the body passed the container's healthcheck and the deploy's wait with no database behind
  * the API. And the filter must not rewrite the body into its error envelope, so whoever reads it
  * still sees which check failed.
  */
-describe('readiness over a real connection (P18.7-T1)', () => {
+describe('readiness over a real connection (P18.4-T1)', () => {
   let app: INestApplication;
   let connection: Connection;
 
@@ -127,13 +127,13 @@ describe('readiness over a real connection (P18.7-T1)', () => {
     await stopMongo();
   });
 
-  it('P18.7-T1 answers 200 while the database is connected', async () => {
+  it('P18.4-T1 answers 200 while the database is connected', async () => {
     await request(app.getHttpServer())
       .get('/api/health/ready')
       .expect(200, { status: 'ok', checks: { database: 'up' } });
   });
 
-  it('P18.7-T1 answers 503 with the same body once the database is gone, and liveness stays 200', async () => {
+  it('P18.4-T1 answers 503 with the same body once the database is gone, and liveness stays 200', async () => {
     await connection.close();
     expect(connection.readyState).not.toBe(1);
 

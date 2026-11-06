@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Send one test email with an environment's own mail settings (P18.99-T18, ADR-0182). Run it by hand, over IAP SSH,
+# Send one test email with an environment's own mail settings (P18.11-T18, ADR-0182). Run it by hand, over IAP SSH,
 # after the mail provider changes (a new version of api-env-<env>, then a redeploy):
 #
 #   sudo /opt/agencyboost/bin/send-test-mail.sh staging <to> [--subject "<subject>"]

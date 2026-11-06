@@ -1,4 +1,4 @@
-# Every action in .github/workflows is pinned by commit (P18.7 review, M5): a tag can be moved, and
+# Every action in .github/workflows is pinned by commit (P18.4 review, M5): a tag can be moved, and
 # whoever moves it would run code with this repository's deploy identity. Pins do not update
 # themselves, so Dependabot proposes the new commit and version comment weekly, as a PR that goes
 # through review and CI like any other.

@@ -27,7 +27,7 @@ function placeIn(language: 'en' | 'id', place: CapabilityPlace): string {
 const PART_ID = { stage: 'tahap', milestone: 'milestone', grid: 'grid' } as const;
 
 /**
- * **The capability catalog's refusals, in both languages** (P18.98-T5 AC-2, AC-3): what makes a `capability_ladder`
+ * **The capability catalog's refusals, in both languages** (P18.10-T5 AC-2, AC-3): what makes a `capability_ladder`
  * payload produce a broken office (`capabilityLadderProblems`, read by a template's publish and by provisioning),
  * and what the office's own edits are refused for. A field is named as the API names it (`stageOrder`); a stage is a
  * *tahap*, a tick a *centang*, and *milestone*, *grid* and *item* stay as the screen writes them.

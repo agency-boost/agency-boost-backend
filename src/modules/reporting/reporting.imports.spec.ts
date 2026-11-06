@@ -35,7 +35,7 @@ function reached(entries: readonly string[]): Set<string> {
  * training or events, at any depth, so a dependency cannot bring one in behind it. That no `campaigns` row is
  * read at run time is `reporting.performance.spec.ts`'s query log.
  *
- * *Scoped 2026-10-10 (P18.6-T1 AC-12):* this holds **Phase 18's files — the module's top level** (`readdirSync` reads
+ * *Scoped 2026-10-10 (P18.3-T1 AC-12):* this holds **Phase 18's files — the module's top level** (`readdirSync` reads
  * no subfolder). The Owner's compliance tree, which reads training, events and campaigns by design, lives in
  * `compliance/` with an imports spec of its own (`compliance/compliance.imports.spec.ts`), allowing exactly the readers
  * it calls; nothing at this level imports it.
@@ -47,9 +47,13 @@ describe('P18-T1 AC-12, P18-T2 AC-5 the reporting module reads no training, even
   it('P18-T1 AC-12 the module has code to check', () => {
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
       'agency-partition.ts', 'directory-columns.ts', 'kpm-analytics.service.ts', 'kpm-overview.service.ts',
-      'kpm-recruit-target.repository.ts', 'kpm-recruit-target.schema.ts', 'office-figures.ts', 'office-people.ts',
+      'kpm-recruit-target.repository.ts', 'kpm-recruit-target.schema.ts',
+      // P19.3-T2: the KPM setup card's marks, *Sudah sesuai*'s route and the not-logged list's phones.
+      'kpm-setup-mark.repository.ts', 'kpm-setup-mark.schema.ts', 'kpm-setup.controller.ts', 'kpm-setup.service.ts',
+      // P19.3-T3 (OD-258): the office's custom groups, for *Lihat untuk*.
+      'office-figures.ts', 'office-groups.ts', 'office-people.ts', 'office-phones.ts',
       'platform-analytics.service.ts', 'reporting.controller.ts', 'reporting.dto.ts', 'reporting.messages.ts',
-      'reporting.response.dto.ts',
+      'reporting.response.dto.ts', 'setup-step-saved.interceptor.ts', 'setup-step-saved.ts',
     ]);
   });
 

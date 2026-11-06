@@ -5,7 +5,7 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { AuditService } from '@/modules/audit/audit.service';
 import { ConfigSnapshotRepository } from './activity.repository';
-import { ConfigSnapshotDocument } from './config-snapshot.schema';
+import { ConfigSnapshotDocument, type ConfigSnapshotOrigin } from './config-snapshot.schema';
 import { ActivityConfigService, type ActivityCategoryView } from './activity.service';
 import { ActivityBindingService, type ActivityBindingView } from './activity-binding.service';
 import { LeadStatusService, type LeadPipelineView } from './lead-status.service';
@@ -192,7 +192,13 @@ export class TenantConfigService {
    * Renders the live rows into one document rather than flipping a flag: what agents read
    * then cannot drift from what was published, whatever happens to the rows afterwards.
    */
-  async publish(ctx: RequestContext): Promise<PublishState> {
+  async publish(
+    ctx: RequestContext,
+    /**
+     * What made the version (ADR-0208 §5): the office's own *Publish* unless a template push says otherwise.
+     */
+    origin: ConfigSnapshotOrigin = { source: 'kpm' },
+  ): Promise<PublishState> {
     const working = await this.read(ctx);
     const previous = await this.newestSnapshot(ctx);
 
@@ -202,13 +208,14 @@ export class TenantConfigService {
       payload: working as unknown as Record<string, unknown>,
       publishedAt: this.clock.now(),
       publishedBy: ctx.membershipId,
+      origin,
     } as Partial<ConfigSnapshotDocument>);
 
     await this.audit.record(ctx, {
       action: 'tenant_config.published',
       targetCollection: 'configSnapshots',
       targetId: ctx.kpmId ?? '',
-      after: { version: (previous?.version ?? 0) + 1, sourceVersion: working.version },
+      after: { version: (previous?.version ?? 0) + 1, sourceVersion: working.version, origin: origin.source },
     });
 
     return this.state(ctx);
@@ -343,7 +350,7 @@ export class TenantConfigService {
         this.leadStatuses.list(ctx),
         this.training.offered(ctx),
         // The published version, its training links named from the modules this copy offers — never a draft's
-        // title, which every member would read here (the Phase 18.5 exit review, B2).
+        // title, which every member would read here (the Phase 18.2 exit review, B2).
         this.activation.publishedForSnapshot(ctx),
         this.events.listTypes(ctx),
         // Whole: archived rows included, each with its status (P11-T9 AC-3).

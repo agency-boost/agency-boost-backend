@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 import { field } from '@/common/validation/violations';
 import { KPM_REPORTING, type KpmAnalyticsPeriod } from '@/domain/constants';
 import { REPORTING_REFUSALS } from './reporting.messages';
@@ -26,7 +26,7 @@ export class SetRecruitTargetDto {
   target!: number;
 }
 
-/** `period` and nothing else (P18-T2 AC-10): a period it does not know, or a parameter of any other name, is 400. */
+/** `period` and `group`, and nothing else (P18-T2 AC-10): a period it does not know, or a parameter of any other name, is 400. */
 export class KpmAnalyticsQueryDto {
   @ApiPropertyOptional({
     enum: KPM_REPORTING.ANALYTICS_PERIODS,
@@ -39,6 +39,18 @@ export class KpmAnalyticsQueryDto {
   @IsOptional()
   @IsIn(KPM_REPORTING.ANALYTICS_PERIODS)
   period?: KpmAnalyticsPeriod;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      '*Lihat untuk* (UI-152, OD-258): one of the office’s custom groups (*All members → Groups*), by id. Every '
+      + 'figure and list is then over that group’s members today. Omitted, the whole KPM. An unknown or archived group, '
+      + 'or another office’s, is 404.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  group?: string;
 }
 
 /** Cross-platform analytics takes no parameter: every office, this month. */

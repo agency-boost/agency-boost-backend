@@ -97,7 +97,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
 
   /**
    * P5-T5's and P5-T10's five decisions: renamed, turned off, pending, approved-then-edited, sent back — as
-   * `demo.ts` wrote them for 0417 and 0555 until P18.95-T6, which dropped its placeholder rename (UI-023).
+   * `demo.ts` wrote them for 0417 and 0555 until P18.7-T6, which dropped its placeholder rename (UI-023).
    */
   async function fiveStates(kpmId: string) {
     const ctx = owner(kpmId);
@@ -130,6 +130,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
         code: 'PRUMAPAN', name: 'PRUMapan BSD',
         tagline: 'Endowment-style life with guaranteed retirement payouts from age 55.',
         category: { code: 'life', label: 'Life' }, channel: 'conventional', lifecycle: 'active', needs: ['retirement'],
+        currencies: ['IDR'],
       });
     });
 
@@ -314,12 +315,13 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       expect(mapan.benefits.length).toBeGreaterThan(0);
       expect(mapan.differentiator).toMatch(/^The accessible retirement-income option/);
       expect(mapan.bestFit).toMatch(/^Sandwich-generation/);
+      // The one pair became a list of cards in P19.4-T4 (ADR-0209 §9).
       expect(Object.keys(mapan.script)).toEqual([
-        'goodFit', 'opening', 'benefits', 'fullScript', 'objectionTheySay', 'objectionYouSay', 'nextAction',
+        'goodFit', 'opening', 'benefits', 'fullScript', 'objections', 'nextAction',
       ]);
     });
 
-    it('P18.98-T7 a band that is a word, *Lump-sum*, is written for the reader; a range of sums reads the same', async () => {
+    it('P18.10-T7 a band that is a word, *Lump-sum*, is written for the reader; a range of sums reads the same', async () => {
       const lumpSum = SEED_PRODUCTS.find((p) => p.activeByDefault && p.eligibleBudgetBands.includes(PRODUCT_LUMP_SUM_BUDGET_BAND))!;
       const english = await service.product(agent(KPM_A), lumpSum.code);
       const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), lumpSum.code);
@@ -339,7 +341,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       );
       const pgb = await service.product(agent(KPM_A), 'PRULINK_GENERASI_BARU_PGB');
       expect(pgb.runOffNote).toBe(english(PRODUCT_RUN_OFF_NOTE));
-      // P18.98-T5 AC-4: written for the reader — an Indonesian one reads it in Indonesian.
+      // P18.10-T5 AC-4: written for the reader — an Indonesian one reads it in Indonesian.
       const inIndonesian = await service.product(agent(KPM_A).withReader(readerIn('id')), 'PRULINK_GENERASI_BARU_PGB');
       expect(inIndonesian.runOffNote).toBe(indonesian(PRODUCT_RUN_OFF_NOTE));
       expect(inIndonesian.runOffNote).toMatch(/^Dalam masa run-off/);
@@ -394,9 +396,10 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       await companyDocument('PRUMAPAN', 'illustration');
 
       expect((await service.product(agent(KPM_A), 'PRUMAPAN')).documents).toEqual([
-        { slot: 'brochure', label: 'Brochure', available: true },
-        { slot: 'illustration', label: 'Illustration / Simulation', available: true },
-        { slot: 'productDoc', label: 'Product Document', available: false },
+        // P19.6-T2: each says what it holds, so an HTML page is drawn in the frame and never opened in a tab.
+        { slot: 'brochure', label: 'Brochure', available: true, mimeType: 'application/pdf' },
+        { slot: 'illustration', label: 'Illustration / Simulation', available: true, mimeType: 'application/pdf' },
+        { slot: 'productDoc', label: 'Product Document', available: false, mimeType: null },
       ]);
     });
 

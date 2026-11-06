@@ -6,7 +6,7 @@ import { localDayOf } from '@/common/time/local-day';
 import { GOAL_DEFAULT_RATIOS, GOAL_DEFAULTS, TIME } from '@/domain/constants';
 import { GOAL_REFUSALS } from './goals.messages';
 
-/** The cascade's refusals, in both languages (P18.98-T5 AC-2). */
+/** The cascade's refusals, in both languages (P18.10-T5 AC-2). */
 const SAY = GOAL_REFUSALS.GOAL_INVALID_ASSUMPTION;
 
 /**
@@ -181,7 +181,7 @@ export function weeklyOf(perMonth: number): number {
 }
 
 /**
- * **Policies per week, to one decimal** (ADR-0160 §5, OD-183; P18.8-T10 AC-2): the monthly policies ÷
+ * **Policies per week, to one decimal** (ADR-0160 §5, OD-183; P18.5-T10 AC-2): the monthly policies ÷
  * `WEEKS_PER_MONTH`, rounded to a tenth. Six a month is **1.4**, not *≈ 2*, which is what the client asked: a
  * week's share of six policies is not two of them. The same 4.33 as every weekly figure in the product (invariant
  * §7) — the client's example divided by four, and one constant beats a second for one figure.
@@ -201,7 +201,7 @@ export interface BenchmarkSource {
 }
 
 /**
- * **The two conversion percentages a new plan opens on** (ADR-0160 §3, OD-182; P18.8-T10 AC-1): *Closing
+ * **The two conversion percentages a new plan opens on** (ADR-0160 §3, OD-182; P18.5-T10 AC-1): *Closing
  * rate* is the office's *Selling success rate* benchmark and *Appointment to Sales meeting* its *Set
  * appointment to meeting* benchmark, by code (`GOAL_DEFAULT_RATIOS`), as percentages to one decimal — 30 and 50
  * with the seeded benchmarks.

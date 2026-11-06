@@ -45,6 +45,18 @@ export class ProductionMonth {
   @Prop({ type: String, default: null })
   lockChangedBy!: string | null;
 
+  /**
+   * **The office day its figures were first written** (P19.5-T2 AC-8; ADR-0214 §11, amending ADR-0050): a month of the
+   * required history that was never written takes its first upload whatever its date, and that write opens a window of
+   * `productionLockGraceDays` from this day. `null` until an import or a correction writes it.
+   */
+  @Prop({ type: String, default: null })
+  firstWrittenOn!: string | null;
+
+  /** D8: the *as of* day of the month's latest import while the month ran, `YYYY-MM-DD`; `null` for a final one. */
+  @Prop({ type: String, default: null })
+  asOf!: string | null;
+
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;
 

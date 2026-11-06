@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -14,7 +14,8 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
-  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, resolveDisplayUnit, SEED_ACTIVITY_TYPES, type SeedActivityCategory, type SeedActivityType,
+  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, RECRUITMENT, resolveDisplayUnit, SEED_ACTIVITY_TYPES,
+  type RecruitmentPlaybookBody, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import {
   CompanyTemplate, CompanyTemplateDocument, TemplateKind,
@@ -23,8 +24,11 @@ import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office
 import { NamedTemplateService, type NamedTemplateView } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import {
-  isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes, type OfficeTemplateKind,
+  isNamedTemplateKind, isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes, type NamedTemplateKind,
 } from './template-defaults';
+import { checkPlaybookBody } from '@/modules/recruitment/recruitment-playbook-input';
+import { defaultPlaybookBody } from '@/modules/recruitment/recruitment-playbook-defaults';
+import { recruitmentVocabulary, type RecruitmentVocabulary } from '@/modules/recruitment/recruitment-plan';
 import {
   checkTemplateSummaryGroups, refuseSummaryGroupConflict, type SummaryGrouped,
 } from './summary-group';
@@ -39,8 +43,11 @@ import {
   campaignKindsProblems, type CampaignKindsPayload,
 } from '@/modules/campaigns/campaign-kinds-payload';
 import { TEMPLATE_REFUSALS } from './template.messages';
+import { AnalyticsTemplateService, type AnalyticsEditorView } from './analytics-template.service';
+import { platformAnalyticsConfig, type AdvancedAnalyticsConfig } from './analytics-config';
+import { checkedTemplatePayload } from '@/modules/branding/branding.service';
 
-/** A publish's refusals, in both languages (P18.98-T5 AC-3). */
+/** A publish's refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = TEMPLATE_REFUSALS.VALIDATION_FAILED;
 
 /** A payload's problems, refused whole: every sentence, one after another, as `join(' ')` said them. */
@@ -50,6 +57,26 @@ const refuseProblems = (problems: readonly FieldSentence[]): void => {
 
 /** No version to stand against — nothing published, or a history row that is not current. */
 const NO_STANDING: OfficeStanding = { behind: 0, unrecorded: 0 };
+
+/** The newest published version of one kind, as the read carries it beside a draft (P19-T6 AC-3). */
+export interface PublishedKindView {
+  id: string;
+  version: number;
+  revision: number;
+  payload: Record<string, unknown>;
+  publishedAt: string | null;
+}
+
+/**
+ * **A row at one revision, as a write's filter** (P19-T6). A row written before `revision` existed has no field and
+ * reads as `0`, so revision `0` matches it by the field's absence too.
+ */
+const atRevision = (revision: number): Record<string, unknown> => (revision === 0
+  ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
+  : { revision });
+
+/** Mongo's duplicate key: the one-version-per-kind index refusing a second draft made at the same moment. */
+const isDuplicate = (err: unknown) => (err as { code?: number } | null)?.code === 11000;
 
 export interface TemplateView {
   id: string;
@@ -61,11 +88,24 @@ export interface TemplateView {
   templateId: string | null;
   kind: TemplateKind;
   version: number;
+  /**
+   * **How many times the kind's working copy has been written** (P19-T6 AC-2): what a draft save sends back as
+   * `expectedRevision`. `0` for nothing saved. `version` is the number a draft will be published as, and does not move
+   * when it is saved.
+   */
+  revision: number;
   status: 'draft' | 'published' | 'archived';
   payload: Record<string, unknown>;
   publishedAt: string | null;
   /** The version offices are currently seeded from, or `null` if nothing is published. */
   publishedVersion: number | null;
+  /**
+   * **The live version, beside the draft** (P19-T6 AC-3; the 11-03 handover's B1-10): the newest published row of the
+   * kind — its version, its payload and when it was published — or `null` where nothing is. On the read only. Where a
+   * draft waits, the read answers the draft, and a reader asking what offices are made from today found nothing but
+   * the draft.
+   */
+  published?: PublishedKindView | null;
   /**
    * How many of the template's offices were built from an older version of **this kind**, or hold a
    * record of it with no version — which since 13.2 means the template held none of the kind when the
@@ -79,19 +119,40 @@ export interface TemplateView {
    */
   officesUnrecorded: number;
   /**
-   * **`activation_checklist` only: what each link kind does, and whether it completes on its own** (P18.5-T3
+   * **`activation_checklist` only: what each link kind does, and whether it completes on its own** (P18.2-T3
    * AC-6, I-80) — the registry, served, so the tab's *Auto* badge reads `live` from the server as the office's
    * screen does, and never re-declares it. `training` answers for every `training:<moduleCode>` link. Absent for
    * every other kind.
    */
   linkKinds?: ReturnType<typeof activationLinkKinds>;
+  /**
+   * **`recruitment_playbook` only: what its editor needs beside the words** (ADR-0210 §1) — the AgencyBoost words to
+   * start from (*Mulai dari kata-kata AgencyBoost*), the brief's vocabulary the words are keyed by, its chips in the
+   * reader's language, and the bounds a publish holds each text to (invariant §7: served, never re-declared). What the
+   * retired `GET …/recruitment-playbook` served. Absent for every other kind.
+   */
+  playbook?: PlaybookEditorView;
+  /**
+   * **`advanced_analytics` only: what its editor needs beside the payload** (P19.5-T1; ADR-0214 §1): the KPMs that read
+   * the template, the kodes they hold data for (the locks), *Dipakai di*, the next month and the bounds. On the read, a
+   * draft save and a publish, for a Super Admin's request. Absent for every other kind.
+   */
+  analytics?: AnalyticsEditorView;
+}
+
+/** What a playbook section's editor reads beside its payload (ADR-0210 §1). */
+export interface PlaybookEditorView {
+  defaults: RecruitmentPlaybookBody;
+  vocabulary: RecruitmentVocabulary;
+  limits: { textMax: number; benefitsMax: number };
 }
 
 /**
  * **The order *Terbitkan semua* publishes in** (ADR-0185 §3): the activity taxonomy before the ratio set, because a
  * ratio is checked against the template's *published* taxonomy — so a draft type and the ratio built on it go out
  * together, as a reader who edited both in one sitting expects; the training taxonomy before the checklist that links
- * its modules. Every one of the seven kinds, once.
+ * its modules. Every one of a template's kinds, once: the seven an office copies, then the recruitment playbook, after
+ * `event_types` (ADR-0210 §1).
  */
 export const PUBLISH_ORDER = [
   'activity_taxonomy',
@@ -101,16 +162,21 @@ export const PUBLISH_ORDER = [
   'activation_checklist',
   'capability_ladder',
   'event_types',
-] as const satisfies readonly OfficeTemplateKind[];
+  'recruitment_playbook',
+  // P19.6-T1 (ADR-0218 §3): *Tampilan* reads no other kind.
+  'branding',
+  // P19.5-T1 (ADR-0214 §1): last, since it reads no other kind.
+  'advanced_analytics',
+] as const satisfies readonly NamedTemplateKind[];
 
 /** What *Terbitkan semua* did with one kind (ADR-0185 §3). */
 export type PublishAllOutcome =
   /** Its draft is now this version. */
-  | { kind: OfficeTemplateKind; outcome: 'published'; version: number }
+  | { kind: NamedTemplateKind; outcome: 'published'; version: number }
   /** No draft waited: nothing to publish. */
-  | { kind: OfficeTemplateKind; outcome: 'skipped'; reason: 'no_changes' }
+  | { kind: NamedTemplateKind; outcome: 'skipped'; reason: 'no_changes' }
   /** Its draft was refused, as `…/template/:kind/publish` would refuse it — in the reader's language. Still a draft. */
-  | { kind: OfficeTemplateKind; outcome: 'refused'; error: { code: string; message: string } };
+  | { kind: NamedTemplateKind; outcome: 'refused'; error: { code: string; message: string } };
 
 /** *Terbitkan semua*'s answer: the template as it now stands, and what happened to each kind, in publishing order. */
 export interface PublishAllView {
@@ -163,6 +229,11 @@ export class TemplateService {
     private readonly campaignKinds: CampaignKindsApplier,
     /** Which named template a kind route means: the one named, or the company's default (ADR-0115 §3). */
     private readonly named: NamedTemplateService,
+    /**
+     * The *Advanced analytics* section's own rules (P19.5-T1; ADR-0214 §2, §4, §7). `@Optional` because the specs that
+     * build this by hand for another kind need none; a write of the kind without it is refused as a server fault.
+     */
+    @Optional() private readonly analytics?: AnalyticsTemplateService,
   ) {}
 
   /**
@@ -182,18 +253,28 @@ export class TemplateService {
    */
   async read(
     companyId: string, kind: TemplateKind, templateId?: string | null, reader: Reader = readerOf(),
+    /** The Super Admin's request, for the *Advanced analytics* editor's view (P19.5-T1); absent, the view is left out. */
+    ctx?: RequestContext,
   ): Promise<TemplateView> {
     const company = await this.requireCompany(companyId);
     const at = await this.address(companyId, kind, templateId);
+    const view = await this.readAt(company, at, reader);
+    return ctx ? this.withAnalytics(ctx, at, view) : view;
+  }
+
+  private async readAt(company: CompanyDocument, at: KindAddress, reader: Reader): Promise<TemplateView> {
+    const { companyId, kind } = at;
 
     const draft = await this.templates
       .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
     const published = await this.newestPublished(at);
 
     const standing = await this.standing(at, published?.version ?? null);
+    // The live version beside whatever is shown (P19-T6 AC-3): a draft no longer hides it.
+    const live = { published: published ? publishedOf(published) : null };
 
-    if (draft) return this.view(draft, published?.version ?? null, standing, reader);
-    if (published) return this.view(published, published.version, standing, reader);
+    if (draft) return { ...this.view(draft, published?.version ?? null, standing, reader), ...live };
+    if (published) return { ...this.view(published, published.version, standing, reader), ...live };
 
     return {
       id: '',
@@ -201,20 +282,27 @@ export class TemplateService {
       templateId: at.templateId,
       kind,
       version: 0,
+      revision: 0,
       status: 'draft',
       /*
        * **A company that declined the defaults gets nothing** (`usesPlatformDefaults`) — on the one
        * kind that is still the company's. Every other kind is a template's, and an unpublished one is
        * empty whoever the company is.
        */
-      payload: kind === 'campaign_kinds' && company.usesPlatformDefaults
+      /*
+       * The *Advanced analytics* section is never empty (ADR-0214 §3, §9): a template with nothing published of it reads
+       * the platform's, as its KPMs do — so the editor opens on the four system columns.
+       */
+      payload: (kind === 'campaign_kinds' && company.usesPlatformDefaults) || kind === 'advanced_analytics'
         ? platformDefaultPayload(kind)
         : {},
       publishedAt: null,
       publishedVersion: null,
+      published: null,
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
       ...linkKindsOf(kind, reader),
+      ...playbookOf(kind, reader),
     };
   }
 
@@ -225,6 +313,13 @@ export class TemplateService {
    * (ADR-0064): both fields or neither on each section, and one label per tile. The office's own
    * settings refuse the same body at save, and a Super Admin should not meet a rule an Owner
    * meets earlier.
+   *
+   * **Pinned to the revision the editor read, when it sends one** (P19-T6 AC-2; the 11-03 handover's B1-10):
+   * `expectedRevision` is the `revision` of what the editor opened — the draft, else the newest published, else `0`.
+   * Somebody else's save or publish since moved it, and this save is refused `409 VERSION_CONFLICT` with nothing
+   * written, where the last save used to win. The write is conditional on the revision it read, so of two saves
+   * racing on one draft exactly one lands; two first drafts made at once collide on the one-version index, and the
+   * second is the same `409` rather than a `500`. Absent, the save lands as it always did.
    */
   async saveDraft(
     ctx: RequestContext,
@@ -232,18 +327,28 @@ export class TemplateService {
     kind: TemplateKind,
     payload: Record<string, unknown>,
     templateId?: string | null,
+    expectedRevision?: number,
   ): Promise<TemplateView> {
     await this.requireCompany(companyId);
     const at = await this.writable(companyId, kind, templateId);
     if (kind === 'activity_taxonomy') payload = this.checkedTaxonomy(payload);
+    // P19.5-T1 (ADR-0214 §2): the section's type, its system columns and locks, the aliases a rename leaves.
+    if (kind === 'advanced_analytics') payload = await this.requireAnalytics().checkDraft(ctx, companyId, at.templateId!, payload);
+    // P19.6-T1 (ADR-0218 §3): *Tampilan*'s groups whole, its colours readable, its images the company's own.
+    if (kind === 'branding') payload = checkedTemplatePayload(companyId, payload);
 
     const existing = await this.templates
       .findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
+    const newest = await this.newestPublished(at);
+    const revision = (existing ?? newest)?.revision ?? 0;
+    if (expectedRevision !== undefined && expectedRevision !== revision) {
+      throw draftMoved(expectedRevision, revision);
+    }
 
     const saved = existing
       ? await this.templates.findOneAndUpdate(
-        { _id: existing._id },
-        { $set: { payload, updatedBy: ctx.userId } },
+        { _id: existing._id, status: 'draft', deletedAt: null, ...atRevision(revision) },
+        { $set: { payload, updatedBy: ctx.userId }, $inc: { revision: 1 } },
         { new: true },
       ).exec()
       : await this.templates.create({
@@ -251,29 +356,38 @@ export class TemplateService {
         templateId: at.templateId,
         kind,
         // A draft carries the version it *will* be, so the screen can say so.
-        version: ((await this.newestPublished(at))?.version ?? 0) + 1,
+        version: (newest?.version ?? 0) + 1,
+        revision: revision + 1,
         status: 'draft',
         payload,
         publishedAt: null,
         deletedAt: null,
         createdBy: ctx.userId,
         updatedBy: ctx.userId,
+      }).catch((err: unknown) => {
+        if (isDuplicate(err)) return null;
+        throw err;
       });
+    if (!saved) {
+      // Published or saved past between the read and the write: the same refusal as a stale pin.
+      throw draftMoved(expectedRevision ?? revision, await this.headRevision(at));
+    }
 
     await this.audit.record(ctx, {
       action: 'company_template.draft_saved',
       targetCollection: 'companyTemplates',
-      targetId: String(saved!._id),
-      after: { companyId, templateId: at.templateId, kind },
+      targetId: String(saved._id),
+      // P19.5-T1 AC-20: who, when — the entry's own — and the version the draft will be published as.
+      after: { companyId, templateId: at.templateId, kind, revision: saved.revision, version: saved.version },
     });
 
     const published = await this.newestPublished(at);
-    return this.view(
-      saved!,
+    return this.withAnalytics(ctx, at, this.view(
+      saved,
       published?.version ?? null,
       await this.standing(at, published?.version ?? null),
       ctx.reader,
-    );
+    ));
   }
 
   /**
@@ -294,7 +408,23 @@ export class TemplateService {
     if (!draft) {
       throw new InvalidRequestException(SAY.nothingToPublish);
     }
-    await this.refuseBroken(at, draft.payload);
+    if (kind === 'recruitment_playbook') {
+      /*
+       * **Whole before it is published** (ADR-0210 §1; ADR-0125 §2): every profile and hesitation answered, each text
+       * within its bounds, by the check the retired company route made at every save. A draft saves as it is typed; the
+       * version every KPM made from the template reads is the one that must be whole — stored as the check answers it,
+       * every text trimmed.
+       */
+      draft.payload = checkPlaybookBody(draft.payload) as unknown as Record<string, unknown>;
+    } else if (kind === 'advanced_analytics') {
+      // P19.5-T1 AC-11 (ADR-0214 §7): whole, and its agent-code pattern tested over every registered code first.
+      await this.requireAnalytics().checkPublish(ctx, companyId, at.templateId!, draft.payload);
+    } else if (kind === 'branding') {
+      // P19.6-T1 (ADR-0218 §3, §5): the version every KPM on the template reads must carry readable colours.
+      draft.payload = checkedTemplatePayload(companyId, draft.payload);
+    } else {
+      await this.refuseBroken(at, draft.payload);
+    }
 
     const published = await this.newestPublished(at);
     draft.version = (published?.version ?? 0) + 1;
@@ -324,7 +454,21 @@ export class TemplateService {
       after: { companyId, templateId: at.templateId, kind, version: draft.version },
     });
 
-    return this.view(draft, draft.version, await this.standing(at, draft.version), ctx.reader);
+    /*
+     * P19.5-T1 AC-17 (ADR-0214 §4): live at once for every KPM on the template, existing ones included — so their Owners
+     * and Admins are told, when the columns, the archive or the upload rules changed.
+     */
+    if (kind === 'advanced_analytics' && at.template) {
+      await this.requireAnalytics().announce(
+        ctx,
+        { companyId, id: at.templateId!, name: at.template.name },
+        (published?.payload as unknown as AdvancedAnalyticsConfig | undefined) ?? platformAnalyticsConfig(),
+        draft.payload as unknown as AdvancedAnalyticsConfig,
+        draft.version,
+      );
+    }
+
+    return this.withAnalytics(ctx, at, this.view(draft, draft.version, await this.standing(at, draft.version), ctx.reader));
   }
 
   /**
@@ -387,7 +531,7 @@ export class TemplateService {
   private async address(
     companyId: string, kind: TemplateKind, templateId?: string | null,
   ): Promise<KindAddress> {
-    if (!isOfficeTemplateKind(kind)) return { companyId, templateId: null, kind, template: null };
+    if (!isNamedTemplateKind(kind)) return { companyId, templateId: null, kind, template: null };
     const template = await this.named.resolve(companyId, templateId);
     return { companyId, templateId: String(template._id), kind, template };
   }
@@ -415,6 +559,24 @@ export class TemplateService {
       .exec();
   }
 
+  /** The revision of what a reader would open now: the draft, else the newest published, else `0`. */
+  private async headRevision(at: KindAddress): Promise<number> {
+    const draft = await this.templates.findOne({ ...this.rowsOf(at), status: 'draft', deletedAt: null }).exec();
+    return (draft ?? await this.newestPublished(at))?.revision ?? 0;
+  }
+
+  /** The section's own rules, or a server fault: the kind is never written without them. */
+  private requireAnalytics(): AnalyticsTemplateService {
+    if (!this.analytics) throw new Error('TemplateService was built without AnalyticsTemplateService.');
+    return this.analytics;
+  }
+
+  /** An `advanced_analytics` answer with its editor's view (P19.5-T1); any other kind's as it is. */
+  private async withAnalytics(ctx: RequestContext, at: KindAddress, view: TemplateView): Promise<TemplateView> {
+    if (at.kind !== 'advanced_analytics' || !this.analytics || !at.templateId || !ctx.isSuperAdmin) return view;
+    return { ...view, analytics: await this.analytics.editorOf(ctx, at.companyId, at.templateId) };
+  }
+
   private async requireCompany(companyId: string): Promise<CompanyDocument> {
     const company = await this.companies
       .findOne({ _id: companyId, deletedAt: null }).exec()
@@ -433,6 +595,8 @@ export class TemplateService {
   private async standing(at: KindAddress, publishedVersion: number | null): Promise<OfficeStanding> {
     // Nothing published of this kind: there is no version to be behind, or unrecorded against.
     if (publishedVersion === null || !at.template) return NO_STANDING;
+    // The playbook is read live by every KPM made from the template (ADR-0210 §4): none is ever behind it.
+    if (!isOfficeTemplateKind(at.kind)) return NO_STANDING;
     const scope: TemplateScope = this.named.scopeOf(at.template);
     return this.officesOf.standing(at.companyId, at.kind, publishedVersion, scope);
   }
@@ -623,6 +787,7 @@ export class TemplateService {
       templateId: doc.templateId ?? null,
       kind: doc.kind,
       version: doc.version,
+      revision: doc.revision ?? 0,
       status: doc.status,
       payload: doc.payload,
       publishedAt: doc.publishedAt ? doc.publishedAt.toISOString() : null,
@@ -630,13 +795,38 @@ export class TemplateService {
       officesBehind: standing.behind,
       officesUnrecorded: standing.unrecorded,
       ...linkKindsOf(doc.kind, reader),
+      ...playbookOf(doc.kind, reader),
     };
   }
 }
 
+/** The newest published row of a kind, as the read carries it beside the draft (P19-T6 AC-3). */
+function publishedOf(doc: CompanyTemplateDocument): PublishedKindView {
+  return {
+    id: String(doc._id),
+    version: doc.version,
+    revision: doc.revision ?? 0,
+    payload: doc.payload,
+    publishedAt: doc.publishedAt ? doc.publishedAt.toISOString() : null,
+  };
+}
+
 /**
- * The link registry an `activation_checklist` read carries (P18.5-T3 AC-6); nothing for any other kind. **What
- * completes each kind is written for the reader** (P18.98-T7; ADR-0179 §7), the activation module's own sentence
+ * **A draft save that somebody else's save or publish has moved past** (P19-T6 AC-2): `409 VERSION_CONFLICT`, the
+ * revisions in `details` — the one the editor read and the one stored now.
+ */
+function draftMoved(expectedRevision: number, actualRevision: number): DomainException {
+  return new DomainException(
+    ErrorCode.VERSION_CONFLICT,
+    TEMPLATE_REFUSALS.VERSION_CONFLICT.draftMoved,
+    HttpStatus.CONFLICT,
+    { expectedRevision, actualRevision },
+  );
+}
+
+/**
+ * The link registry an `activation_checklist` read carries (P18.2-T3 AC-6); nothing for any other kind. **What
+ * completes each kind is written for the reader** (P18.10-T7; ADR-0179 §7), the activation module's own sentence
  * (`completesWhenOf`) — the same words the office's checklist serves. A feature kind's label is a page's name, and
  * *Training module* the kind's, the same in both (§A.1, §A.2).
  */
@@ -648,4 +838,19 @@ function linkKindsOf(kind: TemplateKind, reader: Reader): Pick<TemplateView, 'li
     completesWhen: render(completesWhenOf(key === 'training' ? ACTIVATION_TRAINING_LINK_PREFIX : key), reader),
   }])) as unknown as typeof kinds;
   return { linkKinds: written };
+}
+
+/**
+ * What a `recruitment_playbook` read carries beside its words (ADR-0210 §1): the AgencyBoost words, the brief's
+ * vocabulary in the reader's language and the bounds a publish holds a text to — nothing for any other kind.
+ */
+function playbookOf(kind: TemplateKind, reader: Reader): Pick<TemplateView, 'playbook'> {
+  if (kind !== 'recruitment_playbook') return {};
+  return {
+    playbook: {
+      defaults: defaultPlaybookBody(),
+      vocabulary: recruitmentVocabulary(reader),
+      limits: { textMax: RECRUITMENT.TEXT_MAX_LENGTH, benefitsMax: RECRUITMENT.BENEFITS_MAX },
+    },
+  };
 }

@@ -1,7 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
-import { PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_TAGLINE_MAX_LENGTH } from '@/domain/constants';
+import { Transform, Type } from 'class-transformer';
+import {
+  Allow, ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, MaxLength, ValidateNested,
+} from 'class-validator';
+import {
+  PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, PRODUCT_OBJECTIONS_MAX, PRODUCT_TAGLINE_MAX_LENGTH, PROPOSAL,
+} from '@/domain/constants';
+import { FaqEntryDto, ObjectionDto, PlanHighlightDto } from './product.dto';
 
 export class SetProductActiveDto {
   @ApiPropertyOptional({
@@ -59,17 +64,42 @@ export class SaveProductOverridesDto {
   @IsOptional() @IsString() @MaxLength(4000)
   fullScript?: string;
 
-  @ApiPropertyOptional({ description: '4a · If they push back — they say' })
-  @IsOptional() @IsString() @MaxLength(1000)
-  objectionTheySay?: string;
-
-  @ApiPropertyOptional({ description: '4b · If they push back — you say' })
-  @IsOptional() @IsString() @MaxLength(1000)
-  objectionYouSay?: string;
+  @ApiPropertyOptional({
+    type: [ObjectionDto],
+    maxItems: PRODUCT_OBJECTIONS_MAX,
+    description: '4 · If they push back: the office\'s own cards, the whole list in place of the company\'s (ADR-0209 '
+      + `§9) — at most ${PRODUCT_OBJECTIONS_MAX}. A card with neither side written is dropped. Held for approval with `
+      + 'the script.',
+  })
+  @IsOptional() @IsArray() @ArrayMaxSize(PRODUCT_OBJECTIONS_MAX) @ValidateNested({ each: true })
+  @Type(() => ObjectionDto)
+  objections?: ObjectionDto[];
 
   @ApiPropertyOptional({ description: '5 · Next action' })
   @IsOptional() @IsString() @MaxLength(1000)
   nextAction?: string;
+
+  @ApiPropertyOptional({
+    type: [FaqEntryDto],
+    maxItems: PROPOSAL.FAQ_MAX,
+    description: '**The proposal\'s *Tanya-jawab*, the office\'s own** (ADR-0225 §5): the whole list in '
+      + `place of the company's, at most ${PROPOSAL.FAQ_MAX}, held to the company's bounds — \`400 VALIDATION_FAILED\` `
+      + 'naming the path. **Held for approval with the script**: agents read the company\'s until it is approved. '
+      + '`DELETE …/overrides/faq` gives it back.',
+  })
+  @Allow()
+  faq?: FaqEntryDto[];
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'array', items: { $ref: '#/components/schemas/PlanHighlightDto' } },
+    example: { Gold: [{ label: 'Kamar per hari', value: 'Rp 1,5 jt' }] },
+    description: '**Each plan\'s highlights, the office\'s own**, by the company\'s plan name (ADR-0225 §5): one to '
+      + `${PROPOSAL.PLAN_HIGHLIGHTS_MAX} each. A plan the company does not have is \`400\`; \`{}\` gives them all back. `
+      + 'The whole map is sent. Held for approval with the script.',
+  })
+  @Allow()
+  planHighlights?: Record<string, PlanHighlightDto[]>;
 }
 
 export class AttachProductDocumentDto {

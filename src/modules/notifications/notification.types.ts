@@ -29,7 +29,7 @@ export const NotificationTemplate = {
   JOIN_REQUEST_DECLINED: 'join_request.declined',
   MEMBER_TAGGED_BY_LEADER: 'member.tagged_by_leader',
   /*
-   * P18.96-T3 (ADR-0170): the invitee accepted a leader's invite and is in their unit, to the leader; a transfer
+   * P18.8-T3 (ADR-0170): the invitee accepted a leader's invite and is in their unit, to the leader; a transfer
    * request, to the office's Owner and Admins; and its decision — to whoever asked, and when approved to the member and
    * the leader they left (`payload.audience`). The payload names people by their names and ids, never a phone.
    */
@@ -71,7 +71,7 @@ export const NotificationTemplate = {
   /*
    * An office event is coming up. The payload is the event as it stood when the reminder went: `eventId`, its
    * `title`, `startsAt` (the instant, ISO) with the office's `timezone` that instant is read in, and its `location` —
-   * so the notice names its time and place (P18.95-T7 AC-4; `inbox-copy.ts`). A reminder written before those four,
+   * so the notice names its time and place (P18.7-T7 AC-4; `inbox-copy.ts`). A reminder written before those four,
    * with its title alone, still reads, in the words it had.
    */
   EVENT_REMINDER: 'event.reminder',
@@ -93,6 +93,56 @@ export const NotificationTemplate = {
    */
   EMAIL_CHANGE_VERIFICATION: 'auth.email_change_verification',
   EMAIL_CHANGE_REQUESTED: 'auth.email_change_requested',
+  /*
+   * **The password was changed** (P19-T1 AC-5; UI-163, ADR-0190 §5): after a reset and after a change from *Profil
+   * saya*, to the address the account has. No token — a link to ask for a reset, for somebody who did not do it. Email
+   * only, as the auth templates above: it is about the account, and every session was just signed out.
+   */
+  PASSWORD_CHANGED: 'auth.password_changed',
+  /*
+   * **A linked login** (UI-169 item 5; ADR-0199 §2): the link, **to the other login's address** (B), naming who asked;
+   * a notice that it was asked for, to the starting login's (A), with no link that applies anything; and, once it is
+   * confirmed, a notice to both, each naming the other login. Email only, as every auth template: the link proves the
+   * mailbox, and a notice about the account must reach whoever holds the mailbox, signed in or not.
+   */
+  ACCOUNT_LINK_REQUEST: 'auth.account_link_request',
+  ACCOUNT_LINK_REQUESTED: 'auth.account_link_requested',
+  ACCOUNT_LINKED: 'auth.account_linked',
+  /*
+   * **A new person added by a member import** (P19.3-T4; ADR-0205 §10): a one-time link to choose their password, through
+   * the reset link's mechanism, worded as an invitation. Email only (ADR-0010): it is about an account nobody has signed in
+   * to yet, so an inbox row would wait for a sign-in the link exists to make possible. Not one of `AUTH_TEMPLATES`: the
+   * person has chosen nothing, so their choices cannot stop it, and it is a notice the office sent, not the account's own.
+   */
+  MEMBER_INVITATION: 'member.invitation',
+  /*
+   * **The Owner a KPM was made with, invited** (ADR-0212 §2; P19.4-T3 AC-6): the member invitation's mechanism — a
+   * one-time link to choose a password, alive for `ROSTER_INVITATION.TTL_DAYS` — worded for an Owner: the KPM's code
+   * and branch, and that they run it. Sent by *KPM baru*'s *"Kirim undangan … sekarang"*, by *Ganti pemilik* to a new
+   * person, and by *Kirim ulang undangan*. Email only (ADR-0010): nothing goes by WhatsApp, and an inbox row would wait
+   * for the sign-in the link exists to make possible. Not one of `AUTH_TEMPLATES`, as the member invitation is not.
+   */
+  OWNER_INVITATION: 'kpm.owner_invitation',
+  /*
+   * **The Super Admin applied a template's sections to the office** (ADR-0208 §7; OD-260's default), to its Owner and
+   * Admins: the template's name, the sections (`kinds`) and whether they wait for the office's own publish
+   * (`awaitingPublish`). In-app only: the push changes settings, not anybody's account.
+   */
+  TEMPLATE_APPLIED: 'template.applied',
+  /*
+   * **The template's Data upload changed** (P19.5-T1 AC-17; AA UI-019; ADR-0214 §4), to each Owner and each Admin of
+   * every KPM on the template, once per person per publish: the template's name and version, and the columns it added
+   * with their start months. Only for a publish that changes the columns, the archive or the upload rules. In-app only:
+   * nothing is emailed.
+   */
+  ANALYTICS_TEMPLATE_PUBLISHED: 'analytics_template.published',
+  /*
+   * **A subscription quote for the KPM** (ADR-0211 §5; P19.4-T3 AC-10), to its Owner alone — never the Admins, because
+   * commercial terms are the Owner's. In-app and email: the email carries the printable quote's content (`QUOTE_WORDS`),
+   * the inbox row what came and its total. The payload is the server's figures and the dialog's names, never a client's
+   * total. The recipient's choices apply as to any notice.
+   */
+  BILLING_QUOTE_RECEIVED: 'billing.quote_received',
 } as const;
 
 export type NotificationTemplateId =
@@ -132,7 +182,39 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.PASSWORD_RESET]: ['email'],
   [NotificationTemplate.EMAIL_CHANGE_VERIFICATION]: ['email'],
   [NotificationTemplate.EMAIL_CHANGE_REQUESTED]: ['email'],
+  [NotificationTemplate.PASSWORD_CHANGED]: ['email'],
+  [NotificationTemplate.ACCOUNT_LINK_REQUEST]: ['email'],
+  [NotificationTemplate.ACCOUNT_LINK_REQUESTED]: ['email'],
+  [NotificationTemplate.ACCOUNT_LINKED]: ['email'],
+  [NotificationTemplate.MEMBER_INVITATION]: ['email'],
+  [NotificationTemplate.OWNER_INVITATION]: ['email'],
+  [NotificationTemplate.TEMPLATE_APPLIED]: ['in_app'],
+  [NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED]: ['in_app'],
+  [NotificationTemplate.BILLING_QUOTE_RECEIVED]: ['in_app', 'email'],
 };
+
+/**
+ * **The account's own mail** (P19-T1 AC-6; UI-163, ADR-0190 §5): verifying the address, resetting the password, the
+ * password changed, and an email change's link and notice. **Sent whatever the recipient chose for notification
+ * email** — an opted-out channel or a muted template is a choice about notices, and somebody who turned them off must
+ * still be able to verify, reset, and hear that their password changed. Each send's outcome is logged, sent or failed
+ * (AC-7), so a mail that never arrived can be found.
+ */
+export const AUTH_TEMPLATES: readonly NotificationTemplateId[] = [
+  NotificationTemplate.EMAIL_VERIFICATION,
+  NotificationTemplate.PASSWORD_RESET,
+  NotificationTemplate.PASSWORD_CHANGED,
+  NotificationTemplate.EMAIL_CHANGE_VERIFICATION,
+  NotificationTemplate.EMAIL_CHANGE_REQUESTED,
+  // UI-169 item 5 (ADR-0199 §2): the linked login's link and its two notices, sent whatever the reader opted out of.
+  NotificationTemplate.ACCOUNT_LINK_REQUEST,
+  NotificationTemplate.ACCOUNT_LINK_REQUESTED,
+  NotificationTemplate.ACCOUNT_LINKED,
+];
+
+export function isAuthTemplate(templateId: string): boolean {
+  return (AUTH_TEMPLATES as readonly string[]).includes(templateId);
+}
 
 export interface SendRequest {
   /** Recipient membership. Auth templates that precede membership use `userId` instead. */
@@ -141,7 +223,7 @@ export interface SendRequest {
   readonly templateId: NotificationTemplateId;
   readonly payload: Record<string, unknown>;
   /**
-   * **The reader of the request that caused it**, for a recipient with no saved language (P18.98-T5 AC-5): set only
+   * **The reader of the request that caused it**, for a recipient with no saved language (P18.10-T5 AC-5): set only
    * where that request was the recipient's own — the verification and reset emails, whose page asked for them in its
    * language. Every other email reads the recipient's `users.locale`, or a reader who has chosen nothing.
    */

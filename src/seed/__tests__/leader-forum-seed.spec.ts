@@ -64,10 +64,10 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(list.can.create).toBe(true);
   });
 
-  it('P18.1-T2 AC-10, P18.97-T2 AC-4 #14: live; the ten items naming October, its own month; the four rows, the first remark dated from it', () => {
+  it('P18.1-T2 AC-10, P18.9-T2 AC-4 #14: live; the ten items naming October, its own month; the four rows, the first remark dated from it', () => {
     const view = views[14];
     expect(view.scorecard.frozenAt).toBeNull();
-    // In Bahasa Indonesia, as the service writes it for an Indonesian reader (P18.98-T7).
+    // In Bahasa Indonesia, as the service writes it for an Indonesian reader (P18.10-T7).
     expect(view.agenda.preparation.map((i) => i.text)[1]).toBe('Siapkan data kinerja Oktober');
     expect([view.agenda.preparation, view.agenda.during, view.agenda.post].map((s) => s.length)).toEqual([3, 5, 2]);
     expect([...view.agenda.preparation, ...view.agenda.during, ...view.agenda.post].every((i) => i.pic === '' && !i.done)).toBe(true);
@@ -79,9 +79,10 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(view.actionItems[0].remarks).toBe(FORUM_REMARKS.scheduled('20 Okt'));
   });
 
-  it('P18.97-T1 AC-20 #14’s targets are rates — the prototype’s as migration 0043 reads them — × its 9 units; New AA’s kept, not drawn', async () => {
+  it('P18.9-T1 AC-20, P19.3-T1 AC-15 #14’s targets are rates × its 7 units — the leaders who lead somebody; New AA’s kept, not drawn', async () => {
     const view = views[14];
-    expect(view.scorecard.chips).toMatchObject({ units: view.scorecard.chips.ab + view.scorecard.chips.aab });
+    // P19.3-T1 (ADR-0203 §1): five ABs and four AABs, two of whom lead nobody — 7 units, where it read 9.
+    expect(view.scorecard.chips).toMatchObject({ ab: 5, aab: 4, units: 7 });
     const units = view.scorecard.chips.units;
     expect(Object.fromEntries(view.scorecard.rows.map((r) => [r.key, r.monthlyTarget]))).toEqual({
       ape: { rate: null, value: null, typed: null, version: 1 },
@@ -98,7 +99,7 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(stored!.monthlyTargets.new_aa).toEqual({ value: 'TBD', version: 1 });
   });
 
-  it('P18.97-T1 AC-20 0417’s file holds every month of last year, so Full Year and YTD 2025 read whole years: no (*) note on either', async () => {
+  it('P18.9-T1 AC-20 0417’s file holds every month of last year, so Full Year and YTD 2025 read whole years: no (*) note on either', async () => {
     const months = (await col('productionMonths').find({ kpmId: owner.kpmId, month: { $regex: '^2025-' }, deletedAt: null }).toArray())
       .map((m) => m.month as string).sort();
     expect(months).toEqual(Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}`));
@@ -134,21 +135,22 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     const input = { kpmId: owner.kpmId!, timezone: 'Asia/Jakarta', meetingDate: '2026-09-26' };
     expect(stored!.frozenScorecard).toEqual(await thatMorning.compute(input));
     /*
-     * Asked today, every row but *3M new agent %* answers the same: the periods end at the meeting's date either way.
-     * That row reads each new hire's 3M activation as it stands (P18.96-T6, `ACTIVATION_3M_PCT`, by rule A since UI V1,
-     * UI-023): a first sale by day 90 counts the day it is recorded, one after day 90 is in neither part. Since that
-     * morning one more hire is decided, so a live read moves; the frozen one does not (ADR-0129 §7): 7 of 8 that
-     * morning, 8 of 9 today — Raka's day-120 and Lukman's day-96 sales outside the share, Tari and Yanti inside their 90 days.
+     * Asked today, every row answers the same: the periods end at the meeting's date either way. *3M new agent %* reads
+     * the office's file month by month since P19.3-T1 (`NEW_AGENT_ACTIVATION_3M_PCT`, ADR-0202), and the file has not
+     * moved since that morning — so it reads 80% both, where New Hires' day-90 share moved from 88% to 89% overnight. A
+     * live read would move with the file; the frozen one never does (ADR-0129 §7).
      */
     const again = await forum.scorecards.compute(input);
     const others = (card: { rows: { key: string }[] }) => ({ ...card, rows: card.rows.filter((r) => r.key !== 'new_agent_3m') });
     expect(others(stored!.frozenScorecard)).toEqual(others(again));
     const ytd = (card: { rows: { key: string; cells: Record<string, unknown> }[] }) => card.rows.find((r) => r.key === 'new_agent_3m')!.cells.ytd;
     expect([ytd(stored!.frozenScorecard), ytd(again)]).toEqual([
-      { kind: 'figure', value: 88, leavesOut: [] }, { kind: 'figure', value: 89, leavesOut: [] },
+      { kind: 'figure', value: 80, leavesOut: [] }, { kind: 'figure', value: 80, leavesOut: [] },
     ]);
+    // Frozen since P19.3-T1: it carries the definitions it was computed with, so its footnotes are D7's.
+    expect([stored!.frozenScorecard.definitions, views[13].scorecard.definitions]).toEqual(['data_sources', 'data_sources']);
     expect(views[13].actionItems.map((r) => r.status)).toEqual(['not_planned', 'planned', 'implemented']);
-    // P18.97-T2 AC-4: the follow-ups the session before's; the month item #13's own month.
+    // P18.9-T2 AC-4: the follow-ups the session before's; the month item #13's own month.
     expect(views[13].agenda.preparation.map((i) => i.text)).toEqual(['Kumpulkan follow-up dari sesi Agustus', 'Siapkan data kinerja September']);
     expect(views[13].actionItems[1].remarks).toBe(FORUM_REMARKS.scheduled('3 Okt'));
     expect(views[12].openItems).toBe(0);
@@ -159,7 +161,7 @@ describe('Phase 18.1 the Strategic Leader Forum seed — a run at 10:00 on 10 Oc
     expect(threeMonths.cells.fy.kind).toBe('figure');
   });
 
-  it('P18.97-T1 AC-19, AC-20 #12 keeps a scorecard frozen in the old shape, read tolerantly: — where it lacks, its own 5 units', async () => {
+  it('P18.9-T1 AC-19, AC-20 #12 keeps a scorecard frozen in the old shape, read tolerantly: — where it lacks, its own 5 units', async () => {
     const stored = await col('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(views[12].id) });
     const frozen = stored!.frozenScorecard as { periods: Record<string, unknown>; chips: Record<string, number>; rows: { key: string; cells: Record<string, unknown> }[] };
     // The shape before the reference slide: five columns, nine rows with New AA, # of units the AB agencies, no AS OF.

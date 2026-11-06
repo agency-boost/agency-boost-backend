@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
-import { VALUE_COLUMNS } from '@/modules/production/production-preview';
 import { TEMPLATE_HEADER_V1 } from '@/modules/production/production-template';
+import { byKode } from '@/modules/production/upload-columns';
 import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule } from '../../../../test/config-module';
@@ -13,11 +13,14 @@ import { LeaderScorecardService } from './scorecard.service';
 import type { ColumnKey, ComputedScorecard, RowKey, ScorecardCell } from './scorecard.types';
 
 const M = 1_000_000 * 100;
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them (P19.5-T2). */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 const JAKARTA = 'Asia/Jakarta';
 /** In two days: live, its periods ending today, 14 September 2026. */
 const MEETING = '2026-09-16';
 const LAST_YEAR = Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}`);
-/** *YTD 2025* for a meeting in September 2026: the months *YTD 2026* covers, a year earlier (P18.97-T1 AC-1). */
+/** *YTD 2025* for a meeting in September 2026: the months *YTD 2026* covers, a year earlier (P18.9-T1 AC-1). */
 const LAST_YEAR_TO_DATE = LAST_YEAR.slice(0, 9);
 const THIS_YEAR = Array.from({ length: 9 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
 /** The end of a local day, and of a month, in Jakarta: 00:00 the next day, as `Clock` gives it. */
@@ -83,14 +86,16 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     await db().collection('monthlyAgentData').insertMany(Object.entries(year).flatMap(([membershipId, f]) =>
       LAST_YEAR.filter((month) => month <= (f.to ?? '2025-12')).map((month) => ({
         kpmId: KPM_A, membershipId, month, agentCode: 'x', deletedAt: null,
-        apeMonthly: cell(f.ape * M), apeYtd: cell(f.ape * M * Number(month.slice(5))),
-        policyCountMonthly: cell(f.pol), newActiveAgentsMonthly: cell(f.nAA),
+        ...byKode({
+          apeMonthly: cell(f.ape * M), apeYtd: cell(f.ape * M * Number(month.slice(5))),
+          policyCountMonthly: cell(f.pol), newActiveAgentsMonthly: cell(f.nAA),
+        }),
       }))));
     // This year's August and September: new active agents on the file for two of the members held.
     for (const who of ['INDAH', 'AGUS'] as const) {
       await db().collection('monthlyAgentData').updateMany(
         { membershipId: office.id[who], month: { $in: ['2026-08', '2026-09'] } },
-        { $set: { newActiveAgentsMonthly: cell(who === 'INDAH' ? 1 : 2) } },
+        { $set: { 'values.NEW_ACTIVE_AGENTS': cell(who === 'INDAH' ? 1 : 2) } },
       );
     }
 
@@ -99,24 +104,32 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
 
   afterAll(stopMongo);
 
-  /** A month of the office's file: the month table's rows, and each leaver's row beside them (OD-74). */
+  /**
+   * A month of the office's file: the month table's rows, and each leaver's row beside them (OD-74). A year to date is
+   * the sum of the member's months held from January (R4, P19.5-T2) — the table's calculated one, and a leaver's added
+   * here the same way — so it reads in a month whose file holds no row of theirs: a row is on the month's file by its
+   * month's own figures.
+   */
   async function fileOf(month: string): Promise<FileRow[]> {
     const table = (await wired.production.readMonth(owner(), month)).rows.map((r): FileRow => ({
       membershipId: r.membershipId,
-      ape: r.metrics.ape.monthly.value, ytd: r.metrics.ape.ytd.value,
-      policies: r.metrics.policyCount.monthly.value, newAA: r.metrics.newActiveAgents.monthly.value,
+      ape: r.values.APE?.value ?? null, ytd: r.ytd.APE?.value ?? null,
+      policies: r.values.POLICY_COUNT?.value ?? null, newAA: r.values.NEW_ACTIVE_AGENTS?.value ?? null,
       maa: r.monthlyActiveAgent,
     }));
     const leavers = await db().collection('memberships').find({ kpmId: KPM_A, status: 'removed' }).toArray();
-    const theirs = await db().collection('monthlyAgentData')
-      .find({ kpmId: KPM_A, month, deletedAt: null, membershipId: { $in: leavers.map((l) => String(l._id)) } }).toArray();
+    const theirYear = await db().collection('monthlyAgentData').find({
+      kpmId: KPM_A, month: { $gte: `${month.slice(0, 4)}-01`, $lte: month }, deletedAt: null,
+      membershipId: { $in: leavers.map((l) => String(l._id)) },
+    }).toArray();
     const listed = new Set(table.map((r) => r.membershipId));
-    const leaverRows = theirs.filter((r) => !listed.has(r.membershipId)).map((r): FileRow => ({
-      membershipId: r.membershipId, ape: r.apeMonthly?.value ?? null, ytd: r.apeYtd?.value ?? null,
-      policies: r.policyCountMonthly?.value ?? null, newAA: r.newActiveAgentsMonthly?.value ?? null,
-      maa: monthlyActiveAgent(r.apeMonthly?.value ?? null, r.policyCountMonthly?.value ?? null),
+    const leaverRows = theirYear.filter((r) => r.month === month && !listed.has(r.membershipId)).map((r): FileRow => ({
+      membershipId: r.membershipId, ape: r.values?.APE?.value ?? null,
+      ytd: sum(theirYear.filter((x) => x.membershipId === r.membershipId).map((x) => x.values?.APE?.value ?? null)),
+      policies: r.values?.POLICY_COUNT?.value ?? null, newAA: r.values?.NEW_ACTIVE_AGENTS?.value ?? null,
+      maa: monthlyActiveAgent(r.values?.APE?.value ?? null, r.values?.POLICY_COUNT?.value ?? null),
     }));
-    return [...table.filter((r) => r.ape !== null || r.ytd !== null || r.policies !== null || r.newAA !== null), ...leaverRows];
+    return [...table.filter((r) => r.ape !== null || r.policies !== null || r.newAA !== null), ...leaverRows];
   }
 
   const sum = (values: (number | null)[]) => {
@@ -139,17 +152,24 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       .map((m): MembershipRow => ({ _id: m._id, status: m.status, joinedAt: m.joinedAt ?? null, removedAt: m.removedAt ?? null, orgLevelCode: m.orgLevelCode }));
     const files = new Map<string, FileRow[]>();
     for (const month of [...LAST_YEAR, ...THIS_YEAR]) files.set(month, await fileOf(month));
-    const held = (month: string) => files.get(month)!.some((r) => r.ape !== null || r.ytd !== null);
+    // A month the office's file holds: a row of it with the month's APE — a year to date is calculated, never held (P19.5-T2).
+    const held = (month: string) => files.get(month)!.some((r) => r.ape !== null);
 
-    // ---- The headcount and the chips: the Overview's, today. *# of units* is every AB and AAB (P18.97-T1 AC-9).
+    // ---- The headcount and the chips: the Overview's, today. *# of units* is the AB and AAB who lead an active member
+    // (P19.3-T1 AC-15; ADR-0203 §1), counted here from the memberships themselves.
     const rung = (code: string) => overview.composition.rungs.find((r) => r.code === code)?.count ?? 0;
+    const live = (await db().collection('memberships').find({ kpmId: KPM_A, deletedAt: null, status: 'active' }).toArray());
+    const leading = new Set(live.map((m) => m.leaderId).filter((l): l is string => typeof l === 'string'));
+    const units = live.filter((m) => (m.role === 'ab' || m.role === 'aab') && leading.has(String(m._id))).length;
     expect([at('chips'), card.chips]).toEqual([at('chips'), {
       manpower: overview.composition.total,
       agents: rung('AGENT'),
       ab: rung('AB'),
-      units: rung('AB') + rung('AAB'),
+      units,
       aab: rung('AAB'),
     }]);
+    // 0417 has leaders who lead nobody: fewer units than ABs and AABs.
+    expect([at('units below AB + AAB'), units < rung('AB') + rung('AAB')]).toEqual([at('units below AB + AAB'), true]);
     expect([at('manpower'), value('manpower', 'thisMonth'), value('manpower', 'ytd')])
       .toEqual([at('manpower'), overview.composition.total, overview.composition.total]);
     // An earlier period's last day: OFFICE_HEADCOUNT on the office's memberships, the Overview's function.
@@ -164,7 +184,7 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     for (const [column, month] of [['thisMonth', '2026-09'], ['lastMonth', '2026-08'], ['thisMonthLastYear', '2025-09']] as const) {
       expect([at(`APE ${month}`), value('ape', column)]).toEqual([at(`APE ${month}`), sum(files.get(month)!.map((r) => r.ape)) ?? 'pending']);
     }
-    // FY, and last year to September (P18.97-T1 AC-1): each member's latest year to date of the months, from the tables,
+    // FY, and last year to September (P18.9-T1 AC-1): each member's latest year to date of the months, from the tables,
     // a leaver's included.
     for (const [column, months] of [['fy', LAST_YEAR], ['ytdLastYear', LAST_YEAR_TO_DATE]] as const) {
       const latestYtd = new Map<string, number>();
@@ -194,7 +214,7 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     expect([at('MAA months agree'), maaIn('2026-09', endOf('2026-09')), maaIn('2026-08', endOf('2026-08'))])
       .toEqual([at('MAA months agree'), now.total.activeAgents, then.total.activeAgents]);
 
-    // ---- Case submission: the table's policies, with its leavers. (*New AA* is drawn nowhere since P18.97-T1 AC-6.)
+    // ---- Case submission: the table's policies, with its leavers. (*New AA* is drawn nowhere since P18.9-T1 AC-6.)
     const perMonth = (pick: (r: FileRow) => number | null) => (month: string) => sum(files.get(month)!.map(pick));
     const policies = perMonth((r) => r.policies);
     for (const [column, month] of [['thisMonth', '2026-09'], ['lastMonth', '2026-08'], ['thisMonthLastYear', '2025-09']] as const) {
@@ -219,19 +239,23 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       }).map((r) => r.membershipId)));
       expect([at(`producing ${column}`), value('producing_agents', column)])
         .toEqual([at(`producing ${column}`), months.some(held) ? producing.size : 'pending']);
-      // Cases/producing agents (P18.97-T1 AC-5): the same months' policies over the same members.
-      const cases = sum(months.map(policies));
-      expect([at(`cases/producing ${column}`), value('cases_per_producing_agent', column)])
-        .toEqual([at(`cases/producing ${column}`), cases === null || !months.some(held) ? 'pending' : producing.size === 0 ? 'none' : cases / producing.size]);
+      // Cases/producing agents, per active agent per month (P19.3-T1 AC-15; ADR-0203 §5): the months held with a policy
+      // count, their policies over their monthly active agents — each month's count the *Avg. monthly AA* row reads.
+      const maaOf = (m: string) => (m.startsWith('2026') ? countOf(m) : maaIn(m, endOf(m)));
+      const paired = months.filter((m) => held(m) && policies(m) !== null);
+      const active = paired.reduce((n, m) => n + maaOf(m), 0);
+      const pairedPolicies = paired.reduce((n, m) => n + policies(m)!, 0);
+      expect([at(`cases/active agent/month ${column}`), value('cases_per_producing_agent', column)])
+        .toEqual([at(`cases/active agent/month ${column}`), paired.length === 0 ? 'pending' : active === 0 ? 'none' : pairedPolicies / active]);
     }
 
-    // ---- FLC: pending everywhere (OD-26).
+    // ---- FLC: the upload's recruitment (P19.3-T1 AC-15) — pending everywhere while nothing on this file carries one.
     expect([at('FLC'), Object.values(card.rows.find((r) => r.key === 'flc')!.cells).map((x) => x.kind)])
       .toEqual([at('FLC'), Array(6).fill('pending')]);
     return card;
   }
 
-  it('P18.1-T2 AC-4 exit test 1 over the office as it stands — P18.97-T1 AC-1, AC-21: YTD {Y−1} equal to the month table’s figures for its months', async () => {
+  it('P18.1-T2 AC-4 exit test 1 over the office as it stands — P18.9-T1 AC-1, AC-21: YTD {Y−1} equal to the month table’s figures for its months', async () => {
     const card = await reconciles('as it stands');
     // The office holds August and September this year, and last year whole: what reconciled are figures, not two
     // *pending data* agreeing — FLC and This Month's new active agents aside, which nothing on file carries.
@@ -262,8 +286,10 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     });
     await db().collection('monthlyAgentData').insertOne({
       kpmId: KPM_A, membershipId: String(joined), month: '2026-09', agentCode: 'PRU-79999', deletedAt: null,
-      apeMonthly: { value: 7 * M, provenance: 'imported', sourceBatchId: null }, apeYtd: { value: 7 * M, provenance: 'imported', sourceBatchId: null },
-      policyCountMonthly: { value: 1, provenance: 'imported', sourceBatchId: null },
+      ...byKode({
+        apeMonthly: { value: 7 * M, provenance: 'imported', sourceBatchId: null }, apeYtd: { value: 7 * M, provenance: 'imported', sourceBatchId: null },
+        policyCountMonthly: { value: 1, provenance: 'imported', sourceBatchId: null },
+      }),
     });
     const before = await scorecard.compute({ kpmId: KPM_A, timezone: JAKARTA, meetingDate: MEETING });
     const after = await reconciles('after a join');

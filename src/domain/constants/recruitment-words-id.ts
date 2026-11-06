@@ -1,7 +1,7 @@
 import type { RecruitmentPlaybookBody } from './recruitment';
 
 /**
- * **The seed recruitment playbook in Bahasa Indonesia** (UI V1, UI-107; Phase 18.99 T13): `SEED_RECRUITMENT_PLAYBOOK`,
+ * **The seed recruitment playbook in Bahasa Indonesia** (UI V1, UI-107; Phase 18.11 T13): `SEED_RECRUITMENT_PLAYBOOK`,
  * path for path. Served to a reader in Indonesian wherever a company's playbook still holds the platform's English word
  * for word (`modules/recruitment/recruitment-words.ts`); a word a company typed is shown as typed. Translated for the
  * product owner's review before release.

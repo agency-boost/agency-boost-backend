@@ -5,6 +5,8 @@ import { KpmProductConfig, KpmProductConfigSchema } from '@/modules/products/kpm
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { up as attackPlanReply } from '@/migrations/0024-attack-plan-reply';
 import { up as productNamePlaceholder } from '@/migrations/0039-product-name-placeholder';
+import { up as productKindAndCurrency } from '@/migrations/0053-product-kind-and-currency';
+import { up as productObjectionCards } from '@/migrations/0054-product-objection-cards';
 import { seedObjectId } from './coaching-fixture';
 
 /**
@@ -16,7 +18,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | What | Its state | Who to sign in as, and what they see |
  * |---|---|---|
- * | **0417 BSD City**, the decisions `configure` gives it | *PRUMapan* under the company's name (no rename since P18.95-T6); *PRUSmart Plan* turned off; *PRUFuture*'s opening **pending**; *PRUWarisan* approved and edited again; *PRUAnugerah* sent back | `rina@kpm0417.test` at `/product-catalog`: *PRUMapan*, no *PRUSmart Plan*, the company's words on *PRUFuture* and *PRUAnugerah*, the approved opening on *PRUWarisan* |
+ * | **0417 BSD City**, the decisions `configure` gives it | *PRUMapan* under the company's name (no rename since P18.7-T6); *PRUSmart Plan* turned off; *PRUFuture*'s opening **pending**; *PRUWarisan* approved and edited again; *PRUAnugerah* sent back | `rina@kpm0417.test` at `/product-catalog`: *PRUMapan*, no *PRUSmart Plan*, the company's words on *PRUFuture* and *PRUAnugerah*, the approved opening on *PRUWarisan* |
  * | **0417 keeps PRULink Generasi Baru (PGB) on** (new) | `active: true` on a product the company closed to new business | `rina@kpm0417.test`: an *In run-off* card under *Investment-linked*, its run-off sentence, no script. 0555 does not keep it on, so its agents do not see it |
  * | **An approved description** (new, OD-136) on *PRUMapan* | the office's *Short description (shown to agents)*, approved by the Owner six days ago | `rina@kpm0417.test`: the office's sentence on the card, the drawer and the plan, in the tagline's place. `owner@kpm0417.test` at `/kpm/settings/products` → *PRUMapan* → *Customize*: the field marked *Yours.*, the row *Approved* |
  * | **A pending description** (new, OD-136) on *PRUFuture* | written beside its pending opening, not yet approved | `rina@kpm0417.test`: the company's tagline still. `owner@kpm0417.test` or `admin@kpm0417.test` at *Script approvals*: *PRUFuture*, its description among the lines to decide; **Approve**, and the agent's next read has both |
@@ -30,7 +32,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * **Migration `0024-attack-plan-reply` runs here**, as a deployed database meets it, so a database seeded
  * before the reply was corrected (D-reply) is corrected by a re-seed without `--reset`; a fresh seed has
- * nothing for it to do. **So does `0039-product-name-placeholder`** (P18.95-T6, UI-023): a database seeded
+ * nothing for it to do. **So does `0039-product-name-placeholder`** (P18.7-T6, UI-023): a database seeded
  * while `configure` still renamed PRUMapan *"PRUMapan (nama kami)"* is given the company's name back.
  *
  * **Written once, until `--reset`.** Each write leaves the audit row its service would have — the same
@@ -92,6 +94,18 @@ export const SALES_TOOLS_COMMISSION: Readonly<Record<string, readonly { year: nu
 /** The product the guide names for the drawer's *not set* line. */
 export const SALES_TOOLS_NOT_SET = 'PRUWARISAN';
 
+/**
+ * **A rider on Prudential's demo shelf** (P19.4-T4; the riders spec; ADR-0209 §1–§3): *PRUPersonal Accident D&D Plus*,
+ * which the seed catalogue already calls an accident-only rider, attached to two bases. Agents of 0417 meet it only
+ * inside *PRUMapan*'s and *PRUTect Care*'s drawer and plan, as *"Bisa ditambah: PRUPersonal Accident D&D Plus"*; it
+ * leaves the list, its filters and the needs finder. **A demo attachment, not Prudential's own** (OD-262): the owner
+ * names the real ones.
+ */
+export const SALES_TOOLS_RIDER = {
+  code: 'PRUPERSONAL_ACCIDENT_D_D_PLUS',
+  bases: ['PRUMAPAN', 'PRUTECT_CARE'],
+} as const;
+
 /** The derived id of a decision row this fixture creates. */
 export const salesToolsConfigId = (code: string) => seedObjectId('sales-tools-fixture', 'kpmProductConfig', '0417', code);
 
@@ -116,6 +130,9 @@ export interface SalesToolsFixture {
   reply: Awaited<ReturnType<typeof attackPlanReply>>;
   /** What migration `0039` did on this run: nothing on a fresh seed. */
   named: Awaited<ReturnType<typeof productNamePlaceholder>>;
+  /** What migrations `0053` and `0054` did on this run: the Template company's catalogue, the first time. */
+  kinds: Awaited<ReturnType<typeof productKindAndCurrency>>;
+  objections: Awaited<ReturnType<typeof productObjectionCards>>;
   guide: string;
 }
 
@@ -145,6 +162,10 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
 
   const reply = await attackPlanReply(mongoose.connection.db!, now);
   const named = await productNamePlaceholder(mongoose.connection.db!, now);
+  // P19.4-T4 (ADR-0209): the Template company's catalogue is written by migration `0037`, in the shape of its day — so
+  // the two product migrations run here too, as a deployed database meets them; a re-seed finds nothing for either.
+  const kinds = await productKindAndCurrency(mongoose.connection.db!);
+  const objections = await productObjectionCards(mongoose.connection.db!, now);
 
   const productIdOf = async (code: string): Promise<string> => {
     const product = await Products.findOne({ companyId, code, deletedAt: null }).select('_id').lean().exec();
@@ -189,6 +210,24 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
       targetId: productId, before: { commissionSchedule: [] }, after: { commissionSchedule: rows },
     });
     written += 1;
+  }
+
+  // The rider, once: a product the Super Admin made a base again, or attached elsewhere, in a walk is the walk's.
+  const riderId = await productIdOf(SALES_TOOLS_RIDER.code);
+  const riderMarker = { action: 'product.updated', targetCollection: 'products', targetId: riderId, 'after.kind': 'rider' };
+  if (!(await decided(riderMarker))) {
+    const bases = await Promise.all(SALES_TOOLS_RIDER.bases.map(productIdOf));
+    const result = await Products.updateOne(
+      { _id: riderId, companyId, deletedAt: null, kind: { $ne: 'rider' } },
+      { $set: { kind: 'rider', attachesTo: bases }, $inc: { version: 1 } },
+    ).exec();
+    if (result.modifiedCount > 0) {
+      await Audit.create({
+        kpmId: null, actorUserId: deps.superAdminUserId, action: 'product.updated', targetCollection: 'products',
+        targetId: riderId, before: { kind: 'base', attachesTo: [] }, after: { kind: 'rider', attachesTo: bases },
+      });
+      written += 1;
+    }
   }
 
   const { keptOnRunOff, approvedDescription, pendingDescription } = SALES_TOOLS_DECISIONS;
@@ -284,7 +323,11 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
     KPM 0701 · Cempaka Putih     agent@kpm0701.test — the empty shelf: its company has no product
     Prudential commission        DEMO figures on PRUMapan, PRUFuture and PRULink NextGen; PRUWarisan and the
                                  rest not set. Edit at /admin/companies → Prudential → Template → Products
+    Prudential rider             PRUPersonal Accident D&D Plus is a RIDER on PRUMapan and PRUTect Care (a demo
+                                 attachment). Not in 0417's catalog list; open PRUMapan → "Bisa ditambah: …".
+                                 On /kpm/settings/products it sits under both bases with no switch of its own.
+                                 Super Admin: Produk tab, chip "Rider", "Untuk: PRUMapan, PRUTect Care"
 `;
 
-  return { written, reply, named, guide };
+  return { written, reply, named, kinds, objections, guide };
 }

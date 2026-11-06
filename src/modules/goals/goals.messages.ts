@@ -1,7 +1,7 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The goals module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a goal's own fields, the assumptions
+ * **The goals module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a goal's own fields, the assumptions
  * the cascade needs before there is any arithmetic, and a period that has ended. *Goal*, *Target* and *APE* stay
  * English (glossary §A.6), and so do Goal Settings' own labels — *Closing rate*, *Commission rate*, *Average case
  * size*, *Appointment to Sales meeting* (§A.4) — which the refusals name as the reader sees them. A figure is written

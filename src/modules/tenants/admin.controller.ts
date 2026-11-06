@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put,
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Optional, Param, Patch, Post, Put,
   Query, StreamableFile, UploadedFile, UseInterceptors,
 } from '@nestjs/common';
 import {
@@ -12,22 +12,28 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, InvalidRequestException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
-import { ElevateImpersonationDto, ImpersonateDto } from '@/modules/auth/auth.dto';
+import { AuditQueryDto } from '@/modules/audit/audit-query.dto';
+import { ImpersonateDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import {
+  AccountSearchQueryDto,
   ApproveKpmRequestDto,
   AssignOwnerDto,
-  AuditQueryDto,
+  CodeAvailabilityQueryDto,
+  MoveCompanyDto,
   CreateCompanyDto,
   SetCompanyStatusDto,
   UpdateCompanyDto,
   CreateKpmDto,
   CreateOrgLevelDto,
   DeclineKpmRequestDto,
+  RosterFileImportDto,
+  RosterImportDto,
   RosterRowsDto,
   RosterTemplateQueryDto,
   SetStatusDto,
   UpdateOrgLevelDto,
+  DeleteOrgLevelQueryDto,
   UpdateSubscriptionDto,
 } from './tenant.dto';
 import { KpmRequestService } from './kpm-request.service';
@@ -40,6 +46,7 @@ import {
   ROSTER_TEMPLATE_HEADER,
 } from './roster-csv';
 import { TenantService } from './tenant.service';
+import { PlatformReads } from '@/modules/reporting/platform/platform-reads.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { SaveTemplateDraftDto } from '@/modules/config/template.dto';
 import { TemplateQueryDto } from '@/modules/config/named-template.dto';
@@ -47,7 +54,7 @@ import { TEMPLATE_KINDS, type TemplateKind } from '@/modules/config/company-temp
 import { TENANTS_REFUSALS } from './tenants.messages';
 import { RosterUploadInterceptor } from './roster-upload.interceptor';
 import type { FileUpload } from '@/common/spreadsheet/file-upload.interceptor';
-import { ROSTER_UPLOAD, XLSX_MIME_TYPE } from '@/domain/constants';
+import { AUDIT_LOG, ROSTER_UPLOAD, XLSX_MIME_TYPE } from '@/domain/constants';
 
 /**
  * The Super Admin console.
@@ -69,6 +76,11 @@ export class AdminController {
     private readonly auditRead: AuditReadService,
     private readonly roster: RosterImportService,
     private readonly templates: TemplateService,
+    /*
+     * *Data terakhir* and *Perlu tindakan* on the offices list (P19.4-T3 AC-8): whether each office's months are
+     * uploaded. Optional so a spec building the controller by hand need not; the application always provides it.
+     */
+    @Optional() @Inject(PlatformReads) private readonly platformReads: PlatformReads | null = null,
   ) {}
 
   @Get('overview')
@@ -112,17 +124,25 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @RequirePermission('kpm_request:decide')
   @ApiOperation({
-    summary: 'Approve a KPM registration',
+    summary: 'Approve a KPM registration and make the applicant its Owner',
     description:
-      'Creates the office and hands it to the person who asked, in one audited operation. The code ' +
-      'is supplied here because it must be unique within the company and a requester cannot know ' +
-      'what is free.',
+      '"Setujui & jadikan Owner" (ADR-0191 §3): creates the office and makes the person who asked its '
+      + 'Owner as one step that completes or leaves nothing behind. The code is supplied here because it must be unique '
+      + 'within the company; `companyId` corrects the request\'s company. Every check comes first — `404` for an unknown '
+      + 'company or applicant, `409 TENANT_CODE_TAKEN` naming the office holding the code, `409 TENANT_COMPANY_MISMATCH` '
+      + 'for an applicant of another company or with no agent code, `409 AUTH_EMAIL_NOT_VERIFIED` for an unverified '
+      + 'address. A press while another approval holds the request is `409 TENANT_REQUEST_IN_PROGRESS`; one after it '
+      + 'succeeded answers the queue with the same office, never a second. If the Owner cannot be set the office is '
+      + 'soft-deleted again. A declined request is `409 TENANT_REQUEST_DECIDED`. Answers the queue. `startFrom` is '
+      + '*Mulai dari* (ADR-0213 §3), offered when the company has no template: absent, the company\'s default template, '
+      + 'or the built-in default where it has none.',
   })
   async approveKpmRequest(
     @Ctx() ctx: RequestContext,
     @Param('requestId') requestId: string,
     @Body() dto: ApproveKpmRequestDto,
   ) {
+    this.refuseTheDefaults(dto);
     return this.kpmRequestService.approve(ctx, requestId, dto);
   }
 
@@ -139,6 +159,32 @@ export class AdminController {
     @Body() dto: DeclineKpmRequestDto,
   ) {
     return this.kpmRequestService.decline(ctx, requestId, dto);
+  }
+
+  @Delete('kpm-requests/:requestId')
+  @RequirePermission('kpm_request:decide')
+  @ApiOperation({
+    summary: 'Remove a wrong or duplicate KPM request',
+    description:
+      '"Hapus" (ADR-0191 §5): a soft delete, pending or decided, audited as `kpm_request.deleted`. Nothing '
+      + 'it made is touched. `409 TENANT_REQUEST_IN_PROGRESS` while an approval holds it; `404` for one that is not '
+      + 'there. Answers the queue.',
+  })
+  async deleteKpmRequest(@Ctx() ctx: RequestContext, @Param('requestId') requestId: string) {
+    return this.kpmRequestService.remove(ctx, requestId);
+  }
+
+  @Get('accounts')
+  @RequirePermission('kpm:assign_owner')
+  @ApiOperation({
+    summary: 'Find the account to make an Owner',
+    description:
+      '"Ganti Owner"\'s picker (ADR-0191 §5): accounts whose name or email contains `q` (at least two '
+      + 'characters, else `400`), at most twenty, Super Admins left out — each with its company, whether its address '
+      + 'is verified and whether it holds an agent code, and the offices it already owns or belongs to.',
+  })
+  async searchAccounts(@Ctx() ctx: RequestContext, @Query() query: AccountSearchQueryDto) {
+    return this.tenants.searchAccounts(ctx, query.q);
   }
 
   @Get('companies')
@@ -239,7 +285,9 @@ export class AdminController {
       'The code is not updatable, by construction \u2014 it is absent from the body. ' +
       'Archiving retires a rung and keeps every membership that references it readable. ' +
       'A change of `leaderTier` is refused `409 ORG_LEVEL_TIER_IN_USE`, with `details.members`, ' +
-      'while any live membership stands on the rung: nobody is re-classed silently (ADR-0156 \u00a75).',
+      'while any live membership stands on the rung: nobody is re-classed silently (ADR-0156 \u00a75). ' +
+      '`expectedVersion`, when sent, must be the rung\'s `version` as read, or `409 VERSION_CONFLICT` ' +
+      'and nothing is written.',
   })
   async updateOrgLevel(
     @Ctx() ctx: RequestContext,
@@ -249,11 +297,40 @@ export class AdminController {
     return this.orgLevels.update(ctx, id, dto);
   }
 
+  @Delete('org-levels/:id')
+  @RequirePermission('org_level:crud')
+  @ApiOperation({
+    summary: 'Delete an archived rung that nothing names',
+    description:
+      'A soft delete (ADR-0213 §2, B1-6), audited as `org_level.deleted` with its code and label; answers the '
+      + 'company\'s ladder as it now stands. Only an **archived** rung, and only when nothing in its company names it — '
+      + 'a membership of any status or its role history, a leader-limit request, a KPM\'s live or published setting or '
+      + 'campaign, the company\'s carrier rules, any version or draft of its templates. Otherwise `409 ORG_LEVEL_IN_USE` '
+      + 'with `details.references`, each `{ kind, count }` (empty for a live rung, which is archived first). '
+      + '`?expectedVersion=` as read, or `409 VERSION_CONFLICT`. The code may be used again afterwards.',
+  })
+  async deleteOrgLevel(
+    @Ctx() ctx: RequestContext,
+    @Param('id') id: string,
+    @Query() query: DeleteOrgLevelQueryDto,
+  ) {
+    return this.orgLevels.remove(ctx, id, query.expectedVersion);
+  }
+
   @Get('tenants')
   @RequirePermission('kpm:list_all')
-  @ApiOperation({ summary: 'List every KPM on the platform' })
+  @ApiOperation({
+    summary: 'List every KPM on the platform',
+    description:
+      'Newest first, each with its subscription, *Leaders used*, its Owner\'s state and its member counts (ADR-0212), and '
+      + '`dataStatus` (SA R5; the setup spec\'s A2): the latest month its file holds and, when the last ended month is not uploaded and the '
+      + 'KPM existed in it, that month — *"Data <bulan> belum diunggah"*. Whether a month was uploaded, never a figure of it.',
+  })
   async listTenants(@Ctx() ctx: RequestContext) {
-    return this.tenants.listAll(ctx);
+    const rows = await this.tenants.listAll(ctx);
+    if (!this.platformReads) return rows.map((row) => ({ ...row, dataStatus: { latestMonth: null, missingMonth: null } }));
+    const status = await this.platformReads.dataStatusAcrossTenants(ctx, rows);
+    return rows.map((row) => ({ ...row, dataStatus: status.get(row._id) ?? { latestMonth: null, missingMonth: null } }));
   }
 
   @Post('tenants')
@@ -271,7 +348,14 @@ export class AdminController {
       'three cascade activity types. The whole source is checked before the office is written, so ' +
       'a refusal (400, naming what is broken; 404 for a template that is not the company\'s; 409 ' +
       'TEMPLATE_RUNG_UNKNOWN for a library template naming a role the company\'s ladder lacks) leaves ' +
-      'nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY.',
+      'nothing behind. The Template library itself holds no office: 409 COMPANY_IS_TEMPLATE_LIBRARY. '
+      + '**`owner`** (ADR-0212 §1, §2; *Pemilik KPM*): made the Owner as one unit with the KPM — checked before anything is '
+      + 'written as `PATCH /admin/tenants/:id/owner` checks one (`409 TENANT_COMPANY_MISMATCH`, `409 '
+      + 'AUTH_EMAIL_NOT_VERIFIED`; for an email nobody holds `agentCode` required, `400`, and free, `409 '
+      + 'AGENT_CODE_TAKEN`), and a failure after the KPM is written undoes it. With no `email`, no account: '
+      + '`pendingOwner`, *Belum diundang*. `sendInvitation` (default `true`) emails the Owner a one-time link to choose a '
+      + 'password; `invitationSent` says whether it went. A code taken in the company is `409 TENANT_CODE_TAKEN`: *"Kode '
+      + '0417 sudah dipakai KPM lain di Prudential: …"*.',
   })
   async createTenant(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmDto) {
     this.refuseTheDefaults(dto);
@@ -288,7 +372,7 @@ export class AdminController {
    * for the callers that are not a request. `StartFromDto` still admits the value, so the refusal names the field
    * and says what to choose instead rather than reading as an unknown enum member.
    */
-  private refuseTheDefaults(dto: CreateKpmDto): void {
+  private refuseTheDefaults(dto: { startFrom?: CreateKpmDto['startFrom'] }): void {
     if (dto.startFrom?.kind !== 'defaults') return;
     throw new DomainException(
       ErrorCode.VALIDATION_FAILED,
@@ -298,23 +382,38 @@ export class AdminController {
     );
   }
 
-  // ---- Filling a new office from a spreadsheet (P3.6-T4). ----
+  @Get('tenants/code-availability')
+  @RequirePermission('kpm:create')
+  @ApiOperation({
+    summary: 'Is a KPM code free in a company?',
+    description:
+      'Read as the code is typed on a KPM request\'s card or the New office form (ADR-0191 §2): '
+      + '`available`, and when it is not, `takenBy` — the live office of the company holding it. Declared above '
+      + '`tenants/:id`, which would otherwise read it as an id. `404` for an unknown company.',
+  })
+  async codeAvailability(@Ctx() ctx: RequestContext, @Query() query: CodeAvailabilityQueryDto) {
+    return this.tenants.codeAvailability(ctx, query.companyId, query.code);
+  }
+
+  // ---- Filling and updating an office from a spreadsheet (P3.2-T4; the setup spec's §A3 since P19.3-T4). ----
 
   @Get('tenants/roster-template')
   @RequirePermission('kpm:import_roster')
   @ApiOperation({
-    summary: 'The roster template',
+    summary: 'The member template',
     description:
       'Absent `format`: the JSON below — the header, the columns, `template` (the CSV: **the header and nothing '
       + 'else**, ADR-0184) and `examples`, three worked rows as cells, which is what the paste box shows; a screen '
-      + 'splitting a CSV itself would be a second parser. `format=csv`: that CSV as the file itself, '
-      + '`roster-template.csv`. `format=xlsx`: the template as an Excel workbook, `roster-template.xlsx` — a guide sheet '
-      + 'in the reader’s language (*Petunjuk*, *Guide*: the steps, each column, the rules, the examples) apart from the '
-      + '*Data* sheet, which holds the header alone, its code and date columns as text and its fixed choices as '
-      + 'dropdowns. With `kpmId` (or, for an Owner or an Admin, their own office) `role` is a dropdown of the company '
-      + 'ladder\'s rung codes; another office\'s id is 404. Any other `format`, a `kpmId` that is not an id, or any '
-      + 'other query field is `400 VALIDATION_FAILED`. Declared above the routes that take an `:id`, because Nest would '
-      + 'otherwise read "roster-template" as one.',
+      + 'splitting a CSV itself would be a second parser. **The header is A3\'s** (ADR-0205 §5): *Kode agen, '
+      + 'Nama, Peran, Kode upline, No. WhatsApp, Email, Tanggal bergabung, Waktu, Tanggal lahir*, then *Jenis kelamin* '
+      + 'and *Bulan bergabung di perusahaan*. `format=csv`: that CSV as the file itself, `roster-template.csv`. '
+      + '`format=xlsx`: the template as an Excel workbook, `roster-template.xlsx` — a guide sheet in the reader’s '
+      + 'language (*Petunjuk*, *Guide*: the steps, each column, the rules, the examples) apart from the *Data* sheet, '
+      + 'which holds the header alone, its code, phone and date columns as text and its fixed choices as dropdowns. '
+      + 'With `kpmId` (or, for an Owner or an Admin, their own office) *Peran* is a dropdown of the company ladder\'s '
+      + 'rungs; another office\'s id is 404. Any other `format`, a `kpmId` that is not an id, or any other query field '
+      + 'is `400 VALIDATION_FAILED`. Declared above the routes that take an `:id`, because Nest would otherwise read '
+      + '"roster-template" as one.',
   })
   @ApiProduces('application/json', 'text/csv', XLSX_MIME_TYPE)
   async rosterTemplate(@Ctx() ctx: RequestContext, @Query() query: RosterTemplateQueryDto) {
@@ -352,7 +451,9 @@ export class AdminController {
       + 'an office made from the template would get of the kind. `campaign_kinds` is the company\'s '
       + 'own, shared by every template, and ignores `templateId`. `officesBehind` says how many of '
       + 'the template\'s offices are on something older, which is the count the Superadmin prototype '
-      + 'puts on its front page.',
+      + 'puts on its front page. `published` is the live version beside it — the newest published '
+      + 'version, payload and date, or `null` where nothing is published — so a draft never hides it. '
+      + '`revision` is what a draft save sends back as `expectedRevision`.',
   })
   async readTemplate(
     @Ctx() ctx: RequestContext,
@@ -360,7 +461,7 @@ export class AdminController {
     @Param('kind') kind: string,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.read(companyId, this.kindOf(kind), query.templateId, ctx.reader);
+    return this.templates.read(companyId, this.kindOf(kind), query.templateId, ctx.reader, ctx);
   }
 
   @Get('companies/:companyId/template/:kind/history')
@@ -393,7 +494,9 @@ export class AdminController {
       + '(`400 VALIDATION_FAILED`), one label per tile '
       + '(`422 CONFIG_SUMMARY_GROUP_LABEL_MISMATCH`), and no shared tile under the code of a '
       + 'category outside it (`422 CONFIG_SUMMARY_GROUP_CODE_TAKEN`). Writes the template '
-      + '`?templateId=` names, the default when absent; an archived template is refused (400).',
+      + '`?templateId=` names, the default when absent; an archived template is refused (400). '
+      + '`expectedRevision`, when sent, must be the `revision` read, or `409 VERSION_CONFLICT` and '
+      + 'nothing is written.',
   })
   async saveTemplateDraft(
     @Ctx() ctx: RequestContext,
@@ -402,7 +505,9 @@ export class AdminController {
     @Body() dto: SaveTemplateDraftDto,
     @Query() query: TemplateQueryDto,
   ) {
-    return this.templates.saveDraft(ctx, companyId, this.kindOf(kind), dto.payload, query.templateId);
+    return this.templates.saveDraft(
+      ctx, companyId, this.kindOf(kind), dto.payload, query.templateId, dto.expectedRevision,
+    );
   }
 
   @Post('companies/:companyId/template/:kind/publish')
@@ -438,26 +543,8 @@ export class AdminController {
   }
 
   // ---- Support sessions (P4-T10, §3.13). ----
-
-  @Post('impersonation/:sessionId/elevate')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermission('impersonation:elevate_to_write')
-  @ApiOperation({
-    summary: 'Approve a support session to write',
-    description:
-      '**A second Super Admin, never the one running it.** An admin session can rewrite '
-      + 'the configuration every member of an office depends on, and the operator best '
-      + 'placed to notice that is a bad idea is somebody other than the one having it. '
-      + 'The reason is typed again and the office\'s Owner reads it. `403` for the '
-      + 'session\'s own starter; `404` for one that has ended or expired.',
-  })
-  async elevateSession(
-    @Ctx() ctx: RequestContext,
-    @Param('sessionId') sessionId: string,
-    @Body() dto: ElevateImpersonationDto,
-  ) {
-    await this.impersonation.elevate(ctx, sessionId, dto.reason);
-  }
+  // `POST /admin/impersonation/:sessionId/elevate` is retired (P19.4-T2; ADR-0206 §3): a session only looks, so there
+  // is no write for a second Super Admin to approve, and the route answers 404 like any that does not exist.
 
   @Get('tenants/:id')
   @RequirePermission('kpm:read_profile')
@@ -471,9 +558,14 @@ export class AdminController {
   @ApiOperation({
     summary: 'Assign or transfer the KPM Owner',
     description:
-      'Name the person by email or by user id. The account must already exist — this ' +
-      'promotes an existing platform user, and inviting a new one is not this route\'s. ' +
-      'Audited with both the outgoing and incoming user.',
+      'Name the person by email or by user id — "Ganti Owner" picks the id from `GET /admin/accounts` — or, with '
+      + '`owner { fullName, phone, email, agentCode? }`, somebody named (ADR-0212 §3): an account with that email is made '
+      + 'the Owner, or one is made for it (no usable password; `agentCode` then required, `400`, and free in the company, '
+      + '`409 AGENT_CODE_TAKEN`), and invited by email unless `sendInvitation` is `false` (an account that has signed in '
+      + 'is sent none); `owner.email` is required (`400`). A pending Owner (`pendingOwner`) is cleared once one is set. '
+      + 'Refused before anything is written: `409 TENANT_COMPANY_MISMATCH` for an account of another company or with no '
+      + 'agent code, `409 AUTH_EMAIL_NOT_VERIFIED` for an unverified address (ADR-0190 §4). '
+      + 'Audited with both the outgoing and incoming user. Answers the office as the list reads it.',
   })
   async assignOwner(
     @Ctx() ctx: RequestContext,
@@ -481,6 +573,65 @@ export class AdminController {
     @Body() dto: AssignOwnerDto,
   ) {
     return this.tenants.assignOwner(ctx, id, dto);
+  }
+
+  @Post('tenants/:id/owner/invitation')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('kpm:assign_owner')
+  @ApiOperation({
+    summary: 'Send the Owner their invitation again',
+    description:
+      '*Kirim ulang undangan* on the Owner\'s card (ADR-0212 §2): a new one-time link to choose a password, emailed to '
+      + 'the Owner (`password_reset`, alive `ROSTER_INVITATION.TTL_DAYS`), every older link revoked, `invitedAt` '
+      + 'stamped, audited `kpm.owner_invited` with `resent: true`. Nothing by WhatsApp or SMS. `409 '
+      + 'TENANT_OWNER_NOT_INVITABLE` — `details.reason` `no_owner`, `no_email` (an Owner named without one) or '
+      + '`signed_in`; `429 AUTH_RATE_LIMITED` past three an hour for the KPM; `404` for an unknown KPM. Nothing is sent '
+      + 'on a refusal. Answers the office as the list reads it.',
+  })
+  async resendOwnerInvitation(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.tenants.resendOwnerInvitation(ctx, id);
+  }
+
+  @Patch('tenants/:id/company')
+  @RequirePermission('kpm:update_company_tag')
+  @ApiOperation({
+    summary: 'Move a KPM to another company',
+    description:
+      '"Pindahkan ke perusahaan lain" (ADR-0191 §5): only while the office has no member but its Owner '
+      + '(`409 TENANT_NOT_EMPTY`, `details.members`), its configuration provisioned again from the new company\'s '
+      + 'default template and the old one soft-deleted. The Owner must be the new company\'s (`409 '
+      + 'TENANT_COMPANY_MISMATCH`) and keeps their rung by its code; the code must be free there (`409 '
+      + 'TENANT_CODE_TAKEN`); the Template library holds no office (`409 COMPANY_IS_TEMPLATE_LIBRARY`); the same '
+      + 'company is `400`. Every check first, so a refusal writes nothing. Audited as `kpm.company_moved`.',
+  })
+  async moveCompany(@Ctx() ctx: RequestContext, @Param('id') id: string, @Body() dto: MoveCompanyDto) {
+    return this.tenants.moveCompany(ctx, id, dto.companyId);
+  }
+
+  @Get('tenants/:id/contents')
+  @RequirePermission('kpm:archive')
+  @ApiOperation({
+    summary: 'What a KPM holds: its members and its records',
+    description:
+      'What the "Hapus KPM" confirmation shows (ADR-0191 §5): `members` (every membership, the Owner\'s '
+      + 'included), `records` (every row carrying the office, apart from its configuration and the audit log) and '
+      + '`deletable` when both are zero.',
+  })
+  async tenantContents(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.tenants.contents(ctx, id);
+  }
+
+  @Delete('tenants/:id')
+  @RequirePermission('kpm:archive')
+  @ApiOperation({
+    summary: 'Delete an empty KPM',
+    description:
+      '"Hapus KPM" (ADR-0191 §5): a soft delete of an office with no member and no record, its '
+      + 'configuration with it, audited as `kpm.deleted`; its code is free again. One with either is `409 '
+      + 'TENANT_NOT_EMPTY` with the counts — archive it instead (`PATCH /admin/tenants/:id/status`).',
+  })
+  async deleteTenant(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.tenants.deleteKpm(ctx, id);
   }
 
   @Patch('tenants/:id/status')
@@ -524,11 +675,17 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @RequirePermission('kpm:import_roster')
   @ApiOperation({
-    summary: 'What a roster file would do',
+    summary: 'What a member file would do',
     description:
-      'Every problem in the file, per row, in one pass — shape, blanks, duplicates, a '
-      + 'code the insurer already issued, a leader who is in neither the file nor the '
-      + 'office. Writes nothing.',
+      'Each row\'s result, in the file\'s order (the setup spec\'s §A3; ADR-0205 §5 to §8): `imported` (a new '
+      + 'person), `updated` (a code already in this office: blank cells keep what is stored, an email is never changed) '
+      + 'or `skipped`, with A3\'s words — a code twice in the file, a role not on the company\'s ladder, an upline in '
+      + 'neither the file nor the office, an upline who is no leader or ranks lower, an Agent or AAB with no upline, a '
+      + 'loop, a row whose upline\'s row is skipped, a code held elsewhere at the insurer (naming no office), a new '
+      + 'person with no email, a cell in the wrong shape, a row past the leader limit. `counts` is *N orang baru siap '
+      + 'diimpor, M diperbarui, K baris dilewati*; `skippedCsv` the skipped rows with an `Alasan` column. `issues` is '
+      + 'only what makes the file unreadable — no *Kode agen*, *Nama* or *Peran* column, an unknown column — and then '
+      + '`rows` is empty. Writes nothing.',
   })
   async previewRoster(
     @Ctx() ctx: RequestContext,
@@ -541,20 +698,22 @@ export class AdminController {
   @Post('tenants/:id/roster')
   @RequirePermission('kpm:import_roster')
   @ApiOperation({
-    summary: 'Create everybody in the file',
+    summary: 'Import the valid rows of a member file',
     description:
-      'All or nothing: one bad row and nothing is written, because a half-imported '
-      + 'roster cannot be told from a whole one. Returns each account with the password '
-      + 'it starts on — **the only place those exist** — for the operator to pass on. '
-      + 'Every one of them is refused every route but change-password until it is '
-      + 'replaced.',
+      'The whole file checked again — never a preview trusted — then **every valid row as one unit** (ADR-0205 §9): '
+      + 'written leader first, and if any write fails, what this commit wrote is undone (its memberships, edges and '
+      + 'accounts soft-deleted, its updates put back) before the failure is answered, so the office holds every valid '
+      + 'row or none. New people are existing agents (ADR-0169 §6). **No password is returned or shown**: with `invite` '
+      + '(the default) each new person is emailed a one-time link to choose theirs; without it they use *Lupa kata '
+      + 'sandi?*. Answers the preview\'s rows and counts, and `invited`. `400 VALIDATION_FAILED` for a file that cannot '
+      + 'be read, or one with no row to import; `409 LEADER_LIMIT_REACHED` when the office fills while it is written.',
   })
   async importRoster(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
-    @Body() dto: RosterRowsDto,
+    @Body() dto: RosterImportDto,
   ) {
-    return this.roster.commit(ctx, id, dto.rows);
+    return this.roster.commit(ctx, id, dto.rows, dto.invite ?? true);
   }
 
   /** The file's form, for the two routes that take one. */
@@ -566,6 +725,10 @@ export class AdminController {
         file: {
           type: 'string', format: 'binary',
           description: `The filled template — an Excel workbook (.xlsx) or a CSV. At most ${ROSTER_UPLOAD.MAX_BYTES / 1024 / 1024} MiB.`,
+        },
+        invite: {
+          type: 'string', enum: ['true', 'false'],
+          description: 'On `roster/file` only: mail each new person their invitation. Absent is `true`.',
         },
       },
     },
@@ -606,31 +769,42 @@ export class AdminController {
     summary: 'Create everybody in a roster file',
     description:
       'The same import as the pasted rows\' (`roster`), for the file the preview read (ADR-0184): read again, checked '
-      + 'again, and **all or nothing**. Returns each account with the password it starts on — the only place those '
-      + 'exist. The file\'s own refusals are the preview\'s.',
+      + 'again, and its valid rows written as one unit. `invite` is a form field, `true` or `false`. No password is '
+      + 'returned. The file\'s own refusals are the preview\'s.',
   })
   async importRosterFile(
     @Ctx() ctx: RequestContext,
     @Param('id') id: string,
+    @Body() dto: RosterFileImportDto,
     @UploadedFile() file?: FileUpload,
   ) {
-    return this.roster.commitFile(ctx, id, file);
+    return this.roster.commitFile(ctx, id, file, dto.invite !== 'false');
   }
 
   @Get('audit')
   @RequirePermission('audit_log:read')
   @ApiOperation({
-    summary: 'Read the audit log',
+    summary: 'Read the audit log, a page at a time',
     description:
-      'Defaults to the caller\'s own tenant. A Super Admin has no tenant, so their ' +
-      'default is the platform-level log — provisioning, company creation, ' +
-      'impersonation — and `kpmId` narrows it to one office. Anyone else is pinned to ' +
-      'their own office whatever they pass.',
+      'Defaults to the caller\'s own tenant. A Super Admin has no tenant, so their default is the platform-level log — '
+      + 'provisioning, companies, templates, products, support sessions — and `kpmId` narrows it to one office. Anyone '
+      + 'else is pinned to their own office whatever they pass. Within that reach `companyId`, `action`, `actorUserId`, '
+      + '`from` and `to` narrow it, together. Newest first, and **grouped on the server**: consecutive rows with the same '
+      + `actor, action and target within ${AUDIT_LOG.GROUP_WINDOW_MINUTES} minutes of the group's newest (inclusive) are `
+      + `one item carrying \`count\` and \`oldestAt\`. At most ${AUDIT_LOG.PAGE_SIZE} items a page, never a group split `
+      + 'across two; `page.nextCursor` asks for the next, and is null on the last. The first page (no `cursor`) carries '
+      + '`facets`, the actions and actors within the reach. **In words** (SA UI-016): each item carries '
+      + '`actionLabel` and `targetKind` in the reader\'s language and `targetLabel`, the target\'s name — *"Prudential '
+      + 'template · Aktivitas & rasio"*, *"PRUProsper"*, *"KPM 0417 · Bandung"* — and `facets.actionLabels` the chip\'s '
+      + 'words. A leader note\'s rows about the reader are dropped before '
+      + 'grouping (ADR-0073). A query field that is not a string, or not its shape, is 400 VALIDATION_FAILED naming it.',
   })
   async readAudit(@Ctx() ctx: RequestContext, @Query() query: AuditQueryDto) {
     const scope = ctx.isSuperAdmin ? (query.kpmId ?? null) : ctx.kpmId;
+    const { kpmId: _asked, cursor, ...filters } = query;
     // The reader, so a leader note's rows about them are never served to them (ADR-0073).
-    return this.auditRead.findForTenant(scope, 100, ctx.userId);
+    // And their language: the actions, the kinds of target and a section's name in their words (P19.4-T3 AC-11).
+    return this.auditRead.page({ kpmId: scope, readerUserId: ctx.userId, reader: ctx.reader }, filters, cursor);
   }
 
   /**
@@ -642,12 +816,12 @@ export class AdminController {
    * both paths because it reads decorators rather than the router.
    */
   @Post('impersonate/end')
-  // Blocking this would strand the operator inside the session they are leaving.
+  // Blocking this would strand the operator inside the session they are leaving: the one route a session posts to.
   @AllowWhileReadOnly()
   // And so would the office being suspended or archived while they were in it (P13.2 exit review).
   @AllowWhileOfficeUnavailable()
   // A POST defaults to 201, and this one answers 200 — it ends a session rather than
-  // creating anything. The document said 201 until P3.5-T11; a client checking the status
+  // creating anything. The document said 201 until P3.1-T11; a client checking the status
   // would have treated every successful call as a failure.
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'End the current impersonation session' })
@@ -663,12 +837,12 @@ export class AdminController {
     description:
       'Time-boxed to an hour, reason required, and every action it produces records ' +
       'both the real Super Admin and the person acted as. Refused for another Super ' +
-      'Admin — that would erase the attribution the feature depends on. Read-only, unless ' +
-      '`purpose` is `setup`: then it may also write the office\'s settings, its people import ' +
-      'and its production file, and nothing else, without a second Super Admin — for an ' +
-      'active office\'s Owner or one of its Admins only (`409 IMPERSONATION_SETUP_TARGET`). A second start ' +
-      'as the same person within one second would sign the same token, and is refused ' +
-      '(`409 IMPERSONATION_JUST_STARTED`) with nothing written.',
+      'Admin — that would erase the attribution the feature depends on. **It only looks** ' +
+      '(ADR-0206): every request of the session whose method is not `GET`, `HEAD` or `OPTIONS` is ' +
+      '`403 IMPERSONATION_READ_ONLY`, but `POST /admin/impersonate/end`. `purpose` is `support` or left ' +
+      'out; `setup` is `400 VALIDATION_FAILED` naming `purpose`, with nothing written. The answer is ' +
+      '`{ accessToken, expiresAt, sessionId, readOnly: true }`. A second start as the same person within one ' +
+      'second would sign the same token, and is refused (`409 IMPERSONATION_JUST_STARTED`) with nothing written.',
   })
   async impersonate(
     @Ctx() ctx: RequestContext,

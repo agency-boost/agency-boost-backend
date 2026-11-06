@@ -10,8 +10,8 @@ describe('the Owner’s reporting constants (Phase 18, §B)', () => {
     expect(KPM_REPORTING.MONTHLY_CHART_MONTHS).toBe(6);
   });
 
-  it('P18-T2 AC-4 Monthly2 AA reads the last two months held (OD-22)', () => {
-    expect(KPM_REPORTING.MONTHLY2_MONTHS).toBe(2);
+  it('P19.3-T1 AC-14 Monthly2 AA has no two-month window any more: it averages the year’s months held (Q6)', () => {
+    expect('MONTHLY2_MONTHS' in KPM_REPORTING).toBe(false);
   });
 
   it('P18-T1 AC-7, P18-T2 AC-3 a row is success at 70% attainment and above, alert below (`KPM_Owner.html:3150`, `:3220`)', () => {
@@ -23,8 +23,8 @@ describe('the Owner’s reporting constants (Phase 18, §B)', () => {
     expect(KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT).toBe(80);
   });
 
-  it('P18-T1 AC-4 the not-logged reveal lists three and counts the rest (`KPM_Owner.html:988-1001`)', () => {
-    expect(KPM_REPORTING.NOT_LOGGED_SHOWN).toBe(3);
+  it('P19.3-T2 AC-2 the Belum mencatat list names five and counts the rest (`kpm-overview-mobile` 3; was three, `KPM_Owner.html:988-1001`)', () => {
+    expect(KPM_REPORTING.NOT_LOGGED_SHOWN).toBe(5);
   });
 
   it('P18-T2 AC-4 MOC_PERSISTENCY_MIN_PCT is 75, and both seeded MOC rules ask for it (`KPM_Owner.html:3305`, `:3313`)', () => {

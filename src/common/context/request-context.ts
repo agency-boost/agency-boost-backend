@@ -78,7 +78,7 @@ export class RequestContext {
     /**
      * They are signed in on a password somebody else chose for them.
      *
-     * Set on an account created by the roster import (P3.6-T4): the admin was handed a
+     * Set on an account created by the roster import (P3.2-T4): the admin was handed a
      * generated password to pass on, so until it is replaced, the person holding this
      * session is not demonstrably the person the account belongs to.
      *
@@ -90,26 +90,16 @@ export class RequestContext {
     /**
      * A support session that may look and not touch (P4-T10, §3.13).
      *
-     * **True for every session until a second Super Admin says otherwise.** The operator
-     * who wants to write is not the one who decides they may — an admin session can
-     * rewrite the configuration every member's data depends on, and the person best
-     * placed to notice that was a bad idea is somebody other than the person having it.
+     * **True for every session** (ADR-0206 §4; P19.4-T2): `ContextResolver` sets it whenever there is an impersonator,
+     * and a session row that could write — a setup or an elevated one, from before the deploy — is no session at all
+     * (`AuthGuard`, `401`). Until then it was true until a second Super Admin said otherwise.
      *
      * `false` outside a session, because a person acting as themselves is not being
      * restrained; `can()` reads it and nothing else has to.
      */
     readonly impersonationReadOnly: boolean = false,
     /**
-     * **What a setup session may write** (ADR-0162 §2): permission names, read from the session row on every
-     * request. `can()` and `PermissionsGuard` let a read-only session's write through when its permission is
-     * here, and refuse every other write as before.
-     *
-     * Empty outside a session and in a support session. A setup session keeps it once a second Super Admin
-     * elevates it — enforcement no longer needs it then, and it still says which kind of session this is.
-     */
-    readonly impersonationWriteScope: readonly string[] = [],
-    /**
-     * **Who this request's sentences are written for** (ADR-0179 §7; P18.98-T5 AC-1): the `Accept-Language` the app
+     * **Who this request's sentences are written for** (ADR-0179 §7; P18.10-T5 AC-1): the `Accept-Language` the app
      * sent, else the person's saved `users.locale`, else a reader who has chosen nothing (`readerOf`). Resolved once,
      * by `AuthGuard`, from the user `ContextResolver` already reads — no extra read. What a service writes a sentence
      * for — a notice in the inbox, a figure's words — and the language of a sentence it stores (AC-6).
@@ -125,17 +115,8 @@ export class RequestContext {
   withReader(reader: Reader): RequestContext {
     return new RequestContext(
       this.userId, this.platformRole, this.membership, this.impersonatorUserId, this.actingInKpmId,
-      this.mustChangePassword, this.impersonationReadOnly, this.impersonationWriteScope, reader,
+      this.mustChangePassword, this.impersonationReadOnly, reader,
     );
-  }
-
-  /**
-   * Which kind of support session this is (ADR-0162 §1): `setup` with a write scope, `support` without one,
-   * `null` outside a session. Read off the scope rather than carried beside it, so the two cannot disagree.
-   */
-  get impersonationPurpose(): 'support' | 'setup' | null {
-    if (!this.isImpersonating) return null;
-    return this.impersonationWriteScope.length > 0 ? 'setup' : 'support';
   }
 
   get isSuperAdmin(): boolean {
@@ -228,6 +209,23 @@ export class RequestContext {
   }
 
   /**
+   * **A platform read of one KPM, by the Super Admin who is in none** (ADR-0207 §4; P19.4-T3): the office named, no
+   * membership, and **read-only** — `impersonationReadOnly` is set although nobody is being impersonated, so `can()`
+   * refuses every write by its verb and every read-time write a service gates on it (a campaign window frozen, an
+   * activation link met, the setup card's mark) is skipped. Nobody is acted as: the actor is the Super Admin, and the
+   * reader's language is kept. What the `…ForOffice` reads of the KPM's own Phase 19.3 functions are given.
+   */
+  static platformRead(ctx: RequestContext, kpmId: string): RequestContext {
+    return new RequestContext(ctx.userId, 'super_admin', null, null, kpmId, false, true, ctx.reader);
+  }
+
+  /** Is this a platform read's context — a Super Admin, an office named, no membership, read-only (ADR-0207 §4)? */
+  get isPlatformRead(): boolean {
+    return this.isSuperAdmin && this.membership === null && this.actingInKpmId !== null && this.impersonationReadOnly
+      && this.impersonatorUserId === null;
+  }
+
+  /**
    * Somebody writing themselves into an office they have not joined yet.
    *
    * The join flow has the same shape as Super Admin provisioning — a write into a tenant
@@ -246,7 +244,7 @@ export class RequestContext {
    * `auditActors` still answers *who really did this*.
    */
   static joiningTenant(ctx: RequestContext, kpmId: string): RequestContext {
-    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId, false, false, [], ctx.reader);
+    return new RequestContext(ctx.userId, 'none', null, ctx.impersonatorUserId, kpmId, false, false, ctx.reader);
   }
 
   /**

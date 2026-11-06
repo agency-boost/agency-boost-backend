@@ -29,21 +29,21 @@ import {
  */
 describe('domain constants', () => {
   /*
-   * **The client's benchmarks, not the prototype's** (ADR-0160 §2, P18.8-T9 AC-3): `Overall.html` reads
+   * **The client's benchmarks, not the prototype's** (ADR-0160 §2, P18.5-T9 AC-3): `Overall.html` reads
    * 15%, 15%, 0.30 and 1.50. `activity-taxonomy.spec.ts` pins the prototype's against these as named
    * exceptions; the band is the prototype's.
    */
   describe('ratio benchmarks (Overall.html:5208-5273, raised by ADR-0160)', () => {
-    it('P18.8-T9 AC-1 pins the selling success rate at 30%', () => {
+    it('P18.5-T9 AC-1 pins the selling success rate at 30%', () => {
       expect(RATIO_BENCHMARKS.SELLING_SUCCESS_RATE).toBe(0.3);
     });
-    it('P18.8-T9 AC-1 pins the recruitment success rate at 30%', () => {
+    it('P18.5-T9 AC-1 pins the recruitment success rate at 30%', () => {
       expect(RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE).toBe(0.3);
     });
-    it('P18.8-T9 AC-1 pins leads per activity at 1.00', () => {
+    it('P18.5-T9 AC-1 pins leads per activity at 1.00', () => {
       expect(RATIO_BENCHMARKS.LEADS_PER_ACTIVITY).toBe(1);
     });
-    it('P18.8-T9 AC-1 pins set appointment to meeting at 50%', () => {
+    it('P18.5-T9 AC-1 pins set appointment to meeting at 50%', () => {
       expect(RATIO_BENCHMARKS.MEETING_PER_APPROACH).toBe(0.5);
     });
     it('pins the selling/recruitment balance band at ±30 points', () => {
@@ -59,7 +59,7 @@ describe('domain constants', () => {
       expect(GOAL_DEFAULTS.LEADS_TO_APPOINTMENT_PCT).toBe(30);
       expect(GOAL_DEFAULTS.CLOSING_RATE_PCT).toBe(30);
     });
-    it('P18.8-T10 AC-1 defaults the two from the office’s selling success and set-appointment-to-meeting ratios', () => {
+    it('P18.5-T10 AC-1 defaults the two from the office’s selling success and set-appointment-to-meeting ratios', () => {
       // By ratio code (invariant §4), the client's pairing (ADR-0160 §3).
       expect(GOAL_DEFAULT_RATIOS).toEqual({
         closingRatePct: 'SELLING_SUCCESS_RATE',
@@ -211,7 +211,7 @@ describe('domain constants', () => {
     expect(DEFAULT_ORG_LADDER.map((l) => l.displayOrder)).toEqual([1, 2, 3]);
     expect(DEFAULT_ORG_LADDER.map((l) => l.code.toLowerCase())).toEqual(['agent', 'aab', 'ab']);
 
-    // Three registry rows that named no test until the Phase 3.5 exit re-review. The rule
+    // Three registry rows that named no test until the Phase 3.1 exit re-review. The rule
     // is that every number in `metrics-and-definitions.md` is pinned by a test that fails
     // if it drifts, and these three were the exceptions.
     expect(PERFORMANCE.COMPLIANCE_WINDOW_DAYS).toBe(7);
@@ -258,6 +258,8 @@ describe('domain constants', () => {
         'application/pdf',
         'video/mp4',
         'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        // P19.6-T2 (ADR-0217 §1): the vocabulary only. Which routes accept it is pinned in `assets.spec.ts`.
+        'text/html',
       ]);
     });
   });

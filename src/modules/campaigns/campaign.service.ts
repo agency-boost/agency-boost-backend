@@ -6,8 +6,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import {
-  DEFAULT_CAMPAIGN_POSTER, DEFAULT_TENANT_TIMEZONE, SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, isCampaignMetric,
-  metricByKey, type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow,
+  DEFAULT_CAMPAIGN_POSTER, DEFAULT_TENANT_TIMEZONE, SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, currentMetricKey,
+  isCampaignMetric, metricByKey, type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow,
 } from '@/domain/constants';
 import { campaignPhase, inclusiveEnd } from '@/domain/metrics/campaign-window';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -39,7 +39,7 @@ export interface CampaignView {
   title: string;
   description: string;
   startsAt: string;
-  /** `null` for a structural campaign with no end (P18.5-T7, D-fields). */
+  /** `null` for a structural campaign with no end (P18.2-T7, D-fields). */
   endsAt: string | null;
   /** Derived on every read (AC-3), never stored. */
   phase: 'upcoming' | 'running' | 'ended';
@@ -86,7 +86,7 @@ export class CampaignService {
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    /** P18.5-T7: the company's ladder, which a campaign's rungs are checked against. */
+    /** P18.2-T7: the company's ladder, which a campaign's rungs are checked against. */
     @Optional() private readonly orgLevels: OrgLevelService | null = null,
   ) {}
 
@@ -101,7 +101,7 @@ export class CampaignService {
   async create(ctx: RequestContext, body: unknown): Promise<CampaignView> {
     const input = checkCampaign(body);
     const timezone = await this.timezoneOf(ctx);
-    // P18.5-T7, D-fields: a campaign written without the new fields is a seasonal one over its own dates.
+    // P18.2-T7, D-fields: a campaign written without the new fields is a seasonal one over its own dates.
     const whole = {
       kind: 'seasonal' as const, subtype: null, window: 'campaign_dates' as const, appliesToOrgLevelCodes: [],
       poster: { ...DEFAULT_CAMPAIGN_POSTER }, blurb: '', endsAt: null, requirements: [], ...input,
@@ -138,7 +138,7 @@ export class CampaignService {
     delete (input as { code?: string }).code;
     const timezone = await this.timezoneOf(ctx);
     if (input.endsAt) input.endsAt = inclusiveEnd(input.endsAt, timezone);
-    // P18.5-T7: the rules across fields, over the campaign as it will be stored — the whole-month rule and the rungs
+    // P18.2-T7: the rules across fields, over the campaign as it will be stored — the whole-month rule and the rungs
     // only where this edit touches them (item 10).
     await this.checkShape(ctx, {
       kind: input.kind ?? stored.kind,
@@ -347,7 +347,8 @@ export class CampaignService {
     const metricKey = String((r as CheckedRequirement).metricKey);
     return {
       metricKey,
-      metricName: metricByKey(metricKey)?.name ?? metricKey,
+      // A rule's stored key is named by the metric it reads now (P19.3-T1): a `NET_APE` left on a rule reads *APE, MOC scope*.
+      metricName: metricByKey(currentMetricKey(metricKey))?.name ?? metricKey,
       comparator: String((r as CheckedRequirement).comparator),
       value: Number((r as CheckedRequirement).value),
       unit: String((r as CheckedRequirement).unit),

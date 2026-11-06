@@ -15,7 +15,7 @@ import { AUTH_GUARD_REFUSALS } from './auth.messages';
  * Roles are resolved from the database on every request rather than read from the
  * token, which is what makes revoking a grant take effect immediately.
  *
- * **It resolves the request's reader too** (ADR-0179 §7; P18.98-T5 AC-1), first of all and on every route, public
+ * **It resolves the request's reader too** (ADR-0179 §7; P18.10-T5 AC-1), first of all and on every route, public
  * ones included: the `Accept-Language` the app sent, and — once the person is read — their saved `users.locale`. The
  * error filter writes every refusal for it, and every service reads it off the context.
  */
@@ -80,9 +80,12 @@ export class AuthGuard implements CanActivate {
      *
      * Only `imp:` tokens pay for the lookup, and they are rare by design.
      */
-    let readOnlySession = false;
-    let writeScope: readonly string[] = [];
     if (impersonator) {
+      /*
+       * **Only a session that only looks is live** (ADR-0206 §5; P19.4-T2): `liveSession` answers `null` for a row
+       * that was started as a setup session or elevated to write, as for one ended or expired — so a token minted
+       * before the deploy, whose row the migration missed, is refused here like any ended session.
+       */
       const session = await this.impersonation.liveSession(token);
       if (!session) {
         throw new DomainException(
@@ -91,16 +94,6 @@ export class AuthGuard implements CanActivate {
           HttpStatus.UNAUTHORIZED,
         );
       }
-      /*
-       * Read from the **session row**, not from the token (P4-T10).
-       *
-       * Elevation happens after the token is minted — a second Super Admin approves a
-       * session already running — so a flag baked into the JWT could never move. The row
-       * is already being read here to check the session is live, so this costs nothing.
-       */
-      readOnlySession = session.readOnly;
-      // A setup session's scope, off the same row (ADR-0162 §2). A row from before it existed has none.
-      writeScope = session.writeScope ?? [];
     }
 
     /*
@@ -112,9 +105,7 @@ export class AuthGuard implements CanActivate {
       ALLOWED_WHILE_OFFICE_UNAVAILABLE, [execution.getHandler(), execution.getClass()],
     ) === true;
 
-    const context = await this.resolver.resolve(
-      claims.sub, impersonator, readOnlySession, leavingSupport, writeScope, language,
-    );
+    const context = await this.resolver.resolve(claims.sub, impersonator, leavingSupport, language);
     // The person read: their saved language, behind the header (AC-1).
     request.reader = context.reader;
 

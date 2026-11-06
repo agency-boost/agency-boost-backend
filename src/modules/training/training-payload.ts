@@ -1,7 +1,8 @@
 import type { DomainException } from '@/common/errors/domain.exception';
 import type { FieldSentence } from '@/common/validation/fields';
+import { plainText } from '@/common/validation/plain-text';
 import {
-  SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS,
+  SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS, splitTrainingTitle,
   type TrainingPublishState,
 } from '@/domain/constants';
 import {
@@ -14,11 +15,14 @@ const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 /** A `training_taxonomy` payload: the three levels, without ids, versions or status. */
 export interface TrainingTaxonomyPayload {
   categories: { code: string; label: string; description?: string | null }[];
-  skills: { code: string; categoryCode: string; label: string }[];
+  /** `description`: the skill's *Deskripsi singkat* (P19.6-T4, ADR-0220 §1); absent reads as `null`. */
+  skills: { code: string; categoryCode: string; label: string; description?: string | null }[];
   modules: {
     code: string;
     skillCode: string;
     title: string;
+    /** The module's *Deskripsi singkat* (P19.6-T4, ADR-0220 §1); absent reads as `null`. */
+    description?: string | null;
     publishState?: TrainingPublishState;
     /**
      * The company's material for this module (P5-T2, ADR-0032).
@@ -46,13 +50,34 @@ export const contentFromPayload = (raw: TrainingContentPayload | undefined) => (
   links: (raw?.links ?? []).map((l) => ({ ...l })),
 });
 
+/**
+ * A skill's or a module's *Deskripsi singkat* as an office row stores it (P19.6-T4, ADR-0220 §1): plain text, trimmed,
+ * `null` for none — absent, blank or not text alike. The payload's checker has refused anything longer before here.
+ */
+export const shortText = (value: unknown): string | null =>
+  (typeof value === 'string' ? plainText(value) : '') || null;
+
+/**
+ * **A skill's or a module's name and description, as read** (P19.6-T4, ADR-0220 §3). A row that carries a `description`
+ * — `null` included — is read as it stands. **One with no `description` at all was written before the field existed**,
+ * and is read as the split migration reads it: *"Name: description"* split at the first colon followed by a space
+ * (`splitTrainingTitle`), or whole. So a template version published before the split, an office row the migration has not
+ * reached, and the same words split, all read alike — and *changed by the KPM* (ADR-0208 §4) stays true across the split.
+ */
+export function namedAs(name: unknown, description: unknown): { name: string; description: string | null } {
+  const whole = typeof name === 'string' ? name.trim() : '';
+  if (description !== undefined) return { name: whole, description: shortText(description) };
+  const split = splitTrainingTitle(whole);
+  return split.split ? { name: split.name, description: split.description } : { name: whole, description: null };
+}
+
 /** The domain defaults as a payload: a template's starting point, and a company's seed until it publishes one. */
 export function defaultTrainingTaxonomy(): TrainingTaxonomyPayload {
   return {
     categories: SEED_TRAINING_CATEGORIES.map(({ code, label, description }) => ({ code, label, description })),
-    skills: SEED_TRAINING_SKILLS.map(({ code, categoryCode, label }) => ({ code, categoryCode, label })),
+    skills: SEED_TRAINING_SKILLS.map(({ code, categoryCode, label }) => ({ code, categoryCode, label, description: null })),
     modules: SEED_TRAINING_MODULES.map(({ code, skillCode, title, publishState }) => ({
-      code, skillCode, title, publishState,
+      code, skillCode, title, description: null, publishState,
     })),
   };
 }
@@ -67,7 +92,7 @@ export function defaultTrainingTaxonomy(): TrainingTaxonomyPayload {
  * module naming a skill it does not define. **An empty level is fine** — a company may publish
  * categories with nothing in them yet, which is what the prototype draws for five of six.
  *
- * **Each problem in both languages** (P18.98-T5 AC-3): a row the office's checker refused keeps that checker's own
+ * **Each problem in both languages** (P18.10-T5 AC-3): a row the office's checker refused keeps that checker's own
  * sentence, after the row's place in its level.
  */
 export function trainingTaxonomyProblems(payload: unknown): FieldSentence[] {
@@ -83,10 +108,12 @@ export function trainingTaxonomyProblems(payload: unknown): FieldSentence[] {
     ['category', rows('categories'), (r: Record<string, unknown>) =>
       checkTrainingCategoryCreate({ code: r.code, label: r.label, description: r.description })],
     ['skill', rows('skills'), (r: Record<string, unknown>) =>
-      checkTrainingSkillCreate({ code: r.code, categoryCode: r.categoryCode, label: r.label })],
+      checkTrainingSkillCreate({
+        code: r.code, categoryCode: r.categoryCode, label: r.label, description: r.description,
+      })],
     ['module', rows('modules'), (r: Record<string, unknown>) =>
       checkTrainingModuleCreate({
-        code: r.code, skillCode: r.skillCode, title: r.title, publishState: r.publishState,
+        code: r.code, skillCode: r.skillCode, title: r.title, description: r.description, publishState: r.publishState,
       })],
   ] as const;
 
@@ -140,17 +167,23 @@ export function trainingSeedDocuments(kpmId: string, payload: TrainingTaxonomyPa
     return next;
   };
 
+  // A row from before P19.6-T4 (no `description`) is read split, as the migration splits it (`namedAs`).
+  const skillNames = (s: TrainingTaxonomyPayload['skills'][number]) => namedAs(s.label, s.description);
+  const moduleNames = (m: TrainingTaxonomyPayload['modules'][number]) => namedAs(m.title, m.description);
+
   return {
     categories: payload.categories.map((c, index) => ({
       ...base, code: code(c.code), label: c.label.trim(), description: c.description?.trim() || null,
       displayOrder: index + 1,
     })),
     skills: payload.skills.map((s) => ({
-      ...base, code: code(s.code), categoryCode: code(s.categoryCode), label: s.label.trim(),
+      ...base, code: code(s.code), categoryCode: code(s.categoryCode), label: skillNames(s).name,
+      description: skillNames(s).description,
       displayOrder: nextIn(`category:${code(s.categoryCode)}`),
     })),
     modules: payload.modules.map((m) => ({
-      ...base, code: code(m.code), skillCode: code(m.skillCode), title: m.title.trim(),
+      ...base, code: code(m.code), skillCode: code(m.skillCode), title: moduleNames(m).name,
+      description: moduleNames(m).description,
       publishState: m.publishState ?? 'draft',
       displayOrder: nextIn(`skill:${code(m.skillCode)}`),
       // **By reference.** The office points at the company's objects and stores no bytes of its

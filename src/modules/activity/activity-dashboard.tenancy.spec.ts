@@ -18,7 +18,7 @@ const member = (kpmId: string, over: Record<string, unknown> = {}) => new Reques
     membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
   } as never,
-).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
 const owner = (kpmId: string) => member(kpmId, { isKpmOwner: true });
 
 /**
@@ -199,7 +199,7 @@ describe('the Activity Dashboard (P10-T1)', () => {
       expect(view.total).toBe(3);
     });
 
-    it('P18.98-T5 AC-4 names that section in the reader’s language, and its row by its code', async () => {
+    it('P18.10-T5 AC-4 names that section in the reader’s language, and its row by its code', async () => {
       await day(TODAY, { LEGACY_CODE: 3 });
       const view = await read({}, member(KPM_A).withReader(readerIn('id')));
       expect(view.sections.at(-1)).toMatchObject({

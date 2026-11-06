@@ -99,11 +99,13 @@ export class OnboardingService {
    * must reveal nothing an outsider should not see: no member counts, no production,
    * no owner name.
    *
-   * `reader`: the request's, for the word written in place of a company with no name (P18.98-T5 AC-4).
+   * `reader`: the request's, for the word written in place of a company with no name (P18.10-T5 AC-4).
    */
-  async searchKpms(q?: string, reader: Reader = readerOf()): Promise<KpmDirectoryEntry[]> {
+  async searchKpms(q?: string, reader: Reader = readerOf(), companyId?: string): Promise<KpmDirectoryEntry[]> {
     const term = q?.trim();
     const filter: Record<string, unknown> = { deletedAt: null, status: 'active' };
+    // One company's offices (ADR-0191 §1, P19-T2 AC-1), when the caller names it — `searchKpmsFor` always does.
+    if (companyId) filter.companyId = companyId;
     if (term) {
       const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       // Code substring or branch-name substring, as the prototype's own filter does.
@@ -149,6 +151,20 @@ export class OnboardingService {
       companyName: nameOf.get(o.companyId) ?? render(ORG_MESSAGES.unknownName, reader),
       city: o.address,
     }));
+  }
+
+  /**
+   * **The directory as the reader may join it** (ADR-0191 §1, P19-T2 AC-1; UI-165 item 1): only the offices of the
+   * company they signed up with (`users.companyId`). An office admits only its insurer's agents
+   * (`HierarchyService.agentCodeOf`), so a Manulife account shown a Prudential office was shown a choice that could
+   * only fail — and it is how a Manulife applicant came to ask Prudential for an office. An account with no company is
+   * answered none: no office could admit it; its *Daftar KPM* asks it for a company instead (AC-2).
+   */
+  async searchKpmsFor(ctx: RequestContext, q?: string): Promise<KpmDirectoryEntry[]> {
+    const user = await this.users.findOne({ _id: ctx.userId, deletedAt: null }).select('companyId').exec()
+      .catch(() => null);
+    if (!user?.companyId) return [];
+    return this.searchKpms(q, ctx.reader, user.companyId);
   }
 
   /** Where the person asking stands: office, leader, and any outstanding request. */
@@ -271,7 +287,7 @@ export class OnboardingService {
     }
 
     /*
-     * **Never the reader, and never anybody below them** (ADR-0170 §6, P18.96-T3 AC-6; UI-006). Somebody in the
+     * **Never the reader, and never anybody below them** (ADR-0170 §6, P18.8-T3 AC-6; UI-006). Somebody in the
      * reader's downline carries the reader's membership in `ancestorIds`, and asking one of them to lead you is a loop
      * — refused when it was approved, and since T3 when it is sent; offering it was the defect. `$ne` on an array is
      * *no element equals*, so this is one indexed read, as the rest of the hierarchy's are.
@@ -363,7 +379,7 @@ export class OnboardingService {
     }
 
     /*
-     * **A loop is refused when it is asked, not only when it is approved** (ADR-0170 §6, P18.96-T3 AC-6). An orphan
+     * **A loop is refused when it is asked, not only when it is approved** (ADR-0170 §6, P18.8-T3 AC-6). An orphan
      * who still leads a unit has no leader, so the check above lets them ask somebody in that unit; approving it was
      * refused by `assertCanMoveUnder`, after the leader had been notified of a request nobody could approve.
      */
@@ -397,7 +413,7 @@ export class OnboardingService {
       kpmId: ctx.kpmId,
       templateId: NotificationTemplate.JOIN_REQUEST_RECEIVED,
       payload: {
-        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.98-T5 AC-4).
+        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.10-T5 AC-4).
         askerName: asker?.fullName ?? null,
         membershipId: ctx.membershipId,
       },

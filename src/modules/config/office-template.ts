@@ -2,13 +2,13 @@ import type { Sentence } from '@/common/i18n/sentence';
 import { trainingLinkModuleCode } from '@/modules/activation/activation-input';
 import type { StoredObject } from '@/modules/assets/storage.port';
 import type { TrainingContentPayload, TrainingTaxonomyPayload } from '@/modules/training/training-payload';
-import { withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
+import { withCascadeTypes, type NamedTemplateKind, type OfficeTemplateKind } from './template-defaults';
 import {
   BINDING_ROLE_LABEL, BINDING_ROLES, bindingOfPayload, defaultBinding, type CascadeBinding,
 } from './activity-binding';
 import { TEMPLATE_MESSAGES } from './template.messages';
 
-/** Why a setting was left out, in both languages (P18.98-T5 AC-4): written for the person who saved. */
+/** Why a setting was left out, in both languages (P18.10-T5 AC-4): written for the person who saved. */
 const SAY = TEMPLATE_MESSAGES;
 
 /**
@@ -97,8 +97,11 @@ interface ContentRows {
   links?: { id: string; label: string; url: string }[];
 }
 
-/** A template's kinds, each the payload its published version 1 will hold. Absent: held empty. */
-export type TemplateKinds = Partial<Record<OfficeTemplateKind, Record<string, unknown>>>;
+/**
+ * A template's kinds, each the payload its published version 1 will hold. Absent: held empty. The recruitment playbook
+ * among them (ADR-0210 §1): a copy carries it; an office's settings never hold one.
+ */
+export type TemplateKinds = Partial<Record<NamedTemplateKind, Record<string, unknown>>>;
 
 /**
  * **A file a template's training content names**, and whose it is (ADR-0032): `office` for an
@@ -127,7 +130,7 @@ export interface DroppedSetting {
   /** The ratio, stage, grid or checklist item concerned; `null` when the whole kind is left out. */
   code: string | null;
   /**
-   * One sentence, naming the codes, in both languages (P18.98-T5 AC-4): written for the person who saved where the
+   * One sentence, naming the codes, in both languages (P18.10-T5 AC-4): written for the person who saved where the
    * answer and the audit row are made (`TemplateCopyService.saveOffice`), as the office page shows it.
    */
   reason: Sentence<null>;
@@ -245,7 +248,8 @@ function bindingFrom(settings: OfficeSettings, taxonomy: Record<string, unknown>
   const held = settings.binding
     ?? bindingOfPayload({ bindings: (settings.snapshot as Row | null)?.activityBinding ?? null });
   if (!held) return null;
-  const typeCodes = new Set(((taxonomy.types ?? []) as Row[]).map((t) => String(t.code)));
+  // `taxonomy` is the kind `templateKindsFromOffice` has just built, whose `types` is always a list.
+  const typeCodes = new Set((taxonomy.types as Row[]).map((t) => String(t.code)));
   const kept = Object.fromEntries(BINDING_ROLES.map((role) => [role, held[role].filter((c) => typeCodes.has(c))])) as unknown as CascadeBinding;
   const gone = [...new Set(BINDING_ROLES.flatMap((role) => held[role].filter((c) => !typeCodes.has(c))))];
   const empty = BINDING_ROLES.filter((role) => kept[role].length === 0);

@@ -7,12 +7,12 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { AuthGuard } from '@/common/auth/auth.guard';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
+import { ViewOnlySessionGuard } from '@/common/auth/view-only-session.guard';
 import { Clock, FixedClock } from '@/common/clock/clock.port';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { DEFAULT_LANGUAGE } from '@/domain/constants';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
-import { SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { listenOnLoopback } from '../../../test/listen';
@@ -27,27 +27,28 @@ import { Hs256TokenSigner, TokenSigner } from './token-signer';
 
 const NOW = new Date('2026-10-29T03:00:00Z');
 
-/** The three kinds of support session (ADR-0162): one that looks, one a second Super Admin let write, and setup. */
+/**
+ * **The one kind of support session** (ADR-0206 §3): it only looks. The setup session and the one a second Super Admin
+ * let write (ADR-0162) are retired — `liveSession` answers `null` for their rows (`impersonation.service.tenancy.spec.ts`).
+ */
 const SESSIONS = {
-  'a support session that only looks': { readOnly: true, writeScope: [] as readonly string[] },
-  'a support session a second Super Admin let write': { readOnly: false, writeScope: [] as readonly string[] },
-  'a setup session': { readOnly: true, writeScope: SETUP_SESSION_WRITE_SCOPE },
+  'a support session': { readOnly: true, purpose: 'support' },
 } as const;
 type SessionKind = keyof typeof SESSIONS;
 
 /**
- * **The reader's language, kept on their account, over HTTP** (P18.98-T2 AC-1, AC-2, AC-7; ADR-0179 §2), through the
+ * **The reader's language, kept on their account, over HTTP** (P18.10-T2 AC-1, AC-2, AC-7; ADR-0179 §2), through the
  * real `AuthGuard`, `ContextResolver` and `PermissionsGuard`, a signed token and the real `users` rows.
  *
  * - `GET /auth/me` answers `user.locale`, the language in force — `'id'` for somebody who has chosen nothing — and
  *   `user.localeChosen`, which tells the two apart.
  * - `PATCH /auth/me` takes `locale`, `'id'` or `'en'`, for every role, and refuses anything else, `null` included.
- * - It stays refused in every kind of support session (ADR-0162 §4): the person's choice is neither written there nor
- *   replaced, and the session still reads.
+ * - It stays refused in a support session (ADR-0162 §4; since P19.4-T2 as every write of one is, ADR-0206 §4): the
+ *   person's choice is neither written there nor replaced, and the session still reads.
  *
  * No cross-tenant case: the route reaches only the caller's own account (AC-7).
  */
-describe('P18.98-T2 the language on the account, over HTTP', () => {
+describe('P18.10-T2 the language on the account, over HTTP', () => {
   let app: INestApplication;
   const clock = new FixedClock(NOW);
   const signer = new Hs256TokenSigner('s'.repeat(40), clock);
@@ -55,7 +56,7 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
   let kpms: mongoose.Model<Kpm>;
   let memberships: mongoose.Model<Membership>;
   /** The support session the next `imp:` token is in, as `ImpersonationService.liveSession` reads its row. */
-  let liveSession: { readOnly: boolean; writeScope: readonly string[] } = SESSIONS['a support session that only looks'];
+  let liveSession: { readOnly: boolean; purpose: string } = SESSIONS['a support session'];
   let seq = 0;
 
   beforeAll(async () => {
@@ -79,7 +80,7 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
         { provide: RateLimiter, useValue: { check: () => null } },
         { provide: ConfigService, useValue: { get: () => undefined, getOrThrow: () => 's'.repeat(40) } },
         { provide: ImpersonationService, useValue: { liveSession: async () => liveSession } },
-        ContextResolver, AuthGuard, PermissionsGuard,
+        ContextResolver, AuthGuard, ViewOnlySessionGuard, PermissionsGuard,
       ],
     }).compile();
 
@@ -88,7 +89,7 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     app.useGlobalPipes(productionPipe());
     app.useGlobalFilters(new DomainExceptionFilter());
-    app.useGlobalGuards(app.get(AuthGuard), app.get(PermissionsGuard));
+    app.useGlobalGuards(app.get(AuthGuard), app.get(ViewOnlySessionGuard), app.get(PermissionsGuard));
     await app.init();
     await listenOnLoopback(app);
   });
@@ -100,7 +101,7 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
 
   beforeEach(async () => {
     await clearCollections();
-    liveSession = SESSIONS['a support session that only looks'];
+    liveSession = SESSIONS['a support session'];
   });
 
   type Role = 'super_admin' | 'owner' | 'admin' | 'ab' | 'aab' | 'agent' | 'nobody';
@@ -202,7 +203,7 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
     });
   });
 
-  // Phase 18.98's exit permission review: a language is saved by somebody, never by nobody.
+  // Phase 18.10's exit permission review: a language is saved by somebody, never by nobody.
   it('refuses a language with no session, 401, and writes nothing', async () => {
     const userId = await person('agent', 'en');
 
@@ -213,13 +214,14 @@ describe('P18.98-T2 the language on the account, over HTTP', () => {
   });
 
   describe('AC-2 in a support session the person’s language is theirs', () => {
-    it.each(Object.keys(SESSIONS) as SessionKind[])('refuses PATCH /auth/me in %s, 403 PERM_DENIED', async (kind) => {
+    it.each(Object.keys(SESSIONS) as SessionKind[])('P19.4-T2 AC-2 refuses PATCH /auth/me in %s, 403 IMPERSONATION_READ_ONLY', async (kind) => {
       liveSession = SESSIONS[kind];
       const userId = await person('owner', 'en');
 
       const res = await patch(userId, { locale: 'id' }, 'imp:sa-1').expect(403);
 
-      expect(res.body.error.code).toBe('PERM_DENIED');
+      // Every write of a session meets `ViewOnlySessionGuard` first (ADR-0206 §4); it was `PERM_DENIED` until then.
+      expect(res.body.error.code).toBe('IMPERSONATION_READ_ONLY');
       // Neither written nor replaced: the person's own choice stands.
       expect(await stored(userId)).toBe('en');
     });

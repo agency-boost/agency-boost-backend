@@ -20,13 +20,13 @@ interface Office {
 }
 
 /**
- * **Events at the 500-member ceiling** (P18.5-T11 AC-3; `performance-and-scale.md`): a member's `GET /events` and the
+ * **Events at the 500-member ceiling** (P18.2-T11 AC-3; `performance-and-scale.md`): a member's `GET /events` and the
  * Owner's *View feedback* reads — the roll call and the *Feedback Summary* — over an office of 501 (one AB, ten AABs,
  * forty-nine agents each) and an office of 51 beside it, each with a dozen events of every audience kind — office-wide,
  * leaders only, chosen people and chosen leaders; upcoming, running and past — and, on the past ones, RSVPs, claims,
  * confirmations and answers. **The same queries for fifty as for five hundred: none per member, none per event.**
  */
-describe('events, measured (P18.5-T11 AC-3)', () => {
+describe('events, measured (P18.2-T11 AC-3)', () => {
   let wired: ReturnType<typeof configModule>;
   const offices: Record<'big' | 'small', Office> = {} as never;
 
@@ -173,7 +173,7 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     return times[Math.ceil(0.95 * times.length) - 1];
   };
 
-  it('P18.5-T11 AC-3 a member’s GET /events reads 501 people and a dozen events in the same queries as 51', async () => {
+  it('P18.2-T11 AC-3 a member’s GET /events reads 501 people and a dozen events in the same queries as 51', async () => {
     const small = await counted(() => wired.eventGuests.list(offices.small.agent));
     const large = await counted(() => wired.eventGuests.list(offices.big.agent));
     // The agent's audience: the office-wide five, the four past ones among them, nothing for leaders or the chosen.
@@ -185,7 +185,7 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     expect(large.queries.length).toBeLessThanOrEqual(10);
   }, 60_000);
 
-  it('P18.5-T11 AC-3 a leader’s list, with the leaders’ edges read, is the same fixed shape at both sizes', async () => {
+  it('P18.2-T11 AC-3 a leader’s list, with the leaders’ edges read, is the same fixed shape at both sizes', async () => {
     const leader = (o: Office) => context(o.kpmId, String(o.owner.membershipId), 'AB', false);
     const small = await counted(() => wired.eventGuests.list(leader(offices.small)));
     const large = await counted(() => wired.eventGuests.list(leader(offices.big)));
@@ -194,7 +194,7 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     expect(large.queries.length).toBeLessThanOrEqual(10);
   }, 60_000);
 
-  it('P18.5-T11 AC-3 the Owner’s View feedback — the roll call and the Feedback Summary — is a fixed number of queries', async () => {
+  it('P18.2-T11 AC-3 the Owner’s View feedback — the roll call and the Feedback Summary — is a fixed number of queries', async () => {
     const callSmall = await counted(() => wired.eventRollCalls.rollCall(offices.small.owner, offices.small.biggest));
     const callLarge = await counted(() => wired.eventRollCalls.rollCall(offices.big.owner, offices.big.biggest));
     expect(callLarge.result.people).toHaveLength(501);
@@ -211,7 +211,7 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     expect(sumLarge.queries.length).toBeLessThanOrEqual(10);
   }, 60_000);
 
-  it('P18.6-T1 AC-3 attendanceOfMany reads a dozen events over 501 people in the same queries as over 51', async () => {
+  it('P18.3-T1 AC-3 attendanceOfMany reads a dozen events over 501 people in the same queries as over 51', async () => {
     const all = async (o: Office) => (await wired.events.list(o.owner, false)).map((e: { id: string }) => e.id);
     const idsSmall = await all(offices.small);
     const idsBig = await all(offices.big);
@@ -231,7 +231,7 @@ describe('events, measured (P18.5-T11 AC-3)', () => {
     expect(time).toBeLessThan(2000);
   }, 120_000);
 
-  it('P18.5-T11 AC-3 records the ceiling’s cost', async () => {
+  it('P18.2-T11 AC-3 records the ceiling’s cost', async () => {
     const list = await p95(() => wired.eventGuests.list(offices.big.agent));
     const call = await p95(() => wired.eventRollCalls.rollCall(offices.big.owner, offices.big.biggest));
     const summary = await p95(() => wired.eventRollCalls.feedbackSummary(offices.big.owner, offices.big.biggest));

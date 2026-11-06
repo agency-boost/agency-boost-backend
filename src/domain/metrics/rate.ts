@@ -19,7 +19,7 @@ export function rateOver(count: number, of: number): Rate {
 
 /**
  * **`part / of` as a whole percent, rounded half up in integers** — the one rounding every whole percentage of whole
- * numbers takes (P18.5 exit review; parity F-253, P18.97-T3, the client's UI-018 *"correctly rounded"*): a share of
+ * numbers takes (P18.2 exit review; parity F-253, P18.9-T3, the client's UI-018 *"correctly rounded"*): a share of
  * counts through `rateOver`, and an attainment of two sums — the APE achieved over its target in sen, the activities
  * logged over theirs — which may pass 100 and whose caller keeps its own cap and its own `null`. `of` is above 0.
  *

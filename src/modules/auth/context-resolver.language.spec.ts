@@ -8,11 +8,11 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { ContextResolver } from './context-resolver';
 
 /**
- * **P18.98-T5 AC-1 — the request's reader, resolved with the context** (ADR-0179 §7): from the user the resolver
+ * **P18.10-T5 AC-1 — the request's reader, resolved with the context** (ADR-0179 §7): from the user the resolver
  * already reads — no extra read — the header first, then the saved `users.locale`, then nobody's choice; and never the
  * person's own choice in a support session. A refusal of the person read is written in their language.
  */
-describe('P18.98-T5 AC-1 the reader ContextResolver resolves', () => {
+describe('P18.10-T5 AC-1 the reader ContextResolver resolves', () => {
   let resolver: ContextResolver;
   const users = () => mongoose.model(User.name);
 
@@ -38,13 +38,13 @@ describe('P18.98-T5 AC-1 the reader ContextResolver resolves', () => {
   it('AC-1 reads the header over the saved choice, and the saved choice where no header names one', async () => {
     const saved = await person('id');
     // A person who has chosen reads figures in the language in force — here the one this screen sends.
-    expect((await resolver.resolve(saved, null, false, false, [], 'en')).reader).toEqual({ language: 'en', figures: 'en' });
-    expect((await resolver.resolve(saved, null, false, false, [], null)).reader).toEqual({ language: 'id', figures: 'id' });
+    expect((await resolver.resolve(saved, null, false, 'en')).reader).toEqual({ language: 'en', figures: 'en' });
+    expect((await resolver.resolve(saved, null, false, null)).reader).toEqual({ language: 'id', figures: 'id' });
   });
 
   it('AC-1 reads nobody’s choice for a person who has made none: Bahasa Indonesia, words and figures, as it is live', async () => {
     expect((await resolver.resolve(await person(null))).reader).toEqual({ language: 'id', figures: 'id' });
-    expect((await resolver.resolve(await person(null), null, false, false, [], 'id')).reader)
+    expect((await resolver.resolve(await person(null), null, false, 'id')).reader)
       .toEqual({ language: 'id', figures: 'id' });
   });
 
@@ -55,8 +55,8 @@ describe('P18.98-T5 AC-1 the reader ContextResolver resolves', () => {
   it('AC-1 never reads the person’s own choice in a support session (ADR-0179 §2)', async () => {
     // Saved English, so nobody's choice — Bahasa Indonesia, now it is live — tells the two apart.
     const saved = await person('en');
-    expect((await resolver.resolve(saved, 'root', true)).reader).toEqual({ language: 'id', figures: 'id' });
-    expect((await resolver.resolve(saved, 'root', true, false, [], 'en')).reader).toEqual({ language: 'en', figures: 'en' });
+    expect((await resolver.resolve(saved, 'root')).reader).toEqual({ language: 'id', figures: 'id' });
+    expect((await resolver.resolve(saved, 'root', false, 'en')).reader).toEqual({ language: 'en', figures: 'en' });
   });
 
   it('AC-1 writes a refusal of the person read in their saved language', async () => {

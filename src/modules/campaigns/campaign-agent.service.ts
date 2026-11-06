@@ -81,7 +81,7 @@ export interface ChasedCampaignView {
   phase: 'upcoming' | 'running';
   duration: string;
   /**
-   * The months it runs, the Personal Summary row's one line (P18.95-T7 AC-1, ADR-0167 §7): *Runs Jan – Des*, *Runs
+   * The months it runs, the Personal Summary row's one line (P18.7-T7 AC-1, ADR-0167 §7): *Runs Jan – Des*, *Runs
    * Agu – Okt 2026*, *Runs over the last 12 months* (`runsWords`).
    */
   runs: string;
@@ -94,7 +94,7 @@ export interface ChasingView {
 }
 
 /**
- * **The agent's campaigns** (P18.5-T7, T8, T9): the list, one campaign with the reader's progress, the chase, and
+ * **The agent's campaigns** (P18.2-T7, T8, T9): the list, one campaign with the reader's progress, the chase, and
  * whose chases a reader may see.
  *
  * - **The office's active campaigns only** — an archived one, another office's or an unknown code is `404`, never
@@ -302,7 +302,7 @@ function posterOf(row: { poster: { emoji: string; color: CampaignPosterColor } }
   return { emoji: row.poster.emoji, color: row.poster.color };
 }
 
-/** A chased campaign as its row draws it, its words for `reader` (P18.98-T5 AC-4). */
+/** A chased campaign as its row draws it, its words for `reader` (P18.10-T5 AC-4). */
 function chasedView(c: ChasedCampaign, timezone: string, reader: Reader): ChasedCampaignView {
   return {
     code: c.code,

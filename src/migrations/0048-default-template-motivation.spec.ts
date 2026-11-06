@@ -17,12 +17,12 @@ const before = () => ({ ...today(), categories: today().categories.filter((c) =>
 const codes = (payload: unknown) => ((payload as { categories: Row[] }).categories).map((c) => c.code);
 
 /**
- * **Motivation in the platform's Default template** (Phase 18.99 T10; UI V1, UI-063): migration 0048 gives the Template
+ * **Motivation in the platform's Default template** (Phase 18.11 T10; UI V1, UI-063): migration 0048 gives the Template
  * company's Default template the owner's seventh training category — every version, after *Team Management*, the
  * seed's words — where it holds none, and touches nothing else: no office's taxonomy or snapshot, no insurer's
  * template, no other named template, no deleted row. Twice is once; a template already holding it is current.
  */
-describe('0048 — Motivation in the Default template (P18.99-T10, UI-063)', () => {
+describe('0048 — Motivation in the Default template (P18.11-T10, UI-063)', () => {
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   const templates = () => db().collection('companyTemplates');
   const defaults = { companyId: TEMPLATE_LIBRARY.companyId, templateId: TEMPLATE_LIBRARY.defaultTemplateId };

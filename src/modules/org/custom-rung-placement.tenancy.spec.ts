@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
+import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { PasswordService } from '@/modules/auth/password.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -28,7 +29,7 @@ const office = (kpmId: string) => RequestContext.superAdminInTenant('sa-1', kpmI
 const PERSONAL = '1990-01-01,2020-01,full-time,female';
 
 /**
- * **A member placed on a rung the company added, by name** (OD-50's placement gap, closed after P18.8-T1): the
+ * **A member placed on a rung the company added, by name** (OD-50's placement gap, closed after P18.5-T1): the
  * role change and the roster import's *role* column take any live rung code of the office's company ladder, and
  * the class follows the rung's tier — `SM` (*Senior Leader*) gives `ab`, `UM` (*Associate Leader*) `aab`, `FA`
  * (*Not a leader*) `agent`. KPM A's company (Allianz) has those beside the default codes; KPM B's company has the
@@ -63,7 +64,11 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
     roles = new RoleChangeService(
       members, hierarchy, historyRepo, users as never, audit, { send: async () => undefined } as never, clock,
     );
-    roster = new RosterImportService(members, hierarchy, kpms as never, users as never, new PasswordService(), audit, clock);
+    roster = new RosterImportService(
+      members, hierarchy, kpms as never, users as never, new PasswordService(), audit, clock, orgLevels, historyRepo,
+      { send: async () => undefined } as never,
+      (mongoose.models[AuthToken.name] ?? mongoose.model(AuthToken.name, AuthTokenSchema)) as never,
+    );
     await syncIndexes();
   });
   afterAll(stopMongo);
@@ -144,7 +149,7 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
       await expect(roles.change(leader, fa, 'SM')).rejects.toMatchObject({ code: 'ORG_ROLE_CHANGE_NOT_PERMITTED' });
     });
 
-    it('P18.95-T9 AC-1 names the company’s own senior rung in the refusal: its code when short, its label when not', async () => {
+    it('P18.7-T9 AC-1 names the company’s own senior rung in the refusal: its code when short, its label when not', async () => {
       // A second senior rung with a code too long to read as one (ADR-0167 §10: `shortOfRung`).
       await mongoose.model(CompanyOrgLevel.name).create({
         companyId: companyA, code: 'REGIONAL', label: 'Regional Director', displayOrder: 7, leaderTier: 'senior',
@@ -195,16 +200,23 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
 
   describe('the roster import’s role column', () => {
     const file = (...lines: string[]) => [ROSTER_TEMPLATE_HEADER, ...lines].join('\n');
+    /**
+     * **The office's Owner, who imports** (P19.4-T2; ADR-0206 §2), reading the API's English: the Super Admin ran these
+     * until their grant went. A context with no row behind it, so the limit counts only what the file adds.
+     */
+    const ownerOf = (kpmId: string) => new RequestContext('u-owner', 'none', {
+      membershipId: 'mem-owner', kpmId, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+      isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+    }).withReader(SOURCE_READER);
+    /** A3's columns (P19.3-T4): code, name, rung, upline, number, email, join date, work, birth date. */
+    const row = (code: string, name: string, rung: string, up = '') =>
+      `${code},${name},${rung},${up},,${name.toLowerCase()}@k.test,,Full-time,${PERSONAL.split(',')[0]}`;
 
     it('creates people on the company’s own rungs, the class from each tier', async () => {
-      const csv = file(
-        `Sinta,sinta@k.test,301,SM,,${PERSONAL}`,
-        `Umar,umar@k.test,302,um,301,${PERSONAL}`,
-        `Fajar,fajar@k.test,303,Fa,302,${PERSONAL}`,
-      );
-      const preview = await roster.preview(RequestContext.platform('sa-1'), KPM_A, csv);
-      expect(preview.issues).toEqual([]);
-      await roster.commit(RequestContext.platform('sa-1'), KPM_A, csv);
+      const csv = file(row('301', 'Sinta', 'SM'), row('302', 'Umar', 'um', '301'), row('303', 'Fajar', 'Fa', '302'));
+      const preview = await roster.preview(ownerOf(KPM_A), KPM_A, csv);
+      expect(preview.counts).toEqual({ imported: 3, updated: 0, skipped: 0 });
+      await roster.commit(ownerOf(KPM_A), KPM_A, csv);
 
       const made = await mongoose.model(Membership.name).find({ kpmId: KPM_A }).sort({ agentSeq: 1 }).lean().exec();
       expect(made.map((m) => [m.agentCode, m.orgLevelCode, m.role])).toEqual([
@@ -212,15 +224,13 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
       ]);
     });
 
-    it('names a code that is no rung of this company’s ladder, with the ones that are', async () => {
-      // Read by a Super Admin in the API's English: nobody's choice is Bahasa Indonesia since P18.98-T4's exit.
-      const preview = await roster.preview(
-        RequestContext.platform('sa-1').withReader(SOURCE_READER), KPM_B, file(`Sinta,sinta@k.test,301,SM,,${PERSONAL}`),
-      );
-      expect(preview.issues).toEqual([{
-        line: 2, column: 'role', message: '"SM" is not a rung of this company’s ladder. Use one of: AAB, AB, AGENT.',
-      }]);
-      expect(preview.willCreate).toBe(0);
+    it('skips a rung that is no rung of this company’s ladder, naming the ones that are (A3)', async () => {
+      // Read by the office's Owner in the API's English: nobody's choice is Bahasa Indonesia since P18.10-T4's exit.
+      const preview = await roster.preview(ownerOf(KPM_B), KPM_B, file(row('301', 'Sinta', 'SM')));
+      expect(preview.rows.map((r) => [r.line, r.outcome, r.messages])).toEqual([
+        [2, 'skipped', ['Role "SM" does not exist. Use: Agent, AAB, AB.']],
+      ]);
+      expect(preview.counts.imported).toBe(0);
     });
 
     it('counts a custom leader rung against the limit as it counts AB', async () => {
@@ -232,12 +242,11 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
           },
         },
       });
-      const preview = await roster.preview(RequestContext.platform('sa-1'), KPM_A, file(
-        `Sinta,sinta@k.test,301,SM,,${PERSONAL}`,
-        `Umar,umar@k.test,302,UM,301,${PERSONAL}`,
-        `Fajar,fajar@k.test,303,FA,302,${PERSONAL}`,
+      const preview = await roster.preview(ownerOf(KPM_A), KPM_A, file(
+        row('301', 'Sinta', 'SM'), row('302', 'Umar', 'UM', '301'), row('303', 'Fajar', 'FA', '302'),
       ));
-      expect(preview.issues.map((i) => [i.line, i.column])).toEqual([[3, 'role']]);
+      // Umar is the second leader; Fajar's upline is then Umar's skipped row.
+      expect(preview.rows.map((r) => [r.line, r.outcome])).toEqual([[2, 'imported'], [3, 'skipped'], [4, 'skipped']]);
     });
   });
   describe('the rung a placement with no choice lands on (ADR-0156)', () => {

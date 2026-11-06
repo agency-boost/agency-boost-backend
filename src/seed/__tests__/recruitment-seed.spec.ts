@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { localDayOf } from '@/common/time/local-day';
 import { SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
 import { up as recruitmentPlaybook } from '@/migrations/0025-recruitment-playbook';
+import { up as playbookIntoTemplate } from '@/migrations/0056-playbook-into-template';
 import { GcsAdapter } from '@/modules/assets/gcs.adapter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -70,7 +71,7 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
 
     it('P17-T7 AC-1 leaves Sejahtera Baru Life, created blank, with none — 0701’s agents meet the empty state', async () => {
       expect(await col('recruitmentPlaybooks').countDocuments({ companyId: BLANK_COMPANY._id })).toBe(0);
-      // Prudential's and Allianz Life's; the Template library's, migration 0037's, is not the seed's (P18.9-T3).
+      // Prudential's and Allianz Life's; the Template library's, migration 0037's, is not the seed's (P18.6-T3).
       expect(await col('recruitmentPlaybooks').countDocuments({ companyId: { $ne: TEMPLATE_LIBRARY.companyId } })).toBe(2);
       const nadia = await as('agent@kpm0701.test');
       expect(nadia.kpmId).toBe(EMPTY_OFFICE._id);
@@ -86,17 +87,30 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
 
     it('P17-T2 AC-3 migration 0025, run twice over the seed, finds both companies given and the blank one blank — and changes nothing', async () => {
       const before = await col('recruitmentPlaybooks').find({}).sort({ _id: 1 }).toArray();
-      // Prudential, Allianz Life and, since P18.9-T3, the Template library (ADR-0164): each holds one already.
+      // Prudential, Allianz Life and, since P18.6-T3, the Template library (ADR-0164): each holds one already.
       for (const run of [1, 2]) {
         expect([run, await recruitmentPlaybook(mongoose.connection.db!, clock.now())])
           .toEqual([run, { given: 0, current: 3, blank: 1 }]);
       }
       expect(await col('recruitmentPlaybooks').find({}).sort({ _id: 1 }).toArray()).toEqual(before);
     });
+
+    it('P19.4-T5 AC-7 the seed runs migration 0056: each company’s words are its default template’s, published; a re-run moves nothing', async () => {
+      for (const companyId of [prudentialId, allianzId]) {
+        const record = await col('recruitmentPlaybooks').findOne({ companyId });
+        const byDefault = await col('templates').findOne({ companyId, isDefault: true, deletedAt: null });
+        expect(record!.migratedTo).toEqual({ templateId: String(byDefault!._id), version: 1 });
+        expect(await col('companyTemplates').findOne({ companyId, templateId: String(byDefault!._id), kind: 'recruitment_playbook' }))
+          .toMatchObject({ status: 'published', version: 1, payload: SEED_RECRUITMENT_PLAYBOOK });
+      }
+      const sections = await col('companyTemplates').countDocuments({ kind: 'recruitment_playbook' });
+      expect(await playbookIntoTemplate(mongoose.connection.db!, clock.now())).toMatchObject({ moved: 0, versions: 0 });
+      expect(await col('companyTemplates').countDocuments({ kind: 'recruitment_playbook' })).toBe(sections);
+    });
   });
 
   describe('the pitch documents', () => {
-    it('P17-T7 AC-1, P18.97-T5 AC-5 0417 shows the prototype’s pitch — partial, uploaded, two missing, the ring 1/4 — and its Company Profile', async () => {
+    it('P17-T7 AC-1, P18.9-T5 AC-5 0417 shows the prototype’s pitch — partial, uploaded, two missing, the ring 1/4 — and its Company Profile', async () => {
       const view = await wired.recruitmentPitch.read(await as('rina@kpm0417.test'));
       expect(view.slots.map((s) => [s.slot, s.state, s.file?.name ?? null])).toEqual([
         ['opportunity', 'partial', 'Opportunity_Overview_v3.pdf'],
@@ -128,7 +142,7 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       expect(await col('auditLog').countDocuments({ action: 'recruitment_pitch.attached', kpmId: owner.kpmId })).toBe(3);
     });
 
-    it('P17-T7 AC-1, P18.97-T5 AC-5 0555 shows all four, Opportunity Overview’s four ticked — 4/4, complete — and both optional documents', async () => {
+    it('P17-T7 AC-1, P18.9-T5 AC-5 0555 shows all four, Opportunity Overview’s four ticked — 4/4, complete — and both optional documents', async () => {
       const view = await wired.recruitmentPitch.read(await as('agent@kpm0555.test'));
       expect(view.slots.map((s) => [s.slot, s.state, s.file?.name ?? null])).toEqual([
         ['opportunity', 'complete', 'Kelapa_Gading_Opportunity_Overview.pdf'],
@@ -150,7 +164,7 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       ]);
     });
 
-    it('P18.97-T5 AC-5 0417’s Company Profile is uploaded and its Agency Profile empty; 0555 holds both — the seed’s optional documents', async () => {
+    it('P18.9-T5 AC-5 0417’s Company Profile is uploaded and its Agency Profile empty; 0555 holds both — the seed’s optional documents', async () => {
       expect(RECRUITMENT_SEED_PITCH['0417'].filter((s) => s.slot === 'company' || s.slot === 'agency').map((s) => s.slot)).toEqual(['company']);
       expect(RECRUITMENT_SEED_PITCH['0555'].filter((s) => s.slot === 'company' || s.slot === 'agency').map((s) => s.slot)).toEqual(['company', 'agency']);
       const rina = await as('rina@kpm0417.test');
@@ -162,7 +176,7 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       await expect(wired.recruitmentPitch.url(rina, 'agency')).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('P18.97-T5 AC-4 every seeded file is a one-page PDF under 1 KB, its size the one storage reported — which a card reads “< 1 KB”', async () => {
+    it('P18.9-T5 AC-4 every seeded file is a one-page PDF under 1 KB, its size the one storage reported — which a card reads “< 1 KB”', async () => {
       const rows = await col('kpmRecruitmentPitchDocuments').find({}).toArray();
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {
@@ -182,9 +196,11 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
           kpmId: row.kpmId, uploadState: 'confirmed', refCount: 1, originalFilename: row.fileName, mimeType: 'application/pdf',
         });
       }
-      // Every slot record names a file storage holds: none written without one. (Phase 18.5's training PDFs are the
-      // company's, in its own folder, and `training-seed.spec.ts`'s to count.)
-      expect(storage.puts.filter((key) => !key.includes('/training/'))).toHaveLength(rows.length + 1);
+      // Every slot record names a file storage holds: none written without one. (Phase 18.2's training PDFs are the
+      // company's, in its own folder, and `training-seed.spec.ts`'s to count; P19.6-T1's branding images — 0555's logo,
+      // its sizes and its mascot, under `<kpmId>/branding/` (ADR-0218 §2) — are `branding-seed.spec.ts`'s.)
+      expect(storage.puts.filter((key) => !key.includes('/training/') && !key.includes('/branding/')))
+        .toHaveLength(rows.length + 1);
     });
 
     it('D-seed a link opens for an uploaded slot, and a missing one is 404', async () => {
@@ -280,7 +296,7 @@ describe('the recruitment fixture’s pieces (D-seed)', () => {
     expect(Buffer.byteLength(stream, 'latin1')).toBe(length);
   });
 
-  it('P18.7-T2 finds storage only where GCS_BUCKET names a bucket, its prefix dev unless named (ADR-0153)', () => {
+  it('P18.4-T2 finds storage only where GCS_BUCKET names a bucket, its prefix dev unless named (ADR-0153)', () => {
     const clock = new FixedClock(new Date('2026-10-09T03:00:00Z'));
     type Config = { get: (k: string) => string | undefined; getOrThrow: (k: string) => string };
     const configOf = (storage: unknown) => (storage as { config: Config }).config;
@@ -304,7 +320,7 @@ describe('the recruitment fixture’s pieces (D-seed)', () => {
   it('D-seed a storage that refuses leaves no slot and no brochure, and the run says why', async () => {
     await clearCollections();
     const refusing = new StubStorage();
-    // P18.7-T2: a vendor failure carrying the request it made — bearer token included — reports its message alone.
+    // P18.4-T2: a vendor failure carrying the request it made — bearer token included — reports its message alone.
     jest.spyOn(refusing, 'putObject').mockRejectedValue(Object.assign(new Error('Invalid Signature'), {
       code: 401, config: { headers: { Authorization: 'Bearer ya29.a0-secret-token' } },
     }));

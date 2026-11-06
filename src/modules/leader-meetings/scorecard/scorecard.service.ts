@@ -2,20 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
-import { activation3MOf, activation3MShare } from '@/domain/metrics/activation-3m';
 import { casesPerProducingAgent } from '@/domain/metrics/cases-per-producing-agent';
-import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg } from '@/domain/metrics/held-months';
+import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg, recruitmentMonthlyAvg } from '@/domain/metrics/held-months';
 import { maaCountInUnit } from '@/domain/metrics/maa-count-in-unit';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
+import { newAgentActivationOf, newAgentActivationShare } from '@/domain/metrics/new-agent-activation-3m';
 import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
 import { belongedDuring, producingAgents } from '@/domain/metrics/producing-agents';
 import { MembershipRepository } from '@/modules/org/membership.repository';
-import type { Membership } from '@/modules/org/membership.schema';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
-import {
-  ProductionReadings, type HeldFigure, type MonthCells, type OfficeMonth,
-} from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
+import type { HeldFigure, MonthCells, OfficeMonth } from '@/modules/production/production-readings';
 import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS } from '@/modules/reporting/agency-partition';
 import { shiftMonth } from '@/modules/reporting/office-figures';
 import { OfficePeople, type OfficePerson } from '@/modules/reporting/office-people';
@@ -23,6 +21,9 @@ import {
   COLUMN_KEYS, MONTH_COLUMN_KEYS, ROW_UNITS, type ColumnKey, type ColumnPeriod, type ComputedScorecard,
   type RowKey, type ScorecardCell, type ScorecardChips, type ScorecardInput,
 } from './scorecard.types';
+
+/** *Full Year {Y−1}* and *YTD {Y−1}*: the columns that read *"—"* until any month of theirs is uploaded (ADR-0203 §8). */
+const YEAR_BEFORE_COLUMN_KEYS: readonly ColumnKey[] = ['fy', 'ytdLastYear'];
 
 /** A column's period: its first day, and the day it ends — the earliest of its own last day, the meeting's and today. */
 interface Period {
@@ -47,12 +48,13 @@ interface Reads {
 const PENDING: ScorecardCell = { kind: 'pending' };
 const NONE: ScorecardCell = { kind: 'none' };
 const BLOCKED: ScorecardCell = { kind: 'blocked' };
+const NOT_UPLOADED: ScorecardCell = { kind: 'not_uploaded' };
 const figure = (value: number, leavesOut: string[] = []): ScorecardCell => ({ kind: 'figure', value, leavesOut });
 const orPending = (value: number | null, leavesOut: string[]): ScorecardCell =>
   (value === null ? PENDING : figure(value, leavesOut));
 
 /**
- * **The months each column names, from the meeting's own month** (P18.97-T1 AC-2; ADR-0175 §1): *Full Year {Y−1}*
+ * **The months each column names, from the meeting's own month** (P18.9-T1 AC-2; ADR-0175 §1): *Full Year {Y−1}*
  * January to December of the year before, ***YTD {Y−1}*** January to the meeting's month of the year before — the
  * months *YTD {Y}* covers — *YTD {Y}* January to the meeting's month, and the three single months. What each header's
  * second line reads; a scorecard frozen before *YTD {Y−1}* existed is named by the same function (`scorecard-record.ts`).
@@ -83,7 +85,7 @@ export function columnPeriods(meetingDate: string): Record<ColumnKey, ColumnPeri
  * sums it (`ProductionReadings.officeMonths`), the members' year to date by the rule the Overview's `ledgersFor` reads
  * it with and `MONTHLY_ACTIVE_AGENT` and `MAA_COUNT_IN_UNIT` from the month table's cells, both from one read
  * (`monthCellsAndYearToDateFor`) — and the forum's own, each once under `domain/metrics/`. ***YTD {Y−1}* goes
- * through the same functions as *YTD {Y}***, a year earlier (P18.97-T1 AC-1). **A period ends at the earliest of its
+ * through the same functions as *YTD {Y}***, a year earlier (P18.9-T1 AC-1). **A period ends at the earliest of its
  * own last day, the meeting's date and today**: a point-in-time figure is taken on that day; a figure from the file
  * counts the period's months the office holds now, and names the ones it leaves out — but the office's current month,
  * whose file is not due yet. **Exact**: no rounding but money's to whole minor units.
@@ -98,12 +100,13 @@ export function columnPeriods(meetingDate: string): Record<ColumnKey, ColumnPeri
 export class LeaderScorecardService {
   constructor(
     private readonly people: OfficePeople,
-    private readonly production: ProductionReadings,
+    // The official APE (ADR-0195): the scorecard reads the office's file and never a member's estimate (UI-157 item 5).
+    private readonly production: OfficialApe,
     private readonly monthRows: MonthlyAgentDataRepository,
-    // P18.96-T6: the office's new hires, for *3M new agent %* (`ACTIVATION_3M_PCT`) — read here, written by nobody here.
+    // The office's new hires, for *3M new agent %* — `NEW_AGENT_ACTIVATION_3M_PCT` since P19.3-T1 (ADR-0202), read here.
     private readonly memberships: MembershipRepository,
     private readonly clock: Clock,
-    // P18.97-T1 AC-13: the day of the office's latest upload, *AS OF* — read here, written by the import alone.
+    // P18.9-T1 AC-13: the day of the office's latest upload, *AS OF* — read here, written by the import alone.
     private readonly batches: DataUploadBatchRepository,
   ) {}
 
@@ -134,11 +137,12 @@ export class LeaderScorecardService {
       this.policyMonths(ctx, range),
       // Each member's cells and year to date in one read: every year column's months are inside the range.
       this.production.monthCellsAndYearToDateFor(ctx, ids, range),
-      // P18.96-T6: every new hire who joined over the periods, removed or not — a cohort is who joined.
+      // Every new hire who joined over the periods, removed or not — a cohort is who joined. P19.3-T1: their own file's
+      // months are read from the cells, by their membership (ADR-0202 §1).
       this.memberships.find(
         ctx,
         { joinedAs: 'new_hire', joinDate: { $gte: periods.fy.from, $lte: cohortTo } },
-        { projection: { joinedAs: 1, joinDate: 1, firstSaleDate: 1, activation3M: 1 } },
+        { projection: { _id: 1, joinedAs: 1, joinDate: 1 } },
       ),
       this.latestUpload(ctx, range, timezone),
     ]);
@@ -147,36 +151,44 @@ export class LeaderScorecardService {
     // ---- Each row, column by column. **The office's current month is never named as left out**, as the Overview's
     // `missingMonths` never names it: its file is not due until it ends. *This Month* still reads *pending data* then.
     const current = today.slice(0, 7);
-    const named = (cell: ScorecardCell): ScorecardCell =>
-      (cell.kind === 'figure' ? { ...cell, leavesOut: cell.leavesOut.filter((m) => m !== current) } : cell);
+    // P19.3-T1 (ADR-0203 §8): a year-before column with no month of its period held reads *"—"*, where it read *pending
+    // data* — the SLF map's *"Show '—' until uploaded"*. A figure the app gives (*Manpower*) stays a figure.
+    const yearBeforeEmpty = new Set(YEAR_BEFORE_COLUMN_KEYS.filter((key) => !periods[key].months.some((m) => office.get(m)?.held === true)));
+    const named = (cell: ScorecardCell, key: ColumnKey): ScorecardCell => {
+      if (cell.kind === 'pending' && yearBeforeEmpty.has(key)) return NOT_UPLOADED;
+      return cell.kind === 'figure' ? { ...cell, leavesOut: cell.leavesOut.filter((m) => m !== current) } : cell;
+    };
     const columns = (cell: (period: Period, key: ColumnKey) => ScorecardCell) =>
-      Object.fromEntries(COLUMN_KEYS.map((key) => [key, named(cell(periods[key], key))])) as Record<ColumnKey, ScorecardCell>;
+      Object.fromEntries(COLUMN_KEYS.map((key) => [key, named(cell(periods[key], key), key)])) as Record<ColumnKey, ScorecardCell>;
     /** A row the table tracks over the year columns alone: *Not tracked* in the *Monthly View*. */
     const yearly = (cell: (period: Period, key: ColumnKey) => ScorecardCell) =>
       columns((period, key) => (MONTH_COLUMN_KEYS.includes(key) ? BLOCKED : cell(period, key)));
-    // Whose year to date each year column sums — P18.97-T1 AC-1: *YTD {Y−1}*'s last year's producers, as *Full Year*'s.
+    // Whose year to date each year column sums — P18.9-T1 AC-1: *YTD {Y−1}*'s last year's producers, as *Full Year*'s.
     const lastYears = producersIn(lastYear);
     const producers = { fy: lastYears, ytdLastYear: lastYears, ytd: producersIn(String(year)) } as Partial<Record<ColumnKey, string[]>>;
 
     const producing = yearly((period) => this.producing(reads, period));
     const cases = columns((period) => this.overHeld(period, (m) => policies.get(m) ?? null, caseSubmissions));
+    // `newHires` read with `_id` (the projection): each hire's own months in the file are the cells, by membership.
+    const hires = newHires.map((m) => ({ membershipId: String((m as unknown as { _id: unknown })._id), joinDate: m.joinDate }));
 
     const rows: Record<RowKey, Record<ColumnKey, ScorecardCell>> = {
       ape: columns((period, key) => (producers[key]
         ? this.apeToDate(reads, period, (through) => file.apeYearToDateThrough(producers[key]!, through))
         : this.overHeld(period, (m) => office.get(m)?.apeMonthlyMinor ?? null, (values) => values[0]))),
       manpower: columns((period) => figure(officeHeadcount(everyone, this.clock.endOfLocalDay(timezone, period.end)))),
-      // OD-26 is open: no source holds the FLC count for any period.
-      flc: columns(() => PENDING),
+      // P19.3-T1 (ADR-0203 §2): `RECRUITMENT_MONTHLY_AVG`, the upload's recruitment per month (D2), averaged over the
+      // column's months held — our reading of the SLF map's *Recruitment*; OD-26 (what *FLC* expands to) stays open.
+      flc: columns((period) => this.overHeld(period, (m) => office.get(m)?.recruitmentMonthly ?? null, recruitmentMonthlyAvg)),
       producing_agents: producing,
-      new_agent_3m: yearly((period) => this.newAgent3m(period, today, newHires)),
+      new_agent_3m: yearly((period) => this.newAgent3m(reads, period, hires)),
       avg_monthly_aa: columns((period) => this.overHeld(
         period, (m) => this.maaCount(reads, period, m),
         (values) => (period.months.length === 1 ? values[0] : maaMonthlyAvg(values)),
       )),
       case_submission: cases,
-      // P18.97-T1 AC-5: *Case submission* ÷ *Annual Active Agents*, the two cells of the same period.
-      cases_per_producing_agent: yearly((_, key) => this.perProducing(cases[key], producing[key])),
+      // P19.3-T1 (ADR-0203 §5): per active agent per month — Σ policies ÷ Σ monthly active agents over the months held.
+      cases_per_producing_agent: yearly((period) => this.perActiveAgent(reads, period)),
       average_case_size: yearly((period) => {
         const months = period.months.map((m) => ({ apeMinor: office.get(m)?.apeMonthlyMinor ?? null, policies: policies.get(m) ?? null }));
         const size = averageCaseSizeRealised(months);
@@ -191,12 +203,14 @@ export class LeaderScorecardService {
       chips: this.chips(everyone, this.clock.endOfLocalDay(timezone, periods.thisMonth.end)),
       rows: (Object.keys(rows) as RowKey[]).map((key) => ({ key, unit: ROW_UNITS[key], cells: rows[key] })),
       asOf,
+      // P19.3-T1 (ADR-0202 §4): stored with a freeze, so the footnotes describe what each row was computed with.
+      definitions: 'data_sources',
     };
   }
 
   /**
    * ***# of units* for a meeting, alone** — the *Monthly Target*'s multiplier, for a target's write to answer with its
-   * value (P18.97-T1 AC-10): the chips' own count, the same function on the same day, from one read of the people.
+   * value (P18.9-T1 AC-10): the chips' own count, the same function on the same day, from one read of the people.
    */
   async units(input: ScorecardInput): Promise<number> {
     const { kpmId, timezone, meetingDate } = input;
@@ -232,16 +246,21 @@ export class LeaderScorecardService {
   /**
    * **The chips**, on the *This Month* period's last day: `OFFICE_HEADCOUNT` — the same function, on the same day, as
    * the *Manpower* row's *This Month* cell — and its members by class (ADR-0156), as `kpm-analytics.service.ts`
-   * counts them: a *Senior Leader* rung's members are ABs, whatever the company called it. ***# of units* is *# of AB*
-   * + *# of AAB*** since P18.97-T1 (AC-9, ADR-0175 §3; UI-007): every member of a leader tier, where it was the
-   * office's AB agencies (D-units). The analytics' rows stay D-units' agencies.
+   * counts them: a *Senior Leader* rung's members are ABs, whatever the company called it.
+   *
+   * ***# of units* is the AB and AAB with at least one downline** since P19.3-T1 (ADR-0203 §1; the SLF map's *"Units =
+   * number of AB + AAB with ≥ 1 downline"*): a member of either leader class who, that day, leads at least one member —
+   * a member that day whose upline they are (ADR-0087's *leads*). It was *# of AB* + *# of AAB* from P18.9-T1 (ADR-0175
+   * §3), so it may now be less than the two chips beside it. The *Monthly Target*'s multiplier follows it (`units`).
    */
   private chips(everyone: readonly OfficePerson[], endOfDay: Date): ScorecardChips {
     const members = everyone.filter((p) => memberAt(p, endOfDay));
     const of = (role: string) => members.filter((p) => p.role === role).length;
     const ab = of(AGENCY_CLASS);
     const aab = of(UNIT_CLASS);
-    return { manpower: officeHeadcount(everyone, endOfDay), agents: of(AGENT_CLASS), units: ab + aab, ab, aab };
+    const leading = new Set(members.flatMap((p) => (p.leaderId === null ? [] : [p.leaderId])));
+    const units = members.filter((p) => (p.role === AGENCY_CLASS || p.role === UNIT_CLASS) && leading.has(p.membershipId)).length;
+    return { manpower: officeHeadcount(everyone, endOfDay), agents: of(AGENT_CLASS), units, ab, aab };
   }
 
   /**
@@ -257,17 +276,16 @@ export class LeaderScorecardService {
   }
 
   /**
-   * *Cases/producing agents* (`CASES_PER_PRODUCING_AGENT`, P18.97-T1 AC-5): the period's *Case submission* over its
-   * *Annual Active Agents*, through the metric's function — *—* over nobody, *pending data* while either is — naming
-   * the months either of the two leaves out.
+   * *Cases/producing agents* (`CASES_PER_PRODUCING_AGENT`) **per active agent per month** since P19.3-T1 (ADR-0203 §5):
+   * each month's policies over the office's file and its `MAA_COUNT_IN_UNIT` over the office — the *Avg. monthly AA*
+   * row's own count — summed over the period's months holding both, through the metric's function: *—* over nobody,
+   * *pending data* while no month holds both, the months either half leaves out named.
    */
-  private perProducing(cases: ScorecardCell, producing: ScorecardCell): ScorecardCell {
-    const value = casesPerProducingAgent(
-      cases.kind === 'figure' ? cases.value : null, producing.kind === 'figure' ? producing.value : null,
-    );
+  private perActiveAgent(reads: Reads, period: Period): ScorecardCell {
+    const months = period.months.map((m) => ({ policies: reads.policies.get(m) ?? null, activeAgents: this.maaCount(reads, period, m) }));
+    const value = casesPerProducingAgent(months);
     if (value === 'none') return NONE;
-    const leavesOut = [...new Set([cases, producing].flatMap((c) => (c.kind === 'figure' ? c.leavesOut : [])))].sort();
-    return orPending(value, leavesOut);
+    return orPending(value, period.months.filter((_, i) => months[i].policies === null || months[i].activeAgents === null));
   }
 
   /**
@@ -335,27 +353,23 @@ export class LeaderScorecardService {
   }
 
   /**
-   * ***3M new agent %*** — **`ACTIVATION_3M_PCT`** since P18.96-T6 (ADR-0171 §2, which retired `NEW_AGENT_3M_ACTIVE_PCT`),
-   * by rule A since UI V1 (UI-023): of the office's new hires who joined in the period — by their join date in the
-   * office's calendar, removed or not — activated by day 90 ÷ (that + past day 90 with no first sale), each hire's
-   * `ACTIVATION_3M` as it stands on the office's today: the result kept on the membership where one is, computed the
-   * same where none is yet. A first sale after day 90 is in neither part, nor is a hire inside their 90 days without one;
-   * leaving decides nothing. Nothing is written here. *Pending data* while none of them is decided; **it names no month
-   * left out** — a hire still in their 90 days waits on no file.
+   * ***3M new agent %*** — **`NEW_AGENT_ACTIVATION_3M_PCT`** since P19.3-T1 (ADR-0202 §1; the data sources' D7, *"in
+   * SLF and Quant B1"*), where it was `ACTIVATION_3M_PCT` (ADR-0171 §2, which New Hires keeps): of the office's new hires
+   * who joined in the period — by their join date in the office's calendar, removed or not — those with a policy in the
+   * office's file in their join month or the three months after it, over those decided. **A month is held for it when the
+   * office's file holds a policy count for it** (the column D7 reads); a hire's month with no row of theirs shows none. A
+   * hire whose window is not all held, with no policy yet, is in neither part. *Pending data* while nobody is decided; **it
+   * names no month left out** — an undecided hire is in no figure. Read through the cells of the one read; never written.
    */
   private newAgent3m(
-    period: Period, today: LocalDate,
-    newHires: readonly Pick<Membership, 'joinDate' | 'firstSaleDate' | 'activation3M'>[],
+    reads: Reads, period: Period, hires: readonly { membershipId: string; joinDate: LocalDate | null }[],
   ): ScorecardCell {
     if (period.months.length === 0) return PENDING;
-    const cohort = newHires.filter((m) => m.joinDate !== null && m.joinDate >= period.from && m.joinDate <= period.end);
-    const share = activation3MShare(cohort.map((m) => {
-      const firstSaleDate = m.firstSaleDate ?? null;
-      return {
-        result: activation3MOf({ joinDate: m.joinDate!, firstSaleDate, locked: m.activation3M ?? null }, today),
-        firstSaleDate,
-      };
-    }));
+    const cohort = hires.filter((m) => m.joinDate !== null && m.joinDate >= period.from && m.joinDate <= period.end);
+    const share = newAgentActivationShare(cohort.map((hire) => newAgentActivationOf(hire.joinDate!, (m) => {
+      const held = reads.policies.get(m);
+      return { held: held !== null && held !== undefined, policies: reads.cells.get(hire.membershipId)?.get(m)?.policyCountMonthly ?? null };
+    })));
     return share.pct === null ? PENDING : figure(share.pct);
   }
 
@@ -363,7 +377,7 @@ export class LeaderScorecardService {
    * The office's policy count, month by month, over a range — the sum of every figure the office's file holds for the
    * month, a leaver's included (OD-74), `null` where it holds none: one aggregate over the office's rows on the
    * `(kpmId, month, deletedAt)` index, as `officeMonths` sums APE. (*New AA*'s `NEW_ACTIVE_AGENTS` sum went with the
-   * row, P18.97-T1 AC-6.)
+   * row, P18.9-T1 AC-6.)
    */
   private async policyMonths(ctx: RequestContext, range: { from: string; to: string }): Promise<Map<string, number | null>> {
     const rows = await this.monthRows.aggregate(ctx, [
@@ -371,8 +385,8 @@ export class LeaderScorecardService {
       {
         $group: {
           _id: '$month',
-          policies: { $sum: { $ifNull: ['$policyCountMonthly.value', 0] } },
-          policiesHeld: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$policyCountMonthly.value', null] }, null] }, 1, 0] } },
+          policies: { $sum: { $ifNull: ['$values.POLICY_COUNT.value', 0] } },
+          policiesHeld: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$values.POLICY_COUNT.value', null] }, null] }, 1, 0] } },
         },
       },
     ]);
@@ -380,7 +394,7 @@ export class LeaderScorecardService {
   }
 
   /**
-   * ***AS OF*** (P18.97-T1 AC-13; ADR-0175 §6, UI-010): **the office's day its latest production file was uploaded** —
+   * ***AS OF*** (P18.9-T1 AC-13; ADR-0175 §6, UI-010): **the office's day its latest production file was uploaded** —
    * the newest import standing (`committed`) of the months the table reads, by the moment the scorecard is computed,
    * in its calendar — or `null` while it has none, which draws no *AS OF*. One read on the batches' `(kpmId, month,
    * status, …)` index.

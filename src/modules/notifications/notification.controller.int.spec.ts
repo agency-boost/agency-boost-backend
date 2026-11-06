@@ -153,7 +153,7 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
     });
   });
 
-  it('P18.95-T7 AC-4 an event reminder reads its time and place over HTTP, from the payload in the office’s zone', async () => {
+  it('P18.7-T7 AC-4 an event reminder reads its time and place over HTTP, from the payload in the office’s zone', async () => {
     await mongoose.model(Notification.name).collection.insertMany([
       {
         _id: new mongoose.Types.ObjectId(), userId: AGENT.userId, kpmId: AGENT.kpmId, membershipId: AGENT.membershipId,
@@ -173,14 +173,14 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
     ]);
     const { items } = (await http().get('/notifications').expect(200)).body;
     // The suite reads in English (`test/setup.ts`), and since the default went live an English reader's figures are
-    // English too: 09:00, where nobody's choice read 09.00 before (P18.98-T5 AC-1).
+    // English too: 09:00, where nobody's choice read 09.00 before (P18.10-T5 AC-1).
     expect(items.map((i: { title: string; detail: string }) => [i.title, i.detail])).toEqual([
       ['Kickoff 2026 is coming up', '9 Nov 2026, 09:00 · Kantor KPM'],
       ['Town Hall is coming up', 'Check the time and where it is.'],
     ]);
   });
 
-  it('P18.96-T1 AC-3 a join request reads who asked and opens the request inbox, over HTTP; an older row still reads its name', async () => {
+  it('P18.8-T1 AC-3 a join request reads who asked and opens the request inbox, over HTTP; an older row still reads its name', async () => {
     session.current = OWNER;
     const row = (payload: Record<string, unknown>, at: number) => ({
       _id: new mongoose.Types.ObjectId(), userId: OWNER.userId, kpmId: OWNER.kpmId, membershipId: OWNER.membershipId,
@@ -298,10 +298,10 @@ describe('the inbox over HTTP (P12.1-T4)', () => {
   });
 
   /*
-   * **P18.98-T5 AC-4 — the inbox in the reader's language, when it is read** (ADR-0179 §7). Each row is composed for the
+   * **P18.10-T5 AC-4 — the inbox in the reader's language, when it is read** (ADR-0179 §7). Each row is composed for the
    * request's reader, so the same stored notice — one written before the phase — reads in either language.
    */
-  describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
+  describe('P18.10-T5 AC-4 the inbox in the reader’s language', () => {
     afterEach(() => { savedLanguage.current = null; });
 
     it('AC-4 reads the same stored row in Indonesian for an Indonesian screen, and in English for an English one', async () => {

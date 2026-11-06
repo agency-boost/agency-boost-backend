@@ -33,7 +33,7 @@ export class HealthController {
   /**
    * Readiness: the process can serve traffic. Includes database connectivity.
    *
-   * **`503` when the database is down** (P18.7-T1, ADR-0152). It answered `200` with `degraded` in
+   * **`503` when the database is down** (P18.4-T1, ADR-0152). It answered `200` with `degraded` in
    * the body, and a probe reads the status, not the body: the container's healthcheck, `deploy.sh`
    * waiting before it switches traffic, and the smoke test after a deploy would all have passed an
    * API with no database. The body is unchanged, so a person reading it still sees which check

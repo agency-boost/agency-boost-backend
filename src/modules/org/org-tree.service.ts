@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render } from '@/common/i18n/sentence';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
@@ -14,6 +14,7 @@ import { initialsOf } from './directory.service';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
 import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+import { scopeFor } from '@/modules/rbac/permissions';
 import { visibleTo } from './reader-visibility';
 
 export interface OrgTreeNode {
@@ -128,12 +129,27 @@ export class OrgTreeService {
     @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
   ) {}
 
-  async read(ctx: RequestContext): Promise<OrgTree> {
-    const self = ctx.membershipId;
+  /**
+   * **`for`: a leader's Group Tree, as that leader sees it, read-only** (P19.3-T3 AC-3, AC-16; UI-152 and its Appendix D
+   * row; `/group-tree/[membershipId]`). The leader and everybody below them on today's edges, the leader as the tree's
+   * *self* — layer 1 — and their own leader as the card above it, exactly as their own read draws it.
+   *
+   * - **Reach is the reader's own** (`org_tree:read`, roles §3.4): the Owner and an Admin any active member of the
+   *   office; an AB or an AAB — a Core Leader from KPM Analytics included (ADR-0159 §2 widens no hierarchy scope) —
+   *   anybody in their own downline. Outside it, somebody who left, a malformed id or another office's member: **404**,
+   *   indistinguishable. An Agent, whose grant is `own`, is refused **403**: nobody else's tree is theirs to read.
+   * - **Nothing is written**, as the tree records nothing, and nothing in the view writes.
+   */
+  async read(ctx: RequestContext, forId?: string): Promise<OrgTree> {
+    const subject = forId === undefined || forId === ctx.membershipId ? null : await this.subjectOf(ctx, forId);
+    const self = subject ?? ctx.membershipId;
 
     const rows = await this.members.find(
       ctx,
-      { ...visibleTo(ctx, 'org_tree:read'), status: 'active' },
+      subject === null
+        ? { ...visibleTo(ctx, 'org_tree:read'), status: 'active' }
+        // Below a member the reader may see, inside the reader's reach by construction: every reach is downline-closed.
+        : { $or: [{ _id: subject }, { ancestorIds: subject }], status: 'active' },
       { sort: { agentSeq: 1 } },
     );
 
@@ -153,7 +169,7 @@ export class OrgTreeService {
     ]);
 
     const present = new Set(rows.map((r) => String(r._id)));
-    // A person whose account is gone is still a node, named in the reader's language (P18.98-T5 AC-4).
+    // A person whose account is gone is still a node, named in the reader's language (P18.10-T5 AC-4).
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
     // Every root sits at layer 1, whatever its office depth. Orphaning already rewrites
@@ -216,11 +232,21 @@ export class OrgTreeService {
 
     return {
       nodes,
-      leader: await this.leaderContext(ctx, present),
+      leader: await this.leaderContext(ctx, present, self ?? undefined),
       rootIds,
       selfId: self ?? null,
       counts,
     };
+  }
+
+  /** `for`'s member, within the reader's reach and active, or 404; an Agent's `own` grant reaches no other tree (403). */
+  private async subjectOf(ctx: RequestContext, forId: string): Promise<string> {
+    const office = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;
+    const scope = scopeFor(ctx, 'org_tree:read');
+    if (!office && (scope === null || scope === 'own')) throw new PermissionDeniedException('org_tree:read', { for: forId });
+    const found = await this.members.findOne(ctx, { $and: [{ _id: forId, status: 'active' }, visibleTo(ctx, 'org_tree:read')] });
+    if (!found) throw new NotFoundException('Member');
+    return String(found._id);
   }
 
   /**
@@ -233,8 +259,9 @@ export class OrgTreeService {
   private async leaderContext(
     ctx: RequestContext,
     present: Set<string>,
+    // The tree's self: the reader, or with `for` the leader whose tree it is (their own leader is the card above).
+    self: string | undefined = ctx.membershipId ?? undefined,
   ): Promise<OrgTreeLeader | null> {
-    const self = ctx.membershipId;
     if (!self) return null;
 
     const me = await this.members.findById(ctx, self);

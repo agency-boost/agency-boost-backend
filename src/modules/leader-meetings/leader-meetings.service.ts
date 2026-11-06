@@ -92,7 +92,7 @@ export class LeaderMeetingsService {
       try {
         created = await this.meetings.create(ctx, {
           number, title: input.title, date: input.date,
-          // The first agenda in the maker's language, stored as text (P18.98-T5 AC-6); a copied one as stored.
+          // The first agenda in the maker's language, stored as text (P18.10-T5 AC-6); a copied one as stored.
           agenda: startingAgenda(input.date, previous?.agenda ?? null, newItemId, ctx.reader),
           actionItems: [], monthlyTargets: {}, writtenAt: null,
           frozenScorecard: null, frozenAt: null, frozenCoeditors: null, version: 1,
@@ -257,7 +257,7 @@ export class LeaderMeetingsService {
   /**
    * A frozen meeting's record. `frozenScorecard`, `frozenAt` and `frozenCoeditors` are written in one update
    * (`LeaderMeetingRepository.freeze`), so a meeting with the one has the others. **The scorecard is read tolerantly**
-   * (ADR-0175 §8, P18.97-T1 AC-19): one frozen before the reference slide's table reads *—* where it lacks a column, a
+   * (ADR-0175 §8, P18.9-T1 AC-19): one frozen before the reference slide's table reads *—* where it lacks a column, a
    * row or *AS OF*, keeps the *# of units* it froze with, and is never recomputed (`frozenRecord`).
    */
   private frozen(meeting: LeaderMeetingDocument) {

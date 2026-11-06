@@ -26,7 +26,7 @@ const NO_ACTIVATION =
 export class ActivationProgressController {
   constructor(
     private readonly activation: ActivationProgressService,
-    // P18.96-T4 AC-3: a tick of a data-backed item, with its record.
+    // P18.8-T4 AC-3: a tick of a data-backed item, with its record.
     private readonly records: ActivationItemRecords,
   ) {}
 

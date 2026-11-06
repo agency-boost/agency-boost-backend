@@ -1,6 +1,6 @@
 name: deploy
 
-# development is staging and main is production (P18.7-T4, ADR-0152, ADR-0154). Every push to either
+# development is staging and main is production (P18.4-T4, ADR-0152, ADR-0154). Every push to either
 # runs ci, then build, then deploy, then smoke, and stops at the first job that fails.
 #
 # Both environments run on one VM, in one project (ADR-0155): each has its own API container, its own
@@ -9,11 +9,11 @@ name: deploy
 # - build builds the image in this run and pushes it to the environment's own Artifact Registry
 #   repository, agencyboost-<staging|prod>. **Nothing is reused, by tag or by cache.** An image found by tag would be
 #   trusted because of a name, and anything able to run a job on development could have written that
-#   name first (P18.7 review). So production builds from the main commit with no build cache imported.
+#   name first (P18.4 review). So production builds from the main commit with no build cache imported.
 #   Tags are immutable and unique per build, `<commit>-<run id>-<attempt>`, so a re-run pushes a new
 #   tag rather than failing on an old one.
 #   It signs in as gh-builder, which may push images and nothing else, and with a bare access token:
-#   no credentials file is written into the workspace, so none can reach the build context (P18.7
+#   no credentials file is written into the workspace, so none can reach the build context (P18.4
 #   review, H1).
 # - deploy signs in as gh-deployer. It goes ahead only if this commit is still the branch's head, so an
 #   older run that queued behind a newer one cannot put the older code back. A re-run (attempt 2 and

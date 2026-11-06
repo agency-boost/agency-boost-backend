@@ -44,7 +44,7 @@ export type DisplayUnitResolution =
  *
  * Returns a refusal rather than throwing, because the callers refuse in different
  * vocabularies — a domain exception, a batch failure naming its op, a publish error — in both languages
- * (P18.98-T5 AC-2): a caller raising another code re-files it (`refiled`).
+ * (P18.10-T5 AC-2): a caller raising another code re-files it (`refiled`).
  */
 export function resolveDisplayUnit(
   comparison: 'gte' | 'band',

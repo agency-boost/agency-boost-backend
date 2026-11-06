@@ -18,17 +18,17 @@ function importsOf(file: string): string[] {
 const rel = (file: string) => relative(SRC, file).replace(/\\/g, '/');
 
 /**
- * **The compliance tree reads each category through the module that owns it, and nothing else** (P18.6-T1 AC-12,
- * P18.6-T2 AC-9; invariant §8). Its own folder, so `reporting.imports.spec.ts` — which holds Phase 18's top-level
+ * **The compliance tree reads each category through the module that owns it, and nothing else** (P18.3-T1 AC-12,
+ * P18.3-T2 AC-9; invariant §8). Its own folder, so `reporting.imports.spec.ts` — which holds Phase 18's top-level
  * files to *no training, event or campaign* — stays true for them, and this one holds the tree to exactly the readers
  * it calls: training's offered catalog and progress, goals' plans, activity's readings, activation's bulk reader,
  * events' readings, campaigns' standings reader, the names, the office's day, the audit seam and the permission check.
  * A new import of another module's internals fails here by name.
  */
-describe('P18.6-T1 AC-12 the compliance tree reaches exactly the readers it calls', () => {
+describe('P18.3-T1 AC-12 the compliance tree reaches exactly the readers it calls', () => {
   const code = readdirSync(FOLDER).filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts')).map((f) => join(FOLDER, f));
 
-  it('P18.6-T1 AC-12 the folder has the code it is meant to', () => {
+  it('P18.3-T1 AC-12 the folder has the code it is meant to', () => {
     expect(code.map((f) => f.slice(FOLDER.length + 1)).sort()).toEqual([
       'activation.category.ts', 'activity.category.ts', 'campaigns.category.ts', 'compliance-category.ts',
       'compliance.controller.ts', 'compliance.dto.ts', 'compliance.response.dto.ts', 'compliance.service.ts',
@@ -36,7 +36,7 @@ describe('P18.6-T1 AC-12 the compliance tree reaches exactly the readers it call
     ]);
   });
 
-  it('P18.6-T1 AC-12, P18.6-T2 AC-9 imports, of other modules, the readers it calls and nothing else', () => {
+  it('P18.3-T1 AC-12, P18.3-T2 AC-9 imports, of other modules, the readers it calls and nothing else', () => {
     const reached = [...new Set(code.flatMap(importsOf))]
       .map(rel)
       .filter((f) => f.startsWith('modules/') && !f.startsWith('modules/reporting/compliance/'))
@@ -51,25 +51,28 @@ describe('P18.6-T1 AC-12 the compliance tree reaches exactly the readers it call
       'modules/goals/goal.service.ts',
       'modules/org/member-names.service.ts',
       'modules/rbac/permissions.ts',
-      // Phase 18's own: the agencies, the names' order, and the office's people — and the module's sentences (P18.98-T5).
+      // Phase 18's own: the agencies, the names' order, and the office's people — and the module's sentences (P18.10-T5).
       'modules/reporting/agency-partition.ts',
       'modules/reporting/office-figures.ts',
+      // P19.3-T3 (OD-258): the office's custom groups for *Lihat untuk*, and the one group shape the two reads declare.
+      'modules/reporting/office-groups.ts',
       'modules/reporting/office-people.ts',
       'modules/reporting/reporting.messages.ts',
+      'modules/reporting/reporting.response.dto.ts',
       'modules/tenants/tenant-day.service.ts',
       'modules/training/offered-training.ts',
       'modules/training/training-progress-readings.ts',
     ]);
   });
 
-  it('P18.6-T1 AC-12 no file of the tree reaches a Mongoose model: every record through its owner’s reader', () => {
+  it('P18.3-T1 AC-12 no file of the tree reaches a Mongoose model: every record through its owner’s reader', () => {
     for (const file of code) {
       expect([rel(file), /@InjectModel\(|mongoose\.model\(|\.collection\(|from 'mongoose'/.test(readFileSync(file, 'utf8'))])
         .toEqual([rel(file), false]);
     }
   });
 
-  it('P18.6-T1 AC-12 each T1 category imports its own reader alone', () => {
+  it('P18.3-T1 AC-12 each T1 category imports its own reader alone', () => {
     const own = (file: string) => importsOf(join(FOLDER, file)).map(rel)
       .filter((f) => f.startsWith('modules/') && !f.startsWith('modules/reporting/compliance/'));
     expect(own('training.category.ts').sort()).toEqual(['modules/training/offered-training.ts', 'modules/training/training-progress-readings.ts']);

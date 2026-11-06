@@ -136,7 +136,7 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       expect((await h.http().get('/calendar/entries').query({ view: 'day', for: h.id('SARI') }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('P18.95-T8 AC-2 answers `for` with Month: no longer refused (UI-020, the client asked for compare in Month)', async () => {
+    it('P18.7-T8 AC-2 answers `for` with Month: no longer refused (UI-020, the client asked for compare in Month)', async () => {
       h.as('AGUS');
       const month = (await h.http().get('/calendar/entries').query({ view: 'month', for: h.id('SARI') }).expect(200)).body;
       expect(month).toMatchObject({ view: 'month', subject: { membershipId: h.id('SARI') } });
@@ -205,7 +205,7 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       await h.http().post('/calendar/entries').send(timed(1, '09:00', '10:00', { title: 'x'.repeat(120), notes: 'y'.repeat(1000) })).expect(201);
     });
 
-    it('P18.98-T5 AC-7 refuses an entry’s timing field by field in Indonesian, each field named as the API names it', async () => {
+    it('P18.10-T5 AC-7 refuses an entry’s timing field by field in Indonesian, each field named as the API names it', async () => {
       h.as('AGUS');
       const res = await h.http().post('/calendar/entries').set('Accept-Language', 'id')
         .send({ type: 'task', start: '09:00', end: '10:00', endsOn: '2026-09-16' }).expect(400);
@@ -216,7 +216,7 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       expect(await h.col('calendarEvents').countDocuments()).toBe(0);
     });
 
-    it('P18.98-T5 AC-7 the DTO’s own sentences name their field in Indonesian too, and in English as before', async () => {
+    it('P18.10-T5 AC-7 the DTO’s own sentences name their field in Indonesian too, and in English as before', async () => {
       h.as('AGUS');
       const body = timed(1, '24:00', '10:00', { date: '2026/09/16' });
       const res = await h.http().post('/calendar/entries').set('Accept-Language', 'id').send(body).expect(400);
@@ -426,7 +426,7 @@ describe('the calendar over HTTP (P12-T2, P12-T3)', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-7 tells the member a block was placed on, in Indonesian, that there is nothing to answer', async () => {
+    it('P18.10-T5 AC-7 tells the member a block was placed on, in Indonesian, that there is nothing to answer', async () => {
       h.as('OWNER');
       const placed = (await h.http().post('/calendar/blocks')
         .send({ ...timed(2, '11:00', '11:30', { type: 'coaching', title: '1:1 with Agus Salim' }), membershipId: h.id('AGUS') })

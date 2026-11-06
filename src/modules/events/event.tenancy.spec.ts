@@ -49,7 +49,7 @@ describe('an office’s events (P5-T6)', () => {
 
   beforeEach(async () => {
     await clearCollections();
-    // P18.5-T5 AC-9: the offices carry the zone column the day is read from (`kpms.timezone`), as every office does.
+    // P18.2-T5 AC-9: the offices carry the zone column the day is read from (`kpms.timezone`), as every office does.
     await mongoose.model('KpmModelForConfig').create([
       { _id: KPM_A, companyId: '66f0000000000000000000c1', code: '0417', branchName: 'A', timezone: 'Asia/Jakarta' },
       { _id: KPM_B, companyId: '66f0000000000000000000c1', code: '0555', branchName: 'B', timezone: 'Asia/Jakarta' },
@@ -165,7 +165,7 @@ describe('an office’s events (P5-T6)', () => {
       expect(late.startsOn).toBe('2026-10-02');
     });
 
-    it('P18.5-T5 AC-9 reads the zone from kpms.timezone, never a constant (invariant §9)', async () => {
+    it('P18.2-T5 AC-9 reads the zone from kpms.timezone, never a constant (invariant §9)', async () => {
       // 16:30 UTC is still the 1st in Jakarta and already the 2nd in Makassar: only the column can tell them apart.
       const at = { startsAt: '2026-10-01T16:30:00Z', endsAt: '2026-10-01T18:00:00Z' };
       expect((await wired.events.create(member(KPM_A), anEvent({ code: 'JKT', ...at }))).startsOn).toBe('2026-10-01');
@@ -223,7 +223,7 @@ describe('an office’s events (P5-T6)', () => {
     it('takes a leader from the graph, and refuses one from a job title (AC-5)', async () => {
       // Being an AB is a rung; leading is having somebody under you. An AAB with nobody under
       // them leads nobody, and inviting them on the strength of the enum is OD-50's defect.
-      // *P18.5-T5 (D-picker):* read from who reports to whom, as the picker's `leads` is — not the
+      // *P18.2-T5 (D-picker):* read from who reports to whom, as the picker's `leads` is — not the
       // `directCounts` cache, which `titleOnly` below holds stale at 3 to prove it is not read.
       const leads = await membership(KPM_A, {
         role: 'ab', orgLevelCode: 'AB', directCounts: { total: 0 },
@@ -247,8 +247,8 @@ describe('an office’s events (P5-T6)', () => {
     });
   });
 
-  describe('the paths a screen reaches only by mistake (the Phase 18.5 exit review, module coverage)', () => {
-    it('P18.5-T5 AC-9 a type, an event and an unknown type code each answer as nothing found; a re-seed adds nothing', async () => {
+  describe('the paths a screen reaches only by mistake (the Phase 18.2 exit review, module coverage)', () => {
+    it('P18.2-T5 AC-9 a type, an event and an unknown type code each answer as nothing found; a re-seed adds nothing', async () => {
       const nowhere = '66f00000000000000000ffff';
       await expect(wired.events.updateType(member(KPM_A), nowhere, { label: 'X' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(wired.events.archiveType(member(KPM_A), nowhere)).rejects.toMatchObject({ code: 'NOT_FOUND' });
@@ -260,7 +260,7 @@ describe('an office’s events (P5-T6)', () => {
       expect(await wired.events.seedForOffice(member(KPM_A))).toBe(0);
     });
 
-    it('P18.5-T5 AC-9 the first type of an office with none is first in order', async () => {
+    it('P18.2-T5 AC-9 the first type of an office with none is first in order', async () => {
       const empty = '66f0000000000000000000e1';
       const made = await wired.events.createType(member(empty), { code: 'FIRST', label: 'First' });
       expect(made.displayOrder).toBe(1);
@@ -279,7 +279,7 @@ describe('an office’s events (P5-T6)', () => {
       }
     });
 
-    it('P18.5-T5 AC-6 an RSVP, a claim, a confirmation and an answer each land in their own row — never on the event', async () => {
+    it('P18.2-T5 AC-6 an RSVP, a claim, a confirmation and an answer each land in their own row — never on the event', async () => {
       // A real member of 0417, so the audience as at the start holds them, and an Owner who is somebody else.
       const someone = await membership(KPM_A, { joinedAt: new Date('2026-01-02T02:00:00Z') });
       const guest = new RequestContext('u-guest', 'none', {

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import { SavesSetupStep } from '@/modules/reporting/setup-step-saved';
 import { RequestContext } from '@/common/context/request-context';
 import { SaveActivationChecklistDto } from './activation.dto';
 import { ActivationService } from './activation.service';
@@ -20,7 +21,7 @@ export class ActivationController {
   constructor(private readonly activation: ActivationService) {}
 
   /*
-   * **The Owner's and the Admins' read** (`activation_settings:read`; the Phase 18.5 exit review, B2): it answers the
+   * **The Owner's and the Admins' read** (`activation_settings:read`; the Phase 18.2 exit review, B2): it answers the
    * draft and names each training link by the module's working title, a draft's included. It sat on
    * `tenant_config:read`, which every member holds. A field member reads their own activation, named from what the
    * office offers.
@@ -40,6 +41,7 @@ export class ActivationController {
 
   @Put()
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activation-checklist')
   @ApiOperation({
     summary: 'Save the working draft',
     description:
@@ -53,6 +55,7 @@ export class ActivationController {
 
   @Post('publish')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('activation-checklist')
   @ApiOperation({
     summary: 'Publish the draft as the next version',
     description:

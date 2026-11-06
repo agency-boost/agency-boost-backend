@@ -167,7 +167,7 @@ export class CalendarService {
    * - **With `for`**, a compared pane: `COACH(reader, member)` resolved now, 404 outside it — a peer, a
    *   peer AAB's agent, another office's member, a member who left, nobody's id, and the reader
    *   themselves, since compare never reaches oneself. An empty `for` is the DTO's 400, never the
-   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.95-T8 AC-2: it was Week
+   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.7-T8 AC-2: it was Week
    *   only — the client asked for compare in Month, UI-020*). In *Who reads what*'s projection
    *   (`comparedView`), and one §3.5 entry, surface `calendar`, with the period's `from` and `to`,
    *   written last, so a refused read writes none. **Each organiser in the period who hides their
@@ -221,7 +221,7 @@ export class CalendarService {
         membershipId: subject.membershipId,
         name: names.get(subject.membershipId) ?? '',
         rung: { code: subject.orgLevelCode, label: labels.get(subject.orgLevelCode) ?? subject.orgLevelCode },
-        // A person who hides their details hides their number as well (the Phase 18.99 exit review, L2), as their tasks
+        // A person who hides their details hides their number as well (the Phase 18.11 exit review, L2), as their tasks
         // and events go out as *Sibuk*: the WhatsApp beside their tasks is part of what they chose not to show.
         phone: hidden.has(subject.membershipId) ? null : phones.get(subject.membershipId) ?? null,
       },

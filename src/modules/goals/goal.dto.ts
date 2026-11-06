@@ -3,6 +3,20 @@ import { Allow, IsOptional, IsString, MaxLength } from 'class-validator';
 import { GOAL_MODES } from './goal.schema';
 
 /**
+ * **`PUT /goals/:period/ape-estimate`** (P19.1-T4, UI-157 item 4; ADR-0195 §2): the member's own estimate of the APE
+ * produced so far this year. `@Allow()`, read by `checkEstimate`, as the save's body is read by `checkGoal`.
+ */
+export class SaveEstimateDto {
+  @ApiProperty({
+    type: Number, nullable: true, example: 120_000_000_00,
+    description: 'IDR **sen**, whole: the APE produced so far this year, as the member estimates it — *perkiraan Anda*. '
+      + '`null` (or `0`) clears it (*Hapus*). The same figure Goal Settings shows as *APE yang sudah dicapai tahun ini* (ADR-0195).',
+  })
+  @Allow()
+  apeAchievedMinor!: number | null;
+}
+
+/**
  * **`@Allow()`, and the whole body is read by `checkGoal` instead.**
  *
  * The global pipe runs with `whitelist` and `forbidNonWhitelisted`, so a property with no

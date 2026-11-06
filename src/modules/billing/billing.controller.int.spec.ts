@@ -117,10 +117,10 @@ describe('GET /admin/billing/prices (P13.2-T2)', () => {
   });
 
   /*
-   * P18.98-T5: billing writes no sentence of its own — the table is codes and figures — so its one refusal is the guard's,
+   * P18.10-T5: billing writes no sentence of its own — the table is codes and figures — so its one refusal is the guard's,
    * and it reads in the reader's language like every other.
    */
-  it('P18.98-T5 AC-7 refuses a tenant role in Indonesian: the same code and details, and still no rate', async () => {
+  it('P18.10-T5 AC-7 refuses a tenant role in Indonesian: the same code and details, and still no rate', async () => {
     session.current = OWNER;
     const res = await request(app.getHttpServer()).get(url).set('Accept-Language', 'id').expect(403);
     expect(res.body.error).toMatchObject({

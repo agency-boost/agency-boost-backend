@@ -3,14 +3,14 @@ import {
 } from './capability';
 
 /**
- * **The capability ladder a new office starts with, in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5).
+ * **The capability ladder a new office starts with, in Bahasa Indonesia** (P18.10-T7; OD-238, option 1; ADR-0179 §5).
  *
  * Pinned word for word: these are what a leader reads on Leader Notes and Capability Mapping. The four stages keep
  * their English names — the ladder's titles, as the role ladder's *Agency Builder* is (the approved glossary, §A.5) —
  * and so does the *Recruitment* grid (§A.6). The English recorded for migration 0046 is exactly what changed: every
  * code once, and never a word the seed kept.
  */
-describe('P18.98-T7 the seeded capability ladder in Bahasa Indonesia (OD-238)', () => {
+describe('P18.10-T7 the seeded capability ladder in Bahasa Indonesia (OD-238)', () => {
   const WAS = SEEDED_CAPABILITY_LABELS_BEFORE_OD_238;
   const items = SEED_CAPABILITY_GRIDS.flatMap((g) => g.items);
 

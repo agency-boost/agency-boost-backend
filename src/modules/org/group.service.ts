@@ -107,7 +107,7 @@ export class GroupService {
       _id: { $in: [...new Set(rows.map((g) => g.ownerMembershipId))] },
     });
     const named = await this.namesFor(owners.map((o) => o.userId));
-    // An owner whose account is gone is still named, in the reader's language (P18.98-T5 AC-4).
+    // An owner whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     const byMembership = new Map(
       owners.map((o) => [
@@ -276,7 +276,7 @@ export class GroupService {
   }
 
   /**
-   * **Tag or untag one member *Core Leader*, and nothing else** (ADR-0159 §1, P18.8-T5 AC-2, AC-3): the directory
+   * **Tag or untag one member *Core Leader*, and nothing else** (ADR-0159 §1, P18.5-T5 AC-2, AC-3): the directory
    * row's control. Their groups are untouched, so the row needs no copy of them to send back. The same refusals as
    * `tag`, and the same audit entry, with both halves of the tags before and after. Setting what is already set
    * writes nothing.
