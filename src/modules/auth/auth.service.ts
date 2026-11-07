@@ -442,15 +442,18 @@ export class AuthService {
     const user = await this.users.findOne({ _id: record.userId, deletedAt: null }).exec();
     if (!user) throw linkInvalid();
     if (user.emailVerifiedAt) return;
+    if (!this.usable(record)) throw linkInvalid();
 
+    // The address before the link. Pressed twice at once, a press that finds the link spent then finds the address
+    // verified, which is its success; spending first left a window where it found neither.
+    await this.markVerified(record.userId);
     try {
       await this.consumeSingleUse(rawToken, 'email_verification');
     } catch (err) {
-      // Pressed twice at once: the other press spent the token and verified the address, which is this one's success.
+      // The other press spent it a moment earlier, after verifying the same address.
       if (await this.addressVerified(record.userId)) return;
       throw err;
     }
-    await this.markVerified(record.userId);
   }
 
   /** Whether the account's address is verified now, read again. */
@@ -860,12 +863,16 @@ export class AuthService {
       )
       : linkInvalid();
 
-    if (!record || record.usedAt || record.revokedAt) throw invalid;
-    if (record.expiresAt.getTime() <= this.clock.now().getTime()) throw invalid;
+    if (!record || !this.usable(record)) throw invalid;
 
     record.usedAt = this.clock.now();
     await record.save();
     return record;
+  }
+
+  /** A single-use link not yet spent, revoked or expired. */
+  private usable(record: AuthTokenDocument): boolean {
+    return !record.usedAt && !record.revokedAt && record.expiresAt.getTime() > this.clock.now().getTime();
   }
 }
 

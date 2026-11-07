@@ -117,6 +117,26 @@ describe('P19-T1 email at the service (UI-163, ADR-0190)', () => {
       expect((await account(userId))!.emailVerifiedAt).toEqual(NOW);
     });
 
+    it('P19-T1 AC-2 a press that lands between the other press’s two writes answers success, and so does the other', async () => {
+      const { userId, token } = await registered();
+      const original = service.markVerified.bind(service);
+      let second: Promise<void> | undefined;
+      // The second press runs to its end inside the first's step: the interleaving that refused it while the link was
+      // spent before the address was verified.
+      const mark = jest.spyOn(service, 'markVerified').mockImplementationOnce(async (id: string) => {
+        second = service.verifyEmail(token);
+        await second;
+        await original(id);
+      });
+      try {
+        await expect(service.verifyEmail(token)).resolves.toBeUndefined();
+        await expect(second).resolves.toBeUndefined();
+      } finally {
+        mark.mockRestore();
+      }
+      expect((await account(userId))!.emailVerifiedAt).toEqual(NOW);
+    });
+
     it('P19-T1 AC-2 a token that names nobody, or whose account is gone, is 400 AUTH_TOKEN_INVALID', async () => {
       expect(await refusal(service.verifyEmail('never-issued'))).toEqual({ code: 'AUTH_TOKEN_INVALID', status: 400 });
       const { userId, token } = await registered();
