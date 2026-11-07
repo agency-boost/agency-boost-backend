@@ -136,10 +136,12 @@ export async function seedPotensiFixture(deps: PotensiFixtureDeps): Promise<Pote
                                  is at the final stage: Tandai berhasil is on, Tandai tidak berhasil is off with
                                  "Polis sudah dibayar dan terbit"
     budi@kpm0417.test            /leads: Pak Andi Kurniawan, Potensi rekrut bulan ini
-    agus@kpm0417.test            Unit Dashboard → Potensi: the AA tile, units grouped (Arief's, Dewi's, Sari's,
-                                 then Langsung ke AB Agus); Yanti potensi only, Budi ✕, Dewi AA ✓ without the
-                                 switch. Rekrut: Indah's Sdri. Sinta Rahayu (Tambahkan ke unit ›) and Arief's
-                                 Sdr. Wahyu Saputra (New Hires ›). Last month: Siti's case, Dimas's open potensi
+    agus@kpm0417.test            Unit Dashboard → Potensi: the Active Agent tile with its potensi x, units grouped
+                                 (Unit Anda first, then Arief's, Dewi's, Sari's); Yanti's orange number (potensi
+                                 only), Budi ✕, Dewi ✓ without the switch. Rekrut: Budi's potensi rekrut, Indah's
+                                 Sdri. Sinta Rahayu (Tambahkan ke unit ›), Arief's Sdr. Wahyu Saputra (New Hires ›).
+                                 Last month: Siti's case, Dimas's open potensi. An earlier month with none: the
+                                 whole team, every row ✕ (P19.8-T4)
     rina@ · indah@kpm0417.test   Agents: no Potensi tab
 `;
   return { written, guide };

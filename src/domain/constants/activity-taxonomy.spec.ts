@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS, SEED_RATIO_PURPOSES,
+  ACTIVITY_TEXT, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES, SEED_RATIO_DEFINITIONS, SEED_RATIO_PURPOSES,
   SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160, SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167, SEEDED_RATIO_VALUES_BEFORE_ADR_0160,
   SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238, SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238,
 } from './activity-taxonomy';
@@ -434,5 +434,34 @@ describe('P18.10-T7 metrics-and-definitions.md’s activity table against the se
     }
     expect(rows.find((r) => r.code === 'DEV_TRAINING_ATTEND')!.label)
       .toMatch(/^Menghadiri meeting atau training dari KPM atau perusahaan — /);
+  });
+});
+
+/**
+ * **The activity types' *Nama singkat*** (P19.8-T4, ADR-0229 §5): the owner's approved words of 7 November 2026 (MOB
+ * UI-180; `revisions/2026-11-09/`, the *Aktivitas* mockup's table), by code — pinned here word for word, as the
+ * Indonesian labels are — and the bound an office's and a template's writes refuse past.
+ */
+describe('P19.8-T4 AC-13 MOB UI-180 the short names', () => {
+  it('P19.8-T4 AC-13 MOB UI-180 holds the bound at 20 characters', () => {
+    expect(ACTIVITY_TEXT.SHORT_LABEL_MAX).toBe(20);
+  });
+
+  it('P19.8-T4 AC-13 MOB UI-180 seeds the twelve by code with the approved words, each within the bound', () => {
+    expect(Object.fromEntries(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.shortLabel]))).toEqual({
+      LEADS_GEN_ACTIVITY: 'Leads generation',
+      LEADS_NEW_PROSPECT: 'Prospek baru',
+      LEADS_CONTACTED: 'Set appointment',
+      SELL_PRESENTATION: 'Presentasi',
+      SELL_FOLLOWUP: 'Follow up',
+      SELL_SUBMISSION: 'Submission polis',
+      RECRUIT_PRESENTATION: 'Presentasi rekrut',
+      RECRUIT_FOLLOWUP: 'Follow up rekrut',
+      RECRUIT_AGENT_CODE: 'Proses NPA',
+      DEV_TRAINING_ATTEND: 'Meeting / training',
+      DEV_COACHING_RECEIVED: '1-on-1 dgn leader',
+      DEV_TEAM_ACTIVITY: 'Team development',
+    });
+    for (const t of SEED_ACTIVITY_TYPES) expect(t.shortLabel!.length).toBeLessThanOrEqual(ACTIVITY_TEXT.SHORT_LABEL_MAX);
   });
 });

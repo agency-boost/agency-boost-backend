@@ -121,6 +121,29 @@ describe('P19.4-T1 what a KPM changed in a section, by code (ADR-0208 §4)', () 
     expect(merged).toEqual([{ level: 'modules', code: 'M', change: 'changed', fields: ['material', 'title'] }]);
   });
 
+  it('P19.8-T4 AC-13 MOB UI-180 a type’s short name is a field an Owner edits: a KPM that wrote its own is changed', () => {
+    const office = activityOffice(activity);
+    const presentation = office.activityTypes.find((t) => t.code === 'SELL_PRESENTATION')!;
+    presentation.shortLabel = 'Pres. jual';
+    expect(differencesOf(
+      'activity_taxonomy', itemsOfPayload('activity_taxonomy', activity), itemsOfOffice('activity_taxonomy', office),
+    )).toEqual([{ level: 'types', code: 'SELL_PRESENTATION', change: 'changed', fields: ['shortLabel'] }]);
+  });
+
+  it('P19.8-T4 AC-13 MOB UI-180 a template published before the field reads as the seed’s short names: a KPM migration 0060 filled is unchanged', () => {
+    const old = platformDefaultPayload('activity_taxonomy') as { types: Record<string, unknown>[] };
+    const before = { ...old, types: old.types.map(({ shortLabel: _gone, ...t }) => t) };
+    // The office as provisioned today, or as the migration left an older one: the seed's words by code.
+    expect(differencesOf(
+      'activity_taxonomy', itemsOfPayload('activity_taxonomy', before), itemsOfOffice('activity_taxonomy', activityOffice(activity)),
+    )).toEqual([]);
+    // A template that cleared one says none, and the office holding the seed's is a difference a push would carry.
+    const cleared = { ...old, types: old.types.map((t) => (t.code === 'SELL_FOLLOWUP' ? { ...t, shortLabel: null } : t)) };
+    expect(differencesOf(
+      'activity_taxonomy', itemsOfPayload('activity_taxonomy', cleared), itemsOfOffice('activity_taxonomy', activityOffice(activity)),
+    )).toEqual([{ level: 'types', code: 'SELL_FOLLOWUP', change: 'changed', fields: ['shortLabel'] }]);
+  });
+
   it('P19.6-T4 AC-1 a skill’s and a module’s description are fields an Owner edits: a KPM that wrote one is changed', () => {
     const office = trainingOffice();
     expect(differencesOf(

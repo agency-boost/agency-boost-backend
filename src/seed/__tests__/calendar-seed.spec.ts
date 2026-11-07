@@ -174,6 +174,16 @@ describe.each([
     expect(padding.some((date) => (perDay.get(date) ?? 0) > 0)).toBe(true);
   });
 
+  it('P19.8-T3 AC-9 Seed: Agus’s Agenda from today holds Kickoff tim 2026 four days on, 09:00 to 13:00; his week two events at 09:00', async () => {
+    const agus = await as('agus@kpm0417.test');
+    const agenda = await wired.calendar.read(agus, { view: 'agenda', date: today });
+    const kickoff = named(agenda, T.kickoff)!;
+    expect([kickoff.date, kickoff.start, kickoff.end]).toEqual([addDays(today, 4), '09:00', '13:00']);
+    const week = await wired.calendar.read(agus, {});
+    const atNine = week.entries.filter((e) => 'title' in e && e.title === T.standup && e.start === '09:00');
+    expect(atNine).toHaveLength(2);
+  });
+
   it('Seed: a second run on the same day writes nothing', async () => {
     const second = await seedDemo({ clock, log: quiet });
     expect(second.written).toEqual({});

@@ -12,6 +12,8 @@ const quiet = () => undefined;
 const col = (name: string) => mongoose.connection.db!.collection(name);
 const rowsOf = (g: UnitGroup): UnitRow[] => [g.head, ...g.members, ...g.units.flatMap(rowsOf)];
 const everyRow = (view: UnitDashboardView): UnitRow[] => [...view.yourUnit.rows, ...view.units.flatMap(rowsOf)];
+/** The seed's year: the run's, in Jakarta (10:00 on 8 October 2026). */
+const thisYear = () => '2026';
 
 /** The account's live membership in office 0417, as a signed-in context. */
 async function as(email: string): Promise<RequestContext> {
@@ -61,6 +63,30 @@ describe('P19.1-T4 AC-15 the estimate seed — a run at 10:00 on 8 October 2026 
     expect(summary.yearly.production).toBe('official');
     expect(summary.estimateReplaced).toEqual({ uploadedOn: summary.uploadedOn.year });
     expect(summary.uploadedOn.year).not.toBeNull();
+  });
+
+  it('P19.8-T5 AC-8 Pandu typed over his upload after the office’s latest file: his screens read his figure, Satria’s the office’s', async () => {
+    const pandu = await as('pandu@kpm0417.test');
+    const goal = await wired.goals.readOrDefaults(pandu, thisYear());
+    expect(goal.achieved).toEqual({ minor: 60 * M, provenance: 'self_reported', month: null });
+    expect(goal.official).toMatchObject({ provenance: expect.stringMatching(/^(imported|corrected)$/) });
+    expect(goal.official!.minor).toBeGreaterThan(0);
+    const summary = await wired.summary.read(pandu);
+    expect(summary.yearly).toMatchObject({ actualMinor: 60 * M, production: 'estimate' });
+    expect(summary.estimateReplaced).toBeNull();
+
+    const satria = await as('satria@kpm0417.test');
+    const year = await wired.unitDashboard.read(satria, { period: 'year' });
+    const row = everyRow(year).find((r) => r.membershipId === pandu.membershipId)!;
+    expect(row.goal).toMatchObject({ actualMinor: goal.official!.minor, source: { provenance: goal.official!.provenance } });
+  });
+
+  it('P19.8-T5 AC-8 Rina typed before the office’s files: they replaced her figure, which stays stored', async () => {
+    const rina = await as('rina@kpm0417.test');
+    const goal = await wired.goals.readOrDefaults(rina, thisYear());
+    expect(goal.apeAchievedMinor).toBeGreaterThan(0);
+    expect(goal.achieved.provenance).not.toBe('self_reported');
+    expect(goal.official).toMatchObject({ minor: goal.achieved.minor });
   });
 
   it('P19.1-T4 AC-15 a second run changes neither', async () => {

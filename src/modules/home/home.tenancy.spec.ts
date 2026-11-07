@@ -190,57 +190,94 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   });
 
   /*
-   * **Tim saya, by role** (ADR-0189 §4, P19-T4 AC-2; UI-159 item 2): every leader gets the block, a leader with nobody
-   * yet at zero — an AAB who leads nobody was an agent here until Phase 19.
+   * **Home by role** (P19.8-T2 AC-10; ADR-0228 §4; OD-283, OD-284 by their defaults): *Leads* and *New hires* are every
+   * reader's; the leader's block every leader's by role, a leader with nobody yet at zero. *Tim saya*'s own figures
+   * (`members`, `recruitmentPipeline`) left the answer with the block (ADR-0228 §2).
    */
-  describe('P19-T4 Tim saya for every leader', () => {
-    /** Every row the Unit Dashboard draws: the reader's unit, and each unit below, its head and its members. */
-    const rowsOf = (units: { head: { membershipId: string; leadsCounts: { recruitOpen: number } }; members: { membershipId: string; leadsCounts: { recruitOpen: number } }[]; units: unknown[] }[]): { membershipId: string; leadsCounts: { recruitOpen: number } }[] =>
-      units.flatMap((u) => [u.head, ...u.members, ...rowsOf(u.units as never)]);
+  describe('P19.8-T2 AC-10 Home by role', () => {
+    const zero = { count: 0, of: 0 };
+    const ZERO_BLOCK = { activeAgent: { ...zero, unit: zero, aab: zero }, coached7d: { ...zero, unit: zero, aab: zero }, team: [] };
 
-    it('P19-T4 AC-2 an AAB who leads nobody gets the leader block at zero, not null, and nobody is recorded as read', async () => {
+    it('P19.8-T2 AC-10 an AAB who leads nobody gets the leader block at zero, not null — and nobody is recorded as read', async () => {
       const before = await db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
       const view = await read('DEWI');
-      const zero = { count: 0, of: 0 };
-      expect(view.leader).toEqual({
-        activeAgent: { ...zero, unit: zero, aab: zero },
-        coached7d: { ...zero, unit: zero, aab: zero },
-        team: [],
-        members: 0,
-        recruitmentPipeline: 0,
-        newHires: 0,
-      });
+      expect(view.leader).toEqual(ZERO_BLOCK);
+      expect(view.newHires).toBe(0);
       expect(await db().collection('auditLog').countDocuments({ 'after.surface': 'home' })).toBe(before);
     });
 
-    it('P19-T4 AC-2 a leader with no team counts their own recruitment pipeline — never another office’s lead', async () => {
-      const recruit = (kpmId: string, name: string, over: Record<string, unknown> = {}) => ({
-        kpmId, ownerMembershipId: office.id.DEWI, type: 'recruitment', name, statusCode: null, outcome: null,
+    it('P19.8-T2 AC-10 every leader by role gets the block — an AB, an AAB, the Owner and an Admin with nobody — an Agent none', async () => {
+      for (const who of ['AGUS', 'SARI', 'OWNER'] as Who[]) {
+        const view = await read(who);
+        expect({ who, team: view.leader!.team.length > 0 }).toEqual({ who, team: true });
+      }
+      // Maya runs the office and leads nobody: the block at zero, as Dewi's.
+      expect((await read('ADMIN')).leader).toEqual(ZERO_BLOCK);
+      for (const who of ['INDAH', 'RINA', 'DODI'] as Who[]) {
+        const view = await read(who);
+        expect({ who, leader: view.leader }).toEqual({ who, leader: null });
+        expect({ who, newHires: view.newHires }).toEqual({ who, newHires: 0 });
+      }
+    });
+
+    it('P19.8-T2 AC-10 OD-283 Leads is the reader’s own open Sales and Recruit leads: not a won, a lost or a deleted one, not another member’s, not another office’s', async () => {
+      const lead = (over: Record<string, unknown>) => ({
+        kpmId: KPM_A, ownerMembershipId: office.id.INDAH, type: 'recruitment', name: 'Calon', statusCode: null, outcome: null,
         commitments: [], nextActionDate: null, nextActionNote: null, version: 1, deletedAt: null,
         dateRegistered: new Date('2026-09-01T02:00:00Z'), contact: { phone: null, email: null }, transitions: [], ...over,
       });
+      // The office's terminal Recruit stage is the fixture's own, provisioned from the default pipeline. A second row on
+      // (kpmId, code) inserted here would pass only while the unique index had not been built yet.
+      expect(await db().collection('leadStatuses').findOne({
+        kpmId: KPM_A, pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', isTerminal: true, status: 'active', deletedAt: null,
+      })).not.toBeNull();
       const { insertedIds } = await db().collection('leads').insertMany([
-        recruit(KPM_A, 'Calon satu'),
-        // Closed, deleted, or in KPM B under the same id: none of them is DEWI's pipeline.
-        recruit(KPM_A, 'Calon dua', { outcome: 'lost' }),
-        recruit(KPM_A, 'Calon tiga', { deletedAt: new Date('2026-09-02T02:00:00Z') }),
-        recruit(KPM_B, 'Calon kantor B'),
+        lead({ name: 'Calon satu', statusCode: 'MEETING_SCHEDULED' }),
+        lead({ name: 'Calon dua', outcome: 'lost' }),
+        lead({ name: 'Calon tiga', deletedAt: new Date('2026-09-02T02:00:00Z') }),
+        // On the office's terminal stage: joined, no longer a candidate in the pipeline.
+        lead({ name: 'Calon empat', statusCode: 'NEW_ACTIVE_AGENT' }),
+        // Another member's, and another office's under Indah's id.
+        lead({ name: 'Calon Dimas', ownerMembershipId: office.id.DIMAS }),
+        lead({ name: 'Calon kantor B', kpmId: KPM_B }),
+        lead({ name: 'Klien kantor B', kpmId: KPM_B, type: 'sales' }),
       ]);
       try {
-        expect((await read('DEWI')).leader!.recruitmentPipeline).toBe(1);
+        // Ibu Wiwik and Pak Teddy (sales, open) and Calon satu: three. Ibu Closed (won), Ibu Deleted and the rest: none.
+        const view = await read('INDAH');
+        expect(view.leads).toBe(3);
+        // The reader's own row of the Unit Dashboard's *Leads* column, as one number.
+        const own = (await wired.leadReadings.countsOfMany(office.as('INDAH'), [office.id.INDAH], { month: view.month }))
+          .get(office.id.INDAH)!;
+        expect(view.leads).toBe(own.salesOpen + own.recruitOpen);
+        // A leader's downline's leads are theirs, never the leader's (OD-283 option 3 not taken).
+        expect((await read('AGUS')).leads).toBe(0);
       } finally {
         await db().collection('leads').deleteMany({ _id: { $in: Object.values(insertedIds) } });
       }
     });
 
-    it('P19-T4 AC-2 with a team, Anggota tim is Laporan tim’s people and New hires the Unit Dashboard’s count', async () => {
+    it('P19.8-T2 AC-10 an Agent has Leads too, and office B’s reader never counts office A’s', async () => {
+      const view = await read('B_AB');
+      expect(view.leads).toBe(0);
+      expect((await read('INDAH')).leads).toBe(2);
+    });
+
+    it('P19.8-T2 AC-10 with a team, New hires is the Unit Dashboard’s count over the same rows', async () => {
       const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
-      expect(view.leader!.members).toBe(view.leader!.team.length);
-      expect(view.leader!.members).toBe(dashboard.tiles.team.total - 1);
-      expect(view.leader!.newHires).toBe(dashboard.tiles.team.newHires);
-      // The Unit Dashboard's Leads column's recruitment count, summed over every row it draws.
-      const rows = [...dashboard.yourUnit.rows, ...rowsOf(dashboard.units as never)];
-      expect(view.leader!.recruitmentPipeline).toBe(rows.reduce((n, row) => n + row.leadsCounts.recruitOpen, 0));
+      expect(view.newHires).toBe(dashboard.tiles.team.newHires);
+      expect(view.leader!.team.length).toBe(dashboard.tiles.team.total - 1);
+      expect(Object.keys(view.leader!).sort()).toEqual(['activeAgent', 'coached7d', 'team']);
+    });
+
+    it('P19.8-T2 AC-7 an agenda row’s id opens the Calendar’s own detail, and only for its reader: another office’s read is 404', async () => {
+      const view = await read('INDAH');
+      const row = view.actions.find((a) => a.kind === 'agenda' && a.source === 'entry')!;
+      expect(row).toBeDefined();
+      const id = (row as { id: string }).id;
+      const entry = await wired.calendar.readOne(office.as('INDAH'), id);
+      expect(entry.title).toBe('Weekly unit huddle');
+      await expect(wired.calendar.readOne(office.as('B_AB'), id)).rejects.toMatchObject({ status: 404 });
     });
   });
 

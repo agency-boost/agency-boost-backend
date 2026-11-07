@@ -282,6 +282,36 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     }
   }, 60_000);
 
+  /**
+   * **P19.8-T4 AC-14 — the mobile review's states, on the seed** (ADR-0229; MOB UI-177, UI-178, UI-181, UI-183): the
+   * roster shows rows uploaded in each status beside rows not uploaded (which draw no pill), the *Aktivitas* table a count
+   * in every category, and Dewi the empty unit.
+   */
+  it('P19.8-T4 AC-14 Agus’s Group: production uploaded for some, in each status, and not for others', () => {
+    const uploaded = everyRow(view).filter((r) => r.production.monthly.valueMinor !== null);
+    const notUploaded = everyRow(view).filter((r) => r.production.monthly.valueMinor === null);
+    expect(notUploaded.map((r) => first(r.name))).toContain('Yanti');
+    for (const status of ['on_track', 'watch_closely', 'needs_attention'] as const) {
+      expect({ status, held: uploaded.some((r) => r.status === status) }).toEqual({ status, held: true });
+    }
+  });
+
+  it('P19.8-T4 AC-14 the Aktivitas table holds a count in every category for the Group, each type with its short name', async () => {
+    const table = await wired.unitActivities.read(agus, { span: 'month' });
+    const counted = new Set(table.totals.group.counts.map((c) => c.code));
+    for (const section of table.sections) {
+      expect({ section: section.code, counted: section.types.some((t) => counted.has(t.code)) })
+        .toEqual({ section: section.code, counted: true });
+      for (const type of section.types) expect({ type: type.code, short: typeof type.shortLabel }).toEqual({ type: type.code, short: 'string' });
+    }
+  });
+
+  it('P19.8-T4 AC-14 Dewi, an AAB with no team: the empty unit on Overview and on Aktivitas', async () => {
+    const dewi = await as('dewi@kpm0417.test');
+    expect((await wired.unitDashboard.read(dewi)).empty).toBe(true);
+    expect(await wired.unitActivities.read(dewi)).toMatchObject({ empty: true, people: [] });
+  });
+
   it('P15-T1 AC-12 Dewi and Rina lead nobody: the empty unit; Sari and Arief their own units only', async () => {
     for (const email of ['dewi@kpm0417.test', 'rina@kpm0417.test']) {
       expect((await wired.unitDashboard.read(await as(email))).empty).toBe(true);

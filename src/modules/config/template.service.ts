@@ -14,7 +14,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import {
-  ACTIVATION_TRAINING_LINK_PREFIX, activationLinkKinds, RECRUITMENT, resolveDisplayUnit, SEED_ACTIVITY_TYPES,
+  ACTIVATION_TRAINING_LINK_PREFIX, ACTIVITY_TEXT, activationLinkKinds, RECRUITMENT, resolveDisplayUnit, SEED_ACTIVITY_TYPES,
   type RecruitmentPlaybookBody, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import {
@@ -24,7 +24,8 @@ import { OfficeCounter, type OfficeStanding, type TemplateScope } from './office
 import { NamedTemplateService, type NamedTemplateView } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import {
-  isNamedTemplateKind, isOfficeTemplateKind, platformDefaultPayload, withCascadeTypes, type NamedTemplateKind,
+  isNamedTemplateKind, isOfficeTemplateKind, platformDefaultPayload, typeShortLabelProblems, withCascadeTypes,
+  type NamedTemplateKind,
 } from './template-defaults';
 import { checkPlaybookBody } from '@/modules/recruitment/recruitment-playbook-input';
 import { defaultPlaybookBody } from '@/modules/recruitment/recruitment-playbook-defaults';
@@ -746,6 +747,14 @@ export class TemplateService {
    * `CONFIG_SUMMARY_GROUP_LABEL_MISMATCH` for one tile carrying two labels.
    */
   private checkedTaxonomy(payload: Record<string, unknown>): Record<string, unknown> {
+    // P19.8-T4 (ADR-0229 §5): a type's *Nama singkat* within the bound an office's own write meets.
+    const [tooLong] = typeShortLabelProblems(payload.types);
+    if (tooLong !== undefined) {
+      throw new InvalidRequestException(
+        SAY.inSection({ section: 'activityTypes', inner: SAY.typeShortLabel({ code: tooLong, max: ACTIVITY_TEXT.SHORT_LABEL_MAX }) }),
+        { field: 'shortLabel', code: tooLong },
+      );
+    }
     if (!Array.isArray(payload.categories)) return payload;
     const categories = checkTemplateSummaryGroups(payload.categories);
     refuseSummaryGroupConflict(categories as SummaryGrouped[]);

@@ -107,17 +107,11 @@ class HomeLeaderDto {
   @ApiProperty({ type: HomeSplitDto, description: 'Exactly the Unit Dashboard’s *Active Agent* tile.' }) activeAgent!: HomeSplitDto;
   @ApiProperty({ type: HomeSplitDto, description: 'Members coached in the last 7 days (`COACHED_7D`), out of manpower.' })
   coached7d!: HomeSplitDto;
-  @ApiProperty({ type: [HomeTeamPersonDto], description: 'Nobody-reported first, then not today, then the rest.' })
-  team!: HomeTeamPersonDto[];
-  @ApiProperty({ minimum: 0, description: '*Tim saya · Anggota tim*: everybody in your Group but you.' })
-  members!: number;
   @ApiProperty({
-    minimum: 0,
-    description: '*Tim saya · Recruitment pipeline*: `RECRUITMENT_PIPELINE_NOW` over your Group, you included.',
+    type: [HomeTeamPersonDto],
+    description: '*Laporan aktivitas tim*: everybody in your Group but you — nobody-reported first, then not today, then the rest.',
   })
-  recruitmentPipeline!: number;
-  @ApiProperty({ minimum: 0, description: '*Tim saya · New hires*: your Group’s new hires before a first sale (ADR-0172 §1).' })
-  newHires!: number;
+  team!: HomeTeamPersonDto[];
 }
 
 export class HomeDto implements HomeView {
@@ -138,9 +132,24 @@ export class HomeDto implements HomeView {
         { $ref: getSchemaPath(HomeAgendaActionDto) },
       ],
     },
-    description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’.',
+    description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’. An agenda '
+      + 'row’s `id` is the Calendar’s own: an entry’s opens `GET /calendar/entries/{id}`, a joined event’s `/events/{id}`.',
   })
   actions!: HomeView['actions'];
+  @ApiProperty({
+    minimum: 0,
+    example: 7,
+    description: '*Leads* (`OWN_OPEN_LEADS`): your own open leads, Sales and Recruit — `OPEN_SALES_LEADS` and '
+      + '`RECRUITMENT_PIPELINE_NOW` over you alone. Every reader’s.',
+  })
+  leads!: number;
+  @ApiProperty({
+    minimum: 0,
+    example: 1,
+    description: '*New hires*: your Group’s new hires before a first sale (ADR-0172 §1), the Unit Dashboard’s count; 0 when '
+      + 'you lead nobody.',
+  })
+  newHires!: number;
   @ApiProperty({
     type: HomeLeaderDto,
     nullable: true,

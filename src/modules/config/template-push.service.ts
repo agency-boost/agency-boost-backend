@@ -40,7 +40,7 @@ import { CompanyTemplate, CompanyTemplateDocument } from './company-template.sch
 import { NamedTemplateService, type TemplateOfficeView } from './named-template.service';
 import type { NamedTemplateDocument } from './named-template.schema';
 import { OfficeCounter, type OfficeSeeds } from './office-counter.port';
-import { isOfficeTemplateKind, withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
+import { isOfficeTemplateKind, shortLabelOf, withCascadeTypes, type OfficeTemplateKind } from './template-defaults';
 import {
   differencesOf, itemsOfOffice, itemsOfPayload, kindsInOrder, mergeDifferences, ownMaterialDifferences, pushStateOf,
   type OfficeRows, type PushDifference, type PushState,
@@ -575,12 +575,14 @@ export class TemplatePushService {
       };
     });
     const typeRows = types.filter((t) => known.has(t.categoryCode)).map((t, i) => ({
-      code: t.code, categoryCode: t.categoryCode, label: t.label, description: t.description ?? null,
+      code: t.code, categoryCode: t.categoryCode, label: t.label,
+      // P19.8-T4 (ADR-0229 §5): the template's *Nama singkat*, or the platform's by code for a payload made before it.
+      shortLabel: shortLabelOf(t), description: t.description ?? null,
       displayOrder: t.displayOrder ?? i + 1,
     }));
     await this.syncRows(kctx, this.activityCategories, categoryRows,
       ['label', 'description', 'appliesToOrgLevelCodes', 'summaryGroupCode', 'summaryGroupLabel']);
-    await this.syncRows(kctx, this.activityTypes, typeRows, ['categoryCode', 'label', 'description']);
+    await this.syncRows(kctx, this.activityTypes, typeRows, ['categoryCode', 'label', 'shortLabel', 'description']);
 
     const held = await this.bindings.findOne(kctx, { status: 'active' });
     const next = { leads: [...binding.leads], appointments: [...binding.appointments], closings: [...binding.closings] };

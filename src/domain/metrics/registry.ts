@@ -408,6 +408,10 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- The proposal (Phase 19.7, P19.7-T2; ADR-0221 §7; `proposals-made.ts`) ----
   // Over the Unit Dashboard's window (`7d`, `month`, `year`), the office's calendar; its default period is the month.
   PROPOSALS_MADE: { period: 'CALENDAR_MONTH', threshold: null },
+
+  // ---- Home (Phase 19.8, P19.8-T2; ADR-0228 §4, OD-283; `own-open-leads.ts`) ----
+  // The leads as they stand now, as the two counts it adds.
+  OWN_OPEN_LEADS: { period: 'POINT_IN_TIME', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

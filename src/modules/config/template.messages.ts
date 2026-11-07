@@ -80,6 +80,11 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
       id: `${code} tidak memiliki apa pun di penyebutnya. Itu pembagian dengan nol yang menyamar sebagai konfigurasi, `
         + 'dan akan tampil sebagai ∞ di layar setiap agent.',
     }),
+    /* P19.8-T4 (ADR-0229 §5): a type's *Nama singkat* in the template's activity section, refused as an office's is. */
+    typeShortLabel: ({ code, max }: { code: string; max: number }) => ({
+      en: `${code}: the short name must be text of at most ${max} characters, or empty.`,
+      id: `${code}: nama singkat harus berupa teks paling banyak ${max} karakter, atau kosong.`,
+    }),
     taxonomyEmpty: {
       en: 'A taxonomy with no categories or no types would give every new office an empty '
         + 'Log Activity screen.',

@@ -19,6 +19,8 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.ratioCodesUndeclared', V.ratioCodesUndeclared({ codes: ['X'], version: null }), ['X']],
   ['VALIDATION_FAILED.noDenominator', V.noDenominator({ code: 'REFERRAL_RATE' }), ['REFERRAL_RATE', '∞']],
   ['VALIDATION_FAILED.taxonomyEmpty', V.taxonomyEmpty, ['Log Activity']],
+  // P19.8-T4 AC-13 MOB UI-180 (ADR-0229 §5): a type's *Nama singkat* past the bound, in the template's activity section.
+  ['VALIDATION_FAILED.typeShortLabel', V.typeShortLabel({ code: 'SELL_PRESENTATION', max: 20 }), ['SELL_PRESENTATION', '20']],
   ['VALIDATION_FAILED.pipelineNoStages', V.pipelineNoStages({ pipeline: 'sales' }), ['sales']],
   ['VALIDATION_FAILED.pipelineOneTerminal', V.pipelineOneTerminal({ pipeline: 'recruitment' }), ['recruitment']],
   ['VALIDATION_FAILED.inSection', V.inSection({ section: 'activityBinding', inner: V.noRatios }), []],

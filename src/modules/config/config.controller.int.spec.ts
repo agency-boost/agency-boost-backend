@@ -410,6 +410,102 @@ describe('the configuration controllers', () => {
     });
   });
 
+  /*
+   * **An activity type's *Nama singkat*** (P19.8-T4 AC-5, AC-13; ADR-0229 §5, MOB UI-180): written where the name is —
+   * the batch the settings screen saves through and the single routes — by the Owner and an Admin; refused past the bound
+   * and to every field rung and a read-only session; another office's type is 404.
+   */
+  describe('P19.8-T4 an activity type’s short name (MOB UI-180)', () => {
+    const KPM_B = '66f0000000000000000000b1';
+    const typeOf = async (ctx: RequestContext, code: string) =>
+      (await wired.activity.list(ctx, true)).flatMap((c) => c.types).find((t) => t.code === code)!;
+    const field = (over: Partial<Record<string, unknown>>) => new RequestContext(
+      `u-${String(over.membershipId)}`, 'none', member({ isKpmOwner: false, ...over }) as never,
+    );
+    const AB = field({ membershipId: 'mem-ab', hierarchyRole: 'ab', orgLevelCode: 'AB' });
+    const AAB = field({ membershipId: 'mem-aab', hierarchyRole: 'aab', orgLevelCode: 'AAB' });
+    const READ_ONLY = new RequestContext(OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true);
+
+    it('P19.8-T4 AC-13 MOB UI-180 the office is given the seed’s short names, and the settings read returns them', async () => {
+      const res = await request(app.getHttpServer()).get('/kpm/settings/activity-types?includeArchived=true').expect(200);
+      const types = res.body.flatMap((c: { types: { code: string; shortLabel: string | null }[] }) => c.types);
+      expect(types.find((t: { code: string }) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi' });
+      // And /kpm/config, which every screen reads.
+      const config = await request(app.getHttpServer()).get('/kpm/config').expect(200);
+      expect(config.body.activity.flatMap((c: { types: unknown[] }) => c.types)
+        .find((t: { code: string }) => t.code === 'SELL_SUBMISSION')).toMatchObject({ shortLabel: 'Submission polis' });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 the Owner and an Admin write it through the batch and the single route; blank clears it', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [
+          { op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: ' Presentasi jual ' } },
+          { op: 'type.create', body: { code: 'SELL_REFERRAL', categoryCode: 'SELLING', label: 'Meminta referensi', shortLabel: 'Referensi' } },
+        ] })
+        .expect(201);
+      expect(await typeOf(OWNER, 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi jual', version: presentation.version + 1 });
+      expect(await typeOf(OWNER, 'SELL_REFERRAL')).toMatchObject({ shortLabel: 'Referensi' });
+
+      current = ADMIN;
+      const submission = await typeOf(OWNER, 'SELL_SUBMISSION');
+      const patched = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${submission.id}`).send({ shortLabel: 'SPAJ' }).expect(200);
+      expect(patched.body).toMatchObject({ code: 'SELL_SUBMISSION', label: 'Submission polis', shortLabel: 'SPAJ' });
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${submission.id}`).send({ shortLabel: '' }).expect(200);
+      expect(await typeOf(OWNER, 'SELL_SUBMISSION')).toMatchObject({ shortLabel: null, label: 'Submission polis' });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 refuses a short name past 20 characters on both paths, writing nothing', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      const batch = await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: 'x'.repeat(21) } }] })
+        .expect(400);
+      expect(batch.body.error.code).toBe('VALIDATION_FAILED');
+      const single = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'x'.repeat(21) }).expect(400);
+      expect(single.body.error.code).toBe('VALIDATION_FAILED');
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'x'.repeat(20) }).expect(200);
+      current = OWNER;
+      expect((await typeOf(OWNER, 'SELL_PRESENTATION')).shortLabel).toBe('x'.repeat(20));
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 refuses an AB, an AAB, an Agent and a read-only session, through the batch and the route', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      for (const who of [AB, AAB, AGENT, READ_ONLY]) {
+        current = who;
+        await request(app.getHttpServer())
+          .post('/kpm/settings/changes')
+          .send({ ops: [{ op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: 'Milik saya' } }] })
+          .expect(403);
+        await request(app.getHttpServer())
+          .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'Milik saya' }).expect(403);
+      }
+      expect((await typeOf(OWNER, 'SELL_PRESENTATION')).shortLabel).toBe('Presentasi');
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 an Owner of one office cannot write another’s short name — 404, never 403', async () => {
+      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
+        _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta',
+      });
+      await wired.provisioning.seedActivityTaxonomy(KPM_B);
+      const OWNER_B = new RequestContext('u-owner-b', 'none', member({ membershipId: 'mem-ob', kpmId: KPM_B }) as never);
+      const theirs = await typeOf(OWNER_B, 'SELL_PRESENTATION');
+
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${theirs.id}`).send({ shortLabel: 'Bukan milikmu' }).expect(404);
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'type.update', id: theirs.id, expectedVersion: theirs.version, body: { shortLabel: 'Bukan milikmu' } }] })
+        .expect(404);
+      expect((await typeOf(OWNER_B, 'SELL_PRESENTATION')).shortLabel).toBe('Presentasi');
+    });
+  });
+
   describe('POST /kpm/settings/changes', () => {
     it('refuses a member who may read the configuration and not write it', async () => {
       // The API refuses it too — hiding the controls on screen is convenience, not control.

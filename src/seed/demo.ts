@@ -76,6 +76,7 @@ import { seedPotensiFixture } from './potensi-fixture';
 import { seedProposalFixture } from './proposal-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
+import { seedHomeFixture } from './home-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
 import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
 import {
@@ -761,6 +762,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     })));
     await ActivityTypes.insertMany(SEED_ACTIVITY_TYPES.map((t) => ({
       kpmId, code: t.code, categoryCode: t.categoryCode, label: t.label,
+      // *Nama singkat* (P19.8-T4, ADR-0229 §5): the approved short names, by code, as a new office is given them.
+      shortLabel: t.shortLabel,
       description: t.description ?? null, displayOrder: t.displayOrder,
       version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
@@ -2664,6 +2667,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const tugas = await seedTugasFixture({ clock, kpm0417: id0417, agus: ab.id, rina: rina.id });
 
+  // ------------------- Home: a lead's next action on the run's today, for Agus (P19.8-T2 AC-11; `home-fixture.ts`)
+
+  const home = await seedHomeFixture({ clock, kpm0417: id0417, agus: ab.id });
+
   // ------------------- recruitment tools: the playbooks, the pitch, 0417's brochure (Phase 17; `recruitment-fixture.ts`)
 
   const recruitment = await seedRecruitmentFixture({
@@ -2723,6 +2730,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   await Goals.updateOne(
     { kpmId: id0417, membershipId: rina.id, period: thisYear, apeAchievedTypedAt: null, deletedAt: null },
     { $set: { apeAchievedTypedAt: daysAgo(30) } },
+  ).exec();
+  /*
+   * **Pandu typed over his uploaded figure, after the office's latest file** (P19.8-T5 AC-8; MOB UI-190, ADR-0230 §6):
+   * this month's corrected file landed a day ago, and six hours ago he typed Rp 60 jt over the year to date it gives
+   * him. The newer wins on his own screens — Goal Settings reads *Diubah oleh Anda* with *Pakai otomatis*, the Summary
+   * *perkiraan Anda* — while Satria's Unit Dashboard and the Owner's screens read the office's figure. Rina's above is
+   * the other order: typed before the files, replaced by them. Written only while nothing is typed yet.
+   */
+  await Goals.updateOne(
+    { kpmId: id0417, membershipId: reportingCast.pandu.id, period: thisYear, apeAchievedMinor: 0, deletedAt: null },
+    { $set: { apeAchievedMinor: 60_000_000_00, apeAchievedTypedBy: null, apeAchievedTypedAt: daysAgo(0.25) } },
   ).exec();
 
   // ------------------- a lead list in a dragged order (P18.5-T7; ADR-0161 §1)
@@ -3907,8 +3925,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                                        agents of his own and three AABs under him
     sari@kpm0417.test                                  AAB leading two agents
     dewi@kpm0417.test                                  AAB leading nobody: every leader item in the
-                                                       menu, Home's Tim saya at zero, and each empty
-                                                       leader page's Contoh (P19-T4)
+                                                       menu, Home's six tiles at 0, and each empty
+                                                       leader page's Contoh (P19-T4, P19.8-T2)
                                                        Sari, Dewi and Arief were promoted from Agent,
                                                        so /people/members Role change log has rows
     rina@kpm0417.test            demo password rina    Agent under Sari; /leads in the order she dragged
@@ -3938,7 +3956,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM; every Agent
                                                        item opens its Contoh with Cari / Daftar KPM and

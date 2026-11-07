@@ -8,7 +8,7 @@ import {
 import { CODE_MESSAGE, CODE_PATTERN, CONFIG_BOUNDS } from './config-input';
 
 const CODE_EXAMPLE = 'SELL_SUBMISSION';
-const { categoryLabel, typeLabel, description, rungs, summaryGroupLabel } = CONFIG_BOUNDS;
+const { categoryLabel, typeLabel, typeShortLabel, description, rungs, summaryGroupLabel } = CONFIG_BOUNDS;
 
 /** Trim before validating, so a pasted value with a stray space is accepted rather than refused. */
 const trim = Transform(({ value }: { value: unknown }) =>
@@ -142,6 +142,21 @@ export class CreateActivityTypeDto {
   @trim
   label!: string;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: 'Submission polis',
+    maxLength: typeShortLabel.max,
+    description:
+      '*Nama singkat* (ADR-0229 §5): the one line the Unit Dashboard’s activity table shows, the full `label` on tap. '
+      + 'Blank or `null` is none — the table then shows the label on up to two lines.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(typeShortLabel.max)
+  @trim
+  shortLabel?: string | null;
+
   @ApiPropertyOptional({ example: 'telepon, WhatsApp, tatap muka, dll', maxLength: description.max })
   @IsOptional()
   @IsString()
@@ -159,6 +174,19 @@ export class UpdateActivityTypeDto {
   @MaxLength(typeLabel.max)
   @trim
   label?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: 'Submission polis',
+    maxLength: typeShortLabel.max,
+    description: '*Nama singkat* (ADR-0229 §5). Absent leaves it; blank or `null` clears it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(typeShortLabel.max)
+  @trim
+  shortLabel?: string | null;
 
   @ApiPropertyOptional({ example: 'secara mandiri atau melalui BOP', maxLength: description.max })
   @IsOptional()

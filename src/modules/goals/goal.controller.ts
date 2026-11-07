@@ -118,8 +118,10 @@ export class GoalController {
       + 'plan as it stood is kept as a revision and its version moves on; nothing else of it changes — not its other '
       + 'inputs, its agreed snapshot or `savedAt`. **Your own plan only**, and only a '
       + 'saved one: `404 Goal` without it. Read by your own screens alone — never by a leader’s or the office’s, which '
-      + 'read the office’s figures (ADR-0195) — and replaced on every screen once the office holds a year-to-date figure '
-      + 'for the year.',
+      + 'read the office’s figures (ADR-0195). There, **the newer of it and the office’s year-to-date figure is the one '
+      + 'in force** (ADR-0230): an import or a correction written after it replaces it, and sending it again — the same '
+      + 'figure too — is a typing now, newer than that upload, so it is in force again. The same figure sent while it is '
+      + 'already in force changes nothing.',
   })
   @ApiResponse({ status: 200, type: GoalResponseDto })
   @ApiResponse({

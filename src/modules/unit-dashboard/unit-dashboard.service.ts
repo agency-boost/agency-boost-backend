@@ -224,6 +224,11 @@ export interface UnitPeople {
   /** Everybody, the head first, in the roster's order; only the head when they lead nobody. */
   group: string[];
   names: ReadonlyMap<string, string>;
+  /**
+   * Each person's rung (`orgLevelCode`), the head's included (P19.8-T4 AC-7): a person's own ratios apply the definitions
+   * of their own rung, as the Ratio page does for them (ADR-0020).
+   */
+  rungs: ReadonlyMap<string, string>;
   /** The head leads nobody. */
   empty: boolean;
 }
@@ -702,6 +707,10 @@ export class UnitDashboardService {
       head: { membershipId: head.membershipId, orgLevelCode: head.orgLevelCode, isReader: head.isReader },
       ...scopes,
       names,
+      rungs: new Map([
+        [head.membershipId, head.orgLevelCode],
+        ...head.coachees.map((c): [string, string] => [c.membershipId, c.membership.orgLevelCode]),
+      ]),
       empty: head.coachees.length === 0,
     };
   }

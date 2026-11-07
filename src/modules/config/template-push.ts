@@ -8,7 +8,7 @@ import { eventTypeSeedDocuments, type EventTypesPayload } from '@/modules/events
 import { namedAs, trainingSeedDocuments, type TrainingTaxonomyPayload } from '@/modules/training/training-payload';
 import { bindingOfPayload, defaultBinding, type CascadeBinding } from './activity-binding';
 import {
-  OFFICE_TEMPLATE_KINDS, withCascadeTypes, withPlatformLadder, type OfficeTemplateKind,
+  OFFICE_TEMPLATE_KINDS, shortLabelOf, withCascadeTypes, withPlatformLadder, type OfficeTemplateKind,
 } from './template-defaults';
 
 /**
@@ -90,8 +90,13 @@ const categoryFields = (c: Row): ItemFields => ({
   appliesToOrgLevelCodes: sorted(c.appliesToOrgLevelCodes),
 });
 
-const typeFields = (t: Row): ItemFields => ({
-  categoryCode: text(t.categoryCode), label: text(t.label), description: text(t.description),
+/**
+ * A type's fields. *Nama singkat* (P19.8-T4, ADR-0229 §5) is compared too: an office's row as it stands, and a payload's
+ * as provisioning gives it (`shortLabelOf`) — the platform's words for a type published before the field — so an office
+ * the migration filled reads unchanged against an old template, and a push carries the template's.
+ */
+const typeFields = (t: Row, shortLabel: string | null = text(t.shortLabel)): ItemFields => ({
+  categoryCode: text(t.categoryCode), label: text(t.label), shortLabel, description: text(t.description),
 });
 
 const statusFields = (s: Row): ItemFields => ({
@@ -121,7 +126,7 @@ export function itemsOfPayload(kind: OfficeTemplateKind, payload: Record<string,
       const known = new Set(categories.map((c) => c.code));
       for (const c of categories) items.categories.set(c.code, categoryFields(c as unknown as Row));
       for (const t of types.filter((type) => known.has(type.categoryCode))) {
-        items.types.set(t.code, typeFields(t as unknown as Row));
+        items.types.set(t.code, typeFields(t as unknown as Row, shortLabelOf(t)));
       }
       items.binding.set('binding', bindingFields(binding));
       return items;

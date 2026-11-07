@@ -79,8 +79,8 @@ class PotensiLeaderDto {
 class PotensiUnitDto implements PotensiUnit {
   @ApiProperty({
     enum: ['unit', 'direct'],
-    description: '`unit`: a unit below the head (*UNIT AAB SARI PUSPITA*); `direct`: the head and the agents who answer to '
-      + 'them directly (*LANGSUNG KE AB AGUS*), last.',
+    description: '`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 '
+      + '§4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order.',
   })
   kind!: 'unit' | 'direct';
   @ApiProperty({ type: PotensiLeaderDto }) leader!: PotensiLeaderDto;
@@ -95,9 +95,21 @@ class PotensiHeadDto {
   @ApiProperty() isReader!: boolean;
 }
 
+class PotensiTilesPotensiDto {
+  @ApiProperty({ example: 9, description: 'The people of the unit with a Sales lead switched on for the month, whatever became of it.' })
+  aa!: number;
+  @ApiProperty({ example: 2, description: 'The people of the unit with a Recruit lead switched on for the month, whatever became of it.' })
+  rekrut!: number;
+}
+
 class PotensiTilesDto {
   @ApiProperty({ example: 3, description: 'The people of the unit who are AA in the month, its leaders included.' }) aa!: number;
   @ApiProperty({ example: 1, description: 'The kandidat of the unit who became rekrut in the month.' }) rekrut!: number;
+  @ApiProperty({
+    type: PotensiTilesPotensiDto,
+    description: 'ADR-0229 §8: each tile’s *potensi x* — people, the cards’ `switchedPeople` summed.',
+  })
+  potensi!: PotensiTilesPotensiDto;
 }
 
 /** `GET /unit/dashboard/potensi` (P19.1-T6, UI-155). */
@@ -108,7 +120,7 @@ export class UnitPotensiDto implements UnitPotensiView {
   @ApiProperty({ example: '2026-11-04' }) today!: string;
   @ApiProperty({ type: PotensiHeadDto }) head!: PotensiHeadDto;
   @ApiProperty({ type: PotensiTilesDto }) tiles!: PotensiTilesDto;
-  @ApiProperty({ type: [PotensiUnitDto], description: 'One card per unit below the head, then the head’s own card.' })
+  @ApiProperty({ type: [PotensiUnitDto], description: 'The head’s own card first, then one card per unit below the head (ADR-0229 §4).' })
   units!: PotensiUnitDto[];
 }
 

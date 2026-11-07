@@ -20,11 +20,13 @@ import { defaultBinding, type CascadeBinding } from '@/modules/config/activity-b
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
 import { RatioDefinitionRepository } from '@/modules/config/activity.repository';
 import { OfficialApe } from '@/modules/production/official-ape';
+import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
+import type { HeldFigure } from '@/modules/production/production-readings';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
-import { checkEstimate, checkGoal, typedApeOf, typedByAfter } from './goal-input';
+import { checkEstimate, checkGoal, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
 import { GOAL_REFUSALS } from './goals.messages';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -52,8 +54,10 @@ function projectionOf(inputs: Record<string, unknown>): CascadeResult | null {
 }
 
 /**
- * **Which APE a plan is measured against** (P9-T6 AC-3): the office's year to date when it holds one,
- * else the agent's own typed figure. One rule for `planOf`'s single read and `plansOf`'s bulk one.
+ * **Which APE a plan is measured against on a leader's and the office's screens** (P9-T6 AC-3; ADR-0195 §4, kept by
+ * ADR-0230 §7): the office's year to date when it holds one, else the typed figure — which `officialGoalFigures` then
+ * reads as nothing held. `plansOf`'s rule, the Unit Dashboard's, the KPM Overview's and Analytics'. The member's own
+ * screens read `memberAchievedOf`, where a figure typed after the office's may win.
  */
 function achievedOf(
   held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null, typed: number,
@@ -62,6 +66,35 @@ function achievedOf(
   if (held) return { minor: held.minor, provenance: held.provenance, month: held.month };
   // Who typed it, only when it was not the member (S2): the member's own figure says nothing more than it did.
   return { minor: typed, provenance: 'self_reported', month: null, ...(typedBy ? { typedBy } : {}) };
+}
+
+/**
+ * **Which APE the member's own screens measure against** (P19.8-T5; ADR-0230 §6, OD-279's default): **the newer of the
+ * typed figure and the office's** (`typedInForce`) — Goal Settings, the Summary, and their coach's view of the member's
+ * plan. With no office figure it is `achievedOf`'s answer; with one, the typed figure only when it was typed after the
+ * office last wrote the year. The typed figure is never overwritten either way: it stays in `apeAchievedMinor`.
+ */
+function memberAchievedOf(input: {
+  held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null;
+  typed: number;
+  typedAt: Date | null;
+  officialAt: Date | null;
+  typedBy: GoalTypist | null;
+}): GoalAchieved {
+  const { held, typed } = input;
+  const typedWins = typedInForce({ typedMinor: typed, typedAt: input.typedAt, held: held !== null, officialAt: input.officialAt });
+  return achievedOf(typedWins ? null : held, typed, input.typedBy);
+}
+
+/** The figure in force, and the office's own beside it (`GoalView`'s `achieved` and `official`). */
+interface Achieved {
+  achieved: GoalAchieved;
+  official: GoalOfficial | null;
+}
+
+/** The office's own figure for the year, whichever wins (ADR-0230 §4): what *Pakai otomatis* puts back. */
+function officialOf(held: { minor: number; provenance: 'imported' | 'corrected'; month: string } | null): GoalOfficial | null {
+  return held ? { minor: held.minor, provenance: held.provenance, month: held.month } : null;
 }
 
 /**
@@ -166,6 +199,18 @@ export interface GoalTypist {
 }
 
 /**
+ * **The office's year to date for the member's year, whichever figure is in force** (P19.8-T5; ADR-0230 §1, §4): the
+ * automatic figure Goal Settings prefills, marks *⚡ Otomatis · per {month}* and puts back with *Pakai otomatis*.
+ * `null` while the office holds none. The official figure, so nothing a leader may not read.
+ */
+export interface GoalOfficial {
+  minor: number;
+  provenance: 'imported' | 'corrected';
+  /** The latest month the year to date reads, `YYYY-MM`. */
+  month: string;
+}
+
+/**
  * **A plan worked out and not saved** (`GoalService.preview`, P18.11-T5): what the inputs a screen holds would mean,
  * by the formula a save uses. `monthsLeft` is the figure in force — the typed one, or the office's calendar.
  */
@@ -217,6 +262,8 @@ export interface GoalView {
   apeAchievedMinor: number;
   /** The figure `projected` is computed from, and which writer it came from (P9-T6). */
   achieved: GoalAchieved;
+  /** The office's own figure for the year, whichever is in force — `null` while it holds none (ADR-0230 §4). */
+  official: GoalOfficial | null;
   caseSizeMinor: number;
   leadsToApptPct: number;
   closingRatePct: number;
@@ -322,6 +369,12 @@ export class GoalService {
      * the token named as above, and without it the default binding.
      */
     @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
+    /*
+     * P19.8-T5 (ADR-0230 §6): the office's production imports, for the moment it last wrote a member's year — the newer
+     * of that and a typed figure wins on the member's own screens. The application always provides it; optional, the
+     * token named as above, and without it only a correction dates the office's figure.
+     */
+    @Optional() @Inject(DataUploadBatchRepository) private readonly batches: DataUploadBatchRepository | null = null,
   ) {}
 
   /** The office's activity binding (ADR-0163 §4), or the default binding on a hand-built instance. */
@@ -373,10 +426,44 @@ export class GoalService {
    */
   private async achievedFor(
     ctx: RequestContext, membershipId: string, period: string, goal: GoalDocument | null,
-  ): Promise<GoalAchieved> {
+  ): Promise<Achieved> {
     const held = await this.production.apeYearToDate(ctx, membershipId, period);
-    // Who typed it is asked only where the typed figure is the answer.
-    return achievedOf(held, goal?.apeAchievedMinor ?? 0, held ? null : await this.typistOf(ctx, typistIdOf(goal)));
+    return this.inForce(ctx, period, held, {
+      minor: goal?.apeAchievedMinor ?? 0, at: goal?.apeAchievedTypedAt ?? null, by: typistIdOf(goal),
+    });
+  }
+
+  /**
+   * **The figure in force on the member's own screens, and the office's beside it** (P19.8-T5; ADR-0230 §6): the newer
+   * of the typed figure and the office's year to date (`memberAchievedOf`). The office's write moment is read only where
+   * it can decide the answer — a typed figure above 0 beside an office figure — and who typed it only where the typed
+   * figure is the answer.
+   */
+  private async inForce(
+    ctx: RequestContext, period: string, held: HeldFigure | null,
+    typed: { minor: number; at: Date | null; by: string | null },
+  ): Promise<Achieved> {
+    const officialAt = held && typed.minor > 0 ? await this.officialAt(ctx, period, held) : null;
+    const official = officialOf(held);
+    const achieved = memberAchievedOf({ held, typed: typed.minor, typedAt: typed.at, officialAt, typedBy: null });
+    if (achieved.provenance !== 'self_reported' || typed.by === null) return { achieved, official };
+    const typedBy = await this.typistOf(ctx, typed.by);
+    return { achieved: typedBy ? { ...achieved, typedBy } : achieved, official };
+  }
+
+  /**
+   * **When the office last wrote the member's year** (ADR-0230 §6, `officialWrittenAt`): its newest correction among the
+   * year's months, or the year's latest import standing — whichever is later. The office's own: through the
+   * tenant-scoped repository, on the batches' `(kpmId, month, status, …)` index, as the Summary's date reads it.
+   */
+  private async officialAt(ctx: RequestContext, period: string, held: HeldFigure): Promise<Date | null> {
+    if (!this.batches) return officialWrittenAt(held.correctedAt, null);
+    const [latest] = await this.batches.find(
+      ctx,
+      { month: { $gte: `${period}-01`, $lte: `${period}-12` }, status: 'committed', committedAt: { $ne: null } },
+      { sort: { committedAt: -1 }, limit: 1, projection: { committedAt: 1 } },
+    );
+    return officialWrittenAt(held.correctedAt, latest?.committedAt ?? null);
   }
 
   /** A coach who typed the figure, named (S2) — `null` for the member, and a name `null` for nobody the office holds. */
@@ -452,7 +539,7 @@ export class GoalService {
     const previous = await this.goals.findOne(ctx, { membershipId, period: input.period! });
     /*
      * **The APE achieved so far** (ADR-0075, partly reversed by ADR-0183; `typedApeOf`). The member types
-     * their own, always. Somebody else saving the plan — a leader who coaches them, through a session or
+     * their own, always — over the office's figure too since ADR-0230. Somebody else saving the plan — a leader who coaches them, through a session or
      * from Goal Settings, or the office's Owner or Admin — **types it too while the office holds no figure
      * for the year**; once the carrier's file (or a correction) is held, their typing is ignored and the
      * member's stored figure kept. A body that leaves the figure out keeps the stored one, whoever saves (S1). The
@@ -460,22 +547,32 @@ export class GoalService {
      * audit entry's `apeAchievedChanged`.
      */
     const held = await this.production.apeYearToDate(ctx, membershipId, input.period!);
-    const typed = typedApeOf({
-      own: membershipId === savedBy, held, asked: input.apeAchievedMinor, stored: previous?.apeAchievedMinor ?? 0,
-    });
+    const own = membershipId === savedBy;
+    const typed = typedApeOf({ own, held, asked: input.apeAchievedMinor, stored: previous?.apeAchievedMinor ?? 0 });
+    const changed = typed !== (previous?.apeAchievedMinor ?? 0);
+    /*
+     * **The member typing over the office's figure is a typing now** (P19.8-T5; ADR-0230 §6): the newer of the two wins,
+     * so a figure they type again — the same one an upload has since replaced — is newer than that upload. Only the
+     * member's own, only over an office figure, only a figure the body carries.
+     */
+    const retyped = own && held !== null && input.apeAchievedMinor !== undefined && typed > 0;
     /*
      * **Who typed the figure the plan now stores** (S2): the saver when this save changed it, else whoever did before.
      * A screen leaves the figure out unless its reader changed it (S1), so a coach saving the target leaves the
      * member's own figure — and its attribution — as they were.
      */
-    const typedBy = typedByAfter({
+    const typedBy = retyped && !changed ? savedBy : typedByAfter({
       before: previous?.apeAchievedMinor ?? 0, after: typed, savedBy, typedBefore: previous?.apeAchievedTypedBy,
     });
-    // What is agreed is measured against the figure the screen showed — the carrier's, once there is
-    // one — and the typed figure is stored either way (P9-T6).
-    const achieved = achievedOf(
-      held, typed, held ? null : await this.typistOf(ctx, typedBy === membershipId ? null : typedBy),
-    );
+    // When the figure was typed (P19.1-T4 AC-11): now when this save typed it, else as it was.
+    const typedAt = changed || retyped ? now : (previous?.apeAchievedTypedAt ?? null);
+    /*
+     * What is agreed is measured against the figure the member's screen showed — the newer of the typed figure and the
+     * office's (ADR-0230 §6) — and the typed figure is stored either way (P9-T6).
+     */
+    const { achieved, official } = await this.inForce(ctx, input.period!, held, {
+      minor: typed, at: typedAt, by: typedBy === membershipId ? null : typedBy,
+    });
     // Refuses an unusable assumption before anything is written (AC-7).
     const agreed = computeCascade({ ...input, monthsLeft, apeAchievedMinor: achieved.minor } as never);
     const binding = await this.binding(ctx);
@@ -494,8 +591,8 @@ export class GoalService {
           monthsLeftOverride: input.monthsLeft ?? null,
           apeAchievedMinor: typed,
           apeAchievedTypedBy: typedBy,
-          // When the figure changed (P19.1-T4 AC-11): kept as it was when this save leaves it alone.
-          apeAchievedTypedAt: typed !== (previous?.apeAchievedMinor ?? 0) ? now : (previous?.apeAchievedTypedAt ?? null),
+          // When the figure was typed (P19.1-T4 AC-11, ADR-0230 §6): kept as it was when this save leaves it alone.
+          apeAchievedTypedAt: typedAt,
           caseSizeMinor: input.caseSizeMinor!,
           leadsToApptPct: input.leadsToApptPct!,
           closingRatePct: input.closingRatePct!,
@@ -538,7 +635,7 @@ export class GoalService {
       {
         period: saved.period, version: saved.version, savedByMembershipId: savedBy,
         // Who typed the APE produced, when this save changed it (ADR-0183): the saver, named above. No figure.
-        ...(typed !== (previous?.apeAchievedMinor ?? 0) ? { apeAchievedChanged: true } : {}),
+        ...(changed || retyped ? { apeAchievedChanged: true } : {}),
       },
     );
     // §3.6 (AC-7): an agent finding their target changed should not have to notice it.
@@ -547,7 +644,7 @@ export class GoalService {
     }
     // P13-T3 AC-2: the hire's goal, saved by them or by a leader with `?for=`, attributed to whoever saved it.
     await signalActivation(this.activation, ctx, membershipId, 'feature:goals');
-    return this.view(saved, day, achieved, await this.measuring(ctx, membershipId, day), binding);
+    return this.view(saved, day, { achieved, official }, await this.measuring(ctx, membershipId, day), binding);
   }
 
   /**
@@ -564,11 +661,14 @@ export class GoalService {
    *   change; the plan as it stood is kept in `revisions[]` and the version moves on, as a save's does. Not a re-plan:
    *   the other inputs, the agreed snapshot and `savedAt` stay. The audit entry is `goal.estimate_set` or
    *   `goal.estimate_cleared` — no amount, as ADR-0183's `apeAchievedChanged` carries none.
+   * - **The same figure again writes nothing** — unless the office has written the year since it was typed, so the
+   *   office's figure is the one in force: then sending it again is a typing now, newer than that upload, and it is
+   *   re-stamped and wins, as the plan's save does (ADR-0230 §6).
    * - **`null` or 0 clears it** (*Hapus*): nothing typed is 0, as on every plan saved before there was an estimate.
-   * - **Apart from the office's production** (AC-13): stored on the plan, never in `monthlyAgentData`. Once the office
-   *   holds a year-to-date figure for the year every screen reads that instead, and nobody's screen reads the estimate
-   *   again (`achievedOf`; the Summary's `estimateReplaced`). No leader's or office's screen reads it at all
-   *   (`officialGoalFigures`).
+   * - **Apart from the office's production** (AC-13): stored on the plan, never in `monthlyAgentData`. **The newer of it
+   *   and the office's year-to-date figure is the one the member's screens read** (ADR-0230 §6, amending ADR-0195 §3):
+   *   an import or a correction written after it replaces it (`memberAchievedOf`; the Summary's `estimateReplaced`).
+   *   No leader's or office's screen reads it at all (`officialGoalFigures`).
    */
   async saveEstimate(ctx: RequestContext, period: string, body: unknown): Promise<GoalView> {
     const membershipId = this.me(ctx);
@@ -577,8 +677,14 @@ export class GoalService {
     if (!goal) throw new NotFoundException('Goal');
     const day = await this.days.for(ctx);
     this.requireOpenPeriod(period, day);
-    // Unchanged — the same figure, typed by the member — writes nothing and records nothing.
-    const unchanged = minor === goal.apeAchievedMinor && (goal.apeAchievedTypedBy ?? null) === null;
+    /*
+     * Unchanged — the same figure, typed by the member, and still the one in force — writes nothing and records nothing.
+     * The same figure over an office figure written since it was typed is a typing now (ADR-0230 §6): the newer wins.
+     */
+    const same = minor === goal.apeAchievedMinor && (goal.apeAchievedTypedBy ?? null) === null;
+    const replaced = same && minor > 0
+      && (await this.achievedFor(ctx, membershipId, period, goal)).achieved.provenance !== 'self_reported';
+    const unchanged = same && !replaced;
     const now = this.clock.now();
     const current = unchanged
       ? goal
@@ -619,8 +725,9 @@ export class GoalService {
    * here instead, and a save then stores exactly what the reader watched.
    *
    * **The same figures a save would store**, by the same rules: the months left from the office's calendar unless
-   * typed over; the APE produced the office's year to date where it holds one, else the typed figure — the member's on
-   * their own plan, and on anybody else's the reader's while the office holds none (`typedApeOf`, ADR-0183).
+   * typed over; the APE produced the newer of the typed figure and the office's year to date (ADR-0230 §6) — what the
+   * member types on their own plan is typed now, so it wins; on anybody else's the reader's while the office holds
+   * none, and the member's stored figure once it holds one (`typedApeOf`, ADR-0183).
    * Whose plan is `goal:read`'s reach, 404 beyond it, never 403. **An assumption that cannot make a plan is
    * `projected: null`**, as a read answers one, not the save's 422: the screen is mid-edit, and the save still refuses
    * it by name. A field that is not a number at all is the save's own 400 (`checkGoal`).
@@ -642,9 +749,13 @@ export class GoalService {
     const typed = typedApeOf({ own, held, asked: input.apeAchievedMinor, stored: before });
     // Who typed it, as a save would record it (S2): the reader when the figure moved, else whoever typed it.
     const typedBy = typedByAfter({ before, after: typed, savedBy: this.me(ctx), typedBefore: stored?.apeAchievedTypedBy });
-    const achieved = achievedOf(
-      held, typed, held ? null : await this.typistOf(ctx, typedBy === membershipId ? null : typedBy),
-    );
+    // A figure the body carries and a save would take is typed now (ADR-0230 §6): the newer of it and the office's wins.
+    const taken = input.apeAchievedMinor !== undefined && (own || held === null);
+    const { achieved } = await this.inForce(ctx, period, held, {
+      minor: typed,
+      at: taken ? this.clock.now() : (stored?.apeAchievedTypedAt ?? null),
+      by: typedBy === membershipId ? null : typedBy,
+    });
     return {
       period,
       monthsLeft,
@@ -714,9 +825,14 @@ export class GoalService {
     return new Map(ids.map((id) => {
       const goal = byMember.get(id);
       const held = yearToDate.get(id) ?? null;
+      /*
+       * **The office's figure wins here, whenever it holds one** (ADR-0195 §4, kept by ADR-0230 §7): these are the leaders'
+       * and the office's reads, which never read a typed figure over it — `achievedOf`, not `memberAchievedOf`.
+       */
+      const official = officialOf(held);
       return [id, goal
-        ? this.view(goal, day, achievedOf(held, goal.apeAchievedMinor, held ? null : typistOfGoal(goal)), null, binding)
-        : this.defaultsView(period, day, achievedOf(held, 0), null, rates, binding)];
+        ? this.view(goal, day, { achieved: achievedOf(held, goal.apeAchievedMinor, held ? null : typistOfGoal(goal)), official }, null, binding)
+        : this.defaultsView(period, day, { achieved: achievedOf(held, 0), official }, null, rates, binding)];
     }));
   }
 
@@ -792,7 +908,7 @@ export class GoalService {
 
   /** The defaults as a view, from what `defaults` read — and what `plansOf` read in bulk. */
   private defaultsView(
-    period: string, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+    period: string, day: OfficeDay, { achieved, official }: Achieved, activity: ActivityWindow | null,
     rates: Pick<CascadeInputs, 'leadsToApptPct' | 'closingRatePct'>, binding: CascadeBinding,
   ): Omit<GoalView, 'id' | 'membershipId' | 'version'> {
     const inputs = {
@@ -814,6 +930,7 @@ export class GoalService {
       period,
       ...inputs,
       achieved,
+      official,
       // Nothing has been agreed, so there is nothing to snapshot — but the cascade still runs, or
       // the screen would open on five empty cards.
       snapshot: { ...EMPTY_SNAPSHOT },
@@ -829,7 +946,7 @@ export class GoalService {
   }
 
   private view(
-    doc: GoalDocument, day: OfficeDay, achieved: GoalAchieved, activity: ActivityWindow | null,
+    doc: GoalDocument, day: OfficeDay, { achieved, official }: Achieved, activity: ActivityWindow | null,
     binding: CascadeBinding,
   ): GoalView {
     /*
@@ -856,6 +973,7 @@ export class GoalService {
       monthsLeftIsOverride: doc.monthsLeftOverride !== null,
       apeAchievedMinor: doc.apeAchievedMinor,
       achieved,
+      official,
       caseSizeMinor: doc.caseSizeMinor,
       leadsToApptPct: doc.leadsToApptPct,
       closingRatePct: doc.closingRatePct,

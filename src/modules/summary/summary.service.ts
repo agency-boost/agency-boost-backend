@@ -6,6 +6,7 @@ import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { ActivityService } from '@/modules/activity/activity.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { GoalService } from '@/modules/goals/goal.service';
+import { officialWrittenAt } from '@/modules/goals/goal-input';
 import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
 import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
@@ -72,7 +73,7 @@ export interface SummaryView {
   /**
    * **An estimate the office's figure replaced** (P19.1-T4 AC-11, UI-157 item 4; ADR-0195 §3): the plan still stores a
    * typed figure above 0, and the office now holds a year-to-date figure for the year — written after the estimate —
-   * which every screen reads instead. `uploadedOn` is the office's day that figure was written, for the card's
+   * which the member's screens read instead (the newer wins, ADR-0230 §6). `uploadedOn` is the office's day that figure was written, for the card's
    * *Diganti data produksi resmi (diunggah 5 Des)*; `null` when nothing was replaced (`replacedEstimate`).
    */
   estimateReplaced: { uploadedOn: LocalDate } | null;
@@ -373,9 +374,11 @@ export class SummaryService {
 }
 
 /**
- * **Did the office's figure replace an estimate?** (P19.1-T4 AC-11; ADR-0195 §3): the plan still stores a typed figure
- * above 0, the office now holds a year-to-date figure for the year, and that figure was written **after** the estimate —
- * the correction's moment for a figure corrected by hand, else the year's latest import. The answer is the office's day
+ * **Did the office's figure replace an estimate?** (P19.1-T4 AC-11; ADR-0195 §3, ADR-0230 §6): the plan still stores a
+ * typed figure above 0, the office now holds a year-to-date figure for the year, and that figure was written **after**
+ * the estimate — the later of its newest correction and the year's latest import (`officialWrittenAt`), the moment Goal
+ * Settings' *the newer wins* reads. An estimate typed after it is in force instead (`typedInForce`), and nothing was
+ * replaced. The answer is the office's day
  * it was written, for *Diganti data produksi resmi (diunggah 5 Des)*; `null` when nothing was replaced, and when either
  * moment is unknown. `typedAt` is when the estimate last changed, or the plan's `savedAt` on a row from before that was
  * recorded. Pure.
@@ -389,7 +392,8 @@ export function replacedEstimate(input: {
 }): { uploadedOn: LocalDate } | null {
   const { typedMinor, typedAt, official, latestImport, timezone } = input;
   if (official === null || typedMinor <= 0 || typedAt === null) return null;
-  const writtenAt = official.provenance === 'corrected' ? official.correctedAt : latestImport;
+  // The office's latest write of the year, the moment Goal Settings' precedence reads too (ADR-0230 §6).
+  const writtenAt = officialWrittenAt(official.correctedAt, latestImport);
   if (writtenAt === null || writtenAt.getTime() <= new Date(typedAt).getTime()) return null;
   return { uploadedOn: localDayOf(writtenAt, timezone) };
 }

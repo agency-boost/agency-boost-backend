@@ -33,6 +33,15 @@ export class ActivityType {
   @Prop({ type: String, required: true, trim: true })
   label!: string;
 
+  /**
+   * ***Nama singkat*** (P19.8-T4, ADR-0229 §5; MOB UI-180): the one line the Unit Dashboard's activity table shows, with
+   * `label` in full on tap — a second field, so the office's own name is never reworded. `null` for none: the table
+   * shows `label` on up to two lines. At most `ACTIVITY_TEXT.SHORT_LABEL_MAX` characters. Seeded by code for the twelve,
+   * copied with the template, written once into an existing office by migration `0060`.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  shortLabel!: string | null;
+
   /** The prototype's second line — *"networking, canvassing, posting social media, dll"*. */
   @Prop({ type: String, default: null, trim: true })
   description!: string | null;

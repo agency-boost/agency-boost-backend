@@ -189,7 +189,8 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
       version: 1, status: 'active', archivedAt: null, deletedAt: null, createdBy: null, updatedBy: null,
     })));
     await Types.insertMany(types.map((t) => ({
-      kpmId, code: t.code, categoryCode: t.categoryCode, label: t.label, description: t.description ?? null,
+      kpmId, code: t.code, categoryCode: t.categoryCode, label: t.label, shortLabel: t.shortLabel,
+      description: t.description ?? null,
       displayOrder: t.displayOrder,
       version: 1, status: 'active', archivedAt: null, deletedAt: null, createdBy: null, updatedBy: null,
     })));

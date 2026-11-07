@@ -68,7 +68,10 @@ export interface PotensiTotals {
 
 /** One card: a unit below the head, or the head's own direct agents (UI-155). */
 export interface PotensiUnit {
-  /** `unit`: *UNIT AAB SARI PUSPITA*; `direct`: *LANGSUNG KE AB AGUS* — the head and the agents who answer to them. */
+  /**
+   * `direct`: ***Unit Anda*** — the head and the agents who answer to them, **first** (P19.8-T4 AC-4, MOB UI-179);
+   * `unit`: ***Unit <AAB name>***, each unit below, in the *Overview*'s order.
+   */
   kind: 'unit' | 'direct';
   leader: { membershipId: string; name: string; rung: PotensiRung };
   /** The leader first, then everybody in the card in the roster's order. The screen sorts by the tile chosen. */
@@ -84,8 +87,12 @@ export interface UnitPotensiView {
   currentMonth: string;
   today: LocalDate;
   head: { membershipId: string; name: string; isReader: boolean };
-  /** The two tiles: *AA*, the people who are AA in the month; *Rekrut*, the kandidat who became rekrut in it. */
-  tiles: { aa: number; rekrut: number };
+  /**
+   * The two tiles: *Active Agent* (was *AA*; ADR-0229 §8), the people who are `AA_THIS_MONTH` in the month; *Rekrut*,
+   * the kandidat who became rekrut in it. Under each, ***potensi x*** (P19.8-T4 AC-9, MOB UI-186): **the people** with a
+   * lead of that type switched on for the month, whatever became of it — the cards' *y* summed (`switchedPeople`).
+   */
+  tiles: { aa: number; rekrut: number; potensi: { aa: number; rekrut: number } };
   units: PotensiUnit[];
 }
 
@@ -131,8 +138,9 @@ interface Placed {
  * - **Whose**: the dashboard's own reach (`UnitDashboardService.people`) — the reader's unit, or `for` a leader below
  *   them; the Owner and an Admin any leader's; 404 outside it, never 403. A leader who leads nobody is answered their
  *   own card alone, the tiles at 0 — the tab is the role's, never hidden for being empty (ADR-0189, UI-159 item 4).
- * - **Grouped per unit** (AC-3): one card per unit below the head, in the roster's order, each with its leader first;
- *   then the head's own card — the head and the agents who answer to them directly. Every person counts once.
+ * - **Grouped per unit, in the Overview's order** (AC-3; P19.8-T4 AC-4, MOB UI-179, ADR-0229 §4): **the head's own card
+ *   first** — the head and the agents who answer to them directly — then one card per unit below the head, in the
+ *   roster's order, each with its leader first. Every person counts once, in every month (MOB UI-182).
  * - **The figures** are the three named metrics (ADR-0193), defined once in `domain/metrics/potensi.ts`: the leads read
  *   once for the whole unit (`LeadReadings.potensiOfMany`), the month's production rows once through the one port for
  *   the official figure (`OfficialApe`, ADR-0195 §5) — the office's file, imported or corrected, never an estimate. The month is the agency's, through the clock port (`Clock.monthBounds`).
@@ -230,9 +238,10 @@ export class UnitPotensiService {
     // The head's level splits as the dashboard's does: its agents who lead nobody are *direct*, anybody else a unit.
     const direct = below.get(people.head.membershipId) ?? [];
     const isUnitHead = (id: string) => placed.get(id)?.role !== 'agent' || leadsSomebody(id);
+    // *Unit Anda* first, then each unit below, as the Overview's roster orders them (MOB UI-179).
     const units = [
-      ...direct.filter(isUnitHead).flatMap(unitsOf),
       card('direct', people.head.membershipId, direct.filter((id) => !isUnitHead(id))),
+      ...direct.filter(isUnitHead).flatMap(unitsOf),
     ];
     const everybody = units.flatMap((u) => u.people);
 
@@ -244,6 +253,11 @@ export class UnitPotensiService {
       tiles: {
         aa: everybody.filter((p) => p.aa.aa).length,
         rekrut: everybody.reduce((sum, p) => sum + p.rekrut.rekrut, 0),
+        // *potensi x*: the cards' *y* summed — people, never leads (ADR-0229 §8).
+        potensi: {
+          aa: units.reduce((sum, u) => sum + u.totals.aa.switchedPeople, 0),
+          rekrut: units.reduce((sum, u) => sum + u.totals.rekrut.switchedPeople, 0),
+        },
       },
       units,
     };

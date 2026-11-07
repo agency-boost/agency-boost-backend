@@ -331,4 +331,82 @@ describe('the Unit Dashboard, UI V1 (Phase 18.11 T4)', () => {
       await expect(activities('OWNER', { for: office.id.B_AB })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
+  /*
+   * **P19.8-T4 — the activity table's short names and one person's ratios** (MOB UI-180, MOB UI-184; ADR-0229 §5, §7):
+   * the table's type rows carry the office's *Nama singkat*; `ratioFor` adds one member's own five ratios to the card,
+   * within the dashboard's reach, recorded as the table's read is.
+   */
+  describe('P19.8-T4 the Aktivitas tab’s short names and one person’s ratios', () => {
+    it('P19.8-T4 AC-5 MOB UI-180 each type row carries the office’s short name; a type with none carries null', async () => {
+      const typeOf = (view: Awaited<ReturnType<typeof activities>>, code: string) =>
+        view.sections.flatMap((s) => s.types).find((t) => t.code === code)!;
+      const view = await activities('AGUS');
+      // Provisioned from the platform's defaults: the approved words, by code.
+      expect(typeOf(view, 'SELL_PRESENTATION')).toMatchObject({ label: expect.any(String), shortLabel: 'Presentasi' });
+      expect(typeOf(view, 'DEV_COACHING_RECEIVED').shortLabel).toBe('1-on-1 dgn leader');
+      await db().collection('activityTypes').updateOne({ kpmId: KPM_A, code: 'SELL_FOLLOWUP' }, { $set: { shortLabel: null } });
+      try {
+        expect(typeOf(await activities('AGUS'), 'SELL_FOLLOWUP').shortLabel).toBeNull();
+      } finally {
+        await db().collection('activityTypes').updateOne({ kpmId: KPM_A, code: 'SELL_FOLLOWUP' }, { $set: { shortLabel: 'Follow up' } });
+      }
+    });
+
+    it('P19.8-T4 AC-7 MOB UI-184 without ratioFor the card holds the Unit’s and the Group’s, and no person’s', async () => {
+      expect((await activities('AGUS')).ratios.person).toBeNull();
+    });
+
+    it('P19.8-T4 AC-7 MOB UI-184 ratioFor answers that person’s five ratios — their own Ratio page, on their own rung', async () => {
+      const ctx = office.as('AGUS');
+      for (const who of ['INDAH', 'RINA', 'AGUS'] as const) {
+        const view = await activities('AGUS', { ratioFor: office.id[who] });
+        const membership = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id[who]) });
+        const page = await wired.activityLogs.ratiosOf(ctx, { membershipId: office.id[who], orgLevelCode: membership!.orgLevelCode });
+        expect(view.ratios.person).toEqual({ membershipId: office.id[who], ratios: page.ratios });
+      }
+      // The same 30 days, whatever the table's period; the Unit's and the Group's unchanged beside it.
+      const week = await activities('AGUS', { span: 'week', date: '2026-08-05', ratioFor: office.id.INDAH });
+      expect(week.ratios).toMatchObject({ from: '2026-08-16', to: ROSTER_TODAY, days: 30 });
+      expect(week.ratios.unit).toEqual((await activities('AGUS')).ratios.unit);
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-184 a person outside the Group read is 404 — a peer’s agent, another office’s, a unit above, nobody', async () => {
+      // A peer AB's person, office B's agent, a member of the Group above the unit read, an id that is nobody's.
+      for (const named of [office.id.PEER_AB, office.id.B_AGENT, office.id.RINA, '000000000000000000000000', 'nobody']) {
+        await expect(activities('SARI', { for: office.id.NINA, ratioFor: named })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      // A peer AB, their AAB and that AAB's agent: the same office, another AB's hierarchy; and office B's agent.
+      for (const named of [office.id.PEER_AB, office.id.PEER_AAB, office.id.PEER_AGENT, office.id.B_AGENT]) {
+        await expect(activities('AGUS', { ratioFor: named })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      // A leader who leads nobody has no Group to pick from, themselves included.
+      await expect(activities('DEWI', { ratioFor: office.id.DEWI })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('P19.8-T4 AC-7 MOB UI-184 an Agent who leads (Lukas) reads his own agent’s ratios, on her rung; never his leader’s', async () => {
+      const view = await activities('LUKAS', { ratioFor: office.id.TARI });
+      const tari = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.TARI) });
+      const page = await wired.activityLogs.ratiosOf(office.as('LUKAS'), { membershipId: office.id.TARI, orgLevelCode: tari!.orgLevelCode });
+      expect(view.ratios.person).toEqual({ membershipId: office.id.TARI, ratios: page.ratios });
+      for (const named of [office.id.AGUS, office.id.INDAH, office.id.PEER_AGENT]) {
+        await expect(activities('LUKAS', { ratioFor: named })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-184 cross-tenant: office B’s leader asking for office A’s member is 404, and nothing is recorded', async () => {
+      await db().collection('auditLog').deleteMany({});
+      await expect(activities('B_AB', { ratioFor: office.id.INDAH })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(await db().collection('auditLog').countDocuments({})).toBe(0);
+      const b = await activities('B_AB', { ratioFor: office.id.B_AGENT });
+      expect(b.ratios.person?.membershipId).toBe(office.id.B_AGENT);
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-184 the read is recorded as the table’s: the person among the members shown, the 30 days disclosed', async () => {
+      await db().collection('auditLog').deleteMany({});
+      await activities('AGUS', { span: 'week', date: '2026-09-10', ratioFor: office.id.RINA });
+      const entries = await db().collection('auditLog').find({ action: 'activity_log.read_raw' }).toArray();
+      const rina = entries.find((e) => e.targetMembershipId === office.id.RINA);
+      expect(rina).toMatchObject({ kpmId: KPM_A, after: { surface: 'unit_dashboard', from: '2026-08-16', to: ROSTER_TODAY } });
+    });
+  });
 });

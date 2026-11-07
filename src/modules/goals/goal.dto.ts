@@ -46,9 +46,9 @@ export class SaveGoalDto {
   @Allow()
   monthsLeft!: number;
 
-  @ApiPropertyOptional({ type: Number, example: 0, description: 'IDR sen. The typed figure, the answer only while the office holds no year-to-date figure for the year. On a save of somebody else’s plan (`for`) it is stored while the office holds no figure for them, and ignored — their stored figure kept — once it holds one (ADR-0183, partly reversing ADR-0075). **Optional, and absent means keep the stored figure** (S1): the screens send it only when the reader changed it in this edit, so a coach saving the target never writes back over the member’s newer figure the one they read. The save records who typed it (`apeAchievedTypedBy`).' })
+  @ApiPropertyOptional({ type: Number, nullable: true, example: 0, description: 'IDR sen. The typed figure. **On your own plan it is stored and typed now, also over the office’s figure** (ADR-0230): the newer of it and the office’s year to date is the one your screens measure against, until an import or a correction written after it. **`null` clears it** — *Pakai otomatis*, saved — and the office’s figure is read again (0 is nothing typed). On a save of somebody else’s plan (`for`) it is stored while the office holds no figure for them, and ignored — their stored figure kept — once it holds one (ADR-0183, partly reversing ADR-0075). **Optional, and absent means keep the stored figure** (S1): the screens send it only when the reader changed it in this edit, so a coach saving the target never writes back over the member’s newer figure the one they read. The save records who typed it (`apeAchievedTypedBy`).' })
   @Allow()
-  apeAchievedMinor?: number;
+  apeAchievedMinor?: number | null;
 
   @ApiProperty({ type: Number, example: 18_000_000_00, description: 'IDR sen per policy. Zero is refused — GOAL_INVALID_ASSUMPTION.' })
   @Allow()

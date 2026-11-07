@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import type { DomainException } from '@/common/errors/domain.exception';
+import { localDayOf } from '@/common/time/local-day';
+import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
@@ -296,7 +298,14 @@ describe('P19.7-T2 the proposal (service, tenancy)', () => {
         products: [{ name: 'PRUWell Medical', plan: 'Gold' }], totals: [{ currency: 'IDR', amountMinor: 50_000_000 }],
         leadId: leads.budi, leadDeleted: false,
       });
-      expect(page.rows[0]).toMatchObject({ date: '2026-11-06', status: 'draft', products: [] });
+      // A draft's date is its last change's day in the office's calendar. The change's time is the row's `updatedAt`,
+      // which the database stamps from the wall clock, not the service's clock set above: derived, so it holds any day.
+      expect(page.rows[0]).toMatchObject({
+        date: localDayOf(new Date(page.rows[0].updatedAt), DEFAULT_TENANT_TIMEZONE), status: 'draft', products: [],
+      });
+      expect(page.rows[0].updatedAt).toBe(
+        ((await db().collection('proposals').findOne({ _id: new mongoose.Types.ObjectId(second.id) }))!.updatedAt as Date).toISOString(),
+      );
     });
 
     it('P19.7-T2 AC-10 searches the client’s and the products’ names, as typed, and filters status and lead', async () => {

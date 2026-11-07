@@ -70,6 +70,17 @@ export class UnitActivitiesQueryDto {
   @IsString()
   @MaxLength(64)
   for?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      'ADR-0229 §7: the **membership** whose own five ratios the ratio card shows — somebody of the *Group* '
+      + 'read. Answered in `ratios.person`, the same 30 days, on their own rung. Anybody else is `404`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  ratioFor?: string;
 }
 
 /** One person's figures from the company report, in sen. Either or both; never `null`. */

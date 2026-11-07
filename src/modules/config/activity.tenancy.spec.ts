@@ -106,6 +106,41 @@ describe('the office activity taxonomy (P4-T1)', () => {
       ]);
     });
 
+    it('P19.8-T4 AC-13 MOB UI-180 gives the defaults’ short names by code; a template’s own, or none it cleared', async () => {
+      await provisioning.seedActivityTaxonomy(KPM_A);
+      const given = (await service.list(ctx(KPM_A))).flatMap((c) => c.types);
+      expect(given.map((t) => [t.code, t.shortLabel])).toEqual(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.shortLabel]));
+
+      await provisioning.seedActivityTaxonomy(KPM_B, source({
+        categories: [{ code: 'SELLING', label: 'Penjualan', displayOrder: 1 }],
+        types: [
+          { code: 'SELL_PRESENTATION', categoryCode: 'SELLING', label: 'Presentasi', shortLabel: 'Pres. jual', description: null, displayOrder: 1 },
+          // The template's author cleared it: an explicit none stays none.
+          { code: 'SELL_SUBMISSION', categoryCode: 'SELLING', label: 'Submission polis', shortLabel: null, description: null, displayOrder: 2 },
+          { code: 'SELL_REFERRAL', categoryCode: 'SELLING', label: 'Referensi', shortLabel: 'Referensi', description: null, displayOrder: 3 },
+        ],
+      }));
+      const theirs = (await service.list(ctx(KPM_B))).flatMap((c) => c.types);
+      expect(Object.fromEntries(theirs.map((t) => [t.code, t.shortLabel]))).toEqual({
+        SELL_PRESENTATION: 'Pres. jual', SELL_SUBMISSION: null, SELL_REFERRAL: 'Referensi',
+        // The cascade type the template lacked comes with the platform's.
+        LEADS_CONTACTED: 'Set appointment',
+      });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 a template published before the field gives the seed’s short name by code, and none for its own code', async () => {
+      await provisioning.seedActivityTaxonomy(KPM_A, source({
+        categories: [{ code: 'SELLING', label: 'Penjualan', displayOrder: 1 }],
+        types: [
+          { code: 'SELL_FOLLOWUP', categoryCode: 'SELLING', label: 'Follow up penjualan', description: null, displayOrder: 1 },
+          { code: 'OFFICE_CALLS', categoryCode: 'SELLING', label: 'Telepon kantor', description: null, displayOrder: 2 },
+        ],
+      }));
+      const types = (await service.list(ctx(KPM_A))).flatMap((c) => c.types);
+      expect(types.find((t) => t.code === 'SELL_FOLLOWUP')).toMatchObject({ label: 'Follow up penjualan', shortLabel: 'Follow up' });
+      expect(types.find((t) => t.code === 'OFFICE_CALLS')).toMatchObject({ shortLabel: null });
+    });
+
     it('does not copy a type whose category the template forgot to define', async () => {
       // It would render as a blank heading on the capture screen rather than as the bad
       // template it is.

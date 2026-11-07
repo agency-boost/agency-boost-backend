@@ -68,7 +68,9 @@ describe('P19.1-T6 the Potensi tab over HTTP', () => {
       as('AGUS');
       const res = await tab().expect(200);
       expect(res.body).toMatchObject({ month: '2026-09', currentMonth: '2026-09', head: { name: 'Agus Salim', isReader: true } });
-      expect(res.body.units.at(-1)).toMatchObject({ kind: 'direct', leader: { name: 'Agus Salim' } });
+      // The head's own card first (P19.8-T4 AC-4, MOB UI-179), and each tile's *potensi x* (AC-9).
+      expect(res.body.units[0]).toMatchObject({ kind: 'direct', leader: { name: 'Agus Salim' } });
+      expect(res.body.tiles).toMatchObject({ potensi: { aa: expect.any(Number), rekrut: expect.any(Number) } });
     });
 
     it('P19.1-T6 AC-1 positive: an AAB is answered their own; one who leads nobody, their card alone (AC-10)', async () => {

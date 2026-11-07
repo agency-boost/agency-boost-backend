@@ -1,5 +1,5 @@
 import { CODE_MESSAGE, CODE_PATTERN, Fields, checkNoFields } from '@/common/validation/fields';
-import { RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
+import { ACTIVITY_TEXT, RATIO_DISPLAY_UNITS, type RatioDisplayUnit } from '@/domain/constants';
 import { CONFIG_REFUSALS } from './config.messages';
 import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 import { RATIO_COMPARISONS, type RatioComparison } from './ratio-definition.schema';
@@ -36,6 +36,11 @@ export const CONFIG_BOUNDS = {
   ratioLabel: { min: 1, max: 80 },
   leadStatusLabel: { min: 1, max: 80 },
   description: { max: 200 },
+  /**
+   * An activity type's *Nama singkat* (P19.8-T4, ADR-0229 §5; MOB UI-180): one line in the Unit Dashboard's activity
+   * table. The number is the domain's (`ACTIVITY_TEXT.SHORT_LABEL_MAX`), never declared again here.
+   */
+  typeShortLabel: { max: ACTIVITY_TEXT.SHORT_LABEL_MAX },
   rungs: { max: 20 },
   formulaTerms: { min: 1, max: 50 },
   /**
@@ -133,29 +138,35 @@ export interface TypeCreateInput {
   code: string;
   categoryCode: string;
   label: string;
+  /** *Nama singkat* (ADR-0229 §5): `null` for none — blank and absent read alike. */
+  shortLabel: string | null;
   description: string | null;
 }
 
 export function checkTypeCreate(body: unknown): TypeCreateInput {
-  const f = new Fields(body, ['code', 'categoryCode', 'label', 'description']);
+  const f = new Fields(body, ['code', 'categoryCode', 'label', 'shortLabel', 'description']);
   return f.done({
     code: f.code('code', true),
     categoryCode: f.code('categoryCode', true),
     label: f.text('label', CONFIG_BOUNDS.typeLabel, true),
+    shortLabel: f.note('shortLabel', CONFIG_BOUNDS.typeShortLabel) ?? null,
     description: f.note('description', CONFIG_BOUNDS.description) ?? null,
   }) as TypeCreateInput;
 }
 
 export interface TypeUpdateInput {
   label?: string;
+  /** Absent leaves it; `null` or blank clears it (ADR-0229 §5). */
+  shortLabel?: string | null;
   description?: string | null;
   categoryCode?: string;
 }
 
 export function checkTypeUpdate(body: unknown): TypeUpdateInput {
-  const f = new Fields(body, ['label', 'description', 'categoryCode']);
+  const f = new Fields(body, ['label', 'shortLabel', 'description', 'categoryCode']);
   return f.done({
     label: f.text('label', CONFIG_BOUNDS.typeLabel, false),
+    shortLabel: f.note('shortLabel', CONFIG_BOUNDS.typeShortLabel),
     description: f.note('description', CONFIG_BOUNDS.description),
     categoryCode: f.code('categoryCode', false),
   });

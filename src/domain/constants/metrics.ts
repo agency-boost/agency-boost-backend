@@ -346,6 +346,12 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    * of a member's own working documents, nothing a campaign requirement names, registered after campaign evaluation.
    */
   { key: 'PROPOSALS_MADE', name: 'Proposals made', unit: 'count', phase: '19.7', requirable: false },
+  /*
+   * Phase 19.8 (P19.8-T2; ADR-0228 §4, OD-283 by its default): **Home's *Leads* tile** — the reader's own open leads,
+   * Sales and Recruit, `OPEN_SALES_LEADS` and `RECRUITMENT_PIPELINE_NOW` over one owner added
+   * (`domain/metrics/own-open-leads.ts`). Not requirable: a figure on one screen, registered after campaign evaluation.
+   */
+  { key: 'OWN_OPEN_LEADS', name: 'Your open leads', unit: 'count', phase: '19.8', requirable: false },
 ];
 
 /**

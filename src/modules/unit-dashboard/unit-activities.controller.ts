@@ -32,7 +32,8 @@ export class UnitActivitiesController {
       + '*Unit*’s and the *Group*’s *Total* column summed; the agency’s sections and types in its order, an archived one '
       + 'only while the period counts it; and **the Ratio page’s ratios over the *Unit*’s and the *Group*’s counts '
       + 'summed**, always the last 30 days. Counts only, never points. Somebody who leads nobody is answered an empty '
-      + 'unit. Every member shown other than you is recorded as read.',
+      + 'unit. Every member shown other than you is recorded as read. With `ratioFor`, **one member’s own ratios** too '
+      + '(`ratios.person`): somebody of the *Group* read, on their own rung.',
   })
   @ApiResponse({ status: 200, type: UnitActivitiesDto })
   @ApiResponse(refusal(
@@ -43,7 +44,8 @@ export class UnitActivitiesController {
   @ApiResponse(refusal(
     404,
     '`NOT_FOUND` — `for` names yourself, somebody who leads nobody, somebody outside your reach or who has left, **or** '
-    + 'somebody in another office: indistinguishable, as on `GET /unit/dashboard`.',
+    + 'somebody in another office: indistinguishable, as on `GET /unit/dashboard`. Likewise `ratioFor` naming anybody '
+    + 'who is not in the *Group* read.',
   ))
   async read(@Ctx() ctx: RequestContext, @Query() query: UnitActivitiesQueryDto) {
     return this.activities.read(ctx, query);

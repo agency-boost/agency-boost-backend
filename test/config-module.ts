@@ -516,6 +516,8 @@ export function configModule(
     new RatioDefinitionRepository(ratioDefinitions as never),
     // P18.6-T2: the measured rates and `cascadeBinding` read the office's binding.
     activityBindings,
+    // P19.8-T5 (ADR-0230 §6): when the office last wrote a member's year, so the newer of it and a typed figure wins.
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
   );
   // P6: what an agent did, day by day. The first module holding what people *did*. After `goals` since
   // P11-T4, whose plan the 7-day targets read.

@@ -362,6 +362,38 @@ describe('P19.4-T1 a template’s material and its push (ADR-0208)', () => {
       expect(await col('activityTypes').findOne({ kpmId: B, code: 'COFFEE_MEETING' })).toMatchObject({ status: 'active' });
     });
 
+    it('P19.8-T4 AC-13 MOB UI-180 the Super Admin edits a type’s short name in the template; the push carries it, and a type without the key keeps the seed’s', async () => {
+      const taxonomy = (await wired.templateService.read(COMPANY, 'activity_taxonomy', templateId)).payload as {
+        categories: { code: string }[]; types: Record<string, unknown>[];
+      };
+      // The office was given the seed's short names with its template.
+      expect(await col('activityTypes').findOne({ kpmId: A, code: 'SELL_FOLLOWUP', deletedAt: null }))
+        .toMatchObject({ shortLabel: 'Follow up' });
+
+      // Past the bound, the draft is refused as an office's own write is, and nothing is saved.
+      const tooLong = { ...taxonomy, types: taxonomy.types.map((t) => (t.code === 'SELL_PRESENTATION' ? { ...t, shortLabel: 'x'.repeat(21) } : t)) };
+      const refused = await wired.templateService.saveDraft(sa, COMPANY, 'activity_taxonomy', tooLong, templateId).catch((e) => e);
+      expect(refused).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'shortLabel', code: 'SELL_PRESENTATION' } });
+      expect(english(refused.sentence)).toMatch(/SELL_PRESENTATION: the short name must be text of at most 20 characters/);
+
+      // One edited; every other type without the key, as a template published before the field holds them.
+      const edited = {
+        ...taxonomy,
+        types: taxonomy.types.map(({ shortLabel: _old, ...t }) => (t.code === 'SELL_PRESENTATION' ? { ...t, shortLabel: 'Pres. jual' } : t)),
+      };
+      await wired.templateService.saveDraft(sa, COMPANY, 'activity_taxonomy', edited, templateId);
+      await wired.templateService.publish(sa, COMPANY, 'activity_taxonomy', templateId);
+
+      const [standing] = (await wired.templatePush.standings(sa, COMPANY, templateId, ['activity_taxonomy'])).filter((r) => r.code === '0417');
+      expect(standing.state).toBe('unchanged');
+      await wired.templatePush.apply(sa, COMPANY, templateId, { kinds: ['activity_taxonomy'], kpmIds: [A] });
+      expect(await col('activityTypes').findOne({ kpmId: A, code: 'SELL_PRESENTATION', deletedAt: null }))
+        .toMatchObject({ shortLabel: 'Pres. jual', version: 2 });
+      // Never wiped: the type without the key gives the seed's words, which the office already holds — no version moves.
+      expect(await col('activityTypes').findOne({ kpmId: A, code: 'SELL_FOLLOWUP', deletedAt: null }))
+        .toMatchObject({ shortLabel: 'Follow up', version: 1 });
+    });
+
     it('P19.4-T1 AC-6 every section applied to an untouched KPM leaves it current on every one, its rows matching the template’s', async () => {
       // A second version of each kind: the same payload, published again.
       for (const kind of OFFICE_TEMPLATE_KINDS) {

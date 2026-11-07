@@ -150,6 +150,48 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       expect((await activities({ for: office.id.PEER_AB }).expect(404)).body.error.code).toBe('NOT_FOUND');
     });
 
+    describe('P19.8-T4 AC-7, AC-13 MOB UI-184 ratioFor — one person’s ratios, a positive and a negative per role', () => {
+      it('P19.8-T4 AC-13 positive: an AB asks for a member of their Group, an AAB for one of theirs, the Owner and an Admin within a leader’s unit, an Agent who leads for his agent', async () => {
+        as('AGUS');
+        const ab = (await activities({ ratioFor: office.id.RINA }).expect(200)).body;
+        expect(ab.ratios.person).toMatchObject({ membershipId: office.id.RINA });
+        expect(ab.ratios.person.ratios.length).toBeGreaterThan(0);
+        as('SARI');
+        expect((await activities({ ratioFor: office.id.DODI }).expect(200)).body.ratios.person.membershipId).toBe(office.id.DODI);
+        as('OWNER');
+        expect((await activities({ for: office.id.SARI, ratioFor: office.id.BUDI }).expect(200)).body.ratios.person.membershipId)
+          .toBe(office.id.BUDI);
+        as('ADMIN');
+        expect((await activities({ for: office.id.SARI, ratioFor: office.id.BUDI }).expect(200)).body.ratios.person.membershipId)
+          .toBe(office.id.BUDI);
+        // An Agent who leads somebody: his own agent.
+        as('LUKAS');
+        expect((await activities({ ratioFor: office.id.TARI }).expect(200)).body.ratios.person.membershipId).toBe(office.id.TARI);
+      });
+
+      it('P19.8-T4 AC-13 negative: an Agent who leads nobody, an AAB naming her AB, a peer AB’s hierarchy, anybody of another office — 404, never 403', async () => {
+        as('INDAH');
+        expect((await activities({ ratioFor: office.id.INDAH }).expect(404)).body.error.code).toBe('NOT_FOUND');
+        as('SARI');
+        expect((await activities({ ratioFor: office.id.AGUS }).expect(404)).body.error.code).toBe('NOT_FOUND');
+        as('AGUS');
+        for (const named of [office.id.PEER_AB, office.id.PEER_AAB, office.id.PEER_AGENT, office.id.B_AGENT]) {
+          expect((await activities({ ratioFor: named }).expect(404)).body.error.code).toBe('NOT_FOUND');
+        }
+        as('LUKAS');
+        expect((await activities({ ratioFor: office.id.AGUS }).expect(404)).body.error.code).toBe('NOT_FOUND');
+        as('OWNER');
+        expect((await activities({ ratioFor: office.id.B_AGENT }).expect(404)).body.error.code).toBe('NOT_FOUND');
+      });
+
+      it('P19.8-T4 AC-13 a ratioFor longer than an id is 400 VALIDATION_FAILED, named in details', async () => {
+        as('AGUS');
+        const res = await activities({ ratioFor: 'x'.repeat(65) }).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(JSON.stringify(res.body.error.details)).toContain('ratioFor');
+      });
+    });
+
     it.each([
       ['a span it does not know', { span: 'year' }, 'span'],
       ['a date that is not a day', { date: '14-09-2026' }, 'date'],

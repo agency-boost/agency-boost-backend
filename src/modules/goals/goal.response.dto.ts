@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalMeasured, GoalPreview, GoalSnapshotView, GoalTypist, GoalView } from './goal.service';
+import type { GoalAchieved, GoalMeasured, GoalOfficial, GoalPreview, GoalSnapshotView, GoalTypist, GoalView } from './goal.service';
 
 export class GoalMeasuredDto implements GoalMeasured {
   @ApiProperty({ example: '2026-08-30' }) from!: string;
@@ -35,7 +35,7 @@ export class GoalAchievedDto implements GoalAchieved {
 
   @ApiProperty({
     enum: ['imported', 'corrected', 'self_reported'],
-    description: 'The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`) — the last only while the office holds no year-to-date figure for the year.',
+    description: 'The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`). On the member’s own plan **the newer of the typed figure and the office’s year to date** (ADR-0230 §6): a figure typed after the office last wrote the year, until an import or a correction written after it. On a leader’s or the office’s reads the office’s figure whenever it holds one.',
   })
   provenance!: 'imported' | 'corrected' | 'self_reported';
 
@@ -47,6 +47,18 @@ export class GoalAchievedDto implements GoalAchieved {
     description: 'Who typed a `self_reported` figure, **when it was not the member** — a coach (S2). Absent when the member typed it, and on the office’s own figure.',
   })
   typedBy?: GoalTypistDto;
+}
+
+/** **The office's own year to date** (P19.8-T5; ADR-0230 §1, §4): Goal Settings' automatic figure, whichever is in force. */
+export class GoalOfficialDto implements GoalOfficial {
+  @ApiProperty({ type: Number, description: 'The office’s year to date for the plan’s year, in IDR minor units.' })
+  minor!: number;
+
+  @ApiProperty({ enum: ['imported', 'corrected'], description: 'The carrier’s file, or a correction by hand.' })
+  provenance!: 'imported' | 'corrected';
+
+  @ApiProperty({ type: String, example: '2026-10', description: 'The latest month the year to date reads: *⚡ Otomatis · per Okt 2026*.' })
+  month!: string;
 }
 
 export class GoalSnapshotDto implements GoalSnapshotView {
@@ -162,11 +174,18 @@ export class GoalResponseDto implements Omit<GoalView, 'id' | 'membershipId' | '
   })
   monthsLeftIsOverride!: boolean;
 
-  @ApiProperty({ type: Number, description: 'The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used only until production arrives.' })
+  @ApiProperty({ type: Number, description: 'The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used while it is newer than the office’s year to date (ADR-0230 §6). 0 is nothing typed.' })
   apeAchievedMinor!: number;
 
   @ApiProperty({ type: GoalAchievedDto, description: 'The figure the plan is measured against, and whose it is.' })
   achieved!: GoalAchievedDto;
+
+  @ApiProperty({
+    type: GoalOfficialDto, nullable: true,
+    description: '**The office’s own year to date for the year, whichever figure is in force** (ADR-0230 §4): what Goal '
+      + 'Settings prefills as *⚡ Otomatis · per {month}* and puts back with *Pakai otomatis*. `null` while the office holds none.',
+  })
+  official!: GoalOfficialDto | null;
 
   @ApiProperty({ type: Number })
   caseSizeMinor!: number;
@@ -264,8 +283,9 @@ export class GoalPreviewDto implements GoalPreview {
 
   @ApiProperty({
     type: GoalAchievedDto,
-    description: 'The APE the plan is measured against: the office’s year to date where it holds one, else the typed '
-      + 'figure on your own plan and the stored one on anybody else’s.',
+    description: 'The APE the plan is measured against: the newer of the typed figure and the office’s year to date '
+      + '(ADR-0230 §6) — a figure you type on your own plan is typed now, so it is the answer; on anybody else’s the '
+      + 'figure typed while the office holds none, else the member’s stored one by the same rule.',
   })
   achieved!: GoalAchievedDto;
 

@@ -1,5 +1,5 @@
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
+  ACTIVITY_TEXT, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
   SEED_RATIO_DEFINITIONS, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import { defaultTrainingTaxonomy } from '@/modules/training/training-payload';
@@ -100,6 +100,41 @@ export function platformDefaultPayload(kind: TemplateKind): Record<string, unkno
       // AgencyBoost's own (ADR-0218 §3): nothing set, so a KPM on the template shows AgencyBoost's logo, colours and Boost.
       return { logo: null, logoSquare: null, primary: null, secondary: null, mascot: null };
   }
+}
+
+/**
+ * **A template type's *Nama singkat*, as an office is given it** (P19.8-T4, ADR-0229 §5).
+ *
+ * - **A payload that carries the key gives what it says** — a text, or `null` for none (the template's author cleared it).
+ * - **A payload type with no such key** — every template published before the field, and an office's published settings
+ *   saved as a template before it — **gives the platform's short name for its code** (`SEED_ACTIVITY_TYPES`), or `null`
+ *   for a code of the office's own. So provisioning from an old template gives the approved words, and a push of one
+ *   never wipes what migration `0060` wrote into an office.
+ *
+ * Provisioning and the push call this one rule, so the two cannot give an office different words.
+ */
+export function shortLabelOf(type: { code: string; shortLabel?: string | null }): string | null {
+  if (Object.prototype.hasOwnProperty.call(type, 'shortLabel') && type.shortLabel !== undefined) {
+    const own = typeof type.shortLabel === 'string' ? type.shortLabel.trim() : null;
+    return own || null;
+  }
+  return SEED_ACTIVITY_TYPES.find((t) => t.code === type.code)?.shortLabel ?? null;
+}
+
+/**
+ * **The codes of a template's types whose *Nama singkat* an office's own write would refuse** (P19.8-T4, ADR-0229 §5):
+ * not text and not `null`, or longer than `ACTIVITY_TEXT.SHORT_LABEL_MAX` once trimmed. Absent is fine (`shortLabelOf`).
+ */
+export function typeShortLabelProblems(types: unknown): string[] {
+  if (!Array.isArray(types)) return [];
+  return types
+    .filter((t): t is { code?: unknown; shortLabel?: unknown } => t !== null && typeof t === 'object')
+    .filter((t) => {
+      const value = t.shortLabel;
+      if (value === undefined || value === null) return false;
+      return typeof value !== 'string' || value.trim().length > ACTIVITY_TEXT.SHORT_LABEL_MAX;
+    })
+    .map((t) => String(t.code ?? '?'));
 }
 
 /**

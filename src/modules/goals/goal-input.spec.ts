@@ -1,7 +1,7 @@
 import type { DomainException } from '@/common/errors/domain.exception';
 import type { Sentence } from '@/common/i18n/sentence';
 import { indonesianAll } from '../../../test/i18n';
-import { checkGoal, GOAL_BOUNDS, typedApeOf, typedByAfter } from './goal-input';
+import { checkGoal, GOAL_BOUNDS, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
 
 /**
  * What a goal's fields may hold (P8-T1).
@@ -208,5 +208,51 @@ describe('typedByAfter — who typed the figure a plan stores (S2)', () => {
     expect(typedByAfter({ before: 150, after: 150, savedBy: 'member', typedBefore: 'coach' })).toBe('coach');
     // A row from before the field: nobody recorded, which reads as the member.
     expect(typedByAfter({ before: 150, after: 150, savedBy: 'coach', typedBefore: undefined })).toBeNull();
+  });
+});
+
+/**
+ * **P19.8-T5 — the newer wins** (ADR-0230 §6; OQ3, OD-279's default): which of the typed figure and the office's year to
+ * date the member's own screens measure against, and when the office last wrote it.
+ */
+describe('P19.8-T5 typedInForce and officialWrittenAt — the newer wins (ADR-0230 §6)', () => {
+  const at = (iso: string) => new Date(iso);
+  const IMPORT = at('2026-10-05T03:00:00Z');
+
+  it('P19.8-T5 AC-5 OD-279 a figure typed after the office last wrote the year is in force; one typed before it is not', () => {
+    expect(typedInForce({ typedMinor: 67, typedAt: at('2026-10-06T03:00:00Z'), held: true, officialAt: IMPORT })).toBe(true);
+    expect(typedInForce({ typedMinor: 67, typedAt: at('2026-10-04T03:00:00Z'), held: true, officialAt: IMPORT })).toBe(false);
+    // The same moment is not newer: the office's figure stays.
+    expect(typedInForce({ typedMinor: 67, typedAt: IMPORT, held: true, officialAt: IMPORT })).toBe(false);
+  });
+
+  it('P19.8-T5 AC-4 nothing typed is never in force; with no office figure a typed one always is', () => {
+    expect(typedInForce({ typedMinor: 0, typedAt: at('2026-10-06T03:00:00Z'), held: true, officialAt: IMPORT })).toBe(false);
+    expect(typedInForce({ typedMinor: 0, typedAt: null, held: false, officialAt: null })).toBe(false);
+    expect(typedInForce({ typedMinor: 67, typedAt: null, held: false, officialAt: null })).toBe(true);
+  });
+
+  it('P19.8-T5 AC-5 a moment either side does not know leaves the office’s figure in force (ADR-0195 §3)', () => {
+    expect(typedInForce({ typedMinor: 67, typedAt: null, held: true, officialAt: IMPORT })).toBe(false);
+    expect(typedInForce({ typedMinor: 67, typedAt: at('2026-10-06T03:00:00Z'), held: true, officialAt: null })).toBe(false);
+  });
+
+  it('P19.8-T5 AC-5 the office’s write is the later of its newest correction and its latest import', () => {
+    const corrected = at('2026-10-07T03:00:00Z');
+    expect(officialWrittenAt(corrected, IMPORT)).toBe(corrected);
+    expect(officialWrittenAt(at('2026-09-01T03:00:00Z'), IMPORT)).toBe(IMPORT);
+    expect(officialWrittenAt(null, IMPORT)).toBe(IMPORT);
+    expect(officialWrittenAt(corrected, null)).toBe(corrected);
+    expect(officialWrittenAt(null, null)).toBeNull();
+  });
+
+  it('P19.8-T5 AC-4 checkGoal reads apeAchievedMinor: null as the typed figure cleared — 0, nothing typed', () => {
+    const base = {
+      period: '2026', mode: 'direct', annualApeTargetMinor: 500_000_000_00, savingsTargetMinor: 50_000_000_00,
+      commissionRatePct: 10, monthsLeft: null, caseSizeMinor: 18_000_000_00, leadsToApptPct: 30, closingRatePct: 30,
+    };
+    expect(checkGoal({ ...base, apeAchievedMinor: null }).apeAchievedMinor).toBe(0);
+    expect(checkGoal(base)).not.toHaveProperty('apeAchievedMinor');
+    expect(() => checkGoal({ ...base, apeAchievedMinor: 'x' })).toThrow();
   });
 });

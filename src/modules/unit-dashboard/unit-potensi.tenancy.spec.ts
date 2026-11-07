@@ -88,14 +88,15 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
   const cardOf = (view: UnitPotensiView, who: Who) => view.units.find((u) => u.leader.membershipId === office.id[who])!;
 
   describe('AC-2, AC-3 the tiles, and the list grouped per unit', () => {
-    it('P19.1-T6 AC-3 one card per unit below the AB, nested ones too, then LANGSUNG KE AB — each leader first', async () => {
+    // *Changed 2026-11-07 (P19.8-T4 AC-4, MOB UI-179; ADR-0229 §4):* the head's own card first, where it was last.
+    it('P19.8-T4 AC-4 MOB UI-179 Unit Anda first, then one card per unit below the AB in the Overview’s order — each leader first', async () => {
       const view = await read('AGUS');
       expect(view.units.map((u) => [u.kind, u.leader.name, u.people.map((p) => p.name)])).toEqual([
+        ['direct', 'Agus Salim', ['Agus Salim', 'Dimas Pratama', 'Indah Permatasari']],
         ['unit', 'Dewi Lestari', ['Dewi Lestari']],
         ['unit', 'Lukas Hartono', ['Lukas Hartono', 'Tari Anggraini']],
         ['unit', 'Sari Puspita', ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya']],
         ['unit', 'Nina Lestari', ['Nina Lestari', 'Dodi Kurniawan']],
-        ['direct', 'Agus Salim', ['Agus Salim', 'Dimas Pratama', 'Indah Permatasari']],
       ]);
       expect(view.units.every((u) => u.people[0].isLeader && u.people.slice(1).every((p) => !p.isLeader))).toBe(true);
       // Everybody in the unit, once; the leaders counted like everyone else.
@@ -111,9 +112,10 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
 
     it('P19.1-T6 AC-3 an AAB is answered their agents in their own card, a nested unit in its own', async () => {
       const view = await read('SARI');
+      // The AAB's own card first (P19.8-T4 AC-4).
       expect(view.units.map((u) => [u.kind, u.people.map((p) => p.name)])).toEqual([
-        ['unit', ['Nina Lestari', 'Dodi Kurniawan']],
         ['direct', ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya']],
+        ['unit', ['Nina Lestari', 'Dodi Kurniawan']],
       ]);
     });
 
@@ -122,6 +124,18 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
       expect(view).toMatchObject({ month: '2026-09', currentMonth: '2026-09', today: ROSTER_TODAY, tiles: { aa: 3, rekrut: 1 } });
       expect(everyone(view).filter((p) => p.aa.aa).map((p) => p.name).sort())
         .toEqual(['Budi Santoso', 'Dodi Kurniawan', 'Indah Permatasari']);
+    });
+
+    it('P19.8-T4 AC-9 MOB UI-186 each tile’s potensi x counts people with a lead switched on, whatever became of it — never leads', async () => {
+      const view = await read('AGUS');
+      // Sales: Rina (two switched on) and Budi (one won, one open) — 2 people, though 4 leads; Indah's AA needs no switch.
+      // Recruit: Rina (Tia open, Maya won) — 1 person; Dimas's kandidat was never switched on.
+      expect(view.tiles.potensi).toEqual({ aa: 2, rekrut: 1 });
+      // The cards' *y* summed, one figure for both.
+      expect(view.tiles.potensi.aa).toBe(view.units.reduce((sum, u) => sum + u.totals.aa.switchedPeople, 0));
+      expect(view.tiles.potensi.rekrut).toBe(view.units.reduce((sum, u) => sum + u.totals.rekrut.switchedPeople, 0));
+      // August: Sari's and Nina's switches, one person each.
+      expect((await read('AGUS', { month: '2026-08' })).tiles).toEqual({ aa: 1, rekrut: 0, potensi: { aa: 2, rekrut: 0 } });
     });
   });
 
@@ -170,6 +184,17 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
       expect(person(august, 'RINA').aa).toEqual({ potensi: 0, aa: false, switched: 0 });
     });
 
+    it('P19.8-T4 AC-10 MOB UI-182 an earlier month lists the whole team under each card, as this month does', async () => {
+      const names = (view: UnitPotensiView) => view.units.map((u) => [u.leader.name, u.people.map((p) => p.name)]);
+      const september = await read('AGUS');
+      // A month with nothing switched on at all still answers everybody, each at 0.
+      const july = await read('AGUS', { month: '2026-07' });
+      expect(names(july)).toEqual(names(september));
+      expect(everyone(july)).toHaveLength(11);
+      expect(everyone(july).every((p) => p.aa.potensi === 0 && !p.aa.aa && p.rekrut.potensi === 0 && p.rekrut.rekrut === 0)).toBe(true);
+      expect(july.tiles).toEqual({ aa: 0, rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
+    });
+
     it('P19.1-T6 AC-12 a month after this one, or one that is not a month, is 400 VALIDATION_FAILED', async () => {
       await expect(read('AGUS', { month: '2026-10' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
       await expect(read('AGUS', { month: '2026-13' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
@@ -179,7 +204,7 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
   describe('AC-10 a leader with nobody below them', () => {
     it('P19.1-T6 AC-10 is answered their own card alone and the tiles at 0 — never an error (UI-159 item 4)', async () => {
       const view = await read('DEWI');
-      expect(view.tiles).toEqual({ aa: 0, rekrut: 0 });
+      expect(view.tiles).toEqual({ aa: 0, rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
       expect(view.units).toHaveLength(1);
       expect(view.units[0]).toMatchObject({ kind: 'direct', people: [{ name: 'Dewi Lestari', isLeader: true, isReader: true }] });
     });
@@ -194,7 +219,7 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
     });
 
     it('P19.1-T6 AC-12 cross-tenant: office B’s case is in office B’s figures and nowhere in office A’s', async () => {
-      expect((await read('B_AB')).tiles).toEqual({ aa: 1, rekrut: 0 });
+      expect((await read('B_AB')).tiles).toEqual({ aa: 1, rekrut: 0, potensi: { aa: 1, rekrut: 0 } });
       expect(JSON.stringify(await read('OWNER'))).not.toContain(office.id.B_AGENT);
     });
 

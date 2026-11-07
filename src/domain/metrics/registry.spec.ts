@@ -340,6 +340,8 @@ describe('the metric registry (P4-T4)', () => {
       SUBGROUP_TARGET_ATTAINMENT_PCT: '19.5',
       // P19.7-T2 (ADR-0221 §7): the Unit Dashboard's *Proposal* count.
       PROPOSALS_MADE: '19.7',
+      // P19.8-T2 (ADR-0228 §4, OD-283): Home's *Leads* tile.
+      OWN_OPEN_LEADS: '19.8',
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -383,7 +385,8 @@ describe('the metric registry (P4-T4)', () => {
       // 18.8 since P18.8-T4 (`FIRST_SALE_DATE`); 18.9 since P18.9-T1 (`CASES_PER_PRODUCING_AGENT`); 18.11 since UI V1
       // (`SALES_LEADS_CLOSED_IN_PERIOD`); 19.1 since P19.1-T6 (the *Potensi* tab's three, ADR-0193); 19.3 since P19.3-T1
       // (the data sources' three of 3 November, ADR-0201 to ADR-0203); 19.5 since P19.5-T4 (the surveys' six, ADR-0216).
-      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7']);
+      // 19.8 since P19.8-T2 (Home's *Leads*, `OWN_OPEN_LEADS`, ADR-0228 §4).
+      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8']);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -442,6 +445,8 @@ describe('the metric registry (P4-T4)', () => {
         'SUBGROUP_RECRUITMENT_BASELINE', 'SUBGROUP_TARGET_ATTAINMENT_PCT',
         // And the proposals a member made, a count of their own documents (P19.7-T2, ADR-0221 §7).
         'PROPOSALS_MADE',
+        // And Home's *Leads*, the reader's own open leads on one screen (P19.8-T2, ADR-0228 §4).
+        'OWN_OPEN_LEADS',
       ].sort());
     });
 
@@ -485,8 +490,8 @@ describe('the metric registry (P4-T4)', () => {
         // since P18.8-T4, the first sale's day, no requirement's either; 18.9 since P18.9-T1, *Cases/producing agents*.
         // 18.11 since UI V1: the roster's *Closing*, no requirement's. 19.1 since P19.1-T6: the *Potensi* tab's three. 19.3
         // since P19.3-T1: a leader row's unit persistency and two of the forum's rows, no requirement's.
-        // 19.5 since P19.5-T4: the surveys' six, no requirement's.
-        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7']);
+        // 19.5 since P19.5-T4: the surveys' six, no requirement's. 19.8 since P19.8-T2: Home's *Leads*, no requirement's.
+        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8']);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -548,6 +553,8 @@ describe('the metric registry (P4-T4)', () => {
           'SUBGROUP_WEEKLY_ACTIVITY_TARGET', 'SUBGROUP_RECRUITMENT_BASELINE', 'SUBGROUP_TARGET_ATTAINMENT_PCT',
           // P19.7-T2 (ADR-0221 §7): the proposals made, no requirement's.
           'PROPOSALS_MADE',
+          // P19.8-T2 (ADR-0228 §4): Home's *Leads*, no requirement's.
+          'OWN_OPEN_LEADS',
         ].sort());
       });
 

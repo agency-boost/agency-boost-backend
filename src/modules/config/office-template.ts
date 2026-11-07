@@ -191,6 +191,12 @@ export function templateKindsFromOffice(
           code: t.code,
           categoryCode: c.code,
           label: t.label,
+          /*
+           * *Nama singkat* (P19.8-T4, ADR-0229 §5) as the office published it. A snapshot published before the field
+           * carries no key, and the template carries none either, so an office made from it is given the platform's
+           * words by code (`shortLabelOf`) rather than an explicit none.
+           */
+          ...(Object.prototype.hasOwnProperty.call(t, 'shortLabel') ? { shortLabel: t.shortLabel ?? null } : {}),
           description: t.description ?? null,
           displayOrder: t.displayOrder,
         }))),

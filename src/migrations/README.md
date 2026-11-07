@@ -175,3 +175,9 @@ configuration is published again, origin `{ source: 'migration' }`, with every s
 row; a KPM unchanged against the template version it was given moves its `seededFrom.training_taxonomy` to the split one.
 `lines` names every split and every title left whole for a reason (`empty_half`, `too_long`), per KPM and template. No
 code, progress, material, order or archived state moves. A second run writes none.
+`0060-activity-short-labels` (Phase 19.8, P19.8-T4; ADR-0229 §5, MOB UI-180) prints `{ types, snapshots }`: every
+office's activity type of the twelve seeded codes, archived ones too and deleted ones never, given its *Nama singkat*
+from `SEED_ACTIVITY_TYPES` by code where it holds none (the key missing, `null` or blank), and each office's newest
+published snapshot the same, so the working copy and what agents read agree and no publish bar speaks. An office's own
+short name, and a type of its own code, are left alone. No version moves; templates are not written (a template type
+without the key gives the seed's words by code when an office is provisioned or pushed). A second run writes none.

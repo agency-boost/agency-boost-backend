@@ -65,6 +65,17 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
       .toEqual(SEED_RATIO_DEFINITIONS.map((r) => [r.code, r.label, r.benchmark, 'platform', 'active', 1]));
   });
 
+  it('P19.8-T4 AC-13 MOB UI-180 every demo type carries its short name, by code, in the working copy and what agents read', async () => {
+    const kpmId = await office('0417');
+    const types = await col('activityTypes').find({ kpmId }).sort({ displayOrder: 1 }).toArray();
+    expect(types.map((t) => [t.code, t.shortLabel])).toEqual(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.shortLabel]));
+    expect(types.find((t) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi' });
+
+    const published = await wired.config.readPublished(await as('rina@kpm0417.test'));
+    expect(published.activity.flatMap((c) => c.types).find((t) => t.code === 'DEV_COACHING_RECEIVED'))
+      .toMatchObject({ shortLabel: '1-on-1 dgn leader' });
+  });
+
   it('AC-2 0417’s publish bar reads clean, and item 7 reaches its agents under the client’s label', async () => {
     const owner = await as('owner@kpm0417.test', true);
     expect(await wired.config.state(owner)).toMatchObject({ publishedVersion: 1, hasUnpublishedChanges: false });

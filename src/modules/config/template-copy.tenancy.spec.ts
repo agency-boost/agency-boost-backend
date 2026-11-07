@@ -125,6 +125,17 @@ describe('template copies (P13.2-T7)', () => {
       });
     });
 
+    it('P19.8-T4 AC-13 MOB UI-180 copies a type’s short name with the template, as edited', async () => {
+      await edit(PRUDENTIAL, 'activity_taxonomy', prudentialDefault, (p) => {
+        (p.types as Payload[]).find((t) => t.code === 'SELL_PRESENTATION')!.shortLabel = 'Pres. jual';
+        return p;
+      });
+      const copy = await wired.namedTemplates.create(sa, PRUDENTIAL, { name: 'Short names', from: { templateId: prudentialDefault } });
+      const types = (await read(PRUDENTIAL, 'activity_taxonomy', copy.id)).types as Payload[];
+      expect(types.find((t) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Pres. jual' });
+      expect(types.find((t) => t.code === 'SELL_SUBMISSION')).toMatchObject({ shortLabel: 'Submission polis' });
+    });
+
     it('stays its own: a later edit and publish on either side never reaches the other — both ways', async () => {
       const copy = await wired.namedTemplates.create(sa, PRUDENTIAL, { name: 'Copy', from: { templateId: prudentialDefault } });
       const sourceRatios = await read(PRUDENTIAL, 'ratio_set', prudentialDefault);
@@ -316,6 +327,20 @@ describe('template copies (P13.2-T7)', () => {
       expect(await codes(NEW_KPM)).toEqual(await codes(KPM));
       expect(await col('ratioDefinitions').countDocuments({ kpmId: NEW_KPM }))
         .toBe(await col('ratioDefinitions').countDocuments({ kpmId: KPM }));
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 carries an office’s short names into the template, and into an office made from it', async () => {
+      await col('configSnapshots').updateOne(
+        { kpmId: KPM },
+        { $set: { 'payload.activity.$[].types.$[t].shortLabel': 'Pres. kami' } },
+        { arrayFilters: [{ 't.code': 'SELL_PRESENTATION' }] },
+      );
+      const saved = await wired.templateCopies.saveOffice(sa, KPM, { name: 'Short names', companyId: PRUDENTIAL });
+      const types = (await read(PRUDENTIAL, 'activity_taxonomy', saved.id)).types as Payload[];
+      expect(types.find((t) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Pres. kami' });
+      await provisionFrom(wired, NEW_KPM, PRUDENTIAL, { kind: 'template', templateId: saved.id });
+      expect(await col('activityTypes').findOne({ kpmId: NEW_KPM, code: 'SELL_PRESENTATION' })).toMatchObject({ shortLabel: 'Pres. kami' });
+      expect(await col('activityTypes').findOne({ kpmId: NEW_KPM, code: 'SELL_FOLLOWUP' })).toMatchObject({ shortLabel: 'Follow up' });
     });
 
     it('carries a section’s rungs and description into the template, and into an office made from it', async () => {

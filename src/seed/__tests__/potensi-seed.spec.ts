@@ -74,8 +74,8 @@ describe('P19.1 the Potensi seed — a run at 10:00 on 4 November 2026 in Jakart
     expect(everyone(view).some((p) => p.aa.aa && p.aa.switched === 0)).toBe(true);
     expect(named('Budi').aa).toEqual({ potensi: 0, aa: false, switched: 0 });
     expect(view.tiles.aa).toBeGreaterThan(0);
-    // Grouped per unit, Agus's own card last.
-    expect(view.units.at(-1)).toMatchObject({ kind: 'direct', leader: { name: 'Agus Prasetyo' } });
+    // Grouped per unit, Agus's own card first (*changed 2026-11-07*, P19.8-T4 AC-4, MOB UI-179: it was last).
+    expect(view.units[0]).toMatchObject({ kind: 'direct', leader: { name: 'Agus Prasetyo' } });
   });
 
   it('P19.1-T6 AC-13 Rekrut: a Recruit lead switched on, a rekrut linked to a membership and one not yet added', async () => {
@@ -93,6 +93,29 @@ describe('P19.1 the Potensi seed — a run at 10:00 on 4 November 2026 in Jakart
     const october = await potensi.read(agus, { month: '2026-10' });
     expect(named('Siti', october).aa).toMatchObject({ aa: true, switched: 1 });
     expect(named('Dimas', october).aa).toMatchObject({ potensi: 1, switched: 1 });
+  });
+
+  /** **P19.8-T4 AC-14** (ADR-0229 §8; MOB UI-182, UI-186): the tiles' *potensi x*, and the months the demo shows. */
+  it('P19.8-T4 AC-14 this month: a Recruit potensi, and each tile’s potensi x', () => {
+    expect(view.tiles.potensi.rekrut).toBeGreaterThanOrEqual(1);
+    expect(view.tiles.potensi.aa).toBeGreaterThan(0);
+  });
+
+  it('P19.8-T4 AC-14 last month holds potensi and AA; an earlier month holds none, and still lists the whole team', async () => {
+    const october = await potensi.read(agus, { month: '2026-10' });
+    expect(october.tiles.aa).toBeGreaterThan(0);
+    expect(october.tiles.potensi.aa).toBeGreaterThan(0);
+    const months = ['2026-09', '2026-08', '2026-07', '2026-06', '2026-05', '2026-04', '2026-03', '2026-02', '2026-01'];
+    const withNone: UnitPotensiView[] = [];
+    for (const month of months) {
+      const read = await potensi.read(agus, { month });
+      if (read.tiles.potensi.aa === 0 && read.tiles.potensi.rekrut === 0) withNone.push(read);
+    }
+    expect(withNone.length).toBeGreaterThan(0);
+    for (const read of withNone) {
+      expect(everyone(read).map((p) => p.membershipId)).toEqual(everyone(view).map((p) => p.membershipId));
+      expect(everyone(read).every((p) => p.aa.potensi === 0 && p.rekrut.potensi === 0)).toBe(true);
+    }
   });
 
   it('a second run writes nothing: each row’s id is derived', async () => {

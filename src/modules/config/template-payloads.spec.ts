@@ -4,7 +4,8 @@ import {
 import {
   defaultEventTypes, eventTypeSeedDocuments, eventTypesProblems,
 } from '@/modules/events/event-types-payload';
-import { platformDefaultPayload, withPlatformLadder } from './template-defaults';
+import { ACTIVITY_TEXT } from '@/domain/constants';
+import { platformDefaultPayload, typeShortLabelProblems, withPlatformLadder } from './template-defaults';
 import { englishAll } from '../../../test/i18n';
 
 /**
@@ -281,5 +282,50 @@ describe('withPlatformLadder (ADR-0116)', () => {
     const first = withPlatformLadder(null).payload;
     (first.stages as { label: string }[])[0].label = 'Changed';
     expect((withPlatformLadder(null).payload.stages as { label: string }[])[0].label).not.toBe('Changed');
+  });
+});
+
+/**
+ * **A template's types whose *Nama singkat* an office's own write would refuse** (P19.8-T4, ADR-0229 §5): the codes
+ * publishing a template, and a push of one, name in their `VALIDATION_FAILED`. Absent and `null` are fine.
+ */
+describe('P19.8-T4 typeShortLabelProblems (ADR-0229 §5)', () => {
+  it.each([
+    ['nothing', undefined],
+    ['null', null],
+    ['an object', { SELL_PRESENTATION: { shortLabel: 5 } }],
+    ['a text', 'SELL_PRESENTATION'],
+  ])('P19.8-T4 AC-13 types that are not a list (%s) name nobody', (_what, types) => {
+    expect(typeShortLabelProblems(types)).toEqual([]);
+  });
+
+  it('P19.8-T4 AC-13 a short name that is text within the limit, null, or absent is fine; a row that is not an object is skipped', () => {
+    const atLimit = `  ${'x'.repeat(ACTIVITY_TEXT.SHORT_LABEL_MAX)}  `;
+    expect(typeShortLabelProblems([
+      { code: 'SELL_PRESENTATION', shortLabel: 'Presentasi' },
+      { code: 'SELL_FOLLOWUP', shortLabel: null },
+      { code: 'SELL_SUBMISSION' },
+      { code: 'AT_LIMIT', shortLabel: atLimit },
+      null,
+      'SELL_PRESENTATION',
+    ])).toEqual([]);
+  });
+
+  it('P19.8-T4 AC-13 a short name that is not text — a number, a list — is named by its code', () => {
+    expect(typeShortLabelProblems([
+      { code: 'SELL_PRESENTATION', shortLabel: 5 },
+      { code: 'SELL_FOLLOWUP', shortLabel: ['Follow up'] },
+      { code: 'SELL_SUBMISSION', shortLabel: 'Submit' },
+    ])).toEqual(['SELL_PRESENTATION', 'SELL_FOLLOWUP']);
+  });
+
+  it(`P19.8-T4 AC-13 a short name over ${ACTIVITY_TEXT.SHORT_LABEL_MAX} characters once trimmed is named`, () => {
+    expect(typeShortLabelProblems([
+      { code: 'SELL_PRESENTATION', shortLabel: 'x'.repeat(ACTIVITY_TEXT.SHORT_LABEL_MAX + 1) },
+    ])).toEqual(['SELL_PRESENTATION']);
+  });
+
+  it('P19.8-T4 AC-13 a row with no code is named ?, so the refusal still counts it', () => {
+    expect(typeShortLabelProblems([{ shortLabel: 5 }, { code: null, shortLabel: 'x'.repeat(30) }])).toEqual(['?', '?']);
   });
 });

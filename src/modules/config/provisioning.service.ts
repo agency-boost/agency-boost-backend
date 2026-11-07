@@ -19,7 +19,8 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { refuseUnknownRungs } from './template-rungs';
 import { NamedTemplate, NamedTemplateDocument } from './named-template.schema';
 import {
-  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, withCascadeTypes, withPlatformLadder, type OfficeTemplateKind,
+  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, shortLabelOf, withCascadeTypes, withPlatformLadder,
+  type OfficeTemplateKind,
 } from './template-defaults';
 import { ActivityCategory, ActivityCategoryDocument } from './activity-category.schema';
 import { ActivityType, ActivityTypeDocument } from './activity-type.schema';
@@ -677,6 +678,8 @@ export class ProvisioningService {
       code: t.code,
       categoryCode: t.categoryCode,
       label: t.label,
+      // *Nama singkat* (P19.8-T4, ADR-0229 §5): the payload's, or the platform's by code for one published before it.
+      shortLabel: shortLabelOf(t),
       description: t.description ?? null,
       displayOrder: t.displayOrder,
       version: 1,

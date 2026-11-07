@@ -57,6 +57,16 @@ export class ActivityTypeDto implements ActivityTypeView {
   @ApiProperty({ type: String, example: 'Submission polis' })
   label!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Submission polis',
+    description:
+      '*Nama singkat* (ADR-0229 §5): the one line the Unit Dashboard’s activity table shows, the full `label` '
+      + 'on tap. `null` for none.',
+  })
+  shortLabel!: string | null;
+
   @ApiProperty({ type: String, nullable: true, example: 'secara mandiri atau melalui BOP' })
   description!: string | null;
 

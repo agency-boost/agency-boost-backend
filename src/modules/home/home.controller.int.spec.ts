@@ -19,6 +19,8 @@ const VIEW: HomeView = {
   activity: { today: 0, yesterday: 5, days: [], total: 18 },
   schedule: { meetings: 2, tasks: 3 },
   actions: [],
+  leads: 7,
+  newHires: 0,
   leader: null,
 };
 

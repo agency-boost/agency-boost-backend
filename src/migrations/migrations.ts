@@ -55,6 +55,7 @@ import { up as playbookIntoTemplate } from './0056-playbook-into-template';
 import { up as advancedAnalyticsV1 } from './0057-advanced-analytics-v1';
 import { up as uploadValuesByKode } from './0058-upload-values-by-kode';
 import { up as trainingTitleSplit } from './0059-training-title-split';
+import { up as activityShortLabels } from './0060-activity-short-labels';
 
 /*
  * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
@@ -162,4 +163,8 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // templates' newest published version as a new one, drafts in place, each KPM's rows a new version with its agents'
   // copy published again; an unchanged KPM's `seededFrom` moved with its template. A row keyed `description` is done.
   ['0059-training-title-split', trainingTitleSplit],
+  // P19.8-T4 (ADR-0229 §5, MOB UI-180): each office's activity types of the twelve seeded codes given their *Nama
+  // singkat* by code where they hold none — the working copy and the newest snapshot, no version moved, an office's own
+  // kept. Templates are not written: a type without the key gives the seed's words by code (`shortLabelOf`).
+  ['0060-activity-short-labels', activityShortLabels],
 ];

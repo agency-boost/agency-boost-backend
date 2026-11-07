@@ -1506,7 +1506,7 @@
     },
     "/api/v1/goals/{period}/ape-estimate": {
       "put": {
-        "description": "Writes the plan’s `apeAchievedMinor` — the figure Goal Settings shows as *APE yang sudah dicapai tahun ini* — as the caller’s own estimate (*perkiraan Anda*, provenance `self_reported`); `null` or `0` clears it (*Hapus*). The plan as it stood is kept as a revision and its version moves on; nothing else of it changes — not its other inputs, its agreed snapshot or `savedAt`. **Your own plan only**, and only a saved one: `404 Goal` without it. Read by your own screens alone — never by a leader’s or the office’s, which read the office’s figures (ADR-0195) — and replaced on every screen once the office holds a year-to-date figure for the year.\n\n**Requires `goal:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Writes the plan’s `apeAchievedMinor` — the figure Goal Settings shows as *APE yang sudah dicapai tahun ini* — as the caller’s own estimate (*perkiraan Anda*, provenance `self_reported`); `null` or `0` clears it (*Hapus*). The plan as it stood is kept as a revision and its version moves on; nothing else of it changes — not its other inputs, its agreed snapshot or `savedAt`. **Your own plan only**, and only a saved one: `404 Goal` without it. Read by your own screens alone — never by a leader’s or the office’s, which read the office’s figures (ADR-0195). There, **the newer of it and the office’s year-to-date figure is the one in force** (ADR-0230): an import or a correction written after it replaces it, and sending it again — the same figure too — is a typing now, newer than that upload, so it is in force again. The same figure sent while it is already in force changes nothing.\n\n**Requires `goal:update`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "GoalController_saveEstimate_v1",
         "parameters": [
           {
@@ -27511,7 +27511,7 @@
     },
     "/api/v1/unit/dashboard/activities": {
       "get": {
-        "description": "The *Activities* tab: for the unit the dashboard would answer — yours, or with `for` a leader’s below you; the agency’s owner and its administrators any leader’s — **every person’s count per activity type** over a week, Monday to Sunday, or a calendar month on the agency’s calendar (`span`, the period holding `date`), with the *Unit*’s and the *Group*’s *Total* column summed; the agency’s sections and types in its order, an archived one only while the period counts it; and **the Ratio page’s ratios over the *Unit*’s and the *Group*’s counts summed**, always the last 30 days. Counts only, never points. Somebody who leads nobody is answered an empty unit. Every member shown other than you is recorded as read.\n\n**Requires `unit_dashboard:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The *Activities* tab: for the unit the dashboard would answer — yours, or with `for` a leader’s below you; the agency’s owner and its administrators any leader’s — **every person’s count per activity type** over a week, Monday to Sunday, or a calendar month on the agency’s calendar (`span`, the period holding `date`), with the *Unit*’s and the *Group*’s *Total* column summed; the agency’s sections and types in its order, an archived one only while the period counts it; and **the Ratio page’s ratios over the *Unit*’s and the *Group*’s counts summed**, always the last 30 days. Counts only, never points. Somebody who leads nobody is answered an empty unit. Every member shown other than you is recorded as read. With `ratioFor`, **one member’s own ratios** too (`ratios.person`): somebody of the *Group* read, on their own rung.\n\n**Requires `unit_dashboard:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "UnitActivitiesController_read_v1",
         "parameters": [
           {
@@ -27543,6 +27543,16 @@
             "required": false,
             "in": "query",
             "description": "The **membership** whose unit to read, as the dashboard’s own `for`. Omitted, it is your own unit.",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "ratioFor",
+            "required": false,
+            "in": "query",
+            "description": "ADR-0229 §7: the **membership** whose own five ratios the ratio card shows — somebody of the *Group* read. Answered in `ratios.person`, the same 30 days, on their own rung. Anybody else is `404`.",
             "schema": {
               "maxLength": 64,
               "type": "string"
@@ -27591,7 +27601,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — `for` names yourself, somebody who leads nobody, somebody outside your reach or who has left, **or** somebody in another office: indistinguishable, as on `GET /unit/dashboard`.",
+            "description": "`NOT_FOUND` — `for` names yourself, somebody who leads nobody, somebody outside your reach or who has left, **or** somebody in another office: indistinguishable, as on `GET /unit/dashboard`. Likewise `ratioFor` naming anybody who is not in the *Group* read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27823,7 +27833,7 @@
     },
     "/api/v1/home": {
       "get": {
-        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day. **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks and *Tim saya* (*Anggota tim*, *Recruitment pipeline*, *New hires*) at zero when nobody reports to them yet (ADR-0189 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day; *Leads*, your own open leads, Sales and Recruit (`OWN_OPEN_LEADS`); and *New hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks at zero when nobody reports to them yet (ADR-0189 §4, ADR-0228 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "HomeController_read_v1",
         "parameters": [],
         "responses": {
@@ -37104,7 +37114,7 @@
               "corrected",
               "self_reported"
             ],
-            "description": "The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`) — the last only while the office holds no year-to-date figure for the year."
+            "description": "The carrier’s file, a correction by hand, or a figure **typed in the app, not uploaded** — by the member, or by whoever coaches them (ADR-0183; `typedBy`). On the member’s own plan **the newer of the typed figure and the office’s year to date** (ADR-0230 §6): a figure typed after the office last wrote the year, until an import or a correction written after it. On a leader’s or the office’s reads the office’s figure whenever it holds one."
           },
           "month": {
             "type": "string",
@@ -37119,6 +37129,33 @@
                 "$ref": "#/components/schemas/GoalTypistDto"
               }
             ]
+          }
+        },
+        "required": [
+          "minor",
+          "provenance",
+          "month"
+        ]
+      },
+      "GoalOfficialDto": {
+        "type": "object",
+        "properties": {
+          "minor": {
+            "type": "number",
+            "description": "The office’s year to date for the plan’s year, in IDR minor units."
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "corrected"
+            ],
+            "description": "The carrier’s file, or a correction by hand."
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-10",
+            "description": "The latest month the year to date reads: *⚡ Otomatis · per Okt 2026*."
           }
         },
         "required": [
@@ -37338,13 +37375,22 @@
           },
           "apeAchievedMinor": {
             "type": "number",
-            "description": "The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used only until production arrives."
+            "description": "The typed figure — the agent’s, or a coach’s while the office held none (ADR-0183) — kept, and used while it is newer than the office’s year to date (ADR-0230 §6). 0 is nothing typed."
           },
           "achieved": {
             "description": "The figure the plan is measured against, and whose it is.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalAchievedDto"
+              }
+            ]
+          },
+          "official": {
+            "nullable": true,
+            "description": "**The office’s own year to date for the year, whichever figure is in force** (ADR-0230 §4): what Goal Settings prefills as *⚡ Otomatis · per {month}* and puts back with *Pakai otomatis*. `null` while the office holds none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalOfficialDto"
               }
             ]
           },
@@ -37428,6 +37474,7 @@
           "monthsLeftIsOverride",
           "apeAchievedMinor",
           "achieved",
+          "official",
           "caseSizeMinor",
           "leadsToApptPct",
           "closingRatePct",
@@ -37474,8 +37521,9 @@
           },
           "apeAchievedMinor": {
             "type": "number",
+            "nullable": true,
             "example": 0,
-            "description": "IDR sen. The typed figure, the answer only while the office holds no year-to-date figure for the year. On a save of somebody else’s plan (`for`) it is stored while the office holds no figure for them, and ignored — their stored figure kept — once it holds one (ADR-0183, partly reversing ADR-0075). **Optional, and absent means keep the stored figure** (S1): the screens send it only when the reader changed it in this edit, so a coach saving the target never writes back over the member’s newer figure the one they read. The save records who typed it (`apeAchievedTypedBy`)."
+            "description": "IDR sen. The typed figure. **On your own plan it is stored and typed now, also over the office’s figure** (ADR-0230): the newer of it and the office’s year to date is the one your screens measure against, until an import or a correction written after it. **`null` clears it** — *Pakai otomatis*, saved — and the office’s figure is read again (0 is nothing typed). On a save of somebody else’s plan (`for`) it is stored while the office holds no figure for them, and ignored — their stored figure kept — once it holds one (ADR-0183, partly reversing ADR-0075). **Optional, and absent means keep the stored figure** (S1): the screens send it only when the reader changed it in this edit, so a coach saving the target never writes back over the member’s newer figure the one they read. The save records who typed it (`apeAchievedTypedBy`)."
           },
           "caseSizeMinor": {
             "type": "number",
@@ -37526,7 +37574,7 @@
             "description": "Whether `monthsLeft` was typed over (`true`) or is the office’s calendar."
           },
           "achieved": {
-            "description": "The APE the plan is measured against: the office’s year to date where it holds one, else the typed figure on your own plan and the stored one on anybody else’s.",
+            "description": "The APE the plan is measured against: the newer of the typed figure and the office’s year to date (ADR-0230 §6) — a figure you type on your own plan is typed now, so it is the answer; on anybody else’s the figure typed while the office holds none, else the member’s stored one by the same rule.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/GoalAchievedDto"
@@ -40330,6 +40378,13 @@
             "minLength": 1,
             "maxLength": 200
           },
+          "shortLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Submission polis",
+            "maxLength": 20,
+            "description": "*Nama singkat* (ADR-0229 §5): the one line the Unit Dashboard’s activity table shows, the full `label` on tap. Blank or `null` is none — the table then shows the label on up to two lines."
+          },
           "description": {
             "type": "string",
             "example": "telepon, WhatsApp, tatap muka, dll",
@@ -40350,6 +40405,13 @@
             "example": "Submission polis",
             "minLength": 1,
             "maxLength": 200
+          },
+          "shortLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Submission polis",
+            "maxLength": 20,
+            "description": "*Nama singkat* (ADR-0229 §5). Absent leaves it; blank or `null` clears it."
           },
           "description": {
             "type": "string",
@@ -51689,6 +51751,12 @@
             "example": "Submission polis",
             "description": "As the agency named it — content, never translated."
           },
+          "shortLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Submission polis",
+            "description": "ADR-0229 §5: the agency’s *Nama singkat*, the table’s one line; `null` for none — the row then shows `label` on up to two lines."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -51700,6 +51768,7 @@
         "required": [
           "code",
           "label",
+          "shortLabel",
           "status"
         ]
       },
@@ -52009,6 +52078,26 @@
           "status"
         ]
       },
+      "PersonRatiosDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The member `ratioFor` named."
+          },
+          "ratios": {
+            "description": "The Ratio page’s ratios over their own counts, the same 30 days, on their own rung.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitRatioDto"
+            }
+          }
+        },
+        "required": [
+          "membershipId",
+          "ratios"
+        ]
+      },
       "ActivitiesRatiosDto": {
         "type": "object",
         "properties": {
@@ -52038,6 +52127,15 @@
             "items": {
               "$ref": "#/components/schemas/UnitRatioDto"
             }
+          },
+          "person": {
+            "nullable": true,
+            "description": "ADR-0229 §7: one member’s own, when `ratioFor` names them; `null` otherwise.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PersonRatiosDto"
+              }
+            ]
           }
         },
         "required": [
@@ -52045,7 +52143,8 @@
           "to",
           "days",
           "unit",
-          "group"
+          "group",
+          "person"
         ]
       },
       "UnitActivitiesDto": {
@@ -52116,6 +52215,25 @@
           "isReader"
         ]
       },
+      "PotensiTilesPotensiDto": {
+        "type": "object",
+        "properties": {
+          "aa": {
+            "type": "number",
+            "example": 9,
+            "description": "The people of the unit with a Sales lead switched on for the month, whatever became of it."
+          },
+          "rekrut": {
+            "type": "number",
+            "example": 2,
+            "description": "The people of the unit with a Recruit lead switched on for the month, whatever became of it."
+          }
+        },
+        "required": [
+          "aa",
+          "rekrut"
+        ]
+      },
       "PotensiTilesDto": {
         "type": "object",
         "properties": {
@@ -52128,11 +52246,20 @@
             "type": "number",
             "example": 1,
             "description": "The kandidat of the unit who became rekrut in the month."
+          },
+          "potensi": {
+            "description": "ADR-0229 §8: each tile’s *potensi x* — people, the cards’ `switchedPeople` summed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PotensiTilesPotensiDto"
+              }
+            ]
           }
         },
         "required": [
           "aa",
-          "rekrut"
+          "rekrut",
+          "potensi"
         ]
       },
       "PotensiRungDto": {
@@ -52349,7 +52476,7 @@
               "unit",
               "direct"
             ],
-            "description": "`unit`: a unit below the head (*UNIT AAB SARI PUSPITA*); `direct`: the head and the agents who answer to them directly (*LANGSUNG KE AB AGUS*), last."
+            "description": "`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 §4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order."
           },
           "leader": {
             "$ref": "#/components/schemas/PotensiLeaderDto"
@@ -52396,7 +52523,7 @@
             "$ref": "#/components/schemas/PotensiTilesDto"
           },
           "units": {
-            "description": "One card per unit below the head, then the head’s own card.",
+            "description": "The head’s own card first, then one card per unit below the head (ADR-0229 §4).",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PotensiUnitDto"
@@ -52982,35 +53109,17 @@
             ]
           },
           "team": {
-            "description": "Nobody-reported first, then not today, then the rest.",
+            "description": "*Laporan aktivitas tim*: everybody in your Group but you — nobody-reported first, then not today, then the rest.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HomeTeamPersonDto"
             }
-          },
-          "members": {
-            "type": "number",
-            "minimum": 0,
-            "description": "*Tim saya · Anggota tim*: everybody in your Group but you."
-          },
-          "recruitmentPipeline": {
-            "type": "number",
-            "minimum": 0,
-            "description": "*Tim saya · Recruitment pipeline*: `RECRUITMENT_PIPELINE_NOW` over your Group, you included."
-          },
-          "newHires": {
-            "type": "number",
-            "minimum": 0,
-            "description": "*Tim saya · New hires*: your Group’s new hires before a first sale (ADR-0172 §1)."
           }
         },
         "required": [
           "activeAgent",
           "coached7d",
-          "team",
-          "members",
-          "recruitmentPipeline",
-          "newHires"
+          "team"
         ]
       },
       "HomeDto": {
@@ -53056,7 +53165,19 @@
                 }
               ]
             },
-            "description": "*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’."
+            "description": "*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’. An agenda row’s `id` is the Calendar’s own: an entry’s opens `GET /calendar/entries/{id}`, a joined event’s `/events/{id}`."
+          },
+          "leads": {
+            "type": "number",
+            "minimum": 0,
+            "example": 7,
+            "description": "*Leads* (`OWN_OPEN_LEADS`): your own open leads, Sales and Recruit — `OPEN_SALES_LEADS` and `RECRUITMENT_PIPELINE_NOW` over you alone. Every reader’s."
+          },
+          "newHires": {
+            "type": "number",
+            "minimum": 0,
+            "example": 1,
+            "description": "*New hires*: your Group’s new hires before a first sale (ADR-0172 §1), the Unit Dashboard’s count; 0 when you lead nobody."
           },
           "leader": {
             "nullable": true,
@@ -53077,6 +53198,8 @@
           "activity",
           "schedule",
           "actions",
+          "leads",
+          "newHires",
           "leader"
         ]
       },
@@ -62744,6 +62867,12 @@
             "type": "string",
             "example": "Submission polis"
           },
+          "shortLabel": {
+            "type": "string",
+            "nullable": true,
+            "example": "Submission polis",
+            "description": "*Nama singkat* (ADR-0229 §5): the one line the Unit Dashboard’s activity table shows, the full `label` on tap. `null` for none."
+          },
           "description": {
             "type": "string",
             "nullable": true,
@@ -62783,6 +62912,7 @@
           "code",
           "categoryCode",
           "label",
+          "shortLabel",
           "description",
           "appliesToOrgLevelCodes",
           "displayOrder",

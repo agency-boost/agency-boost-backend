@@ -298,6 +298,8 @@ export {
   type SeedRatioDefinition,
   SEED_ACTIVITY_CATEGORIES,
   SEED_ACTIVITY_TYPES,
+  // P19.8-T4 (ADR-0229 §5): an activity type's *Nama singkat* bound.
+  ACTIVITY_TEXT,
   SEED_LEAD_STATUSES,
   // P18.7-T9 AC-6 (ADR-0167 §10): the recruitment first status's earlier words, for migration 0038 only.
   SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167,
