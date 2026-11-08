@@ -196,12 +196,13 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(office('0701').members).toBeGreaterThan(0);
   });
 
-  it('P18-T1 AC-12 0555’s Owner reads 0555’s own figures; its two members joined two months ago', async () => {
+  it('P18-T1 AC-12 0555’s Owner reads 0555’s own figures; two members joined two months ago, and Fajar after them', async () => {
     const b = await wired.kpmOverview.read(await as('0555', 'owner@kpm0555.test', { owner: true }));
     expect(b.office.code).toBe('0555');
-    expect(b.composition).toMatchObject({ total: 2, newThisMonth: 0 });
-    // P19.3-T2 (ADR-0200 §3): logging is the week's *Pengguna aktif* alone; 0555's two members are counted in it.
-    expect(b.engagement.loggedThisWeek.logged + b.engagement.loggedThisWeek.notLogged).toBe(2);
+    // P19.9-T6: three since Lina, an Agent, recruited Fajar (`demo.ts`, `AGENT_LEADER_0555`) — 45 days back, not this month.
+    expect(b.composition).toMatchObject({ total: 3, newThisMonth: 0 });
+    // P19.3-T2 (ADR-0200 §3): logging is the week's *Pengguna aktif* alone; 0555's three members are counted in it.
+    expect(b.engagement.loggedThisWeek.logged + b.engagement.loggedThisWeek.notLogged).toBe(3);
     expect(b.production.ytd.achievedMinor).not.toBeNull();
     expect(b.coaching.coverage30d.count).toBeGreaterThan(0);
   });

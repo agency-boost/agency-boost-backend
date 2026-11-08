@@ -26,7 +26,7 @@ export class HomeController {
       + 'seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed '
       + 'calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose '
       + 'next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the '
-      + 'quote and the pose of the day; *Leads*, your own open leads, Sales and Recruit (`OWN_OPEN_LEADS`); and *New '
+      + 'quote and the pose of the day; *Leads*, every open lead you own, as `/leads` opens on them (`OWN_OPEN_LEADS`); and *New '
       + 'hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active '
       + 'Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out '
       + 'of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your '

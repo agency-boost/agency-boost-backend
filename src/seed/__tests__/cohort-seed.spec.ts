@@ -3,7 +3,8 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { addDays } from '@/common/time/local-day';
 import { cohortCompletionRate, lastFinishedYear } from '@/domain/metrics/activation-completion-rate';
-import { activationEndsOn, activationState } from '@/modules/activation/activation-rules';
+import type { ActivationView } from '@/modules/activation/activation-progress.view';
+import { activationEndsOn, activationFirstYearEndsOn, activationState } from '@/modules/activation/activation-rules';
 import type { ComputedScorecard } from '@/modules/leader-meetings/scorecard/scorecard.types';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -128,10 +129,35 @@ describe('P18.1-T1 the cohort seed — a run at 10:00 on 10 October 2026 in Jaka
     expect(thisYear.of).toBeGreaterThan(thisYear.count);
   });
 
-  it('P18.1-T1 each hire reads their own activation, complete and graduated', async () => {
-    const view = await wired.activationProgress.mine(await as('arini@kpm0417.test'));
-    expect(view).toMatchObject({ state: 'graduated', startDate: first.starts.arini, pct: 100 });
+  it('P18.1-T1 each hire reads their own activation, complete and graduated — inside their first year (P19.9-T3 AC-5)', async () => {
+    // Cahya joined 360 days before the run: her first year runs to 15 October 2026.
+    const view = await wired.activationProgress.mine(await as('cahya@kpm0417.test')) as ActivationView;
+    expect(view).toMatchObject({ state: 'graduated', startDate: first.starts.cahya, pct: 100 });
     expect(view.done).toBe(view.total);
+  });
+
+  it('P19.9-T3 AC-1, AC-2 Seed: Yosef’s New Hires shows both years, and Arini, past her first year, opens empty where Cahya opens her checklist', async () => {
+    const yosef = await as('yosef@kpm0417.test');
+    const names = (r: { sections: Record<string, { hire: { name: string } }[]> }) =>
+      Object.values(r.sections).flat().map((row) => row.hire.name.split(' ')[0]).sort();
+    // A run on 10 October 2026: Kemal joined on 3 January; the others between September and December 2025.
+    expect(names(await wired.newHires.roster(yosef))).toEqual(['Kemal']);
+    expect(names(await wired.newHires.roster(yosef, 'previous'))).toEqual(['Arini', 'Bonar', 'Cahya', 'Damar', 'Elsa', 'Ikhsan', 'Jihan']);
+    expect(await wired.newHires.detail(yosef, cast.arini.id)).toMatchObject({
+      empty: 'first_year_over', joinDate: first.starts.arini, leader: { name: 'Yosef Tambunan', role: 'ab' },
+    });
+    expect(await wired.newHires.detail(yosef, cast.cahya.id)).toMatchObject({ state: 'graduated', pct: 100 });
+    expect(first.guide).toContain('Tahun berjalan: Kemal');
+    expect(first.guide).toContain('Tahun lalu: Arini (empty), Bonar (empty), Cahya, Damar, Elsa, Ikhsan, Jihan');
+  });
+
+  it('P19.9-T3 AC-5 Arini, 390 days after joining, is past her first year: her own read is empty, nothing of the checklist in it', async () => {
+    const view = await wired.activationProgress.mine(await as('arini@kpm0417.test'));
+    expect(view).toEqual({
+      empty: 'first_year_over', hire: { membershipId: cast.arini.id, name: 'Arini Kusuma' }, today,
+      joinDate: first.starts.arini, firstYearEndsOn: activationFirstYearEndsOn(TZ, first.starts.arini!), leader: null,
+    });
+    expect(view).toMatchObject({ firstYearEndsOn: '2026-09-15' });
   });
 
   it('P18.1-T1 moves no walk already reviewed: the New hires rosters, activation pages, nav, coaching rosters and Unit Dashboards', () => {

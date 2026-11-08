@@ -1,19 +1,19 @@
-import type { LeadCountsRow } from './unit-rollup';
-
 /**
- * **`OWN_OPEN_LEADS` — the reader's own open leads, Sales and Recruit** (P19.8-T2; `metrics-and-definitions.md` §A.17;
- * ADR-0228 §4, OD-283 by its default): Home's *Leads* tile, the one figure an Agent and a leader both have.
+ * **`OWN_OPEN_LEADS` — every open lead the reader owns** (P19.9-T1 AC-5; `metrics-and-definitions.md` §A.17; ADR-0232,
+ * answering OD-283): Home's *Leads* tile, the one figure an Agent and a leader both have — **exactly what `/leads` opens
+ * on**, *Leads milik: Saya* under *Semua* (`GET /leads?scope=own&outcome=open`).
  *
  * ```
- * OWN_OPEN_LEADS(m) = OPEN_SALES_LEADS(m) + RECRUITMENT_PIPELINE_NOW(m)
+ * OWN_OPEN_LEADS(m) = |{ lead : lead.ownerMembershipId = m, lead.outcome = null, lead not deleted }|
  * ```
  *
- * **Two registered counts over one owner, added** — never a rule of its own: a sales lead while it has no outcome, a
- * recruitment lead while it has no outcome and stands on no stage the office marks terminal (`personLeadCounts`), a
- * deleted lead no lead at all. It is the reader's own row of the Unit Dashboard's *Leads* column (*Sales n* and
- * *Recruit n*) as one number, so Home never disagrees with it.
+ * **Any type and any stage**: a lead with no type yet, and a recruitment lead on a stage the office marks terminal, are
+ * open leads on the list, so they are on the tile. A won or a lost lead is closed; a deleted one is no lead at all (the
+ * repository's `deletedAt`). The reader's own only — a downline's leads are theirs (OD-286).
+ *
+ * *Changed 2026-11-08 (P19.9-T1, R1; ADR-0232):* it was `OPEN_SALES_LEADS + RECRUITMENT_PIPELINE_NOW` over one owner
+ * (P19.8-T2), which left out both of those — and the tile read *0* where `/leads` held 71.
  */
-export function ownOpenLeads(counts: Pick<LeadCountsRow, 'salesOpen' | 'recruitOpen'> | undefined): number {
-  if (!counts) return 0;
-  return counts.salesOpen + counts.recruitOpen;
+export function ownOpenLeadsFilter(ownerMembershipId: string): { ownerMembershipId: string; outcome: null } {
+  return { ownerMembershipId, outcome: null };
 }

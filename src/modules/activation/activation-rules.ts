@@ -42,6 +42,47 @@ export function activationEndsOn(timezone: string, startDate: LocalDate): LocalD
 }
 
 /**
+ * **The day a person's activation turns empty** (OD-289, ADR-0233; P19.9-T3 AC-5): their join date plus
+ * `ACTIVATION.FIRST_YEAR_MONTHS` calendar months, in the office's timezone — the first day it is no longer theirs to
+ * read. A month-end join ends as `activationEndsOn` does: 29 February 2028 → 28 February 2029.
+ */
+export function activationFirstYearEndsOn(timezone: string, joinDate: LocalDate): LocalDate {
+  return DateTime.fromFormat(joinDate, 'yyyy-MM-dd', { zone: timezone })
+    .plus({ months: ACTIVATION.FIRST_YEAR_MONTHS })
+    .toFormat('yyyy-MM-dd');
+}
+
+/** **Past the first year**: the office's today has reached the day it ends. Derived on every read, never by a job. */
+export function firstYearOver(today: LocalDate, endsOn: LocalDate): boolean {
+  return today >= endsOn;
+}
+
+/** A person's first year as both activation routes read it: from when, to when, and whether it is over. */
+export interface FirstYear {
+  /** The day it counts from — the join date, or the activation's start for a row with none; `null` with neither. */
+  joinDate: LocalDate | null;
+  /** `activationFirstYearEndsOn(joinDate)`, or `null` with no date to count from. */
+  endsOn: LocalDate | null;
+  over: boolean;
+}
+
+/**
+ * **One source for "one year since joining"** (OD-289, ADR-0233; P19.9-T3 AC-5; the Phase 19.9 exit review, L3): the
+ * leader's `GET /new-hires/:membershipId` and the person's own `GET /activation/me` both count it from here, so the two
+ * cannot disagree about the same person. It counts from the **join date** — the membership's `joinDate` — and falls back
+ * to the activation's start only for a membership without one (ADR-0169 §2 makes them the same day, and a correction
+ * moves both, so they differ only on a row that predates it). With neither there is nothing to count from, and the year
+ * is never over.
+ */
+export function firstYearOf(
+  timezone: string, today: LocalDate, joinDate: LocalDate | null | undefined, activationStart: LocalDate | null | undefined,
+): FirstYear {
+  const from = joinDate || activationStart || null;
+  const endsOn = from ? activationFirstYearEndsOn(timezone, from) : null;
+  return { joinDate: from, endsOn, over: endsOn !== null && firstYearOver(today, endsOn) };
+}
+
+/**
  * Open until graduated, or until the office's today reaches the end day — **derived on every read**,
  * never written by a job (D-notify). An expired activation is kept, read-only.
  */

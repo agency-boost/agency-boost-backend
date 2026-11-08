@@ -1,4 +1,5 @@
 import type { RequestContext } from '@/common/context/request-context';
+import type { NewHireDetailView } from '@/modules/activation/activation-progress.view';
 import type { TrainingProgressView } from '@/modules/training/training-progress.view';
 import {
   LISTED, seedTreeRecords, startComplianceHarness, stopComplianceHarness, type ComplianceHarness, type ComplianceWho,
@@ -130,7 +131,8 @@ describe('the compliance tree against the surfaces that own each fact (P18.3-T1,
       };
       const seen = new Set<string>();
       for (const [who, coach] of Object.entries(coachOf) as [ComplianceWho, ComplianceWho][]) {
-        const detail = await h.wired.newHires.detail(h.ctx(coach), h.id(who));
+        // Inside the first year, so the full view (P19.9-T3 AC-5).
+        const detail = await h.wired.newHires.detail(h.ctx(coach), h.id(who)) as NewHireDetailView;
         const key = `${detail.state}|${detail.overdue}`;
         seen.add(key);
         expect([who, cellOf(view, who)]).toEqual([who, {

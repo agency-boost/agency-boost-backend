@@ -3,7 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SOURCE_READER } from '@/common/i18n/reader';
 import { addDays } from '@/common/time/local-day';
-import type { ActivationView } from '@/modules/activation/activation-progress.view';
+import type { ActivationView, NewHireDetailView } from '@/modules/activation/activation-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { ACTIVATION_TICK_NOTES, SARI_NOTE_TO_RINA } from '../activation-fixture';
@@ -49,7 +49,8 @@ describe.each([
   const today = clock.localDateFor(TZ);
   let first: SeedResult;
   let wired: ReturnType<typeof configModule>;
-  const mine = async (email: string) => wired.activationProgress.mine(await as(email));
+  // Every seeded activation is inside its first year, so its own read is the full view (P19.9-T3 AC-5).
+  const mine = async (email: string) => wired.activationProgress.mine(await as(email)) as Promise<ActivationView>;
 
   beforeAll(async () => {
     await startMongo();
@@ -257,7 +258,7 @@ describe.each([
       done: true, source: 'link', waiting: false, record: { collection: 'monthlyAgentData' }, link: { kind: 'sales:first', label: 'Sales data' },
     });
     expect(await firstSaleOf('dimas@kpm0417.test')).toMatchObject({ date: lastMonthStart, source: 'monthly_file' });
-    const detail = await wired.newHires.detail(await as('agus@kpm0417.test'), dimas.hire.membershipId);
+    const detail = await wired.newHires.detail(await as('agus@kpm0417.test'), dimas.hire.membershipId) as NewHireDetailView;
     expect(item(detail, 'FIRST_CASE_CLOSED')).toMatchObject({ done: true, source: 'link', record: item(dimas, 'FIRST_CASE_CLOSED').record });
   });
 

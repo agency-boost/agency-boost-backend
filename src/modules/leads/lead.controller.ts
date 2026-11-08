@@ -53,6 +53,8 @@ export class LeadController {
       + 'state, sort on one key, and page. The Leads table sorts on name, type, status and '
       + 'registration, and asks for every page in turn. **Scoped to what your grant reaches**: '
       + 'your own, plus your unit or your downline. A lead outside it is a 404, never a 403. '
+      + '**`scope` chooses within it** (*Leads milik*, since 2026-11-08): `own`, your own leads — also what an '
+      + 'omitted `scope` reads — or `team`, everybody else your grant reaches. '
       + 'A page holding somebody else’s leads writes one entry to the audit log for each person '
       + 'whose leads it shows; your own write none.\n\n'
       + '`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching '

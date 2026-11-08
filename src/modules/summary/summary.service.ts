@@ -106,8 +106,8 @@ export interface SummaryView {
     /**
      * **The open leads Leads Management lists the reader besides their own** (P18.5-T15 AC-4; the client's UI
      * review, UI-002): those of everybody else their `lead:read` reaches. Counted only on the reader's own
-     * summary while their own card is empty — the one case its sentence reads — and 0 otherwise. An Agent's
-     * grant is their own leads alone, so an Agent who leads somebody reads 0.
+     * summary while their own card is empty — the one case its sentence reads — and 0 otherwise. An Agent who leads
+     * somebody reads their downline's, as any upline does (P19.9-T6, ADR-0234); one who leads nobody reads 0.
      */
     unitOpen: number;
   };

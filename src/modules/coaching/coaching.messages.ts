@@ -66,9 +66,10 @@ export const COACHING_REFUSALS = refusals('modules/coaching', {
     },
   },
   PERM_DENIED: {
+    /** No longer *an AB or an AAB*: an Agent who leads runs sessions too since P19.9-T6 (ADR-0234). */
     logOneOnOne: {
-      en: 'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
-      id: '1:1 dicatat oleh leader yang menjalankan sesi coaching: AB atau AAB.',
+      en: 'A 1:1 is logged by a leader who runs coaching sessions for this person.',
+      id: '1:1 dicatat oleh leader yang menjalankan sesi coaching untuk orang ini.',
     },
   },
   CONFIG_ARCHIVED: {

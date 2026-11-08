@@ -53,9 +53,11 @@ export const REGISTRATION = {
 } as const;
 
 /**
- * **3M activation and the year `/new-hires` lists** (ADR-0171 §2, ADR-0173; P18.8-T6). Documented once in
- * `docs/00-product/metrics-and-definitions.md` (*3M activation*) and pinned by `joining.spec.ts`; the frontend
- * re-declares none of it.
+ * **3M activation** (ADR-0171 §2, ADR-0173; P18.8-T6). Documented once in `docs/00-product/metrics-and-definitions.md`
+ * (*3M activation*) and pinned by `activation-3m.spec.ts`; the frontend re-declares none of it.
+ *
+ * *Changed 2026-11-08 (ADR-0233, OD-288): `WINDOW_MONTHS` — the rolling twelve months `/new-hires` listed — is retired.
+ * The page lists a calendar year (`newHiresYear`), which needs no number.*
  */
 export const ACTIVATION_3M = {
   /**
@@ -64,11 +66,6 @@ export const ACTIVATION_3M = {
    * which paces the checklist and is the office's to change, and not `JOINING.NEW_HIRE_MAX_DAYS_BACK`, which classifies.
    */
   DAYS: 90,
-  /**
-   * **`/new-hires` lists the new hires who joined within this many calendar months before the office's today** — a
-   * join date after the same day twelve months back (ADR-0173 §1). Older ones leave the page and stay in the data.
-   */
-  WINDOW_MONTHS: 12,
 } as const;
 
 /** `memberships.joinedAs` (ADR-0169 §3). The screens say *New hire* and *Existing agent*. */

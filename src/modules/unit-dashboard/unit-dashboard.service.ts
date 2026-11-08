@@ -90,13 +90,20 @@ export interface UnitLastOneOnOne {
 export interface UnitRow extends UnitPerson {
   /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the row draws initials. */
   photoUrl: string | null;
+  /**
+   * ***WhatsApp*** (P19.9-T4 AC-1; ADR-0235, OD-291): the number on their account, for the roster's WhatsApp button at
+   * every period and size. `null` without one — the button then offers *Isi nomor WhatsApp* to a reader who may save one
+   * (`member:update_phone`) — and always on the reader's own row, for an inactive membership, and in the office's
+   * read-only view of another leader's unit, which draws no button.
+   */
+  phone: string | null;
   /** The reader's own row: *You ({first name})*, no *Last 1:1*, and it drills to the reader's own screens. */
   isReader: boolean;
   /**
    * The reader, or somebody they coach (`CoachResolver.coacheesOf(reader)`) whose coaching tabs their grants
    * open (`personal_summary:read` wider than `own`): the row may drill into coaching's pages. `false` for an
-   * Owner or an Admin reading a unit outside their own downline, and for an Agent-rung leader's coachees,
-   * where coaching would answer *not found*.
+   * Owner or an Admin reading a unit outside their own downline, where coaching would answer *not found*. An
+   * Agent-rung leader's coachees are `true` since P19.9-T6 (ADR-0234): every upline coaches.
    */
   coached: boolean;
   rung: { code: string; label: string };
@@ -133,7 +140,8 @@ export interface UnitRow extends UnitPerson {
   followUp: FollowUp | null;
   /**
    * ***Chasing MDRT*** (P18.2-T7 AC-7, ADR-0122): chasing the office's `MDRT_QUALIFICATION`, not ended. `null` for a
-   * row beyond the reader's `campaign_qualification:read` — an Agent-rung leader's coachees — drawn as —.
+   * row beyond the reader's `campaign_qualification:read`, drawn as — (an Agent-rung leader's coachees were, until
+   * P19.9-T6 gave the Agent `own-downline` there; ADR-0234).
    */
   chasingMdrt: boolean | null;
   /** ***Campaigns they're chasing*** (AC-8): their chases of campaigns not ended, by title; `null` as above. */
@@ -327,8 +335,8 @@ export class UnitDashboardService {
 
     /*
      * **Chases only inside `campaign_qualification:read`'s reach** (P18.2-T7 AC-8): the reader's own row always; the
-     * office's own grant every row; a hierarchy token the people the reader coaches; `own` nobody else — so an
-     * Agent-rung leader sees their own ✓ and a — for each coachee. The dashboard's reach is unchanged.
+     * office's own grant every row; a hierarchy token the people the reader coaches — an Agent-rung leader's included
+     * since P19.9-T6 (ADR-0234); `own` nobody else. The dashboard's reach is unchanged.
      */
     const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
     const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
@@ -387,17 +395,18 @@ export class UnitDashboardService {
         [...ledgers].map(([id, ledger]) => [id, ledger.standing.yearToDate]),
       )),
       this.sessions.followUpsOf(ctx, latest.map((l) => l.sessionId), office, leadsShown),
-      // The rows' photos signed with their names (UI V1, UI-111); a coach or a corrector is only named.
-      this.names.pictured(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors], ids),
+      // The rows' photos signed with their names (UI V1, UI-111); a coach or a corrector is only named. The rows' numbers
+      // in the same user read (P19.9-T4 AC-1): no query more.
+      this.names.pictured(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors], ids, { phones: true }),
     ]);
     const names = new Map([...people].map(([id, p]) => [id, p.name]));
 
     /*
      * **Which rows open the person's coaching pages** (`coached`): the coaching person shell answers somebody
      * the reader coaches (`COACH`, `GET /coaching/coachees/:id`), and its tabs read the person's Summary on
-     * `personal_summary:read` — reaching them only by a grant wider than `own` (`CoachResolver.subject`). So an
-     * Agent-rung leader, whose Summary grant is `own`, opens none but their own; an Owner or an Admin opening a
-     * unit outside their own downline coaches none of it.
+     * `personal_summary:read` — reaching them only by a grant wider than `own` (`CoachResolver.subject`). An
+     * Agent-rung leader holds `own-downline` there since P19.9-T6 (ADR-0234), so their coachees' rows open as an AB's
+     * do; an Owner or an Admin opening a unit outside their own downline coaches none of it.
      */
     const opensCoaching = OPENS_A_SUBJECT.includes(scopeFor(ctx, 'personal_summary:read'));
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
@@ -435,6 +444,8 @@ export class UnitDashboardService {
         membershipId: id,
         name: nameOf(id),
         photoUrl: people.get(id)?.photoUrl ?? null,
+        // Nobody WhatsApps themselves, and the office's read-only view draws no button (P19.9-T4 AC-1).
+        phone: id === me || head.readOnly ? null : people.get(id)?.phone ?? null,
         isReader: id === me,
         coached: id === me || (opensCoaching && head.coachedByReader.has(id)),
         rung: { code: orgLevelCode, label: labels.get(orgLevelCode) ?? orgLevelCode },

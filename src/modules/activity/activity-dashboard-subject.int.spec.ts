@@ -158,6 +158,8 @@ describe('P13.1-T9 — a coachee’s Activity Dashboard, over HTTP', () => {
       ['the Owner, anybody in the office', 'OWNER', 'PEER_AGENT'],
       ['the Admin, anybody in the office', 'ADMIN', 'RINA'],
       ['the Owner, a member who has left: history belongs to the office', 'OWNER', 'LEFT'],
+      // P19.9-T6 (ADR-0234): every upline coaches — the coaching Activity tab for an Agent who leads.
+      ['an Agent who leads, their own report', 'LUKAS', 'TARI'],
     ] as [string, Who, Who][])('P13.1-T9 AC-4 answers %s, and writes one entry', async (_name, reader, subject) => {
       as(reader);
       await dashboard({ for: office.id[subject] }).expect(200);
@@ -171,7 +173,7 @@ describe('P13.1-T9 — a coachee’s Activity Dashboard, over HTTP', () => {
       ['a peer AAB, an agent of another unit', 'PEER_AAB', 'RINA'],
       ['an AAB, their own leader', 'SARI', 'AGUS'],
       ['an Agent, a colleague', 'INDAH', 'DIMAS'],
-      ['an Agent who leads, their own report: `own` reaches nobody else', 'LUKAS', 'TARI'],
+      ['an Agent who leads, somebody outside their downline', 'LUKAS', 'INDAH'],
       ['an AB, somebody outside their downline', 'AGUS', 'PEER_AGENT'],
       ['an AB, a member who has left', 'AGUS', 'LEFT'],
       ['office B’s AB, a member of office A (cross-tenant)', 'B_AB', 'RINA'],

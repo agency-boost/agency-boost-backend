@@ -2,8 +2,8 @@ import { addDays as addDaysTo } from '@/common/time/local-day';
 import { ACTIVATION_3M } from '@/domain/constants';
 import {
   ACTIVATION_3M_LOCKS, ACTIVATION_3M_RESULTS, NEW_HIRE_STATUSES, activation3MByJoinMonth, activation3MDay, activation3MDecided,
-  activation3MFirstSaleDay, activation3MLastDay, activation3MOf, activation3MShare, newHireStatusOf, newHiresWindow,
-  type Activation3MInput, type Activation3MOutcome,
+  activation3MFirstSaleDay, activation3MLastDay, activation3MOf, activation3MShare, inSpan, NEW_HIRE_YEARS, newHireStatusOf,
+  newHiresReach, newHiresYear, type Activation3MInput, type Activation3MOutcome,
 } from './activation-3m';
 
 /**
@@ -19,8 +19,8 @@ const hire = (over: Partial<Activation3MInput> = {}): Activation3MInput => ({
 });
 
 describe('3M activation (ADR-0171 §2)', () => {
-  it('P18.8-T6 AC-1 pins the 90 days and the twelve months, and the three results', () => {
-    expect(ACTIVATION_3M).toEqual({ DAYS: 90, WINDOW_MONTHS: 12 });
+  it('P18.8-T6 AC-1 pins the 90 days and the three results; P19.9-T3 AC-1 the rolling twelve months are retired', () => {
+    expect(ACTIVATION_3M).toEqual({ DAYS: 90 });
     expect([...ACTIVATION_3M_RESULTS]).toEqual(['in_progress', 'activated', 'not_activated']);
     expect([...ACTIVATION_3M_LOCKS]).toEqual(['activated', 'not_activated']);
   });
@@ -102,12 +102,34 @@ describe('3M activation (ADR-0171 §2)', () => {
   });
 });
 
-describe('the year /new-hires lists (ADR-0173 §1)', () => {
-  it('P18.8-T6 AC-3 runs from the day after the same date twelve months back to today', () => {
-    expect(newHiresWindow('2026-10-27')).toEqual({ from: '2025-10-28', to: '2026-10-27' });
-    expect(newHiresWindow('2026-03-01')).toEqual({ from: '2025-03-02', to: '2026-03-01' });
-    // A month-end clamps: 29 February 2028 counts back to 28 February 2027.
-    expect(newHiresWindow('2028-02-29')).toEqual({ from: '2027-03-01', to: '2028-02-29' });
+describe('the year /new-hires lists (ADR-0233, amending ADR-0173 §1)', () => {
+  it('P19.9-T3 AC-1 this calendar year: 1 January of the office’s year to its today', () => {
+    expect(newHiresYear('2026-11-08', 'current')).toEqual({ from: '2026-01-01', to: '2026-11-08' });
+    expect(newHiresYear('2026-12-31', 'current')).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+  });
+
+  it('P19.9-T3 AC-1 on 1 January it starts again: that day alone, and last year’s hires leave it', () => {
+    expect(newHiresYear('2027-01-01', 'current')).toEqual({ from: '2027-01-01', to: '2027-01-01' });
+    expect(inSpan('2026-12-31', newHiresYear('2027-01-01', 'current'))).toBe(false);
+  });
+
+  it('P19.9-T3 AC-2 Tahun lalu: all of last year, 1 January to 31 December, whatever day today is', () => {
+    expect(newHiresYear('2026-11-08', 'previous')).toEqual({ from: '2025-01-01', to: '2025-12-31' });
+    expect(newHiresYear('2027-01-01', 'previous')).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+    // A leap year's last day is in it, as any other.
+    expect(inSpan('2028-02-29', newHiresYear('2029-03-01', 'previous'))).toBe(true);
+    expect([...NEW_HIRE_YEARS]).toEqual(['current', 'previous']);
+  });
+
+  it('P19.9-T3 AC-2, AC-3 both years: 1 January of last year to today — what the 404 and the session’s flag read', () => {
+    expect(newHiresReach('2026-11-08')).toEqual({ from: '2025-01-01', to: '2026-11-08' });
+    expect(inSpan('2024-12-31', newHiresReach('2026-11-08'))).toBe(false);
+  });
+
+  it('P19.9-T3 AC-1 a span holds both its ends and nothing else, and no date is in it', () => {
+    const span = { from: '2026-01-01', to: '2026-11-08' };
+    expect(['2025-12-31', '2026-01-01', '2026-11-08', '2026-11-09'].map((d) => inSpan(d, span))).toEqual([false, true, true, false]);
+    expect([inSpan(null, span), inSpan(undefined, span)]).toEqual([false, false]);
   });
 });
 

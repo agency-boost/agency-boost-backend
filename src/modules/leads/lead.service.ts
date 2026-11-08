@@ -22,6 +22,7 @@ import type { FieldSentence } from '@/common/validation/fields';
 import { leadFlags, type LeadFlag } from './lead-attention';
 import { ageToday, ageWrite } from './lead-age';
 import { LEAD_REFUSALS } from './leads.messages';
+import type { LeadScope } from './lead.dto';
 import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
 import {
@@ -43,6 +44,8 @@ export const LEAD_PAGE_SIZE = 50;
 export interface LeadQuery {
   /** One member's leads: the caller's own, or a coachee's (P11-T4 AC-3). */
   owner?: string;
+  /** *Leads milik* (P19.9-T1 AC-3): `own` the caller's alone, `team` everybody else the grant reaches. Narrows only. */
+  scope?: LeadScope;
   search?: string;
   type?: 'sales' | 'recruitment' | 'unassigned';
   statusCode?: string;
@@ -131,6 +134,12 @@ export interface LeadView {
    * the owner touched.
    */
   lastEditedBy: { membershipId: string; name: string | null } | null;
+  /**
+   * **Whose lead it is, by name** (P19.9-T1 AC-4; ADR-0232): `ownerMembershipId` and the account's name behind it, so a
+   * leader's card under *Leads milik: Tim* says *Milik Rina Wijaya*. Every row carries it, the caller's own too; `name`
+   * is `null` for a membership that can no longer be named, never a placeholder.
+   */
+  owner: { membershipId: string; name: string | null };
   remarks: string | null;
   nextActionDate: string | null;
   nextActionNote: string | null;
@@ -407,9 +416,8 @@ export class LeadService {
     });
     // P13-T3 AC-3: a lead of either type, added by the hire or by a leader in a session.
     await signalActivation(this.activation, ctx, ownerMembershipId, 'feature:leads');
-    return this.view(
-      created, day, ownerMembershipId === membershipId ? new Map() : await this.attribution(ctx, [created]),
-    );
+    // Named even on the caller's own lead: every answer carries its owner (P19.9-T1 AC-4).
+    return this.view(created, day, await this.attribution(ctx, [created]));
   }
 
   /**
@@ -958,11 +966,20 @@ export class LeadService {
     const named = query.owner === undefined
       ? null
       : await this.coach.subject(ctx, query.owner, 'lead:read', 'Membership');
-    const owners = named ? [named.membershipId] : await this.ownersInScope(ctx, 'lead:read');
+    const reached = named ? [named.membershipId] : await this.ownersInScope(ctx, 'lead:read');
+    /*
+     * ***Leads milik: Saya · Tim*** (P19.9-T1 AC-2, AC-3; ADR-0232 §2–§3, OD-286): `scope` narrows what the grant reaches —
+     * `own` to the caller, `team` to everybody else in it — and never widens it. **Absent, the caller's own**, where it was
+     * the whole reach (P7-T7); beside `owner=` (the coaching tab's), absent narrows nothing, so that list is as it was.
+     */
+    const me = this.me(ctx);
+    const scope = query.scope ?? (named ? undefined : 'own');
+    const owners = scopedOwners(reached, scope, me);
 
     const filter: Record<string, unknown> = { deletedAt: null };
     // `null` is the whole office, which no row-reading grant produces — see `ownersInScope`.
     if (owners !== null) filter.ownerMembershipId = { $in: owners };
+    else if (scope === 'team') filter.ownerMembershipId = { $ne: me };
     if (query.type) filter.type = query.type === 'unassigned' ? null : query.type;
     if (query.statusCode) filter.statusCode = query.statusCode;
     if (query.outcome) filter.outcome = query.outcome === 'open' ? null : query.outcome;
@@ -972,8 +989,8 @@ export class LeadService {
        * either first narrows the list to the caller's own leads — nobody else's, whatever the grant reaches — and then to
        * those with a live proposal, or without one. Beside every other filter.
        */
-      const me = this.me(ctx);
-      filter.ownerMembershipId = owners === null || owners.includes(me) ? me : { $in: [] };
+      const holdsOwn = owners === null ? scope !== 'team' : owners.includes(me);
+      filter.ownerMembershipId = holdsOwn ? me : { $in: [] };
       const withOne = this.proposalReadings ? await this.proposalReadings.leadIdsWithProposals(ctx, me) : new Set<string>();
       filter._id = query.hasProposal === 'true' ? { $in: [...withOne] } : { $nin: [...withOne] };
     }
@@ -1149,10 +1166,11 @@ export class LeadService {
   }
 
   /**
-   * The names behind a page's proxy edits, in one read rather than one per row.
+   * The names behind a page's proxy edits **and its owners**, in one read rather than one per row.
    *
-   * Only the rows a leader actually touched cost anything: a lead whose last change was its own
-   * owner's contributes no id at all, so an agent working alone resolves nothing.
+   * A lead whose last change was its own owner's contributes no editor. *Changed 2026-11-08 (P19.9-T1 AC-4; ADR-0232):*
+   * every row names its owner now (`owner`), so the page's owners are asked for in the same batch — two reads for the
+   * page, whatever it holds, where an agent working alone resolved nothing.
    */
   private async attribution(
     ctx: RequestContext, rows: readonly LeadDocument[],
@@ -1160,7 +1178,7 @@ export class LeadService {
     const editors = rows
       .filter((r) => r.updatedBy && r.updatedBy !== r.ownerMembershipId)
       .map((r) => r.updatedBy as string);
-    return this.names.byMembershipId(ctx, editors);
+    return this.names.byMembershipId(ctx, [...editors, ...rows.map((r) => r.ownerMembershipId)]);
   }
 
   /** The stored row with the patch applied: the pair travels together, so one never erases the other. */
@@ -1219,6 +1237,7 @@ export class LeadService {
        * boundary. Jakarta has none; the next company's offices are not promised to.
        */
       lastEditedBy: editor ? { membershipId: editor, name: names.get(editor) ?? null } : null,
+      owner: { membershipId: doc.ownerMembershipId, name: names.get(doc.ownerMembershipId) ?? null },
       overdueDays: flags.includes('overdue') && doc.nextActionDate
         ? this.clock.daysBetween(day.timezone, doc.nextActionDate, day.today)
         : null,
@@ -1242,4 +1261,16 @@ export class LeadService {
   ): Promise<void> {
     await this.audit.record(ctx, { action, targetCollection: 'leads', targetId, after });
   }
+}
+
+/**
+ * **`scope` over the owners a list reaches** (P19.9-T1 AC-3; ADR-0232; OD-286 by its default): `own` keeps the caller
+ * alone, and only where the reach holds them; `team` everybody else it holds; none, all of them — `owner=`'s one member,
+ * which `list` alone leaves unscoped. **It narrows and never widens.** `null` — the whole office, which no row-reading grant gives a member today — narrows to the caller for
+ * `own` and stays the office for `team`, the caller left out by the list's own filter.
+ */
+export function scopedOwners(owners: string[] | null, scope: LeadScope | undefined, me: string): string[] | null {
+  if (scope === 'own') return owners === null || owners.includes(me) ? [me] : [];
+  if (scope === 'team') return owners === null ? null : owners.filter((id) => id !== me);
+  return owners;
 }

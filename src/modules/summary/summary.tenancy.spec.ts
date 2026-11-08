@@ -585,11 +585,19 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
         expect((await wired.summary.read(asAb())).leads).toMatchObject({ total: 1, unitOpen: 0 });
       });
 
-      it('P18.5-T15 AC-4 an Agent who leads somebody reads only their own leads on Leads Management, so 0', async () => {
+      // Was *an Agent who leads somebody reads only their own leads on Leads Management, so 0*: P19.9-T6 (ADR-0234) gave
+      // the Agent `lead:read` at `own-downline`, so their downline's leads are in their reach as an AB's are.
+      it('P18.5-T15 AC-4, P19.9-T6 an Agent who leads somebody counts their downline’s open leads, as an AB does', async () => {
         await below();
         await lead('Theirs', { ownerMembershipId: DOWNLINE });
 
-        expect((await wired.summary.read(agent({ directCount: 1 }))).leads.unitOpen).toBe(0);
+        expect((await wired.summary.read(agent({ directCount: 1 }))).leads.unitOpen).toBe(1);
+      });
+
+      it('P18.5-T15 AC-4 an Agent who leads nobody counts nobody else’s', async () => {
+        await lead('Somebody else’s', { ownerMembershipId: DOWNLINE });
+
+        expect((await wired.summary.read(agent())).leads.unitOpen).toBe(0);
       });
     });
 

@@ -5,6 +5,7 @@ import {
   KPM_A, KPM_B, startActivationHarness, stopActivationHarness, TODAY, type ActivationHarness,
 } from '../../../test/activation-office';
 import { ActivationReadings } from './activation-readings';
+import type { NewHireDetailView } from './activation-progress.view';
 
 /**
  * **`ActivationReadings.ofMembers` — its shape pinned** (P18.3-T1 AC-7): every activation of the members asked, in
@@ -56,7 +57,8 @@ describe('ActivationReadings.ofMembers (P18.3-T1 AC-7)', () => {
     await h.start('DODI', '2026-03-01', { graduatedAt: new Date('2026-05-20T03:00:00Z'), graduatedByMembershipId: h.id('DODI') });
     const out = await read(h.office.as('OWNER'), [h.id('RINA'), h.id('BUDI'), h.id('DODI')]);
     for (const who of ['RINA', 'BUDI', 'DODI'] as const) {
-      const detail = await h.wired.newHires.detail(h.office.as('AGUS'), h.id(who));
+      // Inside the first year, so the full view (P19.9-T3 AC-5).
+      const detail = await h.wired.newHires.detail(h.office.as('AGUS'), h.id(who)) as NewHireDetailView;
       expect(out.get(h.id(who))).toMatchObject({ state: detail.state, overdue: detail.overdue, endsOn: detail.endsOn, startDate: detail.startDate });
     }
   });

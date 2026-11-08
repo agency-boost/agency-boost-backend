@@ -103,10 +103,13 @@ describe('the Unit Dashboard’s campaign parts (P18.2-T7)', () => {
     }
   });
 
-  it('P18.2-T7 AC-8 an Agent-rung leader sees their own ✓ and — for a coachee their campaign read does not reach', async () => {
+  // Was *an Agent-rung leader sees their own ✓ and — for a coachee*: P19.9-T6 (ADR-0234) gave the Agent `own-downline`.
+  it('P18.2-T7 AC-8, P19.9-T6 AC-3 an Agent-rung leader reads their coachee’s chases too — every upline coaches', async () => {
     const v = await read('LUKAS');
     expect(row(v, 'LUKAS')).toMatchObject({ chasingMdrt: false, campaigns: [] });
-    expect(row(v, 'TARI')).toMatchObject({ chasingMdrt: null, campaigns: null });
+    // Her own chases, read — no longer the — of a row beyond the reader's reach.
+    expect(row(v, 'TARI').chasingMdrt).not.toBeNull();
+    expect(row(v, 'TARI').campaigns).not.toBeNull();
   });
 
   it('P18.2-T8 review item 13 an MDRT campaign not yet begun is not running: the header says none is', async () => {

@@ -475,8 +475,10 @@ describe('P19.8-T5 the goal routes over HTTP (ADR-0230)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('P19.8-T5 AC-7 an Agent who leads cannot type for somebody else: 404 (own only)', async () => {
+  // Was *an Agent who leads cannot type for somebody else: 404 (own only)* — P19.9-T6 (ADR-0234) made them a coach.
+  it('P19.8-T5 AC-7, P19.9-T6 AC-2 an Agent who leads types for their own report, and for nobody outside their downline: 404', async () => {
     as('LUKAS');
-    await http().put('/goals/2026').query({ for: office.id.TARI }).send(body(99 * M)).expect(404);
+    await http().put('/goals/2026').query({ for: office.id.TARI }).send(body(99 * M)).expect(200);
+    await http().put('/goals/2026').query({ for: office.id.INDAH }).send(body(99 * M)).expect(404);
   });
 });

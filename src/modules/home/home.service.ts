@@ -8,8 +8,8 @@ import { addDays, rollingWindow, type LocalDate } from '@/common/time/local-day'
 import { HOME, quoteOfTheDay, type HomeQuotePose } from '@/domain/constants/home';
 import { coachingCoverage } from '@/domain/metrics/coaching-coverage';
 import { newHireBeforeFirstSale, type ProductionStanding } from '@/domain/metrics/counts-for-production';
-import { ownOpenLeads } from '@/domain/metrics/own-open-leads';
 import { activeAgentSplit, type ProductionRow } from '@/domain/metrics/unit-rollup';
+import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { officeClockOf } from '@/modules/calendar/calendar-time';
@@ -20,6 +20,7 @@ import { LeadReadings } from '@/modules/leads/lead-readings';
 import { LeadRepository } from '@/modules/leads/lead.repository';
 import type { LeadType } from '@/modules/leads/lead.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { UnitDashboardService, type UnitPeople } from '@/modules/unit-dashboard/unit-dashboard.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
@@ -75,6 +76,12 @@ export interface HomeTeamPerson extends HomePerson {
   photoUrl: string | null;
   /** In the reader's *Unit* — them and their direct agents who lead nobody; everybody is in the *Group*. */
   inUnit: boolean;
+  /**
+   * **Their rung** (P19.9-T2 AC-2; ADR-0235): the code and the company's own label for it — the *Group* tab names it in
+   * the company's short words (*AB · AAB · Agent*; *BP · SBP* where the ladder says so). From `UnitPeople.rungs`, the
+   * roster already read; the label from the company's ladder, the code itself where a rung has none.
+   */
+  rung: { code: string; label: string };
   /** The day's saved total (`ActivityReadings.perPersonPerDay`), `null` for no saved day. */
   yesterday: number | null;
   today: number | null;
@@ -98,14 +105,16 @@ export interface HomeView {
    */
   actions: HomeAction[];
   /**
-   * ***Leads*** (P19.8-T2 AC-4; ADR-0228 §4, OD-283 by its default): `OWN_OPEN_LEADS`, the reader's own open leads,
-   * Sales and Recruit — every reader's, the Agent's too.
+   * ***Leads*** (P19.8-T2 AC-4; ADR-0228 §4): `OWN_OPEN_LEADS`, every open lead the reader owns, any type and any stage
+   * — what `/leads` opens on (P19.9-T1 AC-5; ADR-0232, answering OD-283) — every reader's, the Agent's too.
    */
   leads: number;
   /**
-   * ***New hires*** (P19.8-T2 AC-4; ADR-0228 §4): the Unit Dashboard's *Tim Anda* tile's — the reader's Group's new hires
-   * before a first sale (ADR-0172 §1), 0 when they lead nobody. A leader's tile, and an Agent's where their menu has New
-   * Hires (OD-284): which of them draws it is the screen's, by role.
+   * ***New hires*** (P19.8-T2 AC-4; ADR-0228 §4 as amended by ADR-0233, OD-288; P19.9-T3 AC-6): **what `/new-hires`
+   * opens on** — this calendar year's new hires in the reader's reach, the ones who left included
+   * (`NewHiresService.countThisYear`), so the tile and the page agree; 0 with nobody, and 0 on 1 January. It was the
+   * Unit Dashboard's *Tim Anda* count, the Group before a first sale, which the dashboard keeps. A leader's tile, and an
+   * Agent's where their menu has New Hires (OD-284): which of them draws it is the screen's, by role.
    */
   newHires: number;
   /**
@@ -143,10 +152,10 @@ export interface HomeLeader {
  *   the same manpower — the head included, as the analytics' unit rows count theirs; coached by anyone.
  * - **Laporan aktivitas tim** (*Laporan tim* until ADR-0228 §6): the same per-person-per-day count as the Group Tree's
  *   *Hari ini* (O-5), yesterday and today, for everybody in the reader's Group but the reader, in UI-101's order
- *   (`byReport`), with each one's photo (signed, UI-111) and WhatsApp number.
- * - **Leads** (P19.8-T2; OD-283): `OWN_OPEN_LEADS` — `LeadReadings.countsOfMany` over the reader alone, the Unit
- *   Dashboard's *Leads* column's own row (`ownOpenLeads`). **New hires**: the Unit Dashboard's *Tim Anda* count over the
- *   same rows as *Active Agent*; 0 with nobody.
+ *   (`byReport`), with each one's photo (signed, UI-111), WhatsApp number and rung, in the company's words (P19.9-T2).
+ * - **Leads** (P19.9-T1 AC-5; ADR-0232): `OWN_OPEN_LEADS` — `LeadReadings.ownOpenOf`, one count of the reader's own
+ *   open leads, any type and any stage: what `/leads` opens on (*Saya*, *Semua*). **New hires** (P19.9-T3 AC-6;
+ *   OD-288): `/new-hires`' own count of this calendar year (`NewHiresService.countThisYear`); 0 with nobody.
  * - **Jadwal hari ini and Aksi hari ini**: Calendar's own count of the reader's today (`CalendarService.today`, UI-104
  *   point 7) — timed things (entries not declined, a trip left out, and the events they joined) and open *Tugas* (the
  *   action items of their newest 1:1 due today and their own open leads whose next action is today, a ticked one gone),
@@ -175,6 +184,10 @@ export class HomeService {
     private readonly avatars: AvatarLinks,
     private readonly clock: Clock,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    // P19.9-T2 AC-2: the company's ladder, so the *Group* tab names each person's rung in the company's own words.
+    private readonly orgLevels: OrgLevelService,
+    // P19.9-T3 AC-6 (OD-288): *New hires* is `/new-hires`' own count of this calendar year.
+    private readonly newHires: NewHiresService,
   ) {}
 
   async read(ctx: RequestContext): Promise<HomeView> {
@@ -185,12 +198,14 @@ export class HomeService {
     const chartDays = daysOf(rollingWindow(office.today, HOME.CHART_DAYS));
     const now = this.clock.now();
 
-    const [mine, people, schedule, own] = await Promise.all([
+    const [mine, people, schedule, own, newHires] = await Promise.all([
       this.activity.perPersonPerDay(ctx, [me], chartDays),
       this.unit.people(ctx),
       this.scheduleOf(ctx, me, office),
-      // *Leads* (OD-283): the reader's own row of the Unit Dashboard's *Leads* column, one read.
-      this.leadCounts.countsOfMany(ctx, [me], { month: office.month }),
+      // *Leads* (P19.9-T1 AC-5): every open lead the reader owns, as `/leads` opens on them — one count.
+      this.leadCounts.ownOpenOf(ctx, me),
+      // *New hires* (P19.9-T3 AC-6): this calendar year's, as `/new-hires` opens on them — one count.
+      this.newHires.countThisYear(ctx),
     ]);
     const days = daysWithCounts(chartDays, mine.get(me));
     // By role, never by the data (ADR-0189 §4): a leader who leads nobody yet gets the block at zero, not `null`.
@@ -211,8 +226,8 @@ export class HomeService {
       },
       schedule: { meetings: schedule.meetings, tasks: schedule.tasks },
       actions: schedule.actions,
-      leads: ownOpenLeads(own.get(me)),
-      newHires: group?.newHires ?? 0,
+      leads: own,
+      newHires,
       leader,
     };
 
@@ -223,17 +238,17 @@ export class HomeService {
 
   /**
    * **The leader's blocks** (UI-100, UI-101): *Active Agent* and *Coaching 7 hari* over the Unit Dashboard's two scopes,
-   * and the team's report list; and the Group's *New hires*, which the same rows give.
+   * and the team's report list.
    */
   private async leaderOf(
     ctx: RequestContext, me: string, office: Office, people: UnitPeople, yesterday: LocalDate,
-  ): Promise<{ leader: HomeLeader; newHires: number }> {
+  ): Promise<{ leader: HomeLeader }> {
     const unitIds = people.unit;
     const inUnit = new Set(unitIds);
     const aabIds = people.group.filter((id) => !inUnit.has(id));
     const team = people.group.filter((id) => id !== me);
 
-    const [paces, rows, sessions, perDay, named] = await Promise.all([
+    const [paces, rows, sessions, perDay, named, ladder] = await Promise.all([
       this.paces.paceOf(ctx, people.group, {
         today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold,
       }),
@@ -241,7 +256,9 @@ export class HomeService {
       this.coaching.countedSince(ctx, people.group, addDays(office.today, -HOME.COACHED_WINDOW_DAYS)),
       this.activity.perPersonPerDay(ctx, team, [yesterday, office.today]),
       this.peopleOf(ctx, team, { photos: true }),
+      office.companyId ? this.orgLevels.list(ctx, office.companyId) : Promise.resolve([]),
     ]);
+    const labels = new Map(ladder.map((level) => [level.code, level.label]));
 
     // *Active Agent*: the Unit Dashboard's own rollup, row by row. Only `pacingToMaa` and the new-hire standing are
     // read by `potentialActive`; the goal figure is the paired goal's, which this tile does not show.
@@ -270,6 +287,7 @@ export class HomeService {
         phone: person?.phone ?? null,
         photoUrl: person?.photoUrl ?? null,
         inUnit: inUnit.has(id),
+        rung: rungOf(people.rungs.get(id) ?? '', labels),
         yesterday: counts?.get(yesterday) ?? null,
         today: counts?.get(office.today) ?? null,
       };
@@ -281,8 +299,6 @@ export class HomeService {
         coached7d: splitOf(coached(unitIds), coached(aabIds)),
         team: list,
       },
-      // The Unit Dashboard's own count: every row of the Group before a first sale (`rollUpProduction`'s `newHires`).
-      newHires: people.group.filter((id) => rowOf(id).newHireBeforeFirstSale).length,
     };
   }
 
@@ -373,6 +389,9 @@ export class HomeService {
 }
 
 const NO_STANDING: ProductionStanding = { joinedAs: null, firstSaleDate: null };
+
+/** A rung as a row names it (P19.9-T2 AC-2): its code and the company's label, the code where the ladder has none. */
+const rungOf = (code: string, labels: ReadonlyMap<string, string>) => ({ code, label: labels.get(code) ?? code });
 
 /**
  * **A leader by role** (ADR-0189 §1, §4; OD-247's default): on a leader rung — an AB or an AAB by class (ADR-0156 §3),

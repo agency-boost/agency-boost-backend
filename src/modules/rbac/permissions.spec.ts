@@ -871,35 +871,42 @@ describe('permission matrix', () => {
       'coaching_profile:read', 'coaching_profile:update', 'leader_notes:read', 'leader_notes:write',
     ] as const satisfies readonly Permission[];
 
-    /** The six columns, each as nothing more than that role: the Owner and the Admin stand on the agent rung. */
+    /**
+     * The six columns, each as nothing more than that role. **The Owner and the Admin stand on no rung** (`NO_CLASS`):
+     * since P19.9-T6 the Agent rung holds the coach's grants (ADR-0234), so an Owner on it would read as that Agent —
+     * which is the hierarchy (§1.1), and pinned below — and the column is about the office as such.
+     */
     const ROLES: Record<string, RequestContext> = {
       SUPER_ADMIN: ctx({ superAdmin: true, noMembership: true }),
-      KPM_OWNER: ctx({ owner: true }),
-      KPM_ADMIN: ctx({ admin: true }),
+      KPM_OWNER: ctx({ owner: true, role: NO_CLASS }),
+      KPM_ADMIN: ctx({ admin: true, role: NO_CLASS }),
       AB: ctx({ role: 'ab' }),
       AAB: ctx({ role: 'aab' }),
       AGENT: ctx({ role: 'agent' }),
     };
 
-    /** The widest scope each role holds, or null for `—`, read from the coaching spec's table. */
+    /**
+     * The widest scope each role holds, or null for `—`, read from the coaching spec's table: **every upline**, the
+     * Agent on their rung included since P19.9-T6 (ADR-0234, OD-287).
+     */
     const LEADERS: Record<string, Scope | null> = {
-      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+      SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
     };
     const EXPECTED: Record<(typeof COACHING)[number], Record<string, Scope | null>> = {
       'coaching_session:create': LEADERS,
       'coaching_session:edit': LEADERS,
       'coaching_session:read': {
         SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
-        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
       },
       'coaching_session:finalize': LEADERS,
       'coaching_session:reopen': {
         SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
-        AB: 'own-downline', AAB: 'own-downline', AGENT: null,
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
       },
       'coaching_session:export_pdf': {
         SUPER_ADMIN: null, KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm',
-        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own',
+        AB: 'own-downline', AAB: 'own-downline', AGENT: 'own-downline',
       },
       'coaching_profile:read': LEADERS,
       'coaching_profile:update': LEADERS,
@@ -930,6 +937,7 @@ describe('permission matrix', () => {
       for (const status of ['removed', 'pending'] as const) {
         expect(can(ctx({ role: 'ab', status }), permission)).toBe(false);
         expect(can(ctx({ role: 'aab', status }), permission)).toBe(false);
+        expect(can(ctx({ role: 'agent', status }), permission)).toBe(false);
       }
     });
 
@@ -940,6 +948,43 @@ describe('permission matrix', () => {
       }
     });
 
+    it('P19.9-T6 AC-1: the Agent holds what the AB holds on every coaching row — every upline coaches (ADR-0234)', () => {
+      for (const permission of COACHING) {
+        expect([permission, scopeFor(ROLES.AGENT, permission)])
+          .toEqual([permission, scopeFor(ROLES.AB, permission)]);
+      }
+    });
+
+    it('P19.9-T6 AC-1: and on every read the person’s tabs make, `own` · `own-downline` as two grants', () => {
+      const tokens = (permission: Permission) => (PERMISSIONS[permission] as readonly { grantee: unknown; scope: Scope }[])
+        .filter((g) => g.grantee === AGENT).map((g) => g.scope);
+      for (const permission of [
+        'activity_log:read_raw', 'activity_ratios:read', 'personal_summary:read', 'goal:read', 'goal:update',
+        'lead:read', 'lead:create', 'lead:update', 'lead:mark_outcome', 'training_progress:read',
+        'campaign_qualification:read',
+      ] as const) {
+        expect([permission, tokens(permission)]).toEqual([permission, ['own', 'own-downline']]);
+      }
+      // The Survei tab's read has no `own` for anybody on a rung: *Survei saya* is not built (OD-267).
+      expect(tokens('survey_answers:read')).toEqual(['own-downline']);
+      // Nothing the decision did not reach: the lead's delete stays the owner's, Potensi stays out of an Agent's reach,
+      // and the calendar's compare is not coaching's (roles §3.15).
+      expect(tokens('lead:delete')).toEqual(['own']);
+      expect(tokens('unit_dashboard:read_potensi')).toEqual([]);
+      expect(tokens('unit_dashboard:update_production')).toEqual([]);
+      expect(scopeFor(ROLES.AGENT, 'calendar_entry:read')).toBe('own');
+    });
+
+    it('P19.9-T6 AC-4: an Owner or an Admin on no rung coaches nobody; on the Agent rung they coach as that Agent (§1.1)', () => {
+      for (const office of [ROLES.KPM_OWNER, ROLES.KPM_ADMIN]) {
+        for (const permission of ['coaching_session:create', 'coaching_session:finalize', 'coaching_profile:update', 'leader_notes:write'] as const) {
+          expect([permission, can(office, permission)]).toEqual([permission, false]);
+        }
+      }
+      expect(scopeFor(ctx({ role: 'agent', owner: true }), 'coaching_session:create')).toBe('own-downline');
+      expect(scopeFor(ctx({ role: 'agent', admin: true }), 'leader_notes:write')).toBe('own-downline');
+    });
+
     it('P11-T3 AC-1: a leader who is coached holds `own` beside `own-downline`, as two grants', () => {
       // §3: a wider token never silently includes the reader's own records.
       const ownToo = (permission: Permission, grantee: typeof AB) =>
@@ -948,9 +993,13 @@ describe('permission matrix', () => {
       for (const permission of ['coaching_session:read', 'coaching_session:export_pdf', 'leader_notes:read'] as const) {
         expect([permission, ownToo(permission, AB), ownToo(permission, AAB)]).toEqual([permission, true, true]);
       }
+      // The Agent too, who is coached and, leading somebody, coaches (P19.9-T6).
+      for (const permission of ['coaching_session:read', 'coaching_session:export_pdf', 'leader_notes:read'] as const) {
+        expect([permission, ownToo(permission, AGENT)]).toEqual([permission, true]);
+      }
       // …and nowhere a session is written or a profile kept: `COACH` never reaches oneself.
       for (const permission of ['coaching_session:create', 'coaching_profile:read', 'leader_notes:write'] as const) {
-        expect([permission, ownToo(permission, AB)]).toEqual([permission, false]);
+        expect([permission, ownToo(permission, AB), ownToo(permission, AGENT)]).toEqual([permission, false, false]);
       }
     });
 
@@ -959,7 +1008,7 @@ describe('permission matrix', () => {
     });
 
     it('P11-T3 AC-7 office_roles_cannot_read_leader_notes: the Owner, the Admin and the Super Admin as such', () => {
-      for (const office of [ROLES.KPM_OWNER, ROLES.KPM_ADMIN, ROLES.SUPER_ADMIN, ctx({ superAdmin: true })]) {
+      for (const office of [ROLES.KPM_OWNER, ROLES.KPM_ADMIN, ROLES.SUPER_ADMIN, ctx({ superAdmin: true, role: NO_CLASS })]) {
         expect(can(office, 'leader_notes:read')).toBe(false);
         expect(can(office, 'coaching_profile:read')).toBe(false);
       }
@@ -1317,7 +1366,8 @@ describe('permission matrix', () => {
       },
       'campaign:chase': { SUPER_ADMIN: null, KPM_OWNER: null, KPM_ADMIN: null, AB: 'own', AAB: 'own', AGENT: 'own' },
       'campaign_qualification:read': {
-        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+        // P19.9-T6 (ADR-0234): an Agent who leads reads their coachees' chases, the coaching Summary tab's card.
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own-downline',
       },
       // Leak 15: the settings reads, the Owner's and the Admins' — never a field rung.
       'campaign_settings:read': { SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: null, AAB: null, AGENT: null },
@@ -1972,8 +2022,9 @@ describe('permission matrix', () => {
       AGENT: ctx({ role: 'agent' }),
     };
     const EXPECTED: Record<(typeof TRAINING)[number], Record<string, Scope | null>> = {
+      // P19.9-T6 (ADR-0234): an Agent who leads reads their coachees' training, the coaching Training tab.
       'training_progress:read': {
-        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own',
+        SUPER_ADMIN: 'all', KPM_OWNER: 'own-kpm', KPM_ADMIN: 'own-kpm', AB: 'own-downline', AAB: 'own-unit', AGENT: 'own-downline',
       },
       // The AB and the AAB learn too (the matrix's defect, fixed); the Owner and the Admin through a rung only.
       'training_progress:update': {
@@ -2059,7 +2110,8 @@ describe('permission matrix', () => {
     } as const;
     const holders: Record<string, (keyof typeof roles)[]> = {
       'survey:respond': ['KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB', 'AGENT'],
-      'survey_answers:read': ['KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB'],
+      // P19.9-T6 (ADR-0234): every upline opens the coaching page, an Agent who leads included.
+      'survey_answers:read': ['KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB', 'AGENT'],
       'advanced_analytics:read': ['KPM_OWNER', 'KPM_ADMIN', 'AB', 'AAB'],
       'advanced_analytics:write': ['KPM_OWNER', 'KPM_ADMIN'],
     };
@@ -2077,7 +2129,8 @@ describe('permission matrix', () => {
       expect(scopeFor(roles.AB, 'survey_answers:read')).toBe('own-downline');
       expect(scopeFor(roles.AAB, 'survey_answers:read')).toBe('own-downline');
       expect(scopeFor(roles.SUPER_ADMIN, 'survey_answers:read')).toBeNull();
-      expect(scopeFor(roles.AGENT, 'survey_answers:read')).toBeNull();
+      // P19.9-T6: an Agent's downline, as any upline's; `COACH` reaches nobody for one who leads nobody.
+      expect(scopeFor(roles.AGENT, 'survey_answers:read')).toBe('own-downline');
     });
 
     it('P19.5-T4 a view-as session holds no survey write: survey:respond and advanced_analytics:write are not reads', () => {

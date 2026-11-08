@@ -16,7 +16,6 @@ import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
-import { scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { CalendarAutoItems, type CalendarTaskView, type JoinedEvent } from './calendar-auto-items';
@@ -616,11 +615,13 @@ export class CalendarService {
   }
 
   /**
-   * Everybody the reader coaches now — **when their role holds the downline read**. An Agent coaches
-   * nobody on the calendar, as in coaching, whatever the tree says: no chip of theirs opens a session.
+   * Everybody the reader coaches now. **The tree alone decides** since every upline coaches (P19.9-T6, ADR-0234):
+   * every rung that reads a calendar holds `coaching_session:create` over its downline, an Agent who leads included, so
+   * a 1:1 they organise links its coachees' chips to the session as an AB's does; an Owner or Admin on no rung is
+   * refused every calendar route before this. An Agent still compares nobody: the compare read is
+   * `calendar_entry:read`'s, which that decision did not reach, and this set opens no compared entry for them.
    */
   private async coachedBy(ctx: RequestContext, me: string): Promise<Set<string>> {
-    if (scopeFor(ctx, 'calendar_entry:read') !== 'own-downline') return new Set();
     return new Set((await this.coach.coacheesOf(ctx, me)).map((c) => c.membershipId));
   }
 

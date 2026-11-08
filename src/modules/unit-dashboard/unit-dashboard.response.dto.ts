@@ -116,6 +116,13 @@ export class UnitRowDto implements UnitRow {
     description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise.',
   })
   photoUrl!: string | null;
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281234567890',
+    description: 'The WhatsApp number on their account, for the row’s WhatsApp button. `null` without one, '
+      + 'and always on the reader’s own row, for an inactive membership, and in the agency’s read-only view of another '
+      + 'leader’s unit.',
+  })
+  phone!: string | null;
   @ApiProperty({ description: 'The reader’s own row.' }) isReader!: boolean;
   @ApiProperty({
     description:

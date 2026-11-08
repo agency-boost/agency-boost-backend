@@ -117,6 +117,8 @@ describe('P11-T4 — the coachee’s ratios and week, over HTTP', () => {
       ['an AAB, their nested AAB’s agent', 'SARI', 'DODI'],
       ['the Owner, anybody in the office', 'OWNER', 'PEER_AGENT'],
       ['the Admin, anybody in the office', 'ADMIN', 'RINA'],
+      // P19.9-T6 (ADR-0234): every upline coaches — the session's Ratios card for an Agent who leads.
+      ['an Agent who leads, their own report', 'LUKAS', 'TARI'],
     ] as [string, Who, Who][])('P11-T4 AC-2 answers %s', async (_name, reader, subject) => {
       as(reader);
       const res = await ratios({ for: office.id[subject] }).expect(200);
@@ -127,7 +129,7 @@ describe('P11-T4 — the coachee’s ratios and week, over HTTP', () => {
     it.each([
       ['a peer AAB, an agent of another unit (AC-5)', 'PEER_AAB', 'RINA'],
       ['an Agent, a colleague', 'INDAH', 'DIMAS'],
-      ['an Agent who leads, their own report: `own` reaches nobody else', 'LUKAS', 'TARI'],
+      ['an Agent who leads, somebody outside their downline', 'LUKAS', 'INDAH'],
       ['an AB, somebody outside their downline', 'AGUS', 'PEER_AGENT'],
       ['an AB, a member who has left', 'AGUS', 'LEFT'],
       ['office B’s AB, a member of office A (cross-tenant)', 'B_AB', 'RINA'],

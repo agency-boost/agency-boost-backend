@@ -160,13 +160,18 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(everyRow(await read('OWNER', { for: office.id.AGUS })).every((r) => r.coached)).toBe(true);
     });
 
-    it('Phase 15 exit S1/S2 `coached`: an Agent-rung leader opens no coaching tab but their own — their Summary grant is `own`', async () => {
+    /*
+     * Was *Phase 15 exit S1/S2: an Agent-rung leader opens no coaching tab but their own — their Summary grant is `own`*,
+     * Tari's row `coached: false`. P19.9-T6 (ADR-0234, OD-287) answered ADR-0087's open question: every upline coaches.
+     */
+    it('P19.9-T6 AC-3 `coached`: an Agent-rung leader opens their coachees’ coaching tabs, as an AB does (ADR-0234)', async () => {
       const view = await read('LUKAS');
       expect(everyRow(view).map((r) => [r.name, r.isReader, r.coached])).toEqual([
-        ['Lukas Hartono', true, true], ['Tari Anggraini', false, false],
+        ['Lukas Hartono', true, true], ['Tari Anggraini', false, true],
       ]);
-      // As the coaching tab would answer them: the Summary of somebody below is not theirs to read.
-      await expect(wired.summary.read(office.as('LUKAS'), office.id.TARI)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // As the coaching tab answers them: the Summary of somebody below is theirs to read, and nobody else's.
+      await expect(wired.summary.read(office.as('LUKAS'), office.id.TARI)).resolves.toHaveProperty('activity');
+      await expect(wired.summary.read(office.as('LUKAS'), office.id.INDAH)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('P15-T4 AC-2 `coached`: an Admin who is not the root, reading a unit outside their downline, coaches none of it', async () => {

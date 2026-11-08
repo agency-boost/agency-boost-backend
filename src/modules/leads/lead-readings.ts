@@ -6,6 +6,7 @@ import { personLeadCounts, personLeadCountsAt, type CountedLead, type DatedLead 
 import {
   leadPotensiThisMonth, openAtEndOf, personPotensi, wonIn, type PersonPotensi, type PotensiMonth,
 } from '@/domain/metrics/potensi';
+import { ownOpenLeadsFilter } from '@/domain/metrics/own-open-leads';
 import type { LeadCountsRow } from '@/domain/metrics/unit-rollup';
 import { LeadStatusRepository } from '@/modules/config/activity.repository';
 import type { OfficeDay } from '@/modules/tenants/tenant-day.service';
@@ -201,6 +202,15 @@ export class LeadReadings {
     const others = [...new Set(owners)].filter((id) => id !== except);
     if (others.length === 0) return 0;
     return this.leads.count(ctx, { ownerMembershipId: { $in: others }, outcome: null, deletedAt: null });
+  }
+
+  /**
+   * **`OWN_OPEN_LEADS`: every open lead one member owns** (P19.9-T1 AC-5; §A.17; ADR-0232): Home's *Leads* tile — any type
+   * and any stage, as `/leads` opens on them (`ownOpenLeadsFilter`). One count over the `{kpmId, ownerMembershipId,
+   * deletedAt}` index; never a row.
+   */
+  async ownOpenOf(ctx: RequestContext, membershipId: string): Promise<number> {
+    return this.leads.count(ctx, ownOpenLeadsFilter(membershipId));
   }
 
   /**

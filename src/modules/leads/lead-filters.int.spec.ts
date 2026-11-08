@@ -200,34 +200,43 @@ describe('P18.7-T4 AC-2 — /leads’ search and filters, over HTTP', () => {
       expect(await names('BUDI', { search: 'wulan' })).toEqual(['Ibu Wulan Kusuma']);
     });
 
+    /*
+     * *Amended 2026-11-08 (P19.9-T1 AC-3; ADR-0232 §3):* a leader's team is `scope=team` — their own list holds their own
+     * leads alone — so the reach these pin is asked for by name. What it reaches is unchanged.
+     */
     it('P18.7-T4 AC-2 a leader’s search keeps their reach: their unit’s leads, and nobody else’s', async () => {
       // Sari leads Rina and Budi; the peer unit's agent and office B's are outside her.
-      expect((await names('SARI', { search: 'wulan' })).sort()).toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
-      expect((await names('SARI', { search: 'wulan', statusCode: 'FOLLOW_UP', type: 'sales' })).sort())
+      expect((await names('SARI', { scope: 'team', search: 'wulan' })).sort()).toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
+      expect((await names('SARI', { scope: 'team', search: 'wulan', statusCode: 'FOLLOW_UP', type: 'sales' })).sort())
         .toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
       // Agus leads Sari, so his reach is hers and more — still not his peer's unit.
-      expect((await names('AGUS', { search: 'wulan' })).sort()).toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
-      expect(await names('PEER_AB', { search: 'wulan' })).toEqual(['Ibu Wulan Ayu']);
+      expect((await names('AGUS', { scope: 'team', search: 'wulan' })).sort()).toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
+      expect(await names('PEER_AB', { scope: 'team', search: 'wulan' })).toEqual(['Ibu Wulan Ayu']);
+      // Their own list, searched, holds none of it.
+      expect(await names('SARI', { search: 'wulan' })).toEqual([]);
     });
 
     it('P18.7-T4 AC-2 the Owner and the Admin search as the rung they stand on reads, in their office alone', async () => {
       await leadOf('OWNER', 'Ibu Wulan Owner');
       await leadOf('ADMIN', 'Ibu Wulan Admin');
-      // Wilson is an AB at the root as well as the Owner, so his rung reaches every unit below him…
-      expect((await names('OWNER', { search: 'wulan' })).sort())
-        .toEqual(['Ibu Wulan Admin', 'Ibu Wulan Ayu', 'Ibu Wulan Kusuma', 'Ibu Wulan Owner', 'Ibu Wulan Sari']);
+      // Wilson is an AB at the root as well as the Owner, so his rung reaches every unit below him (*Tim*)…
+      expect(await names('OWNER', { search: 'wulan' })).toEqual(['Ibu Wulan Owner']);
+      expect((await names('OWNER', { scope: 'team', search: 'wulan' })).sort())
+        .toEqual(['Ibu Wulan Admin', 'Ibu Wulan Ayu', 'Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
       // …and Maya is an AB leading nobody: her own, and nothing a search could widen.
       expect(await names('ADMIN', { search: 'wulan' })).toEqual(['Ibu Wulan Admin']);
+      expect(await names('ADMIN', { scope: 'team', search: 'wulan' })).toEqual([]);
       expect(await names('ADMIN', { search: 'sari' })).toEqual([]);
     });
 
     it('P18.7-T4 AC-2 another office’s leads are never found, by a search or a filter, either way', async () => {
       expect(await names('RINA', { search: 'bayu' })).toEqual([]);
       expect(await names('AGUS', { search: 'bayu' })).toEqual([]);
+      expect(await names('AGUS', { scope: 'team', search: 'bayu' })).toEqual([]);
       expect(await names('B_AGENT', { search: 'wulan' })).toEqual(['Ibu Wulan Bayu']);
-      expect(await names('B_AB', { search: 'wulan' })).toEqual(['Ibu Wulan Bayu']);
-      expect(await names('B_AB', { search: 'sari' })).toEqual([]);
-      expect(await names('B_AB', { statusCode: 'MEETING_SCHEDULED' })).toEqual([]);
+      expect(await names('B_AB', { scope: 'team', search: 'wulan' })).toEqual(['Ibu Wulan Bayu']);
+      expect(await names('B_AB', { scope: 'team', search: 'sari' })).toEqual([]);
+      expect(await names('B_AB', { scope: 'team', statusCode: 'MEETING_SCHEDULED' })).toEqual([]);
     });
 
     it('P18.7-T4 AC-2 a leader’s search writes a read entry for the owners it shows, and none for a list of their own', async () => {
@@ -237,10 +246,43 @@ describe('P18.7-T4 AC-2 — /leads’ search and filters, over HTTP', () => {
       expect(await names('SARI', { search: 'sendiri' })).toEqual(['Ibu Wulan Sendiri']);
       expect(await entries()).toBe(0);
 
-      expect((await names('SARI', { search: 'kusuma' }))).toEqual(['Ibu Wulan Kusuma']);
+      expect((await names('SARI', { scope: 'team', search: 'kusuma' }))).toEqual(['Ibu Wulan Kusuma']);
       expect(await db().collection('auditLog').find({ action: SUBJECT_READ_ACTION }).toArray())
         .toEqual([expect.objectContaining({ targetMembershipId: office.id.BUDI })]);
     });
+  });
+
+  /*
+   * **P19.9-T1 AC-3 — `scope`, over HTTP, per role and across offices** (ADR-0232; OD-286): *Leads milik: Saya · Tim*.
+   * Office B's Agent holds an *Ibu Wulan* too, under the same stage codes: no scope reaches it from office A.
+   */
+  describe('P19.9-T1 AC-3 scope=own and scope=team narrow what the grant reaches', () => {
+    it('P19.9-T1 AC-3 an AB, an AAB and an Agent: own is theirs alone, team the rest of their reach', async () => {
+      await leadOf('SARI', 'Ibu Wulan Sendiri');
+      expect(await names('SARI', { scope: 'own', search: 'wulan' })).toEqual(['Ibu Wulan Sendiri']);
+      expect((await names('SARI', { scope: 'team', search: 'wulan' })).sort()).toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari']);
+      expect((await names('AGUS', { scope: 'team', search: 'wulan' })).sort())
+        .toEqual(['Ibu Wulan Kusuma', 'Ibu Wulan Sari', 'Ibu Wulan Sendiri']);
+      expect(await names('AGUS', { scope: 'own' })).toEqual([]);
+      expect(await names('RINA', { scope: 'team' })).toEqual([]);
+      expect((await names('RINA', { scope: 'own', outcome: 'open' })).sort())
+        .toEqual(['Ibu Dewi (Referral)', 'Ibu Wulan Sari', 'Pak Bambang', 'Sdri. Maya Putri']);
+    });
+
+    it('P19.9-T1 AC-3 another office’s leads are in no scope: KPM A’s team never holds KPM B’s, nor B’s A’s', async () => {
+      expect(await names('AGUS', { scope: 'team', search: 'bayu' })).toEqual([]);
+      expect(await names('B_AB', { scope: 'team' })).toEqual(['Ibu Wulan Bayu']);
+      expect(await names('B_AB', { scope: 'team', search: 'sari' })).toEqual([]);
+    });
+
+    it('P19.9-T1 AC-4 every row carries its owner by name over HTTP', async () => {
+      as('SARI');
+      const res = await http().get('/leads').query({ scope: 'team', search: 'kusuma' }).expect(200);
+      expect(res.body.rows[0].owner).toEqual({ membershipId: office.id.BUDI, name: office.name.BUDI });
+    });
+
+    it('P19.9-T1 AC-3 refuses a scope outside its vocabulary', () => refused('scope=everyone', 'scope'));
+    it('P19.9-T1 AC-3 refuses an object in scope', () => refused('scope[$ne]=own', 'scope'));
   });
 
   describe('what the pipe refuses before the service is asked', () => {

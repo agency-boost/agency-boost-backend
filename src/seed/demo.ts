@@ -209,6 +209,14 @@ const BUDI_JOINED_DAYS_AGO = 61;
 /** When 0555's Owner and Lina joined: before 0555's two months of files, its logging and its 1:1 — and Lina's activation start. */
 const OFFICE_0555_JOINED_DAYS_AGO = 60;
 
+/**
+ * **Fajar, the agent Lina recruited** (P19.9-T6, ADR-0234): 0555's Agent who leads somebody. Joined after Lina could lead
+ * him, before 0555's files; his producer code given, as every code added to a seeded database is.
+ */
+export const AGENT_LEADER_0555 = {
+  email: 'fajar@kpm0555.test', fullName: 'Fajar Nugroho', agentCode: '85501', joinedDaysAgo: 45,
+} as const;
+
 /*
  * **What the office types, in Bahasa Indonesia** (P18.10-T7, OD-238): the demo reads as an Indonesian office. Content an
  * office typed is shown as typed in both languages (ADR-0179 §5), so this is the seed's own text, never a translation.
@@ -2561,7 +2569,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const owner0555 = await place(office0555, String(owner0555User._id), 'ab', null, { joinedDaysAgo: OFFICE_0555_JOINED_DAYS_AGO });
   const agent0555User = await user('agent@kpm0555.test', 'Lina Marlina', { pronoun: 'she' });
   const agent0555 = await place(office0555, String(agent0555User._id), 'agent', owner0555, { joinedDaysAgo: OFFICE_0555_JOINED_DAYS_AGO });
+  /*
+   * **An Agent who leads somebody** (P19.9-T6; ADR-0234, the owner's R13): Lina recruited Fajar a month and a half ago,
+   * so she is an upline on the Agent rung, and every upline coaches — *Tim saya › Coaching* opens Fajar for her, and
+   * Hendra coaches him two levels down. The demo had no such member (`functional/unit-dashboard.md`, *Agent-rung
+   * leaders*). Placed after Lina, before 0555's files, so its months carry a row for him; an existing agent (`place()`'s
+   * default), so no activation and no New Hires row. A code of his own, given (`coaching-cast.ts` says why).
+   */
+  const fajar0555User = await user(AGENT_LEADER_0555.email, AGENT_LEADER_0555.fullName, { pronoun: 'he', agentCode: AGENT_LEADER_0555.agentCode });
+  const fajar0555 = await place(office0555, String(fajar0555User._id), 'agent', agent0555, { joinedDaysAgo: AGENT_LEADER_0555.joinedDaysAgo });
   await recount(String(kpm0555._id), owner0555.id);
+  await recount(String(kpm0555._id), agent0555.id);
 
   /*
    * Two leads in the second office, on the two ladders.
@@ -2585,6 +2603,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       email: 'teguh.s@example.com',
       remarks: 'Kepala cabang di sebuah bank, cari penghasilan tambahan.',
       source: 'Referral — Hendra',
+    },
+    // P19.9-T6: Fajar's own prospect, so Lina's coaching *Leads* tab and the session's Leads card have a row to work.
+    {
+      owner: fajar0555.id, name: 'Ibu Melati Sasmita', type: 'sales',
+      path: ['NOT_YET_APPROACHED', 'FOLLOW_UP'],
+      phone: '0812-3300-4411',
+      remarks: 'Sunter. Baru punya anak kedua, tanya soal asuransi pendidikan.',
+      nextActionIn: 2, nextActionNote: 'Kirim ilustrasi pendidikan.',
+      source: 'Referral — Lina',
     },
   ]);
 
@@ -3952,7 +3979,9 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
                                                        type and lead status, an office-made ratio, and
                                                        an edit since publishing. 0417's settings are
                                                        the prototype's, published and untouched
-    agent@kpm0555.test                                 Agent
+    agent@kpm0555.test                                 Agent who leads somebody — Lina recruited Fajar
+                                                       Nugroho: Tim saya › Coaching opens him, every tab
+                                                       answers, and *Start coaching session* runs (P19.9-T6)
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended

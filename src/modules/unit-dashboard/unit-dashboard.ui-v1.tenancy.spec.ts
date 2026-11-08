@@ -409,4 +409,53 @@ describe('the Unit Dashboard, UI V1 (Phase 18.11 T4)', () => {
       expect(rina).toMatchObject({ kpmId: KPM_A, after: { surface: 'unit_dashboard', from: '2026-08-16', to: ROSTER_TODAY } });
     });
   });
+
+  /*
+   * **P19.9-T4 — each row's WhatsApp number** (R6; ADR-0235, OD-291): `UnitRow.phone`, the number on the person's account,
+   * at every period, read in the user read the rows' names already make. `null` on the reader's own row, without a number,
+   * and in the office's read-only view of another leader's unit (P19.3-T3 AC-3), which draws no button.
+   */
+  describe('P19.9-T4 AC-1 each roster row’s WhatsApp number', () => {
+    const PHONES: Partial<Record<Who, string>> = {
+      AGUS: '+6281100000001', INDAH: '+6281100000002', SARI: '+6281100000003', RINA: '+6281100000004',
+      B_AGENT: '+6281100000009',
+    };
+    const phonesOf = (view: UnitDashboardView) => Object.fromEntries(everyRow(view).map((r) => [r.name, r.phone]));
+
+    beforeAll(async () => {
+      for (const [who, phone] of Object.entries(PHONES)) {
+        const member = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id[who as Who]) });
+        await db().collection('users').updateOne({ _id: new mongoose.Types.ObjectId(String(member!.userId)) }, { $set: { phone } });
+      }
+    });
+
+    it.each(['7d', 'month', 'year'] as const)('P19.9-T4 AC-1 period=%s: each row carries its person’s number, null without one; the reader’s own is null', async (period) => {
+      const phones = phonesOf(await read('AGUS', { period }));
+      expect(phones).toMatchObject({
+        'Indah Permatasari': PHONES.INDAH, 'Sari Puspita': PHONES.SARI, 'Rina Wijaya': PHONES.RINA,
+        'Dimas Pratama': null, 'Budi Santoso': null,
+      });
+      // Agus has a number on file; his own row never carries it — nobody WhatsApps themselves.
+      expect(phones['Agus Salim']).toBeNull();
+    });
+
+    it('P19.9-T4 AC-1 a leader reading a unit below their own keeps the numbers: Sari’s head row carries hers', async () => {
+      const view = await read('AGUS', { for: office.id.SARI });
+      expect(view.readOnly).toBe(false);
+      expect(phonesOf(view)).toMatchObject({ 'Sari Puspita': PHONES.SARI, 'Rina Wijaya': PHONES.RINA, 'Budi Santoso': null });
+    });
+
+    it('P19.9-T4 AC-1 the office’s read-only view of another leader’s unit carries no number at all', async () => {
+      const view = await read('OWNER', { for: office.id.AGUS });
+      expect(view.readOnly).toBe(true);
+      expect(everyRow(view).length).toBeGreaterThan(3);
+      expect(everyRow(view).map((r) => r.phone)).toEqual(everyRow(view).map(() => null));
+      expect(JSON.stringify(view)).not.toContain('+62811');
+    });
+
+    it('P19.9-T4 AC-1 cross-tenant: office B’s number is on office B’s roster and nowhere in office A’s', async () => {
+      expect(phonesOf(await read('B_AB'))).toEqual({ 'Lina Marlina': null, 'Bayu Saputra': PHONES.B_AGENT });
+      expect(JSON.stringify(await read('OWNER'))).not.toContain(PHONES.B_AGENT);
+    });
+  });
 });

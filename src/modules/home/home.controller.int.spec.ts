@@ -73,7 +73,7 @@ describe('UI-100 GET /home — who may read it', () => {
 
   it('UI-100 a Super Admin belongs to no office: the read refuses them before it reads anything', async () => {
     // The real service, with nothing behind it: it must refuse before it touches a dependency.
-    const service = new HomeService(...(Array.from({ length: 13 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
+    const service = new HomeService(...(Array.from({ length: 15 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
     await expect(service.read(SUPER_ADMIN)).rejects.toBeInstanceOf(NoMembershipException);
   });
 });

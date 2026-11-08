@@ -11,6 +11,20 @@ export class LeadContactDto {
   email!: string | null;
 }
 
+/** Whose lead it is, by name (P19.9-T1 AC-4; ADR-0232): *Milik Rina Wijaya* on a leader's card under *Tim*. */
+export class LeadOwnerDto {
+  @ApiProperty({ type: String, description: 'The membership whose lead it is — `ownerMembershipId` again.' })
+  membershipId!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Rina Wijaya',
+    description: 'The account’s name behind that membership; `null` for one that can no longer be named, never a placeholder.',
+  })
+  name!: string | null;
+}
+
 /** The latest proposal's products, as its card names them (P19.7-T2 AC-12). */
 export class LeadLatestProposalDto {
   @ApiProperty({
@@ -148,6 +162,14 @@ export class LeadResponseDto implements LeadView {
       + '`ownerMembershipId`: two columns, so no flag is needed.',
   })
   lastEditedBy!: { membershipId: string; name: string | null } | null;
+
+  @ApiProperty({
+    type: LeadOwnerDto,
+    description:
+      '**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s '
+      + 'leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.',
+  })
+  owner!: LeadOwnerDto;
 
   @ApiProperty({
     type: Number,

@@ -101,22 +101,42 @@ export function activation3MFirstSaleDay(joinDate: LocalDate, firstSaleDate: Loc
   return firstSaleDate === null ? null : activation3MDay(joinDate, firstSaleDate);
 }
 
-/** Twelve calendar months before an office date, the day clamped to the shorter month: 29 Feb 2028 → 28 Feb 2027. */
-function monthsBefore(date: LocalDate, months: number): LocalDate {
-  const year = Number(date.slice(0, 4));
-  const month = Number(date.slice(5, 7)) - 1 - months;
-  const target = new Date(Date.UTC(year, month, 1));
-  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(Number(date.slice(8, 10)), last));
-  return target.toISOString().slice(0, 10);
+/**
+ * **The two years `/new-hires` offers** (ADR-0233, the owner's R2 and R3 of 6 November 2026): *Tahun berjalan* — this
+ * calendar year, the page's default — and *Tahun lalu*, the one before it.
+ */
+export const NEW_HIRE_YEARS = ['current', 'previous'] as const;
+export type NewHireYear = (typeof NEW_HIRE_YEARS)[number];
+
+/** A span of join dates, both ends in it: office dates. */
+export interface JoinDateSpan {
+  from: LocalDate;
+  to: LocalDate;
 }
 
 /**
- * **The join dates `/new-hires` lists** (ADR-0173 §1): after the same day `ACTIVATION_3M.WINDOW_MONTHS` months back, to
- * the office's today — `from` is the first day in it. On 27 October 2026, 28 October 2025 to 27 October 2026.
+ * **The join dates `/new-hires` lists for a year** (ADR-0233, amending ADR-0173 §1): `current` is 1 January of the
+ * office's year to the office's today — so on 1 January it holds that day alone, and the count starts again from 0 —
+ * and `previous` is all of last year, 1 January to 31 December. Office dates throughout: `today` is the office's, and
+ * the year is read off it, never off the server's clock. On 8 November 2026, 2026-01-01 to 2026-11-08 and 2025-01-01 to
+ * 2025-12-31.
  */
-export function newHiresWindow(today: LocalDate): { from: LocalDate; to: LocalDate } {
-  return { from: addDays(monthsBefore(today, ACTIVATION_3M.WINDOW_MONTHS), 1), to: today };
+export function newHiresYear(today: LocalDate, year: NewHireYear): JoinDateSpan {
+  const y = Number(today.slice(0, 4));
+  return year === 'current' ? { from: `${y}-01-01`, to: today } : { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` };
+}
+
+/**
+ * **Both years at once**: 1 January of last year to the office's today — what decides whether `/new-hires` has anybody
+ * to show at all (a 404 only when neither year does) and the session's `newHires` flag (P19.9-T3 AC-2, AC-3).
+ */
+export function newHiresReach(today: LocalDate): JoinDateSpan {
+  return { from: newHiresYear(today, 'previous').from, to: today };
+}
+
+/** Whether an office date is in a span, both ends included. `YYYY-MM-DD` sorts as the calendar does. */
+export function inSpan(date: LocalDate | null | undefined, span: JoinDateSpan): date is LocalDate {
+  return date != null && date >= span.from && date <= span.to;
 }
 
 /** A new hire as the share reads them: their result and whether they have a first sale. */

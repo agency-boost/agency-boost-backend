@@ -675,13 +675,20 @@ describe('training progress over HTTP (P18.2-T1 to T4)', () => {
       ['a member who left, to a leader', 'AGUS', 'LEFT'],
       ['another office’s leader, to the Owner', 'OWNER', 'B_AB'],
       ['an Agent’s colleague (own reaches nobody)', 'RINA', 'BUDI'],
-      ['an Agent who leads, on an own grant', 'LUKAS', 'TARI'],
+      // P19.9-T6 (ADR-0234): an Agent who leads reaches their own report now (below), and nobody else.
+      ['an Agent who leads, outside their downline', 'LUKAS', 'INDAH'],
       ['a leader who leads nobody', 'DEWI', 'RINA'],
     ] as const)('P18.2-T4 AC-1 404 for %s, and no entry written', async (_name, reader, subject) => {
       h.as(reader);
       const res = await forOf(subject).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
       expect(await reads()).toEqual([]);
+    });
+
+    it('P19.9-T6 AC-2 an Agent who leads reads their report’s training — the coaching Training tab — and the read is recorded', async () => {
+      h.as('LUKAS');
+      expect((await forOf('TARI').expect(200)).body.membershipId).toBe(id('TARI'));
+      expect(await reads()).toEqual([expect.objectContaining({ targetMembershipId: id('TARI'), after: expect.objectContaining({ surface: 'training' }) })]);
     });
 
     it('P18.2-T4 AC-1 an id that names nobody is 404, a malformed one too', async () => {

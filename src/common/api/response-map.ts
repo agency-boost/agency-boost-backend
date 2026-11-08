@@ -54,7 +54,7 @@ import {
 import { TemplateSyncResultDto, TemplateSyncViewDto } from '@/modules/config/template-sync.dto';
 import { ActivationChecklistDto } from '@/modules/activation/activation.response.dto';
 import {
-  ActivationClosingsDto, ActivationNoteSavedDto, ActivationViewDto, NewHiresRosterDto,
+  ActivationClosingsDto, ActivationEmptyDto, ActivationNoteSavedDto, ActivationViewDto, NewHireDetailDto, NewHiresRosterDto,
 } from '@/modules/activation/activation-progress.response.dto';
 import { ProductResponseDto } from '@/modules/products/product.response.dto';
 import {
@@ -89,6 +89,11 @@ import {
 export interface ResponseShape {
   type?: Type<unknown>;
   isArray?: true;
+  /**
+   * **Another shape the same operation may answer** in place of `type`, told apart by a field only it carries: an
+   * activation served empty past its first year (ADR-0233). Documented as `oneOf` the two.
+   */
+  or?: Type<unknown>;
   /**
    * Media types the operation may answer **as a file** instead, by a query parameter: the two templates' `format`
    * (ADR-0184). Documented beside the JSON body as binary.
@@ -234,11 +239,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   CalendarController_readSettings: { type: CalendarSettingsDto },
   CalendarController_saveSettings: { type: CalendarSettingsDto },
   // Phase 13: the hire's own activation, and a leader's new hires.
-  ActivationProgressController_mine: { type: ActivationViewDto },
+  // ADR-0233: past the first year, the activation is answered empty.
+  ActivationProgressController_mine: { type: ActivationViewDto, or: ActivationEmptyDto },
   ActivationProgressController_tick: { type: ActivationViewDto },
   ActivationProgressController_graduate: { type: ActivationViewDto },
   NewHiresController_roster: { type: NewHiresRosterDto },
-  NewHiresController_detail: { type: ActivationViewDto },
+  NewHiresController_detail: { type: NewHireDetailDto, or: ActivationEmptyDto },
   NewHiresController_tick: { type: ActivationViewDto },
   NewHiresController_correctStart: { type: ActivationViewDto },
   NewHiresController_saveNote: { type: ActivationNoteSavedDto },
@@ -657,7 +663,7 @@ const SHARED_SHAPES: Type<unknown>[] = [
 /** Every class the table names, so Swagger emits a schema for each. */
 export const RESPONSE_MODELS: Type<unknown>[] = [
   ...new Set([
-    ...Object.values(RESPONSE_SHAPES).flatMap((s) => (s.type ? [s.type] : [])),
+    ...Object.values(RESPONSE_SHAPES).flatMap((s) => [...(s.type ? [s.type] : []), ...(s.or ? [s.or] : [])]),
     ...SHARED_SHAPES,
   ]),
 ];

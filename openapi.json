@@ -193,7 +193,7 @@
     },
     "/api/v1/leads": {
       "get": {
-        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The Leads table sorts on name, type, status and registration, and asks for every page in turn. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403. A page holding somebody else’s leads writes one entry to the audit log for each person whose leads it shows; your own write none.\n\n`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching session’s Leads card — beside every other filter. Somebody your grant does not reach is a 404. Another member’s list writes one audit entry, whatever it holds.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Search over the name and the remarks, filter by ladder, stage, outcome and attention state, sort on one key, and page. The Leads table sorts on name, type, status and registration, and asks for every page in turn. **Scoped to what your grant reaches**: your own, plus your unit or your downline. A lead outside it is a 404, never a 403. **`scope` chooses within it** (*Leads milik*, since 2026-11-08): `own`, your own leads — also what an omitted `scope` reads — or `team`, everybody else your grant reaches. A page holding somebody else’s leads writes one entry to the audit log for each person whose leads it shows; your own write none.\n\n`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching session’s Leads card — beside every other filter. Somebody your grant does not reach is a 404. Another member’s list writes one audit entry, whatever it holds.\n\n**Requires `lead:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_list_v1",
         "parameters": [
           {
@@ -213,6 +213,19 @@
             "description": "Whose leads: a membership id. Yours, or somebody your grant reaches; 404 outside it.",
             "schema": {
               "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "`own`: your own leads alone — **and what an omitted `scope` means** (since 2026-11-08; it was everything your grant reaches). `team`: the leads of everybody your grant reaches **but you** — an AB’s downline, an AAB’s unit, an Agent’s downline when they lead somebody; nobody else’s, so an Agent who leads nobody gets an empty page. Beside `owner`, an omitted `scope` narrows nothing; a given one narrows that member’s list, so `owner` naming somebody else under `own`, or you under `team`, is an empty page. It never widens your grant.",
+            "schema": {
+              "enum": [
+                "own",
+                "team"
+              ],
               "type": "string"
             }
           },
@@ -25709,7 +25722,7 @@
     },
     "/api/v1/activation/me": {
       "get": {
-        "description": "Your checklist as it was published when you started, with what is done, when and by whom, your own note and date on each item, your start date, the office’s today, your day and window, each aspect’s status and the percentage — computed by the server, never in the browser — and your leader’s coaching note. Answered in any state: open, complete, or past its six months.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your checklist as it was published when you started, with what is done, when and by whom, your own note and date on each item, your start date, the office’s today, your day and window, each aspect’s status and the percentage — computed by the server, never in the browser — and your leader’s coaching note. Answered in any state: open, complete, or past its six months. **Empty** (`ActivationEmptyDto`, told apart by its `empty`) once your join date plus twelve calendar months has come: the activation covers your first year only, and nothing of the checklist is served.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ActivationProgressController_mine_v1",
         "parameters": [],
         "responses": {
@@ -25718,7 +25731,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActivationViewDto"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ActivationViewDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationEmptyDto"
+                    }
+                  ]
                 }
               }
             }
@@ -26450,9 +26470,24 @@
     },
     "/api/v1/new-hires": {
       "get": {
-        "description": "Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, the day, the first sale with its day and source, the status and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every new hire you coach, at any depth, whose join date is in the year asked for — `year=current`, the default: 1 January of the office’s year to today, so on 1 January the count starts again from nobody; `year=previous`: all of last year — never an existing agent, in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, the day, the first sale with its day and source, the status and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. A year with nobody in it while the other has somebody answers empty sections. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_roster_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "year",
+            "required": false,
+            "in": "query",
+            "description": "Which year of join dates to list: `current` (the default) — 1 January of the office’s year to today, *Tahun berjalan* — or `previous`, all of last year, *Tahun lalu*.",
+            "schema": {
+              "default": "current",
+              "enum": [
+                "current",
+                "previous"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -26460,6 +26495,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NewHiresRosterDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -26485,7 +26530,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — you coach no new hire who joined in the last twelve months, so there is nobody to show. Answered exactly as a record in another office is.",
+            "description": "`NOT_FOUND` — you coach no new hire who joined this year or last year, so there is nobody to show in either. Answered exactly as a record in another office is.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26519,7 +26564,7 @@
     },
     "/api/v1/new-hires/{membershipId}": {
       "get": {
-        "description": "As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The detail page, and a coaching page’s Activation tab. A recorded read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The detail page, and a coaching page’s Activation tab. A recorded read. **Empty** (`ActivationEmptyDto`, told apart by its `empty`) once the join date plus twelve calendar months has come — the activation covers the first year only — and for a new hire New Hires lists who has no activation at all: the person, their join date and leader, and nothing of a checklist, recording no read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_detail_v1",
         "parameters": [
           {
@@ -26537,7 +26582,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActivationViewDto"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NewHireDetailDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ActivationEmptyDto"
+                    }
+                  ]
                 }
               }
             }
@@ -26737,7 +26789,7 @@
             }
           },
           "403": {
-            "description": "`PERM_DENIED` — a 1:1 logged by a leader who runs no coaching sessions: an Agent who leads.",
+            "description": "`PERM_DENIED` — a 1:1 logged by a reader who holds no coaching-session grant (`coaching_session:create` and `:finalize`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -26757,7 +26809,7 @@
             }
           },
           "409": {
-            "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "description": "`ACTIVATION_ITEM_AUTOMATIC` — the item completes on its own. `ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes — nor after its first year, when it is served empty.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26875,7 +26927,7 @@
             }
           },
           "409": {
-            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes — nor after its first year, when it is served empty.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26983,7 +27035,7 @@
             }
           },
           "409": {
-            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.",
+            "description": "`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes — nor after its first year, when it is served empty.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27833,7 +27885,7 @@
     },
     "/api/v1/home": {
       "get": {
-        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day; *Leads*, your own open leads, Sales and Recruit (`OWN_OPEN_LEADS`); and *New hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks at zero when nobody reports to them yet (ADR-0189 §4, ADR-0228 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day; *Leads*, every open lead you own, as `/leads` opens on them (`OWN_OPEN_LEADS`); and *New hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks at zero when nobody reports to them yet (ADR-0189 §4, ADR-0228 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "HomeController_read_v1",
         "parameters": [],
         "responses": {
@@ -36347,6 +36399,25 @@
           "email"
         ]
       },
+      "LeadOwnerDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership whose lead it is — `ownerMembershipId` again."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Rina Wijaya",
+            "description": "The account’s name behind that membership; `null` for one that can no longer be named, never a placeholder."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
       "LeadLatestProposalDto": {
         "type": "object",
         "properties": {
@@ -36519,6 +36590,14 @@
             },
             "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
           },
+          "owner": {
+            "description": "**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadOwnerDto"
+              }
+            ]
+          },
           "overdueDays": {
             "type": "number",
             "nullable": true,
@@ -36557,6 +36636,7 @@
           "version",
           "flags",
           "lastEditedBy",
+          "owner",
           "overdueDays",
           "proposals"
         ]
@@ -36768,6 +36848,14 @@
             },
             "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
           },
+          "owner": {
+            "description": "**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadOwnerDto"
+              }
+            ]
+          },
           "overdueDays": {
             "type": "number",
             "nullable": true,
@@ -36813,6 +36901,7 @@
           "version",
           "flags",
           "lastEditedBy",
+          "owner",
           "overdueDays",
           "proposals",
           "history"
@@ -49702,13 +49791,13 @@
         "properties": {
           "from": {
             "type": "string",
-            "example": "2025-10-28",
-            "description": "The earliest join date listed."
+            "example": "2026-01-01",
+            "description": "The earliest join date listed: 1 January of the year."
           },
           "to": {
             "type": "string",
-            "example": "2026-10-27",
-            "description": "Today."
+            "example": "2026-11-08",
+            "description": "The latest: today for this year, 31 December for last year."
           }
         },
         "required": [
@@ -50039,8 +50128,17 @@
             "type": "string",
             "example": "2026-10-27"
           },
+          "year": {
+            "type": "string",
+            "enum": [
+              "current",
+              "previous"
+            ],
+            "example": "current",
+            "description": "The year listed, as asked: `current` — this calendar year, the default — or `previous`, last year."
+          },
           "window": {
-            "description": "The join dates listed: the last twelve months.",
+            "description": "The join dates listed: the year’s, in the office’s calendar.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NewHiresWindowDto"
@@ -50073,6 +50171,7 @@
         },
         "required": [
           "today",
+          "year",
           "window",
           "days",
           "activation3M",
@@ -51214,6 +51313,12 @@
             "nullable": true,
             "description": "UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise."
           },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281234567890",
+            "description": "The WhatsApp number on their account, for the row’s WhatsApp button. `null` without one, and always on the reader’s own row, for an inactive membership, and in the agency’s read-only view of another leader’s unit."
+          },
           "isReader": {
             "type": "boolean",
             "description": "The reader’s own row."
@@ -51308,6 +51413,7 @@
           "membershipId",
           "name",
           "photoUrl",
+          "phone",
           "isReader",
           "coached",
           "rung",
@@ -53046,6 +53152,25 @@
           "aab"
         ]
       },
+      "HomeRungDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The rung’s code on the company’s ladder."
+          },
+          "label": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The company’s own label for it; the code where the ladder has none."
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
       "HomeTeamPersonDto": {
         "type": "object",
         "properties": {
@@ -53069,6 +53194,14 @@
             "type": "boolean",
             "description": "In the reader’s Unit; everybody is in the Group."
           },
+          "rung": {
+            "description": "Their rung, which the *Group* tab names in the company’s short words — *AB*, *AAB*, *Agent* (ADR-0235).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeRungDto"
+              }
+            ]
+          },
           "yesterday": {
             "type": "number",
             "nullable": true,
@@ -53085,6 +53218,7 @@
           "phone",
           "photoUrl",
           "inUnit",
+          "rung",
           "yesterday",
           "today"
         ]
@@ -53171,7 +53305,7 @@
             "type": "number",
             "minimum": 0,
             "example": 7,
-            "description": "*Leads* (`OWN_OPEN_LEADS`): your own open leads, Sales and Recruit — `OPEN_SALES_LEADS` and `RECRUITMENT_PIPELINE_NOW` over you alone. Every reader’s."
+            "description": "*Leads* (`OWN_OPEN_LEADS`): every open lead you own, any type and any stage — what `/leads` opens on (`GET /leads?scope=own&outcome=open`’s `total`). Every reader’s."
           },
           "newHires": {
             "type": "number",
@@ -61270,6 +61404,56 @@
         "required": [
           "items",
           "page"
+        ]
+      },
+      "ActivationEmptyDto": {
+        "type": "object",
+        "properties": {
+          "empty": {
+            "type": "string",
+            "enum": [
+              "first_year_over",
+              "no_activation"
+            ],
+            "description": "`first_year_over` — the join date plus twelve calendar months has come, and the activation covers the first year only; `no_activation` — a new hire New Hires lists who has no checklist (an AB or an AAB placed as one, or an office that has published none). Only this shape carries it."
+          },
+          "hire": {
+            "$ref": "#/components/schemas/ActivationPersonDto"
+          },
+          "today": {
+            "type": "string",
+            "example": "2026-11-08",
+            "description": "The office’s today."
+          },
+          "joinDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2025-03-03",
+            "description": "The join date, day 1; `null` with none."
+          },
+          "firstYearEndsOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-03-03",
+            "description": "The first day the activation is empty: the join date plus twelve calendar months. `null` with no join date."
+          },
+          "leader": {
+            "nullable": true,
+            "description": "Who they report to, for the header on a leader’s read; `null` on the person’s own and with nobody.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewHireLeaderDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "empty",
+          "hire",
+          "today",
+          "joinDate",
+          "firstYearEndsOn",
+          "leader"
         ]
       },
       "SessionDto": {

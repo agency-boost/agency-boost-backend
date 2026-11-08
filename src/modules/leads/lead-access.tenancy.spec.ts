@@ -198,20 +198,24 @@ describe('who may touch whose lead (P7-T7)', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('lists a leader’s own leads and their downline’s, and no others', async () => {
+    /*
+     * *Rewritten 2026-11-08 (P19.9-T1 AC-2, AC-3; ADR-0232 §2–§3):* a leader's list held their own leads and their
+     * downline's together. It holds their own now, and the downline's are `scope=team` — the same reach, in two lists.
+     */
+    it('lists a leader’s own leads, their downline’s on scope=team, and no others', async () => {
       await leadOf(ab(), 'Agus’ own');
       await leadOf(aab(), 'Sari’s own');
       await leadOf(agent(), 'Rina’s');
       await leadOf(sibling(), 'Budi’s');
       await leadOf(outsider(), 'Lina’s');
 
-      const seenByAb = await wired.leadRecords.list(ab());
-      const seenByAab = await wired.leadRecords.list(aab());
+      const names = async (who: RequestContext, scope?: 'team') =>
+        (await wired.leadRecords.list(who, scope ? { scope } : {})).rows.map((r) => r.name).sort();
 
-      expect(seenByAb.rows.map((r) => r.name).sort())
-        .toEqual(['Agus’ own', 'Budi’s', 'Rina’s', 'Sari’s own']);
-      expect(seenByAab.rows.map((r) => r.name).sort())
-        .toEqual(['Budi’s', 'Rina’s', 'Sari’s own']);
+      expect(await names(ab())).toEqual(['Agus’ own']);
+      expect(await names(ab(), 'team')).toEqual(['Budi’s', 'Rina’s', 'Sari’s own']);
+      expect(await names(aab())).toEqual(['Sari’s own']);
+      expect(await names(aab(), 'team')).toEqual(['Budi’s', 'Rina’s']);
     });
 
     it('refuses a leader the delete a lead’s owner has', async () => {
@@ -262,7 +266,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       await expect(wired.leadRecords.read(aab(), theirs.id)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
       await expect(wired.leadRecords.update(aab(), theirs.id, { remarks: 'Taken' }))
         .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
-      expect((await wired.leadRecords.list(aab())).rows.map((r) => r.name)).not.toContain('Peer’s lead');
+      expect((await wired.leadRecords.list(aab(), { scope: 'team' })).rows.map((r) => r.name)).not.toContain('Peer’s lead');
     });
 
     it('P11-T3 ADR-0074: an AAB reaches a nested AAB’s agent’s lead — `own-unit` is the subtree for a member’s data', async () => {
@@ -271,7 +275,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       const edited = await wired.leadRecords.update(aab(), theirs.id, { remarks: 'Coached.', version: theirs.version });
 
       expect(edited).toMatchObject({ ownerMembershipId: NESTED_AGENT, remarks: 'Coached.' });
-      expect((await wired.leadRecords.list(aab())).rows.map((r) => r.name)).toContain('Nested agent’s lead');
+      expect((await wired.leadRecords.list(aab(), { scope: 'team' })).rows.map((r) => r.name)).toContain('Nested agent’s lead');
     });
 
     it('P11-T3 AC-2: a leader no longer reaches the leads of a member who has left (§6.1, §6.7)', async () => {
@@ -281,7 +285,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       );
 
       await expect(wired.leadRecords.read(aab(), theirs.id)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
-      expect((await wired.leadRecords.list(ab())).rows.map((r) => r.name)).not.toContain('Left’s lead');
+      expect((await wired.leadRecords.list(ab(), { scope: 'team' })).rows.map((r) => r.name)).not.toContain('Left’s lead');
     });
   });
 
@@ -290,6 +294,100 @@ describe('who may touch whose lead (P7-T7)', () => {
    * One §3.5 entry per owner other than the caller whose rows the answer holds, surface `leads`, and
    * none for the caller's own: the same record `GET /leads?owner=` leaves, so neither route steps round it.
    */
+  /*
+   * **P19.9-T1 — *Leads milik: Saya · Tim*** (R9, R10; ADR-0232; OD-286 by its default): `/leads` opens on the reader's
+   * own leads and offers the team's in its filter; every row names its owner. `scope` narrows what the grant reaches,
+   * never widens it, and the §3.5 entry per owner shown is as it was (ADR-0089).
+   */
+  describe('P19.9-T1 AC-2, AC-3, AC-4 — scope=own, scope=team and the owner on every row', () => {
+    const names = (page: { rows: { name: string }[] }) => page.rows.map((r) => r.name).sort();
+    const reads = async () => mongoose.connection.db!.collection('auditLog')
+      .find({ action: 'activity_log.read_raw', 'after.surface': 'leads' }).toArray();
+
+    beforeEach(async () => {
+      await leadOf(ab(), 'Agus’ own');
+      await leadOf(aab(), 'Sari’s own');
+      await leadOf(agent(), 'Rina’s');
+      await leadOf(sibling(), 'Budi’s');
+      await leadOf(outsider(), 'Lina’s');
+    });
+
+    it('P19.9-T1 AC-2 scope=own is the reader’s own leads alone, for a leader as for an agent — and records nobody', async () => {
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'own' }))).toEqual(['Agus’ own']);
+      expect(names(await wired.leadRecords.list(aab(), { scope: 'own' }))).toEqual(['Sari’s own']);
+      expect(names(await wired.leadRecords.list(agent(), { scope: 'own' }))).toEqual(['Rina’s']);
+      expect(await reads()).toEqual([]);
+    });
+
+    it('P19.9-T1 AC-3 OD-286 scope=team is everybody the grant reaches but the reader: an AB’s downline, an AAB’s unit', async () => {
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'team' }))).toEqual(['Budi’s', 'Rina’s', 'Sari’s own']);
+      expect(names(await wired.leadRecords.list(aab(), { scope: 'team' }))).toEqual(['Budi’s', 'Rina’s']);
+      // Never wider than the grant: the outsider's lead is in no team.
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'team' }))).not.toContain('Lina’s');
+    });
+
+    it('P19.9-T1 AC-3 an Agent’s grant reaches nobody else: scope=team is an empty page, never a colleague’s', async () => {
+      expect(await wired.leadRecords.list(agent(), { scope: 'team' })).toMatchObject({ rows: [], total: 0 });
+      expect(await wired.leadRecords.list(outsider(), { scope: 'team' })).toMatchObject({ rows: [], total: 0 });
+    });
+
+    it('P19.9-T1 AC-2 absent, the list is the reader’s own (ADR-0232 §2) — where it was their whole reach', async () => {
+      expect(names(await wired.leadRecords.list(ab()))).toEqual(names(await wired.leadRecords.list(ab(), { scope: 'own' })));
+      expect(names(await wired.leadRecords.list(aab()))).toEqual(['Sari’s own']);
+      expect(await reads()).toEqual([]);
+    });
+
+    it('P19.9-T1 AC-3 absent beside owner=, the coaching tab’s list is that member’s, as it was', async () => {
+      expect(names(await wired.leadRecords.list(ab(), { owner: AGENT }))).toEqual(['Rina’s']);
+      expect(names(await wired.leadRecords.list(ab(), { owner: AB }))).toEqual(['Agus’ own']);
+    });
+
+    it('P19.9-T1 AC-3 the closed lists narrow the same way: a downline’s won lead is Tim’s, never Saya’s', async () => {
+      const rina = await wired.leadRecords.list(agent());
+      const won = await wired.leadRecords.update(agent(), rina.rows[0].id, { type: 'recruitment' });
+      await wired.leadRecords.setStatus(agent(), won.id, 'NEW_ACTIVE_AGENT', won.version);
+      await wired.leadRecords.setOutcome(agent(), won.id, 'won');
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'own', outcome: 'won' }))).toEqual([]);
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'team', outcome: 'won' }))).toEqual(['Rina’s']);
+    });
+
+    it('P19.9-T1 AC-3 scope narrows owner= and never widens it: a coachee under own is nothing, yourself under team is nothing', async () => {
+      expect(names(await wired.leadRecords.list(ab(), { owner: AGENT, scope: 'team' }))).toEqual(['Rina’s']);
+      expect(await wired.leadRecords.list(ab(), { owner: AGENT, scope: 'own' })).toMatchObject({ rows: [], total: 0 });
+      expect(await wired.leadRecords.list(ab(), { owner: AB, scope: 'team' })).toMatchObject({ rows: [], total: 0 });
+      // owner= outside the reach is still the 404 it was, whatever the scope.
+      await expect(wired.leadRecords.list(aab(), { owner: OUTSIDER, scope: 'team' })).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('P19.9-T1 AC-3 ADR-0089 a leader’s Tim writes one leads entry per owner shown, and Saya none', async () => {
+      await wired.leadRecords.list(aab(), { scope: 'own' });
+      expect(await reads()).toEqual([]);
+      await wired.leadRecords.list(aab(), { scope: 'team' });
+      expect((await reads()).map((e) => e.targetMembershipId).sort()).toEqual([AGENT, SIBLING].sort());
+    });
+
+    it('P19.9-T1 AC-3 with Sudah ada proposal, Tim holds nothing: a proposal is its owner’s alone', async () => {
+      expect(await wired.leadRecords.list(ab(), { scope: 'team', hasProposal: 'false' })).toMatchObject({ rows: [], total: 0 });
+      expect(names(await wired.leadRecords.list(ab(), { scope: 'own', hasProposal: 'false' }))).toEqual(['Agus’ own']);
+    });
+
+    it('P19.9-T1 AC-4 every row names its owner — the reader’s own included — on the list, a read and a write', async () => {
+      const team = await wired.leadRecords.list(ab(), { scope: 'team' });
+      expect(team.rows.map((r) => [r.name, r.owner]).sort()).toEqual([
+        ['Budi’s', { membershipId: SIBLING, name: 'Budi Santoso' }],
+        ['Rina’s', { membershipId: AGENT, name: 'Rina Wijaya' }],
+        ['Sari’s own', { membershipId: AAB, name: 'Ibu Sari' }],
+      ]);
+      const [own] = (await wired.leadRecords.list(ab(), { scope: 'own' })).rows;
+      expect(own.owner).toEqual({ membershipId: AB, name: 'Pak Agus' });
+      const rina = team.rows.find((r) => r.ownerMembershipId === AGENT)!;
+      expect((await wired.leadRecords.read(ab(), rina.id)).owner).toEqual({ membershipId: AGENT, name: 'Rina Wijaya' });
+      const edited = await wired.leadRecords.update(ab(), rina.id, { remarks: 'Coached.', version: rina.version });
+      expect(edited.owner).toEqual({ membershipId: AGENT, name: 'Rina Wijaya' });
+      expect((await leadOf(agent(), 'Rina’s new')).owner).toEqual({ membershipId: AGENT, name: 'Rina Wijaya' });
+    });
+  });
+
   describe('OD-107 — the list writes the §3.5 entry per other owner shown', () => {
     const reads = async () => mongoose.connection.db!.collection('auditLog')
       .find({ action: 'activity_log.read_raw' }).toArray();
@@ -302,7 +400,8 @@ describe('who may touch whose lead (P7-T7)', () => {
       await leadOf(sibling(), 'Budi’s');
       await leadOf(outsider(), 'Lina’s');
 
-      await wired.leadRecords.list(ab());
+      // The downline's rows are *Tim*'s since P19.9-T1 (ADR-0232 §3); its entries are as they were (ADR-0089).
+      await wired.leadRecords.list(ab(), { scope: 'team' });
 
       const entries = await reads();
       // Rina's two rows are one disclosure of Rina: one entry, not one per row.
@@ -330,7 +429,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       await leadOf(agent(), 'Rina’s');
       await leadOf(sibling(), 'Budi’s');
 
-      const page = await wired.leadRecords.list(aab(), { pageSize: 1 });
+      const page = await wired.leadRecords.list(aab(), { scope: 'team', pageSize: 1 });
 
       expect(page.total).toBe(2);
       expect((await reads()).map((e) => e.targetMembershipId)).toEqual([page.rows[0].ownerMembershipId]);
@@ -366,7 +465,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       // The *Status* sort reads the published ladders once the rows are in hand; that read fails here.
       const failing = jest.spyOn(wired.config, 'readPublished').mockRejectedValue(new Error('the config store is down'));
       try {
-        await expect(wired.leadRecords.list(ab(), { sort: 'status' })).rejects.toThrow('the config store is down');
+        await expect(wired.leadRecords.list(ab(), { scope: 'team', sort: 'status' })).rejects.toThrow('the config store is down');
       } finally {
         failing.mockRestore();
       }
@@ -380,7 +479,7 @@ describe('who may touch whose lead (P7-T7)', () => {
       const failing = jest.spyOn(wired.audit, 'record').mockRejectedValue(new Error('the audit store is down'));
       let page;
       try {
-        page = await wired.leadRecords.list(ab());
+        page = await wired.leadRecords.list(ab(), { scope: 'team' });
         // One attempt per downline owner shown, each refused by the store.
         expect(failing).toHaveBeenCalledTimes(2);
       } finally {

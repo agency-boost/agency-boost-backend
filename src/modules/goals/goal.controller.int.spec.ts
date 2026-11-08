@@ -35,6 +35,14 @@ const ROUTES: Record<string, string> = {
  * stripped by `forbidNonWhitelisted` before a service sees it, which is how three event and
  * campaign DTOs shipped unable to accept the fields they documented.
  */
+
+/**
+ * **An Agent who stands above nobody in this office** (P19.9-T6): the shared fixture's `AGENT` is `mem-a`, the leader the
+ * subjects below are written under, and an Agent who leads somebody reaches them since ADR-0234 — so the *anybody else*
+ * cases name an Agent elsewhere in the tree.
+ */
+const AGENT_ELSEWHERE = new RequestContext('u-agent-z', 'none', { ...AGENT.membership!, membershipId: 'mem-z' } as never);
+
 describe('goals over HTTP (P8-T3)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
@@ -197,6 +205,12 @@ describe('goals over HTTP (P8-T3)', () => {
       expect(res.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
     });
 
+    it('P19.9-T6 AC-2 an Agent who leads them reads their plan — the coaching Goal Setting tab (ADR-0234)', async () => {
+      // SUBJECT reports to `mem-a`, and the session is `mem-a` on the Agent rung: an upline, who coaches.
+      const res = await http().get(url).query({ for: SUBJECT }).expect(200);
+      expect(res.body).toHaveProperty('measured', null);
+    });
+
     it('P11-T7 for is a string of at most 64 characters', async () => {
       const long = await http().get(url).query({ for: 'a'.repeat(65) }).expect(400);
       expect(long.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('for')]));
@@ -204,6 +218,8 @@ describe('goals over HTTP (P8-T3)', () => {
     });
 
     it('P11-T7 an Agent naming anybody else is not found, as is an id that is nobody’s', async () => {
+      // An Agent who stands above nobody here: `mem-a`, the shared fixture's Agent, is SUBJECT's leader (below).
+      session.current = AGENT_ELSEWHERE;
       expect((await http().get(url).query({ for: SUBJECT }).expect(404)).body.error.code).toBe('NOT_FOUND');
       session.current = AB;
       await http().get(url).query({ for: new mongoose.Types.ObjectId().toString() }).expect(404);
@@ -260,6 +276,7 @@ describe('goals over HTTP (P8-T3)', () => {
         status: 'active', deletedAt: null,
       } as never);
 
+      session.current = AGENT_ELSEWHERE;
       expect((await http().post(preview).query({ for: SUBJECT }).send(plan()).expect(404)).body.error.code).toBe('NOT_FOUND');
       session.current = AB;
       const res = await http().post(preview).query({ for: SUBJECT }).send(plan({ apeAchievedMinor: 400_000_000_00 }))

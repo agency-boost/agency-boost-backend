@@ -71,7 +71,8 @@ describe('P19.7-T2 AC-12 proposals on the Leads page (HTTP)', () => {
     await completeProposal(wired, agent(), leads.budi);
     for (const leader of [aab(), ab()]) {
       session.current = leader;
-      const res = await http().get('/leads').expect(200);
+      // A downline's lead is on *Leads milik: Tim* since P19.9-T1 (ADR-0232 §3).
+      const res = await http().get('/leads?scope=team').expect(200);
       expect(rowOf(res.body, leads.budi)).toBeDefined();
       expect(rowOf(res.body, leads.budi)?.proposals).toBeNull();
       const one = await http().get(`/leads/${leads.budi}`).expect(200);

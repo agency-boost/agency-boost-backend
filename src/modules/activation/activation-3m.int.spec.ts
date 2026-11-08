@@ -73,17 +73,71 @@ describe('P18.8-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', (
   // ------------------------------------------------------------------ AC-3: the year, and the sections
 
   describe('AC-3 the year of new hires, in three sections', () => {
-    it('P18.8-T6 AC-3 lists the new hires who joined in the last twelve months — never an existing agent, never one older', async () => {
-      await h.start('INDAH', '2025-09-15'); // the first day of the year listed
-      await h.start('DIMAS', '2025-09-14'); // twelve months back to the day: off the page, in the data
+    it('P19.9-T3 AC-1 lists this calendar year’s new hires by default — never an existing agent, never last year’s', async () => {
+      // Amends P18.8-T6 AC-3 (ADR-0233, ADR-0173 §1): a calendar year, where it was the last twelve months.
+      await h.start('INDAH', '2026-01-01'); // the first day of the year listed
+      await h.start('DIMAS', '2025-12-31'); // last year's last day: on Tahun lalu, not here
       await h.start('BUDI', '2026-07-15');
       await existingAgent('RINA', '2026-08-01'); // joined lately, as an existing agent: never listed
       const r = await roster();
-      expect(r.window).toEqual({ from: '2025-09-15', to: TODAY });
+      expect(r.window).toEqual({ from: '2026-01-01', to: TODAY });
       expect(names(rows(r)).sort()).toEqual(['Budi Santoso', 'Indah Permatasari']);
-      expect(r).toMatchObject({ today: TODAY, days: 90 });
-      // Still in the data: off the page is not gone.
-      expect(await member('DIMAS')).toMatchObject({ joinedAs: 'new_hire', joinDate: '2025-09-14' });
+      expect(r).toMatchObject({ today: TODAY, year: 'current', days: 90 });
+      // Still in the data: off this year is not gone.
+      expect(await member('DIMAS')).toMatchObject({ joinedAs: 'new_hire', joinDate: '2025-12-31' });
+    });
+
+    it('P19.9-T3 AC-2 year=previous lists all of last year, 1 January to 31 December, with its own figures', async () => {
+      await h.start('INDAH', '2025-01-01');
+      await h.start('DIMAS', '2025-12-31');
+      await h.start('TARI', '2024-12-31'); // before last year: in neither
+      await h.start('BUDI', '2026-07-15');
+      h.as('AGUS');
+      const r = (await h.http().get('/new-hires?year=previous').expect(200)).body as Roster & { year: string };
+      expect(r).toMatchObject({ today: TODAY, year: 'previous', window: { from: '2025-01-01', to: '2025-12-31' } });
+      expect(names(rows(r)).sort()).toEqual(['Dimas Pratama', 'Indah Permatasari']);
+      // Both past day 90 with no first sale: the year's own 3M figures, not this year's.
+      expect(r.activation3M.all).toMatchObject({ notActivated: 2, activated: 0, pct: 0 });
+      expect(r.activation3M.byMonth.map((m) => m.month)).toEqual(['2025-12', '2025-01']);
+      // And `current`, named, is the default's answer.
+      const current = (await h.http().get('/new-hires?year=current').expect(200)).body as Roster;
+      expect(names(rows(current))).toEqual(['Budi Santoso']);
+    });
+
+    it('P19.9-T3 AC-2 a year with nobody is a 200 with empty sections while the other year has somebody; 404 only when neither has', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('SARI');
+      const last = (await h.http().get('/new-hires?year=previous').expect(200)).body as Roster;
+      expect(last).toMatchObject({
+        year: 'previous', units: [], sections: { inProgress: [], activated: [], notActivated: [] },
+        activation3M: { all: { activated: 0, notActivated: 0, late: 0, inProgress: 0, pct: null }, byMonth: [] },
+      });
+      // Only last year has somebody: this year is the empty one now.
+      await h.col('memberships').updateOne({ _id: oid('BUDI') }, { $set: { joinDate: '2025-06-01' } });
+      expect(rows((await h.http().get('/new-hires').expect(200)).body as Roster)).toEqual([]);
+      // Before last year: nobody in either, and the page is the empty one.
+      await h.col('memberships').updateOne({ _id: oid('BUDI') }, { $set: { joinDate: '2024-06-01' } });
+      for (const year of ['current', 'previous']) {
+        expect((await h.http().get(`/new-hires?year=${year}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+      }
+    });
+
+    it('P19.9-T3 AC-2 a year it does not know, or a parameter of another name, is refused by name', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('SARI');
+      for (const query of ['year=2025', 'year=last', 'month=2026-01']) {
+        const res = await h.http().get(`/new-hires?${query}`).expect(400);
+        expect([query, res.body.error.code]).toEqual([query, 'VALIDATION_FAILED']);
+      }
+    });
+
+    it('P19.9-T3 AC-2 one read recorded per new hire shown — the year shown, never the other', async () => {
+      await h.start('BUDI', '2026-07-15');
+      await h.start('RINA', '2025-07-18');
+      h.as('SARI');
+      await h.http().get('/new-hires?year=previous').expect(200);
+      const reads = await h.col('auditLog').find({ action: 'activity_log.read_raw', 'after.surface': 'activation' }).toArray();
+      expect(reads.map((r) => r.targetMembershipId)).toEqual([id('RINA')]);
     });
 
     it('UI-023 sections by status: a first sale by day 90 Teraktivasi at once, after it Teraktivasi late; no sale past day 90 not', async () => {

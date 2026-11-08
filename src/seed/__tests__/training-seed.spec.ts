@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SEED_TRAINING_MODULES } from '@/domain/constants';
+import type { ActivationView } from '@/modules/activation/activation-progress.view';
 import type { TrainingProgressView } from '@/modules/training/training-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -121,7 +122,8 @@ describe('Phase 18.2 the training seed — a run at 10:00 on 10 October 2026 in 
 
   it('P18.2-T3 AC-8 D-seed-link: Lina’s item 9 is bound to Closing Techniques That Work, live, waiting; her day and prospects item kept', async () => {
     const lina = await as('0555', 'agent@kpm0555.test');
-    const view = await wired.activationProgress.mine(lina);
+    // Inside her first year: the full view (P19.9-T3 AC-5).
+    const view = await wired.activationProgress.mine(lina) as ActivationView;
     const item = (code: string) => view.aspects.flatMap((a) => a.items).find((i) => i.code === code)!;
     expect(item('MANDATORY_TRAINING')).toMatchObject({
       done: false,

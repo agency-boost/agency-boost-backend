@@ -296,6 +296,18 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     }
   });
 
+  /*
+   * **P19.9-T4 AC-1 — WhatsApp on the seed** (ADR-0235 §3): Agus's roster holds rows with a number on file, which open
+   * WhatsApp straight through, beside rows with none, where an AB is offered *Isi nomor WhatsApp*; his own row carries none.
+   */
+  it('P19.9-T4 AC-1 Agus’s roster: numbers on file for some rows, none for others, never his own', () => {
+    const phones = Object.fromEntries(everyRow(view).map((r) => [first(r.name), r.phone]));
+    expect(phones).toMatchObject({ Indah: '+6281211002201', Siti: '+6281311002203', Arief: '+6281511002204', Dimas: null });
+    expect(phones.Agus).toBeNull();
+    // Every unit's header has its *Rp x / y* to show (R7): a target, and production for some of its rows.
+    for (const group of view.units) expect({ unit: group.head.name, target: group.total.goal.targetMinor! > 0 }).toEqual({ unit: group.head.name, target: true });
+  });
+
   it('P19.8-T4 AC-14 the Aktivitas table holds a count in every category for the Group, each type with its short name', async () => {
     const table = await wired.unitActivities.read(agus, { span: 'month' });
     const counted = new Set(table.totals.group.counts.map((c) => c.code));

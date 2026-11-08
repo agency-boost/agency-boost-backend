@@ -507,6 +507,8 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
       ['an AAB, a nested unit’s agent', 'SARI', 'DODI'],
       ['the Owner, own-kpm', 'OWNER', 'LUKAS'],
       ['the Admin, own-kpm', 'ADMIN', 'LUKAS'],
+      // P19.9-T6 (ADR-0234): every upline coaches — an Agent who leads, for their own report.
+      ['an Agent who leads, for their own report', 'LUKAS', 'TARI'],
     ] as [string, Who, Who][])('ADR-0183 %s types it too', async (_name, caller, member) => {
       as(caller);
       await http().put(`/goals/2026?for=${id(member)}`).send(body(700 * M, 42 * M)).expect(200);
@@ -526,7 +528,7 @@ describe('a goal saved through a coaching session (P11-T8)', () => {
     });
 
     it.each([
-      ['an Agent who leads, for their own downline (own only)', 'LUKAS', 'TARI'],
+      ['an Agent who leads, for somebody outside their downline', 'LUKAS', 'INDAH'],
       ['an Agent, for a colleague', 'INDAH', 'DIMAS'],
       ['a peer AAB, for an agent of another unit', 'PEER_AAB', 'BUDI'],
       ['a peer AB, for somebody beside their line', 'PEER_AB', 'LUKAS'],

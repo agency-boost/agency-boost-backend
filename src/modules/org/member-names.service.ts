@@ -26,6 +26,12 @@ export interface NamedPerson {
  */
 export interface PicturedPerson extends NamedPerson {
   photoUrl: string | null;
+  /**
+   * **Their WhatsApp number, asked for** (`pictured`'s `phones`; P19.9-T4 AC-1): the account's `users.phone` for a person
+   * the read draws whose membership is active — `null` without one, for an inactive membership, and for somebody the read
+   * only names. Absent unless asked: no other reader carries a number it does not show.
+   */
+  phone?: string | null;
 }
 
 /**
@@ -100,23 +106,32 @@ export class MemberNames {
    * then **one batch of signatures** (`AvatarLinks.linksFor`) over the photos of `drawnIds` alone — the rows the read
    * returns with an avatar, never a coach or a corrector it only names. Everybody else, and anybody without a photo,
    * has `photoUrl: null`. A photo that cannot be signed is `null` too: the read still answers.
+   *
+   * **`phones`** (P19.9-T4 AC-1, the Unit roster's WhatsApp): each drawn person's number read in the same user read —
+   * `users.phone` beside the name, **no query more** — `null` for an inactive membership and for anybody only named.
    */
   async pictured(
     ctx: RequestContext, membershipIds: readonly string[], drawnIds: readonly string[] = membershipIds,
+    { phones = false }: { phones?: boolean } = {},
   ): Promise<Map<string, PicturedPerson>> {
     const unique = [...new Set(membershipIds)].filter((id) => Boolean(id) && isValidObjectId(id));
     if (unique.length === 0) return new Map();
 
     const members = await this.memberships.find(ctx, { _id: { $in: unique } });
-    const people = await this.peopleOf(members, true);
+    const people = await this.peopleOf(members, true, phones);
     const drawn = new Set(drawnIds);
+    const active = new Set(members.filter((m) => m.status === 'active').map((m) => String(m._id)));
     const links = this.avatarLinks
       ? await this.avatarLinks.linksFor([...people].filter(([id]) => drawn.has(id)).map(([, p]) => p.photoKey))
       : new Map<string, string>();
 
     const out = new Map<string, PicturedPerson>();
-    for (const [id, { photoKey, ...person }] of people) {
-      out.set(id, { ...person, photoUrl: drawn.has(id) && photoKey ? links.get(photoKey) ?? null : null });
+    for (const [id, { photoKey, phone, ...person }] of people) {
+      out.set(id, {
+        ...person,
+        photoUrl: drawn.has(id) && photoKey ? links.get(photoKey) ?? null : null,
+        ...(phones ? { phone: drawn.has(id) && active.has(id) ? phone ?? null : null } : {}),
+      });
     }
     return out;
   }
@@ -138,31 +153,34 @@ export class MemberNames {
 
   /**
    * The second hop: the users behind memberships already read, each once, over their primary key — with `photos`,
-   * each one's photo key (`users.avatarUrl`) beside the name, for `pictured` to sign.
+   * each one's photo key (`users.avatarUrl`) beside the name, for `pictured` to sign; with `phones`, their number too.
    */
   private async peopleOf(members: readonly ReadMembership[]): Promise<Map<string, NamedPerson>>;
   private async peopleOf(
-    members: readonly ReadMembership[], photos: true,
-  ): Promise<Map<string, NamedPerson & { photoKey: string | null }>>;
+    members: readonly ReadMembership[], photos: true, phones?: boolean,
+  ): Promise<Map<string, NamedPerson & { photoKey: string | null; phone?: string | null }>>;
   private async peopleOf(
-    members: readonly ReadMembership[], photos = false,
-  ): Promise<Map<string, NamedPerson & { photoKey?: string | null }>> {
+    members: readonly ReadMembership[], photos = false, phones = false,
+  ): Promise<Map<string, NamedPerson & { photoKey?: string | null; phone?: string | null }>> {
     const userIds = [...new Set(members.map((m) => String(m.userId)))];
     if (userIds.length === 0) return new Map();
 
-    const users = await this.users.find({ _id: { $in: userIds } })
-      .select(photos ? 'fullName pronoun avatarUrl' : 'fullName pronoun').lean().exec();
+    const fields = ['fullName', 'pronoun', ...(photos ? ['avatarUrl'] : []), ...(phones ? ['phone'] : [])];
+    const users = await this.users.find({ _id: { $in: userIds } }).select(fields.join(' ')).lean().exec();
     const named = new Map(
-      (users as unknown as { _id: unknown; fullName?: string; pronoun?: NamedPerson['pronoun']; avatarUrl?: string | null }[])
+      (users as unknown as {
+        _id: unknown; fullName?: string; pronoun?: NamedPerson['pronoun']; avatarUrl?: string | null; phone?: string | null;
+      }[])
         // A row older than the field reads as the schema's default, which `lean()` does not apply.
         .map((u) => [String(u._id), {
           name: u.fullName ?? '',
           pronoun: u.pronoun ?? 'they',
           ...(photos ? { photoKey: u.avatarUrl ?? null } : {}),
+          ...(phones ? { phone: u.phone ?? null } : {}),
         }]),
     );
 
-    const out = new Map<string, NamedPerson & { photoKey?: string | null }>();
+    const out = new Map<string, NamedPerson & { photoKey?: string | null; phone?: string | null }>();
     for (const member of members) {
       const person = named.get(String(member.userId));
       if (person?.name) out.set(String(member._id), person);

@@ -464,10 +464,15 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * The Personal Summary (P10-T4). The matrix's grant, whole: without `for` the route is the caller's
    * own, and with it the grant reaches the subject through `CoachResolver.subject` (P11-T4).
+   *
+   * **The Agent's `own-downline`, here and on the raw log and the ratios** (P19.9-T6; ADR-0234): the coaching
+   * person's *Activity* and *Personal Summary* tabs and the session read the coachee through these, and an Agent who
+   * leads somebody coaches them. The Unit Dashboard's `coached` reads this cell, so their rows drill too.
    */
   'personal_summary:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -476,6 +481,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'activity_ratios:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -484,6 +490,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **`activity_log:proxy_create` is deliberately absent from this registry.**
@@ -513,24 +520,31 @@ export const PERMISSIONS = {
    * caller's membership and a Super Admin has none, so the grant yields MissingTenantContextError
    * rather than access. §3.7 argues minimisation harder for a platform reader than for an office
    * one, so it is a row to revisit rather than a route to build.
+   *
+   * **The Agent holds `own` · `own-downline`** since P19.9-T6 (ADR-0234): an Agent who leads somebody coaches them,
+   * and the coaching *Leads* tab and the session's Leads card read and write the coachee's leads. `COACH` reaches
+   * nobody for an Agent who leads nobody, so their reach stays their own.
    */
   'lead:create': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'lead:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'lead:update': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **`own` and nothing else** (§3.7). Not the coach — the coaching leads table has no delete —
@@ -563,7 +577,8 @@ export const PERMISSIONS = {
    *
    * The AB/AAB grant is the **coaching** grant: the Coaching Session mounts a writable replica of
    * the coachee's Goal Settings (Phase 11). A leader saves directly and the goal carries their name
-   * (ADR-0046).
+   * (ADR-0046). An Agent who leads somebody holds it as `own-downline` beside their `own` since P19.9-T6
+   * (ADR-0234): every upline coaches.
    */
   'goal:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -572,6 +587,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /** No Super Admin grant at all, not even the nominal one `goal:read` carries (§3.6). */
   'goal:update': [
@@ -580,6 +596,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'lead:read_aggregate_counts': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -602,6 +619,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
 
   /*
@@ -651,6 +669,13 @@ export const PERMISSIONS = {
    * module). The AAB's cells are the AB's: a leader coaches their whole downline, never sideways and
    * never themselves (ADR-0074).
    *
+   * **The Agent's cells are the AB's too** (P19.9-T6; ADR-0234, OD-287 — *"semua downline seharusnya bisa
+   * dicoaching oleh semua uplinenya"*): every upline coaches, and an Agent with a direct report is an upline
+   * (ADR-0087). `COACH` reaches nobody for an Agent who leads nobody, so their grant opens nothing, as
+   * activation's and the Unit Dashboard's downline grants already did. So do the reads the person's tabs make,
+   * `own` · `own-downline` on each — activity, ratios, Summary, goals, leads, training and chases, above and
+   * below. An Owner or an Admin with no rung still coaches nobody: there is no office cell to write here.
+   *
    * **`own` · `own-downline` is two grants, written as two.** A wider token never silently includes
    * the reader's own records (§3), so an AB who is also a coachee holds both, and the matrix spec
    * compares the whole set of tokens in each cell, not only the widest.
@@ -665,10 +690,12 @@ export const PERMISSIONS = {
   'coaching_session:create': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'coaching_session:edit': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'coaching_session:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -679,10 +706,12 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own' },
     { grantee: AAB, scope: 'own-downline' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'coaching_session:finalize': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /** A correction, inside ADR-0079's window. The Owner and the Admin correct; they never coach. */
   'coaching_session:reopen': [
@@ -691,6 +720,7 @@ export const PERMISSIONS = {
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /** The print of a finalized session (ADR-0077). A read, so a read-only support session may. */
   'coaching_session:export_pdf': [
@@ -701,6 +731,7 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own' },
     { grantee: AAB, scope: 'own-downline' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * The capability ladder and the skill tracker: one profile per coachee, the shared assessment of
@@ -710,10 +741,12 @@ export const PERMISSIONS = {
   'coaching_profile:read': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'coaching_profile:update': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **The surveys** (P19.5-T4; ADR-0216 §3, §8; roles §3.8).
@@ -724,8 +757,9 @@ export const PERMISSIONS = {
    * them as its member does and this is no read by its verb; its writes declare it, and a session is refused each.
    *
    * `survey_answers:read` — a person's qualitative answers on the coaching *Survei* tab, to whoever can open their
-   * coaching page (OD-261's OQ4): the Owner and the Admins `own-kpm`, an upline `own-downline` (`COACH`). No Agent —
-   * *Survei saya* is not built (OD-267) — and no Super Admin. **Every view-as session is refused**, `403
+   * coaching page (OD-261's OQ4): the Owner and the Admins `own-kpm`, an upline `own-downline` (`COACH`) — an Agent
+   * who leads included since P19.9-T6 (ADR-0234). No Agent `own` — *Survei saya* is not built (OD-267) — and no Super
+   * Admin. **Every view-as session is refused**, `403
    * SURVEY_ANSWERS_HIDDEN`, by `CoachingSurveyService` — not by the blocked list below, whose refusal would not say so.
    */
   'survey:respond': [
@@ -740,6 +774,7 @@ export const PERMISSIONS = {
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **A note's owner is its author, not its subject** (ADR-0073): `own` is what the reader wrote,
@@ -753,11 +788,14 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /** Written only by its author, about somebody they coach now: the `COACH` grant. */
   'leader_notes:write': [
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
 
   /*
@@ -772,7 +810,8 @@ export const PERMISSIONS = {
    * **`own-downline` is `COACH`** (§1.3, ADR-0074): on the read, the compare read
    * (`GET /calendar/entries?for=`) and the compare list; on the block, *Block time*'s reach. Written as a
    * second grant beside `own`, as coaching's are: a wider token never silently includes the reader's own.
-   * **An Agent compares and blocks nobody**, as an Agent coaches nobody.
+   * **An Agent compares and blocks nobody** — an Agent who leads included, who coaches since P19.9-T6 (ADR-0234)
+   * but whose calendar cells that decision did not reach.
    *
    * **`calendar_invitee:search` is the people picker** (D-picker, ADR-0094): the office's active field
    * members, in four fields — §2 rule 4's exception (a).
@@ -896,7 +935,8 @@ export const PERMISSIONS = {
    * **The read is the Personal Summary's shape** (`personal_summary:read`): the reader's own at `own`, and with
    * `?for=` another member through `CoachResolver.subject` — the Owner's and the Admin's `own-kpm` the whole office
    * (leavers included), an AB's and an AAB's their COACH reach, as campaigns and the Unit Dashboard read it (the exit
-   * review, 2026-10-10). An Agent's `own` reaches nobody else. The Super Admin's `all` reads nothing on its own: outside a support session there
+   * review, 2026-10-10). An Agent's `own-downline` (P19.9-T6, ADR-0234) reaches their COACH, nobody for one who leads
+   * nobody. The Super Admin's `all` reads nothing on its own: outside a support session there
    * is no office, and inside one the member's own grant answers. A read, so a read-only session holds it — and
    * opening an item (`POST …/open`) is under it, answered in a support session and recorded only under `update`.
    *
@@ -913,6 +953,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   'training_progress:update': [
     { grantee: AB, scope: 'own' },
@@ -1580,7 +1621,8 @@ export const PERMISSIONS = {
   /*
    * **Whose chases and standings a reader sees** (P18.2-T9, `GET /campaigns/chasing?for=`; the 18.3 port): the
    * reader's own always, and as far as coaching reaches — an AB their downline, an AAB their unit read as the subtree
-   * (roles §2 rule 2, ADR-0074), resolved through `CoachResolver`; the Owner and the Admin the office. 404 beyond it.
+   * (roles §2 rule 2, ADR-0074), resolved through `CoachResolver`; an Agent who leads their downline since P19.9-T6
+   * (ADR-0234), the coaching *Summary* tab's card; the Owner and the Admin the office. 404 beyond it.
    * The Unit Dashboard serves chases inside this reach and no further (`unit-dashboard.service.ts`).
    */
   'campaign_qualification:read': [
@@ -1590,6 +1632,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **The settings reads of the office's campaigns** (the phase file's *Found while preparing* 15, closed by P18.2-T7):

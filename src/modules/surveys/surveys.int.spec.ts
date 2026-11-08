@@ -174,14 +174,15 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
   });
 
   describe('survey_answers:read — the coaching Survei tab', () => {
-    it.each([['the Owner', OWNER], ['an Admin', ADMIN], ['an AB', AB], ['an AAB', AAB]])(
-      'P19.5-T4 AC-16 %s passes the guard (the service checks the line and the run)', async (_who, ctx) => {
+    // An Agent too since P19.9-T6 (ADR-0234): an Agent who leads opens their coachee's page, and `COACH` decides the rest.
+    it.each([['the Owner', OWNER], ['an Admin', ADMIN], ['an AB', AB], ['an AAB', AAB], ['an Agent', AGENT]])(
+      'P19.5-T4 AC-16, P19.9-T6 AC-2 %s passes the guard (the service checks the line and the run)', async (_who, ctx) => {
         session.current = ctx;
         await http().get(`/coaching/${PERSON}/survey`).expect(200);
       },
     );
 
-    it.each([['an agent', AGENT], ['a Super Admin', SUPER_ADMIN]])('P19.5-T4 AC-16 %s is refused 403 before any read', async (_who, ctx) => {
+    it.each([['a Super Admin', SUPER_ADMIN]])('P19.5-T4 AC-16 %s is refused 403 before any read', async (_who, ctx) => {
       session.current = ctx;
       await http().get(`/coaching/${PERSON}/survey`).expect(403);
       expect(coaching.read).not.toHaveBeenCalled();

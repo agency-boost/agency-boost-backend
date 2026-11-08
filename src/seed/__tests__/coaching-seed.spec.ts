@@ -22,7 +22,7 @@ import {
   COACHING_CAST, pacingFloor, type CoacheeKey, type RosterStatus,
 } from '../coaching-cast';
 import { ROSTER_PLAN, seedObjectId, type CoachingFixture, type LastOneToOne } from '../coaching-fixture';
-import { seedDemo, type SeedResult } from '../demo';
+import { AGENT_LEADER_0555, seedDemo, type SeedResult } from '../demo';
 import { backfillCoachingSnapshots } from '../coaching-snapshots';
 import { LEADER_LIMIT_PEOPLE, SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
 import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
@@ -167,6 +167,8 @@ const MEN = [
   'rudi@agencyboost.test',
   // P18.8-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
   'lukman@kpm0417.test',
+  // P19.9-T6: Fajar, the agent Lina recruited in 0555 — the demo's Agent who leads somebody (`demo.ts`).
+  AGENT_LEADER_0555.email,
   ...subscriptionPeople('he'),
   ...templatePeople('he'),
 ];

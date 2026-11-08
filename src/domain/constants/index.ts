@@ -199,6 +199,14 @@ export const ACTIVATION = {
    */
   VISIBLE_MONTHS: 6,
   /**
+   * **An activation is the first year's** (OD-289, ADR-0233; the owner's request of 6 November 2026, R5): from the
+   * join date plus this many calendar months, in the office's timezone, a person's activation opens **empty** — on
+   * their leader's `/new-hires/{id}`, on their own `/activation` and on both coaching tabs — and nothing on it changes.
+   * Longer than `VISIBLE_MONTHS`, so every write is refused well before it (`ACTIVATION_CLOSED`). A month-end join
+   * ends as `VISIBLE_MONTHS` does: 29 February 2028 is over on 28 February 2029.
+   */
+  FIRST_YEAR_MONTHS: 12,
+  /**
    * **How far back a leader may correct a start date** (OD-118): the office's today at the latest, and
    * at most this many days before it. A date further back would start an activation that ended long ago.
    */

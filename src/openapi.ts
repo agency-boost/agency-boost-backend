@@ -87,7 +87,9 @@ function describeFailuresAndPermissions(
       const shape = key ? RESPONSE_SHAPES[key] : undefined;
       const success = Object.keys(responses).find((c) => c.startsWith('2') && c !== '204');
       if (shape && success) {
-        const ref = shape.type ? { $ref: getSchemaPath(shape.type) } : null;
+        const one = shape.type ? { $ref: getSchemaPath(shape.type) } : null;
+        // A second shape the operation may answer instead (`ResponseShape.or`): documented as one of the two.
+        const ref = one && shape.or ? { oneOf: [one, { $ref: getSchemaPath(shape.or) }] } : one;
         const existing = responses[success] as { description?: string } | undefined;
         responses[success] = {
           description: existing?.description ?? '',

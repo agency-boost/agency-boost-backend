@@ -123,7 +123,7 @@ describe('the coaching session’s races (P11-T5)', () => {
    * **A 1:1 logged after it was held refuses in both languages** (P18.8-T4 AC-3; P18.10-T5 AC-2). The checklist's
    * route checks the date and the note before it asks, so these are the service's own backstop, read here directly.
    */
-  it('P18.10-T5 AC-2 a 1:1 logged for a day to come, with a blank note, or by an Agent is refused in both languages', async () => {
+  it('P18.10-T5 AC-2 a 1:1 logged for a day to come, with a blank note, or by a reader who holds no session grant is refused in both languages', async () => {
     const svc = service({});
     const refusal = async (run: Promise<unknown>): Promise<DomainException> => {
       try {
@@ -148,15 +148,16 @@ describe('the coaching session’s races (P11-T5)', () => {
       'Catatan harus 1 sampai 500 karakter, tanpa spasi di awal dan akhir.',
     ]);
 
-    const agent = new RequestContext('u-tari', 'none', {
-      membershipId: 'tari', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: 'agent', status: 'active',
+    // Was an Agent who leads: they hold both session grants since P19.9-T6 (ADR-0234). A rung of no class holds neither.
+    const noGrant = new RequestContext('u-tari', 'none', {
+      membershipId: 'tari', kpmId: 'kpm-a', orgLevelCode: 'NO_RUNG', hierarchyRole: 'none', status: 'active',
       isKpmOwner: false, isKpmAdmin: false, directCount: 1,
     } as never);
-    const refused = await refusal(svc.logOneOnOne(agent, INDAH, { date: '2026-09-10', note: 'Talked it through.' }));
+    const refused = await refusal(svc.logOneOnOne(noGrant, INDAH, { date: '2026-09-10', note: 'Talked it through.' }));
     expect([refused.code, refused.details, english(refused.sentence), indonesian(refused.sentence)]).toEqual([
       'PERM_DENIED', { permission: 'coaching_session:create' },
-      'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
-      '1:1 dicatat oleh leader yang menjalankan sesi coaching: AB atau AAB.',
+      'A 1:1 is logged by a leader who runs coaching sessions for this person.',
+      '1:1 dicatat oleh leader yang menjalankan sesi coaching untuk orang ini.',
     ]);
   });
 });

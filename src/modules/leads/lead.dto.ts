@@ -9,6 +9,13 @@ import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 
 /**
+ * **Whose leads a list holds** (P19.9-T1 AC-3; ADR-0232): `own` the reader's alone — what `/leads` opens on — and `team`
+ * everybody else their grant reaches, *Leads milik: Tim* (OD-286: the downline without the reader's own).
+ */
+export const LEAD_SCOPES = ['own', 'team'] as const;
+export type LeadScope = (typeof LEAD_SCOPES)[number];
+
+/**
  * **`@Allow()`, and the whole body is read by `checkLead` instead.**
  *
  * The global pipe runs with `whitelist` and `forbidNonWhitelisted`, so a property with no
@@ -201,6 +208,23 @@ export class ListLeadsQueryDto {
   @IsString()
   @MaxLength(64)
   owner?: string;
+
+  /**
+   * ***Leads milik: Saya · Tim*** (P19.9-T1 AC-2, AC-3; ADR-0232; OD-286 by its default): `/leads` opens on the reader's
+   * own leads and offers the team's in its filter. It narrows what the grant reaches, and never widens it.
+   */
+  @ApiPropertyOptional({
+    enum: LEAD_SCOPES,
+    description:
+      '`own`: your own leads alone — **and what an omitted `scope` means** (since 2026-11-08; it was everything your '
+      + 'grant reaches). `team`: the leads of everybody your grant reaches **but you** — an AB’s downline, an AAB’s unit, '
+      + 'an Agent’s downline when they lead somebody; nobody else’s, so an Agent who leads nobody gets an empty page. '
+      + 'Beside `owner`, an omitted `scope` narrows nothing; a given one narrows that member’s list, so `owner` naming '
+      + 'somebody else under `own`, or you under `team`, is an empty page. It never widens your grant.',
+  })
+  @IsOptional()
+  @IsIn(LEAD_SCOPES as unknown as string[])
+  scope?: LeadScope;
 
   @ApiPropertyOptional({ enum: [...LEAD_TYPES, 'unassigned'] })
   @IsOptional()

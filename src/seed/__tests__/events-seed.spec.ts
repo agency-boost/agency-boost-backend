@@ -4,7 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import type { GuestEvent } from '@/modules/events/event-guest.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import { seedDemo, type SeedResult } from '../demo';
+import { AGENT_LEADER_0555, seedDemo, type SeedResult } from '../demo';
 import {
   CONFIGURED_EVENTS, EVENT_ANSWERS, EVENTS_FIXTURE_TITLES as TITLE, TOWN_HALL_ANSWERS,
 } from '../events-fixture';
@@ -169,10 +169,14 @@ describe('Phase 18.2 the events seed — a run at 10:00 on 10 October 2026 in Ja
   });
 
   it('P18.2-T5 AC-11 0555’s agent sees only 0555’s events — not its leaders’ huddle — and nobody there has answered', async () => {
-    const lina = await as('0555', 'agent@kpm0555.test');
-    const events = (await wired.eventGuests.list(lina)).events;
+    // Fajar leads nobody. Lina recruited him (P19.9-T6), so she leads somebody now, and the huddle is hers too.
+    const fajar = await as('0555', AGENT_LEADER_0555.email);
+    const events = (await wired.eventGuests.list(fajar)).events;
     expect(events.map((e) => e.code).sort()).toEqual(['KICKOFF', 'PRULINK_BRIEFING']);
     expect(events.every((e) => e.me.rsvp === null && e.me.feedback === null)).toBe(true);
+
+    const lina = await as('0555', 'agent@kpm0555.test');
+    expect((await wired.eventGuests.list(lina)).events.map((e) => e.code)).toContain('LEADERS_HUDDLE');
   });
 
   it('P18.2-T5 AC-11 a second run writes nothing', async () => {

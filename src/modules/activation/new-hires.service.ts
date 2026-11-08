@@ -4,11 +4,12 @@ import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
-import { addDays, isLocalDate } from '@/common/time/local-day';
+import { addDays, isLocalDate, type LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { ACTIVATION, ACTIVATION_3M } from '@/domain/constants';
 import {
-  activation3MByJoinMonth, activation3MDay, activation3MFirstSaleDay, activation3MShare, newHireStatusOf, newHiresWindow,
+  activation3MByJoinMonth, activation3MDay, activation3MFirstSaleDay, activation3MShare, inSpan, newHireStatusOf,
+  newHiresReach, newHiresYear, type NewHireYear,
 } from '@/domain/metrics/activation-3m';
 import type { FirstSaleSource } from '@/domain/metrics/first-sale';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -16,19 +17,22 @@ import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { can } from '@/modules/rbac/permissions';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
 import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service';
 import { User, type UserDocument } from '@/modules/users/user.schema';
 import type { ActivationProgressDocument } from './activation-progress.schema';
 import { ActivationProgressRepository } from './activation-progress.repository';
 import { ActivationProgressService, activationClosed } from './activation-progress.service';
+import { newHiresIn } from './new-hire-years';
 import type {
-  ActivationClosingsView, ActivationNoteSavedView, ActivationView, FirstSaleSourceView, NewHireDetailView, NewHireLeaderView,
+  ActivationClosingsView, ActivationEmptyReason, ActivationEmptyView, ActivationNoteSavedView, ActivationView,
+  FirstSaleSourceView, NewHireDetailView, NewHireLeaderView,
   NewHireRowView, NewHiresRosterView, NewHireStandingView, NewHireUnitRefView, Activation3MFiguresView,
 } from './activation-progress.view';
 import { Activation3MService } from './activation-3m.service';
 import { ActivationItemRecords, type ItemRecordInput } from './activation-records.service';
-import { activationEndsOn, activationState } from './activation-rules';
+import { activationEndsOn, activationState, firstYearOf } from './activation-rules';
 import { ACTIVATION_REFUSALS } from './activation.messages';
 
 const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
@@ -67,43 +71,51 @@ export class NewHiresService {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
 
+  /** What `newHiresIn` reads with: the same `COACH` and the same memberships as every route here. */
+  private get readers() {
+    return { coach: this.coach, memberships: this.memberships };
+  }
+
   /**
-   * **`GET /new-hires`** (ADR-0173; P18.8-T6 AC-2, AC-3; UI V1, UI-023): **every new hire the reader coaches whose
-   * join date is in the last twelve months** (`newHiresWindow`, the office's calendar) — `joinedAs = new_hire`, at any
-   * depth, never an existing agent — in three sections by their **status** (D-24): *In progress* (no first sale, days 1
-   * to 90), *Teraktivasi* (a first sale — by day 90, or after it in amber) and *not activated* (no first sale, past day
-   * 90). Each row: the join date, today's day, the first sale with its day and source, the status, the 3M result, and
-   * their checklist where they have one — an AB or an AAB placed as a new hire has none (ADR-0103), and is listed with
-   * `checklist: null`. A hire marked left is listed as anybody else, by their sale and join date (no *Keluar*, UI-025).
+   * **Home's *New hires* tile** (OD-288, ADR-0233; P19.9-T3 AC-6, amending ADR-0228 §4): how many new hires `/new-hires`
+   * opens on — this calendar year's, in the reader's reach, the ones who left included — so the tile and the page agree.
+   * 0 for a reader the page is not theirs to open (`new_hires:read_roster`), as the nav would not offer it. Records no
+   * read: a count discloses nobody.
+   */
+  async countThisYear(ctx: RequestContext): Promise<number> {
+    if (!ctx.membershipId || !can(ctx, 'new_hires:read_roster')) return 0;
+    const office = await this.days.office(ctx);
+    return (await newHiresIn(this.readers, ctx, ctx.membershipId, newHiresYear(office.today, 'current'))).listed.length;
+  }
+
+  /**
+   * **`GET /new-hires`** (ADR-0173; P18.8-T6 AC-2, AC-3; UI V1, UI-023; **the year since ADR-0233**, P19.9-T3 AC-1,
+   * AC-2): **every new hire the reader coaches whose join date is in the year asked for** — `current`, 1 January of the
+   * office's year to its today, the default; or `previous`, all of last year (`newHiresYear`) — `joinedAs = new_hire`,
+   * at any depth, never an existing agent, and the ones who left (`newHiresIn`), in three sections by their **status**
+   * (D-24): *In progress* (no first sale, days 1 to 90), *Teraktivasi* (a first sale — by day 90, or after it in amber)
+   * and *not activated* (no first sale, past day 90). Each row: the join date, today's day, the first sale with its day
+   * and source, the status, the 3M result, and their checklist where they have one — an AB or an AAB placed as a new
+   * hire has none (ADR-0103), and is listed with `checklist: null`. A hire marked left is listed as anybody else, by
+   * their sale and join date (no *Keluar*, UI-025).
    *
    * **The 3M activation %** (`ACTIVATION_3M_PCT`) of everybody listed, and of each unit — *Direct Unit*, then each
    * AAB's (or AB's) below the reader, D-group's grouping kept — each overall and by join month, so the page's month
    * filter reads the server's figure and computes none. A decided result nothing has kept yet is kept here
-   * (`Activation3MService.settle`), never in a read-only session. A reader who coaches no such new hire is 404: the nav
-   * would not offer them the page.
+   * (`Activation3MService.settle`), never in a read-only session.
+   *
+   * **404 only when neither year has anybody** (AC-2): the nav would not offer the page, and the screen shows its sample.
+   * A year with nobody while the other has somebody is a 200 with empty sections, so the page can say so in its list.
    *
    * One §3.5 entry per new hire shown, written concurrently (N7) — each fails open on its own, in the seam.
    */
-  async roster(ctx: RequestContext): Promise<NewHiresRosterView> {
+  async roster(ctx: RequestContext, year: NewHireYear = 'current'): Promise<NewHiresRosterView> {
     const me = ctx.membershipId!;
     const office = await this.days.office(ctx);
-    const window = newHiresWindow(office.today);
-    const inWindow = { joinedAs: 'new_hire', joinDate: { $gte: window.from, $lte: window.to } } as const;
-    const [coachees, gone] = await Promise.all([
-      this.coach.coacheesOf(ctx, me),
-      /*
-       * **And the ones who left** (ADR-0173 §2, *"Not activated, including Left"*; ADR-0169 §4 as amended 2026-10-27):
-       * *Mark left* removes a new hire from the office, so `COACH` reaches them no more — they are read here, below the
-       * reader on the edges they were removed with, for the rest of their year.
-       */
-      this.memberships.find(ctx, { ...inWindow, ancestorIds: me, status: 'removed', leftAt: { $ne: null } }),
-    ]);
-    const listed = [
-      ...coachees.filter(({ membership: m }) =>
-        m.joinedAs === 'new_hire' && m.joinDate !== null && m.joinDate >= window.from && m.joinDate <= window.to),
-      ...gone.map((m) => ({ membershipId: String(m._id), membership: m })),
-    ];
-    if (listed.length === 0) throw new NotFoundException('New hires');
+    const window = newHiresYear(office.today, year);
+    const { coachees, listed: either } = await newHiresIn(this.readers, ctx, me, newHiresReach(office.today));
+    if (either.length === 0) throw new NotFoundException('New hires');
+    const listed = either.filter(({ membership: m }) => inSpan(m.joinDate, window));
 
     const ids = listed.map((c) => c.membershipId);
     const [results, activations] = await Promise.all([
@@ -176,6 +188,7 @@ export class NewHiresService {
     )));
     return {
       today: office.today,
+      year,
       window,
       days: ACTIVATION_3M.DAYS,
       activation3M: figuresOf(rows),
@@ -200,13 +213,38 @@ export class NewHiresService {
    * **`GET /new-hires/:membershipId`**: one hire's activation as a leader reads it, in any state — the
    * detail page, and the coaching *Activation* tab. The hire's own note and date on each item are not in
    * it. One §3.5 entry per read.
+   *
+   * **Served empty** (OD-289, ADR-0233; P19.9-T3 AC-5) — the person, their join date and their leader, and nothing of a
+   * checklist (`ActivationEmptyView`) — once their first year is over (`activationFirstYearEndsOn`), whatever is stored;
+   * and for a new hire with no activation at all, whom New Hires lists all the same (an AB or an AAB placed as one, an
+   * office with nothing published), where the page said *not found*. An empty answer reads no activation and records
+   * none. Reach is unchanged: somebody the reader does not coach, or who is neither a new hire nor has an activation, is
+   * 404.
    */
-  async detail(ctx: RequestContext, membershipId: string): Promise<NewHireDetailView> {
-    const doc = await this.reach(ctx, membershipId);
+  async detail(ctx: RequestContext, membershipId: string): Promise<NewHireDetailView | ActivationEmptyView> {
+    const hire = await this.coach.coachee(ctx, ctx.membershipId!, membershipId);
+    const doc = hire ? await this.activations.latestOf(ctx, membershipId) : null;
+    if (!hire || (!doc && hire.joinedAs !== 'new_hire')) throw new NotFoundException('Activation');
     const office = await this.days.office(ctx);
+    // The one count `GET /activation/me` makes too (the Phase 19.9 exit review, L3).
+    const year = firstYearOf(office.timezone, office.today, hire.joinDate, doc?.startDate);
+    if (year.over) return this.emptyOf(ctx, hire, 'first_year_over', year.joinDate, year.endsOn, office);
+    if (!doc) return this.emptyOf(ctx, hire, 'no_activation', year.joinDate, year.endsOn, office);
     const view = await this.withStanding(ctx, await this.activations.viewOne(ctx, doc, office, 'leader'), office);
     await this.subjectReads.record(ctx, { membershipId }, 'activation', { from: doc.startDate, to: office.today });
     return view;
+  }
+
+  /** The empty answer (P19.9-T3 AC-5): who, the two dates its one line says, and their leader for the header. */
+  private async emptyOf(
+    ctx: RequestContext, hire: MembershipDocument, empty: ActivationEmptyReason, joinDate: LocalDate | null,
+    firstYearEndsOn: LocalDate | null, office: OfficeDay,
+  ): Promise<ActivationEmptyView> {
+    const membershipId = String(hire._id);
+    const [names, leader] = await Promise.all([this.names.byMembershipId(ctx, [membershipId]), this.leaderOf(ctx, hire)]);
+    return {
+      empty, hire: { membershipId, name: names.get(membershipId) ?? '' }, today: office.today, joinDate, firstYearEndsOn, leader,
+    };
   }
 
   /**

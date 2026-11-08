@@ -1,8 +1,8 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { addDays } from '@/common/time/local-day';
 import {
-  activationDay, activationEndsOn, activationState, activityWeeksCompletedOn, firstCaseClosed, isOverdue,
-  nthOneOnOne, officeMondayOf, progressOf,
+  activationDay, activationEndsOn, activationFirstYearEndsOn, activationState, activityWeeksCompletedOn, firstCaseClosed,
+  firstYearOf, firstYearOver, isOverdue, nthOneOnOne, officeMondayOf, progressOf,
 } from './activation-rules';
 
 const J = 'Asia/Jakarta';
@@ -51,6 +51,45 @@ describe('the activation’s arithmetic (Phase 13)', () => {
       expect(activationState(null, '2027-03-01', '2027-02-06')).toBe('expired');
       expect(activationState(new Date(), '2027-03-01', '2027-02-06')).toBe('graduated');
       expect(activationState(new Date(), '2026-09-01', '2027-02-06')).toBe('graduated');
+    });
+  });
+
+  describe('the first year (OD-289, P19.9-T3 AC-5)', () => {
+    it('P19.9-T3 AC-5 ends twelve calendar months after the join date, in the office’s zone', () => {
+      expect(activationFirstYearEndsOn(J, '2025-11-08')).toBe('2026-11-08');
+      expect(activationFirstYearEndsOn(J, '2026-01-01')).toBe('2027-01-01');
+      expect(activationFirstYearEndsOn('America/New_York', '2026-03-08')).toBe('2027-03-08');
+    });
+
+    it('P19.9-T3 AC-5 a month-end join ends on the last day of the shorter month: 29 February 2028 → 28 February 2029', () => {
+      expect(activationFirstYearEndsOn(J, '2028-02-29')).toBe('2029-02-28');
+    });
+
+    it('P19.9-T3 AC-5 is over on the day it ends and every day after; the day before is still the first year', () => {
+      const ends = activationFirstYearEndsOn(J, '2025-11-08');
+      expect([firstYearOver('2026-11-07', ends), firstYearOver('2026-11-08', ends), firstYearOver('2027-01-01', ends)])
+        .toEqual([false, true, true]);
+    });
+
+    it('P19.9-T3 AC-5 (exit review L3) firstYearOf counts from the join date, the activation’s start only without one', () => {
+      // The two differ: the join date decides.
+      expect(firstYearOf(J, '2026-09-14', '2025-09-14', '2025-10-01'))
+        .toEqual({ joinDate: '2025-09-14', endsOn: '2026-09-14', over: true });
+      expect(firstYearOf(J, '2026-09-14', '2025-10-01', '2025-09-14'))
+        .toEqual({ joinDate: '2025-10-01', endsOn: '2026-10-01', over: false });
+      // No join date on the membership: the activation's start.
+      for (const none of [null, undefined, '']) {
+        expect(firstYearOf(J, '2026-09-14', none, '2025-09-14')).toEqual({ joinDate: '2025-09-14', endsOn: '2026-09-14', over: true });
+      }
+      // Neither: nothing to count from, never over.
+      expect(firstYearOf(J, '2026-09-14', null, null)).toEqual({ joinDate: null, endsOn: null, over: false });
+    });
+
+    it('P19.9-T3 AC-5 is always past the activation’s own end, so nothing on it is open by then', () => {
+      for (const join of ['2025-01-31', '2025-08-31', '2026-02-28', '2028-02-29']) {
+        const ends = activationFirstYearEndsOn(J, join);
+        expect([join, activationState(null, ends, activationEndsOn(J, join))]).toEqual([join, 'expired']);
+      }
     });
   });
 

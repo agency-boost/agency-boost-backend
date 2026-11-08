@@ -91,6 +91,13 @@ class HomeSplitDto implements SplitFigure {
   @ApiProperty({ type: HomeCountOfDto, description: 'Every AAB unit below them.' }) aab!: HomeCountOfDto;
 }
 
+/** A person's rung on *Laporan aktivitas tim*'s *Group* tab (P19.9-T2 AC-2; ADR-0235). */
+class HomeRungDto {
+  @ApiProperty({ example: 'AAB', description: 'The rung’s code on the company’s ladder.' }) code!: string;
+  @ApiProperty({ example: 'AAB', description: 'The company’s own label for it; the code where the ladder has none.' })
+  label!: string;
+}
+
 class HomeTeamPersonDto implements HomeTeamPerson {
   @ApiProperty() membershipId!: string;
   @ApiProperty({ example: 'Lukman Hakim' }) name!: string;
@@ -98,6 +105,11 @@ class HomeTeamPersonDto implements HomeTeamPerson {
   @ApiProperty({ type: String, nullable: true, description: 'A signed link to their photo, never the stored key.' })
   photoUrl!: string | null;
   @ApiProperty({ description: 'In the reader’s Unit; everybody is in the Group.' }) inUnit!: boolean;
+  @ApiProperty({
+    type: HomeRungDto,
+    description: 'Their rung, which the *Group* tab names in the company’s short words — *AB*, *AAB*, *Agent* (ADR-0235).',
+  })
+  rung!: HomeRungDto;
   @ApiProperty({ type: Number, nullable: true, description: 'Yesterday’s saved total; `null` for no saved day.' })
   yesterday!: number | null;
   @ApiProperty({ type: Number, nullable: true }) today!: number | null;
@@ -139,8 +151,8 @@ export class HomeDto implements HomeView {
   @ApiProperty({
     minimum: 0,
     example: 7,
-    description: '*Leads* (`OWN_OPEN_LEADS`): your own open leads, Sales and Recruit — `OPEN_SALES_LEADS` and '
-      + '`RECRUITMENT_PIPELINE_NOW` over you alone. Every reader’s.',
+    description: '*Leads* (`OWN_OPEN_LEADS`): every open lead you own, any type and any stage — what `/leads` opens on '
+      + '(`GET /leads?scope=own&outcome=open`’s `total`). Every reader’s.',
   })
   leads!: number;
   @ApiProperty({

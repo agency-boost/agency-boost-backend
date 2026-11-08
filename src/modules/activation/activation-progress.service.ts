@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { newHiresWindow } from '@/domain/metrics/activation-3m';
+import { newHiresReach } from '@/domain/metrics/activation-3m';
 import { DomainException, NotFoundException, VersionConflictException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { isLocalDate, type LocalDate } from '@/common/time/local-day';
@@ -31,12 +31,13 @@ import type {
 } from './activation-progress.schema';
 import { ActivationProgressRepository } from './activation-progress.repository';
 import type {
-  ActivationItemProgressView, ActivationPersonView, ActivationView,
+  ActivationEmptyView, ActivationItemProgressView, ActivationPersonView, ActivationView,
 } from './activation-progress.view';
 import {
-  activationDay, activationEndsOn, activationState, firstCaseClosed, freshItemState, isOverdue, progressOf,
-  type ActivationState, type Progress,
+  activationDay, activationEndsOn, activationState, firstCaseClosed, firstYearOf,
+  freshItemState, isOverdue, progressOf, type ActivationState, type Progress,
 } from './activation-rules';
+import { newHiresIn } from './new-hire-years';
 
 /** Whose read it is: the hire's own carries their note and date on each item; a leader's never does. */
 export type ActivationAudience = 'hire' | 'leader';
@@ -385,10 +386,27 @@ export class ActivationProgressService {
 
   // ------------------------------------------------------------------ the hire's own
 
-  /** `GET /activation/me`: the reader's own activation, in any state, with their note and date. */
-  async mine(ctx: RequestContext): Promise<ActivationView> {
+  /**
+   * `GET /activation/me`: the reader's own activation, in any state, with their note and date — **and empty once their
+   * first year is over** (OD-289, ADR-0233; P19.9-T3 AC-5): from the join date plus `ACTIVATION.FIRST_YEAR_MONTHS`,
+   * their own page and their coaching's *Activation* tab say the activation covers the first year only, and nothing of
+   * the checklist is served. Every write was refused long before (`ACTIVATION_CLOSED`). The year is `firstYearOf`'s —
+   * the membership's join date, the activation's start only without one — the count a leader's
+   * `GET /new-hires/:membershipId` makes, so the two never disagree about the same person (the Phase 19.9 exit review, L3).
+   */
+  async mine(ctx: RequestContext): Promise<ActivationView | ActivationEmptyView> {
     const doc = await this.requireOwn(ctx);
-    return this.viewOne(ctx, doc, await this.days.office(ctx), 'hire');
+    const office = await this.days.office(ctx);
+    const member = await this.memberships.findById(ctx, doc.membershipId);
+    const year = firstYearOf(office.timezone, office.today, member?.joinDate, doc.startDate);
+    if (year.over) {
+      const names = await this.names.byMembershipId(ctx, [doc.membershipId]);
+      return {
+        empty: 'first_year_over', hire: { membershipId: doc.membershipId, name: names.get(doc.membershipId) ?? '' },
+        today: office.today, joinDate: year.joinDate, firstYearEndsOn: year.endsOn, leader: null,
+      };
+    }
+    return this.viewOne(ctx, doc, office, 'hire');
   }
 
   /*
@@ -594,19 +612,16 @@ export class ActivationProgressService {
   }
 
   /**
-   * Whether the reader coaches a **new hire who joined in the last twelve months** (OD-122; P18.8-T6, ADR-0173 §1) —
-   * what `GET /new-hires` answers since it lists the year's new hires by their 3M result, not the open activations.
+   * Whether the reader coaches a **new hire who joined this calendar year or last** (OD-122; P18.8-T6, ADR-0173 §1;
+   * since ADR-0233, P19.9-T3 AC-3) — exactly when `GET /new-hires` answers anything rather than 404: the same reads
+   * (`newHiresIn`), the ones who left included, over both years (`newHiresReach`).
    */
   private async reachesANewHire(ctx: RequestContext, office: Office): Promise<boolean> {
     if (!can(ctx, 'new_hires:read_roster') || ctx.membership!.directCount === 0) return false;
-    const window = newHiresWindow(office.today);
-    const coaches = (await this.coach.coacheesOf(ctx, ctx.membershipId!)).some(({ membership: m }) =>
-      m.joinedAs === 'new_hire' && m.joinDate !== null && m.joinDate >= window.from && m.joinDate <= window.to);
-    // And one who left — removed by *Mark left*, listed for the rest of their year (ADR-0173 §2).
-    return coaches || (await this.memberships.count(ctx, {
-      ancestorIds: ctx.membershipId, status: 'removed', leftAt: { $ne: null }, joinedAs: 'new_hire',
-      joinDate: { $gte: window.from, $lte: window.to },
-    })) > 0;
+    const { listed } = await newHiresIn(
+      { coach: this.coach, memberships: this.memberships }, ctx, ctx.membershipId!, newHiresReach(office.today),
+    );
+    return listed.length > 0;
   }
 }
 

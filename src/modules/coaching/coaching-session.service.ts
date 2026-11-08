@@ -536,8 +536,8 @@ export class CoachingSessionService {
   /**
    * **A 1:1 logged after it was held** (P18.8-T4 AC-3; ADR-0171 §3): the checklist's *Log 1:1*, a date and a note, by
    * a leader who coaches the coachee now (`COACH`, else 404) and holds the grants a session needs —
-   * `coaching_session:create` and `:finalize`, an AB's or an AAB's (an Agent who leads holds neither, and is
-   * refused `403 FORBIDDEN`).
+   * `coaching_session:create` and `:finalize` — an AB's, an AAB's, and since P19.9-T6 an Agent's who leads (ADR-0234);
+   * a reader who holds neither is refused `403 PERM_DENIED`.
    *
    * **The session model, kept whole**: one record, its coach the caller, **finalized as it is written** — a 1:1 that
    * happened has nothing left to draft — so it counts in every coaching metric from its `date`, as any finalized one

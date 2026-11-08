@@ -302,6 +302,109 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       }
       expect(await h.col('activationProgress').findOne({ membershipId: id('B_AGENT') })).toMatchObject({ startDate: '2026-08-01', note: null, version: 1 });
     });
+
+    /*
+     * **The first year only** (P19.9-T3 AC-4, AC-5; OD-289, ADR-0233): every reader opens a new hire on this detail; from
+     * the join date plus twelve calendar months it is served empty — the person, their join date and leader, and nothing
+     * of the checklist — and so is a new hire New Hires lists who has no activation at all.
+     */
+    describe('P19.9-T3 AC-5 served empty past the first year', () => {
+      const SARI_AS_LEADER = () => ({ membershipId: id('SARI'), name: 'Sari Puspita', role: 'aab' });
+
+      it('P19.9-T3 AC-5 Rina, joined twelve months ago to the day, is empty: the person, her dates and leader, nothing of her checklist, no read recorded', async () => {
+        await h.start('RINA', '2025-09-14');
+        h.as('SARI');
+        const view = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        expect(view).toEqual({
+          empty: 'first_year_over', hire: { membershipId: id('RINA'), name: 'Rina Wijaya' }, today: TODAY,
+          joinDate: '2025-09-14', firstYearEndsOn: '2026-09-14', leader: SARI_AS_LEADER(),
+        });
+        expect(await reads()).toEqual([]);
+        // A coach two levels up reads the same, with her leader named as hers.
+        h.as('AGUS');
+        expect((await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body).toMatchObject({
+          empty: 'first_year_over', leader: SARI_AS_LEADER(),
+        });
+      });
+
+      it.each([
+        ['joined a year ago, her activation started later', '2025-09-14', '2025-10-01', true],
+        ['joined within the year, her activation started a year ago', '2025-10-01', '2025-09-14', false],
+      ])('P19.9-T3 AC-5 (exit review L3) %s: the leader’s detail and her own page count the year from the join date alike', async (_case, joinDate, startDate, over) => {
+        await h.start('RINA', startDate);
+        await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('RINA')) }, { $set: { joinDate } });
+        h.as('SARI');
+        const leaders = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        h.as('RINA');
+        const hers = (await h.http().get('/activation/me').expect(200)).body;
+
+        const year = (v: Record<string, unknown>) => (v.empty ? [v.empty, v.joinDate, v.firstYearEndsOn] : 'whole activation');
+        expect(year(leaders)).toEqual(over ? ['first_year_over', joinDate, '2026-09-14'] : 'whole activation');
+        expect(year(hers)).toEqual(year(leaders));
+      });
+
+      it('P19.9-T3 AC-5 the day before, still her first year: the whole activation, as before', async () => {
+        await h.start('RINA', '2025-09-15');
+        h.as('SARI');
+        const view = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        expect(view).not.toHaveProperty('empty');
+        expect(view).toMatchObject({ state: 'expired', startDate: '2025-09-15', newHire: { joinDate: '2025-09-15' } });
+        expect(view.aspects.length).toBeGreaterThan(0);
+      });
+
+      it('P19.9-T3 AC-5 every write on an activation past its first year is refused, ACTIVATION_CLOSED, and nothing changes', async () => {
+        await h.start('RINA', '2025-09-01');
+        const before = await h.col('activationProgress').findOne({ membershipId: id('RINA') });
+        h.as('SARI');
+        for (const res of [
+          await h.http().put(`/new-hires/${id('RINA')}/items/CRM_SETUP`).send({ done: true }),
+          await h.http().put(`/new-hires/${id('RINA')}/start-date`).send({ startDate: '2025-09-20' }),
+          await h.http().put(`/new-hires/${id('RINA')}/note`).send({ text: 'Too late.' }),
+        ]) {
+          expect([res.status, res.body.error.code]).toEqual([409, 'ACTIVATION_CLOSED']);
+        }
+        expect(await h.col('activationProgress').findOne({ membershipId: id('RINA') })).toEqual(before);
+      });
+
+      it('P19.9-T3 AC-5 a new hire New Hires lists with no activation at all opens empty too, not a 404', async () => {
+        // Nina, placed as a new hire at the AAB rung: listed, with no checklist (ADR-0103).
+        await h.col('memberships').updateOne(
+          { _id: new mongoose.Types.ObjectId(id('NINA')) }, { $set: { joinedAs: 'new_hire', joinDate: '2026-08-01' } },
+        );
+        h.as('SARI');
+        expect(Object.values((await roster()).sections).flat().map((r) => r.hire.name)).toContain('Nina Lestari');
+        const listed = (await reads()).length;
+        expect((await h.http().get(`/new-hires/${id('NINA')}`).expect(200)).body).toEqual({
+          empty: 'no_activation', hire: { membershipId: id('NINA'), name: 'Nina Lestari' }, today: TODAY,
+          joinDate: '2026-08-01', firstYearEndsOn: '2027-08-01', leader: SARI_AS_LEADER(),
+        });
+        // Past her first year with none, it is the first year that says so.
+        await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('NINA')) }, { $set: { joinDate: '2025-08-01' } });
+        expect((await h.http().get(`/new-hires/${id('NINA')}`).expect(200)).body).toMatchObject({ empty: 'first_year_over' });
+        // The roster's own reads, and none for the empty detail.
+        expect(await reads()).toHaveLength(listed);
+      });
+
+      it('P19.9-T3 AC-5 an existing agent with no activation is still 404 — not a new hire, so on no list', async () => {
+        h.as('AGUS');
+        expect((await h.http().get(`/new-hires/${id('DIMAS')}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+      });
+
+      it('P19.9-T3 AC-5 the empty answer keeps the reach: a peer, a sibling, the hire herself and another office are 404', async () => {
+        await h.start('RINA', '2025-09-01');
+        await h.start('B_AGENT', '2025-01-10');
+        for (const [who, target] of [['PEER_AB', 'RINA'], ['DEWI', 'RINA'], ['RINA', 'RINA'], ['OWNER', 'B_AGENT']] as const) {
+          h.as(who);
+          expect([who, target, (await h.http().get(`/new-hires/${id(target)}`).expect(404)).body.error.code])
+            .toEqual([who, target, 'NOT_FOUND']);
+        }
+        // Office B's own leader reads its own empty one.
+        h.as('B_AB');
+        expect((await h.http().get(`/new-hires/${id('B_AGENT')}`).expect(200)).body).toMatchObject({
+          empty: 'first_year_over', hire: { name: 'Bayu Saputra' },
+        });
+      });
+    });
   });
 
   describe('a leader’s tick (OD-121)', () => {

@@ -6,7 +6,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  buildCoachingOffice, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
+  buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from '../../../test/coaching-office';
 import { HomeService, type HomeView } from './home.service';
 
@@ -52,6 +52,9 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
         new Map(keys.filter((k): k is string => !!k).map((k) => [k, `https://signed.test/${k}`])) } as never,
       wired.clock,
       wired.users as never,
+      wired.orgLevels,
+      // P19.9-T3 AC-6: *New hires* is `/new-hires`' own count.
+      wired.newHires,
     );
 
     // Indah's day: a lead whose next action is today, a meeting at 15:00 today, one tomorrow, one declined.
@@ -163,6 +166,23 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect([indah.phone, indah.photoUrl]).toEqual([null, null]);
     });
 
+    it('P19.9-T2 AC-2 names each person’s rung, the code and the company’s own label, from the roster already read', async () => {
+      const view = await read('AGUS');
+      const rung = (who: Who) => view.leader!.team.find((p) => p.membershipId === office.id[who])!.rung;
+      expect(rung('SARI')).toEqual({ code: 'AAB', label: 'AAB' });
+      expect(rung('DEWI')).toEqual({ code: 'AAB', label: 'AAB' });
+      expect(rung('RINA')).toEqual({ code: 'AGENT', label: 'Agent' });
+      expect(rung('LUKAS')).toEqual({ code: 'AGENT', label: 'Agent' });
+      // The company's own words: a ladder that calls its Agent rung *Business Partner* is read as it says.
+      await db().collection('companyOrgLevels').updateOne({ companyId: COMPANY, code: 'AGENT' }, { $set: { label: 'Business Partner' } });
+      try {
+        expect((await read('AGUS')).leader!.team.find((p) => p.membershipId === office.id.RINA)!.rung)
+          .toEqual({ code: 'AGENT', label: 'Business Partner' });
+      } finally {
+        await db().collection('companyOrgLevels').updateOne({ companyId: COMPANY, code: 'AGENT' }, { $set: { label: 'Agent' } });
+      }
+    });
+
     it('UI-101 records each person on the list as read, surface home, over yesterday and today — and nobody for an agent', async () => {
       const entries = () => db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
       const before = await entries();
@@ -220,7 +240,7 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       }
     });
 
-    it('P19.8-T2 AC-10 OD-283 Leads is the reader’s own open Sales and Recruit leads: not a won, a lost or a deleted one, not another member’s, not another office’s', async () => {
+    it('P19.9-T1 AC-5 OD-283 Leads is every open lead the reader owns, any type and any stage — what /leads opens on — not a won, a lost or a deleted one, not another member’s, not another office’s', async () => {
       const lead = (over: Record<string, unknown>) => ({
         kpmId: KPM_A, ownerMembershipId: office.id.INDAH, type: 'recruitment', name: 'Calon', statusCode: null, outcome: null,
         commitments: [], nextActionDate: null, nextActionNote: null, version: 1, deletedAt: null,
@@ -235,23 +255,25 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
         lead({ name: 'Calon satu', statusCode: 'MEETING_SCHEDULED' }),
         lead({ name: 'Calon dua', outcome: 'lost' }),
         lead({ name: 'Calon tiga', deletedAt: new Date('2026-09-02T02:00:00Z') }),
-        // On the office's terminal stage: joined, no longer a candidate in the pipeline.
+        // On the office's terminal stage, and one of no type yet: both open leads on /leads, so both on the tile (R1).
         lead({ name: 'Calon empat', statusCode: 'NEW_ACTIVE_AGENT' }),
+        lead({ name: 'Belum dipilih', type: null }),
         // Another member's, and another office's under Indah's id.
         lead({ name: 'Calon Dimas', ownerMembershipId: office.id.DIMAS }),
         lead({ name: 'Calon kantor B', kpmId: KPM_B }),
         lead({ name: 'Klien kantor B', kpmId: KPM_B, type: 'sales' }),
       ]);
       try {
-        // Ibu Wiwik and Pak Teddy (sales, open) and Calon satu: three. Ibu Closed (won), Ibu Deleted and the rest: none.
+        // Ibu Wiwik and Pak Teddy (sales, open), Calon satu, Calon empat and Belum dipilih: five. Ibu Closed (won), Calon
+        // dua (lost), Ibu Deleted and the rest: none. P19.8-T2's Sales + Recruit read three here.
         const view = await read('INDAH');
-        expect(view.leads).toBe(3);
-        // The reader's own row of the Unit Dashboard's *Leads* column, as one number.
-        const own = (await wired.leadReadings.countsOfMany(office.as('INDAH'), [office.id.INDAH], { month: view.month }))
-          .get(office.id.INDAH)!;
-        expect(view.leads).toBe(own.salesOpen + own.recruitOpen);
-        // A leader's downline's leads are theirs, never the leader's (OD-283 option 3 not taken).
+        expect(view.leads).toBe(5);
+        // Exactly what /leads opens on: *Leads milik: Saya*, *Semua* (P19.9-T1 AC-1, AC-2).
+        const list = await wired.leadRecords.list(office.as('INDAH'), { scope: 'own', outcome: 'open' });
+        expect(view.leads).toBe(list.total);
+        // A leader's downline's leads are theirs, never the leader's (OD-286: they are *Tim*, not *Saya*).
         expect((await read('AGUS')).leads).toBe(0);
+        expect((await wired.leadRecords.list(office.as('AGUS'), { scope: 'own', outcome: 'open' })).total).toBe(0);
       } finally {
         await db().collection('leads').deleteMany({ _id: { $in: Object.values(insertedIds) } });
       }
@@ -263,11 +285,37 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect((await read('INDAH')).leads).toBe(2);
     });
 
-    it('P19.8-T2 AC-10 with a team, New hires is the Unit Dashboard’s count over the same rows', async () => {
+    it('P19.8-T2 AC-10 with a team, the leader block is the Unit Dashboard’s rows', async () => {
       const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
-      expect(view.newHires).toBe(dashboard.tiles.team.newHires);
       expect(view.leader!.team.length).toBe(dashboard.tiles.team.total - 1);
       expect(Object.keys(view.leader!).sort()).toEqual(['activeAgent', 'coached7d', 'team']);
+    });
+
+    it('P19.9-T3 AC-6 OD-288 New hires is what /new-hires opens on — this calendar year’s new hires in reach — not last year’s, and not the Unit Dashboard’s', async () => {
+      // Dimas joined this year as a new hire, Indah last year; neither has a first sale.
+      const set = (who: Who, joinDate: string | null, joinedAs: string | null) => db().collection('memberships')
+        .updateOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: { joinDate, joinedAs } });
+      await set('DIMAS', '2026-03-01', 'new_hire');
+      await set('INDAH', '2025-11-20', 'new_hire');
+      try {
+        const [view, roster, last, dashboard] = await Promise.all([
+          read('AGUS'), wired.newHires.roster(office.as('AGUS')), wired.newHires.roster(office.as('AGUS'), 'previous'),
+          wired.unitDashboard.read(office.as('AGUS')),
+        ]);
+        const listed = (r: typeof roster) => Object.values(r.sections).flat().map((row) => row.hire.membershipId);
+        expect(listed(roster)).toEqual([office.id.DIMAS]);
+        expect(view.newHires).toBe(1);
+        expect(listed(last)).toEqual([office.id.INDAH]);
+        // The dashboard's *Tim Anda* keeps its own rule: every new hire before a first sale, whatever the year.
+        expect(dashboard.tiles.team.newHires).toBe(2);
+        // Sari coaches neither, and an Agent nobody: 0 — as `/new-hires` would answer them nobody.
+        expect([(await read('SARI')).newHires, (await read('INDAH')).newHires]).toEqual([0, 0]);
+        // Office B's reader never counts office A's.
+        expect((await read('B_AB')).newHires).toBe(0);
+      } finally {
+        await set('DIMAS', null, null);
+        await set('INDAH', null, null);
+      }
     });
 
     it('P19.8-T2 AC-7 an agenda row’s id opens the Calendar’s own detail, and only for its reader: another office’s read is 404', async () => {

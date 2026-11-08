@@ -116,6 +116,32 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect(refused.body.error).toMatchObject({ code: 'ACTIVATION_CLOSED', details: { state: 'expired' } });
     });
 
+    it('P19.9-T3 AC-5 from the join date plus twelve months her own read is empty — nothing of the checklist — and every write is refused', async () => {
+      await h.start('BUDI', '2025-09-14');
+      h.as('BUDI');
+      const view = (await h.http().get('/activation/me').expect(200)).body;
+      expect(view).toEqual({
+        empty: 'first_year_over', hire: { membershipId: id('BUDI'), name: 'Budi Santoso' }, today: TODAY,
+        joinDate: '2025-09-14', firstYearEndsOn: '2026-09-14', leader: null,
+      });
+      for (const res of [
+        await h.http().put('/activation/me/items/CRM_SETUP').send({ done: true }),
+        await h.http().post('/activation/me/graduate'),
+      ]) {
+        expect([res.status, res.body.error.code]).toEqual([409, 'ACTIVATION_CLOSED']);
+      }
+      // The day before, still her first year: the whole activation, read-only (expired at six months).
+      await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('BUDI')) }, { $set: { joinDate: '2025-09-15' } });
+      await h.col('activationProgress').updateOne({ membershipId: id('BUDI') }, { $set: { startDate: '2025-09-15' } });
+      expect((await h.http().get('/activation/me').expect(200)).body).toMatchObject({ state: 'expired', startDate: '2025-09-15' });
+    });
+
+    it('P19.9-T3 AC-5 the nav keeps no section for an activation past its first year', async () => {
+      await h.start('BUDI', '2025-09-01');
+      h.as('BUDI');
+      expect((await h.http().get('/auth/me').expect(200)).body.activation).toEqual({ open: false, complete: false });
+    });
+
     it('P13-T1 AC-1 is 404 for a reader with no activation: an AB, an Agent who joined by no leader', async () => {
       for (const who of ['AGUS', 'SARI', 'BUDI'] as const) {
         h.as(who);
@@ -385,14 +411,19 @@ describe('the hire’s own activation over HTTP (Phase 13)', () => {
       expect((await facts()).activation).toEqual({ open: false, complete: false });
       h.as('BUDI');
       expect((await facts()).activation).toEqual({ open: false, complete: false });
-      // ADR-0173 §1: the page lists new hires who joined in the last twelve months, whatever their checklist's state.
+      // ADR-0173 §1: the page lists the year's new hires, whatever their checklist's state.
       h.as('SARI');
       expect((await facts()).newHires).toBe(true);
       await h.http().get('/new-hires').expect(200);
-      // Past the year, nobody is listed, and the nav says so.
-      await h.col('memberships').updateMany(
-        { _id: { $in: [id('RINA'), id('BUDI')].map((x) => new mongoose.Types.ObjectId(x)) } }, { $set: { joinDate: '2025-09-14' } },
+      const joined = (joinDate: string) => h.col('memberships').updateMany(
+        { _id: { $in: [id('RINA'), id('BUDI')].map((x) => new mongoose.Types.ObjectId(x)) } }, { $set: { joinDate } },
       );
+      // P19.9-T3 AC-3 (ADR-0233): last year's new hires keep the menu — *Tahun lalu* lists them.
+      await joined('2025-01-01');
+      expect((await facts()).newHires).toBe(true);
+      await h.http().get('/new-hires').expect(200);
+      // Before last year, nobody is listed in either year, and the nav says so.
+      await joined('2024-12-31');
       expect((await facts()).newHires).toBe(false);
       expect((await h.http().get('/new-hires').expect(404)).body.error.code).toBe('NOT_FOUND');
     });

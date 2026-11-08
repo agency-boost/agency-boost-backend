@@ -421,20 +421,32 @@ describe('P18.8-T4 — the first sale and the data-backed checklist items (ADR-0
       expect(await h.col('coachingSessions').countDocuments({ coacheeMembershipId: id('BUDI'), date: '2026-09-07' })).toBe(0);
     });
 
-    it('P18.8-T4 AC-3 an Agent who leads cannot log a 1:1 (403) nor read the hire’s closings (404), and nothing is written', async () => {
+    /*
+     * Was *an Agent who leads cannot log a 1:1 (403) nor read the hire's closings (404)*: P19.9-T6 (ADR-0234) gave the
+     * Agent rung the coach's grants over their downline, so Lukas does for Tari what Nina does for Dodi above.
+     */
+    it('P19.9-T6 AC-1 an Agent who leads logs a 1:1 for their hire, reads her closings and logs one — as any coach (ADR-0234)', async () => {
       await h.start('TARI', '2026-08-01');
       h.as('LUKAS');
-      expect((await h.http().put(`/new-hires/${id('TARI')}/items/WEEKLY_CHECK_IN`)
-        .send({ done: true, record: { kind: 'one_on_one', date: '2026-09-01', note: 'Check-in.' } }).expect(403)).body.error.code)
-        .toBe('PERM_DENIED');
-      await h.http().get(`/new-hires/${id('TARI')}/closings`).expect(404);
-      // Nor log a closing in her pipeline: an Agent's `lead:create` is their own.
+      await h.http().put(`/new-hires/${id('TARI')}/items/WEEKLY_CHECK_IN`)
+        .send({ done: true, record: { kind: 'one_on_one', date: '2026-09-01', note: 'Check-in.' } }).expect(200);
+      expect(await h.col('coachingSessions').findOne({ coacheeMembershipId: id('TARI'), date: '2026-09-01' })).toMatchObject({
+        coachMembershipId: id('LUKAS'), status: 'finalized', finalizedByMembershipId: id('LUKAS'),
+      });
+      await h.http().get(`/new-hires/${id('TARI')}/closings`).expect(200);
       await h.http().put(`/new-hires/${id('TARI')}/items/FIRST_CASE_CLOSED`)
-        .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(404);
-      expect(await h.col('leads').countDocuments({ ownerMembershipId: id('TARI') })).toBe(0);
-      expect(await stored('TARI', 'FIRST_CASE_CLOSED')).toMatchObject({ done: false });
-      expect(await stored('TARI', 'WEEKLY_CHECK_IN')).toMatchObject({ done: false });
-      expect(await h.col('coachingSessions').countDocuments({ coacheeMembershipId: id('TARI') })).toBe(0);
+        .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(200);
+      expect(await h.col('leads').countDocuments({ ownerMembershipId: id('TARI'), createdBy: id('LUKAS') })).toBe(1);
+    });
+
+    it('P19.9-T6 AC-1 an Agent who leads reaches no hire outside their downline: 404, and nothing is written', async () => {
+      await h.start('DODI', '2026-08-01');
+      h.as('LUKAS');
+      await h.http().put(`/new-hires/${id('DODI')}/items/WEEKLY_CHECK_IN`)
+        .send({ done: true, record: { kind: 'one_on_one', date: '2026-09-01', note: 'Check-in.' } }).expect(404);
+      await h.http().get(`/new-hires/${id('DODI')}/closings`).expect(404);
+      expect(await stored('DODI', 'WEEKLY_CHECK_IN')).toMatchObject({ done: false });
+      expect(await h.col('coachingSessions').countDocuments({ coacheeMembershipId: id('DODI') })).toBe(0);
     });
 
     it('P18.8-T4 AC-3 unticks a hand tick freely, leaving its record where it is; an item its data completed is nobody’s to untick', async () => {

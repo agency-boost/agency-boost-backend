@@ -56,6 +56,8 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
       { linksFor: async () => new Map() } as never,
       wired.clock,
       wired.users as never,
+      wired.orgLevels,
+      wired.newHires,
     );
   }, RUN_MS);
   afterAll(stopMongo);
@@ -84,6 +86,17 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
       expect({ name, yesterday: (person.yesterday ?? 0) > 0, today: (person.today ?? 0) > 0 }).toEqual({ name, yesterday: false, today: false });
     }
     expect(team.some((p) => (p.today ?? 0) > 0 && (p.yesterday ?? 0) > 0)).toBe(true);
+  });
+
+  it('P19.9-T1 AC-5 P19.9-T2 AC-2 Agus’s Leads is his own open list’s total, and his Group names AABs and Agents', async () => {
+    const view = await read('agus@kpm0417.test');
+    const own = await wired.leadRecords.list(await as('agus@kpm0417.test'), { scope: 'own', outcome: 'open' });
+    expect(view.leads).toBeGreaterThan(0);
+    expect(view.leads).toBe(own.total);
+    // *Tim* holds his downline's leads, more of them than his own: the filter has something to show.
+    const team = await wired.leadRecords.list(await as('agus@kpm0417.test'), { scope: 'team', outcome: 'open' });
+    expect(team.total).toBeGreaterThan(own.total);
+    expect(new Set(view.leader!.team.map((p) => p.rung.code))).toEqual(new Set(['AAB', 'AGENT']));
   });
 
   it('P19.8-T2 AC-11 the day after the run, somebody reported yesterday only', async () => {

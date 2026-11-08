@@ -409,8 +409,8 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // Over the Unit Dashboard's window (`7d`, `month`, `year`), the office's calendar; its default period is the month.
   PROPOSALS_MADE: { period: 'CALENDAR_MONTH', threshold: null },
 
-  // ---- Home (Phase 19.8, P19.8-T2; ADR-0228 §4, OD-283; `own-open-leads.ts`) ----
-  // The leads as they stand now, as the two counts it adds.
+  // ---- Home (Phase 19.8, P19.8-T2; ADR-0228 §4; redefined by P19.9-T1, ADR-0232; `own-open-leads.ts`) ----
+  // The leads as they stand now: every open one the reader owns, as `/leads` opens on them.
   OWN_OPEN_LEADS: { period: 'POINT_IN_TIME', threshold: null },
 };
 

@@ -1,4 +1,5 @@
 import type { LocalDate } from '@/common/time/local-day';
+import type { NewHireYear } from '@/domain/metrics/activation-3m';
 import type { ActivationLinkView } from './activation.service';
 import type { ActivationItemSource, ActivationRecordCollection } from './activation-progress.schema';
 import type { ActivationState, AspectStatus } from './activation-rules';
@@ -197,10 +198,12 @@ export interface NewHireUnitView extends NewHireUnitRefView {
   activation3M: Activation3MFiguresView;
 }
 
-/** `GET /new-hires` (ADR-0173; P18.8-T6 AC-2, AC-3). */
+/** `GET /new-hires` (ADR-0173; P18.8-T6 AC-2, AC-3; the year since ADR-0233, P19.9-T3 AC-1, AC-2). */
 export interface NewHiresRosterView {
   today: LocalDate;
-  /** The join dates listed: the page's year (`newHiresWindow`). */
+  /** Which year is listed: `current` — *Tahun berjalan*, the default — or `previous`, *Tahun lalu*. */
+  year: NewHireYear;
+  /** The join dates listed: that year's (`newHiresYear`) — 1 January to today, or all of last year. */
   window: { from: LocalDate; to: LocalDate };
   /** `ACTIVATION_3M.DAYS`: the day the result locks on, what *Day 64 of 90* prints. */
   days: number;
@@ -254,6 +257,29 @@ export interface NewHireLeaderView extends ActivationPersonView {
 /** One hire's activation as a leader reads it on `/new-hires/:membershipId` (and its writes): the view and the standing. */
 export interface NewHireDetailView extends ActivationView {
   newHire: NewHireStandingView | null;
+}
+
+/** Why an activation is served empty (P19.9-T3 AC-5): its first year is over, or there never was one. */
+export type ActivationEmptyReason = 'first_year_over' | 'no_activation';
+
+/**
+ * **An activation served empty** (OD-289, ADR-0233; P19.9-T3 AC-5): from the join date plus `ACTIVATION.FIRST_YEAR_MONTHS`
+ * the person's activation is not theirs to read any more — `GET /activation/me` answers this in its place, and so does
+ * `GET /new-hires/:membershipId`, which answers it too for a new hire it lists who has no activation at all. **Nothing of
+ * a checklist is in it**: the person, the dates the one line says, and — on a leader's read — who they report to, for
+ * the header. Told from the full view by `empty`, which the full view does not carry.
+ */
+export interface ActivationEmptyView {
+  empty: ActivationEmptyReason;
+  hire: ActivationPersonView;
+  /** The office's today. */
+  today: LocalDate;
+  /** Their join date, day 1; `null` for a membership that carries none. */
+  joinDate: LocalDate | null;
+  /** The first day it is empty — the join date plus twelve calendar months; `null` with no join date. */
+  firstYearEndsOn: LocalDate | null;
+  /** Who they report to, the header's *AAB Arief · Bergabung 3 Agu 2025* (UI-027); `null` on the person's own read. */
+  leader: NewHireLeaderView | null;
 }
 
 /** What saving the coaching note answers. */

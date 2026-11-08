@@ -159,6 +159,11 @@ describe('domain constants', () => {
     it('P13-T1 AC-5 pins an activation’s life at six calendar months (OD-120, Overall.html:3349)', () => {
       expect(ACTIVATION.VISIBLE_MONTHS).toBe(6);
     });
+    it('P19.9-T3 AC-5 pins the first year at twelve calendar months (OD-289), past the six every write is refused after', () => {
+      expect(ACTIVATION.FIRST_YEAR_MONTHS).toBe(12);
+      // The empty page never meets an open activation: a write is refused before the year is out.
+      expect(ACTIVATION.FIRST_YEAR_MONTHS).toBeGreaterThan(ACTIVATION.VISIBLE_MONTHS);
+    });
     it('P13-T5 AC-5 pins how far back a leader may correct a start date at 365 days (OD-118)', () => {
       expect(ACTIVATION.START_DATE_MAX_DAYS_BACK).toBe(365);
     });

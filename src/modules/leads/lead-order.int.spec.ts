@@ -116,8 +116,9 @@ describe('P18.5-T7 — the owner’s own order, over HTTP', () => {
       const [mine] = [await leadOf('SARI', 'SARI own')];
       const rinas = await threeOf('RINA');
       as('SARI');
-      // Sari's `/leads` holds her unit's leads beside her own (P7-T7)…
-      expect(await listed()).toHaveLength(4);
+      // Sari's `/leads` reaches her unit's leads (P7-T7) — on *Leads milik: Tim* since P19.9-T1 (ADR-0232 §3)…
+      expect(await listed()).toEqual(['SARI own']);
+      expect((await http().get('/leads').query({ scope: 'team' }).expect(200)).body.rows).toHaveLength(3);
 
       // …and her order is hers alone: Rina's leads in it, or in place of hers, are refused.
       for (const ids of [[mine, ...rinas], [...rinas], [mine, rinas[0]]]) {
