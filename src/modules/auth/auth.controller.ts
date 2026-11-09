@@ -29,6 +29,7 @@ import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
 import { InvitesService } from '@/modules/org/invites.service';
+import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { BrandingReader } from '@/modules/branding/branding-reader';
 import { AuthService } from './auth.service';
@@ -139,6 +140,11 @@ export class AuthController {
      * harness that never registers on an invite builds this without the org module's graph.
      */
     @Optional() @Inject(InvitesService) private readonly invites: InvitesService | null = null,
+    /*
+     * P19.10-T1 AC-1 (ADR-0236 §1): registration on a leader's link joins the code's leader's unit. By its token, as
+     * the invite above.
+     */
+    @Optional() @Inject(LeaderCodeService) private readonly leaderCodes: LeaderCodeService | null = null,
     /*
      * **The photo's signed link** (UI V1, UI-111): `users.avatarUrl` holds the photo's storage key and the bucket is
      * private, so `/auth/me` signs a link for the title row and the *Lainnya* sheet. Optional, as the readers above are:
@@ -279,6 +285,13 @@ export class AuthController {
     type: ApiErrorEnvelope,
   })
   @ApiResponse({
+    status: HttpStatus.GONE,
+    description:
+      '`ORG_INVITE_EXPIRED` — with `leaderCode`, a code that opens nothing (nobody holds it, its owner has left, or the '
+      + 'office has stopped), answered alike, before any account is made.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({
     status: HttpStatus.TOO_MANY_REQUESTS,
     description: '`AUTH_RATE_LIMITED` — too many sign-ups from this address in the hour; `details.retryAfterSeconds`.',
     type: ApiErrorEnvelope,
@@ -287,7 +300,19 @@ export class AuthController {
     // Per client address, before anything is read (the P18.8 exit review, L2): a script making accounts, or walking
     // agent codes against `AGENT_CODE_TAKEN`, is stopped here, as an invite link's banner stops one walking tokens.
     this.limit(registrationLimitKey(req.ip ?? 'unknown'), REGISTRATION.MAX_PER_ADDRESS, REGISTRATION.WINDOW_SECONDS);
-    const { inviteToken, ...input } = dto;
+    const { inviteToken, leaderCode, ...input } = dto;
+    if (!inviteToken && leaderCode && this.leaderCodes) {
+      /*
+       * **On a leader's link** (ADR-0236 §1, P19.10-T1 AC-1): the code's office's insurer, and the membership made at
+       * once under the code's leader — the code was the approval — for an account made here and now. A code that opens
+       * nothing is refused before any account is made; an address that already exists answers as it always has and
+       * joins nobody, as on an invite.
+       */
+      const held = await this.leaderCodes.forRegistration(leaderCode);
+      const { user, created } = await this.auth.registerAccount({ ...input, ...held }, readerOfRequest(req));
+      if (created) await this.leaderCodes.joinNewAccount(leaderCode, String(user._id));
+      return { status: 'verification_sent' };
+    }
     if (!inviteToken || !this.invites) {
       // The verification email in the language of the page that asked (P18.10-T5 AC-5).
       await this.auth.register(input, readerOfRequest(req));

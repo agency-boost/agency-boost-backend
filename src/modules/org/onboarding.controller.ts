@@ -323,7 +323,11 @@ export class OnboardingController {
     description:
       'Registers you and tags you to the issuer in one step, with no approval — that is ' +
       'the whole difference from asking a leader. No join request is created: one would ' +
-      'sit in their inbox asking them to approve something that already happened.',
+      'sit in their inbox asking them to approve something that already happened. Somebody still waiting in the ' +
+      'code’s office — registered to it, with a request open or none — is placed the same way, and any request ' +
+      'they had open is cancelled (ADR-0236 §2). `409 ORG_AGENT_ALREADY_TAGGED` for somebody active in an office, ' +
+      'refused before the code is read, and for somebody waiting in another office than the code’s, in words that ' +
+      'say so.',
   })
   async redeem(@Ctx() ctx: RequestContext, @Body() dto: RedeemInviteDto) {
     this.limitCodeAttempts(ctx);

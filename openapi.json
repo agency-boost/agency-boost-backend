@@ -2521,6 +2521,16 @@
               }
             }
           },
+          "410": {
+            "description": "`ORG_INVITE_EXPIRED` — with `leaderCode`, a code that opens nothing (nobody holds it, its owner has left, or the office has stopped), answered alike, before any account is made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "429": {
             "description": "`AUTH_RATE_LIMITED` — too many sign-ups from this address in the hour; `details.retryAfterSeconds`.",
             "content": {
@@ -12362,7 +12372,7 @@
     },
     "/api/v1/join/redeem": {
       "post": {
-        "description": "Registers you and tags you to the issuer in one step, with no approval — that is the whole difference from asking a leader. No join request is created: one would sit in their inbox asking them to approve something that already happened.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Registers you and tags you to the issuer in one step, with no approval — that is the whole difference from asking a leader. No join request is created: one would sit in their inbox asking them to approve something that already happened. Somebody still waiting in the code’s office — registered to it, with a request open or none — is placed the same way, and any request they had open is cancelled (ADR-0236 §2). `409 ORG_AGENT_ALREADY_TAGGED` for somebody active in an office, refused before the code is read, and for somebody waiting in another office than the code’s, in words that say so.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OnboardingController_redeem_v1",
         "parameters": [],
         "requestBody": {
@@ -38940,7 +38950,7 @@
           },
           "companyId": {
             "type": "string",
-            "description": "From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says.",
+            "description": "From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says; with `leaderCode`, the code’s office’s, and it may be left out.",
             "example": "65f1a0c2e4b0a1b2c3d4e5f6"
           },
           "agentCode": {
@@ -38954,6 +38964,11 @@
           "inviteToken": {
             "type": "string",
             "description": "The token from an invite link, `/register?invite=…`."
+          },
+          "leaderCode": {
+            "type": "string",
+            "example": "JOR417",
+            "description": "A leader’s code, from `/register?code=…`. Ignored beside `inviteToken`, which names its own leader."
           },
           "dateOfBirth": {
             "type": "string",

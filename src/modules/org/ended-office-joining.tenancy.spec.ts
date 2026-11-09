@@ -9,6 +9,7 @@ import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
+import { ApprovalsService } from './approvals.service';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequest, JoinRequestSchema } from './join-request.schema';
 import { LeaderCodeService } from './leader-code.service';
@@ -62,8 +63,13 @@ describe('joining an ended office (P13.2 exit review, S1)', () => {
       members, hierarchy, kpms as never, companies as never, users as never, requests, audit,
       notifications as never, clock,
     );
+    const approvals = new ApprovalsService(
+      members, hierarchy, requests,
+      new MembershipHistoryRepository(mongoose.model(MembershipHistory.name) as never),
+      users as never, audit, notifications as never, clock,
+    );
     leaderCodes = new LeaderCodeService(
-      members, hierarchy, requests, kpms as never, companies as never, users as never, audit,
+      members, hierarchy, requests, approvals, kpms as never, companies as never, users as never, audit,
       notifications as never, clock,
     );
     await syncIndexes();

@@ -31,6 +31,11 @@ export const ONBOARDING_REFUSALS = refusals('modules/org: joining', {
       en: 'You are already registered to an office.',
       id: 'Anda sudah terdaftar di sebuah KPM.',
     },
+    /** P19.10-T1 AC-4: waiting in one office, with a leader's code into another. */
+    waitingElsewhere: {
+      en: 'You are waiting to join another office. This code is for a different one, so it cannot place you.',
+      id: 'Anda sedang menunggu bergabung di KPM lain. Kode ini untuk KPM yang berbeda, jadi tidak dapat menempatkan Anda.',
+    },
     youReport: {
       en: 'You already report to somebody. Moving to another leader is not something you can ask for here.',
       id: 'Anda sudah melapor ke seseorang. Pindah ke leader lain tidak dapat Anda minta di sini.',

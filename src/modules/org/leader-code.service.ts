@@ -15,6 +15,7 @@ import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { ActivationStarter, startActivation } from './activation-starter.port';
+import { ApprovalsService } from './approvals.service';
 import { HierarchyService } from './hierarchy.service';
 import { JoinRequestRepository } from './org.repositories';
 import { leaderCodeUrl } from './leader-code';
@@ -61,6 +62,8 @@ export class LeaderCodeService {
     private readonly members: MembershipRepository,
     private readonly hierarchy: HierarchyService,
     private readonly requests: JoinRequestRepository,
+    /** P19.10-T1 AC-3: a member waiting in the code's office is placed as an approval or a tag places one. */
+    private readonly approvals: ApprovalsService,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
@@ -141,9 +144,15 @@ export class LeaderCodeService {
    * This is the whole difference from Flow A. The joiner ends `active` under the leader
    * whose code they used, and **no join request is created** — a request would sit in that
    * leader's inbox asking them to approve something that already happened.
+   *
+   * **Somebody already waiting in the code's office is placed too** (P19.10-T1 AC-3; ADR-0236 §2): they registered to
+   * it and asked nobody yet, or asked and were not answered, and the code is the answer. Until then they were refused
+   * as *already registered*, and the code they were sent did nothing. Waiting in **another** office is still refused,
+   * in words that say so: a code is a way into somebody's unit, not a way from one office to another. Somebody active
+   * anywhere is refused before the code is read, as before.
    */
   async redeem(ctx: RequestContext, code: string): Promise<{ kpmId: string; leaderName: string }> {
-    if (ctx.membership) {
+    if (ctx.membership && ctx.membership.status !== 'pending') {
       throw new DomainException(
         ErrorCode.ORG_AGENT_ALREADY_TAGGED,
         ONBOARDING_REFUSALS.ORG_AGENT_ALREADY_TAGGED.alreadyRegistered,
@@ -153,13 +162,60 @@ export class LeaderCodeService {
     }
 
     const { leader, kpm } = await this.resolve(code);
-    const scoped = RequestContext.joiningTenant(ctx, String(kpm._id));
+    const kpmId = String(kpm._id);
 
+    if (ctx.membership) {
+      if (ctx.kpmId !== kpmId) {
+        throw new DomainException(
+          ErrorCode.ORG_AGENT_ALREADY_TAGGED,
+          ONBOARDING_REFUSALS.ORG_AGENT_ALREADY_TAGGED.waitingElsewhere,
+          HttpStatus.CONFLICT,
+          { kpmId: ctx.kpmId },
+        );
+      }
+      // The placement writes the history, the join date, the audit row and the activation (`attach`).
+      await this.approvals.placeByCode(ctx, ctx.membershipId!, String(leader._id), leader.leaderCode);
+      await this.tellLeader(leader, ctx.userId, kpmId);
+    } else {
+      await this.admit(RequestContext.joiningTenant(ctx, kpmId), leader, kpmId, ctx.userId);
+    }
+
+    const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
+    return {
+      kpmId,
+      leaderName: leaderUser?.fullName ?? render(ONBOARDING_MESSAGES.yourLeader, ctx.reader),
+    };
+  }
+
+  /**
+   * **Registering on a leader's link** (P19.10-T1 AC-1; ADR-0236 §1): what `POST /auth/register` with `leaderCode`
+   * makes the account with — the insurer of the code's office, whatever the form sent. A code that opens nothing is
+   * refused here, `410` as a redemption is, before any account is made.
+   */
+  async forRegistration(code: string): Promise<{ companyId: string }> {
+    const { kpm } = await this.resolve(code);
+    return { companyId: kpm.companyId };
+  }
+
+  /**
+   * **A new account, made on the leader's link, joins at once** (P19.10-T1 AC-1): active under the code's leader, as
+   * redeeming it signed in would place them, whether or not the email is verified yet. The code is resolved again, so
+   * an office that stopped between the two reads admits nobody.
+   */
+  async joinNewAccount(code: string, userId: string): Promise<void> {
+    const { leader, kpm } = await this.resolve(code);
+    const kpmId = String(kpm._id);
+    const scoped = RequestContext.joiningTenant(new RequestContext(userId, 'none', null), kpmId);
+    await this.admit(scoped, leader, kpmId, userId);
+  }
+
+  /** A newcomer in: the membership, active under the leader at the joining rung, the notice, the audit row, the activation. */
+  private async admit(scoped: RequestContext, leader: MembershipDocument, kpmId: string, userId: string): Promise<void> {
     const membership = await this.hierarchy.create(scoped, {
-      userId: ctx.userId,
+      userId,
       // Flow C forces the ladder's lowest rung that leads nobody (`AGENT` on the default ladder, ADR-0156): a
       // code is a way into somebody's unit, not a way to choose your own rank on the way in.
-      role: await this.hierarchy.entryRungCode(String(kpm._id), 'joiner'),
+      role: await this.hierarchy.entryRungCode(kpmId, 'joiner'),
       leaderId: String(leader._id),
       status: 'active',
       recruitedByMembershipId: String(leader._id),
@@ -172,18 +228,7 @@ export class LeaderCodeService {
       { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
     );
 
-    const joiner = await this.users.findOne({ _id: ctx.userId }).exec();
-    await this.notifications.send({
-      userId: leader.userId,
-      kpmId: String(kpm._id),
-      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
-      payload: {
-        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.10-T5 AC-4).
-        joinerName: joiner?.fullName ?? null,
-        via: 'leader-code',
-        code: leader.leaderCode,
-      },
-    });
+    await this.tellLeader(leader, userId, kpmId);
 
     await this.audit.record(scoped, {
       action: 'leader_code.redeemed',
@@ -194,11 +239,21 @@ export class LeaderCodeService {
 
     // Their activation starts in the same call that placed them (OD-119), failing open.
     await startActivation(this.activations, scoped, String(membership._id));
+  }
 
-    const leaderUser = await this.users.findOne({ _id: leader.userId }).exec();
-    return {
-      kpmId: String(kpm._id),
-      leaderName: leaderUser?.fullName ?? render(ONBOARDING_MESSAGES.yourLeader, ctx.reader),
-    };
+  /** The code's owner is told somebody walked in, by the joiner's name. */
+  private async tellLeader(leader: MembershipDocument, joinerUserId: string, kpmId: string): Promise<void> {
+    const joiner = await this.users.findOne({ _id: joinerUserId }).exec();
+    await this.notifications.send({
+      userId: leader.userId,
+      kpmId,
+      templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
+      payload: {
+        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.10-T5 AC-4).
+        joinerName: joiner?.fullName ?? null,
+        via: 'leader-code',
+        code: leader.leaderCode,
+      },
+    });
   }
 }

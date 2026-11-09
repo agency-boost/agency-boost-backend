@@ -528,6 +528,43 @@ export class ApprovalsService {
   }
 
   /**
+   * **A leader's code places a member still waiting in this office under that leader, now** (P19.10-T1 AC-3;
+   * ADR-0236 §2): the code was the approval, as it is for somebody new. `ctx` is the joiner's own, in the office the
+   * code is for. Only somebody pending and under nobody — never the office's owner; then the join date (the office's
+   * today, ADR-0169), the placement, which starts a new hire's activation, and any request they had open cancelled.
+   * The leader's notice is the caller's, as a redemption sends it.
+   */
+  async placeByCode(ctx: RequestContext, membershipId: string, leaderId: string, code: string): Promise<void> {
+    const target = await this.members.findById(ctx, membershipId);
+    if (!target || target.status !== 'pending' || target.leaderId) {
+      throw new DomainException(
+        ErrorCode.ORG_AGENT_ALREADY_TAGGED,
+        SAY.ORG_AGENT_ALREADY_TAGGED.alreadyRegistered,
+        HttpStatus.CONFLICT,
+        { kpmId: ctx.kpmId },
+      );
+    }
+    if (await this.hierarchy.ownsTheOffice(ctx, target)) {
+      throw new DomainException(
+        ErrorCode.ORG_NOT_PERMITTED_TO_TAG,
+        SAY.ORG_NOT_PERMITTED_TO_TAG.leadsTheOffice,
+        HttpStatus.FORBIDDEN,
+        { membershipId },
+      );
+    }
+
+    const joining = await this.joiningFor(ctx, target);
+    await this.attach(ctx, target, leaderId, { action: 'leader_code.redeemed', via: 'leader_code', code }, {}, joining);
+
+    // Any request they had open is moot — they are in, and by another door.
+    await this.requests.updateMany(
+      ctx,
+      { membershipId, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: this.clock.now() } },
+    );
+  }
+
+  /**
    * **What letting this pending member in would be, if this reader may do it** (ADR-0157 §1) — for asking
    * AgencyBoost to approve it past the leader limit.
    *
@@ -733,7 +770,7 @@ export class ApprovalsService {
     ctx: RequestContext,
     member: MembershipDocument,
     leaderId: string,
-    audit: { action: string; requestId?: string; via?: 'tagged' | 'add_agent' },
+    audit: { action: string; requestId?: string; via?: 'tagged' | 'add_agent' | 'leader_code'; code?: string },
     seat: LeaderSeatOptions = {},
     /** ADR-0169: written with the activation, for a member who had no join date yet. */
     joining: JoiningFields | null = null,
@@ -813,8 +850,10 @@ export class ApprovalsService {
       after: {
         leaderId,
         requestId: audit.requestId,
-        // P18.8-T3: *+ Add agent* linking an account says so, beside a tag from the untagged pool.
+        // P18.8-T3: *+ Add agent* linking an account says so, beside a tag from the untagged pool; P19.10-T1, a leader's
+        // code, with the code, as a newcomer's redemption records it.
         ...(audit.via === 'add_agent' ? { via: 'add_agent' } : {}),
+        ...(audit.via === 'leader_code' ? { via: 'leader_code', code: audit.code } : {}),
         ...(joining ?? {}),
         ...(seat.pastLimit ? { leaderLimitRequestId: seat.pastLimit.approvedRequestId } : {}),
       },

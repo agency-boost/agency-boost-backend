@@ -126,18 +126,6 @@ describe('organisation', () => {
       clock,
     );
 
-    leaderCodes = new LeaderCodeService(
-      members,
-      hierarchy,
-      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
-      kpmModel as never,
-      mongoose.model(Company.name) as never,
-      users as never,
-      new AuditService(mongoose.model(AuditLog.name) as never),
-      notifications as never,
-      clock,
-    );
-
     approvals = new ApprovalsService(
       members,
       hierarchy,
@@ -148,6 +136,20 @@ describe('organisation', () => {
       notifications as never,
       clock,
     );
+
+    leaderCodes = new LeaderCodeService(
+      members,
+      hierarchy,
+      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
+      approvals,
+      kpmModel as never,
+      mongoose.model(Company.name) as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
+      clock,
+    );
+
 
     roles = new RoleChangeService(
       members,
@@ -1424,10 +1426,39 @@ describe('organisation', () => {
       });
       await onboarding.requestLeader(asJoiner, leader);
 
-      // They are pending, so redeeming refuses — they already have an office.
-      await expect(leaderCodes.redeem(asJoiner, leaderCode)).rejects.toMatchObject({
-        code: 'ORG_AGENT_ALREADY_TAGGED',
+      // P19.10-T1 AC-3 (ADR-0236 §2): waiting in the code's office, they are placed by it — until then this refused
+      // them as already registered, and the code they were sent did nothing.
+      await leaderCodes.redeem(asJoiner, leaderCode);
+      expect(await mongoose.model(Membership.name).findById(registered!._id)).toMatchObject({ status: 'active', leaderId: leader });
+      const requests = await mongoose.model(JoinRequest.name).find({ membershipId: String(registered!._id) });
+      expect(requests.map((r) => r.get('status'))).toEqual(['cancelled']);
+    });
+
+    it('P19.10-T1 a code places only somebody still waiting: an active member is refused before the code is read', async () => {
+      const agent = await join(KPM_A, 'agent', leader);
+      const row = await members.findById(ctx(KPM_A), agent);
+      const asAgent = new RequestContext(row!.userId, 'none', {
+        membershipId: agent, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
+      await expect(leaderCodes.redeem(asAgent, 'ZZZZZZ')).rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+    });
+
+    it('P19.10-T1 placing by a code refuses anybody not waiting, and the office’s owner, before anything is written', async () => {
+      const agent = await join(KPM_A, 'agent', leader);
+      const joiner = ctx(KPM_A, { membershipId: agent, isKpmOwner: false });
+      await expect(approvals.placeByCode(joiner, agent, leader, leaderCode)).rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+      await expect(approvals.placeByCode(joiner, new mongoose.Types.ObjectId().toString(), leader, leaderCode))
+        .rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+
+      // An office whose owner is still waiting in it: a code does not put the owner under somebody.
+      const ownerId = await person('Pending Owner');
+      await onboarding.registerKpm(new RequestContext(ownerId, 'none', null), KPM_A);
+      const owner = await mongoose.model(Membership.name).findOne({ userId: ownerId });
+      await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { ownerUserId: ownerId } });
+      await expect(approvals.placeByCode(ctx(KPM_A), String(owner!._id), leader, leaderCode))
+        .rejects.toMatchObject({ code: 'ORG_NOT_PERMITTED_TO_TAG' });
+      expect(await mongoose.model(Membership.name).findById(owner!._id)).toMatchObject({ status: 'pending', leaderId: null });
     });
 
     it('notifies the code owner that somebody walked in', async () => {
