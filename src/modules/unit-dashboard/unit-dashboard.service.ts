@@ -1,6 +1,8 @@
 import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, NoMembershipException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import type { Sentence } from '@/common/i18n/sentence';
 import { localDayOf, rollingWindow, type LocalDate } from '@/common/time/local-day';
@@ -25,6 +27,7 @@ import { knowsTheLeads, leadsReached } from '@/modules/coaching/lead-visibility'
 import { PaceStatusReadings } from '@/modules/coaching/pace-status';
 import { GoalService } from '@/modules/goals/goal.service';
 import { LeadReadings } from '@/modules/leads/lead-readings';
+import { ProposalReadings } from '@/modules/proposals/proposal-readings';
 import { CoachResolver, type Coachee } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -32,9 +35,10 @@ import type { Provenance } from '@/modules/production/monthly-agent-data.schema'
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
 import { type MonthState, ProductionMonths } from '@/modules/production/production-months.service';
-import { ProductionReadings, type MonthLedger, type ReadCell } from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
+import type { MonthLedger, ReadCell } from '@/modules/production/production-readings';
 import { can, scopeFor, type Scope } from '@/modules/rbac/permissions';
-import { activityTargets, goalFigures, type FigureSource } from '@/modules/summary/summary-figures';
+import { activityTargets, officialGoalFigures, type FigureSource } from '@/modules/summary/summary-figures';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { defaultBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
@@ -86,13 +90,20 @@ export interface UnitLastOneOnOne {
 export interface UnitRow extends UnitPerson {
   /** Their profile photo as a signed link (UI V1, UI-111); `null` for none: the row draws initials. */
   photoUrl: string | null;
+  /**
+   * ***WhatsApp*** (P19.9-T4 AC-1; ADR-0235, OD-291): the number on their account, for the roster's WhatsApp button at
+   * every period and size. `null` without one — the button then offers *Isi nomor WhatsApp* to a reader who may save one
+   * (`member:update_phone`) — and always on the reader's own row, for an inactive membership, and in the office's
+   * read-only view of another leader's unit, which draws no button.
+   */
+  phone: string | null;
   /** The reader's own row: *You ({first name})*, no *Last 1:1*, and it drills to the reader's own screens. */
   isReader: boolean;
   /**
    * The reader, or somebody they coach (`CoachResolver.coacheesOf(reader)`) whose coaching tabs their grants
    * open (`personal_summary:read` wider than `own`): the row may drill into coaching's pages. `false` for an
-   * Owner or an Admin reading a unit outside their own downline, and for an Agent-rung leader's coachees,
-   * where coaching would answer *not found*.
+   * Owner or an Admin reading a unit outside their own downline, where coaching would answer *not found*. An
+   * Agent-rung leader's coachees are `true` since P19.9-T6 (ADR-0234): every upline coaches.
    */
   coached: boolean;
   rung: { code: string; label: string };
@@ -108,6 +119,11 @@ export interface UnitRow extends UnitPerson {
    * the roster's *Closing* column, beside *Leads penjualan*, *Leads rekrut* and *Potensi rekrut* (`leadsCounts`).
    */
   closings: number;
+  /**
+   * ***Proposal*** (P19.7-T2 AC-13; ADR-0221 §7): `PROPOSALS_MADE` — their live proposals first saved as a PDF within the
+   * period's `window`. A count, and nothing about any client, product or premium (decision 4).
+   */
+  proposalsMade: number;
   activity: { leads: CountAgainst; appointments: CountAgainst; closings: CountAgainst; touches: CountAgainst };
   /** Coaching's; `null` on the reader's own row, and before a first finalized session (*No 1:1 yet*). */
   lastOneOnOne: UnitLastOneOnOne | null;
@@ -115,7 +131,7 @@ export interface UnitRow extends UnitPerson {
   /** `PACING_TO_MAA`; `null` without a target. */
   pacingToMaa: boolean | null;
   /**
-   * ***New hire*** (ADR-0172 §2–3, P18.96-T5 AC-3): a new hire with no first sale by the office's today —
+   * ***New hire*** (ADR-0172 §2–3, P18.8-T5 AC-3): a new hire with no first sale by the office's today —
    * `!COUNTS_FOR_PRODUCTION`. The row is in the team and tagged; every total above it leaves it out of the production
    * and of *On pace to be active*. `false` from the first sale's day.
    */
@@ -123,8 +139,9 @@ export interface UnitRow extends UnitPerson {
   /** The next open action item of their latest finalized session (OD-140). */
   followUp: FollowUp | null;
   /**
-   * ***Chasing MDRT*** (P18.5-T7 AC-7, ADR-0122): chasing the office's `MDRT_QUALIFICATION`, not ended. `null` for a
-   * row beyond the reader's `campaign_qualification:read` — an Agent-rung leader's coachees — drawn as —.
+   * ***Chasing MDRT*** (P18.2-T7 AC-7, ADR-0122): chasing the office's `MDRT_QUALIFICATION`, not ended. `null` for a
+   * row beyond the reader's `campaign_qualification:read`, drawn as — (an Agent-rung leader's coachees were, until
+   * P19.9-T6 gave the Agent `own-downline` there; ADR-0234).
    */
   chasingMdrt: boolean | null;
   /** ***Campaigns they're chasing*** (AC-8): their chases of campaigns not ended, by title; `null` as above. */
@@ -140,9 +157,11 @@ export interface UnitTotal {
   leadsCounts: LeadCountsRow;
   /** The rows' *Closing* summed (UI-028). */
   closings: number;
+  /** The rows' *Proposal* summed (P19.7-T2 AC-13). */
+  proposalsMade: number;
   touches: CountAgainst;
   potentialActive: { count: number; of: number };
-  /** The new hires before a first sale the goal and *on pace* leave out — named in their ⓘ (P18.96-T5 AC-4). */
+  /** The new hires before a first sale the goal and *on pace* leave out — named in their ⓘ (P18.8-T5 AC-4). */
   newHires: number;
 }
 
@@ -167,6 +186,13 @@ export interface UnitDashboardView {
   head: UnitPerson & { isReader: boolean };
   /** The head leads nobody: no rows, and the screen draws its empty state. */
   empty: boolean;
+  /**
+   * **Drawn as that leader sees it, with no write** (P19.3-T3 AC-3; UI-152's Appendix D row): the Owner or an Admin reading
+   * another leader's unit (`for`) through the office's own grant — from KPM Analytics' leader sheet, the member page or the
+   * org tree. `production.canUpdate` is then false, and a save that names this unit (`PATCH … { for }`) is refused 403.
+   * A leader reading a unit below their own keeps their writes.
+   */
+  readOnly: boolean;
   tiles: {
     /**
      * Everybody on the roster, a new hire from their join date (ADR-0172 §1); `newHires` of them before a first sale,
@@ -186,7 +212,7 @@ export interface UnitDashboardView {
   units: UnitGroup[];
   production: { month: string; revision: number; locked: boolean; canUpdate: boolean };
   /**
-   * *Chasing MDRT*'s header (P18.5-T7 AC-7, OD-152): whether the office runs an `MDRT_QUALIFICATION` campaign not
+   * *Chasing MDRT*'s header (P18.2-T7 AC-7, OD-152): whether the office runs an `MDRT_QUALIFICATION` campaign not
    * ended, and the tooltip composed from its requirement — or saying none is running.
    */
   mdrt: { running: boolean; tooltip: string };
@@ -206,6 +232,11 @@ export interface UnitPeople {
   /** Everybody, the head first, in the roster's order; only the head when they lead nobody. */
   group: string[];
   names: ReadonlyMap<string, string>;
+  /**
+   * Each person's rung (`orgLevelCode`), the head's included (P19.8-T4 AC-7): a person's own ratios apply the definitions
+   * of their own rung, as the Ratio page does for them (ADR-0020).
+   */
+  rungs: ReadonlyMap<string, string>;
   /** The head leads nobody. */
   empty: boolean;
 }
@@ -224,6 +255,8 @@ interface Head {
   coachees: Coachee[];
   /** Everybody the reader coaches (`COACH`): all of a leader's own unit, and of one below them; not always the Owner's. */
   coachedByReader: ReadonlySet<string>;
+  /** Another leader's unit read through the office's own grant (P19.3-T3 AC-3): the view writes nothing. */
+  readOnly: boolean;
 }
 
 /**
@@ -246,7 +279,7 @@ interface Head {
  * **The read is recorded** (D-audit): one §3.5 entry per member other than the reader whose figures it
  * carries, in one insert, the period's window as the range; it fails open.
  *
- * **Nothing here reads training or events, and of campaigns only the chases** (P18.5-T7 AC-8): *Chasing MDRT* and
+ * **Nothing here reads training or events, and of campaigns only the chases** (P18.2-T7 AC-8): *Chasing MDRT* and
  * *Campaigns they're chasing* through the campaigns module's one named reader, `CampaignChaseReadings`, in the same
  * read — two queries for any roster — and nothing else of that module, which a test says.
  */
@@ -260,15 +293,15 @@ export class UnitDashboardService {
     private readonly sessions: CoachingReadings,
     private readonly paces: PaceStatusReadings,
     private readonly goals: GoalService,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly months: ProductionMonths,
     private readonly corrections: ProductionCorrections,
     private readonly activity: ActivityReadings,
     private readonly leads: LeadReadings,
     private readonly subjectReads: SubjectReadAudit,
-    /** P18.5-T7 AC-8: the campaigns module's one named reader of chases, and nothing else of it. */
+    /** P18.2-T7 AC-8: the campaigns module's one named reader of chases, and nothing else of it. */
     private readonly chaseReadings: CampaignChaseReadings,
-    /** P18.96-T5: the head's own membership, for whether they count for production yet — coachees carry theirs. */
+    /** P18.8-T5: the head's own membership, for whether they count for production yet — coachees carry theirs. */
     private readonly memberships: MembershipRepository,
     /** UI V1 (UI-028): the office's imports, for the day of the latest standing one — *Last updated*. */
     private readonly batches: DataUploadBatchRepository,
@@ -278,6 +311,11 @@ export class UnitDashboardService {
      * and without it the default binding.
      */
     @Optional() @Inject(ActivityBindingService) private readonly bindings: ActivityBindingService | null = null,
+    /*
+     * P19.7-T2 AC-13 (ADR-0221 §7): `PROPOSALS_MADE` per row, through the proposals module's one named reader — a count,
+     * nothing else of a proposal. Optional, the token named; without it every row reads 0.
+     */
+    @Optional() @Inject(ProposalReadings) private readonly proposals: ProposalReadings | null = null,
   ) {}
 
   async read(
@@ -296,9 +334,9 @@ export class UnitDashboardService {
     const coached = ids.filter((id) => id !== me);
 
     /*
-     * **Chases only inside `campaign_qualification:read`'s reach** (P18.5-T7 AC-8): the reader's own row always; the
-     * office's own grant every row; a hierarchy token the people the reader coaches; `own` nobody else — so an
-     * Agent-rung leader sees their own ✓ and a — for each coachee. The dashboard's reach is unchanged.
+     * **Chases only inside `campaign_qualification:read`'s reach** (P18.2-T7 AC-8): the reader's own row always; the
+     * office's own grant every row; a hierarchy token the people the reader coaches — an Agent-rung leader's included
+     * since P19.9-T6 (ADR-0234); `own` nobody else. The dashboard's reach is unchanged.
      */
     const campaignScope = scopeFor(ctx, 'campaign_qualification:read');
     const chaseReach = new Set(ids.filter((id) => id === me || campaignScope === 'own-kpm' || campaignScope === 'all'
@@ -320,8 +358,12 @@ export class UnitDashboardService {
       this.leads.closingsOfMany(ctx, ids),
       this.lastUploadDay(ctx, office),
     ]);
+    // P19.7-T2 AC-13: each person's proposals first finished within the window — one query for the roster.
+    const made = this.proposals
+      ? await this.proposals.madeByMany(ctx, ids, window, office.timezone)
+      : new Map<string, number>();
     /*
-     * **Who counts for production on the office's today** (ADR-0172 §2, P18.96-T5 AC-2): `COUNTS_FOR_PRODUCTION`, decided
+     * **Who counts for production on the office's today** (ADR-0172 §2, P18.8-T5 AC-2): `COUNTS_FOR_PRODUCTION`, decided
      * once per row here and read by every total and tile below (`rollUpProduction`). A new hire before their first sale
      * is in the team and tagged, and in no production total and no *on pace* count — its `of` is everybody (UI-013).
      */
@@ -353,17 +395,18 @@ export class UnitDashboardService {
         [...ledgers].map(([id, ledger]) => [id, ledger.standing.yearToDate]),
       )),
       this.sessions.followUpsOf(ctx, latest.map((l) => l.sessionId), office, leadsShown),
-      // The rows' photos signed with their names (UI V1, UI-111); a coach or a corrector is only named.
-      this.names.pictured(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors], ids),
+      // The rows' photos signed with their names (UI V1, UI-111); a coach or a corrector is only named. The rows' numbers
+      // in the same user read (P19.9-T4 AC-1): no query more.
+      this.names.pictured(ctx, [...ids, ...latest.map((l) => l.coachMembershipId), ...correctors], ids, { phones: true }),
     ]);
     const names = new Map([...people].map(([id, p]) => [id, p.name]));
 
     /*
      * **Which rows open the person's coaching pages** (`coached`): the coaching person shell answers somebody
      * the reader coaches (`COACH`, `GET /coaching/coachees/:id`), and its tabs read the person's Summary on
-     * `personal_summary:read` — reaching them only by a grant wider than `own` (`CoachResolver.subject`). So an
-     * Agent-rung leader, whose Summary grant is `own`, opens none but their own; an Owner or an Admin opening a
-     * unit outside their own downline coaches none of it.
+     * `personal_summary:read` — reaching them only by a grant wider than `own` (`CoachResolver.subject`). An
+     * Agent-rung leader holds `own-downline` there since P19.9-T6 (ADR-0234), so their coachees' rows open as an AB's
+     * do; an Owner or an Admin opening a unit outside their own downline coaches none of it.
      */
     const opensCoaching = OPENS_A_SUBJECT.includes(scopeFor(ctx, 'personal_summary:read'));
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
@@ -376,8 +419,12 @@ export class UnitDashboardService {
     const row = (id: string, orgLevelCode: string, depth: number, leads: boolean): UnitRow => {
       const ledger = ledgers.get(id) as MonthLedger;
       const plan = plans.get(id)!;
-      // The Summary's own computation, the source naming who corrected the figure, as `GET /summary` does.
-      const figures = goalFigures({
+      /*
+       * The Summary's own computation, the source naming who corrected the figure, as `GET /summary` does — **over the
+       * office's figures alone** (ADR-0195, UI-157 item 5): a member's own estimate is *Belum diunggah* here, and fixes no
+       * month's target.
+       */
+      const figures = officialGoalFigures({
         goal: plan, month: office.month, ...ledger.standing, names,
       });
       const { source, ...measured } = goalPeriod === 'year' ? figures.yearly : figures.monthly;
@@ -397,6 +444,8 @@ export class UnitDashboardService {
         membershipId: id,
         name: nameOf(id),
         photoUrl: people.get(id)?.photoUrl ?? null,
+        // Nobody WhatsApps themselves, and the office's read-only view draws no button (P19.9-T4 AC-1).
+        phone: id === me || head.readOnly ? null : people.get(id)?.phone ?? null,
         isReader: id === me,
         coached: id === me || (opensCoaching && head.coachedByReader.has(id)),
         rung: { code: orgLevelCode, label: labels.get(orgLevelCode) ?? orgLevelCode },
@@ -415,6 +464,7 @@ export class UnitDashboardService {
         },
         leadsCounts: leadCounts.get(id)!,
         closings: closingsIn(closed.get(id) ?? [], window, office.timezone),
+        proposalsMade: made.get(id) ?? 0,
         activity: {
           leads: leadsChip, appointments: appointmentsChip, closings: closingsChip,
           touches: cascadeActivityTouches([leadsChip, appointmentsChip, closingsChip]),
@@ -509,9 +559,21 @@ export class UnitDashboardService {
    */
   async updateProduction(
     ctx: RequestContext,
-    body: { month: string; revision: number; rows: { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[] },
+    body: {
+      month: string; revision: number; for?: string;
+      rows: { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[];
+    },
   ): Promise<ProductionUpdated> {
     const me = requireMembership(ctx);
+    /*
+     * **The office's read-only view writes nothing** (P19.3-T3 AC-3; UI-152's Appendix D row): a save naming another
+     * leader's unit (`for`) from the Owner or an Admin — the unit KPM Analytics, the member page and the org tree open
+     * read-only — is refused before anything is read, whatever its rows. Their own dashboard, and the Data upload,
+     * keep the office's corrections.
+     */
+    if (body.for !== undefined && body.for !== me && (await this.coach.unitOf(ctx, 'unit_dashboard:update_production')).office) {
+      throw new PermissionDeniedException('unit_dashboard:update_production', { readOnly: true, for: body.for });
+    }
     const office = await this.days.office(ctx);
     if (body.month !== office.month) {
       throw invalid(UNIT_DASHBOARD_REFUSALS.VALIDATION_FAILED.currentMonthOnly({ month: office.month }), {
@@ -544,7 +606,7 @@ export class UnitDashboardService {
       month: body.month,
       revision: body.revision,
       rows: body.rows,
-      // AC-6 (P18.98-T5): the API's own reason, stored in the saving leader's language and shown as stored.
+      // AC-6 (P18.10-T5): the API's own reason, stored in the saving leader's language and shown as stored.
       reason: UNIT_DASHBOARD_MESSAGES.correctionReason,
       surface: 'unit_dashboard',
     });
@@ -565,21 +627,25 @@ export class UnitDashboardService {
     const unit = await this.coach.unitOf(ctx, 'unit_dashboard:read');
     const coachedByReader = new Set(unit.below.map((c) => c.membershipId));
     if (asked === undefined) {
-      return { membershipId: me, orgLevelCode: ctx.membership!.orgLevelCode, isReader: true, coachees: unit.below, coachedByReader };
+      return {
+        membershipId: me, orgLevelCode: ctx.membership!.orgLevelCode, isReader: true, coachees: unit.below, coachedByReader,
+        readOnly: false,
+      };
     }
     const subject = await this.coach.subject(ctx, asked, 'unit_dashboard:read', 'Unit');
     // `for` naming the reader — or nobody — is not a unit below them.
     if (subject.self) throw new NotFoundException('Unit');
     const coachees = await this.coach.coacheesOf(ctx, asked);
     if (coachees.length === 0) throw new NotFoundException('Unit');
-    return { membershipId: asked, orgLevelCode: subject.orgLevelCode, isReader: false, coachees, coachedByReader };
+    // The office's own grant reading another leader's unit: as that leader sees it, read-only (P19.3-T3 AC-3).
+    return { membershipId: asked, orgLevelCode: subject.orgLevelCode, isReader: false, coachees, coachedByReader, readOnly: unit.office };
   }
 
   /** What every answer carries, rows or none. */
   private frame(
     ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate },
     head: Head, headName: string, state: MonthState,
-  ): Pick<UnitDashboardView, 'today' | 'month' | 'year' | 'period' | 'window' | 'overdueAfterDays' | 'head' | 'production'> {
+  ): Pick<UnitDashboardView, 'today' | 'month' | 'year' | 'period' | 'window' | 'overdueAfterDays' | 'head' | 'production' | 'readOnly'> {
     return {
       today: office.today,
       month: office.month,
@@ -588,12 +654,14 @@ export class UnitDashboardService {
       window,
       overdueAfterDays: office.settings.coachingOverdueDays,
       head: { membershipId: head.membershipId, name: headName, isReader: head.isReader },
+      readOnly: head.readOnly,
       production: {
         month: office.month,
         revision: state.revision,
         locked: state.locked,
-        // The write's own grant, which a read-only support session never holds (`can`), over a unit with rows.
-        canUpdate: head.coachees.length > 0 && can(ctx, 'unit_dashboard:update_production'),
+        // The write's own grant, which a read-only support session never holds (`can`), over a unit with rows — and
+        // never in the office's read-only view of another leader's unit (P19.3-T3 AC-3).
+        canUpdate: head.coachees.length > 0 && can(ctx, 'unit_dashboard:update_production') && !head.readOnly,
       },
     };
   }
@@ -650,6 +718,10 @@ export class UnitDashboardService {
       head: { membershipId: head.membershipId, orgLevelCode: head.orgLevelCode, isReader: head.isReader },
       ...scopes,
       names,
+      rungs: new Map([
+        [head.membershipId, head.orgLevelCode],
+        ...head.coachees.map((c): [string, string] => [c.membershipId, c.membership.orgLevelCode]),
+      ]),
       empty: head.coachees.length === 0,
     };
   }
@@ -691,7 +763,7 @@ function rowsOf(group: UnitGroup): UnitRow[] {
 }
 
 /**
- * A total row over some rows, by the rollup rule — its goal **paired** (ADR-0165 §1, P18.8-T15 AC-6): a member's target
+ * A total row over some rows, by the rollup rule — its goal **paired** (ADR-0165 §1, P18.5-T15 AC-6): a member's target
  * counts only when their production is held, so a late file is named in the tooltip rather than counted as 0. **The
  * goal reads the people who count for production** (`rollUpProduction`, ADR-0172 §2): a new hire before their first
  * sale is not in it, and counted in `newHires`; ***on pace*** counts only them too and is **out of everybody** (UI-013);
@@ -703,6 +775,7 @@ function totalOf(rows: readonly UnitRow[]): UnitTotal {
     goal: production.goal,
     leadsCounts: rollUpLeadCounts(rows.map((r) => r.leadsCounts)),
     closings: rows.reduce((sum, r) => sum + r.closings, 0),
+    proposalsMade: rows.reduce((sum, r) => sum + r.proposalsMade, 0),
     touches: rollUpCounts(rows.map((r) => r.activity.touches)),
     potentialActive: production.potentialActive,
     newHires: production.newHires,
@@ -737,7 +810,7 @@ function requireMembership(ctx: RequestContext): string {
   return me;
 }
 
-/** `400 VALIDATION_FAILED` with the field it names, its sentence in both languages (P18.98-T5 AC-2). */
+/** `400 VALIDATION_FAILED` with the field it names, its sentence in both languages (P18.10-T5 AC-2). */
 function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {
   return new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, details);
 }

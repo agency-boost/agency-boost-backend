@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule } from '../../../../test/config-module';
 import { scorecardServiceOf } from '../../../../test/forum-office';
@@ -30,10 +31,10 @@ interface Query { collection: string; method: string; args: unknown[] }
  * - nothing written: no audit row, no §3.5 entry;
  * - its p95 of twenty at 500, printed for `performance-and-scale.md`.
  *
- * *Measured again 2026-10-28 (P18.97-T1 AC-21; ADR-0175):* the reference slide's table adds **two reads** — last year's
+ * *Measured again 2026-10-28 (P18.9-T1 AC-21; ADR-0175):* the reference slide's table adds **two reads** — last year's
  * year to date for *YTD {Y−1}*, and the latest upload for *AS OF* — and the bound moves from 10 to 12 with them.
  */
-describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.97-T1 AC-21)', () => {
+describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9-T1 AC-21)', () => {
   let wired: ReturnType<typeof configModule>;
   let scorecard: LeaderScorecardService;
   const compute = (kpmId: string) => scorecard.compute({ kpmId, timezone: 'Asia/Jakarta', meetingDate: MEETING });
@@ -80,8 +81,11 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9
           const ape = (i % 5 === 0 ? 0 : 5 + (i % 30)) * M;
           ytd += ape;
           rows.push({
-            kpmId, membershipId: String(id), month, agentCode: `F${seq}`, deletedAt: null, apeMonthly: cell(ape), apeYtd: cell(ytd),
-            policyCountMonthly: cell(i % 5 === 0 ? 0 : 1 + (i % 3)), newActiveAgentsMonthly: cell(i % 7 === 0 ? 1 : 0),
+            kpmId, membershipId: String(id), month, agentCode: `F${seq}`, deletedAt: null,
+            ...byKode({
+              apeMonthly: cell(ape), apeYtd: cell(ytd),
+              policyCountMonthly: cell(i % 5 === 0 ? 0 : 1 + (i % 3)), newActiveAgentsMonthly: cell(i % 7 === 0 ? 1 : 0),
+            }),
           });
         }
         if (role === 'agent' && i % 4 === 3) {
@@ -95,7 +99,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9
     };
     office(KPM_A, 500);
     office(KPM_B, 50);
-    // An upload a month, on the 5th of the next, as the import writes one: what *AS OF* reads (P18.97-T1 AC-13).
+    // An upload a month, on the 5th of the next, as the import writes one: what *AS OF* reads (P18.9-T1 AC-13).
     for (const kpmId of [KPM_A, KPM_B]) {
       for (const [i, month] of MONTHS.entries()) {
         if (month > '2026-09' || month === '2026-08') continue;
@@ -145,7 +149,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9
     }
   };
 
-  it('P18.1-T2 AC-4, P18.97-T1 AC-21 sends the same queries for 50 members as for 500, the two new reads among them: none per member', async () => {
+  it('P18.1-T2 AC-4, P18.9-T1 AC-21 sends the same queries for 50 members as for 500, the two new reads among them: none per member', async () => {
     const large = await counted(() => compute(KPM_A));
     const small = await counted(() => compute(KPM_B));
     const shape = (qs: Query[]) => qs.map((q) => `${q.collection}.${q.method}`).sort();
@@ -162,7 +166,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9
       .toEqual([]);
   });
 
-  it('P18.1-T2 AC-4, P18.97-T1 AC-21 scans no tenant collection: every query explained', async () => {
+  it('P18.1-T2 AC-4, P18.9-T1 AC-21 scans no tenant collection: every query explained', async () => {
     const db = mongoose.connection.db!;
     const scans: string[] = [];
     for (const q of await counted(() => compute(KPM_A))) {
@@ -179,7 +183,7 @@ describe('the forum’s scorecard, measured at 500 members (P18.1-T2 AC-4, P18.9
     expect(scans).toEqual([]);
   }, 120_000);
 
-  it('P18.1-T2 AC-4, P18.97-T1 AC-21 computes the 500-member scorecard well inside the meeting read’s 3 s; its p95 of twenty recorded', async () => {
+  it('P18.1-T2 AC-4, P18.9-T1 AC-21 computes the 500-member scorecard well inside the meeting read’s 3 s; its p95 of twenty recorded', async () => {
     await compute(KPM_A);
     const times: number[] = [];
     for (let i = 0; i < 20; i += 1) {

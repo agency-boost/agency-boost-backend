@@ -12,7 +12,7 @@ export const LEAD_SORT_KEYS = ['dateRegistered', 'name', 'nextActionDate', 'type
 export type LeadSortKey = (typeof LEAD_SORT_KEYS)[number];
 
 /**
- * **The order `GET /leads` answers when no `sort` is asked for: the owner's own** (P18.8-T7, ADR-0161 §1).
+ * **The order `GET /leads` answers when no `sort` is asked for: the owner's own** (P18.5-T7, ADR-0161 §1).
  *
  * `position` smallest first, which is where `PATCH /leads/order` put each lead and where a new one goes.
  * Not a key a reader can ask for, because it is the absence of one: a column sort is for the visit, and

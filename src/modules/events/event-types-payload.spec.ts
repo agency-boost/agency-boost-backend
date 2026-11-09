@@ -2,16 +2,16 @@ import { englishAll, indonesianAll } from '../../../test/i18n';
 import { defaultEventTypes, eventTypesProblems } from './event-types-payload';
 
 /**
- * **A template's event types, refused in both languages** (P18.98-T5 AC-3; P5-T9 AC-4): `eventTypesProblems` answers
+ * **A template's event types, refused in both languages** (P18.10-T5 AC-3; P5-T9 AC-4): `eventTypesProblems` answers
  * sentences, which publishing and provisioning write for their reader. The English is the API's as it always was —
  * `template-payloads.spec.ts` pins each rule — and every one of them reads in Bahasa Indonesia.
  */
-describe('P18.98-T5 AC-3 an event types payload’s problems, in both languages', () => {
-  it('P18.98-T5 AC-3 the platform defaults have none', () => {
+describe('P18.10-T5 AC-3 an event types payload’s problems, in both languages', () => {
+  it('P18.10-T5 AC-3 the platform defaults have none', () => {
     expect(eventTypesProblems(defaultEventTypes())).toEqual([]);
   });
 
-  it('P18.98-T5 AC-3 a payload that is not a list, and an empty one', () => {
+  it('P18.10-T5 AC-3 a payload that is not a list, and an empty one', () => {
     expect(englishAll(eventTypesProblems({}))).toEqual(['types must be a list.']);
     expect(indonesianAll(eventTypesProblems(null))).toEqual(['types harus berupa daftar.']);
     expect(englishAll(eventTypesProblems({ types: [] })))
@@ -20,7 +20,7 @@ describe('P18.98-T5 AC-3 an event types payload’s problems, in both languages'
       .toEqual(['Daftar jenis event tanpa satu jenis pun membuat setiap KPM baru tidak punya jenis untuk mencatat event.']);
   });
 
-  it('P18.98-T5 AC-3 every rule a row can break, each named by its place in the list', () => {
+  it('P18.10-T5 AC-3 every rule a row can break, each named by its place in the list', () => {
     const problems = eventTypesProblems({
       types: [
         { label: 'Training' },

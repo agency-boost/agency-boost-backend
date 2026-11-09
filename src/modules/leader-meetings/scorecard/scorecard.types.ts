@@ -6,7 +6,7 @@
  */
 
 /**
- * The six computed columns, in the client's reference slide's order (ADR-0175 §1, P18.97-T1 AC-1): *Full Year {Y−1}* ·
+ * The six computed columns, in the client's reference slide's order (ADR-0175 §1, P18.9-T1 AC-1): *Full Year {Y−1}* ·
  * ***YTD {Y−1}*** · *YTD {Y}* — the *Full Year & YTD View* — then *This Month, Last Year* · *Last Month* · *This Month*,
  * the *Monthly View* with the typed *Monthly Target*. **The keys are the stored shape's**: `ytdLastYear` is the one
  * added, and a scorecard frozen before it has no such cells (`scorecard-record.ts`).
@@ -21,7 +21,7 @@ export const YEAR_COLUMN_KEYS: readonly ColumnKey[] = ['fy', 'ytdLastYear', 'ytd
 export const MONTH_COLUMN_KEYS: readonly ColumnKey[] = ['thisMonthLastYear', 'lastMonth', 'thisMonth'];
 
 /**
- * The nine rows, **in the slide's order** (ADR-0175 §2, P18.97-T1 AC-4): *APE (Rp M)* · *Manpower* · *FLC* · *Annual
+ * The nine rows, **in the slide's order** (ADR-0175 §2, P18.9-T1 AC-4): *APE (Rp M)* · *Manpower* · *FLC* · *Annual
  * Active Agents* · *Activation*: *3M new agent %*, *Avg. monthly AA* · *Productivity*: *Case submission*,
  * *Cases/producing agents* · *Avg. Case Size (Rp jt)*. **The keys are the stored shape's** — `producing_agents` is the
  * row labelled *Annual Active Agents*, `PRODUCING_AGENTS`, renamed and not redefined — so no frozen scorecard's key
@@ -51,7 +51,7 @@ export const BLOCKED_ROW_KEYS: readonly RowKey[] = [
 ];
 
 /**
- * **The five rows whose *Monthly Target* is typed — as a rate per unit** (ADR-0175 §4, P18.97-T1 AC-10): *APE*,
+ * **The five rows whose *Monthly Target* is typed — as a rate per unit** (ADR-0175 §4, P18.9-T1 AC-10): *APE*,
  * *Manpower*, *FLC*, *Avg. monthly AA* and *Case submission*. *New AA*'s targets typed before stay stored, and none is
  * typed again.
  */
@@ -71,7 +71,27 @@ export type ScorecardCell =
    * *—*: **a column or a row a scorecard frozen before it existed does not hold** (ADR-0175 §8, AC-19) — never
    * computed for it, since nothing recomputes a frozen scorecard. Never written by a computation.
    */
-  | { kind: 'unrecorded' };
+  | { kind: 'unrecorded' }
+  /**
+   * *—*, *Belum diunggah* to a screen reader: **a year-before column — *Full Year {Y−1}* or *YTD {Y−1}* — whose period
+   * the office's file holds no month of** (P19.3-T1; ADR-0203 §8, the SLF map's *"Show '—' until uploaded"*), where its
+   * cell would read *pending data*. Every other cell keeps *pending data*.
+   */
+  | { kind: 'not_uploaded' };
+
+/**
+ * **The definitions a scorecard's rows were computed with** (P19.3-T1; ADR-0202 §4, ADR-0203): what its footnotes must
+ * describe, since a frozen scorecard is never recomputed (ADR-0129 §7).
+ *
+ * - `data_sources` — the owner's data sources of 3 November: *3M new agent %* is D7 (`NEW_AGENT_ACTIVATION_3M_PCT`),
+ *   *FLC* the upload's recruitment (`RECRUITMENT_MONTHLY_AVG`), *Cases/producing agents* per active agent per month.
+ *   Every live scorecard, and every one frozen since P19.3-T1, which stores it.
+ * - `reference_slide` — ADR-0175's and ADR-0171's: *3M new agent %* a first paid-and-issued case by day 90
+ *   (`ACTIVATION_3M_PCT`), *FLC* pending, *Cases/producing agents* over *Annual Active Agents*. **Every scorecard frozen
+ *   before P19.3-T1**, which stores none — its absence is the marker.
+ */
+export const SCORECARD_DEFINITIONS = ['data_sources', 'reference_slide'] as const;
+export type ScorecardDefinitions = (typeof SCORECARD_DEFINITIONS)[number];
 
 /** `ratio` is *Cases/producing agents*, a count over a count, drawn to a tenth. */
 export type ScorecardUnit = 'idr_minor' | 'count' | 'percentage' | 'ratio';
@@ -98,7 +118,11 @@ export interface ComputedScorecardRow {
 export interface ScorecardChips {
   manpower: number;
   agents: number;
-  /** *# of units* = *# of AB* + *# of AAB* since 2026-10-28 (ADR-0175 §3); the AB agencies before it, as frozen. */
+  /**
+   * *# of units*: **the AB and AAB who lead at least one active member** since P19.3-T1 (ADR-0203 §1, the SLF map's
+   * *"Units = number of AB + AAB with ≥ 1 downline"*), so it may be less than *# of AB* + *# of AAB*; *# of AB* + *# of
+   * AAB* from 2026-10-28 (ADR-0175 §3); the AB agencies before it — each as frozen.
+   */
   units: number;
   ab: number;
   aab: number;
@@ -124,6 +148,8 @@ export interface ComputedScorecard {
    * `YYYY-MM-DD` in its calendar — or `null` while it has none. Frozen with the scorecard.
    */
   asOf: string | null;
+  /** Which definitions the rows follow — always `data_sources` when computed; stored with a freeze (`ScorecardDefinitions`). */
+  definitions: ScorecardDefinitions;
 }
 
 /** What a scorecard is computed for: the office, its calendar, and the meeting's own date. */

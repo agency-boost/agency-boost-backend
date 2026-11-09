@@ -1,7 +1,7 @@
 import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
-  activityTargets, goalFigures, madeFigures, monthlyApeTarget, paceFor, periodFigures, sectionChips, summaryPlan, totalLogged,
-  ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
+  activityTargets, goalFigures, madeFigures, monthlyApeTarget, officialGoalFigures, paceFor, periodFigures, productionHeld,
+  sectionChips, summaryPlan, totalLogged, ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
 } from './summary-figures';
 
 const RP = 100; // minor units per rupiah
@@ -27,7 +27,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(periodFigures(1 * M, 50 * M, 18 * M).attainmentPct).toBe(999);
     });
 
-    it('P18.97-T3 F-254 rounds an exact half up in integers: Rp 23 jt of Rp 40 jt is 58%, which the float read 57', () => {
+    it('P18.9-T3 F-254 rounds an exact half up in integers: Rp 23 jt of Rp 40 jt is 58%, which the float read 57', () => {
       expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
       expect(periodFigures(40 * M, 23 * M, 18 * M).attainmentPct).toBe(58);
       // The cap and the zero target's null are kept: only the rounding changed.
@@ -172,7 +172,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(leads).toMatchObject({ code: 'RECRUIT_FOLLOWUP', logged: 9 });
     });
 
-    it('P18.9-T2 AC-2 a role bound to [A, B] counts both: the replaced activity’s history and its replacement', () => {
+    it('P18.6-T2 AC-2 a role bound to [A, B] counts both: the replaced activity’s history and its replacement', () => {
       const [leads] = activityTargets(
         { leads: 80, appointments: 1, policies: 1 }, { ...mapping, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }, logged,
       );
@@ -191,7 +191,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(closings).toMatchObject({ target: 0, attainmentPct: null, targetMet: true });
     });
 
-    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 logged of a target of 40 is 58%, never 57', () => {
+    it('P18.9-T3 F-254 rounds an exact half up in integers: 23 logged of a target of 40 is 58%, never 57', () => {
       const [leads] = activityTargets({ leads: 40, appointments: 1, policies: 1 }, mapping, new Map([['LEADS_CONTACTED', 23]]));
       expect(leads).toMatchObject({ logged: 23, target: 40, attainmentPct: 58, targetMet: false });
     });
@@ -234,7 +234,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       });
     });
 
-    it('P18.9-T2 AC-5 an archived section keeps, on its tile, the types the period holds counts for', () => {
+    it('P18.6-T2 AC-5 an archived section keeps, on its tile, the types the period holds counts for', () => {
       const archived: ShownSection[] = [
         { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
           { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
@@ -257,7 +257,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       ]);
     });
 
-    it('P18.9-T2 AC-5 an archived section holding a bound code never takes a live tile out with it', () => {
+    it('P18.6-T2 AC-5 an archived section holding a bound code never takes a live tile out with it', () => {
       const archived: ShownSection[] = [
         { code: 'COMMUNITY', label: 'Community', summaryGroupCode: 'OUTREACH', summaryGroupLabel: 'Outreach', types: [
           { code: 'COMMUNITY_EVENT', label: 'Event', status: 'active' },
@@ -304,7 +304,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
 
     it('the seed gives the prototype’s two: Recruitment and Development (`Overall.html:3164-3183`)', () => {
       const chips = sectionChips(seed, new Map(), cascade);
-      // *Development* in Bahasa Indonesia since P18.98-T7 (OD-238); *Recruitment* is kept English.
+      // *Development* in Bahasa Indonesia since P18.10-T7 (OD-238); *Recruitment* is kept English.
       expect(chips.map((c) => [c.code, c.label])).toEqual([
         ['RECRUITMENT', 'Recruitment'],
         ['DEVELOPMENT', 'Pengembangan'],
@@ -454,5 +454,63 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(figuresOf({ savedAt: null }).plan.yearlyCounts).toBeNull();
       expect(figuresOf({ caseSizeMinor: 0 }).plan.yearlyCounts).toBeNull();
     });
+  });
+});
+
+/** P19.1-T4 (UI-157; ADR-0195): the member's own estimate, read as theirs on their screens and as nothing elsewhere. */
+describe('P19.1-T4 a member’s estimate and the office’s figures', () => {
+  const plannedGoal = (over: Partial<PlannedGoal> = {}): PlannedGoal => ({
+    savedAt: '2026-01-05T02:00:00.000Z',
+    projected: { annualApeTargetMinor: 500 * M },
+    achieved: { minor: 120 * M, month: null, provenance: 'self_reported' },
+    caseSizeMinor: 18 * M, leadsToApptPct: 30, closingRatePct: 30,
+    ...over,
+  });
+  const input = (over: Partial<PlannedGoal> = {}) => ({
+    goal: plannedGoal(over), month: '2026-09', throughLastMonth: null, thisMonth: null, yearToDate: null, names: new Map<string, string>(),
+  });
+
+  it('P19.1-T4 AC-12 officialGoalFigures: an estimate is no APE produced, no source, and fixes no month’s target', () => {
+    const own = goalFigures(input());
+    const official = officialGoalFigures(input());
+    // The member's own: (500 − 120) ÷ 4 = 95 M, and the year measured against the estimate.
+    expect(own.plan.monthlyTargetMinor).toBe(95 * M);
+    expect(own.yearly).toMatchObject({ actualMinor: 120 * M, attainmentPct: 24, source: { provenance: 'self_reported' } });
+    // A leader's and the office's: nothing held — 500 ÷ 4 — and *Belum diunggah* for the year.
+    expect(official.plan.monthlyTargetMinor).toBe(125 * M);
+    expect(official.yearly).toMatchObject({ targetMinor: 500 * M, actualMinor: null, attainmentPct: null, gapMinor: null, source: null });
+  });
+
+  it('P19.1-T4 AC-12 officialGoalFigures: the office’s figure reads exactly as the member’s own read does', () => {
+    const held = { minor: 200 * M, provenance: 'imported' as const, month: '2026-08', correctedBy: null, correctedAt: null };
+    const withFile = { ...input({ achieved: { minor: 200 * M, month: '2026-08', provenance: 'imported' } }), throughLastMonth: { minor: 200 * M }, yearToDate: held };
+    expect(officialGoalFigures(withFile)).toEqual(goalFigures(withFile));
+  });
+
+  it('P19.1-T4 AC-8 productionHeld: nothing held counts 0 achieved for the helpers — the whole target, and its policies', () => {
+    const month = periodFigures(95 * M, null, 18 * M);
+    expect(productionHeld({ ...month, source: null }, 18 * M)).toEqual({
+      production: 'none', withoutProduction: { gapMinor: 95 * M, policiesNeeded: 6 },
+    });
+    // A year with nothing typed is nothing held, too: its own figure is 0.
+    const year = periodFigures(500 * M, 0, 18 * M);
+    expect(productionHeld({ ...year, source: { provenance: 'self_reported', month: null, correctedBy: null, correctedAt: null } }, 18 * M))
+      .toEqual({ production: 'none', withoutProduction: { gapMinor: 500 * M, policiesNeeded: 28 } });
+  });
+
+  it('P19.1-T4 AC-10 productionHeld: an estimate and the office’s figure are said, and need no helpers', () => {
+    const source = (provenance: 'self_reported' | 'imported' | 'corrected') => ({ provenance, month: null, correctedBy: null, correctedAt: null });
+    expect(productionHeld({ ...periodFigures(500 * M, 120 * M, 18 * M), source: source('self_reported') }, 18 * M))
+      .toEqual({ production: 'estimate', withoutProduction: null });
+    expect(productionHeld({ ...periodFigures(500 * M, 120 * M, 18 * M), source: source('imported') }, 18 * M))
+      .toEqual({ production: 'official', withoutProduction: null });
+    expect(productionHeld({ ...periodFigures(500 * M, 0, 18 * M), source: source('corrected') }, 18 * M))
+      .toEqual({ production: 'official', withoutProduction: null });
+  });
+
+  it('P19.1-T4 AC-8 productionHeld: no helpers without a target, with a month already made, or without a case size’s policies', () => {
+    expect(productionHeld({ ...periodFigures(null, null, 18 * M), source: null }, 18 * M).withoutProduction).toBeNull();
+    expect(productionHeld({ ...madeFigures(null), source: null }, 18 * M).withoutProduction).toBeNull();
+    expect(productionHeld({ ...periodFigures(95 * M, null, 0), source: null }, 0).withoutProduction).toEqual({ gapMinor: 95 * M, policiesNeeded: null });
   });
 });

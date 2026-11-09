@@ -245,7 +245,7 @@ export class ApprovalsService {
    * same question OD-23 answers. OD-23 says do not infer *"is a leader"* from the role;
    * leadership is the graph. *"May they hold a unit"* is about the rung, and the second
    * arm below keeps OD-23's answer available anyway: somebody who already leads people
-   * has a unit whatever they are called. P3.5-T8 restates the first arm against the
+   * has a unit whatever they are called. P3.1-T8 restates the first arm against the
    * ladder, where it becomes "not the bottom rung".
    *
    * Built per **requested leader**, not per actor: see `forLeaderMembershipId`.
@@ -316,7 +316,7 @@ export class ApprovalsService {
   /**
    * Approve a join request — into the requested leader's unit, or one of their AABs'.
    *
-   * **`joinDate`** (ADR-0169, P18.96-T2) is the day the person joined, as the approver gives it; omitted, the
+   * **`joinDate`** (ADR-0169, P18.8-T2) is the day the person joined, as the approver gives it; omitted, the
    * office's today. It is checked before anything is written. It classifies them **once**, so for somebody who
    * already has a join date here — an active member whose request moves them — it changes nothing: their date is
    * corrected on their new hire's detail, never by a second approval.
@@ -491,7 +491,7 @@ export class ApprovalsService {
 
   /**
    * **Put a leaderless member of this office under `leaderId`, now** — a tag, and *+ Add agent* for an account that
-   * has no leader here (ADR-0170 §4, P18.96-T3 AC-3). Every refusal a tag meets (`assertTaggable`), with the leader
+   * has no leader here (ADR-0170 §4, P18.8-T3 AC-3). Every refusal a tag meets (`assertTaggable`), with the leader
    * in the caller's place: somebody already in a unit, the leader themselves, the office's root, an orphan who leads
    * a unit for anybody but the office. Then the join date (ADR-0169), the placement, any request they had open
    * cancelled, and their notice. `via` is what the audit row and the notice say brought them: a tag, or the form.
@@ -813,7 +813,7 @@ export class ApprovalsService {
       after: {
         leaderId,
         requestId: audit.requestId,
-        // P18.96-T3: *+ Add agent* linking an account says so, beside a tag from the untagged pool.
+        // P18.8-T3: *+ Add agent* linking an account says so, beside a tag from the untagged pool.
         ...(audit.via === 'add_agent' ? { via: 'add_agent' } : {}),
         ...(joining ?? {}),
         ...(seat.pastLimit ? { leaderLimitRequestId: seat.pastLimit.approvedRequestId } : {}),

@@ -79,7 +79,7 @@ describe('reading a lead’s fields (P7-T1)', () => {
         .toThrow(/contact.phone must be at most 32/);
     });
 
-    it('P18.98-T5 AC-3 says every one of them in Indonesian, joined as the message, each field named as the API names it', () => {
+    it('P18.10-T5 AC-3 says every one of them in Indonesian, joined as the message, each field named as the API names it', () => {
       try {
         checkLead({
           ...ok, nextActionDate: '24/09/2026', thisMonth: 'yes', version: 0,

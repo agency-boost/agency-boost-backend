@@ -22,7 +22,7 @@ const ROUTES: Record<string, string> = {
   list: 'lead:read',
   read: 'lead:read',
   create: 'lead:create',
-  // P18.8-T7: the owner's own order. `lead-order.int.spec.ts` asks whose list it writes.
+  // P18.5-T7: the owner's own order. `lead-order.int.spec.ts` asks whose list it writes.
   reorder: 'lead:update',
   // UI V1 (UI-104): the owner's tick on a next action, from Calendar.
   setNextActionDone: 'lead:update',
@@ -169,8 +169,9 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
 
       const one = await http().get(`${url}/${id}`).expect(200);
       expect(one.body.history).toEqual([
-        { at: NOW.toISOString(), fromStatusCode: null, toStatusCode: 'FOLLOW_UP' },
-        { at: NOW.toISOString(), fromStatusCode: 'FOLLOW_UP', toStatusCode: 'POLICY_SUBMITTED' },
+        // `kind` since P19.7-T2 (ADR-0221 §6): a move, beside the owner's *"Proposal dibuat"* notes.
+        { kind: 'stage', at: NOW.toISOString(), fromStatusCode: null, toStatusCode: 'FOLLOW_UP' },
+        { kind: 'stage', at: NOW.toISOString(), fromStatusCode: 'FOLLOW_UP', toStatusCode: 'POLICY_SUBMITTED' },
       ]);
       const list = await http().get(url).expect(200);
       expect(list.body.rows[0]).not.toHaveProperty('history');
@@ -214,13 +215,13 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
   });
 
   /*
-   * **The same refusals in Indonesian** (P18.98-T5 AC-7): the words follow the request's `Accept-Language`; the
+   * **The same refusals in Indonesian** (P18.10-T5 AC-7): the words follow the request's `Accept-Language`; the
    * code, the status and every detail that is no sentence are the same in both. A field is named as the API names it.
    */
-  describe('P18.98-T5 AC-7 in Indonesian', () => {
+  describe('P18.10-T5 AC-7 in Indonesian', () => {
     const inIndonesian = () => request(app.getHttpServer());
 
-    it('P18.98-T5 AC-7 refuses a lead field by field, every violation in Indonesian, joined as the message', async () => {
+    it('P18.10-T5 AC-7 refuses a lead field by field, every violation in Indonesian, joined as the message', async () => {
       const res = await inIndonesian().post(url).set('Accept-Language', 'id')
         .send({ name: 'B', thisMonth: 'yes', contact: { email: 'nope', whatsapp: '0812' } }).expect(400);
 
@@ -245,7 +246,7 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-7 refuses a second outcome, and the other ladder’s stage, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a second outcome, and the other ladder’s stage, in Indonesian', async () => {
       const { body } = await add({ type: 'sales' }).expect(201);
       await http().patch(`${url}/${body.id}/status`).send({ statusCode: 'FOLLOW_UP' }).expect(200);
       await http().patch(`${url}/${body.id}/outcome`).send({ outcome: 'lost' }).expect(200);

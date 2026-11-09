@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 /**
- * **The seed's new hires: whoever it gave an activation** (ADR-0169, P18.96-T2).
+ * **The seed's new hires: whoever it gave an activation** (ADR-0169, P18.8-T2).
  *
  * `place()` writes every membership it makes active with a join date — the day it backdates the join to — and as an
  * **existing agent**. The fixtures that write an activation then call this for the memberships they wrote one for:

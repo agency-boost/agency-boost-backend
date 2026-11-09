@@ -8,7 +8,7 @@ import { LeadPipeline, LeadStatusDocument } from './lead-status.schema';
 import { checkLeadStatusCreate, checkLeadStatusLabel } from './config-input';
 import { CONFIG_REFUSALS } from './config.messages';
 
-/** The pipelines' own refusals, in both languages (P18.98-T5 AC-3). */
+/** The pipelines' own refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 export interface LeadStatusView {

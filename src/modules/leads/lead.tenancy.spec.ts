@@ -18,7 +18,7 @@ const member = (kpmId: string, membershipId: string) => new RequestContext('u1',
 /** Somebody signed in who has joined no office yet. */
 const noOffice = () => new RequestContext('u9', 'none', null);
 
-/** The three leads a P18.8-T7 case reorders, by id. */
+/** The three leads a P18.5-T7 case reorders, by id. */
 type Ids = { first: string; second: string; third: string };
 
 /**
@@ -764,7 +764,7 @@ describe('the lead record (P7-T1)', () => {
       await wired.leadRecords.update(A(), id.get('Sales blank, Sep 1')!, { nextActionDate: '2026-09-30' });
 
       // Newest registration first when asked for — the prototype's default (`:5432`). Asked for nothing,
-      // the list is in its owner's order since P18.8-T7: the last lead added on top.
+      // the list is in its owner's order since P18.5-T7: the last lead added on top.
       expect((await names({ sort: 'dateRegistered', dir: 'desc' })).slice(0, 2)).toEqual(['Sales new, Sep 24', 'Sales, Sep 22']);
       expect((await names({})).slice(0, 2)).toEqual(['Sales, Sep 15', 'No type, Sep 10']);
       expect((await names({ sort: 'nextActionDate', dir: 'desc' })).slice(0, 2))
@@ -1011,10 +1011,10 @@ describe('the lead record (P7-T1)', () => {
   });
 
   /**
-   * The owner's own order (P18.8-T7, ADR-0161 §1): `position`, a new lead on top, `PATCH /leads/order`
+   * The owner's own order (P18.5-T7, ADR-0161 §1): `position`, a new lead on top, `PATCH /leads/order`
    * the only write, and every refusal before anything is written.
    */
-  describe('P18.8-T7 — the owner’s own order', () => {
+  describe('P18.5-T7 — the owner’s own order', () => {
     beforeEach(() => provisionOffice(wired, KPM_A, COMPANY));
 
     const db = () => mongoose.connection.db!;
@@ -1028,7 +1028,7 @@ describe('the lead record (P7-T1)', () => {
       return { first, second, third };
     };
 
-    it('P18.8-T7 AC-1 puts a new lead at the top: one place before the owner’s first', async () => {
+    it('P18.5-T7 AC-1 puts a new lead at the top: one place before the owner’s first', async () => {
       const { first, second, third } = await three();
 
       expect(await names(A())).toEqual(['Third added', 'Second added', 'First added']);
@@ -1036,7 +1036,7 @@ describe('the lead record (P7-T1)', () => {
         .toEqual([0, -1, -2]);
     });
 
-    it('P18.8-T7 AC-1 places a new lead by its owner’s list alone, never another office’s', async () => {
+    it('P18.5-T7 AC-1 places a new lead by its owner’s list alone, never another office’s', async () => {
       await create(B(), { name: 'Theirs' });
       await create(B(), { name: 'Theirs too' });
       const mine = await create(A(), { name: 'Mine' });
@@ -1044,7 +1044,7 @@ describe('the lead record (P7-T1)', () => {
       expect((await stored(mine.id))!.position).toBe(0);
     });
 
-    it('P18.8-T7 AC-2 AC-3 saves the order sent, and the list without a sort reads it', async () => {
+    it('P18.5-T7 AC-2 AC-3 saves the order sent, and the list without a sort reads it', async () => {
       const { first, second, third } = await three();
 
       const saved = await wired.leadRecords.reorder(A(), [second.id, first.id, third.id]);
@@ -1058,7 +1058,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await names(A())).toEqual(['Fourth added', 'Second added', 'First added', 'Third added']);
     });
 
-    it('P18.8-T7 AC-3 sorts by a key asked for as before, and saves nothing by it', async () => {
+    it('P18.5-T7 AC-3 sorts by a key asked for as before, and saves nothing by it', async () => {
       const { first, second, third } = await three();
       await wired.leadRecords.reorder(A(), [second.id, third.id, first.id]);
 
@@ -1069,7 +1069,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await names(A(), { dir: 'asc' })).toEqual(['Second added', 'Third added', 'First added']);
     });
 
-    it('P18.8-T7 AC-2 is a place, not a change: no version moves and the last editor stays', async () => {
+    it('P18.5-T7 AC-2 is a place, not a change: no version moves and the last editor stays', async () => {
       const { first, second, third } = await three();
       await db().collection('leads').updateOne(
         { _id: new mongoose.Types.ObjectId(first.id) }, { $set: { updatedBy: 'mem-leader' } },
@@ -1088,7 +1088,7 @@ describe('the lead record (P7-T1)', () => {
       ['a lead named twice', (l: Ids) => [l.first, l.second, l.third, l.first]],
       ['an id that is nobody’s lead', (l: Ids) => [l.first, l.second, l.third, '66f00000000000000000ffff']],
       ['a lead named twice in place of another', (l: Ids) => [l.first, l.second, l.second]],
-    ])('P18.8-T7 AC-2 refuses %s with 400, and writes nothing', async (_name, ids) => {
+    ])('P18.5-T7 AC-2 refuses %s with 400, and writes nothing', async (_name, ids) => {
       const { first, second, third } = await three();
 
       await expect(wired.leadRecords.reorder(A(), ids({ first: first.id, second: second.id, third: third.id })))
@@ -1098,7 +1098,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await db().collection('auditLog').countDocuments({ action: 'lead.reordered' })).toBe(0);
     });
 
-    it('P18.8-T7 AC-2 takes the open leads only: a closed or a deleted one is refused, and is not missed', async () => {
+    it('P18.5-T7 AC-2 takes the open leads only: a closed or a deleted one is refused, and is not missed', async () => {
       const { first, second, third } = await three();
       await wired.leadRecords.setOutcome(A(), second.id, 'lost');
       const gone = await create(A(), { name: 'Deleted' });
@@ -1113,7 +1113,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await names(A(), { outcome: 'open' })).toEqual(['First added', 'Third added']);
     });
 
-    it('P18.8-T7 AC-2 refuses another office’s leads, and leaves its order as it was', async () => {
+    it('P18.5-T7 AC-2 refuses another office’s leads, and leaves its order as it was', async () => {
       const ours = await three();
       const theirs = await create(B(), { name: 'Theirs, first' });
       await create(B(), { name: 'Theirs, second' });
@@ -1128,7 +1128,7 @@ describe('the lead record (P7-T1)', () => {
       expect((await stored(theirs.id))!.position).toBe(0);
     });
 
-    it('P18.8-T7 AC-2 `reposition` finds nothing outside the caller’s office or the owner named, whatever ids it is handed', async () => {
+    it('P18.5-T7 AC-2 `reposition` finds nothing outside the caller’s office or the owner named, whatever ids it is handed', async () => {
       const repository = (wired.leadRecords as unknown as { leads: LeadRepository }).leads;
       const theirs = await create(B(), { name: 'Theirs' });
       const mine = await create(A(), { name: 'Mine' });
@@ -1140,7 +1140,7 @@ describe('the lead record (P7-T1)', () => {
       expect(await repository.reposition(A(), 'mem-a1', [])).toBe(0);
     });
 
-    it('P18.8-T7 AC-2 writes one `lead.reordered` entry with the count, and no name', async () => {
+    it('P18.5-T7 AC-2 writes one `lead.reordered` entry with the count, and no name', async () => {
       const { first, second, third } = await three();
 
       await wired.leadRecords.reorder(A(), [first.id, second.id, third.id]);
@@ -1151,12 +1151,12 @@ describe('the lead record (P7-T1)', () => {
       expect(JSON.stringify(entries[0])).not.toContain('added');
     });
 
-    it('P18.8-T7 AC-2 refuses somebody who has joined no office by name', async () => {
+    it('P18.5-T7 AC-2 refuses somebody who has joined no office by name', async () => {
       await expect(wired.leadRecords.reorder(noOffice(), ['66f00000000000000000ffff']))
         .rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
     });
 
-    it('P18.8-T7 AC-1 a reopened lead goes back to the place it had', async () => {
+    it('P18.5-T7 AC-1 a reopened lead goes back to the place it had', async () => {
       const { first, second, third } = await three();
       await wired.leadRecords.reorder(A(), [first.id, second.id, third.id]);
       await wired.leadRecords.setOutcome(A(), second.id, 'lost');

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # `docker compose` for this VM, with the project, the file, the variable files and the deployed
-# environments' profiles already given (P18.7-T3, ADR-0155). The systemd unit starts the stack through
+# environments' profiles already given (P18.4-T3, ADR-0155). The systemd unit starts the stack through
 # it, and an operator reads it through it:
 #
 #   sudo /opt/agencyboost/bin/compose.sh ps

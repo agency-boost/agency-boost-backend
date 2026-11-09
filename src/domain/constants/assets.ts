@@ -17,26 +17,58 @@ export const ASSET_LIMITS = {
   MAX_BYTES: 25 * 1024 * 1024,
   /**
    * The whole vocabulary, and `modules/assets/content-sniff.ts` holds a byte signature for exactly
-   * this list (P18.7-T2) — a type with none, or bytes that contradict the claim, confirm as
+   * this list (P18.4-T2) — a type with none, or bytes that contradict the claim, confirm as
    * `application/octet-stream` and are refused.
+   *
+   * **The vocabulary, not a route's list** (P19.6-T2, ADR-0217 §1): `text/html` is in it so a file can be confirmed
+   * as HTML, and only the routes that name `TRAINING_FILE_MIME_TYPES` or `DOCUMENT_MIME_TYPES` accept one. A route
+   * that names no list takes `DEFAULT_UPLOAD_MIME_TYPES`, which has no HTML.
    */
   ALLOWED_MIME_TYPES: [
     'image/jpeg', 'image/png', 'image/webp',
     'application/pdf',
     'video/mp4',
     'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/html',
   ] as const,
   /** 300 seconds. Nothing in storage is publicly readable, so every read is a signed, expiring URL. */
   SIGNED_URL_TTL_SECONDS: 300,
 } as const;
 
 /**
- * **A document somebody opens for a customer or a candidate: a PDF, and nothing else** (Phase 17, D-slots,
- * P17-T9). The office's recruitment pitch documents and its own product documents are uploaded under this
- * narrower list, checked before a signature is issued and again against what storage reports (ADR-0040);
- * every other upload keeps `ALLOWED_MIME_TYPES`.
+ * **An HTML page: a lesson, or a page an office shows a customer or a candidate** (P19.6-T2, ADR-0217). Text has no
+ * signature, so only the claim can name it, confirmed by its first bytes (`content-sniff.ts`). Served inline from the
+ * storage host alone and drawn only inside a frame sandboxed to `allow-scripts`; never linked on its own.
  */
-export const DOCUMENT_MIME_TYPES = ['application/pdf'] as const;
+export const HTML_MIME_TYPE = 'text/html';
+
+/**
+ * **A document somebody opens for a customer or a candidate: a PDF, or an HTML page** (Phase 17, D-slots,
+ * P17-T9; P19.6-T2, ADR-0217 §1). The office's recruitment pitch documents and its own product documents are
+ * uploaded under this narrower list, checked before a signature is issued and again against what storage reports
+ * (ADR-0040).
+ */
+export const DOCUMENT_MIME_TYPES = ['application/pdf', HTML_MIME_TYPE] as const;
+
+/**
+ * **A training module's material** (P5-T2, ADR-0032; P19.6-T2, ADR-0217 §1): the route that signs a module's *File*
+ * — the office's, `POST /kpm/settings/training/uploads`, and the template's (ADR-0208 §1) — takes the list it always
+ * took, the images, a PDF, a CSV, a workbook and the *Video* slot's MP4, **and an HTML lesson**.
+ */
+export const TRAINING_FILE_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/webp',
+  'application/pdf',
+  'video/mp4',
+  'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  HTML_MIME_TYPE,
+] as const;
+
+/**
+ * **What a route that names no list of its own accepts: the vocabulary without HTML** (ADR-0217 §1). HTML runs a
+ * script, so it is accepted only where a route says so — the four of ADR-0217's table — and never by default.
+ */
+export const DEFAULT_UPLOAD_MIME_TYPES: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES
+  .filter((type) => type !== HTML_MIME_TYPE);
 
 /**
  * **A person's profile photo** (UI V1, UI-111; `metrics-and-definitions.md` §B.9): the square the screen crops it to
@@ -60,7 +92,7 @@ export const AVATAR = {
   /** 1 hour: a cached link this close to its end is signed again, so no page draws one that dies on it. */
   URL_RENEW_SECONDS: 60 * 60,
   /**
-   * 20 upload forms per account per `UPLOAD_WINDOW_SECONDS` (the Phase 18.99 exit review, L5), counted whether or not
+   * 20 upload forms per account per `UPLOAD_WINDOW_SECONDS` (the Phase 18.11 exit review, L5), counted whether or not
    * the claim passes, past which `POST /auth/me/avatar/upload` is `429 AUTH_RATE_LIMITED`. A person changes their photo
    * a few times and retries a failed crop; twenty is far above that, and far below what filling storage with objects
    * nobody attaches would take — the runtime signer cannot delete (ADR-0153), so every form signed may leave one.

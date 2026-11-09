@@ -18,7 +18,7 @@ import { BINDING_ROLE_LABEL, defaultBinding, roleOfCode, type CascadeBinding } f
 import { ActivityBindingService } from './activity-binding.service';
 import { CONFIG_REFUSALS } from './config.messages';
 
-/** The taxonomy's own refusals, in both languages (P18.98-T5 AC-3). */
+/** The taxonomy's own refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**
@@ -73,6 +73,8 @@ export interface ActivityTypeView {
   code: string;
   categoryCode: string;
   label: string;
+  /** *Nama singkat* (P19.8-T4, ADR-0229 §5): the activity table's one line; `null` for none. */
+  shortLabel: string | null;
   description: string | null;
   displayOrder: number;
   version: number;
@@ -357,9 +359,9 @@ export class ActivityConfigService {
 
   async createType(
     ctx: RequestContext,
-    body: { code: string; categoryCode: string; label: string; description?: string | null },
+    body: { code: string; categoryCode: string; label: string; shortLabel?: string | null; description?: string | null },
   ): Promise<ActivityTypeView> {
-    const { code, categoryCode, label, description } = checkTypeCreate(body);
+    const { code, categoryCode, label, shortLabel, description } = checkTypeCreate(body);
     await this.refuseDuplicateType(ctx, code);
     await this.requireLiveCategory(ctx, categoryCode);
 
@@ -367,6 +369,7 @@ export class ActivityConfigService {
       code,
       categoryCode,
       label,
+      shortLabel,
       description,
       displayOrder: (await this.types.count(ctx, {})) + 1,
       version: 1,
@@ -387,11 +390,12 @@ export class ActivityConfigService {
   async updateType(
     ctx: RequestContext,
     id: string,
-    body: { label?: string; description?: string | null; categoryCode?: string },
+    body: { label?: string; shortLabel?: string | null; description?: string | null; categoryCode?: string },
   ): Promise<ActivityTypeView> {
     const input = checkTypeUpdate(body);
     const set: Record<string, unknown> = {};
     if (input.label !== undefined) set.label = input.label;
+    if (input.shortLabel !== undefined) set.shortLabel = input.shortLabel;
     if (input.description !== undefined) set.description = input.description;
     if (input.categoryCode !== undefined) {
       await this.requireLiveCategory(ctx, input.categoryCode);
@@ -590,6 +594,8 @@ export class ActivityConfigService {
       code: doc.code,
       categoryCode: doc.categoryCode,
       label: doc.label,
+      // `?? null`: a row written before the field (P19.8-T4) has no key until migration 0060 runs.
+      shortLabel: doc.shortLabel ?? null,
       description: doc.description,
       appliesToOrgLevelCodes: categoryRungs,
       displayOrder: doc.displayOrder,

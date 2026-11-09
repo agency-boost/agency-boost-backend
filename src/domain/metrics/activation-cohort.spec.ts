@@ -37,6 +37,6 @@ describe('ACTIVATION_COHORT (P18.1-T1; D-cohort, ADR-0102, ADR-0103)', () => {
       expect(activationCohort(hires, { from: '2026-02-01', to: '2026-02-28' })).toEqual(['early']);
     });
   });
-  // P18.96-T6: the four months and the share were `NEW_AGENT_3M_ACTIVE_PCT`'s, retired by ADR-0171 §2 for `ACTIVATION_3M_PCT`
+  // P18.8-T6: the four months and the share were `NEW_AGENT_3M_ACTIVE_PCT`'s, retired by ADR-0171 §2 for `ACTIVATION_3M_PCT`
   // (`activation-3m.spec.ts`). The cohort stays, for `ACTIVATION_COMPLETION_RATE`.
 });

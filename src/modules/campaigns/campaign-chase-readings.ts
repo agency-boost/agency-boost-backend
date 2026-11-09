@@ -31,7 +31,7 @@ export interface ChaseReading {
 }
 
 /**
- * **The one named reader of chases** (P18.5-T7 AC-8, P18.5-T9 AC-2): the Personal Summary's *Campaigns you're
+ * **The one named reader of chases** (P18.2-T7 AC-8, P18.2-T9 AC-2): the Personal Summary's *Campaigns you're
  * chasing*, the coachee's *Campaigns she's chasing*, and the Unit Dashboard's *Chasing MDRT* ✓ and *Campaigns
  * they're chasing* all read here — so the chips, the ✓ and the rows cannot disagree (exit test 3, ADR-0122).
  *
@@ -86,7 +86,7 @@ export class CampaignChaseReadings {
       byMember,
       mdrt: {
         running: mdrt !== null,
-        // Written for the reader who asked (P18.98-T5 AC-4): the Unit Dashboard's header answers it as it is.
+        // Written for the reader who asked (P18.10-T5 AC-4): the Unit Dashboard's header answers it as it is.
         tooltip: mdrtTooltip(mdrt === null ? null : { requirements: mdrt.requirements }, ctx.reader),
       },
     };

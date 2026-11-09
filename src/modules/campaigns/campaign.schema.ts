@@ -71,13 +71,13 @@ export class Campaign {
 
   /**
    * The last instant it runs. **`null` for a structural campaign with no end** — a promotion path or an ongoing
-   * incentive, drawn *Ongoing* (P18.5-T7, D-fields); a seasonal campaign always has one (`campaign-input.ts`).
+   * incentive, drawn *Ongoing* (P18.2-T7, D-fields); a seasonal campaign always has one (`campaign-input.ts`).
    */
   @Prop({ type: Date, default: null })
   endsAt!: Date | null;
 
   /**
-   * *Seasonal* or *Structural* (P18.5-T7, D-fields; `Overall.html:3667-3670`). Every campaign written before the
+   * *Seasonal* or *Structural* (P18.2-T7, D-fields; `Overall.html:3667-3670`). Every campaign written before the
    * field is seasonal (migration `0027-campaign-kinds`).
    */
   @Prop({ type: String, enum: CAMPAIGN_KINDS, required: true, default: 'seasonal' })
@@ -110,7 +110,7 @@ export class Campaign {
   blurb!: string;
 
   /**
-   * **The windows whose standings have been frozen** (P18.5-T8 AC-5; the review, item 1): a window's key and when,
+   * **The windows whose standings have been frozen** (P18.2-T8 AC-5; the review, item 1): a window's key and when,
    * pushed once — atomically, so of two first reads at once one freezes — **even when nobody chased it**, so a chase
    * made later never enters a window already decided. Written only by the evaluation (`markFrozen`), never by the
    * Owner's form; not part of the campaign's `version`.

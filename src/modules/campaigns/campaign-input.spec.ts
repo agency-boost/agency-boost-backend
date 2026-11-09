@@ -1,6 +1,6 @@
 import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn } from '@/common/i18n/reader';
-import { CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_METRICS, METRIC_REGISTRY, metricByKey } from '@/domain/constants';
+import { CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_METRICS, METRIC_REGISTRY, comparePhases, metricByKey } from '@/domain/constants';
 import * as metricsModule from '@/domain/constants/metrics';
 import { checkCampaign, checkCampaignShape, type CampaignShape } from './campaign-input';
 
@@ -114,25 +114,25 @@ describe('reading one campaign (P5-T7)', () => {
       }));
 
       expect(said).toMatch(/"FLC_COUNT" is not a metric this product measures/);
-      // P18.5-T8 AC-1: the alternatives are what a campaign may name, not every metric.
+      // P18.2-T8 AC-1: the alternatives are what a campaign may name, not every metric.
       expect(said).toMatch(new RegExp(CAMPAIGN_METRICS[0].key));
       expect(said).not.toContain('MONTHLY_ACTIVE_AGENT');
     });
 
     it('refuses a metric nothing measures yet, naming it and no phase', () => {
       /*
-       * Since the 2026-10-08 re-plan campaigns are evaluated in 18.5, after every metric registered
+       * Since the 2026-10-08 re-plan campaigns are evaluated in 18.2, after every metric registered
        * today, so nothing real is refused as not measured yet (`registry.spec.ts` pins the empty set).
        * The rule stays for a metric registered after campaign evaluation, and is proven here with the
        * evaluation placed before the latest metric. `CAMPAIGN_EVALUATION_PHASE` is read where it is
        * declared, so this moves it for `checkCampaign` too; `restoreAllMocks` puts it back.
        */
-      // *Amended 2026-10-10 (P18.6-T1):* over the metrics a campaign may require — Phase 18.6 registers two reporting
+      // *Amended 2026-10-10 (P18.3-T1):* over the metrics a campaign may require — Phase 18.3 registers two reporting
       // rates after campaign evaluation, `requirable: false`, which no requirement names and the refusal never reaches.
       const requirable = METRIC_REGISTRY.filter((m) => m.requirable !== false);
-      expect(requirable.find((m) => m.phase > CAMPAIGN_EVALUATION_PHASE)).toBeUndefined();
-      const latest = Math.max(...requirable.map((m) => m.phase));
-      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', latest - 1);
+      expect(requirable.find((m) => comparePhases(m.phase, CAMPAIGN_EVALUATION_PHASE) > 0)).toBeUndefined();
+      const latest = requirable.map((m) => m.phase).sort(comparePhases).at(-1)!;
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: string }, 'CAMPAIGN_EVALUATION_PHASE', String(Number(latest.split('.')[0]) - 1));
       const later = METRIC_REGISTRY.find((m) => m.phase === latest && m.requirable !== false);
       expect(later).toBeTruthy();
 
@@ -149,16 +149,16 @@ describe('reading one campaign (P5-T7)', () => {
       expect(said.slice(said.indexOf(later!.name) + later!.name.length)).not.toMatch(/\d/);
     });
 
-    it('P18.5-T8 AC-1 accepts every metric of the evaluable set, copying its unit (D-evaluable)', () => {
+    it('P18.2-T8 AC-1 accepts every metric of the evaluable set, copying its unit (D-evaluable)', () => {
       for (const { key: metricKey } of CAMPAIGN_METRICS) {
         const read = checkCampaign(whole({ requirements: [{ metricKey, comparator: 'gte', value: 1 }] }));
         expect(read.requirements![0]).toMatchObject({ metricKey, unit: metricByKey(metricKey)!.unit });
       }
     });
 
-    it('P18.5-T8 AC-1 refuses what nobody achieves over a window — a target, an enum, a toggle, a per-event rate — naming what may be', () => {
+    it('P18.2-T8 AC-1 refuses what nobody achieves over a window — a target, an enum, a toggle, a per-event rate — naming what may be', () => {
       /*
-       * *Amended 2026-10-10 (D-evaluable):* until P18.5-T8 a campaign could name any of the sixty requirable metrics —
+       * *Amended 2026-10-10 (D-evaluable):* until P18.2-T8 a campaign could name any of the sixty requirable metrics —
        * the six coaching metrics since P10.1-T2 AC-7, and the unit rollups and the Owner's reporting metrics since the
        * 2026-10-08 re-plan. Measured is not enough: a coaching recency, a target, a pace status, a training toggle or
        * an event's NPS is nothing a member achieves over a campaign's window. A stored one reads *Not measured yet*.
@@ -177,7 +177,7 @@ describe('reading one campaign (P5-T7)', () => {
       }
       // And nothing a campaign may require is left on the far side of the phase line: the refusal and `GET /metrics`
       // (which lists the requirable metrics) draw the same one.
-      expect(METRIC_REGISTRY.filter((m) => m.requirable !== false && m.phase > CAMPAIGN_EVALUATION_PHASE)).toEqual([]);
+      expect(METRIC_REGISTRY.filter((m) => m.requirable !== false && comparePhases(m.phase, CAMPAIGN_EVALUATION_PHASE) > 0)).toEqual([]);
     });
 
     it('P13.2-T4: refuses Leaders used — an office’s count, not anybody’s work — and never offers it', () => {
@@ -203,8 +203,8 @@ describe('reading one campaign (P5-T7)', () => {
     });
   });
 
-  describe('P18.5-T7 AC-9 the card’s fields (D-fields)', () => {
-    it('P18.5-T7 AC-9 reads the kind, section, window, rungs, poster and blurb, and none is required', () => {
+  describe('P18.2-T7 AC-9 the card’s fields (D-fields)', () => {
+    it('P18.2-T7 AC-9 reads the kind, section, window, rungs, poster and blurb, and none is required', () => {
       const read = checkCampaign(whole({
         kind: 'structural', subtype: 'ongoing', window: 'calendar_year', appliesToOrgLevelCodes: ['agent', 'AAB', 'AAB'],
         poster: { emoji: '🏆', color: 'gold' }, blurb: '  Standing production benchmark.  ', endsAt: null,
@@ -217,7 +217,7 @@ describe('reading one campaign (P5-T7)', () => {
       expect(checkCampaign({ subtype: null }, { partial: true })).toEqual({ subtype: null });
     });
 
-    it('P18.5-T7 AC-9 refuses each new field by name when it is not one', () => {
+    it('P18.2-T7 AC-9 refuses each new field by name when it is not one', () => {
       const said = refusal(whole({
         kind: 'annual', subtype: 'trip', window: 'per_month', appliesToOrgLevelCodes: 'AGENT', blurb: 'x'.repeat(201),
       }));
@@ -228,7 +228,7 @@ describe('reading one campaign (P5-T7)', () => {
       expect(said).toMatch(/blurb must be 0–200 characters/);
     });
 
-    it('P18.5-T7 AC-9 takes a poster as one emoji and a palette colour — never a hex, a word or markup', () => {
+    it('P18.2-T7 AC-9 takes a poster as one emoji and a palette colour — never a hex, a word or markup', () => {
       for (const poster of [
         { emoji: '🚀', color: '#F2994A' }, { emoji: 'Rocket', color: 'amber' }, { emoji: '<b>', color: 'amber' },
         { emoji: '', color: 'navy' }, 'rocket', null, { emoji: '🚀', color: 'navy', size: 2 },
@@ -238,37 +238,37 @@ describe('reading one campaign (P5-T7)', () => {
       expect(checkCampaign(whole({ poster: { emoji: '🎖️', color: 'navy-soft' } })).poster).toEqual({ emoji: '🎖️', color: 'navy-soft' });
     });
 
-    it('P18.5-T8 review item 9 refuses a figure asked for twice, an unknown one included, and a row missing its metric', () => {
+    it('P18.2-T8 review item 9 refuses a figure asked for twice, an unknown one included, and a row missing its metric', () => {
       expect(refusal(whole({ requirements: [{ metricKey: 'NOPE', comparator: 'gte', value: 1 }, { metricKey: 'nope', comparator: 'gte', value: 2 }] })))
         .toMatch(/Requirement 2: NOPE is asked for already/);
       expect(refusal(whole({ requirements: [{ comparator: 'gte', value: 1 }] }))).toMatch(/"" is not a metric this product measures/);
       expect(refusal(whole({ requirements: [{ metricKey: 'APE_ACHIEVED', value: 1 }] }))).toMatch(/comparator is one of/);
     });
 
-    it('P18.5-T8 review item 10 keeps a stored requirement sent back unchanged, by metric, comparator and value', () => {
+    it('P18.2-T8 review item 10 keeps a stored requirement sent back unchanged, by metric, comparator and value', () => {
       const keep = [{ metricKey: 'EVENT_NPS', comparator: 'gte' as const, value: 50, unit: 'score' }];
       expect(checkCampaign({ requirements: [{ metricKey: 'event_nps', comparator: 'gte', value: 50 }] }, { partial: true, keep }).requirements)
         .toEqual(keep);
       expect(refusal({ requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 60 }] })).toMatch(/not something a campaign can measure/);
     });
 
-    it('P18.5-T7 AC-9 reads a description, refuses a body that is not an object, and a poster whose emoji is not text', () => {
+    it('P18.2-T7 AC-9 reads a description, refuses a body that is not an object, and a poster whose emoji is not text', () => {
       expect(checkCampaign(whole({ description: '  The office’s own.  ' })).description).toBe('The office’s own.');
       expect(refusal(null)).toMatch(/must be an object of fields|is required/);
       expect(refusal(whole({ poster: { emoji: 7, color: 'navy' } }))).toMatch(/poster.emoji is one emoji/);
     });
 
-    it('P18.5-T7 AC-5 reserves CHASING: the chases read’s address, never a campaign’s', () => {
+    it('P18.2-T7 AC-5 reserves CHASING: the chases read’s address, never a campaign’s', () => {
       expect(refusal(whole({ code: 'chasing' }))).toMatch(/CHASING is a word the Campaigns pages use/);
     });
 
-    it('P18.5-T7 AC-9 lets a structural campaign end nowhere: endsAt null, and an unreadable end refused', () => {
+    it('P18.2-T7 AC-9 lets a structural campaign end nowhere: endsAt null, and an unreadable end refused', () => {
       expect(checkCampaign(whole({ endsAt: null })).endsAt).toBeNull();
       expect(refusal(whole({ endsAt: 'never' }))).toMatch(/endsAt is not a date and time/);
     });
   });
 
-  describe('P18.5-T7 AC-9, P18.5-T8 AC-2 a campaign across its fields', () => {
+  describe('P18.2-T7 AC-9, P18.2-T8 AC-2 a campaign across its fields', () => {
     const JKT = { timezone: 'Asia/Jakarta', rungCodes: ['AB', 'AAB', 'AGENT'] };
     const wib = (local: string) => new Date(`${local}+07:00`);
     const shape = (over: Partial<CampaignShape> = {}): CampaignShape => ({
@@ -285,14 +285,14 @@ describe('reading one campaign (P5-T7)', () => {
       throw new Error('checkCampaignShape accepted a campaign the test expected it to refuse');
     };
 
-    it('P18.5-T8 AC-2 takes a seasonal campaign over whole office months, and a structural one with no end', () => {
+    it('P18.2-T8 AC-2 takes a seasonal campaign over whole office months, and a structural one with no end', () => {
       expect(() => checkCampaignShape(shape(), JKT)).not.toThrow();
       expect(() => checkCampaignShape(shape({
         kind: 'structural', subtype: 'promotion', window: 'rolling_12m', endsAt: null, appliesToOrgLevelCodes: ['AAB'],
       }), JKT)).not.toThrow();
     });
 
-    it('P18.5-T8 AC-2 refuses a file metric over part of a month, with the sentence — and lets activity take any days', () => {
+    it('P18.2-T8 AC-2 refuses a file metric over part of a month, with the sentence — and lets activity take any days', () => {
       expect(refused(shape({ startsAt: wib('2026-08-15T00:00:00'), endsAt: wib('2026-09-15T23:59:00') })))
         .toContain('A campaign asking for figures from the monthly production file runs in whole months: start it on the 1st and end it on the last day of a month.');
       expect(() => checkCampaignShape(shape({
@@ -300,7 +300,7 @@ describe('reading one campaign (P5-T7)', () => {
       }), JKT)).not.toThrow();
     });
 
-    it('P18.5-T7 AC-9 refuses a seasonal campaign with no end, another window or a subtype; a structural one without a section or with its dates', () => {
+    it('P18.2-T7 AC-9 refuses a seasonal campaign with no end, another window or a subtype; a structural one without a section or with its dates', () => {
       expect(refused(shape({ endsAt: null }))).toMatch(/A seasonal campaign needs an end/);
       expect(refused(shape({ window: 'calendar_year' }))).toMatch(/window is campaign_dates/);
       expect(refused(shape({ subtype: 'ongoing' }))).toMatch(/Only a structural campaign has a subtype/);
@@ -308,7 +308,7 @@ describe('reading one campaign (P5-T7)', () => {
       expect(refused(shape({ kind: 'structural', subtype: 'ongoing' }))).toMatch(/read over calendar_year or rolling_12m/);
     });
 
-    it('P18.5-T7 AC-9 names a rung the company’s ladder does not have', () => {
+    it('P18.2-T7 AC-9 names a rung the company’s ladder does not have', () => {
       expect(refused(shape({ appliesToOrgLevelCodes: ['AGENT', 'SENIOR_AB'] }))).toMatch(/SENIOR_AB is not a rung of your company's ladder/);
       expect(refused(shape({ appliesToOrgLevelCodes: ['X1', 'X2'] }))).toMatch(/X1, X2 are not rungs/);
     });
@@ -316,10 +316,10 @@ describe('reading one campaign (P5-T7)', () => {
 });
 
 /**
- * **A campaign's refusals, in Bahasa Indonesia** (P18.98-T5 AC-3): each field sentence in the reader's language,
+ * **A campaign's refusals, in Bahasa Indonesia** (P18.10-T5 AC-3): each field sentence in the reader's language,
  * named as the API names its field — *Syarat 2* for *Requirement 2* — and the English, the code and the order as before.
  */
-describe('P18.98-T5 AC-3 a campaign’s violations, in both languages', () => {
+describe('P18.10-T5 AC-3 a campaign’s violations, in both languages', () => {
   const caught = (read: () => unknown): DomainException => {
     try {
       read();
@@ -331,7 +331,7 @@ describe('P18.98-T5 AC-3 a campaign’s violations, in both languages', () => {
   const indonesian = (read: () => unknown) =>
     (caught(read).detailsFor(readerIn('id')) as { violations: string[] }).violations;
 
-  it('P18.98-T5 AC-3 the fields and the requirements of one campaign, in Indonesian', () => {
+  it('P18.10-T5 AC-3 the fields and the requirements of one campaign, in Indonesian', () => {
     expect(indonesian(() => checkCampaign(whole({
       code: 'chasing', endsAt: 'never', poster: { emoji: 'star', color: 'red', size: 2 },
       requirements: [
@@ -360,17 +360,17 @@ describe('P18.98-T5 AC-3 a campaign’s violations, in both languages', () => {
     expect(indonesian(() => checkCampaign({}))).toEqual(expect.arrayContaining(['code wajib diisi.', 'startsAt wajib diisi.']));
   });
 
-  it('P18.98-T5 AC-3 the metric rules in Indonesian: the office’s count, a metric not measured yet, one no campaign measures', () => {
+  it('P18.10-T5 AC-3 the metric rules in Indonesian: the office’s count, a metric not measured yet, one no campaign measures', () => {
     const office = METRIC_REGISTRY.find((m) => m.requirable === false)!;
     expect(indonesian(() => checkCampaign(whole({ requirements: [{ metricKey: office.key, comparator: 'lte', value: 1 }] }))))
       .toEqual([`Syarat 1: ${office.name} menghitung KPM, bukan hasil kerja seseorang, jadi campaign tidak dapat memintanya.`]);
-    const unmeasurable = METRIC_REGISTRY.find((m) => m.requirable !== false && m.phase <= CAMPAIGN_EVALUATION_PHASE
+    const unmeasurable = METRIC_REGISTRY.find((m) => m.requirable !== false && comparePhases(m.phase, CAMPAIGN_EVALUATION_PHASE) <= 0
       && !CAMPAIGN_METRICS.some((c) => c.key === m.key))!;
     expect(indonesian(() => checkCampaign(whole({ requirements: [{ metricKey: unmeasurable.key, comparator: 'gte', value: 1 }] }))))
       .toEqual([`Syarat 1: ${unmeasurable.name} bukan sesuatu yang dapat diukur campaign. Salah satu dari: `
         + `${CAMPAIGN_METRICS.map((m) => m.name).join(', ')}.`]);
     const later = jest.spyOn(metricsModule, 'metricByKey')
-      .mockReturnValue({ ...metricByKey('APE_ACHIEVED')!, phase: CAMPAIGN_EVALUATION_PHASE + 1 });
+      .mockReturnValue({ ...metricByKey('APE_ACHIEVED')!, phase: '99' });
     try {
       expect(indonesian(() => checkCampaign(whole())))
         .toEqual(['Syarat 1: APE achieved belum diukur, jadi campaign yang memintanya tidak akan pernah membuat siapa pun memenuhi '
@@ -380,7 +380,7 @@ describe('P18.98-T5 AC-3 a campaign’s violations, in both languages', () => {
     }
   });
 
-  it('P18.98-T5 AC-3 a campaign across its fields, in Indonesian', () => {
+  it('P18.10-T5 AC-3 a campaign across its fields, in Indonesian', () => {
     const JKT = { timezone: 'Asia/Jakarta', rungCodes: ['AB', 'AAB', 'AGENT'] };
     const wib = (local: string) => new Date(`${local}+07:00`);
     const shape = (over: Partial<CampaignShape> = {}): CampaignShape => ({

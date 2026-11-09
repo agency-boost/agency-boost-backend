@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import { byKode } from '@/modules/production/upload-columns';
 
 /** 09:00 in Jakarta on 14 September — nine months of production on file, and of log. */
 const NOW = new Date('2026-09-14T02:00:00Z');
@@ -55,7 +56,8 @@ describe('the Personal Summary, measured (P10-T4)', () => {
         });
         MONTHS.forEach((month, i) => production.push({
           kpmId, membershipId: id, month, agentCode: `PRU-${a}`, deletedAt: null,
-          apeMonthly: cell(20 * M * scale), apeYtd: cell(20 * M * scale * (i + 1)),
+          // P19.5-T2 (ADR-0214 §10): the year is the months summed — the file's YTD is kept as a check, read by no figure.
+          templateVersion: 1, ...byKode({ apeMonthly: cell(20 * M * scale), apeYtd: cell(20 * M * scale * (i + 1)) }),
         }));
         // Every day of the year so far — the *Yearly* chips read all of it (P10-T5).
         for (const [m, days] of [[1, 31], [2, 28], [3, 31], [4, 30], [5, 31], [6, 30], [7, 31], [8, 31], [9, 14]]) {

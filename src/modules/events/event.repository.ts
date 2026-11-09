@@ -23,7 +23,7 @@ export class EventRepository extends TenantScopedRepository<EventDocument> {
   }
 }
 
-/** Members' RSVPs, claims and confirmations (P18.5-T5), one row per (event, membership). */
+/** Members' RSVPs, claims and confirmations (P18.2-T5), one row per (event, membership). */
 @Injectable()
 export class EventRsvpRepository extends TenantScopedRepository<EventRsvpDocument> {
   constructor(@InjectModel(EventRsvp.name) model: Model<EventRsvpDocument>) {
@@ -108,7 +108,7 @@ export class EventRsvpRepository extends TenantScopedRepository<EventRsvpDocumen
   }
 }
 
-/** Members' answers about events (P18.5-T6), one per (event, membership), never edited. */
+/** Members' answers about events (P18.2-T6), one per (event, membership), never edited. */
 @Injectable()
 export class EventFeedbackRepository extends TenantScopedRepository<EventFeedbackDocument> {
   constructor(@InjectModel(EventFeedback.name) model: Model<EventFeedbackDocument>) {

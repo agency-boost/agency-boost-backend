@@ -71,7 +71,10 @@ describe('the readings the Owner’s reporting reads through', () => {
     const atEndOfAugust = await wired.leadReadings.countsOfManyAt(ctx, [office.id.TARI], { month: '2026-08', at: new Date('2026-08-31T17:00:00Z') });
     expect(atEndOfAugust.get(office.id.TARI)).toEqual({ salesOpen: 0, salesClosing: 0, recruitOpen: 0, recruitNominated: 0 });
     const cells = await wired.productionReadings.monthCellsFor(ctx, [office.id.INDAH, office.id.TARI], { from: '2026-08', to: '2026-09' });
-    expect(cells.get(office.id.INDAH)!.get('2026-09')).toEqual({ apeMonthly: 80 * 1_000_000 * 100, policyCountMonthly: 2, persistencyMonthly: 88 });
+    // P19.3-T1: a member's row carries no unit persistency — a leader's own column (D6).
+    expect(cells.get(office.id.INDAH)!.get('2026-09')).toEqual({
+      apeMonthly: 80 * 1_000_000 * 100, policyCountMonthly: 2, persistencyMonthly: 88, unitPersistencyMonthly: null,
+    });
     expect(cells.get(office.id.TARI)).toEqual(new Map());
   });
 
@@ -89,7 +92,12 @@ describe('the readings the Owner’s reporting reads through', () => {
       .toEqual(new Map([[office.id.RINA, '2026-09-12']]));
   });
 
-  it('P18-T1 AC-4 item 5 the Overview bounds both engagement reads from last month’s first day; the not-logged list reads all history', async () => {
+  /*
+   * *Changed 2026-11-05 (P19.3-T2; ADR-0200 §3):* the month's logging and its comparison with last month are gone, so the
+   * Overview makes **one** engagement read, bounded from the week's first day — 8 to 14 September — where it made two
+   * from last month's first.
+   */
+  it('P18-T1 AC-4 item 5, P19.3-T2 the Overview bounds its one engagement read from the week’s first day; the not-logged list reads all history', async () => {
     const ctx = office.as('OWNER');
     const matches: Record<string, unknown>[] = [];
     mongoose.set('debug', (collection: string, method: string, pipeline: unknown) => {
@@ -97,7 +105,7 @@ describe('the readings the Owner’s reporting reads through', () => {
     });
     try {
       await wired.kpmOverview.read(ctx);
-      expect(matches.map((m) => m.localDate)).toEqual([{ $gte: '2026-08-01' }, { $gte: '2026-08-01', $lte: '2026-08-14' }]);
+      expect(matches.map((m) => m.localDate)).toEqual([{ $gte: '2026-09-08' }]);
       matches.length = 0;
       await wired.kpmOverview.notLogged(ctx);
       expect(matches.map((m) => m.localDate)).toEqual([undefined]);

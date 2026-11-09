@@ -12,11 +12,11 @@ async function refused(body: Record<string, unknown>): Promise<string[]> {
 const ID = '66f0000000000000000000c1';
 
 /**
- * **P18.9-T3 AC-5 — *Start from* the Template library, as the API takes it** (ADR-0164 §5): `templateLibrary`
+ * **P18.6-T3 AC-5 — *Start from* the Template library, as the API takes it** (ADR-0164 §5): `templateLibrary`
  * with `kind: template` names the library's template, its default when `templateId` is absent; without it a
  * template is still the company's own and must be named.
  */
-describe('P18.9-T3 StartFromDto — the Template library', () => {
+describe('P18.6-T3 StartFromDto — the Template library', () => {
   it('AC-5 takes the library’s default, and one of its templates by id', async () => {
     expect(await refused({ kind: 'template', templateLibrary: true })).toEqual([]);
     expect(await refused({ kind: 'template', templateLibrary: true, templateId: ID })).toEqual([]);

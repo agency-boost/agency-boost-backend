@@ -5,7 +5,7 @@ import { CAPABILITY_REFUSALS } from './capability.messages';
 const SAY = CAPABILITY_REFUSALS.VALIDATION_FAILED;
 
 /**
- * **Every sentence the capability catalog refuses with, in both languages** (P18.98-T5 AC-2): each entry said with its
+ * **Every sentence the capability catalog refuses with, in both languages** (P18.10-T5 AC-2): each entry said with its
  * values, the values kept as they are in both, and every entry of the catalogue here — so one added without a case
  * fails, and one without its Indonesian cannot be written at all (`tsc`).
  */
@@ -31,7 +31,7 @@ const CASES: [entry: keyof typeof SAY, sentence: Message, values: string[]][] = 
   ['sendEvery', SAY.sendEvery({ part: 'grid', count: 1250 }), []],
 ];
 
-describe('P18.98-T5 AC-2 the capability catalog’s sentences', () => {
+describe('P18.10-T5 AC-2 the capability catalog’s sentences', () => {
   it.each(CASES)('%s is said in English and in Indonesian, its values kept as they are', (_entry, sentence, values) => {
     const [en, id] = [english(sentence), indonesian(sentence)];
     expect(en).toBeTruthy();

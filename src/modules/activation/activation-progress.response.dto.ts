@@ -2,8 +2,10 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   ACTIVATION_ITEM_SOURCES, ACTIVATION_RECORD_COLLECTIONS, type ActivationItemSource, type ActivationRecordCollection,
 } from './activation-progress.schema';
+import { NEW_HIRE_YEARS, type NewHireYear } from '@/domain/metrics/activation-3m';
 import type {
-  ActivationAspectProgressView, ActivationClosingsView, ActivationClosingView, ActivationItemProgressView,
+  ActivationAspectProgressView, ActivationClosingsView, ActivationClosingView, ActivationEmptyReason, ActivationEmptyView,
+  ActivationItemProgressView,
   ActivationItemRecordView, ActivationNoteSavedView, ActivationNoteView, ActivationPersonView, ActivationView,
   Activation3MFiguresView, Activation3MMonthView, Activation3MResultView, Activation3MShareView, FirstSaleSourceView,
   NewHireChecklistView, NewHireDetailView, NewHireLeaderView, NewHireRowView, NewHiresRosterView, NewHireStandingView,
@@ -337,10 +339,10 @@ export class NewHireRowDto implements NewHireRowView {
 }
 
 export class NewHiresWindowDto {
-  @ApiProperty({ type: String, example: '2025-10-28', description: 'The earliest join date listed.' })
+  @ApiProperty({ type: String, example: '2026-01-01', description: 'The earliest join date listed: 1 January of the year.' })
   from!: string;
 
-  @ApiProperty({ type: String, example: '2026-10-27', description: 'Today.' })
+  @ApiProperty({ type: String, example: '2026-11-08', description: 'The latest: today for this year, 31 December for last year.' })
   to!: string;
 }
 
@@ -359,7 +361,13 @@ export class NewHiresRosterDto implements NewHiresRosterView {
   @ApiProperty({ type: String, example: '2026-10-27' })
   today!: string;
 
-  @ApiProperty({ type: NewHiresWindowDto, description: 'The join dates listed: the last twelve months.' })
+  @ApiProperty({
+    type: String, enum: NEW_HIRE_YEARS, example: 'current',
+    description: 'The year listed, as asked: `current` — this calendar year, the default — or `previous`, last year.',
+  })
+  year!: NewHireYear;
+
+  @ApiProperty({ type: NewHiresWindowDto, description: 'The join dates listed: the year’s, in the office’s calendar.' })
   window!: NewHiresWindowDto;
 
   @ApiProperty({ type: Number, example: 90, description: 'The day 3M activation is decided after.' })
@@ -428,6 +436,44 @@ export class NewHireDetailDto extends ActivationViewDto implements NewHireDetail
     description: 'The strip at the top of the detail (UI-023, D-25): the row’s status, from the same function. `null` for somebody who is not a new hire.',
   })
   newHire!: NewHireStandingDto | null;
+}
+
+const EMPTY_REASONS: readonly ActivationEmptyReason[] = ['first_year_over', 'no_activation'];
+
+/**
+ * An activation served empty: past the person's first year, or — on a leader's read — a new hire listed on New Hires who
+ * has none. Nothing of a checklist is in it.
+ */
+export class ActivationEmptyDto implements ActivationEmptyView {
+  @ApiProperty({
+    type: String, enum: EMPTY_REASONS,
+    description:
+      '`first_year_over` — the join date plus twelve calendar months has come, and the activation covers the first '
+      + 'year only; `no_activation` — a new hire New Hires lists who has no checklist (an AB or an AAB placed as one, or '
+      + 'an office that has published none). Only this shape carries it.',
+  })
+  empty!: ActivationEmptyReason;
+
+  @ApiProperty({ type: ActivationPersonDto })
+  hire!: ActivationPersonDto;
+
+  @ApiProperty({ type: String, example: '2026-11-08', description: 'The office’s today.' })
+  today!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: '2025-03-03', description: 'The join date, day 1; `null` with none.' })
+  joinDate!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-03-03',
+    description: 'The first day the activation is empty: the join date plus twelve calendar months. `null` with no join date.',
+  })
+  firstYearEndsOn!: string | null;
+
+  @ApiProperty({
+    type: NewHireLeaderDto, nullable: true,
+    description: 'Who they report to, for the header on a leader’s read; `null` on the person’s own and with nobody.',
+  })
+  leader!: NewHireLeaderDto | null;
 }
 
 export class ActivationNoteSavedDto implements ActivationNoteSavedView {

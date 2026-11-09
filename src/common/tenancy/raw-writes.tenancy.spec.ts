@@ -77,6 +77,7 @@ const EXEMPT: Record<string, string> = {
     + 'rows of a template that was never written, filtered by `companyId` and that template\'s id.',
   KpmRequest: 'an office that does not exist yet, so there is no tenant to scope to.',
   AuthToken: 'platform-global. A session belongs to a user, not to an office.',
+  AccountLink: 'platform-global (ADR-0199 §3): two logins of one person, linked; logins belong to no office.',
   ImpersonationSession:
     'a platform record of a platform action. `kpmId` is nullable because a target may be '
     + 'in no office at all, and ending every session an operator has open is keyed by the '

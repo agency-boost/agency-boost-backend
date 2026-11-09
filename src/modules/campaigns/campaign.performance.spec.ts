@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 
@@ -12,13 +13,13 @@ const M = 1_000_000 * 100;
 const wib = (local: string) => new Date(`${local}+07:00`).toISOString();
 
 /**
- * **Campaigns at the 500-member ceiling** (P18.5-T8 AC-9; `performance-and-scale.md`): the standings port Phase 18.6
+ * **Campaigns at the 500-member ceiling** (P18.2-T8 AC-9; `performance-and-scale.md`): the standings port Phase 18.3
  * reads, the agent's dialog and the list, over an office of 500 — one AB, ten AABs, forty-nine agents each — and an
  * office of 50 beside it, with the seeded kinds of campaign: dated over the file, a calendar year, the rolling twelve
  * months, activity with a ratio, and one final and frozen. **The same queries for fifty as for five hundred: none per
  * member.**
  */
-describe('campaigns, measured (P18.5-T8 AC-9)', () => {
+describe('campaigns, measured (P18.2-T8 AC-9)', () => {
   let wired: ReturnType<typeof configModule>;
   const heads: Record<string, string> = {};
   const owner = (kpmId: string) => new RequestContext(`u-${kpmId}`, 'none', {
@@ -60,8 +61,10 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     everyone.forEach((id, i) => {
       ['2026-07', '2026-08', '2026-09'].forEach((month, m) => months.push({
         kpmId, membershipId: id, month, agentCode: `${code}-${i}`, deletedAt: null,
-        apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 7)), policyCountMonthly: cell(1),
-        persistencyMonthly: cell(90), recruitmentMonthly: cell(1), newActiveAgentsMonthly: cell(0),
+        ...byKode({
+          apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 7)), policyCountMonthly: cell(1),
+          persistencyMonthly: cell(90), recruitmentMonthly: cell(1), newActiveAgentsMonthly: cell(0),
+        }),
       }));
       for (let d = 1; d <= 5; d += 1) {
         logs.push({
@@ -78,6 +81,10 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
       }
     });
     await db.collection('monthlyAgentData').insertMany(months);
+    // The months as an upload writes them (ADR-0214 §11): a month never written stays open whatever its date, so July and
+    // August — written at their ends — lock on schedule, and September, written on the 10th, is open.
+    await db.collection('productionMonths').insertMany([['2026-07', '2026-07-31'], ['2026-08', '2026-08-31'], ['2026-09', '2026-09-10']]
+      .map(([month, on]) => ({ kpmId, month, revision: 1, firstWrittenOn: on, deletedAt: null })));
     await db.collection('activityLogs').insertMany(logs);
     await db.collection('campaignChases').insertMany(chases);
 
@@ -149,7 +156,7 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     return times[Math.ceil(0.95 * times.length) - 1];
   };
 
-  it('P18.5-T8 AC-9 the standings port reads 500 members and five campaigns in the same queries as 50', async () => {
+  it('P18.2-T8 AC-9 the standings port reads 500 members and five campaigns in the same queries as 50', async () => {
     const small = await counted(() => wired.campaignStandingsReader.ofOffice(owner(SMALL)));
     const large = await counted(() => wired.campaignStandingsReader.ofOffice(owner(BIG)));
     expect(large.result.standings).toHaveLength(5 * 501);
@@ -164,7 +171,7 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     expect(new Set(july.map((s) => s.status))).toEqual(new Set(['qualified', 'not_joined']));
   }, 60_000);
 
-  it('P18.6-T2 AC-9 the tree’s path — the members asked for, over the year — is the same queries for 50 as for 500', async () => {
+  it('P18.3-T2 AC-9 the tree’s path — the members asked for, over the year — is the same queries for 50 as for 500', async () => {
     const year = { start: new Date('2026-01-01T00:00:00+07:00'), end: new Date('2027-01-01T00:00:00+07:00') };
     const membersOf = async (kpmId: string) => (await mongoose.connection.db!.collection('memberships')
       .find({ kpmId, status: 'active' }).toArray()).map((m) => String(m._id));
@@ -179,7 +186,7 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     expect(large.queries.length).toBeLessThanOrEqual(24);
   }, 60_000);
 
-  it('P18.5-T8 AC-9 the dialog and the list are a fixed number of queries for any office', async () => {
+  it('P18.2-T8 AC-9 the dialog and the list are a fixed number of queries for any office', async () => {
     const ctxSmall = owner(SMALL);
     const ctxBig = owner(BIG);
     const small = await counted(() => wired.campaignAgent.detail(ctxSmall, 'PROMOTION_AAB_AB'));
@@ -190,7 +197,7 @@ describe('campaigns, measured (P18.5-T8 AC-9)', () => {
     expect(listBig.queries.sort()).toEqual(listSmall.queries.sort());
   });
 
-  it('P18.5-T8 AC-9 records the ceiling’s cost', async () => {
+  it('P18.2-T8 AC-9 records the ceiling’s cost', async () => {
     const port = await p95(() => wired.campaignStandingsReader.ofOffice(owner(BIG)));
     const dialog = await p95(() => wired.campaignAgent.detail(owner(BIG), 'APE_SPRINT'));
     // eslint-disable-next-line no-console

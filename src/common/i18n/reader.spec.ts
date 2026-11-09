@@ -3,12 +3,12 @@ import {
 } from './reader';
 
 /**
- * **P18.98-T5 AC-1 — the request's language** (ADR-0179 §7): the `Accept-Language` the app sends, else the signed-in
+ * **P18.10-T5 AC-1 — the request's language** (ADR-0179 §7): the `Accept-Language` the app sends, else the signed-in
  * person's `users.locale`, else a reader who has chosen nothing — Bahasa Indonesia, since the default went live
- * (`LANGUAGE_LIVE`, P18.98-T4's exit); English while it was not, which `live: false` still reads. **A figure's language** is the chosen language, else Indonesian; once
+ * (`LANGUAGE_LIVE`, P18.10-T4's exit); English while it was not, which `live: false` still reads. **A figure's language** is the chosen language, else Indonesian; once
  * live, the request's.
  */
-describe('P18.98-T5 AC-1 the request’s language', () => {
+describe('P18.10-T5 AC-1 the request’s language', () => {
   describe('the order: the header, then the saved choice, then nobody’s', () => {
     it.each([true, false])('AC-1 reads the header first, whatever is saved (live %s)', (live) => {
       expect(readerOf({ header: 'id', stored: 'en', live }).language).toBe('id');

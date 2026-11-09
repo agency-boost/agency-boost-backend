@@ -2,15 +2,16 @@ import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { addDays } from '@/common/time/local-day';
-import { CASCADE_ACTIVITY_CODES, DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import { CASCADE_ACTIVITY_CODES, DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
 import { computeCascade, defaultMonthsLeft } from '@/modules/goals/goal-cascade';
 import { PRODUCTION_METRICS } from '@/modules/production/monthly-agent-data.schema';
 import { MINOR_UNITS_PER_RP_MILLION } from '@/modules/production/production-units';
 import { templateFilename } from '@/modules/production/production-template';
+import { byKode, keyOfLegacy, rekeyByKode } from '@/modules/production/upload-columns';
 import { up as mocPersistency } from '@/migrations/0026-moc-persistency';
 import { seedObjectId } from './coaching-fixture';
 import { backfillCoachingSnapshots } from './coaching-snapshots';
-import { monthField, seedMonthFigures } from './production-figures';
+import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
 
 /**
  * **The Owner's reporting, seeded** (Phase 18, *Seed*; P18-T1 AC-13, P18-T2 AC-11, P18-T8 AC-5;
@@ -32,7 +33,7 @@ import { monthField, seedMonthFigures } from './production-figures';
  * **Every new member joined more than six months ago** — so no New hires roster changes (ADR-0104) — and none is
  * in Agus's, Sari's or Arief's downline, so their walks do not change. **Yosef is tagged *Core Leader***, beside
  * Agus and Sari. The two new ABs and Winda are leaders, so **the subscription walk's *Leaders* reads 9 / 10** where
- * it read 6 / 10, and the Owner's field view gains the two agencies. *Since P18.97-T1 (AC-20):* **Yosef and Winda joined
+ * it read 6 / 10, and the Owner's field view gains the two agencies. *Since P18.9-T1 (AC-20):* **Yosef and Winda joined
  * before January of last year** (`BEFORE_LAST_YEAR`), so the office's file holds every month of last year and the forum's
  * *Full Year* and *YTD* of last year read whole years.
  *
@@ -74,7 +75,7 @@ export type ReportingKey =
 const RECENT = [0, 2, 4, 6, 8, 10, 12];
 
 /**
- * **The longest-serving leaders' join, before January of last year whatever day the seed runs** (P18.97-T1 AC-20): 800
+ * **The longest-serving leaders' join, before January of last year whatever day the seed runs** (P18.9-T1 AC-20): 800
  * days is more than two years back from any day of the run's year, so **0417's file holds every month of last year** —
  * Yosef and Winda on each — and the forum's *Full Year {Y−1}* and *YTD {Y−1}* read whole years, with no *(\*)* note
  * (ADR-0175 §9). Neither is a new hire, so no cohort, *New hires* roster or 3M figure moves; this year's files list
@@ -180,6 +181,20 @@ export function reportingMonthFigures(key: ReportingKey, month: string, thisMont
   ]));
 }
 
+/**
+ * **A reporting cast leader's unit persistency on a file** (P19.3-T1; ADR-0201 §2): Yosef's, Winda's and Satria's unit
+ * persistency, the insurer's `UNIT_PERSISTENCY` on their row — **their own persistency's figure**, so the MOC story the
+ * cast tells stands on the new criterion: Yosef's agency meets the three-criteria path (88), Satria's fails it (70), and
+ * **Winda's is not on this month's file**, as her persistency is not: her MOC reads *Belum diunggah*. `null` for an
+ * agent, whose row never carries one, and for somebody the file leaves out.
+ */
+export function reportingUnitPersistency(key: ReportingKey, month: string, thisMonth: string): number | null {
+  const person = byKey.get(key)!;
+  if (person.role === 'agent' || person.apeMillions === null) return null;
+  if (key === 'winda' && month === thisMonth) return null;
+  return person.persistency;
+}
+
 export interface ReportingFixtureDeps {
   clock: Clock;
   kpmId: string;
@@ -229,7 +244,6 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     .find({ kpmId, status: 'removed', deletedAt: null }).sort({ agentSeq: 1 }).toArray())
     .filter((m) => keyOf.has(String(m._id)));
   const roster = [...active, ...leavers];
-  const EMPTY = { value: null, provenance: null, sourceBatchId: null };
   for (let month = `${lastYear}-01`; month <= shiftMonth(thisMonth, -3); month = shiftMonth(month, 1)) {
     const held = (await db.collection('dataUploadBatches').findOne({ kpmId, month }))
       ?? (await db.collection('productionMonths').findOne({ kpmId, month, deletedAt: null }));
@@ -240,35 +254,41 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
         && (m.status === 'active' || (m.removedAt as Date) >= endOfMonth))
       .flatMap((m) => {
         const key = keyOf.get(String(m._id));
-        const values = key ? reportingMonthFigures(key, month, thisMonth) : seedMonthFigures(earlier.findIndex((e) => String(e._id) === String(m._id)), month);
-        return values ? [{ member: m, values }] : [];
+        const at = earlier.findIndex((e) => String(e._id) === String(m._id));
+        const values = key ? reportingMonthFigures(key, month, thisMonth) : seedMonthFigures(at, month, 1, { history: true });
+        // P19.3-T1: a leader's unit persistency on the same file (ADR-0201 §2) — every AB and AAB on it, as this month's
+        // and last month's files carry it (`demo.ts`), so a held month is complete (`UPLOAD_MONTH_COMPLETE`, P19.5-T2).
+        const unit = key ? reportingUnitPersistency(key, month, thisMonth)
+          : (LEADER_CLASSES as readonly string[]).includes(String(m.role ?? '')) ? seedUnitPersistency(active.indexOf(m), month) : null;
+        return values ? [{ member: m, values: unit === null ? values : { ...values, unitPersistencyMonthly: unit } }] : [];
       });
     if (rows.length === 0) continue;
     const batchId = seedObjectId('reporting-fixture', 'batch', kpmId, month);
     const committedAt = at(`${shiftMonth(month, 1)}-05`, 3);
     await db.collection('dataUploadBatches').insertOne({
       _id: oid(batchId), kpmId, month, status: 'committed', filename: templateFilename('0417', month),
-      fileSha256: createHash('sha256').update(`reporting:${month}`).digest('hex'), templateVersion: 1, encoding: 'utf-8',
+      fileSha256: createHash('sha256').update(`reporting:${month}`).digest('hex'),
+      // Version 2 where a leader row carries *Unit Persistency (%)* (P19.3-T1); each cell the rows hold counted.
+      analyticsConfig: { templateId: null, version: 1 }, encoding: 'utf-8',
       delimiter: ',', basedOnRevision: 0, monthRevision: 1, rowCount: rows.length, writtenRowCount: rows.length,
-      cellCount: rows.length * 12, issueCount: 0, startedAt: committedAt, committedAt, committedBy: deps.owner.membershipId,
+      cellCount: rows.reduce((n, r) => n + Object.keys(r.values).length, 0), issueCount: 0, startedAt: committedAt, committedAt, committedBy: deps.owner.membershipId,
       revertedAt: null, revertedBy: null, restoredCellCount: 0, keptCellCount: 0, deletedAt: null,
       createdBy: deps.owner.membershipId, updatedBy: deps.owner.membershipId, createdAt: committedAt, updatedAt: committedAt,
     });
     await db.collection('dataUploadRows').insertMany(rows.map((r, n) => ({
       kpmId, batchId, month, line: n + 2, agentCode: r.member.agentCode, membershipId: String(r.member._id), status: 'ready',
-      values: r.values, previousValues: Object.fromEntries(Object.keys(r.values).map((k) => [k, null])), issues: [], deletedAt: null,
+      values: rekeyByKode(r.values), previousValues: Object.fromEntries(Object.keys(r.values).map((k) => [keyOfLegacy(k), null])), issues: [], deletedAt: null,
       createdBy: deps.owner.membershipId, updatedBy: deps.owner.membershipId, createdAt: committedAt, updatedAt: committedAt,
     })));
     await db.collection('monthlyAgentData').insertMany(rows.map((r) => ({
       kpmId, membershipId: String(r.member._id), agentCode: r.member.agentCode, month,
-      ...Object.fromEntries(PRODUCTION_METRICS.flatMap((metric) => (['monthly', 'ytd'] as const).map((c) => {
-        const value = r.values[monthField(metric, c)];
-        return [monthField(metric, c), value === undefined ? EMPTY : { value, provenance: 'imported', sourceBatchId: batchId }];
-      }))),
+      // By kode since P19.5-T2 (ADR-0214 §9).
+      ...byKode(Object.fromEntries(Object.entries(r.values).map(([k, value]) => [k, { value, provenance: 'imported', sourceBatchId: batchId }]))),
+      templateVersion: 1, asOf: null,
       deletedAt: null, createdBy: deps.owner.membershipId, updatedBy: deps.owner.membershipId, createdAt: committedAt, updatedAt: committedAt,
     })));
     await db.collection('productionMonths').insertOne({
-      kpmId, month, revision: 1, lockOverride: null, deletedAt: null, createdBy: deps.owner.membershipId,
+      kpmId, month, revision: 1, lockOverride: null, firstWrittenOn: `${shiftMonth(month, 1)}-05`, asOf: null, deletedAt: null, createdBy: deps.owner.membershipId,
       updatedBy: deps.owner.membershipId, createdAt: committedAt, updatedAt: committedAt,
     });
     await db.collection('auditLog').insertOne({
@@ -407,7 +427,7 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     const committedAt = month === thisMonth ? at(today, 2) : at(`${thisMonth}-03`, 3);
     await db.collection('dataUploadBatches').insertOne({
       _id: oid(batchId), kpmId: b.kpmId, month, status: 'committed', filename: templateFilename('0555', month),
-      fileSha256: createHash('sha256').update(`reporting:0555:${month}`).digest('hex'), templateVersion: 1, encoding: 'utf-8',
+      fileSha256: createHash('sha256').update(`reporting:0555:${month}`).digest('hex'), analyticsConfig: { templateId: null, version: 1 }, encoding: 'utf-8',
       delimiter: ',', basedOnRevision: 0, monthRevision: 1, rowCount: members.length, writtenRowCount: members.length,
       cellCount: members.length * 12, issueCount: 0, startedAt: committedAt, committedAt, committedBy: b.owner,
       revertedAt: null, revertedBy: null, restoredCellCount: 0, keptCellCount: 0, deletedAt: null,
@@ -416,8 +436,9 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     await db.collection('monthlyAgentData').insertMany(members.map((m, i) => {
       const values = seedMonthFigures(i + 1, month);
       return {
-        kpmId: b.kpmId, membershipId: String(m._id), agentCode: m.agentCode, month,
-        ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: batchId }])),
+        kpmId: b.kpmId, membershipId: String(m._id), agentCode: m.agentCode, month, templateVersion: 1, asOf: null,
+        // By kode since P19.5-T2 (ADR-0214 §9).
+        ...byKode(Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { value: v, provenance: 'imported', sourceBatchId: batchId }]))),
         deletedAt: null, createdBy: b.owner, updatedBy: b.owner, createdAt: committedAt, updatedAt: committedAt,
       };
     }));

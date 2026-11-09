@@ -26,13 +26,13 @@ const NOW = new Date('2026-10-26T03:00:00Z');
 const office = (kpmId: string) => RequestContext.superAdminInTenant('sa-1', kpmId);
 
 /**
- * **A rung's leader tier decides who leads** (P18.8-T1 AC-3 to AC-5, ADR-0156): over a real database, a member's
+ * **A rung's leader tier decides who leads** (P18.5-T1 AC-3 to AC-5, ADR-0156): over a real database, a member's
  * class is the tier's of the rung they are placed on — on creation and on a role change — whatever the rung is
  * called; the class is what a grant reads and what *Leaders used* counts; and the leader limit holds for a leader
  * on a rung the company named itself. KPM A's company has a custom ladder beside the default codes; KPM B's company
  * has the default ladder alone, and neither office's reads reach the other's.
  */
-describe('P18.8-T1 — the leader tier, where a member is placed', () => {
+describe('P18.5-T1 — the leader tier, where a member is placed', () => {
   let members: MembershipRepository;
   let hierarchy: HierarchyService;
   let roles: RoleChangeService;

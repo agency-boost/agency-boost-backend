@@ -6,7 +6,7 @@ import type {
 } from './compliance-category';
 
 /**
- * **Activation** in the Owner's compliance tree (P18.6-T1 AC-7; OD-158, OD-159): one item, the *90-day checklist*.
+ * **Activation** in the Owner's compliance tree (P18.3-T1 AC-7; OD-158, OD-159): one item, the *90-day checklist*.
  *
  * - **Every hire's activation through activation's own port** (`ActivationReadings.ofMembers`): every state, one
  *   read, the open ones through `resolve` — the computation the leader's roster and detail are served — so each

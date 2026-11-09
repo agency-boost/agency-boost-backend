@@ -6,7 +6,7 @@ import {
   type TrainingProgressView, type TrainingSkillProgressView,
 } from './training-progress.view';
 
-/** The wire shapes of a member's training (P18.5-T1, T2, T4). Each `implements` its view, so the two cannot drift. */
+/** The wire shapes of a member's training (P18.2-T1, T2, T4). Each `implements` its view, so the two cannot drift. */
 
 const DONE = 'Offered modules in this scope marked *Done*.';
 const TOTAL = 'Offered modules in this scope. A draft, or a module withdrawn since the office last published, is in neither number.';
@@ -18,6 +18,12 @@ export class TrainingModuleRowDto implements TrainingModuleRowView {
 
   @ApiProperty({ type: String, example: 'Building Your Prospect List' })
   title!: string;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: '*Deskripsi singkat* (ADR-0220 §2): the grey line under the name, or `null`.',
+  })
+  description!: string | null;
 
   @ApiProperty({
     type: [String], enum: TRAINING_ITEM_KINDS,
@@ -58,6 +64,12 @@ export class TrainingSkillProgressDto implements TrainingSkillProgressView {
 
   @ApiProperty({ type: String, example: 'Prospecting' })
   label!: string;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: '*Deskripsi singkat* (ADR-0220 §2): the grey line under the name, or `null`.',
+  })
+  description!: string | null;
 
   @ApiProperty({
     type: Boolean,
@@ -187,6 +199,12 @@ export class TrainingModulePageDto implements TrainingModulePageView {
 
   @ApiProperty({ type: String, example: 'Closing Techniques That Work' })
   title!: string;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: '*Deskripsi singkat* (ADR-0220 §2): the grey line under the name, or `null`.',
+  })
+  description!: string | null;
 
   @ApiProperty({ type: TrainingPlaceDto })
   category!: TrainingPlaceDto;

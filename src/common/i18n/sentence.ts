@@ -3,7 +3,7 @@ import type { Language } from '@/domain/constants/language';
 import { SOURCE_READER, type Reader } from './reader';
 
 /**
- * **Every sentence the API writes, in both languages** (ADR-0179 §7; P18.98-T5).
+ * **Every sentence the API writes, in both languages** (ADR-0179 §7; P18.10-T5).
  *
  * A sentence is English and Indonesian side by side, the English the source — what the API wrote before the phase —
  * and the Indonesian typed against it from the approved glossary's vocabulary and voice. **A missing language fails
@@ -64,7 +64,7 @@ export function inSource(message: Message): string {
 
 /**
  * **Every sentence inside a value, written for its reader** — a refusal's `details.violations`, a service's field
- * sentences (P18.98-T5 AC-3). Arrays and plain objects are walked; anything else is answered as it is, and a value with
+ * sentences (P18.10-T5 AC-3). Arrays and plain objects are walked; anything else is answered as it is, and a value with
  * no sentence in it is answered as the same object.
  */
 export function renderDeep<T>(value: T, reader: Reader): T {
@@ -152,7 +152,7 @@ function fileEntry(entry: Entry, code: ErrorCodeValue | null): unknown {
 }
 
 /**
- * **A module's refusals** (P18.98-T5 AC-2), filed by code and then by name: `name` is the module's, the walk's way of
+ * **A module's refusals** (P18.10-T5 AC-2), filed by code and then by name: `name` is the module's, the walk's way of
  * saying where a missing sentence belongs. A throw site names its sentence by both —
  * `new DomainException(ErrorCode.LEAD_ALREADY_CLOSED, LEAD_REFUSALS.LEAD_ALREADY_CLOSED.reopenFirst, …)` — and `tsc`
  * refuses a sentence filed under another code.
@@ -167,7 +167,7 @@ export function refusals<const T extends RefusalCatalogue>(name: string, catalog
   ]))) as Refusals<T>;
 }
 
-/** **A module's other sentences** — a notice, an email, a figure's words — by name (P18.98-T5 AC-4, AC-5). */
+/** **A module's other sentences** — a notice, an email, a figure's words — by name (P18.10-T5 AC-4, AC-5). */
 export function messages<const T extends MessageCatalogue>(name: string, catalogue: T): Messages<T> {
   MESSAGES.push({ name, entries: catalogue });
   return Object.freeze(Object.fromEntries(

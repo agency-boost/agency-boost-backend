@@ -3,7 +3,7 @@ import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0035-blank-preferred-name';
 
 /**
- * P18.8-T15 AC-1 (UI-005). An empty or blank preferred name saved before the API stored `null` for one
+ * P18.5-T15 AC-1 (UI-005). An empty or blank preferred name saved before the API stored `null` for one
  * becomes `null`, so the full name stands in for it again.
  */
 describe('0035 — a blank preferred name is no name', () => {
@@ -25,7 +25,7 @@ describe('0035 — a blank preferred name is no name', () => {
 
   const preferredOf = async (email: string) => (await users().findOne({ email }))?.preferredName;
 
-  it('P18.8-T15 AC-1 clears an empty and a blank preferred name, and leaves real ones and nulls alone', async () => {
+  it('P18.5-T15 AC-1 clears an empty and a blank preferred name, and leaves real ones and nulls alone', async () => {
     await users().insertMany([
       account('empty@kpm.test', ''),
       account('blank@kpm.test', '   '),
@@ -45,7 +45,7 @@ describe('0035 — a blank preferred name is no name', () => {
     expect(await preferredOf('none@kpm.test')).toBeNull();
   });
 
-  it('P18.8-T15 AC-1 a second run clears nothing', async () => {
+  it('P18.5-T15 AC-1 a second run clears nothing', async () => {
     await users().insertMany([account('empty@kpm.test', '')] as never);
     await up(db());
     expect(await up(db())).toEqual({ cleared: 0 });

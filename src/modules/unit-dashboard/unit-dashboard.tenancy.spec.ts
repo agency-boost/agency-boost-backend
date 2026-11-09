@@ -11,7 +11,10 @@ import {
 } from '../../../test/coaching-office';
 import { seedUnitLeads, UNIT_MONTH } from '../../../test/unit-office';
 import { MonthlyAgentData } from '../production/monthly-agent-data.schema';
-import { VALUE_COLUMNS } from '../production/production-preview';
+
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them. */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 import { TEMPLATE_HEADER_V1 } from '../production/production-template';
 import type { UnitDashboardView, UnitGroup, UnitRow } from './unit-dashboard.service';
 
@@ -49,12 +52,13 @@ describe('the Unit Dashboard (Phase 15)', () => {
   const state = () => wired.productionMonths.state(office.as('OWNER'), UNIT_MONTH);
   const save = async (who: Who, rows: { membershipId: string; apeMonthlyMinor?: number; apeYtdMinor?: number }[], revision?: number) =>
     // Saved by a leader reading the API's English — the reason is stored in the saver's language, and nobody's choice
-    // is Bahasa Indonesia since P18.98-T4's exit (AC-6 below pins both).
+    // is Bahasa Indonesia since P18.10-T4's exit (AC-6 below pins both).
     wired.unitDashboard.updateProduction(office.as(who).withReader(SOURCE_READER), {
       month: UNIT_MONTH, revision: revision ?? (await state()).revision, rows,
     });
-  const cell = async (who: Who, field: 'apeMonthly' | 'apeYtd') =>
-    (await db().collection('monthlyAgentData').findOne({ kpmId: KPM_A, membershipId: office.id[who], month: UNIT_MONTH }))?.[field];
+  /** A member's APE cell this month, by kode (P19.5-T2; ADR-0214 §9). */
+  const cell = async (who: Who) =>
+    (await db().collection('monthlyAgentData').findOne({ kpmId: KPM_A, membershipId: office.id[who], month: UNIT_MONTH }))?.values?.APE;
   const snapshot = async () => ({
     rows: await db().collection('monthlyAgentData').find({}).sort({ _id: 1 }).toArray(),
     audit: await db().collection('auditLog').countDocuments({}),
@@ -156,13 +160,18 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(everyRow(await read('OWNER', { for: office.id.AGUS })).every((r) => r.coached)).toBe(true);
     });
 
-    it('Phase 15 exit S1/S2 `coached`: an Agent-rung leader opens no coaching tab but their own — their Summary grant is `own`', async () => {
+    /*
+     * Was *Phase 15 exit S1/S2: an Agent-rung leader opens no coaching tab but their own — their Summary grant is `own`*,
+     * Tari's row `coached: false`. P19.9-T6 (ADR-0234, OD-287) answered ADR-0087's open question: every upline coaches.
+     */
+    it('P19.9-T6 AC-3 `coached`: an Agent-rung leader opens their coachees’ coaching tabs, as an AB does (ADR-0234)', async () => {
       const view = await read('LUKAS');
       expect(everyRow(view).map((r) => [r.name, r.isReader, r.coached])).toEqual([
-        ['Lukas Hartono', true, true], ['Tari Anggraini', false, false],
+        ['Lukas Hartono', true, true], ['Tari Anggraini', false, true],
       ]);
-      // As the coaching tab would answer them: the Summary of somebody below is not theirs to read.
-      await expect(wired.summary.read(office.as('LUKAS'), office.id.TARI)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // As the coaching tab answers them: the Summary of somebody below is theirs to read, and nobody else's.
+      await expect(wired.summary.read(office.as('LUKAS'), office.id.TARI)).resolves.toHaveProperty('activity');
+      await expect(wired.summary.read(office.as('LUKAS'), office.id.INDAH)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('P15-T4 AC-2 `coached`: an Admin who is not the root, reading a unit outside their downline, coaches none of it', async () => {
@@ -233,15 +242,22 @@ describe('the Unit Dashboard (Phase 15)', () => {
           attainmentPct: summary.monthly.attainmentPct, gapMinor: summary.monthly.gapMinor, overMinor: summary.monthly.overMinor,
           policiesNeeded: summary.monthly.policiesNeeded, targetMet: summary.monthly.targetMet,
         });
+        /*
+         * **The office's figure, or nothing** (P19.1-T4 AC-12, ADR-0195): where the Summary's year is the member's own
+         * (`self_reported` — an estimate, or nothing typed), the dashboard holds no APE produced for the year and no
+         * source; the target is the same.
+         */
+        const own = summary.yearly.source.provenance === 'self_reported';
         expect({ who: row.name, ...yFigures }).toEqual({
           who: row.name, set: summary.goal.set, period: 'year', caseSizeMinor: summary.caseSizeMinor,
-          targetMinor: summary.yearly.targetMinor, actualMinor: summary.yearly.actualMinor,
-          attainmentPct: summary.yearly.attainmentPct, gapMinor: summary.yearly.gapMinor, overMinor: summary.yearly.overMinor,
-          policiesNeeded: summary.yearly.policiesNeeded, targetMet: summary.yearly.targetMet,
+          targetMinor: summary.yearly.targetMinor, actualMinor: own ? null : summary.yearly.actualMinor,
+          attainmentPct: own ? null : summary.yearly.attainmentPct, gapMinor: own ? null : summary.yearly.gapMinor,
+          overMinor: own ? null : summary.yearly.overMinor,
+          policiesNeeded: own ? null : summary.yearly.policiesNeeded, targetMet: own ? false : summary.yearly.targetMet,
         });
-        // Where the figure came from, and who corrected it — the Summary's `FigureSource`, whole.
+        // Where the figure came from, and who corrected it — the Summary's `FigureSource`, whole, when it is the office's.
         expect({ who: row.name, source: mSource }).toEqual({ who: row.name, source: summary.monthly.source });
-        expect({ who: row.name, source: ySource }).toEqual({ who: row.name, source: summary.yearly.source });
+        expect({ who: row.name, source: ySource }).toEqual({ who: row.name, source: own ? null : summary.yearly.source });
       }
     });
 
@@ -284,9 +300,10 @@ describe('the Unit Dashboard (Phase 15)', () => {
     it('P15-T1 AC-3 production is the month table’s cells, with their provenance', async () => {
       const [view, table] = await Promise.all([read('AGUS'), wired.production.readMonth(office.as('OWNER'), UNIT_MONTH)]);
       for (const row of everyRow(view)) {
-        const cells = table.rows.find((r) => r.membershipId === row.membershipId)!.metrics.ape;
+        const mine = table.rows.find((r) => r.membershipId === row.membershipId)!;
+        // The year to date is the months' sum on both (R4, P19.5-T2).
         expect({ who: row.name, monthly: row.production.monthly.valueMinor, ytd: row.production.ytd.valueMinor, p: row.production.monthly.provenance })
-          .toEqual({ who: row.name, monthly: cells.monthly.value, ytd: cells.ytd.value, p: cells.monthly.provenance });
+          .toEqual({ who: row.name, monthly: mine.values.APE.value, ytd: mine.ytd.APE.value, p: mine.values.APE.provenance });
       }
     });
 
@@ -359,11 +376,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
             const kept = values.filter((v): v is number => v !== null);
             return kept.length ? kept.reduce((a, b) => a + b, 0) : null;
           };
-          // The goal and *on pace* over the people who count for production (ADR-0172 §2, P18.96-T5 AC-2).
+          // The goal and *on pace* over the people who count for production (ADR-0172 §2, P18.8-T5 AC-2).
           const rows = everybody.filter((r) => !r.newHireBeforeFirstSale);
           expect(total.newHires).toBe(everybody.length - rows.length);
           const actual = held(rows.map((r) => r.goal.actualMinor));
-          // Paired (ADR-0165 §1, P18.8-T15 AC-6): a target counts only beside production held — every target when
+          // Paired (ADR-0165 §1, P18.5-T15 AC-6): a target counts only beside production held — every target when
           // nobody's is, so the total reads *Not uploaded yet* beside them as a row does.
           const counted = actual === null ? rows : rows.filter((r) => r.goal.actualMinor !== null);
           const target = held(counted.map((r) => r.goal.targetMinor));
@@ -398,6 +415,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
         check(all, {
           goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive,
           newHires: view.tiles.team.newHires, closings: all.reduce((s, r) => s + r.closings, 0),
+          proposalsMade: all.reduce((s, r) => s + r.proposalsMade, 0),
         });
         // UI-013: Active Agent's of is Your team's number, and its Unit / AAB split adds up to it — Unit is Your Unit.
         const { unit, aab, of } = view.tiles.potentialActive;
@@ -425,7 +443,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
     });
 
-    it('P18.8-T15 AC-6 Agus’s Direct Group production pairs: the seven with no production are out of the target too', async () => {
+    it('P18.5-T15 AC-6 Agus’s Direct Group production pairs: the seven with no production are out of the target too', async () => {
       const view = await read('AGUS');
       const all = everyRow(view);
       const held = all.filter((r) => r.goal.actualMinor !== null);
@@ -448,10 +466,10 @@ describe('the Unit Dashboard (Phase 15)', () => {
   });
 
   /**
-   * **ADR-0172, P18.96-T5** — a new hire counts in the team from their join date, and in production and *on pace* from
+   * **ADR-0172, P18.8-T5** — a new hire counts in the team from their join date, and in production and *on pace* from
    * their first sale's day. Dimas holds this month's production and a target, and is pacing: the case the client saw.
    */
-  describe('P18.96-T5 — who counts where (ADR-0172)', () => {
+  describe('P18.8-T5 — who counts where (ADR-0172)', () => {
     const memberships = () => db().collection('memberships');
     const mark = (who: Who, set: Record<string, unknown>) =>
       memberships().updateOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: set });
@@ -489,7 +507,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(view.yourUnit.total.touches).toEqual(before.yourUnit.total.touches);
     });
 
-    it('P18.96-T5 AC-2, AC-3 from the first sale’s day: not the day after today, but today and before', async () => {
+    it('P18.8-T5 AC-2, AC-3 from the first sale’s day: not the day after today, but today and before', async () => {
       const counted = async (firstSaleDate: string) => {
         await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate });
         const view = await read('AGUS');
@@ -502,7 +520,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(await counted('2026-08-20')).toEqual({ tag: false, newHires: 0, of: all });
     });
 
-    it('P18.96-T5 AC-2 an existing agent with no first sale counts, as today (ADR-0172 §4)', async () => {
+    it('P18.8-T5 AC-2 an existing agent with no first sale counts, as today (ADR-0172 §4)', async () => {
       const before = await read('AGUS');
       await mark('DIMAS', { joinedAs: 'existing_agent', firstSaleDate: null });
       const view = await read('AGUS');
@@ -524,7 +542,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(own.tiles.potentialActive.of).toBe(everyRow(own).length);
     });
 
-    it('P18.96-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {
+    it('P18.8-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {
       await mark('SARI', { joinedAs: 'new_hire', firstSaleDate: null });
       const own = await read('SARI');
       expect(own.yourUnit.rows[0]).toMatchObject({ isReader: true, newHireBeforeFirstSale: true });
@@ -595,28 +613,29 @@ describe('the Unit Dashboard (Phase 15)', () => {
     it('P15-T3 AC-3 writes each changed cell as a correction under the leader’s name and the fixed reason, audited per cell', async () => {
       await db().collection('auditLog').deleteMany({});
       const before = (await state()).revision;
+      // The month alone since P19.5-T2: the year to date is the months' sum (R4).
       const result = await save('SARI', [
-        { membershipId: office.id.RINA, apeMonthlyMinor: 85 * M, apeYtdMinor: 245 * M },
-        { membershipId: office.id.NINA, apeMonthlyMinor: 12 * M, apeYtdMinor: 40 * M },
+        { membershipId: office.id.RINA, apeMonthlyMinor: 85 * M },
+        { membershipId: office.id.NINA, apeMonthlyMinor: 12 * M },
       ]);
 
       expect(result.updated).toBe(2);
       // One claim of the month's revision for the whole save.
       expect(result.state.revision).toBe(before + 1);
-      expect(await cell('RINA', 'apeMonthly')).toMatchObject({
+      expect(await cell('RINA')).toMatchObject({
         value: 85 * M, provenance: 'corrected', correctedBy: office.id.SARI, reason: UNIT_DASHBOARD_CORRECTION_REASON,
         replacedValue: 80 * M, sourceBatchId: null,
       });
       // Nina had no row this month: the correction makes one, with her agent code.
       expect(await db().collection('monthlyAgentData').findOne({ membershipId: office.id.NINA, month: UNIT_MONTH }))
-        .toMatchObject({ agentCode: expect.stringMatching(/^PRU-7/), apeMonthly: { value: 12 * M, replacedValue: null } });
+        .toMatchObject({ agentCode: expect.stringMatching(/^PRU-7/), values: { APE: { value: 12 * M, replacedValue: null } }, templateVersion: 1 });
       const audit = await db().collection('auditLog').find({ action: 'upload.cell_corrected' }).toArray();
-      expect(audit).toHaveLength(4);
-      expect(audit.find((a) => a.targetMembershipId === office.id.RINA && a.after.field === 'apeMonthly')).toMatchObject({
+      expect(audit).toHaveLength(2);
+      expect(audit.find((a) => a.targetMembershipId === office.id.RINA && a.after.field === 'APE')).toMatchObject({
         actorMembershipId: office.id.SARI,
-        before: { month: UNIT_MONTH, field: 'apeMonthly', value: 80 * M, provenance: 'imported', sourceBatchId: null },
+        before: { month: UNIT_MONTH, field: 'APE', value: 80 * M, provenance: 'imported', sourceBatchId: null },
         after: {
-          month: UNIT_MONTH, field: 'apeMonthly', value: 85 * M, provenance: 'corrected',
+          month: UNIT_MONTH, field: 'APE', value: 85 * M, provenance: 'corrected',
           reason: UNIT_DASHBOARD_CORRECTION_REASON, surface: 'unit_dashboard',
         },
       });
@@ -630,16 +649,16 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const claim = jest.spyOn(wired.productionMonths, 'claim');
       try {
         const result = await save('SARI', [
-          { membershipId: office.id.BUDI, apeMonthlyMinor: 3 * M, apeYtdMinor: 7 * M },
-          { membershipId: office.id.DODI, apeYtdMinor: 4 * M },
+          { membershipId: office.id.BUDI, apeMonthlyMinor: 3 * M },
+          { membershipId: office.id.DODI, apeMonthlyMinor: 4 * M },
         ]);
         expect(result.updated).toBe(2);
         expect([bulk.mock.calls.length, many.mock.calls.length, one.mock.calls.length, claim.mock.calls.length]).toEqual([1, 1, 0, 1]);
-        // Two rows in the write, three cells in the entries, each naming its row.
+        // Two rows in the write, two cells in the entries, each naming its row.
         expect((bulk.mock.calls[0][0] as unknown[]).length).toBe(2);
         const entries = many.mock.calls[0][1];
         expect(entries.map((e) => [e.targetMembershipId, (e.after as { field: string }).field])).toEqual([
-          [office.id.BUDI, 'apeMonthly'], [office.id.BUDI, 'apeYtd'], [office.id.DODI, 'apeYtd'],
+          [office.id.BUDI, 'APE'], [office.id.DODI, 'APE'],
         ]);
         const budi = await db().collection('monthlyAgentData').findOne({ membershipId: office.id.BUDI, month: UNIT_MONTH });
         expect(entries[0].targetId).toBe(String(budi!._id));
@@ -662,8 +681,8 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const yearly = rowFor(await read('AGUS', { period: 'year' }), 'RINA');
       expect(yearly.goal.source).toMatchObject({ provenance: 'corrected', correctedBy: { name: 'Sari Puspita' } });
       const table = await wired.production.readMonth(office.as('OWNER'), UNIT_MONTH);
-      expect(table.rows.find((r) => r.membershipId === office.id.RINA)!.metrics.ape.monthly)
-        .toEqual({ value: 85 * M, provenance: 'corrected', correction: { by: 'Sari Puspita', at: ROSTER_NOW.toISOString(), reason: UNIT_DASHBOARD_CORRECTION_REASON } });
+      expect(table.rows.find((r) => r.membershipId === office.id.RINA)!.values.APE)
+        .toEqual({ value: 85 * M, provenance: 'corrected', correction: { by: 'Sari Puspita', at: ROSTER_NOW.toISOString(), reason: UNIT_DASHBOARD_CORRECTION_REASON }, outOfBounds: null });
       // The member's own Summary, and a leader's copy of it, name the leader who corrected it (option 2).
       const corrected = {
         provenance: 'corrected', month: UNIT_MONTH,
@@ -680,16 +699,16 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const result = await save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 85 * M }]);
       expect(result).toMatchObject({ updated: 0, state: { revision: before.revision } });
       expect(await snapshot()).toEqual(before);
-      // Of two cells, the changed one counts its row once.
-      const one = await save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 85 * M, apeYtdMinor: 246 * M }]);
+      // Of two rows, the changed one counts once.
+      const one = await save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 85 * M }, { membershipId: office.id.BUDI, apeMonthlyMinor: 1 * M }]);
       expect(one.updated).toBe(1);
     });
 
     it('P15-T3 AC-3 the Owner and the Admin correct any active member; a leader their own figure while they lead', async () => {
       expect((await save('OWNER', [{ membershipId: office.id.ADMIN, apeMonthlyMinor: 1 * M }])).updated).toBe(1);
-      expect((await save('ADMIN', [{ membershipId: office.id.PEER_AGENT, apeYtdMinor: 3 * M }])).updated).toBe(1);
+      expect((await save('ADMIN', [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 3 * M }])).updated).toBe(1);
       expect((await save('AGUS', [{ membershipId: office.id.AGUS, apeMonthlyMinor: 2 * M }])).updated).toBe(1);
-      expect((await cell('AGUS', 'apeMonthly'))).toMatchObject({ correctedBy: office.id.AGUS });
+      expect((await cell('AGUS'))).toMatchObject({ correctedBy: office.id.AGUS });
     });
 
     it.each([
@@ -715,24 +734,22 @@ describe('the Unit Dashboard (Phase 15)', () => {
       await expect(save('AGUS', [{ membershipId: 'nope', apeMonthlyMinor: 1 }])).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('P15-T3 AC-3 every row’s resulting pair is checked before anything is written: 422 names the row and the cadence', async () => {
+    it('P19.5-T2 AC-7 P15-T3 AC-3 every row is checked before anything is written: a year to date is refused, the sum of the months', async () => {
       const before = await snapshot();
-      // The month above the year to date held (Rp 246 M), on the second row: the first is not written either.
+      // A year to date on the second row (R4: it is calculated): the first row is not written either.
       await expect(save('SARI', [
-        { membershipId: office.id.BUDI, apeMonthlyMinor: 5 * M, apeYtdMinor: 6 * M },
-        { membershipId: office.id.RINA, apeMonthlyMinor: 300 * M },
+        { membershipId: office.id.BUDI, apeMonthlyMinor: 5 * M },
+        { membershipId: office.id.RINA, apeYtdMinor: 300 * M },
+      ])).rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'apeYtdMinor', membershipId: office.id.RINA } });
+      // A figure no APE can be, by the import's own rule — naming the row and the cell.
+      await expect(save('SARI', [
+        { membershipId: office.id.BUDI, apeMonthlyMinor: 5 * M },
+        { membershipId: office.id.RINA, apeMonthlyMinor: Number.MAX_SAFE_INTEGER + 2 },
       ])).rejects.toMatchObject({
-        code: 'UPLOAD_VALUE_OUT_OF_RANGE',
-        details: { membershipId: office.id.RINA, metric: 'ape', cadence: 'monthly', value: 300 * M },
+        code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { membershipId: office.id.RINA, kode: 'APE', ytd: false },
       });
-      // A year to date below the month, sent alone or with it.
-      await expect(save('SARI', [{ membershipId: office.id.RINA, apeYtdMinor: 1 * M }]))
-        .rejects.toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { cadence: 'ytd', value: 1 * M } });
-      await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 9 * M, apeYtdMinor: 8 * M }]))
-        .rejects.toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { cadence: 'ytd' } });
-      // A figure no APE can be, by the import's own rule.
-      await expect(save('SARI', [{ membershipId: office.id.RINA, apeYtdMinor: Number.MAX_SAFE_INTEGER + 2 }]))
-        .rejects.toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { membershipId: office.id.RINA, cadence: 'ytd' } });
+      await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: -1 }]))
+        .rejects.toMatchObject({ code: 'UPLOAD_VALUE_OUT_OF_RANGE', details: { kode: 'APE', value: -1 } });
       expect(await snapshot()).toEqual(before);
     });
 
@@ -761,7 +778,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
           // The sentence names the month as ADR-0167 §1 writes one; `details` keeps it `YYYY-MM`.
           message: 'Production can only be updated here for Sep 2026, the agency\'s current month.',
         });
-      await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }, { membershipId: office.id.RINA, apeYtdMinor: 300 * M }]))
+      await expect(save('SARI', [{ membershipId: office.id.RINA, apeMonthlyMinor: 1 }, { membershipId: office.id.RINA, apeMonthlyMinor: 300 * M }]))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'rows[1].membershipId' } });
       await expect(save('SARI', [{ membershipId: office.id.RINA }]))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'rows[0]' } });
@@ -776,27 +793,29 @@ describe('the Unit Dashboard (Phase 15)', () => {
       };
       const preview = await wired.production.preview(office.as('OWNER'), UNIT_MONTH, file);
       const flagged = preview.rows.flatMap((r) => r.cells).filter((c) => c.correction);
-      expect(flagged.map((c) => [c.metric, c.cadence, c.correction!.by, c.correction!.reason]))
-        .toContainEqual(['ape', 'monthly', 'Sari Puspita', UNIT_DASHBOARD_CORRECTION_REASON]);
+      expect(flagged.map((c) => [c.kode, c.ytd, c.correction!.by, c.correction!.reason]))
+        .toContainEqual(['APE', false, 'Sari Puspita', UNIT_DASHBOARD_CORRECTION_REASON]);
     });
-    it('P18.98-T5 AC-6 stores the fixed reason in the saving reader’s language, and shows it as stored', async () => {
+    it('P18.10-T5 AC-6 stores the fixed reason in the saving reader’s language, and shows it as stored', async () => {
       // An English reader's save first, then the Owner's, reading Indonesian: each reason is written once, in its
       // writer's language, and kept as text.
       await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('en')), {
         month: UNIT_MONTH, revision: (await state()).revision,
-        rows: [{ membershipId: office.id.PEER_AGENT, apeYtdMinor: 9 * M }],
+        rows: [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 9 * M }],
       });
       await wired.unitDashboard.updateProduction(office.as('OWNER').withReader(readerIn('id')), {
         month: UNIT_MONTH, revision: (await state()).revision,
         rows: [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 7 * M }],
       });
-      expect(await cell('PEER_AGENT', 'apeMonthly')).toMatchObject({
+      expect(await cell('PEER_AGENT')).toMatchObject({
         value: 7 * M, provenance: 'corrected', reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.',
       });
-      // A cell an English reader saved keeps the English beside it; neither is translated afterwards.
-      expect((await cell('PEER_AGENT', 'apeYtd'))?.reason).toBe(UNIT_DASHBOARD_CORRECTION_REASON);
+      // The English reader's save keeps its English in the log; neither is translated afterwards.
+      const entries = await db().collection('auditLog').find({ action: 'upload.cell_corrected', targetMembershipId: office.id.PEER_AGENT })
+        .sort({ _id: 1 }).toArray();
+      expect(entries.slice(-2).map((e) => e.after.reason)).toEqual([UNIT_DASHBOARD_CORRECTION_REASON, 'Diperbarui di Unit Dashboard dari laporan perusahaan.']);
       const table = await wired.production.readMonth(office.as('OWNER').withReader(readerIn('en')), UNIT_MONTH);
-      expect(table.rows.find((r) => r.membershipId === office.id.PEER_AGENT)!.metrics.ape.monthly)
+      expect(table.rows.find((r) => r.membershipId === office.id.PEER_AGENT)!.values.APE)
         .toMatchObject({ correction: { reason: 'Diperbarui di Unit Dashboard dari laporan perusahaan.' } });
     });
   });

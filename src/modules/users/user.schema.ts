@@ -69,14 +69,14 @@ export class User {
   pronoun!: 'she' | 'he' | 'they';
 
   /*
-   * **What a person records about themselves** (ADR-0158, P18.8-T4): the three facts that are theirs
+   * **What a person records about themselves** (ADR-0158, P18.5-T4): the three facts that are theirs
    * and the same in every office, beside the agent code. Required by the roster import and by
    * registration; **optional here**, because everybody who arrived before them has none, and is not
    * refused anything for it — they complete them on `/profile`. A screen reads a missing one as
    * *Not recorded*.
    *
    * Personal data under UU 27/2022 (`security-and-privacy.md`): shown to the person, the Owner and the
-   * Admins, and nobody else; carried by the export and the erasure cascade (P19-T1).
+   * Admins, and nobody else; carried by the export and the erasure cascade (P20-T1).
    */
 
   /** `YYYY-MM-DD`, a calendar day — never an instant, so no timezone moves it. At least 18 years ago. */
@@ -111,7 +111,7 @@ export class User {
   avatarUrl!: string | null;
 
   /**
-   * **The language this person chose to read AgencyBoost in** (ADR-0179 §2; P18.98-T2): `'id'` or `'en'`, set by the
+   * **The language this person chose to read AgencyBoost in** (ADR-0179 §2; P18.10-T2): `'id'` or `'en'`, set by the
    * *ID | EN* switch and by *Language* on *Your account*, through `PATCH /auth/me`. It follows them to every device.
    *
    * **`null` is a person who has chosen nothing, and reads Bahasa Indonesia** (`languageOf`, `DEFAULT_LANGUAGE`).
@@ -136,7 +136,7 @@ export class User {
   /**
    * They are signed in on a password somebody else chose for them.
    *
-   * Set by the roster import (P3.6-T4), which generates one and hands it to the admin to
+   * Set by the roster import (P3.2-T4), which generates one and hands it to the admin to
    * pass on. Until it is replaced, `AuthGuard` refuses every route but the ones that let
    * them replace it — a screen-level redirect would leave the temporary password working
    * against the API for as long as the account exists.

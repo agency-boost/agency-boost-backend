@@ -12,7 +12,7 @@ import { ACTIVITY_REFUSALS } from './activity.messages';
  * routes could not succeed at all. Found at the Phase 5 exit review; not repeated here.
  */
 
-/** `YYYY-MM-DD`, and the message says so rather than failing a regex silently — in both languages (P18.98-T5 AC-3). */
+/** `YYYY-MM-DD`, and the message says so rather than failing a regex silently — in both languages (P18.10-T5 AC-3). */
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_MESSAGE = field(ACTIVITY_REFUSALS.VALIDATION_FAILED.dayShape);
 

@@ -9,11 +9,14 @@ import { ConfigSnapshot, ConfigSnapshotSchema } from '@/modules/config/config-sn
 import { TrainingModule, TrainingModuleSchema } from '@/modules/training/training-module.schema';
 import { TrainingProgress, TrainingProgressSchema } from '@/modules/training/training-progress.schema';
 import { TrainingSkill, TrainingSkillSchema } from '@/modules/training/training-skill.schema';
+import { CompanyTemplate, CompanyTemplateSchema } from '@/modules/config/company-template.schema';
+import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
+import { servedLesson } from '@/modules/config/lesson-files';
 import { seedObjectId } from './coaching-fixture';
 import { demonstrationPdf } from './recruitment-fixture';
 
 /**
- * **Training, as its learners live it** (Phase 18.5, P18.5-T1 AC-11, P18.5-T3 AC-8; the phase file's *Seed*):
+ * **Training, as its learners live it** (Phase 18.2, P18.2-T1 AC-11, P18.2-T3 AC-8; the phase file's *Seed*):
  * progress across 0417's coaching cast, modelled on the prototype's Rina and Jordan (`Overall.html:7756-7763`) and the
  * Owner tree's Joko, Andi and Ayu (`KPM_Owner.html:3025-3054`); the training link bound in 0555 for Lina
  * (D-seed-link a); a module Lina did and the office then withdrew (D-history); a draft nobody is offered; and the
@@ -35,7 +38,9 @@ import { demonstrationPdf } from './recruitment-fixture';
  * storage is configured, each Sales module also carries a one-page PDF written here as **Prudential's company
  * material, by reference** — a company asset both offices read, so *"0417 holds no training file of its own"* stays
  * true. Without storage the PDFs are skipped, the tiles fall to the link and the empty line, and the run says so.
- * No video is seeded: *Play Video* is walked by uploading a short mp4 in Settings first.
+ * No video is seeded: *Play Video* is walked by uploading a short mp4 in Settings first. **One HTML lesson**
+ * (P19.6-T2, ADR-0217) goes first in *Building Your Prospect List*, before its PDF, the company's too — added to a
+ * database seeded before as well, by its derived item id, so Rina opens it in the sandboxed frame.
  *
  * **No reviewed walk moves**: every row is a `trainingProgress` row, nothing before this phase reads, or 0555's
  * catalog and checklist (the flagged change: its checklist's version 2 binds item 9, Lina repinned to it, her day 61
@@ -102,6 +107,76 @@ export const TRAINING_SEED_LINK = {
   url: 'https://www.prudential.co.id/',
 } as const;
 
+/**
+ * **One HTML lesson, so a reviewer sees one in the sandboxed frame** (P19.6-T2, ADR-0217): the company's, on *Building
+ * Your Prospect List*, first in the module and beside its PDF — the shape P19.6-T3 gives the owner's 23 lessons. Written
+ * only where storage is configured, as the PDFs are.
+ */
+export const TRAINING_SEED_LESSON = {
+  moduleCode: 'PROSPECT_LIST',
+  id: seedObjectId('training-fixture', 'item', 'PROSPECT_LIST', 'lesson'),
+  name: 'PROSPECT_LIST-lesson',
+} as const;
+
+/**
+ * **A demonstration lesson, self-contained as the owner's are** (ADR-0217 §7): its colours are CSS variables on
+ * `:root`, its table of contents links to anchors in the page, and its one small script keeps those links inside the
+ * frame and reads the KPM's colours from the address's fragment exactly as ADR-0217 §5 states — three names, six
+ * lower-case hexadecimal digits each, and nothing else. It loads nothing from anywhere.
+ */
+export function demonstrationLesson(title: string): Buffer {
+  const escape = (text: string) => text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const sections = [
+    ['tujuan', 'Tujuan', 'Setelah pelajaran ini Anda bisa menyusun daftar 100 nama dan memilah siapa yang dihubungi dulu.'],
+    ['langkah', 'Langkah', 'Tulis nama dari keluarga, teman, rekan kerja dan komunitas. Beri tanda siapa yang paling mudah dihubungi.'],
+    ['latihan', 'Latihan', 'Tambahkan sepuluh nama ke Leads hari ini, lalu tandai lima yang akan Anda hubungi minggu ini.'],
+  ];
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escape(title)}</title>
+<style>
+:root { --accent: #d9822b; --accent-soft: #fbefe2; --ink: #1c2340; }
+body { margin: 0; font-family: system-ui, sans-serif; color: var(--ink); line-height: 1.6; }
+header { background: var(--ink); color: #fff; padding: 24px 16px; }
+header p { margin: 4px 0 0; color: var(--accent-soft); }
+nav, section { max-width: 720px; margin: 0 auto; padding: 16px; }
+nav a { color: var(--accent); margin-right: 16px; font-weight: 600; }
+section { min-height: 70vh; border-top: 4px solid var(--accent-soft); }
+h2 { color: var(--accent); }
+</style>
+</head>
+<body>
+<header><h1>${escape(title)}</h1><p>AgencyBoost: pelajaran demonstrasi. Ini bukan materi pelatihan sungguhan.</p></header>
+<nav>${sections.map(([id, heading]) => `<a href="#${id}">${heading}</a>`).join('')}</nav>
+${sections.map(([id, heading, body]) => `<section id="${id}"><h2>${heading}</h2><p>${body}</p></section>`).join('\n')}
+<script>
+(function () {
+  var names = { accent: '--accent', accentSoft: '--accent-soft', ink: '--ink' };
+  location.hash.slice(1).split('&').forEach(function (pair) {
+    var kv = pair.split('=');
+    if (names.hasOwnProperty(kv[0]) && /^[0-9a-f]{6}$/.test(kv[1] || '')) {
+      document.documentElement.style.setProperty(names[kv[0]], '#' + kv[1]);
+    }
+  });
+  document.querySelectorAll('nav a').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      document.getElementById(a.getAttribute('href').slice(1)).scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+})();
+</script>
+</body>
+</html>
+`;
+  // Served as the owner's are (`servedLesson`, P19.6-T3): its anchors use `scrollIntoView`, which without the scroll
+  // keeper also scrolls the page behind the lesson's window.
+  return Buffer.from(servedLesson(html), 'utf8');
+}
+
 export type TrainingCastKey =
   | 'rina' | 'agus' | 'indah' | 'dimas' | 'novi' | 'wahyu' | 'siti' | 'yantiFirst' | 'yanti' | 'budi' | 'dewi' | 'maya';
 
@@ -124,7 +199,77 @@ export interface TrainingFixture {
   files: 'stored' | 'skipped: storage is not configured' | `skipped: storage refused (${string})`;
   /** `null`, or why 0555's item 9 was left unbound on this run. */
   checklist: string | null;
+  /** Prudential's default template's material (ADR-0208 §1): the version this run published, or `null`. */
+  templateMaterial: TemplateMaterialSeed;
   guide: string;
+}
+
+/** What the template's material step wrote: the training version it published, and the modules it filled. */
+export interface TemplateMaterialSeed {
+  written: number;
+  /** The `training_taxonomy` version published with the material; `null` when this run published none. */
+  version: number | null;
+  /** The module codes that carry material in it. */
+  modules: string[];
+}
+
+/** The derived id of the `training_taxonomy` version that carries the template's material: one per template. */
+export const templateMaterialRowId = (templateId: string) =>
+  seedObjectId('training-fixture', 'template-material', templateId);
+
+/**
+ * **Prudential's default template carries the company's material** (ADR-0208 §1, §2; UI-162 *Done when*): a new
+ * `training_taxonomy` version of the template, published, whose modules hold what 0417's modules hold from the company
+ * — the Sales PDFs where storage took them, and *Closing*'s link — by reference, never by copying bytes. So a KPM
+ * created from the template at `/admin/tenants/new` shows material in those modules with nothing uploaded, and the
+ * section's *x / y modul punya materi* counts them. 0417 and 0555 were given the version before it, so the publish
+ * dialog lists them: 0417 *Belum diubah KPM*, 0555 — which withdrew a module and added a draft — *Sudah diubah KPM*.
+ *
+ * Written once, by derived id, and only where the template's newest training holds no material and no draft waits:
+ * a walk's own publish or draft is kept.
+ */
+async function seedTemplateMaterial(
+  deps: TrainingFixtureDeps,
+  Modules: mongoose.Model<TrainingModule>,
+  source: string,
+  now: Date,
+): Promise<TemplateMaterialSeed> {
+  const Named = mongoose.model(NamedTemplate.name, NamedTemplateSchema, undefined, RECOMPILE);
+  const Rows = mongoose.model(CompanyTemplate.name, CompanyTemplateSchema, undefined, RECOMPILE);
+  const nothing: TemplateMaterialSeed = { written: 0, version: null, modules: [] };
+  const template = await Named.findOne({ companyId: deps.companyId, isDefault: true, deletedAt: null }).lean().exec();
+  if (!template) return nothing;
+  const templateId = String(template._id);
+  const _id = new mongoose.Types.ObjectId(templateMaterialRowId(templateId));
+  if (await Rows.exists({ _id })) return nothing;
+  const scope = { companyId: deps.companyId, templateId, kind: 'training_taxonomy', deletedAt: null };
+  if (await Rows.exists({ ...scope, status: 'draft' })) return nothing;
+  const newest = await Rows.findOne({ ...scope, status: 'published' }).sort({ version: -1 }).lean().exec();
+  if (!newest) return nothing;
+
+  type Item = Record<string, unknown>;
+  type Content = { files?: Item[]; videos?: Item[]; links?: Item[] };
+  const holds = (c: Content | null | undefined) => Boolean(c && ((c.files?.length ?? 0) + (c.videos?.length ?? 0) + (c.links?.length ?? 0)));
+  const payload = structuredClone(newest.payload) as { modules?: (Item & { code: string; content?: Content })[] };
+  if ((payload.modules ?? []).some((m) => holds(m.content))) return nothing;
+
+  const plain = (items: Item[] | undefined) => (items ?? []).map(({ _id: _drop, ...rest }) => ({ ...rest }));
+  const filled: string[] = [];
+  for (const module of payload.modules ?? []) {
+    const row = await Modules.findOne({ kpmId: source, code: module.code }).lean().exec();
+    const company = row?.companyContent as unknown as Content | undefined;
+    if (!holds(company)) continue;
+    module.content = { files: plain(company!.files), videos: plain(company!.videos), links: plain(company!.links) };
+    filled.push(module.code);
+  }
+  if (filled.length === 0) return nothing;
+
+  const version = newest.version + 1;
+  await Rows.create({
+    _id, ...scope, version, revision: ((newest as { revision?: number }).revision ?? 0) + 1, status: 'published',
+    payload, publishedAt: now, createdBy: null, updatedBy: null,
+  });
+  return { written: 1, version, modules: filled };
 }
 
 /** A progress row's derived id: one per office, member and module. */
@@ -144,6 +289,7 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
   const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
   let written = 0;
   let sent = 0;
+  let templateMaterial: TemplateMaterialSeed = { written: 0, version: null, modules: [] };
 
   /**
    * One member's row of one module, written only where neither this fixture's row nor any live row for the
@@ -242,10 +388,43 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
           written += updated.modifiedCount;
         }
       }
+
+      // P19.6-T2: one HTML lesson, first in *Building Your Prospect List*, the PDF beside it (ADR-0217).
+      const lessonTitle = (await Modules.findOne({ kpmId: office0417.kpmId, code: TRAINING_SEED_LESSON.moduleCode }).lean().exec())
+        ?.title ?? TRAINING_SEED_LESSON.moduleCode;
+      const lesson = await deps.storage.putObject({
+        owner: { kind: 'company', companyId: deps.companyId }, folder: 'training', name: TRAINING_SEED_LESSON.name,
+        mimeType: 'text/html', body: demonstrationLesson(lessonTitle),
+      });
+      if (lesson.sent) sent += 1;
+      const lessonLabel = `Pelajaran: ${lessonTitle}`;
+      if (!(await Assets.exists({ storageKey: lesson.storageKey }))) {
+        await Assets.create({
+          kpmId: null, companyId: deps.companyId, storageKey: lesson.storageKey, mimeType: lesson.mimeType,
+          bytes: lesson.bytes, originalFilename: `${lessonTitle}.html`, uploadedByMembershipId: null,
+          refCount: offices.length, uploadState: 'confirmed', deletedAt: null,
+        });
+        written += 1;
+      }
+      for (const kpmId of offices) {
+        const updated = await Modules.updateOne(
+          { kpmId, code: TRAINING_SEED_LESSON.moduleCode, 'companyContent.files.id': { $ne: TRAINING_SEED_LESSON.id } },
+          { $push: { 'companyContent.files': { $each: [{
+            id: TRAINING_SEED_LESSON.id, label: lessonLabel,
+            storageKey: lesson.storageKey, mimeType: lesson.mimeType, bytes: lesson.bytes,
+          }], $position: 0 } } },
+        ).exec();
+        written += updated.modifiedCount;
+      }
     } catch (err) {
       files = `skipped: storage refused (${(err as Error).message ?? 'unknown'})`;
     }
   }
+
+  // ------------------------------------------------ the template's material (ADR-0208 §1, §2; UI-162)
+
+  templateMaterial = await seedTemplateMaterial(deps, Modules, office0417.kpmId, now);
+  written += templateMaterial.written;
 
   // ------------------------------------------------ 0555: Lina, the binding, the withdrawal, the draft
 
@@ -352,7 +531,7 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
     written += 1;
   }
 
-  // The modules by the titles the offices hold: the company's words, which a database seeded before keeps (P18.98-T7).
+  // The modules by the titles the offices hold: the company's words, which a database seeded before keeps (P18.10-T7).
   const titleIn = async (office: string, code: string) =>
     String((await Modules.findOne({ kpmId: office, code }).lean().exec())?.title ?? code);
   const discovery = await titleIn(office0417.kpmId, 'DISCOVERY_QUESTIONS');
@@ -376,6 +555,11 @@ export async function seedTrainingFixture(deps: TrainingFixtureDeps): Promise<Tr
     owner@kpm0555.test           Hendra: Settings > Activation checklist, item 9 Auto
     owner@kpm0701.test           Hadi: the field view's /training is the empty state
     The company's material      ${files === 'stored' ? 'a PDF on every Sales module, by reference, and Closing\'s link' : `the link on Closing only; the PDFs were ${files}`}
+    rina@kpm0417.test            ${files === 'stored' ? `/training/SALES/${TRAINING_SEED_LESSON.moduleCode}: an HTML lesson first, opened inside the sandboxed frame` : `no HTML lesson: ${files}`}
+    superadmin@agencyboost.test  /admin/companies/{Prudential} > Prudential template > Training: the material on
+                                 ${templateMaterial.modules.length || 'its'} module(s)${templateMaterial.version ? ` (version ${templateMaterial.version})` : ''}; "Dipakai N KPM" lists 0417 as
+                                 Belum diubah KPM and 0555 as Sudah diubah KPM. A KPM made from it at /admin/tenants/new
+                                 shows the material with nothing uploaded
 ${checklist ? `    0555's checklist             ${checklist}\n` : ''}`;
-  return { written, sent, files, checklist, guide };
+  return { written, sent, files, checklist, templateMaterial, guide };
 }

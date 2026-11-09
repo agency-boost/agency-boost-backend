@@ -7,6 +7,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { RequestContext } from '@/common/context/request-context';
+import { TRAINING_FILE_MIME_TYPES } from '@/domain/constants';
 import {
   AAB, AB, ADMIN, AGENT, FIXTURE_KPM, NOT_ADMINISTRATORS, OWNER, productionPipe, session, StubAuth,
 } from '../../../test/http-permissions';
@@ -18,7 +19,7 @@ import { IN_INDONESIAN } from '../../../test/i18n';
 const NOW = new Date('2026-09-18T02:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
 const MODULE = 'PROSPECT_LIST';
-/** The field rungs: they learn at `/training`, and read nothing under Settings (P18.5-T1 AC-8). */
+/** The field rungs: they learn at `/training`, and read nothing under Settings (P18.2-T1 AC-8). */
 const FIELD_MEMBERS: [string, RequestContext][] = [['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]];
 
 /**
@@ -96,10 +97,10 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
     });
 
     /*
-     * P18.5-T1 AC-8 (the leak). Every member read this until 2026-10-10, a draft module's material included. A field
+     * P18.2-T1 AC-8 (the leak). Every member read this until 2026-10-10, a draft module's material included. A field
      * member reads a module through `/training/modules/:code`, which answers only what the office offers.
      */
-    it.each(FIELD_MEMBERS)('P18.5-T1 AC-8 refuses %s every settings read, with nothing in the body', async (_name, who) => {
+    it.each(FIELD_MEMBERS)('P18.2-T1 AC-8 refuses %s every settings read, with nothing in the body', async (_name, who) => {
       session.current = who;
       const server = app.getHttpServer();
       for (const path of [url, `${url}/modules/${MODULE}/content`, `${url}/modules/${MODULE}/content/url?storageKey=x`]) {
@@ -109,7 +110,7 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
       }
     });
 
-    it('P18.5-T1 AC-8 a read-only support session as the Owner reads them', async () => {
+    it('P18.2-T1 AC-8 a read-only support session as the Owner reads them', async () => {
       session.current = new RequestContext(
         OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true,
       );
@@ -171,11 +172,14 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
         .send({ mimeType: 'application/pdf', bytes: 1 }).expect(400);
     });
 
-    it('N5 (Phase 17 exit review) signs every type it accepts — no narrower list asked of the storage — and never an overwrite', async () => {
+    it('N5 (Phase 17 exit review) P19.6-T2 AC-1 signs every type it accepts under the training file’s list, and never an overwrite', async () => {
       const res = await request(app.getHttpServer()).post(`${url}/uploads`)
         .send({ filename: 'deck.mp4', mimeType: 'video/mp4', bytes: 1024 }).expect(201);
-      expect(wired.storage.signedWith.at(-1)).toEqual({ folder: 'training', mimeType: 'video/mp4', allowedMimeTypes: undefined });
-      // P18.7-T2: the form names one fresh key, which the create-only signer cannot overwrite, and the type asked for.
+      // P19.6-T2 (ADR-0217 §1): the route names its own list — today's types and HTML — as a document route does.
+      expect(wired.storage.signedWith.at(-1)).toEqual({
+        folder: 'training', mimeType: 'video/mp4', allowedMimeTypes: TRAINING_FILE_MIME_TYPES,
+      });
+      // P18.4-T2: the form names one fresh key, which the create-only signer cannot overwrite, and the type asked for.
       expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'video/mp4' });
     });
 
@@ -210,7 +214,7 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
         .query({ storageKey: 'dev/nobody/training/NOPE' }).expect(404);
     });
 
-    it('P18.5-T1 AC-8 is the office administration’s read: a draft module’s file is unreachable for a field member', async () => {
+    it('P18.2-T1 AC-8 is the office administration’s read: a draft module’s file is unreachable for a field member', async () => {
       // A module nobody is offered yet, with a file the Owner has attached to it.
       await wired.training.createModule(OWNER, {
         code: 'DRAFT_DECK', skillCode: 'CLOSING', title: 'Not yet', publishState: 'draft',
@@ -238,9 +242,9 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
     await request(app.getHttpServer()).get(`${url}/modules/NOT_A_MODULE/content`).expect(404);
   });
 
-  /** **A module's content refused in Bahasa Indonesia** (P18.98-T5 AC-7): the code and the shape as in English. */
-  describe('P18.98-T5 AC-7 a module’s content refused in Indonesian', () => {
-    it('P18.98-T5 AC-7 an insecure link and a file with no label: 400 VALIDATION_FAILED, each item named in Indonesian', async () => {
+  /** **A module's content refused in Bahasa Indonesia** (P18.10-T5 AC-7): the code and the shape as in English. */
+  describe('P18.10-T5 AC-7 a module’s content refused in Indonesian', () => {
+    it('P18.10-T5 AC-7 an insecure link and a file with no label: 400 VALIDATION_FAILED, each item named in Indonesian', async () => {
       const storageKey = await upload();
       const res = await request(app.getHttpServer()).put(`${url}/modules/${MODULE}/content`).set(...IN_INDONESIAN)
         .send({
@@ -261,7 +265,7 @@ describe('a training module’s content over HTTP (P5-T2)', () => {
       ]);
     });
 
-    it('P18.98-T5 AC-7 a module this office does not have is not found, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 a module this office does not have is not found, in Indonesian', async () => {
       const res = await request(app.getHttpServer()).get(`${url}/modules/NOT_A_MODULE/content`).set(...IN_INDONESIAN).expect(404);
       expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Modul training tidak ditemukan.' });
     });

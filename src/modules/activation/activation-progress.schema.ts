@@ -14,7 +14,7 @@ export type ActivationOrigin = (typeof ACTIVATION_ORIGINS)[number];
 
 /**
  * The collections a linked item completes from: a goal, a lead, the day that made the fourth week — and, since
- * P18.5-T3, the hire's progress row of the training module the item binds; since P18.96-T4, the production file's
+ * P18.2-T3, the hire's progress row of the training module the item binds; since P18.8-T4, the production file's
  * month that showed a policy, and the coaching session that made the fourth 1:1. A data-backed item ticked by hand
  * names its record here too: the closing (`leads`) or the 1:1 (`coachingSessions`) saved with the tick.
  */
@@ -55,7 +55,7 @@ export class ActivationItemState {
   /**
    * For a link: **the record that completed it**, by collection and id. A link stays done when that
    * record is later replaced, deleted or corrected to zero (ADR-0031, sticky). For a data-backed item ticked by
-   * hand (P18.96-T4 AC-3): the record the tick was saved with — the closing it named, the 1:1 it logged — or none,
+   * hand (P18.8-T4 AC-3): the record the tick was saved with — the closing it named, the 1:1 it logged — or none,
    * for the hire's own *Log 1:1*, which is their note and date on the item.
    */
   @Prop({ type: String, enum: ACTIVATION_RECORD_COLLECTIONS, default: null })
@@ -105,7 +105,7 @@ export const ActivationNoteSchema = SchemaFactory.createForClass(ActivationNote)
  * - **Keyed by membership** (invariant §2): a leader change keeps it with the hire; a re-join is a new
  *   membership and a fresh activation (ADR-0022).
  *
- * Personal data: P19-T1's erasure cascade reaches it. Soft delete only (invariant §6).
+ * Personal data: P20-T1's erasure cascade reaches it. Soft delete only (invariant §6).
  */
 @Schema({ ...configSchemaOptions, collection: 'activationProgress' })
 export class ActivationProgress {

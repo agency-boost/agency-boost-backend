@@ -9,7 +9,7 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 
 /**
- * **The first Super Admin, on a database that has none** (P18.7-T1, ADR-0152).
+ * **The first Super Admin, on a database that has none** (P18.4-T1, ADR-0152).
  *
  * Production starts dark (plan decision D11): no tenant, no seed, and so nobody who can sign in to the
  * console and provision an office. Registration makes agents, never a Super Admin, and the demo seed's two

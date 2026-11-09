@@ -8,7 +8,7 @@ const SIDE_ID = { numerator: 'pembilang', denominator: 'penyebut' } as const;
 const quoted = (labels: readonly string[]) => labels.map((l) => `“${l}”`);
 
 /**
- * **The office's configuration, refused in both languages** (P18.98-T5 AC-2, AC-3): the activity taxonomy and its
+ * **The office's configuration, refused in both languages** (P18.10-T5 AC-2, AC-3): the activity taxonomy and its
  * summary tiles, the ratios, the two lead pipelines, the activity binding, and the staged batch that writes them all.
  * The Super Admin's templates and provisioning have their own (`template.messages.ts`).
  *

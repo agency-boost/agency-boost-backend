@@ -8,7 +8,7 @@ export interface LeadPositionResult {
 }
 
 /**
- * Give every lead a place in its owner's list (P18.8-T7, ADR-0161 §1).
+ * Give every lead a place in its owner's list (P18.5-T7, ADR-0161 §1).
  *
  * `GET /leads` without `sort` reads `leads.position` from the deploy that brings this. Before it, the
  * same screen opened on the newest registration first, so **that is the order filled in**: each owner's

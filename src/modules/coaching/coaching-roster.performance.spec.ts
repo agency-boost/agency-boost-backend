@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { byKode } from '@/modules/production/upload-columns';
 import type { CoachingRosterView } from './coaching-roster.service';
 
 /** 10:00 on 14 September in Jakarta: eight months on file, a fortnight of September logged. */
@@ -81,7 +82,8 @@ describe('the coaching roster, measured (P11-T6 AC-9)', () => {
       });
       MONTHS.forEach((month, m) => months.push({
         kpmId: KPM_A, membershipId: id, month, agentCode: `S${i}`, deletedAt: null,
-        apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 1)),
+        // P19.5-T2 (ADR-0214 §10): the year is the months summed — the file's YTD is kept as a check, read by no figure.
+        templateVersion: 1, ...byKode({ apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 1)) }),
       }));
       for (let d = 1; d <= DAYS; d += 1) {
         logs.push({

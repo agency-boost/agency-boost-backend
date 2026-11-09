@@ -119,7 +119,7 @@ export function refuseSummaryGroupConflict(rows: readonly SummaryGrouped[]): voi
  */
 export function checkTemplateSummaryGroups(categories: unknown): Record<string, unknown>[] {
   if (!Array.isArray(categories)) return [];
-  // Each named for its row (`categories[2] (CORE): …`), in both languages (P18.98-T5 AC-3).
+  // Each named for its row (`categories[2] (CORE): …`), in both languages (P18.10-T5 AC-3).
   const violations: FieldSentence[] = [];
   const checked = categories.map((entry: unknown, index) => {
     // Not a section this rule can read, and not this rule's to refuse: saved exactly as sent.

@@ -1,0 +1,176 @@
+{
+  "$comment": "P19.4-T3 (ADR-0211 §5): the quote's figures, one fixture for both copies of the pricing function — backend/src/modules/billing/price-quote.ts and frontend/src/lib/billing.ts (priceQuote). The flow doc's §4.2 rows (docs/01-flows/billing.md), as functional/billing.md builds them: the 13-leader row is the Fix (the rate rounded half up once, every total exact). Integer IDR minor units (sen).",
+  "cases": [
+    {
+      "case": "The page as it opens: 8 leaders, six months, no discount",
+      "input": {
+        "leaders": 8,
+        "plan": "six_months",
+        "discount": null
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "baseMinor": 40000000,
+        "finalMinor": 40000000,
+        "monthlyTotalMinor": 320000000,
+        "periodTotalMinor": 1920000000,
+        "annualDiscountMinor": 0,
+        "manualDiscountMinor": 0
+      }
+    },
+    {
+      "case": "8 leaders, annual, no discount",
+      "input": {
+        "leaders": 8,
+        "plan": "annual",
+        "discount": null
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "baseMinor": 38000000,
+        "finalMinor": 38000000,
+        "monthlyTotalMinor": 304000000,
+        "periodTotalMinor": 3648000000,
+        "annualDiscountMinor": 2000000,
+        "manualDiscountMinor": 0
+      }
+    },
+    {
+      "case": "8 leaders, annual, 10%",
+      "input": {
+        "leaders": 8,
+        "plan": "annual",
+        "discount": {
+          "type": "percent",
+          "percent": "10"
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "baseMinor": 38000000,
+        "finalMinor": 34200000,
+        "monthlyTotalMinor": 273600000,
+        "periodTotalMinor": 3283200000,
+        "annualDiscountMinor": 2000000,
+        "manualDiscountMinor": 3800000
+      }
+    },
+    {
+      "case": "15 leaders, six months, Rp 25.000 a leader",
+      "input": {
+        "leaders": 15,
+        "plan": "six_months",
+        "discount": {
+          "type": "flat",
+          "amountMinor": 2500000
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "baseMinor": 37500000,
+        "finalMinor": 35000000,
+        "monthlyTotalMinor": 525000000,
+        "periodTotalMinor": 3150000000,
+        "annualDiscountMinor": 0,
+        "manualDiscountMinor": 2500000
+      }
+    },
+    {
+      "case": "13 leaders, annual, 7% — the rate rounded half up once, every total exact (the Fix)",
+      "input": {
+        "leaders": 13,
+        "plan": "annual",
+        "discount": {
+          "type": "percent",
+          "percent": "7"
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "baseMinor": 35625000,
+        "finalMinor": 33131300,
+        "monthlyTotalMinor": 430706900,
+        "periodTotalMinor": 5168482800,
+        "annualDiscountMinor": 1875000,
+        "manualDiscountMinor": 2493700
+      }
+    },
+    {
+      "case": "120 leaders, six months — the 101+ tier, its real rate",
+      "input": {
+        "leaders": 120,
+        "plan": "six_months",
+        "discount": null
+      },
+      "expected": {
+        "tierCode": "TIER_101_PLUS",
+        "baseMinor": 25000000,
+        "finalMinor": 25000000,
+        "monthlyTotalMinor": 3000000000,
+        "periodTotalMinor": 18000000000,
+        "annualDiscountMinor": 0,
+        "manualDiscountMinor": 0
+      }
+    },
+    {
+      "case": "8 leaders, annual, 10.5% — a decimal percent",
+      "input": {
+        "leaders": 8,
+        "plan": "annual",
+        "discount": {
+          "type": "percent",
+          "percent": "10.5"
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "baseMinor": 38000000,
+        "finalMinor": 34010000,
+        "monthlyTotalMinor": 272080000,
+        "periodTotalMinor": 3264960000,
+        "annualDiscountMinor": 2000000,
+        "manualDiscountMinor": 3990000
+      }
+    },
+    {
+      "case": "1 leader, six months, 100% — the bound",
+      "input": {
+        "leaders": 1,
+        "plan": "six_months",
+        "discount": {
+          "type": "percent",
+          "percent": "100"
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "baseMinor": 40000000,
+        "finalMinor": 0,
+        "monthlyTotalMinor": 0,
+        "periodTotalMinor": 0,
+        "annualDiscountMinor": 0,
+        "manualDiscountMinor": 40000000
+      }
+    },
+    {
+      "case": "20 leaders, annual, the whole rate off — the amount's bound",
+      "input": {
+        "leaders": 20,
+        "plan": "annual",
+        "discount": {
+          "type": "flat",
+          "amountMinor": 35625000
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "baseMinor": 35625000,
+        "finalMinor": 0,
+        "monthlyTotalMinor": 0,
+        "periodTotalMinor": 0,
+        "annualDiscountMinor": 1875000,
+        "manualDiscountMinor": 35625000
+      }
+    }
+  ]
+}

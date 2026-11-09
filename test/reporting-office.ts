@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
+import { byKode } from '@/modules/production/upload-columns';
 import { configModule } from './config-module';
 import { buildCoachingOffice, COMPANY, KPM_A, KPM_B, type CoachingOffice, type Who } from './coaching-office';
 import { seedUnitLeads } from './unit-office';
@@ -12,7 +13,9 @@ import { seedUnitLeads } from './unit-office';
  * |---|---|
  * | The company's name, and its carrier rules (the club tiers, MOC with the persistency criterion) | `companies`, `qualificationRules` |
  * | A recruitment lead at a late stage of 0417's ladder (Rina's, *AAJI licensed*), and one closed won in August (Indah's) | `leads` |
- * | Persistency and policy counts on the months held, so MOC's persistency and `MONTHLY_ACTIVE_AGENT` have figures | `monthlyAgentData` |
+ * | Persistency and policy counts on the months held, so `MONTHLY_ACTIVE_AGENT` has figures | `monthlyAgentData` |
+ * | *Since P19.5-T2:* Agus's months by kode, January's 210 M making his summed year to date 240 M (Aug) and 270 M (Sep) | `monthlyAgentData` |
+ * | *Since P19.3-T1:* a unit persistency on Agus's row (79 Aug, 82 Sep — his own is 91) and Sari's (70 Aug, none Sep), what MOC reads (D6) | `monthlyAgentData` |
  * | Sign-ins: most of 0417 within the week, Dimas within the month, Tari and Lukas never; 0555's both 40 days ago | `users.lastLoginAt` |
  *
  * 0417's Owner is the root AB, with three ABs below them (the Admin, Agus, Hendra); Agus's agency holds Sari's and
@@ -53,26 +56,40 @@ export async function buildReportingOffice(wired: ReturnType<typeof configModule
     },
   ]);
 
-  // Persistency and a policy count on the rows the coaching office holds (Indah, Dimas, Rina, Sari, Aug and Sep).
+  // Persistency and a policy count on every row the coaching office holds (Indah, Dimas, Rina, Sari: January, August and
+  // September — January the month that makes their summed year to date the file's, P19.5-T2).
   for (const who of ['INDAH', 'DIMAS', 'RINA', 'SARI'] as const) {
     await db.collection('monthlyAgentData').updateMany(
       { membershipId: office.id[who] },
       {
         $set: {
-          persistencyMonthly: { value: who === 'SARI' ? 72 : 88, provenance: 'imported', sourceBatchId: null },
-          policyCountMonthly: { value: 2, provenance: 'imported', sourceBatchId: null },
+          'values.PERSISTENCY': { value: who === 'SARI' ? 72 : 88, provenance: 'imported', sourceBatchId: null },
+          'values.POLICY_COUNT': { value: 2, provenance: 'imported', sourceBatchId: null },
         },
       },
     );
   }
-  // Agus's own row, so his persistency is held for MOC.
-  await db.collection('monthlyAgentData').insertMany(['2026-08', '2026-09'].map((month) => ({
-    kpmId: KPM_A, membershipId: office.id.AGUS, month, agentCode: 'AGUS', deletedAt: null,
-    apeMonthly: { value: 30 * M, provenance: 'imported', sourceBatchId: null },
-    apeYtd: { value: (month === '2026-08' ? 240 : 270) * M, provenance: 'imported', sourceBatchId: null },
-    persistencyMonthly: { value: 91, provenance: 'imported', sourceBatchId: null },
-    policyCountMonthly: { value: 1, provenance: 'imported', sourceBatchId: null },
-  })));
+  // Agus's own row, with his unit's persistency as the insurer reports it (D6, P19.3-T1) beside his own. His year to
+  // date is the sum of his months held (R4, P19.5-T2): January's 210 M with August's and September's 30 M each makes the
+  // 240 M and 270 M the file's year to date said.
+  const imported = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
+  await db.collection('monthlyAgentData').insertMany([
+    { kpmId: KPM_A, membershipId: office.id.AGUS, month: '2026-01', agentCode: 'AGUS', deletedAt: null, ...byKode({ apeMonthly: imported(210 * M) }) },
+    ...['2026-08', '2026-09'].map((month) => ({
+      kpmId: KPM_A, membershipId: office.id.AGUS, month, agentCode: 'AGUS', deletedAt: null,
+      ...byKode({
+        apeMonthly: imported(30 * M),
+        persistencyMonthly: imported(91),
+        unitPersistencyMonthly: imported(month === '2026-08' ? 79 : 82),
+        policyCountMonthly: imported(1),
+      }),
+    })),
+  ]);
+  // Sari's unit persistency for August only: September, the latest month held, carries none — *Belum diunggah*.
+  await db.collection('monthlyAgentData').updateOne(
+    { membershipId: office.id.SARI, month: '2026-08' },
+    { $set: { 'values.UNIT_PERSISTENCY': imported(70) } },
+  );
 
   const userIdOf = async (who: Who) =>
     (await db.collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }))!.userId as string;

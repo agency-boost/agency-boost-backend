@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { emptyIfMissing } from './missing-collection';
 
 /**
- * Move the agent code onto the account (ADR-0017, P3.6-T3).
+ * Move the agent code onto the account (ADR-0017, P3.2-T3).
  *
  * The code used to be minted per office — `KPM0417-001`, from `kpms.counters` — and it
  * now belongs to the person, issued by the insurer they sell for. Rows written before
@@ -18,7 +18,7 @@ import { emptyIfMissing } from './missing-collection';
  * unique index deliberately excludes.
  *
  * Idempotent: it touches only accounts with no code yet, and skips a user whose oldest
- * membership it cannot resolve. **Across runs as well as within one** (P18.7-T1): every deploy
+ * membership it cannot resolve. **Across runs as well as within one** (P18.4-T1): every deploy
  * runs it again, so a pair an earlier run gave somebody is claimed before this run begins.
  *
  * It returns counts only. The result is printed to the deploy log, which is a CI log, and a
@@ -44,8 +44,8 @@ export async function up(
   let droppedIndex = false;
   // A fresh database has no `memberships` collection yet, and `indexes()` on a missing collection throws
   // `NamespaceNotFound`: every new VM's first deploy runs the migrations before any collection exists
-  // (P18.7-T3, found rehearsing `deploy.sh` on an empty database). Nothing to drop then; 0023 guards the same way.
-  // Only that error: any other is thrown (`emptyIfMissing`, P18.7-T1).
+  // (P18.4-T3, found rehearsing `deploy.sh` on an empty database). Nothing to drop then; 0023 guards the same way.
+  // Only that error: any other is thrown (`emptyIfMissing`, P18.4-T1).
   const indexes: { name?: string; unique?: boolean }[] = await emptyIfMissing(db.collection('memberships').indexes());
   if (indexes.some((i) => i.name === 'kpmId_1_agentCode_1' && i.unique)) {
     await db.collection('memberships').dropIndex('kpmId_1_agentCode_1');
@@ -64,7 +64,7 @@ export async function up(
   // Every `(companyId, agentCode)` already claimed, so a second claim is reported rather
   // than left for the unique index to reject at some later write.
   //
-  // **Seeded with every account that already holds a pair** (P18.7-T1, the security review's L5),
+  // **Seeded with every account that already holds a pair** (P18.4-T1, the security review's L5),
   // the rows `users { companyId, agentCode }`'s unique index covers. Without it the guard held for one
   // run only: an account reported as a collision on the first claimed the same pair on the next deploy,
   // the index refused it (E11000), and every deploy after stopped at this migration.

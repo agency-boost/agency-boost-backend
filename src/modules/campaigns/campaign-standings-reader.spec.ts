@@ -21,12 +21,12 @@ function importsOf(file: string): string[] {
 }
 
 /**
- * **The port Phase 18.6's tree reads** (P18.5-T8 AC-8): `CampaignStandingsReader.ofOffice(ctx, { codes? })` — per
+ * **The port Phase 18.3's tree reads** (P18.2-T8 AC-8): `CampaignStandingsReader.ofOffice(ctx, { codes? })` — per
  * campaign its identity, kind, phase, window and eligibility; per member and campaign the chase, the eligibility, the
  * status (`not_joined` for a member who did not chase, ADR-0143) and its finality. Its shape is pinned here, and its
  * imports: no route, no screen, no reader of another module's raw collections.
  */
-describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
+describe('the standings port (P18.2-T8 AC-8; P18.3-T2 AC-7)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
 
@@ -50,7 +50,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
   }, 60_000);
   afterAll(stopMongo);
 
-  it('P18.5-T8 AC-8 answers every campaign and every active member, in a pinned shape', async () => {
+  it('P18.2-T8 AC-8 answers every campaign and every active member, in a pinned shape', async () => {
     const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'));
     expect(read.campaigns.map((c) => c.code)).toEqual(['AUGUST_PUSH', 'SEPT_PUSH']);
     expect(Object.keys(read.campaigns[0]).sort()).toEqual([
@@ -63,7 +63,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
     });
     const active = await mongoose.connection.db!.collection('memberships').countDocuments({ kpmId: KPM_A, status: 'active' });
     expect(read.standings).toHaveLength(2 * active);
-    // P18.6-T2 AC-7: `overridden` added — who, when and why — `null` without an override.
+    // P18.3-T2 AC-7: `overridden` added — who, when and why — `null` without an override.
     expect(Object.keys(read.standings[0]).sort()).toEqual([
       'campaignCode', 'chasing', 'eligible', 'final', 'membershipId', 'overridden', 'status',
     ]);
@@ -80,13 +80,13 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
     expect(read.standings.some((s) => s.membershipId === office.id.LEFT)).toBe(false);
   });
 
-  it('P18.5-T8 AC-8 narrows to the codes asked for', async () => {
+  it('P18.2-T8 AC-8 narrows to the codes asked for', async () => {
     const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'), { codes: ['SEPT_PUSH'] });
     expect(read.campaigns.map((c) => c.code)).toEqual(['SEPT_PUSH']);
     expect(new Set(read.standings.map((s) => s.campaignCode))).toEqual(new Set(['SEPT_PUSH']));
   });
 
-  it('P18.6-T2 AC-7 reads only the members asked for, a leaver included, without reading the office’s memberships', async () => {
+  it('P18.3-T2 AC-7 reads only the members asked for, a leaver included, without reading the office’s memberships', async () => {
     await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
     const queries: string[] = [];
     mongoose.set('debug', (collection: string, method: string) => { queries.push(`${collection}.${method}`); });
@@ -98,7 +98,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
     expect(queries.filter((q) => q.startsWith('memberships.'))).toHaveLength(1);
   });
 
-  it('P18.6-T2 AC-7 applies an override the stored standing carries — the status read and who, when and why', async () => {
+  it('P18.3-T2 AC-7 applies an override the stored standing carries — the status read and who, when and why', async () => {
     const at = new Date('2026-09-14T02:00:00Z');
     await mongoose.connection.db!.collection('campaignStandings').updateOne(
       { kpmId: KPM_A, campaignCode: 'AUGUST_PUSH', membershipId: office.id.RINA },
@@ -120,7 +120,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
     }
   });
 
-  describe('D-window (P18.6-T1, P18.6-T2 AC-4): this year in the office’s zone', () => {
+  describe('D-window (P18.3-T1, P18.3-T2 AC-4): this year in the office’s zone', () => {
     const YEAR = { start: new Date('2026-01-01T00:00:00+07:00'), end: new Date('2027-01-01T00:00:00+07:00') };
     const raw = (code: string, over: Record<string, unknown>) => ({
       kpmId: KPM_A, code, title: code, kind: 'seasonal', subtype: null, window: 'campaign_dates', appliesToOrgLevelCodes: [],
@@ -142,7 +142,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
       ]);
     });
 
-    it('P18.6-T2 AC-4 seasonal campaigns overlapping the year, ended ones included; structural ones running; archived never', async () => {
+    it('P18.3-T2 AC-4 seasonal campaigns overlapping the year, ended ones included; structural ones running; archived never', async () => {
       const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'), { window: YEAR, memberIds: [office.id.RINA] });
       expect(read.campaigns.map((c) => c.code).sort()).toEqual([
         // M1: last December's campaign is listed — it became final this January; November's is not. Round 2: next
@@ -182,13 +182,13 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
       expect(read.campaigns.map((c) => c.code)).toContain('SEPT_PUSH');
     });
 
-    it('P18.6-T2 AC-4 without a window every active campaign is read, as before', async () => {
+    it('P18.3-T2 AC-4 without a window every active campaign is read, as before', async () => {
       const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'), { memberIds: [office.id.RINA] });
       expect(read.campaigns.map((c) => c.code)).not.toContain('ARCHIVED_THIS_YEAR');
       expect(read.campaigns.map((c) => c.code)).toEqual(expect.arrayContaining(['LAST_YEAR', 'NEXT_YEAR', 'PROMO_LATER', 'STRUCT_ENDED']));
     });
 
-    it('P18.6-T2 AC-4 the window’s edges: an end at its first instant is in, a start at its end is out', () => {
+    it('P18.3-T2 AC-4 the window’s edges: an end at its first instant is in, a start at its end is out', () => {
       const now = new Date('2026-09-14T03:00:00Z');
       const seasonal = (startsAt: string, endsAt: string | null) => ({ kind: 'seasonal', startsAt: new Date(startsAt), endsAt: endsAt ? new Date(endsAt) : null });
       expect(inWindow(seasonal('2025-12-01T00:00:00+07:00', '2026-01-01T00:00:00+07:00'), YEAR, now, TZ)).toBe(true);
@@ -211,7 +211,7 @@ describe('the standings port (P18.5-T8 AC-8; P18.6-T2 AC-7)', () => {
     });
   });
 
-  it('P18.5-T8 AC-8 imports only the evaluation, its repositories and the membership repository — no route, no screen', () => {
+  it('P18.2-T8 AC-8 imports only the evaluation, its repositories and the membership repository — no route, no screen', () => {
     const file = join(__dirname, 'campaign-standings-reader.ts');
     const direct = importsOf(file).map((f) => f.slice(SRC.length + 1)).sort();
     expect(direct).toEqual([

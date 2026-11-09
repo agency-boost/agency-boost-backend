@@ -57,11 +57,11 @@ const BAD = {
 };
 
 /**
- * **P18.98-T5 AC-3 — the pipe's refusals in the reader's language** (ADR-0179 §7): every violation class-validator
+ * **P18.10-T5 AC-3 — the pipe's refusals in the reader's language** (ADR-0179 §7): every violation class-validator
  * writes, the English exactly as the pipe wrote it before and its Indonesian read off the same template; a DTO's own
  * sentence (`field`) in both languages; a nested property under its path.
  */
-describe('P18.98-T5 AC-3 the pipe’s violations', () => {
+describe('P18.10-T5 AC-3 the pipe’s violations', () => {
   let english: string[];
   let indonesian: string[];
 
@@ -184,11 +184,11 @@ describe('P18.98-T5 AC-3 the pipe’s violations', () => {
 });
 
 /**
- * **Every DTO's violations read in Indonesian** (P18.98-T5 AC-3): each constraint any DTO declares is one this reads by
+ * **Every DTO's violations read in Indonesian** (P18.10-T5 AC-3): each constraint any DTO declares is one this reads by
  * its template, and every message a DTO writes itself is a `field(...)` sentence in both languages. Read off
  * class-validator's own metadata, after loading every DTO and controller the API has.
  */
-describe('P18.98-T5 AC-3 every DTO’s violations', () => {
+describe('P18.10-T5 AC-3 every DTO’s violations', () => {
   const SRC = join(__dirname, '../..');
   const files = globSync('**/*.{dto,controller}.ts', { cwd: SRC }).filter((file) => !file.includes('.spec.'));
 
@@ -236,7 +236,8 @@ describe('P18.98-T5 AC-3 every DTO’s violations', () => {
       .filter(({ name }) => name === undefined || !TRANSLATED_CONSTRAINTS.includes(name))
       .map(({ at, name }) => `${at}: ${name}`);
     // A custom decorator's own default message counts as its sentence once it is a `field(...)`.
-    const ownDefaults = new Set(['isOfficeDate', 'isTemplateFrom']);
+    // P19.4-T5: `isRungMap`, *Salin dari…*'s rung map (ADR-0213 §4), says `rungMapShape`.
+    const ownDefaults = new Set(['isOfficeDate', 'isTemplateFrom', 'isRungMap']);
     expect(unread.filter((line) => !ownDefaults.has(line.split(': ')[1]))).toEqual([]);
   });
 });

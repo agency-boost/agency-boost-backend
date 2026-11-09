@@ -1,7 +1,7 @@
 import { Fields, refuseWith, type FieldSentence } from '@/common/validation/fields';
 import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
-  CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_KINDS, CAMPAIGN_LIMITS, CAMPAIGN_METRICS, CAMPAIGN_POSTER_COLORS,
+  CAMPAIGN_EVALUATION_PHASE, CAMPAIGN_KINDS, comparePhases, CAMPAIGN_LIMITS, CAMPAIGN_METRICS, CAMPAIGN_POSTER_COLORS,
   CAMPAIGN_SUBTYPES, CAMPAIGN_WINDOWS, REQUIREMENT_COMPARATORS, RESERVED_CAMPAIGN_CODES, STRUCTURAL_CAMPAIGN_WINDOWS,
   isCampaignMetric, metricByKey,
   type CampaignKind, type CampaignPosterColor, type CampaignSubtype, type CampaignWindow, type RequirementComparator,
@@ -9,7 +9,7 @@ import {
 import { isWholeMonths } from '@/domain/metrics/campaign-window';
 import { CAMPAIGNS_REFUSALS } from './campaigns.messages';
 
-/** What a campaign's fields are refused with (P18.98-T5 AC-3): this module's sentences, and the shared envelope's. */
+/** What a campaign's fields are refused with (P18.10-T5 AC-3): this module's sentences, and the shared envelope's. */
 const SAY = CAMPAIGNS_REFUSALS.VALIDATION_FAILED;
 const FIELD = VALIDATION_REFUSALS.VALIDATION_FAILED;
 
@@ -73,7 +73,7 @@ export function checkCampaign(
   const source = (body ?? {}) as Record<string, unknown>;
   const f = new Fields(source, [
     'code', 'title', 'description', 'startsAt', 'endsAt', 'reward', 'requirements',
-    // P18.5-T7, D-fields: what the agent's card draws.
+    // P18.2-T7, D-fields: what the agent's card draws.
     'kind', 'subtype', 'window', 'appliesToOrgLevelCodes', 'poster', 'blurb',
   ]);
 
@@ -122,7 +122,7 @@ export function checkCampaign(
 }
 
 /**
- * **A campaign across its fields** (P18.5-T7, D-fields, D-windows) — the rules no one field can decide, over the
+ * **A campaign across its fields** (P18.2-T7, D-fields, D-windows) — the rules no one field can decide, over the
  * campaign as it will be stored (a patch merged onto the stored row). Every refusal is a sentence an Owner reads.
  *
  * - A seasonal campaign is dated: it has an end, its window is its dates, and it has no subtype.
@@ -252,14 +252,14 @@ function readRequirements(
     } else if (metric.requirable === false) {
       // An office's count, not anybody's work (P13.2-T4, `LEADERS_USED`): nobody could qualify by it.
       violations.push(SAY.countsTheOffice({ n, name: metric.name }));
-    } else if (metric.phase > CAMPAIGN_EVALUATION_PHASE) {
+    } else if (comparePhases(metric.phase, CAMPAIGN_EVALUATION_PHASE) > 0) {
       // Accepting it would be a campaign nobody can ever qualify for, failing silently. The Owner
       // reads this, so it says what is true now and names no phase: a phase number is our
       // schedule, and an Owner can do nothing with it (P10.1-T2 AC-3, ADR-0062 §3).
       violations.push(SAY.notMeasuredYet({ n, name: metric.name }));
     } else if (!isCampaignMetric(metricKey)) {
       /*
-       * P18.5-T8 AC-1, D-evaluable: a target, an enum, a boolean, a per-event rate or a self-declared toggle is not
+       * P18.2-T8 AC-1, D-evaluable: a target, an enum, a boolean, a per-event rate or a self-declared toggle is not
        * something anybody achieves over a campaign's window. A requirement stored before the set existed stays,
        * and reads *Not measured yet*; a new one is refused, with what may be named instead.
        */

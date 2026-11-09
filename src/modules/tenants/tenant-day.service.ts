@@ -84,7 +84,7 @@ export class TenantDay {
   }
 
   /**
-   * **The office's day and the month it opened**, from one read (P18.8-T11, ADR-0161 §4): the range a reader may
+   * **The office's day and the month it opened**, from one read (P18.5-T11, ADR-0161 §4): the range a reader may
    * look back over on the Personal Summary, from the office's first month to this one.
    *
    * The first month is the month the office's record was created in, **in the office's own zone** — an office

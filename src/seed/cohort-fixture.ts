@@ -2,11 +2,13 @@ import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { addDays, type LocalDate } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE, mayTickByHand } from '@/domain/constants';
+import { inSpan, newHiresYear, type NewHireYear } from '@/domain/metrics/activation-3m';
 import type { ActivationItemState } from '@/modules/activation/activation-progress.schema';
 import { ActivationProgress, ActivationProgressSchema } from '@/modules/activation/activation-progress.schema';
+import { activationFirstYearEndsOn, firstYearOver } from '@/modules/activation/activation-rules';
 import { seedObjectId } from './coaching-fixture';
 import { markNewHires } from './join-dates';
-import type { ReportingKey } from './reporting-fixture';
+import { REPORTING_CAST, type ReportingKey } from './reporting-fixture';
 
 /**
  * **The activation cohort, seeded** (Phase 18.1, P18.1-T1; `functional/leader-forum.md`, *Seed*): what the forum's
@@ -21,7 +23,8 @@ import type { ReportingKey } from './reporting-fixture';
  * | Signed in as | Sees |
  * |---|---|
  * | `owner@kpm0417.test`, `admin@kpm0417.test` at a meeting's *Overview & Stats* | ***3M new agent %* — FY 2025: 100%**, the nine who started last year (Arini, Bonar, Gilang, Cahya, Damar, Elsa, Oscar, Ikhsan, Jihan) all producing in their first four months — Gilang among them, who left last month and is judged on the months he belonged (the spec's *Noted* 4). **YTD 2026: 33%**, one of three: Pandu producing; Kemal, quiet every month, and Raka, on no file, not. Phase 13's hires (Siti, Indah, Dimas, Wahyu, Novi from July; Budi, Rina in August; Yanti in September) are in the cohort and **left out**, their four months not all held — August's file is empty — and the cell names the months they wait on: August, and November and December, still to come |
- * | `arini@kpm0417.test` and the other eleven | Their own activation, complete: every item done, graduated by themselves on day 71 |
+ * | `arini@kpm0417.test` and the other eleven | Their own activation, complete: every item done, graduated by themselves on day 71 — **empty from a year after joining** (P19.9-T3 AC-5, OD-289): Arini and Bonar, past it, read *Aktivasi hanya untuk tahun pertama* |
+ * | `yosef@kpm0417.test` | ***New hires* by year** (P19.9-T3, ADR-0233): *Tahun berjalan* this year's joiners under him and Winda, *Tahun lalu* last year's — Arini to Elsa, and Gilang who left. Arini and Bonar, past their first year, open **empty**; Cahya, Damar and Elsa, still inside it, open their completed checklist. Which names fall in which year moves with the run's day; the seed's guide prints them |
  *
  * **No walk already reviewed moves**: a graduated activation is on no *New hires* roster (`openOf`), in no leader's
  * nav, and nothing of the coaching roster or the Unit Dashboard reads one; none of the twelve is in Agus's, Sari's,
@@ -120,8 +123,15 @@ export async function seedActivationCohort(deps: CohortSeedDeps): Promise<Cohort
   // gives the same answer. Their join dates are long past; `/new-hires` shows a year of them (ADR-0173).
   await markNewHires(COHORT_HIRES.map((key) => deps.cast[key].id));
 
-  const lastYear = String(Number(clock.localDateFor(tz, now).slice(0, 4)) - 1);
+  const today = clock.localDateFor(tz, now);
+  const lastYear = String(Number(today.slice(0, 4)) - 1);
   const startedLastYear = COHORT_HIRES.filter((key) => starts[key]?.startsWith(lastYear)).length;
+  // P19.9-T3 (ADR-0233): Yosef's New Hires by year — his own Agents and Winda's — and who is past their first year.
+  const yosefs = REPORTING_CAST.filter((m) => COHORT_HIRES.includes(m.key) && (m.leader === 'yosef' || m.leader === 'winda'));
+  const named = (year: NewHireYear) => yosefs
+    .filter((m) => inSpan(starts[m.key], newHiresYear(today, year)))
+    .map((m) => `${m.fullName.split(' ')[0]}${firstYearOver(today, activationFirstYearEndsOn(tz, starts[m.key]!)) ? ' (empty)' : ''}`)
+    .join(', ') || 'nobody';
   const guide = `
   COHORT for the forum's 3M new agent %  (from src/seed/cohort-fixture.ts)
     owner@kpm0417.test           Overview & Stats › 3M new agent %: ${COHORT_HIRES.length} activations, graduated long
@@ -130,6 +140,11 @@ export async function seedActivationCohort(deps: CohortSeedDeps): Promise<Cohort
                                  and Raka (on no file) are the two not producing; Gilang left last month and
                                  counts on the months he belonged. Phase 13's hires (July on) are left out:
                                  August's file is empty, so their four months are not all held
+  NEW HIRES by year  (P19.9-T3, ADR-0233)
+    yosef@kpm0417.test           /new-hires Tahun berjalan: ${named('current')}
+                                 Tahun lalu: ${named('previous')}
+                                 (empty) = past the first year: the activation opens with one line, no checklist
+    arini@kpm0417.test           /activation: past her first year, the one line and no checklist
 `;
   return { written, starts, guide };
 }

@@ -1,8 +1,13 @@
+import { HttpStatus } from '@nestjs/common';
+import { DomainException } from '@/common/errors/domain.exception';
+import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
+import { LEAD_AGE, LEAD_GENDERS, type LeadGender } from '@/domain/constants';
+import { isLeadAge } from './lead-age';
 import { LEAD_TYPES, type LeadType } from './lead.schema';
 import { LEAD_REFUSALS } from './leads.messages';
 
-/** A lead's own field sentences, in both languages (P18.98-T5 AC-3). */
+/** A lead's own field sentences, in both languages (P18.10-T5 AC-3). */
 const SAY = LEAD_REFUSALS.VALIDATION_FAILED;
 
 /** What a lead's own fields may be. Bounds in one place, so a screen and a service agree. */
@@ -24,6 +29,13 @@ export interface CheckedLead {
   nextActionNote?: string | null;
   source?: string | null;
   thisMonth?: boolean;
+  /**
+   * **The client's age at the next birthday** (P19.7-T1 AC-1; ADR-0224 §3): a whole number from `LEAD_AGE.MIN` to
+   * `LEAD_AGE.MAX`, or `null` to clear it and its day. Never `ageRecordedOn`, which only the server writes.
+   */
+  age?: number | null;
+  /** `male`, `female`, or `null` to clear it (ADR-0224 §1). */
+  gender?: LeadGender | null;
   /**
    * The version the writer read, pinned so a stale write is refused rather than applied (P7-T7).
    *
@@ -52,6 +64,9 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   const f = new Fields(body, [
     'name', 'type', 'contact', 'remarks',
     'nextActionDate', 'nextActionNote', 'source', 'thisMonth', 'version',
+    // P19.7-T1 (ADR-0224): the client's age and gender. **No `birthDate`**, and no `ageRecordedOn`: either in a body
+    // is an unknown field, `400` (minimisation, §6; the day is the server's, §1).
+    'age', 'gender',
   ]);
 
   const out: CheckedLead = {};
@@ -99,7 +114,34 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   const contact = raw(body, 'contact');
   if (contact !== undefined) out.contact = readContact(contact, f);
 
+  const age = raw(body, 'age');
+  if (age === null) out.age = null;
+  else if (age !== undefined) {
+    if (typeof age !== 'number' || !Number.isInteger(age)) f.violations.push(SAY.ageShape);
+    else out.age = age;
+  }
+
+  const gender = raw(body, 'gender');
+  if (gender === null) out.gender = null;
+  else if (gender !== undefined) {
+    if (!(LEAD_GENDERS as readonly unknown[]).includes(gender)) f.violations.push(SAY.genderShape);
+    else out.gender = gender as LeadGender;
+  }
+
   if (f.violations.length) refuseWith(f.violations);
+  /*
+   * **The bounds, after the shape** (ADR-0224 §3): a whole number outside 1 to 100 is `422 LEAD_AGE_OUT_OF_RANGE`,
+   * `details: { min, max }` — the screen's *"Umur harus 1–100."* — and nothing is written. A body that is also wrong
+   * elsewhere hears about that first, as `400`.
+   */
+  if (typeof out.age === 'number' && !isLeadAge(out.age)) {
+    throw new DomainException(
+      ErrorCode.LEAD_AGE_OUT_OF_RANGE,
+      LEAD_REFUSALS.LEAD_AGE_OUT_OF_RANGE.between({ min: LEAD_AGE.MIN, max: LEAD_AGE.MAX }),
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      { min: LEAD_AGE.MIN, max: LEAD_AGE.MAX },
+    );
+  }
   return out;
 }
 

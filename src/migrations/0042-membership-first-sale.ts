@@ -12,7 +12,7 @@ export interface MembershipFirstSaleResult {
 }
 
 /**
- * **Every membership's first sale, from the records already held** (ADR-0171 §1, P18.96-T4 AC-1).
+ * **Every membership's first sale, from the records already held** (ADR-0171 §1, P18.8-T4 AC-1).
  *
  * From the deploy that brings it, `FirstSaleService` keeps `memberships.firstSaleDate` as the leads and the production
  * file are written. This gives every membership written before it the same answer, through the same definition
@@ -46,9 +46,13 @@ export async function up(db: mongoose.mongo.Db): Promise<MembershipFirstSaleResu
         { kpmId, deletedAt: null, ownerMembershipId: { $in: ids }, type: 'sales', 'transitions.toStatusCode': FIRST_SALE_STAGE_CODE },
         { projection: { ownerMembershipId: 1, name: 1, transitions: 1, loggedFrom: 1 } },
       ).toArray(),
+      // A row by kode (P19.5-T2, ADR-0214 §9) or one the migration has not reached yet: either holds the policies.
       db.collection('monthlyAgentData').find(
-        { kpmId, deletedAt: null, membershipId: { $in: ids }, 'policyCountMonthly.value': { $gt: 0 } },
-        { projection: { membershipId: 1, month: 1, policyCountMonthly: 1 } },
+        {
+          kpmId, deletedAt: null, membershipId: { $in: ids },
+          $or: [{ 'values.POLICY_COUNT.value': { $gt: 0 } }, { 'policyCountMonthly.value': { $gt: 0 } }],
+        },
+        { projection: { membershipId: 1, month: 1, policyCountMonthly: 1, 'values.POLICY_COUNT': 1 } },
       ).toArray(),
     ]);
 
@@ -63,7 +67,12 @@ export async function up(db: mongoose.mongo.Db): Promise<MembershipFirstSaleResu
           .map((c) => ({ date: localDayOf(c.at, timezone), recordId: c.leadId, logged: c.logged })),
         fileMonths: months
           .filter((m) => m.membershipId === membershipId)
-          .map((m) => ({ month: m.month as string, recordId: String(m._id), policies: (m.policyCountMonthly as { value: number }).value })),
+          .map((m) => ({
+            month: m.month as string, recordId: String(m._id),
+            policies: ((m.values as { POLICY_COUNT?: { value?: number } } | undefined)?.POLICY_COUNT?.value
+              ?? (m.policyCountMonthly as { value?: number } | undefined)?.value ?? 0),
+          }))
+          .filter((m) => m.policies > 0),
       });
       const stored: FirstSale | null = member.firstSaleDate
         ? {

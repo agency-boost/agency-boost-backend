@@ -58,5 +58,10 @@ export class AuditLog {
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);
 AuditLogSchema.index({ kpmId: 1, createdAt: -1 });
+/**
+ * **The audit page's order, straight off the index** (P19.2-T2 AC-6; §B.32): newest first with ties broken by id, which
+ * is what the cursor names — so a page reads in the index's order rather than sorting every row of a scope in memory.
+ */
+AuditLogSchema.index({ kpmId: 1, createdAt: -1, _id: -1 });
 AuditLogSchema.index({ kpmId: 1, targetCollection: 1, targetId: 1 });
 AuditLogSchema.index({ kpmId: 1, actorMembershipId: 1, createdAt: -1 });

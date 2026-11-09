@@ -69,7 +69,7 @@ export interface ComplianceCategoryRead<Catalog> {
   /** Keyed by membership id; `null` unless this category is selected. */
   cells: Map<string, ComplianceCell> | null;
   /**
-   * *Added by BE-tree (P18.6-T1 AC-9, D-audit-tree), additive*: what the selected category's cells disclose under
+   * *Added by BE-tree (P18.3-T1 AC-9, D-audit-tree), additive*: what the selected category's cells disclose under
    * roles §3.5 — the surface, and each member whose record they carry with the first day disclosed (`null`: the whole
    * record). **Absent when nothing is disclosed** — goals, events, campaigns, the chips, and a category not selected.
    * The service writes it, once, after the answer exists; a category never writes an entry.
@@ -78,7 +78,7 @@ export interface ComplianceCategoryRead<Catalog> {
 }
 
 /**
- * **One category of the Owner's compliance tree** (P18.6-T1, T2). Each reads its facts through the owning module's
+ * **One category of the Owner's compliance tree** (P18.3-T1, T2). Each reads its facts through the owning module's
  * bulk port — a fixed number of queries for any number of members, none per member — and throws `NotFoundException`
  * for an `item` the office does not list (another office's, archived, outside D-window).
  */

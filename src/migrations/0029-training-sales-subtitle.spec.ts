@@ -9,7 +9,7 @@ const KPM_A = '66f0000000000000000000a1';
 const KPM_B = '66f0000000000000000000b1';
 
 /**
- * **OD-150 for offices that already exist** (P18.5-T1): Sales's seeded subtitle loses its Skill Tracker promise in
+ * **OD-150 for offices that already exist** (P18.2-T1): Sales's seeded subtitle loses its Skill Tracker promise in
  * the working copy, the newest snapshot agents read, and every Company template — only where the words are still the
  * seeded ones, with no version moving, and a second run doing nothing.
  */
@@ -38,7 +38,7 @@ describe('0029 — Sales’s subtitle without the Skill Tracker promise (OD-150)
     ]);
   });
 
-  it('P18.5-T1 OD-150 rewrites the seeded words in the working copy, the newest snapshot and the templates, versions kept', async () => {
+  it('P18.2-T1 OD-150 rewrites the seeded words in the working copy, the newest snapshot and the templates, versions kept', async () => {
     expect(await up(db())).toEqual({ categories: 1, snapshots: 1, templates: 1 });
 
     const a = await db().collection('trainingCategories').findOne({ kpmId: KPM_A });
@@ -54,13 +54,13 @@ describe('0029 — Sales’s subtitle without the Skill Tracker promise (OD-150)
     ]);
   });
 
-  it('P18.5-T1 OD-150 leaves an office’s own words alone', async () => {
+  it('P18.2-T1 OD-150 leaves an office’s own words alone', async () => {
     await up(db());
     expect(await db().collection('trainingCategories').findOne({ kpmId: KPM_B })).toMatchObject({ description: 'Our own words.' });
     expect((await db().collection('configSnapshots').findOne({ kpmId: KPM_B }))!.payload.training[0].description).toBe('Our own words.');
   });
 
-  it('P18.5-T1 OD-150 is idempotent: a second run writes nothing', async () => {
+  it('P18.2-T1 OD-150 is idempotent: a second run writes nothing', async () => {
     await up(db());
     expect(await up(db())).toEqual({ categories: 0, snapshots: 0, templates: 0 });
   });

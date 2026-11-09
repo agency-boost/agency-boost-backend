@@ -9,7 +9,7 @@ export const EVENT_RSVP_STATUSES = ['going', 'cancelled'] as const;
 export type EventRsvpStatus = (typeof EVENT_RSVP_STATUSES)[number];
 
 /**
- * **One member's standing with one event** (P18.5-T5; OD-31, D-status): the RSVP, the claim and the confirmation.
+ * **One member's standing with one event** (P18.2-T5; OD-31, D-status): the RSVP, the claim and the confirmation.
  *
  * One row per (event, membership), **keyed by the membership `_id`** (invariant §2) — a member who leaves and rejoins
  * is a new membership and starts fresh, and the first one's rows stay the office's. Three writers, each owning its

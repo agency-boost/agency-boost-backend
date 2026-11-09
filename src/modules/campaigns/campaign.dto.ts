@@ -111,7 +111,7 @@ export class SaveCampaignDto {
 }
 
 /**
- * `PUT /kpm/settings/campaigns/:code/standings/:membershipId/override` (P18.6-T2 AC-5, D-override). Declared for
+ * `PUT /kpm/settings/campaigns/:code/standings/:membershipId/override` (P18.3-T2 AC-5, D-override). Declared for
  * OpenAPI; the rules are `checkStandingOverride`'s (ADR-0030), so every property carries `@Allow()` — see
  * `SaveCampaignDto`.
  */

@@ -21,7 +21,7 @@ const operations = Object.entries(document.paths).flatMap(([path, item]) =>
 );
 
 /**
- * P3.5-T11. The document listed every route and described none of their answers: a
+ * P3.1-T11. The document listed every route and described none of their answers: a
  * generated client typed every response `any`, and the whole authorisation model was
  * invisible.
  *
@@ -63,7 +63,7 @@ describe('the OpenAPI document describes the API', () => {
   it('AC-2: every operation documents its failures with the shared envelope', () => {
     const envelope = '#/components/schemas/ApiErrorEnvelope';
     /*
-     * **The one failure that is not an error** (P18.7-T1, ADR-0152): readiness answers 503 with its own body,
+     * **The one failure that is not an error** (P18.4-T1, ADR-0152): readiness answers 503 with its own body,
      * `{status:'degraded', checks:{database:'down'}}`, so a load balancer and `deploy.sh` read the status and an
      * operator reads which check failed. It is a probe's answer, never the envelope, and documenting it as one would
      * be false.

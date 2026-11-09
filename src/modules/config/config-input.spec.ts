@@ -35,7 +35,16 @@ describe('configuration field rules (ADR-0030)', () => {
           summaryGroupCode: null, summaryGroupLabel: null,
         });
       expect(checkTypeCreate({ code: 'sell_x', categoryCode: 'selling', label: 'X', description: ' a ' }))
-        .toEqual({ code: 'SELL_X', categoryCode: 'SELLING', label: 'X', description: 'a' });
+        .toEqual({ code: 'SELL_X', categoryCode: 'SELLING', label: 'X', shortLabel: null, description: 'a' });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 reads a type’s short name trimmed, a blank one as none, and an absent one as untouched', () => {
+      expect(checkTypeCreate({ code: 'sell_x', categoryCode: 'selling', label: 'X', shortLabel: ' Presentasi ' }))
+        .toMatchObject({ shortLabel: 'Presentasi' });
+      expect(checkTypeCreate({ code: 'sell_x', categoryCode: 'selling', label: 'X', shortLabel: '   ' }))
+        .toMatchObject({ shortLabel: null });
+      expect(checkTypeUpdate({ shortLabel: null })).toEqual({ shortLabel: null });
+      expect(checkTypeUpdate({ label: 'Y' })).toEqual({ label: 'Y' });
     });
 
     it('drops absent fields, so an empty update is still an empty change', () => {
@@ -145,6 +154,13 @@ describe('configuration field rules (ADR-0030)', () => {
         () => checkCategoryCreate({ code: 'ABC', label: long(81) }), 'label must be 1–80 characters.'],
       ['a type label', () => checkTypeUpdate({ label: long(200) }),
         () => checkTypeUpdate({ label: long(201) }), 'label must be 1–200 characters.'],
+      // P19.8-T4 AC-13 MOB UI-180 (ADR-0229 §5): `ACTIVITY_TEXT.SHORT_LABEL_MAX`, on a create and an update alike.
+      ['a type’s short name (P19.8-T4 AC-13 MOB UI-180)', () => checkTypeUpdate({ shortLabel: long(20) }),
+        () => checkTypeUpdate({ shortLabel: long(21) }), 'shortLabel must be at most 20 characters.'],
+      ['a new type’s short name (P19.8-T4 AC-13 MOB UI-180)',
+        () => checkTypeCreate({ code: 'SELL_X', categoryCode: 'SELLING', label: 'x', shortLabel: long(20) }),
+        () => checkTypeCreate({ code: 'SELL_X', categoryCode: 'SELLING', label: 'x', shortLabel: long(21) }),
+        'shortLabel must be at most 20 characters.'],
       ['a ratio label', () => checkRatioUpdate({ label: long(80) }),
         () => checkRatioUpdate({ label: long(81) }), 'label must be 1–80 characters.'],
       ['a lead status label', () => checkLeadStatusLabel(long(80)),
@@ -222,6 +238,12 @@ describe('configuration field rules (ADR-0030)', () => {
       ['type create, label too long', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'SELLING', label: long(201) }],
       ['type create, section not a code', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'sell ing', label: 'x' }],
       ['type update, label a number', UpdateActivityTypeDto, checkTypeUpdate, { label: 42 }],
+      // P19.8-T4 AC-13 MOB UI-180: the short name at its edge and past it, through the pipe and the checker alike.
+      ['type create, short name at 20', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'SELLING', label: 'x', shortLabel: long(20) }],
+      ['type create, short name at 21', CreateActivityTypeDto, checkTypeCreate, { code: 'SELL_X', categoryCode: 'SELLING', label: 'x', shortLabel: long(21) }],
+      ['type update, short name cleared', UpdateActivityTypeDto, checkTypeUpdate, { shortLabel: null }],
+      ['type update, short name at 21', UpdateActivityTypeDto, checkTypeUpdate, { shortLabel: long(21) }],
+      ['type update, short name a number', UpdateActivityTypeDto, checkTypeUpdate, { shortLabel: 7 }],
       ['ratio create, whole', CreateRatioDto, checkRatioCreate, { code: 'REFERRAL_RATE', label: 'x', numerator: ['A_B_C'], denominator: ['D_E_F'], benchmark: 0.15, comparison: 'gte' }],
       ['ratio create, benchmark over', CreateRatioDto, checkRatioCreate, { code: 'REFERRAL_RATE', label: 'x', numerator: ['A_B_C'], denominator: ['D_E_F'], benchmark: 1000.5, comparison: 'gte' }],
       ['ratio create, benchmark as text', CreateRatioDto, checkRatioCreate, { code: 'REFERRAL_RATE', label: 'x', numerator: ['A_B_C'], denominator: ['D_E_F'], benchmark: '0.15', comparison: 'gte' }],

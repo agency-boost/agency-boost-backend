@@ -24,7 +24,7 @@ const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
  * **Whether a storage key is a photo this person uploaded** (UI-111): `<prefix>/user/<userId>/avatar/<ulid>`, and
  * nothing else. The key comes back from the browser, so it is a claim: a key in an office's folder, the company's, or
  * another person's is not theirs to attach, whatever storage holds under it. **The prefix is checked too** (the Phase
- * 18.99 exit review, L5): it is this environment's (`STORAGE_KEY_PREFIX`, the key `gcs.adapter.ts` mints), so a key
+ * 18.11 exit review, L5): it is this environment's (`STORAGE_KEY_PREFIX`, the key `gcs.adapter.ts` mints), so a key
  * another environment minted — staging's, in a bucket two environments share — is not this account's photo either.
  */
 export function isOwnAvatarKey(storageKey: string, userId: string, prefix: string): boolean {
@@ -93,7 +93,7 @@ export class AvatarLinks {
  * against `AVATAR` and signs a form for a fresh key under `user/<userId>/avatar/`; `attach` asks storage what landed
  * (ADR-0040: the claim is a claim — the type is read from the bytes) and only then writes the key on `users.avatarUrl`.
  * `remove` clears it. **The object stays in storage**: the runtime signer can create and read, never delete
- * (ADR-0153), and a person's erasure removes their whole `user/<userId>` folder (P19-T1).
+ * (ADR-0153), and a person's erasure removes their whole `user/<userId>` folder (P20-T1).
  *
  * The person's own, and never a support session's (ADR-0162 §4): the controller refuses all three in one.
  * `users` is global identity (ADR-0002), so this reads it by the caller's own id and needs no tenant scope.
@@ -110,7 +110,7 @@ export class AvatarService {
 
   /**
    * A signed form for the photo, after the claim passes the photo's own ceiling and type — and **the form itself holds
-   * the photo's ceiling** (`maxBytes`, the Phase 18.99 exit review, L5), so storage refuses a larger file whatever the
+   * the photo's ceiling** (`maxBytes`, the Phase 18.11 exit review, L5), so storage refuses a larger file whatever the
    * claim said. `AVATAR.UPLOADS_PER_WINDOW` forms per account per hour, refused or not, then `429 AUTH_RATE_LIMITED`:
    * every form signed may leave an object nobody attaches, and the runtime signer cannot delete one (ADR-0153).
    */

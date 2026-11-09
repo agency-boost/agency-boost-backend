@@ -17,7 +17,7 @@ const NOT_OFFERED =
   + 'published by the office, or no such module here. Answered exactly as a module in another office is.';
 
 /**
- * **The learner's training** (P18.5-T1, T2, T4; `functional/training.md`, the Data contract; roles §3.7): the
+ * **The learner's training** (P18.2-T1, T2, T4; `functional/training.md`, the Data contract; roles §3.7): the
  * catalog the office offers with the reader's statuses — or, with `for`, a coachee's — one module's page, an item
  * opened, and the status set.
  *

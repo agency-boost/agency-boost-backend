@@ -24,7 +24,7 @@ function violations(body: unknown): string[] {
   }
 }
 
-/** The same sentences as given — both languages — read in Indonesian (P18.98-T5 AC-3). */
+/** The same sentences as given — both languages — read in Indonesian (P18.10-T5 AC-3). */
 function indonesianViolations(body: unknown): string[] {
   try {
     checkActivationChecklist(body);
@@ -150,7 +150,7 @@ describe('what a write to an activation checklist may contain (P5-T3, ADR-0030)'
     expect(violations({ aspects: ['nope'] }).join(' ')).toContain('must be an object of fields');
   });
 
-  it('P18.98-T5 AC-3 names every problem in Indonesian too, each place in the checklist as the reader counts it', () => {
+  it('P18.10-T5 AC-3 names every problem in Indonesian too, each place in the checklist as the reader counts it', () => {
     const body = {
       aspects: [
         { code: 'INTRODUCTION', label: '', items: [item({ autoLink: 'feature:coaching' }), item({ code: 'X_ITEM', autoLink: 7 })] },
@@ -212,7 +212,7 @@ describe('the checklist as a company template payload', () => {
       .toContain('The change must be an object of fields. aspects must be a list.');
   });
 
-  it('P18.98-T5 AC-3 reports them in both languages, read from the refusal’s sentences as given', () => {
+  it('P18.10-T5 AC-3 reports them in both languages, read from the refusal’s sentences as given', () => {
     expect(indonesianAll(activationChecklistProblems('not a checklist')))
       .toEqual(['Perubahan harus berupa objek berisi kolom.', 'aspects harus berupa daftar.']);
   });

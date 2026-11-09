@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -7,7 +7,7 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AUTH_REFUSALS } from './auth.messages';
 import { AuditService } from '@/modules/audit/audit.service';
-import { can, SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
+import { can } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import {
@@ -18,6 +18,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { PasswordService } from './password.service';
 import { TokenSigner } from './token-signer';
+import { AccountLink, AccountLinkDocument, linkPair } from './account-link.schema';
 
 export const IMPERSONATION_MAX_MINUTES = 60;
 
@@ -41,6 +42,12 @@ export class ImpersonationService {
     private readonly passwords: PasswordService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /*
+     * **The Super Admin's own linked login** (UI-169 item 5; ADR-0199 §7): a support session as it is refused, as one as
+     * themselves is. Optional and last, so a harness that builds this service for something else needs no links; the
+     * application module always provides it.
+     */
+    @Optional() @InjectModel(AccountLink.name) private readonly links: Model<AccountLinkDocument> | null = null,
   ) {}
 
   async start(
@@ -48,12 +55,13 @@ export class ImpersonationService {
     targetUserId: string,
     reason: string,
     durationMinutes = IMPERSONATION_MAX_MINUTES,
-    /** `setup` may write the office's setup and nothing else (ADR-0162); `support` only looks. */
+    /**
+     * **`support`, or nothing** (ADR-0206 §3; P19.4-T2): a session only looks. `setup` is refused `400
+     * VALIDATION_FAILED` naming `purpose`, before anything is written — an old client still starts a session by
+     * naming none, or `support`.
+     */
     purpose: ImpersonationPurpose = 'support',
-  ): Promise<{
-    accessToken: string; expiresAt: Date; sessionId: string; readOnly: boolean;
-    purpose: ImpersonationPurpose; writeScope: string[];
-  }> {
+  ): Promise<{ accessToken: string; expiresAt: Date; sessionId: string; readOnly: true }> {
     /*
      * **This one first, and the order is the point.**
      *
@@ -86,6 +94,19 @@ export class ImpersonationService {
         { field: 'reason' },
       );
     }
+    /*
+     * **No setup session** (P19.4-T2 AC-1; ADR-0206 §3, superseding ADR-0162): view-as only looks, and the server
+     * refuses every write in it. Named here rather than left to the DTO, so the answer names the field as the reason's
+     * does, and a caller that is not the controller meets it too.
+     */
+    if (purpose !== 'support') {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        AUTH_REFUSALS.VALIDATION_FAILED.impersonationPurpose,
+        HttpStatus.BAD_REQUEST,
+        { field: 'purpose' },
+      );
+    }
 
     const target = await this.users
       .findOne({ _id: targetUserId, deletedAt: null })
@@ -108,6 +129,17 @@ export class ImpersonationService {
       throw new DomainException(
         ErrorCode.PERM_DENIED,
         AUTH_REFUSALS.PERM_DENIED.yourself,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    /*
+     * **Nor a login linked to their own** (ADR-0199 §7): they are that person, so they switch to it instead, and the log
+     * never records one person as two — a support row written as *Super Admin acting as the Owner* who is themselves.
+     */
+    if (this.links && await this.links.exists({ userIds: { $all: linkPair(ctx.userId, String(target._id)) }, deletedAt: null }).exec()) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        AUTH_REFUSALS.PERM_DENIED.linkedToYou,
         HttpStatus.FORBIDDEN,
       );
     }
@@ -183,23 +215,6 @@ export class ImpersonationService {
       }
     }
 
-    /*
-     * **A setup session acts as somebody who configures an office** (ADR-0162 §1): its Owner, or one of its
-     * Admins, in an office the loop above has found active. Anybody else has no settings to change, so the
-     * session would be a support session that says otherwise. Refused before anything is written.
-     */
-    const setsUpTheOffice = Boolean(ownedByTarget)
-      || (membership?.status === 'active' && Boolean(membership.adminAccess?.isKpmAdmin));
-    if (purpose === 'setup' && !setsUpTheOffice) {
-      throw new DomainException(
-        ErrorCode.IMPERSONATION_SETUP_TARGET,
-        AUTH_REFUSALS.IMPERSONATION_SETUP_TARGET.notOwnerOrAdmin,
-        HttpStatus.CONFLICT,
-        { purpose },
-      );
-    }
-    const writeScope = purpose === 'setup' ? [...SETUP_SESSION_WRITE_SCOPE] : [];
-
     const minutes = Math.min(Math.max(1, Math.floor(durationMinutes)), IMPERSONATION_MAX_MINUTES);
     const ttlSeconds = minutes * 60;
     const inTenant = kpmId
@@ -235,12 +250,10 @@ export class ImpersonationService {
         effectiveUserId: targetUserId,
         kpmId,
         tokenHash: this.passwords.hashToken(accessToken),
-        // Read-only until a *second* Super Admin says otherwise. The operator who wants to
-        // write is not the one who decides they may — except the setup screens' own
-        // permissions, which a setup session names here (ADR-0162 §2).
+        // Every session only looks (ADR-0206 §3): read-only, a support session, with nothing it may write.
         readOnly: true,
-        purpose,
-        writeScope,
+        purpose: 'support',
+        writeScope: [],
         elevatedByUserId: null,
         elevatedAt: null,
         reason: reason.trim(),
@@ -248,6 +261,7 @@ export class ImpersonationService {
         startedAt: this.clock.now(),
         expiresAt,
         endedAt: null,
+        endReason: null,
         deletedAt: null,
       });
     } catch (err) {
@@ -264,19 +278,18 @@ export class ImpersonationService {
     const sessionId = String(session._id);
     /*
      * **After the row, so the entry names it** (ADR-0162 §3): the Owner's log can then tie the start to the
-     * session's elevation and its end. The purpose and the scope are the trust extended, recorded where an
-     * Owner reads them.
+     * session's end. `readOnly: true` is the whole of the trust extended (ADR-0206 §3).
      */
     await this.audit.record(inTenant, {
       action: 'impersonation.started',
       targetCollection: 'users',
       targetId: targetUserId,
-      after: { reason: reason.trim(), minutes, readOnly: true, purpose, sessionId, writeScope },
+      after: { reason: reason.trim(), minutes, readOnly: true, sessionId },
     });
 
-    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim(), purpose);
+    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim());
 
-    return { accessToken, expiresAt, sessionId, readOnly: true, purpose, writeScope };
+    return { accessToken, expiresAt, sessionId, readOnly: true };
   }
 
   /**
@@ -317,89 +330,13 @@ export class ImpersonationService {
       .findOne({ tokenHash: this.passwords.hashToken(rawToken), deletedAt: null })
       .exec();
     if (!row || row.endedAt) return null;
+    /*
+     * **A session that could write is no session** (ADR-0206 §5, defence in depth): a setup session's row, or one a
+     * second Super Admin elevated, from before P19.4-T2. Migration `0055-view-as-only` ends any such row still open at
+     * the deploy; one it missed is refused here as if it had.
+     */
+    if (row.purpose !== 'support' || row.readOnly !== true) return null;
     return row.expiresAt.getTime() > this.clock.now().getTime() ? row : null;
-  }
-
-  /**
-   * Let a session write — approved by a **different** Super Admin (§3.13).
-   *
-   * The two-person rule is the whole control. An admin session can rewrite the
-   * configuration every member of an office depends on, and the operator best placed to
-   * notice that is a bad idea is somebody other than the one having the idea. So the
-   * approver is checked against the session's own starter, not merely against "is a Super
-   * Admin" — otherwise the rule reads as two people and means one.
-   */
-  async elevate(ctx: RequestContext, sessionId: string, reason: string): Promise<void> {
-    if (!can(ctx, 'impersonation:elevate_to_write')) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        AUTH_REFUSALS.PERM_DENIED.approveSuperAdminOnly,
-        HttpStatus.FORBIDDEN,
-        { permission: 'impersonation:elevate_to_write' },
-      );
-    }
-    if (ctx.isImpersonating) {
-      // Otherwise a session could approve itself by impersonating another Super Admin —
-      // which `impersonation:target_super_admin` already forbids, but defence in depth
-      // costs one line here and the alternative is a hole nobody can see from one file.
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        AUTH_REFUSALS.PERM_DENIED.endYourOwn,
-        HttpStatus.FORBIDDEN,
-      );
-    }
-    if (!reason?.trim()) {
-      throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        AUTH_REFUSALS.VALIDATION_FAILED.elevationReason,
-        HttpStatus.BAD_REQUEST,
-        { field: 'reason' },
-      );
-    }
-
-    const session = await this.sessions
-      .findOne({ _id: sessionId, deletedAt: null }).exec()
-      .catch(() => null);
-    if (!session || session.endedAt) throw new NotFoundException('Support session');
-    if (session.expiresAt.getTime() <= this.clock.now().getTime()) {
-      throw new NotFoundException('Support session');
-    }
-
-    if (session.realActorUserId === ctx.userId) {
-      throw new DomainException(
-        ErrorCode.PERM_DENIED,
-        AUTH_REFUSALS.PERM_DENIED.secondSuperAdmin,
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    session.readOnly = false;
-    session.elevatedByUserId = ctx.userId;
-    session.elevatedAt = this.clock.now();
-    session.elevationReason = reason.trim();
-    await session.save();
-
-    const inTenant = session.kpmId
-      ? RequestContext.superAdminInTenant(ctx.userId, session.kpmId)
-      : ctx;
-    await this.audit.record(inTenant, {
-      action: 'impersonation.elevated',
-      targetCollection: 'users',
-      targetId: session.effectiveUserId,
-      after: {
-        sessionId,
-        approvedBy: ctx.userId,
-        startedBy: session.realActorUserId,
-        reason: reason.trim(),
-      },
-    });
-
-    await this.notifications.send({
-      userId: session.effectiveUserId,
-      kpmId: session.kpmId,
-      templateId: NotificationTemplate.IMPERSONATION_ELEVATED,
-      payload: { reason: reason.trim() },
-    });
   }
 
   /**
@@ -418,7 +355,6 @@ export class ImpersonationService {
     kpmId: string | null,
     ownerUserId: string | null,
     reason: string,
-    purpose: ImpersonationPurpose,
   ): Promise<void> {
     const told = new Set<string>();
     for (const userId of [targetUserId, ownerUserId]) {
@@ -428,8 +364,8 @@ export class ImpersonationService {
         userId,
         kpmId,
         templateId: NotificationTemplate.IMPERSONATION_STARTED,
-        // The notice says which kind of session it is (ADR-0162 §3): a setup one changes things.
-        payload: { reason, isSubject: userId === targetUserId, purpose },
+        // A support session's notice — *they can only look* (ADR-0206 §3); the setup session's wording is retired.
+        payload: { reason, isSubject: userId === targetUserId, purpose: 'support' },
       });
     }
   }

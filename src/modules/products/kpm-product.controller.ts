@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import { SavesSetupStep } from '@/modules/reporting/setup-step-saved';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { RequestDocumentUploadDto } from '@/modules/assets/asset.dto';
@@ -51,6 +52,7 @@ export class KpmProductController {
 
   @Put(':productId/active')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('products')
   @ApiOperation({
     summary: 'Sell this product, or stop',
     description:
@@ -69,6 +71,7 @@ export class KpmProductController {
 
   @Patch(':productId/overrides')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('products')
   @ApiOperation({
     summary: 'Replace some of the company’s words with this office’s',
     description:
@@ -89,6 +92,7 @@ export class KpmProductController {
 
   @Delete(':productId/overrides/:field')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('products')
   @ApiOperation({
     summary: 'Give one field back to the company',
     description:
@@ -123,6 +127,7 @@ export class KpmProductController {
 
   @Put(':productId/documents/:slot')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('products')
   @ApiOperation({
     summary: 'Attach this office’s own file to one slot',
     description:
@@ -145,6 +150,7 @@ export class KpmProductController {
 
   @Delete(':productId/documents/:slot')
   @RequirePermission('tenant_config:write')
+  @SavesSetupStep('products')
   @ApiOperation({
     summary: 'Use the company’s document for this slot again',
     description:

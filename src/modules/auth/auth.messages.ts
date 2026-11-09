@@ -2,7 +2,7 @@ import { formatDate } from '@/common/format/format';
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The auth module's refusals, in both languages** (P18.98-T5 AC-2): signing in and out, the session, registration's
+ * **The auth module's refusals, in both languages** (P18.10-T5 AC-2): signing in and out, the session, registration's
  * password and agent code, the request's context — the account, the office's state — and support sessions. The
  * Indonesian follows the approved glossary (§B.0 voice, §B.6 refusals): a support session is a *sesi dukungan* and
  * acting as somebody *bertindak sebagai pengguna lain* (§A.2).
@@ -17,6 +17,11 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'Your current password is not correct.',
       id: 'Kata sandi Anda saat ini salah.',
     },
+    /* UI-169 item 5 (ADR-0199 §2, §4): the other login's password, on the link's page or in the switcher's sheet. */
+    wrongLinkedPassword: {
+      en: 'That is not the password of that login.',
+      id: 'Itu bukan kata sandi akun tersebut.',
+    },
   },
   AUTH_ACCOUNT_DEACTIVATED: {
     contactOwner: {
@@ -28,11 +33,23 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       id: 'Akun ini telah dinonaktifkan.',
     },
   },
+  /*
+   * *Changed 2026-11-04 (P19-T1 AC-4; UI-163, ADR-0190 §4):* sign-in no longer answers this — it read *"Verify your
+   * email address before signing in. Check your inbox."* What still needs a proven address does: being made a KPM's
+   * Owner (`refuseUnverifiedAddress`, `verified-address.ts`).
+   */
   AUTH_EMAIL_NOT_VERIFIED: {
-    verifyFirst: {
-      en: 'Verify your email address before signing in. Check your inbox.',
-      id: 'Verifikasi alamat email Anda sebelum masuk. Periksa kotak masuk email Anda.',
+    /* UI-169 item 5 (ADR-0199 §1): starting a link needs the starting login's own address proven (ADR-0190 §4). */
+    linkNeedsVerifiedAddress: {
+      en: 'Verify your own email address before you link another login. Use Send again on the banner.',
+      id: 'Verifikasi dulu alamat email Anda sendiri sebelum menautkan akun lain. Gunakan Kirim ulang pada banner.',
     },
+    notVerifiedYet: ({ email }: { email: string }) => ({
+      en: `${email} has not been verified yet. They verify it from the link in their email, or with Send again on `
+        + 'the banner once they sign in, and can then be made the Owner.',
+      id: `${email} belum diverifikasi. Pemilik alamat itu memverifikasinya lewat tautan di emailnya, atau lewat Kirim `
+        + 'ulang pada banner setelah masuk, lalu baru dapat dijadikan Owner.',
+    }),
   },
   AGENT_CODE_TAKEN: {
     registered: ({ agentCode, company }: { agentCode: string; company: string }) => ({
@@ -71,6 +88,24 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
     takenSinceRequest: {
       en: 'That address now belongs to another account, so your email has not changed. Ask again with a different one.',
       id: 'Alamat itu sekarang dipakai akun lain, jadi email Anda tidak berubah. Minta lagi dengan alamat lain.',
+    },
+  },
+  /* UI-169 item 5 (ADR-0199 §1, §2): a login has one link, a pair, in v1. */
+  AUTH_LINK_EXISTS: {
+    youAreLinked: {
+      en: 'Your login is already linked to another. Remove that link on My profile first.',
+      id: 'Akun Anda sudah tertaut ke akun lain. Hapus dulu tautan itu di Profil saya.',
+    },
+    linkedSince: {
+      en: 'One of these two logins was linked to another since this link was sent, so nothing was linked.',
+      id: 'Salah satu dari kedua akun ini sudah tertaut ke akun lain sejak tautan ini dikirim, jadi tidak ada yang ditautkan.',
+    },
+  },
+  /* UI-169 item 5 (ADR-0199 §4): the other login holds no session on this browser; its password is asked once. */
+  AUTH_LINK_SIGN_IN_REQUIRED: {
+    signInFirst: {
+      en: 'That login is not signed in on this browser. Enter its password to switch to it.',
+      id: 'Akun itu belum masuk di browser ini. Masukkan kata sandinya untuk beralih ke akun itu.',
     },
   },
   AUTH_SESSION_ENDED: {
@@ -113,13 +148,19 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'That is already your email address.',
       id: 'Itu sudah alamat email Anda.',
     },
+    /* UI-169 item 5 (ADR-0199 §1): `POST /auth/links` with the caller's own address — a login is never linked to itself. */
+    linkOwnAddress: {
+      en: 'That is your own address. Enter the email of your other login.',
+      id: 'Itu alamat Anda sendiri. Masukkan email akun Anda yang lain.',
+    },
     impersonationReason: {
       en: 'A reason is required to impersonate a user.',
       id: 'Alasan wajib diisi untuk bertindak sebagai pengguna lain.',
     },
-    elevationReason: {
-      en: 'Say why this session needs to write. The office\'s Owner reads it.',
-      id: 'Jelaskan mengapa sesi ini perlu mengubah data. Owner KPM akan membacanya.',
+    /* P19.4-T2 AC-1 (ADR-0206 §3): `purpose: 'setup'` on a start. There is one kind of session, and it only looks. */
+    impersonationPurpose: {
+      en: 'A support session only looks: there is no setup session. Start one with no purpose, or with support.',
+      id: 'Sesi dukungan hanya untuk melihat: tidak ada lagi sesi penyiapan. Mulai sesi tanpa tujuan, atau dengan support.',
     },
     /* The DTOs' own sentences (`field`), each naming its field as the API names it. */
     agentCodeShape: {
@@ -195,17 +236,15 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'Impersonating an office\'s Owner or Admin needs its own grant.',
       id: 'Bertindak sebagai Owner atau Admin KPM memerlukan izin tersendiri.',
     },
-    approveSuperAdminOnly: {
-      en: 'Only a Super Admin can approve writing in a support session.',
-      id: 'Hanya Super Admin yang dapat menyetujui perubahan data dalam sesi dukungan.',
+    /* UI-169 item 5 (ADR-0199 §1, §2): both logins of a link are an Owner's, an Admin's or a Super Admin's. */
+    linkRolesOnly: {
+      en: 'Only the logins of a KPM Owner, a KPM Admin or a Super Admin can be linked.',
+      id: 'Hanya akun KPM Owner, KPM Admin, atau Super Admin yang dapat ditautkan.',
     },
-    endYourOwn: {
-      en: 'End your own support session before approving one.',
-      id: 'Akhiri sesi dukungan Anda sendiri sebelum menyetujui sesi lain.',
-    },
-    secondSuperAdmin: {
-      en: 'A second Super Admin has to approve this — not the one running the session.',
-      id: 'Ini harus disetujui Super Admin kedua — bukan yang menjalankan sesi.',
+    /* ADR-0199 §7: a Super Admin who holds the other login switches to it; they are that person, never a support case. */
+    linkedToYou: {
+      en: 'That login is linked to yours. Switch to it from your avatar menu instead.',
+      id: 'Akun itu tertaut ke akun Anda. Beralihlah ke akun itu lewat menu avatar Anda.',
     },
   },
   IMPERSONATION_OFFICE_UNAVAILABLE: {
@@ -214,14 +253,6 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       id: `KPM ${code} · ${branch} ${reason === 'suspended' ? 'ditangguhkan' : 'diarsipkan'}, jadi tidak ada yang `
         + 'dapat bertindak sebagai anggotanya sampai KPM ini diaktifkan kembali.',
     }),
-  },
-  IMPERSONATION_SETUP_TARGET: {
-    notOwnerOrAdmin: {
-      en: 'A setup session acts as an office\'s Owner or one of its Admins, and this person is neither. '
-        + 'Start a support session to look at their screens.',
-      id: 'Sesi penyiapan bertindak sebagai Owner atau salah satu Admin KPM, dan orang ini bukan keduanya. '
-        + 'Mulai sesi dukungan untuk melihat layarnya.',
-    },
   },
   IMPERSONATION_JUST_STARTED: {
     aMomentAgo: {

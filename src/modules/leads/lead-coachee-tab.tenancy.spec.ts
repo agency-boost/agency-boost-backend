@@ -15,7 +15,7 @@ import { LeadController } from './lead.controller';
 import { LeadService } from './lead.service';
 
 /**
- * **The coachee's *Leads* tab, and the Coaching Session's Leads card** (UI V1, UI-029, UI-062; Phase 18.99 T8) — one
+ * **The coachee's *Leads* tab, and the Coaching Session's Leads card** (UI V1, UI-029, UI-062; Phase 18.11 T8) — one
  * read, `GET /leads?owner=`, every lead of that agent, open and closed, which the screen splits into rows and the
  * *Ditutup* line. The route is ADR-0076's; this spec is the tab's boundary:
  *
@@ -26,7 +26,7 @@ import { LeadService } from './lead.service';
  *   another office's agent, are answered 404, and **no audit entry is written for a refused read**;
  * - **a Super Admin** is refused by name (403), never a cross-office read.
  */
-describe('P18.99-T8 — a coachee’s Leads tab, across the boundary (UI-029)', () => {
+describe('P18.11-T8 — a coachee’s Leads tab, across the boundary (UI-029)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;

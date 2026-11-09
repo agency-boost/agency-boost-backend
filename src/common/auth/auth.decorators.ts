@@ -14,7 +14,7 @@ export const RequirePermission = (permission: Permission) =>
 /**
  * Reachable while somebody is still on a password they did not choose.
  *
- * An account created by the roster import (P3.6-T4) arrives with a generated password
+ * An account created by the roster import (P3.2-T4) arrives with a generated password
  * that an admin has read, written down and sent by email. Until it is replaced, the
  * session proves control of a mailbox and nothing more — so `AuthGuard` refuses every
  * route that does not carry this.
@@ -50,24 +50,23 @@ export function resolveCtx(_data: unknown, ctx: ExecutionContext): RequestContex
 export const Ctx = createParamDecorator(resolveCtx);
 
 /**
- * Reachable inside a read-only support session (P4-T10).
+ * Reachable inside a support session by a method that is not `GET`, `HEAD` or `OPTIONS` (P4-T10; P19.4-T2).
  *
- * `PermissionsGuard` refuses every mutating request a read-only session makes, including
- * on routes that declare no permission at all — because the guarantee the Owner was given
- * is about *writes*, not about which routes somebody remembered to annotate. The exit
- * review found `PATCH /auth/me` renaming the office Owner from inside a session whose own
- * response said `readOnly: true`.
+ * `ViewOnlySessionGuard` refuses every such request a session makes, `403 IMPERSONATION_READ_ONLY`, including on
+ * routes that declare no permission at all — because the guarantee the Owner was given is about *writes*, not about
+ * which routes somebody remembered to annotate (ADR-0206 §4).
  *
- * Two routes have to survive that: ending the session, and signing out. Blocking either
- * strands the operator inside the session they are trying to leave — which is how
- * `POST /admin/impersonate/end` was already unreachable once, for a different reason, and
- * nothing said so.
+ * **Three routes carry it, and `view-only-session.int.spec.ts` pins the list:** ending the session —
+ * `POST /admin/impersonate/end`, without which the operator is stranded inside the session they are leaving — and two
+ * reads sent as `POST` for their bodies, which write nothing: the goal calculator's preview and opening a training
+ * item. Signing out carries it too, and is public. A route joins only by writing nothing, and the spec says why.
  */
 export const ALLOWED_WHILE_READ_ONLY = 'allowedWhileReadOnly';
 export const AllowWhileReadOnly = () => SetMetadata(ALLOWED_WHILE_READ_ONLY, true);
 
 /**
- * **Refused in every support session** — read-only, setup or elevated (ADR-0162 §4).
+ * **Refused in every support session** (ADR-0162 §4). *Since P19.4-T2 every session only looks, and these routes'
+ * writes meet `ViewOnlySessionGuard` first (ADR-0206 §4); the mark stays, so the refusal is the route's own as well.*
  *
  * A person's own account: their profile, their password and where they are signed in. A read-only session
  * was refused these by their method already; an elevated one let them through, so a session approved to fix

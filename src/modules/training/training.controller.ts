@@ -29,7 +29,7 @@ export class TrainingController {
   constructor(private readonly training: TrainingService) {}
 
   /*
-   * **The three reads are `training_settings:read`, the Owner's and the Admins'** (P18.5-T1 AC-8). They sat on
+   * **The three reads are `training_settings:read`, the Owner's and the Admins'** (P18.2-T1 AC-8). They sat on
    * `tenant_config:read`, which every member holds, and answer drafts, archived rows and a draft module's files —
    * so an agent could read what the office has not offered. The learner reads `/training`, which checks *offered*.
    */

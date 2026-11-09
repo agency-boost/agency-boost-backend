@@ -37,11 +37,12 @@ const ADMIN_A = office({ membershipId: 'mem-admin-a', isKpmAdmin: true });
 const OWNER_B = office({ membershipId: 'mem-owner-b', kpmId: OTHER_KPM, isKpmOwner: true });
 
 /**
- * **An office's activity binding over HTTP** (P18.9-T2 AC-3, AC-4), behind the real `PermissionsGuard` and the
- * production pipe: the Super Admin's read and write per office, the Owner's and the Admin's read of their own, and
- * the archive of a bound type refused — positive and negative per role, and across offices.
+ * **An office's activity binding over HTTP** (P18.6-T2 AC-3, AC-4), behind the real `PermissionsGuard` and the
+ * production pipe: the Super Admin's read per office; the Owner's and the Admin's read and, since P19.4-T3 (ADR-0206 §1),
+ * write of their own office's, the Super Admin refused it; and the archive of a bound type refused — positive and
+ * negative per role, and across offices.
  */
-describe('the activity binding over HTTP (P18.9-T2)', () => {
+describe('the activity binding over HTTP (P18.6-T2)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   const http = () => request(app.getHttpServer());
@@ -93,31 +94,68 @@ describe('the activity binding over HTTP (P18.9-T2)', () => {
     expect(declaredPermissions(ActivityBindingReadController)).toEqual({ read: 'activity_binding:read' });
   });
 
-  describe('the Super Admin', () => {
-    it('P18.9-T2 AC-3 reads one office’s binding with every type it may name, archived ones included', async () => {
+  describe('the Super Admin reads it, and writes it no more (P19.4-T3, ADR-0206 §1)', () => {
+    it('P18.6-T2 AC-3 reads one office’s binding with every type it may name, archived ones included', async () => {
       const res = await http().get(admin()).expect(200);
       expect(res.body).toMatchObject({ kpmId: FIXTURE_KPM, ...TODAY, version: 1 });
       expect(res.body.types).toHaveLength(12);
       expect(res.body.types[0]).toEqual(expect.objectContaining({ code: expect.any(String), status: 'active' }));
     });
 
-    it('P18.9-T2 AC-3 saves [A] → [A, B] in that office alone, an archived code allowed', async () => {
-      // Archive a type nothing binds, then bind it beside the old one: its history counts.
-      session.current = OWNER_A;
-      const types = (await http().get('/kpm/settings/activity-types?includeArchived=true').expect(200)).body
-        .flatMap((c: { types: { id: string; code: string }[] }) => c.types);
-      await http().delete(`/kpm/settings/activity-types/${types.find((t: { code: string }) => t.code === 'SELL_FOLLOWUP').id}`).expect(200);
-
-      session.current = SUPER_ADMIN;
-      const saved = await http().put(admin())
-        .send({ ...TODAY, appointments: ['SELL_PRESENTATION', 'sell_followup'], expectedVersion: 1 }).expect(200);
-      expect(saved.body).toMatchObject({ appointments: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'], version: 2 });
-      expect(saved.body.types.find((t: { code: string }) => t.code === 'SELL_FOLLOWUP').status).toBe('archived');
-      // The other office is not touched.
-      expect((await http().get(admin(OTHER_KPM)).expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
+    it('P19.4-T3 F2 the Super Admin is refused the write, 403 PERM_DENIED, and nothing changes', async () => {
+      const res = await http().put(admin()).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(403);
+      expect(res.body.error.code).toBe('PERM_DENIED');
+      await http().put(admin(OTHER_KPM)).send(TODAY).expect(403);
+      expect((await http().get(admin()).expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
+      expect(await wired.audit.findForTenant(FIXTURE_KPM)).toEqual(
+        expect.not.arrayContaining([expect.objectContaining({ action: 'activity_binding.updated' })]),
+      );
     });
 
-    it('P18.9-T2 AC-3 refuses 400 a code not in the office, an empty role and a code in two roles', async () => {
+    it('P18.6-T2 AC-3 has no office of its own to read at the settings route', async () => {
+      const res = await http().get('/kpm/settings/activity-binding').expect(403);
+      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
+    });
+  });
+
+  describe('the Owner and the Admin set their own office’s (P19.4-T3 F2), and nobody else writes it', () => {
+    it.each([['the Owner', OWNER_A], ['the Admin', ADMIN_A]] as [string, RequestContext][])(
+      'P19.4-T3 F2 %s saves [A] → [A, B] in their own office alone, an archived code allowed, audited as themself',
+      async (_who, ctx) => {
+        session.current = ctx;
+        // Archive a type nothing binds, then bind it beside the old one: its history counts.
+        const types = (await http().get('/kpm/settings/activity-types?includeArchived=true').expect(200)).body
+          .flatMap((c: { types: { id: string; code: string }[] }) => c.types);
+        await http().delete(`/kpm/settings/activity-types/${types.find((t: { code: string }) => t.code === 'SELL_FOLLOWUP').id}`).expect(200);
+
+        const saved = await http().put(admin())
+          .send({ ...TODAY, appointments: ['SELL_PRESENTATION', 'sell_followup'], expectedVersion: 1 }).expect(200);
+        expect(saved.body).toMatchObject({ kpmId: FIXTURE_KPM, appointments: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'], version: 2 });
+        expect(saved.body.types.find((t: { code: string }) => t.code === 'SELL_FOLLOWUP').status).toBe('archived');
+        // Their own settings read says the same; the other office is not touched.
+        expect((await http().get('/kpm/settings/activity-binding').expect(200)).body)
+          .toMatchObject({ appointments: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'], version: 2 });
+        session.current = OWNER_B;
+        expect((await http().get('/kpm/settings/activity-binding').expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
+        // Audited in the office, the Owner or the Admin its actor — never a Super Admin.
+        const [entry] = (await wired.audit.findForTenant(FIXTURE_KPM)).filter((r) => r.action === 'activity_binding.updated');
+        expect(entry).toMatchObject({
+          kpmId: FIXTURE_KPM, actorUserId: ctx.userId, actorMembershipId: ctx.membershipId, targetId: FIXTURE_KPM,
+          before: { ...TODAY, version: 1 }, after: { appointments: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'], version: 2 },
+        });
+      },
+    );
+
+    it('P19.4-T3 F2 another office’s id is 404 to the write, never 403, and nothing is written there', async () => {
+      session.current = OWNER_A;
+      await http().put(admin(OTHER_KPM)).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(404);
+      await http().get(admin(OTHER_KPM)).expect(404);
+      session.current = OWNER_B;
+      expect((await http().get('/kpm/settings/activity-binding').expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
+    });
+
+    it('P18.6-T2 AC-3 refuses 400 a code not in the office, an empty role and a code in two roles', async () => {
+      session.current = OWNER_A;
       for (const body of [
         { ...TODAY, leads: ['NOT_A_TYPE'] },
         { ...TODAY, closings: [] },
@@ -130,45 +168,31 @@ describe('the activity binding over HTTP (P18.9-T2)', () => {
       expect((await http().get(admin()).expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
     });
 
-    it('P18.9-T2 AC-3 answers 409 VERSION_CONFLICT to a stale version, and 404 to an office that does not exist', async () => {
+    it('P18.6-T2 AC-3 answers 409 VERSION_CONFLICT to a stale version, and 404 to an office that does not exist', async () => {
+      session.current = OWNER_A;
       const stale = await http().put(admin()).send({ ...TODAY, expectedVersion: 0 }).expect(409);
       expect(stale.body.error.code).toBe('VERSION_CONFLICT');
       await http().get(admin(new mongoose.Types.ObjectId().toString())).expect(404);
       await http().put(admin('not-an-id')).send(TODAY).expect(404);
     });
 
-    it('P18.9-T2 AC-3 has no office of its own to read at the settings route', async () => {
-      const res = await http().get('/kpm/settings/activity-binding').expect(403);
-      expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
-    });
-  });
-
-  describe('the Owner and the Admin read their own office’s, and nobody else writes it', () => {
-    it.each([['the Owner', OWNER_A], ['the Admin', ADMIN_A]] as [string, RequestContext][])('%s', async (_who, ctx) => {
-      session.current = SUPER_ADMIN;
-      await http().put(admin(OTHER_KPM)).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(200);
-
-      session.current = ctx;
-      // Their own office's, at both routes — not office B's rebind.
+    it('P19.4-T3 F2 a view-as session as the Owner is refused the write, and nothing changes', async () => {
+      session.current = new RequestContext(OWNER_A.userId, 'none', OWNER_A.membership, 'u-support', null, false, true);
+      await http().put(admin()).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(403);
+      session.current = OWNER_A;
       expect((await http().get('/kpm/settings/activity-binding').expect(200)).body).toMatchObject({ ...TODAY, version: 1 });
-      expect((await http().get(admin()).expect(200)).body).toMatchObject({ kpmId: FIXTURE_KPM, ...TODAY });
-      // Another office is 404, never 403.
-      await http().get(admin(OTHER_KPM)).expect(404);
-      // The write is the Super Admin's.
-      await http().put(admin()).send(TODAY).expect(403);
-      await http().put(admin(OTHER_KPM)).send(TODAY).expect(403);
     });
 
-    it('P18.9-T2 AC-3 office B’s Owner reads B’s', async () => {
-      await http().put(admin(OTHER_KPM)).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(200);
+    it('P18.6-T2 AC-3 office B’s Owner sets and reads B’s', async () => {
       session.current = OWNER_B;
+      await http().put(admin(OTHER_KPM)).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(200);
       expect((await http().get('/kpm/settings/activity-binding').expect(200)).body)
         .toMatchObject({ leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'], version: 2 });
       await http().get(admin()).expect(404);
     });
 
     it.each([['an AB', AB], ['an AAB', AAB], ['an Agent', AGENT]] as [string, RequestContext][])(
-      'P18.9-T2 AC-3 refuses %s every route, 403',
+      'P18.6-T2 AC-3, P19.4-T3 F2 refuses %s every route, 403',
       async (_who, ctx) => {
         session.current = ctx;
         await http().get('/kpm/settings/activity-binding').expect(403);
@@ -177,21 +201,20 @@ describe('the activity binding over HTTP (P18.9-T2)', () => {
       },
     );
 
-    it('P18.9-T2 AC-3 the fixture Owner and Admin, who hold an AB class too, are served the same', async () => {
+    it('P18.6-T2 AC-3 the fixture Owner and Admin, who hold an AB class too, are served the same', async () => {
       for (const ctx of [OWNER, ADMIN]) {
         session.current = ctx;
         await http().get('/kpm/settings/activity-binding').expect(200);
-        await http().put(admin()).send(TODAY).expect(403);
+        await http().put(admin()).send(TODAY).expect(200);
       }
     });
   });
 
   describe('AC-4: archiving a bound type, by every role that may archive', () => {
     it.each([['the Owner', OWNER_A], ['the Admin', ADMIN_A]] as [string, RequestContext][])('%s', async (_who, ctx) => {
-      session.current = SUPER_ADMIN;
+      session.current = ctx;
       await http().put(admin()).send({ ...TODAY, leads: ['LEADS_CONTACTED', 'RECRUIT_FOLLOWUP'] }).expect(200);
 
-      session.current = ctx;
       const sections = (await http().get('/kpm/settings/activity-types').expect(200)).body as {
         id: string; code: string; types: { id: string; code: string }[];
       }[];
@@ -204,10 +227,8 @@ describe('the activity binding over HTTP (P18.9-T2)', () => {
       const section = await http().delete(`/kpm/settings/activity-categories/${recruitment.id}`).expect(409);
       expect(section.body.error.details.codes).toEqual(['RECRUIT_FOLLOWUP']);
 
-      // Unbound by the Super Admin, both archive — the platform's own LEADS_CONTACTED too, once nothing binds it.
-      session.current = SUPER_ADMIN;
+      // Unbound by the office itself, both archive — the platform's own LEADS_CONTACTED too, once nothing binds it.
       await http().put(admin()).send({ ...TODAY, leads: ['LEADS_GEN_ACTIVITY'] }).expect(200);
-      session.current = ctx;
       await http().delete(`/kpm/settings/activity-types/${type('RECRUIT_FOLLOWUP').id}`).expect(200);
       await http().delete(`/kpm/settings/activity-types/${type('LEADS_CONTACTED').id}`).expect(200);
       await http().delete(`/kpm/settings/activity-types/${type('LEADS_GEN_ACTIVITY').id}`).expect(409);

@@ -31,13 +31,13 @@ const REOPEN = {
 } as const;
 
 /**
- * **The production module's sentences, in both languages** (P18.98-T5 AC-2, AC-3): the month a write names, the file —
+ * **The production module's sentences, in both languages** (P18.10-T5 AC-2, AC-3): the month a write names, the file —
  * its form, its header, each row and each cell, which the preview answers and a commit keeps with the batch (written
  * for the request's reader, `buildPreview`) — confirm and revert, the month's lock and revision, and a correction by
  * hand. Filed by the code each is raised or reported under; a cell's reason is the end of a sentence, said after the
  * figure it is about.
  *
- * **The file's own words stay the file's** (P18.98-T3 AC-4): a column is named as its header names it — *APE (Rp M) —
+ * **The file's own words stay the file's** (P18.10-T3 AC-4): a column is named as its header names it — *APE (Rp M) —
  * This Month*, *Agent Code* — in both languages, and a value as the file has it. *APE*, *FYP*, *Rolling persistency*,
  * *Recruitment* and *New active agents* are metric names (§A.4), and *YTD* the forum's own (§A.4); a *figure* is an
  * *angka*, a *preview* a *pratinjau*.
@@ -86,6 +86,21 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
       en: `Keep the reason under ${max} characters.`,
       id: `Alasan tidak boleh lebih dari ${n(max)} karakter.`,
     }),
+    /** P19.5-T2 (ADR-0214 §10): a `ytd: 'sum'` column's year to date is the sum of its months, and nobody types it. */
+    ytdIsCalculated: ({ label }: { label: string }) => ({
+      en: `${label} year to date is calculated from the months. Correct the month instead.`,
+      id: `YTD ${label} dihitung dari bulan-bulannya. Koreksi angka bulannya.`,
+    }),
+    /** P19.5-T2: a kode the KPM's template holds no current column for, or one not in force in the month. */
+    notAColumn: ({ kode }: { kode: string }) => ({
+      en: `${kode} is not a column of this month's Data upload.`,
+      id: `${kode} bukan kolom Data upload bulan ini.`,
+    }),
+    /** P19.5-T2 (D8, ADR-0214 §11): *as of* is a day of the month being uploaded, no later than today. */
+    asOfOutsideMonth: {
+      en: 'The “as of” date must be a day of this month, no later than today.',
+      id: 'Tanggal “per” harus hari di bulan ini, paling lambat hari ini.',
+    },
   },
   ASSET_TOO_LARGE: {
     fileTooLarge: ({ mb }: { mb: number }) => ({
@@ -112,6 +127,21 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
     }),
   },
   UPLOAD_TEMPLATE_MISMATCH: {
+    /* P19.5-T2 (ADR-0214 §5): a header is matched column by column, and a file is refused only for these three. */
+    noAgentCode: {
+      en: `The file has no Agent Code column, so no row can be matched to a person. ${TEMPLATE_TAIL.en}`,
+      id: `File ini tidak memiliki kolom Agent Code, jadi tidak ada baris yang bisa dicocokkan dengan orangnya. ${TEMPLATE_TAIL.id}`,
+    },
+    noColumnMatched: {
+      en: `None of the file's columns is a column of this KPM's Data upload. ${TEMPLATE_TAIL.en}`,
+      id: `Tidak ada kolom file ini yang merupakan kolom Data upload KPM ini. ${TEMPLATE_TAIL.id}`,
+    },
+    twoHeadersOneColumn: ({ first, second, kode }: { first: string; second: string; kode: string }) => ({
+      en: `“${first}” and “${second}” are both read as ${kode}, and one is not guessed. Keep one of them. `
+        + TEMPLATE_TAIL.en,
+      id: `“${first}” dan “${second}” sama-sama terbaca sebagai ${kode}, dan salah satunya tidak ditebak. Pertahankan `
+        + `salah satunya. ${TEMPLATE_TAIL.id}`,
+    }),
     extraColumn: ({ actual, column }: { actual: string | null; column: number }) => ({
       en: `The header has a column the template does not: “${actual}”, column ${column}. ${TEMPLATE_TAIL.en}`,
       id: `Header memiliki kolom yang tidak ada di template: “${actual}”, kolom ${column}. ${TEMPLATE_TAIL.id}`,
@@ -154,7 +184,53 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
       id: `${who} juga ada di baris ${lines}. Kedua baris tidak diambil — pertahankan salah satunya, lalu unggah lagi.`,
     }),
   },
+  /**
+   * P19.3-T1 (ADR-0201 §2, D6): *Unit Persistency (%)* is the insurer's figure for a leader's unit, filled on an AB's or an
+   * AAB's row. On anybody else's row it is not stored, and the row's other figures import. The column as its header names
+   * it, and the value as the file has it.
+   */
+  UPLOAD_LEADER_ONLY_VALUE: {
+    agentRow: ({ column, raw }: { column: string; raw: string }) => ({
+      en: `${column}: “${raw}” is on an agent’s row and is not stored. Unit persistency is filled on AB and AAB rows only; `
+        + 'an agent’s own persistency goes in Rolling Persistency (%).',
+      id: `${column}: “${raw}” ada di baris agen dan tidak disimpan. Unit persistency hanya diisi di baris AB dan AAB; `
+        + 'persistency agen sendiri diisi di Rolling Persistency (%).',
+    }),
+  },
+  /** P19.5-T2 (ADR-0214 §5 step 2, §7): a code that is not the template's format. `example` is the template's own. */
+  UPLOAD_AGENT_CODE_PATTERN: {
+    notTheFormat: ({ example }: { example: string }) => ({
+      en: `This code is not in the agent code format of this KPM's template — for example ${example}.`,
+      id: `Kode ini tidak sesuai format kode agen di template KPM ini — contohnya ${example}.`,
+    }),
+  },
+  /** P19.5-T2 (R2, ADR-0214 §5 step 4): a required column the file carries is blank, from its start month on. */
+  UPLOAD_REQUIRED_BLANK: {
+    required: ({ label }: { label: string }) => ({
+      en: `${label} is required. The row is not taken.`,
+      id: `${label} wajib diisi`,
+    }),
+  },
+  /** P19.5-T2 (ADR-0214 §5 step 7): an uploaded YTD that does not add up to last month's and this month's. */
+  UPLOAD_YTD_MISMATCH: {
+    doesNotAddUp: ({ column, raw, expected }: { column: string; raw: string; expected: string }) => ({
+      en: `${column}: “${raw}” is not last month's year to date plus this month's figure (${expected}). The YTD is not `
+        + 'stored; the month\'s figure is.',
+      id: `${column}: “${raw}” bukan YTD bulan lalu ditambah angka bulan ini (${expected}). YTD tidak disimpan; angka `
+        + 'bulannya disimpan.',
+    }),
+  },
   UPLOAD_VALUE_OUT_OF_RANGE: {
+    /* ---- P19.5-T2: a column's own limits (ADR-0214 §5 step 5), in its unit. */
+    belowMin: ({ min }: { min: number }) => ({
+      en: `is below this column's minimum, ${min}.`,
+      id: `lebih kecil dari batas terkecil kolom ini, ${formatNumber(min, undefined, 'id')}.`,
+    }),
+    aboveMax: ({ max }: { max: number }) => ({
+      en: `is above this column's maximum, ${max}.`,
+      id: `lebih besar dari batas terbesar kolom ini, ${formatNumber(max, undefined, 'id')}.`,
+    }),
+    notWholeCount: { en: 'is not a whole number — this column counts.', id: 'bukan bilangan bulat — kolom ini menghitung.' },
     /* ---- Why a figure cannot be stored: the end of a sentence, after the figure (`refusalFor`, `readNumber`). */
     notANumber: { en: 'is not a number.', id: 'bukan angka.' },
     negative: { en: 'is negative.', id: 'bernilai negatif.' },

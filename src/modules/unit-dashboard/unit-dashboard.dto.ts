@@ -70,6 +70,17 @@ export class UnitActivitiesQueryDto {
   @IsString()
   @MaxLength(64)
   for?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      'ADR-0229 §7: the **membership** whose own five ratios the ratio card shows — somebody of the *Group* '
+      + 'read. Answered in `ratios.person`, the same 30 days, on their own rung. Anybody else is `404`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  ratioFor?: string;
 }
 
 /** One person's figures from the company report, in sen. Either or both; never `null`. */
@@ -110,6 +121,18 @@ export class UpdateProductionDto {
   @IsInt()
   @Min(0)
   revision!: number;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      'The unit the dashboard was read for (its `for`), which the screen sends whenever it has one. Omitted, your own. '
+      + 'The Owner and an Admin naming another leader’s unit are refused `403 PERM_DENIED`: that view is read-only '
+      + '(UI-152).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  for?: string;
 
   @ApiProperty({ type: [ProductionRowDto], minItems: 1, maxItems: UNIT_DASHBOARD.MAX_ROWS_PER_SAVE })
   @IsArray()

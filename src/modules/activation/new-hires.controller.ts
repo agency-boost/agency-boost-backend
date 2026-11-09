@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import {
-  CorrectActivationStartDto, SaveActivationNoteDto, TickHireActivationItemDto,
+  CorrectActivationStartDto, NewHiresQueryDto, SaveActivationNoteDto, TickHireActivationItemDto,
 } from './activation-progress.dto';
 import {
   ActivationClosingsDto, ActivationNoteSavedDto, NewHireDetailDto, NewHiresRosterDto,
@@ -19,7 +19,8 @@ const NOT_REACHED =
   + 'has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another '
   + 'office: a `403` would confirm that somebody exists.';
 
-const CLOSED = '`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes.';
+const CLOSED = '`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes — '
+  + 'nor after its first year, when it is served empty.';
 
 /**
  * **A leader's new hires** (`functional/activation.md`, the Data contract; roles §3.8): the roster, one
@@ -38,22 +39,23 @@ export class NewHiresController {
   @ApiOperation({
     summary: 'Your new hires',
     description:
-      'Every new hire you coach, at any depth, whose join date is in the last twelve months — never an existing '
-      + 'agent — in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and '
-      + 'issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, '
-      + 'the day, the first sale with its day and source, the status and their checklist where they have one. At the top, '
-      + 'the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below '
-      + 'you — overall and by join month. A result decided is kept, and never changes after. Each new hire shown is '
-      + 'a recorded read.',
+      'Every new hire you coach, at any depth, whose join date is in the year asked for — `year=current`, the default: '
+      + '1 January of the office’s year to today, so on 1 January the count starts again from nobody; `year=previous`: '
+      + 'all of last year — never an existing agent, in three sections by their 3M activation: in progress (days 1 to '
+      + '90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each '
+      + 'row: the join date, the day, the first sale with its day and source, the status and their checklist where they '
+      + 'have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each '
+      + 'AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. A year '
+      + 'with nobody in it while the other has somebody answers empty sections. Each new hire shown is a recorded read.',
   })
   @ApiResponse(refusal(
     404,
-    '`NOT_FOUND` — you coach no new hire who joined in the last twelve months, so there is nobody to show. Answered '
-    + 'exactly as a record in another office is.',
+    '`NOT_FOUND` — you coach no new hire who joined this year or last year, so there is nobody to show in either. '
+    + 'Answered exactly as a record in another office is.',
   ))
   @ApiResponse({ status: 200, type: NewHiresRosterDto })
-  async roster(@Ctx() ctx: RequestContext) {
-    return this.hires.roster(ctx);
+  async roster(@Ctx() ctx: RequestContext, @Query() query: NewHiresQueryDto) {
+    return this.hires.roster(ctx, query.year ?? 'current');
   }
 
   @Get(':membershipId')
@@ -63,7 +65,10 @@ export class NewHiresController {
     description:
       'As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M '
       + 'standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The '
-      + 'detail page, and a coaching page’s Activation tab. A recorded read.',
+      + 'detail page, and a coaching page’s Activation tab. A recorded read. **Empty** (`ActivationEmptyDto`, told apart '
+      + 'by its `empty`) once the join date plus twelve calendar months has come — the activation covers the first year '
+      + 'only — and for a new hire New Hires lists who has no activation at all: the person, their join date and leader, '
+      + 'and nothing of a checklist, recording no read.',
   })
   @ApiResponse(refusal(404, NOT_REACHED))
   @ApiResponse({ status: 200, type: NewHireDetailDto })
@@ -104,7 +109,8 @@ export class NewHiresController {
   ))
   @ApiResponse(refusal(
     403,
-    '`PERM_DENIED` — a 1:1 logged by a leader who runs no coaching sessions: an Agent who leads.',
+    '`PERM_DENIED` — a 1:1 logged by a reader who holds no coaching-session grant (`coaching_session:create` and '
+    + '`:finalize`).',
   ))
   @ApiResponse(refusal(404, `${NOT_REACHED} Or their checklist has no item with that code, or the closing named is not theirs.`))
   @ApiResponse(refusal(409, `\`ACTIVATION_ITEM_AUTOMATIC\` — the item completes on its own. ${CLOSED}`))

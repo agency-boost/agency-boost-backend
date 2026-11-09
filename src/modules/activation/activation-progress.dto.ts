@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { field } from '@/common/validation/violations';
 import { ACTIVATION } from '@/domain/constants';
+import { NEW_HIRE_YEARS, type NewHireYear } from '@/domain/metrics/activation-3m';
 import { ACTIVATION_REFUSALS } from './activation.messages';
 
 /**
@@ -17,7 +18,7 @@ import { ACTIVATION_REFUSALS } from './activation.messages';
 /** `YYYY-MM-DD`. */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /**
- * The day's shape, in both languages (P18.98-T5 AC-3): the service's own sentence, the field named by class-validator's
+ * The day's shape, in both languages (P18.10-T5 AC-3): the service's own sentence, the field named by class-validator's
  * `$property`, which it fills in for each field in either language.
  */
 const DATE_MESSAGE = field(ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ field: '$property' }));
@@ -26,7 +27,7 @@ const DATE_MESSAGE = field(ACTIVATION_REFUSALS.VALIDATION_FAILED.dayShape({ fiel
 const RECORD_TEXT_MAX = 500;
 
 /**
- * **The record a hand tick of a data-backed item is saved with** (P18.96-T4 AC-3; `functional/activation.md`,
+ * **The record a hand tick of a data-backed item is saved with** (P18.8-T4 AC-3; `functional/activation.md`,
  * *Data-backed items*). One of:
  *
  * - `closing` with `leadId` — *Which case?*, one of the member's existing closings (`GET …/closings`);
@@ -136,4 +137,21 @@ export class SaveActivationNoteDto {
   })
   @IsString() @MaxLength(ACTIVATION.COACHING_NOTE_MAX)
   text!: string;
+}
+
+/**
+ * **`GET /new-hires`'s one parameter** (ADR-0233; P19.9-T3 AC-2): which year, `current` or `previous` — and nothing else:
+ * a year it does not know, or a parameter of any other name, is refused by name rather than ignored.
+ */
+export class NewHiresQueryDto {
+  @ApiPropertyOptional({
+    enum: NEW_HIRE_YEARS,
+    default: 'current',
+    description:
+      'Which year of join dates to list: `current` (the default) — 1 January of the office’s year to today, *Tahun '
+      + 'berjalan* — or `previous`, all of last year, *Tahun lalu*.',
+  })
+  @IsOptional()
+  @IsIn(NEW_HIRE_YEARS)
+  year?: NewHireYear;
 }

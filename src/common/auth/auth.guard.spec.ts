@@ -45,21 +45,18 @@ describe('AuthGuard', () => {
   /** The resolver's answer for somebody who saved Bahasa Indonesia: the reader `ContextResolver` builds from the row. */
   const savedIndonesian = {
     resolve: jest.fn(async (userId: string) => new RequestContext(
-      userId, 'none', null, null, null, false, false, [], readerIn('id'),
+      userId, 'none', null, null, null, false, false, readerIn('id'),
     )),
   } as unknown as ContextResolver;
 
   /**
    * Only an `imp:` token reaches `liveSession`, so every case below leaves it untouched.
-   * The impersonation cases set it explicitly.
-   *
-   * It answers the **session row**, not a boolean: since P4-T10 the guard reads `readOnly`
-   * from it, because elevation happens after the token is minted and a flag baked into a
-   * JWT could never move.
+   * The impersonation cases set it explicitly. It answers the session row, or `null` for one
+   * that is no session — ended, expired, or (since P19.4-T2) one that could write.
    */
-  const live = (answer = true, readOnly = true, writeScope?: string[]) =>
+  const live = (answer = true) =>
     ({
-      liveSession: jest.fn(async () => (answer ? { readOnly, writeScope } : null)),
+      liveSession: jest.fn(async () => (answer ? { readOnly: true, purpose: 'support' } : null)),
     }) as unknown as ImpersonationService;
 
   beforeEach(() => jest.clearAllMocks());
@@ -113,7 +110,7 @@ describe('AuthGuard', () => {
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
     // `false`: a person acting as themselves is not being restrained (P4-T10).
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false, [], null);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null);
     expect((request.context as RequestContext).userId).toBe(USER);
   });
 
@@ -125,29 +122,27 @@ describe('AuthGuard', () => {
     const { context, reflector, request } = execution('Bearer impersonating.token');
 
     await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
-    // `true`: every session is read-only until a second Super Admin says otherwise.
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, false, [], null);
+    // The resolver marks the context read-only from the impersonator alone: every session only looks (ADR-0206 §4).
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, false, null);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
   });
 
-  it('ADR-0162: carries a setup session\'s write scope off the row, and an empty one off a row with none', async () => {
+  it('P19.4-T2 AC-1 refuses a session whose row is no session — a setup or an elevated one from before — 401', async () => {
     const OPERATOR = '65b1f0c2a4d3e5f6a7b8c9d1';
     const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
     const { context, reflector } = execution('Bearer impersonating.token');
 
-    await new AuthGuard(reflector, signer, resolver, live(true, true, ['tenant_config:write'])).canActivate(context);
-    expect(resolver.resolve).toHaveBeenLastCalledWith(USER, OPERATOR, true, false, ['tenant_config:write'], null);
-
-    // A row from before the scope existed is a support session: it writes nothing.
-    await new AuthGuard(reflector, signer, resolver, live(true, true)).canActivate(context);
-    expect(resolver.resolve).toHaveBeenLastCalledWith(USER, OPERATOR, true, false, [], null);
+    // `liveSession` answers `null` for those rows, as for an ended one (`impersonation.service.tenancy.spec.ts`).
+    await expect(new AuthGuard(reflector, signer, resolver, live(false)).canActivate(context))
+      .rejects.toMatchObject({ code: ErrorCode.AUTH_TOKEN_EXPIRED, status: 401 });
+    expect(resolver.resolve).not.toHaveBeenCalled();
   });
 
   /*
-   * **P18.98-T5 AC-1 — the request's reader, resolved once**: the header alone before anybody is known — on a public
+   * **P18.10-T5 AC-1 — the request's reader, resolved once**: the header alone before anybody is known — on a public
    * route, and for the refusals before the person is read — then the resolver's, from the user it already reads.
    */
-  describe('P18.98-T5 AC-1 the request’s reader', () => {
+  describe('P18.10-T5 AC-1 the request’s reader', () => {
     it('AC-1 reads the header on a public route, where nobody is known', async () => {
       const signer = { verify: jest.fn() } as unknown as TokenSigner;
       const { context, reflector, request } = execution(undefined, true, 'id');
@@ -174,7 +169,7 @@ describe('AuthGuard', () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
       const { context, reflector, request } = execution('Bearer good.token', false, 'EN');
       await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false, [], 'en');
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, 'en');
       // The resolver's context's reader — here nobody's choice, the stub reading no row — is the request's.
       expect(request.reader).toEqual((request.context as RequestContext).reader);
 
@@ -200,14 +195,14 @@ describe('AuthGuard', () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
       const { context } = execution('Bearer impersonating.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, true, [], null);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, null);
     });
 
     it('never for somebody acting as themselves, on the same route', async () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
       const { context } = execution('Bearer good.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, false, [], null);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null);
     });
   });
 });

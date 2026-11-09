@@ -6,7 +6,7 @@ const db = () => mongoose.connection.db as mongoose.mongo.Db;
 const col = (name: string) => db().collection(name);
 
 /**
- * P18.96-T2 AC-2 (ADR-0169 §6). Every membership is given its join date and who it makes them: one with an activation
+ * P18.8-T2 AC-2 (ADR-0169 §6). Every membership is given its join date and who it makes them: one with an activation
  * record a new hire, from that activation's start date; every other an existing agent, from `joinedAt` as an office
  * date in its office's zone; a pending one nothing, until it is approved. Office by office, and once.
  */
@@ -32,7 +32,7 @@ describe('0040 — every membership’s join date and classification (ADR-0169)'
     return { joinedAs: row?.joinedAs, joinDate: row?.joinDate };
   };
 
-  it('P18.96-T2 AC-2 classifies a member with an activation a new hire, from its start date — a corrected one included', async () => {
+  it('P18.8-T2 AC-2 classifies a member with an activation a new hire, from its start date — a corrected one included', async () => {
     const kpmId = await office();
     const hire = await member(kpmId);
     // A leader moved Wahyu's start a week before the day he joined here (ADR-0102): that date is the join date now.
@@ -49,7 +49,7 @@ describe('0040 — every membership’s join date and classification (ADR-0169)'
     expect(await fieldsOf(graduated)).toEqual({ joinedAs: 'new_hire', joinDate: '2025-11-03' });
   });
 
-  it('P18.96-T2 AC-2 classifies every other member an existing agent, from joinedAt as an office date in its office’s zone', async () => {
+  it('P18.8-T2 AC-2 classifies every other member an existing agent, from joinedAt as an office date in its office’s zone', async () => {
     const jakarta = await office();
     const york = await office({ code: '0555', timezone: 'America/New_York' });
     const plain = await office({ code: '0601', timezone: undefined });
@@ -70,14 +70,14 @@ describe('0040 — every membership’s join date and classification (ADR-0169)'
     expect(await fieldsOf(removed)).toEqual({ joinedAs: 'existing_agent', joinDate: '2026-03-02' });
   });
 
-  it('P18.96-T2 AC-2 leaves a pending member, whom nobody has let in, with neither until they are approved', async () => {
+  it('P18.8-T2 AC-2 leaves a pending member, whom nobody has let in, with neither until they are approved', async () => {
     const kpmId = await office();
     const pending = await member(kpmId, { status: 'pending', leaderId: null, joinedAt: null });
     expect(await up(db())).toEqual({ newHires: 0, existingAgents: 0, waiting: 1 });
     expect(await fieldsOf(pending)).toEqual({ joinedAs: undefined, joinDate: undefined });
   });
 
-  it('P18.96-T2 AC-2 is tenant-safe: an activation in another office never classifies this office’s member', async () => {
+  it('P18.8-T2 AC-2 is tenant-safe: an activation in another office never classifies this office’s member', async () => {
     const a = await office();
     const b = await office({ code: '0555' });
     const inA = await member(a, { joinedAt: new Date('2026-08-01T01:00:00Z') });
@@ -87,7 +87,7 @@ describe('0040 — every membership’s join date and classification (ADR-0169)'
     expect(await fieldsOf(inA)).toEqual({ joinedAs: 'existing_agent', joinDate: '2026-08-01' });
   });
 
-  it('P18.96-T2 AC-2 changes nothing on a second run, nor a member classified already — a later correction stays', async () => {
+  it('P18.8-T2 AC-2 changes nothing on a second run, nor a member classified already — a later correction stays', async () => {
     const kpmId = await office();
     const hire = await member(kpmId);
     await activation(kpmId, hire, '2026-08-01');
@@ -105,7 +105,7 @@ describe('0040 — every membership’s join date and classification (ADR-0169)'
     expect(await fieldsOf(classified)).toEqual({ joinedAs: 'existing_agent', joinDate: '2019-05-01' });
   });
 
-  it('P18.96-T2 AC-2 writes nothing, and makes no collection, on an empty database', async () => {
+  it('P18.8-T2 AC-2 writes nothing, and makes no collection, on an empty database', async () => {
     for (const { name } of await db().listCollections({}, { nameOnly: true }).toArray()) await col(name).drop();
     expect(await up(db())).toEqual({ newHires: 0, existingAgents: 0, waiting: 0 });
     expect(await up(db())).toEqual({ newHires: 0, existingAgents: 0, waiting: 0 });

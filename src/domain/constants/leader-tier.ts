@@ -1,5 +1,5 @@
 /**
- * **A rung's leader tier, and the role class it gives whoever stands on it** (ADR-0156, P18.8-T1).
+ * **A rung's leader tier, and the role class it gives whoever stands on it** (ADR-0156, P18.5-T1).
  *
  * A company's ladder is configuration (ADR-0012): Prudential's is `Agent → AAB → AB`, the next insurer's may be
  * `Agent → UM → SM`. What decides **who leads** is not the rung's code but its tier, set on `/admin/org-levels`:
@@ -58,7 +58,7 @@ export function tierOfRung(rung: { code: string; leaderTier?: LeaderTier | null 
 export const RUNG_SHORT_CODE_MAX_LENGTH = 4;
 
 /**
- * **What a rung is called wherever a person's role is named in a sentence** (ADR-0167 §10, OD-205; P18.95-T9
+ * **What a rung is called wherever a person's role is named in a sentence** (ADR-0167 §10, OD-205; P18.7-T9
  * AC-1: one name per role). A code that reads as an acronym is already the short form — `AB`, `AAB`; a longer one
  * would be shouted, so the ladder's label is used instead — `AGENT` is *Agent*. The rung's long label, whole, is
  * for where the ladder itself is listed and edited.

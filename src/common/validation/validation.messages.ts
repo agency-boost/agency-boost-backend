@@ -7,7 +7,7 @@ function idNumber(n: number): string {
 }
 
 /**
- * **How a request body is refused, field by field, in both languages** (P18.98-T5 AC-3): the pipe's sentences
+ * **How a request body is refused, field by field, in both languages** (P18.10-T5 AC-3): the pipe's sentences
  * (`violations.ts` reads class-validator's English by its templates) and `Fields`', which every module's input checker
  * shares (`fields.ts`). A field is named as the API names it — `label`, `appliesToOrgLevelCodes` — in both.
  */

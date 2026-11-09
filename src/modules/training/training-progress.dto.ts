@@ -3,7 +3,7 @@ import { IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { TRAINING_STATUSES, type TrainingStatus } from '@/domain/constants';
 
 /**
- * **`for`, and nothing else** (P18.5-T4): whose training. The validation pipe refuses a parameter of any other
+ * **`for`, and nothing else** (P18.2-T4): whose training. The validation pipe refuses a parameter of any other
  * name by name rather than ignoring it, and an empty `for` rather than reading it as the caller's own.
  */
 export class TrainingProgressQueryDto {

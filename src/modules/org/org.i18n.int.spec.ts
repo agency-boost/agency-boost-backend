@@ -44,7 +44,7 @@ import { RoleChangeService } from './role-change.service';
 const NOW = new Date('2026-10-29T03:00:00Z');
 
 /**
- * **P18.98-T5 — the org module's words in the reader's language, over HTTP** (ADR-0179 §7; AC-3, AC-4, AC-6, AC-7).
+ * **P18.10-T5 — the org module's words in the reader's language, over HTTP** (ADR-0179 §7; AC-3, AC-4, AC-6, AC-7).
  *
  * The members routes behind the real services, the production pipe, `PermissionsGuard` and the error filter, on one
  * office built through `HierarchyService`:
@@ -59,7 +59,7 @@ const NOW = new Date('2026-10-29T03:00:00Z');
  * the sentence in Indonesian. Every other suite reads English (`test/setup.ts`), so the English stands as it was. The
  * words the API composes into an answer — a name it has none for — and the ones it stores are pinned here too.
  */
-describe('P18.98-T5 the org module’s words in the reader’s language, over HTTP', () => {
+describe('P18.10-T5 the org module’s words in the reader’s language, over HTTP', () => {
   let app: INestApplication;
   let members: MembershipRepository;
   let hierarchy: HierarchyService;
@@ -192,7 +192,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('changing a role', () => {
-    it('P18.98-T5 AC-7 refuses a rung that is no code with the DTO’s own sentence, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a rung that is no code with the DTO’s own sentence, in Indonesian', async () => {
       const res = await http().patch(`/members/${aab}/role`).set(...IN_INDONESIAN).send({ toRole: 'senior manager' })
         .expect(400);
       expect(res.body.error).toEqual({
@@ -205,7 +205,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
       expect(english.body.error.details.violations).toEqual(['toRole must be a rung code']);
     });
 
-    it('P18.98-T5 AC-7 refuses demoting somebody who leads, with the count, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses demoting somebody who leads, with the count, in Indonesian', async () => {
       const res = await http().patch(`/members/${aab}/role`).set(...IN_INDONESIAN).send({ toRole: 'agent' }).expect(409);
       expect(res.body.error).toMatchObject({
         code: 'ORG_HAS_DIRECT_REPORTS',
@@ -216,7 +216,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
       expect(english.body.error.message).toBe('1 person reports to them. Move them to another leader first.');
     });
 
-    it('P18.98-T5 AC-7 refuses a leader past the office’s limit, and asking without a rung, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a leader past the office’s limit, and asking without a rung, in Indonesian', async () => {
       // Two leaders used — the Owner and Sari — and two allowed.
       await mongoose.model(Kpm.name).updateOne({ _id: FIXTURE_KPM }, {
         $set: {
@@ -246,7 +246,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('removing somebody', () => {
-    it('P18.98-T5 AC-7 refuses a removal nobody confirmed, then one that leaves reports nowhere, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a removal nobody confirmed, then one that leaves reports nowhere, in Indonesian', async () => {
       const unconfirmed = await http().delete(`/members/${aab}`).set(...IN_INDONESIAN).send({ confirmation: 'yes' })
         .expect(400);
       expect(unconfirmed.body.error).toMatchObject({
@@ -263,7 +263,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
       expect(english.body.error.message).toBe('1 person reports to them. Say where they go before removing this leader.');
     });
 
-    it('P18.98-T5 AC-6 stores the moved reports’ reason and the removed member’s next step in the remover’s language', async () => {
+    it('P18.10-T5 AC-6 stores the moved reports’ reason and the removed member’s next step in the remover’s language', async () => {
       await http().delete(`/members/${aab}`).set(...IN_INDONESIAN).send({
         confirmation: 'remove', reason: 'Pindah ke kota lain', subtree: { action: 'reassign', toMembershipId: root },
       }).expect(200);
@@ -277,7 +277,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('groups', () => {
-    it('P18.98-T5 AC-7 refuses a second group of one name, and an owner outside the office, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a second group of one name, and an owner outside the office, in Indonesian', async () => {
       await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: aab }).expect(201);
       const taken = await http().post('/members/groups').set(...IN_INDONESIAN)
         .send({ name: 'Mentoring Circle', ownerMembershipId: aab }).expect(409);
@@ -293,7 +293,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
       });
     });
 
-    it('P18.98-T5 AC-7 refuses the Core Leader tag on somebody who leads nobody by rung, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses the Core Leader tag on somebody who leads nobody by rung, in Indonesian', async () => {
       const res = await http().put(`/members/${agent}/core-leader`).set(...IN_INDONESIAN).send({ isCoreLeader: true })
         .expect(400);
       expect(res.body.error).toMatchObject({
@@ -304,7 +304,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('who administers the office', () => {
-    it('P18.98-T5 AC-7 refuses granting somebody not let in yet, granting twice and revoking nobody’s, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses granting somebody not let in yet, granting twice and revoking nobody’s, in Indonesian', async () => {
       const waiting = await http().post(`/members/${pending}/admin`).set(...IN_INDONESIAN).expect(422);
       expect(waiting.body.error).toMatchObject({
         code: 'ORG_ADMIN_TARGET_NOT_ACTIVE', message: 'Dia belum bergabung dengan KPM ini.', details: { status: 'pending' },
@@ -318,7 +318,7 @@ describe('P18.98-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('a name the API has none for (AC-4)', () => {
-    it('P18.98-T5 AC-4 writes it for the reader: one member, the tree, the role change log and a group’s owner', async () => {
+    it('P18.10-T5 AC-4 writes it for the reader: one member, the tree, the role change log and a group’s owner', async () => {
       await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: agent }).expect(201);
       await http().patch(`/members/${agent}/role`).send({ toRole: 'aab', reason: 'Siap memimpin' }).expect(200);
       await forget(agent);

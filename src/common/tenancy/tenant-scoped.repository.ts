@@ -278,4 +278,27 @@ export abstract class TenantScopedRepository<T extends Document> {
       .find({ ...filter, kpmId, deletedAt: null } as FilterQuery<T>, null, options)
       .exec();
   }
+
+  /**
+   * **How many rows of the named offices match, counted by a Super Admin who is in none** (P19.4-T5 AC-2, ADR-0213
+   * §2): whether anything in a company's offices still names a rung before the rung may be deleted.
+   *
+   * A count, never a row. Deliberately verbose, like `findInOfficeAcrossTenants`, and as narrow: the offices are
+   * **named** — `kpmId` is written last, so nothing in `filter` can widen it — an empty list counts nothing without
+   * asking, and soft-deleted rows stay out. Anybody but a Super Admin is refused as an unscoped read is. Who may call
+   * it, and why, is `named-cross-tenant-reads.tenancy.spec.ts`'s register.
+   */
+  async countInOfficesAcrossTenants(
+    ctx: RequestContext,
+    kpmIds: readonly string[],
+    filter: FilterQuery<T> = {},
+  ): Promise<number> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'countInOfficesAcrossTenants');
+    }
+    if (kpmIds.length === 0) return 0;
+    return this.model
+      .countDocuments({ ...filter, kpmId: { $in: [...kpmIds] }, deletedAt: null } as FilterQuery<T>)
+      .exec();
+  }
 }

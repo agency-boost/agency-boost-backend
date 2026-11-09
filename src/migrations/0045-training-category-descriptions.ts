@@ -28,7 +28,7 @@ function holdsSeed(category: Held, { versioned }: { versioned: boolean }): boole
 }
 
 /**
- * **The lines it was written for**, P18.97-T4's English: the seed has said them in Bahasa Indonesia since P18.98-T7
+ * **The lines it was written for**, P18.9-T4's English: the seed has said them in Bahasa Indonesia since P18.10-T7
  * (OD-238), and an office's own configuration keeps its language. Migration `0046` gives the Template company's
  * Default template the Indonesian, where it still holds these.
  */
@@ -47,9 +47,9 @@ function rewrites(list: unknown, path: string, versioned: boolean): Record<strin
 }
 
 /**
- * **One real line of description for each default training category** (P18.97-T4 AC-9, ADR-0176 §9; the client's
+ * **One real line of description for each default training category** (P18.9-T4 AC-9, ADR-0176 §9; the client's
  * UI-031: Sales's *"Structured modules — tracked here."* is generic, and the other five said nothing). A new office was
- * given these words (in Bahasa Indonesia since P18.98-T7); this gives them to the places that still hold the seeded ones:
+ * given these words (in Bahasa Indonesia since P18.10-T7); this gives them to the places that still hold the seeded ones:
  *
  * - **the working copy** (`trainingCategories`), which Settings › Training edits — archived rows too, which still
  *   render a member's history;

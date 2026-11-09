@@ -44,7 +44,7 @@ export class LeadRepository extends TenantScopedRepository<LeadDocument> {
   }
 
   /**
-   * **One owner's leads, given the places `ids` lists them in — one `bulkWrite`** (P18.8-T7, ADR-0161
+   * **One owner's leads, given the places `ids` lists them in — one `bulkWrite`** (P18.5-T7, ADR-0161
    * §1): the first id is place 0, the next 1, and so on.
    *
    * Every filter is the tenant's and the owner's, so an id from another office or another member's

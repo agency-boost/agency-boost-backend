@@ -1,7 +1,7 @@
 import { SEED_TRAINING_CATEGORIES, SEED_TRAINING_MODULES, SEED_TRAINING_SKILLS } from '@/domain/constants';
 import { englishAll, indonesianAll } from '../../../test/i18n';
 import {
-  defaultTrainingTaxonomy, trainingSeedDocuments, trainingTaxonomyProblems,
+  defaultTrainingTaxonomy, namedAs, trainingSeedDocuments, trainingTaxonomyProblems,
 } from './training-payload';
 
 /** A `training_taxonomy` payload: its defaults, what breaks one, and the rows it seeds (P5-T1). */
@@ -35,7 +35,7 @@ describe('the training taxonomy payload', () => {
       'The skill LOST names NOWHERE, which no category in this taxonomy is.',
       'The module ORPHAN names MISSING, which no skill in this taxonomy is.',
     ]);
-    // P18.98-T5 AC-3: each in Bahasa Indonesia — a refused row keeps its checker's own sentence, after its place.
+    // P18.10-T5 AC-3: each in Bahasa Indonesia — a refused row keeps its checker's own sentence, after its place.
     expect(indonesianAll(problems)).toEqual([
       'Kode kategori SALES dipakai dua kali.',
       'Kategori 3: code: Kode terdiri dari 3–40 karakter A–Z, 0–9 dan garis bawah, diawali huruf.',
@@ -78,5 +78,48 @@ describe('the training taxonomy payload', () => {
     expect(rows.modules[0]).toMatchObject({
       kpmId: 'kpm-1', version: 1, status: 'active', archivedAt: null, deletedAt: null,
     });
+  });
+
+  it('P19.6-T4 AC-1 carries a skill’s and a module’s description into the rows, checked as an office’s write is', () => {
+    const rows = trainingSeedDocuments('kpm-1', {
+      categories: [{ code: 'SALES', label: 'Sales' }],
+      skills: [
+        { code: 'LEADS_GEN', categoryCode: 'SALES', label: 'Leads generation', description: ' 8 cara mendapat calon nasabah ' },
+        { code: 'CLOSING', categoryCode: 'SALES', label: 'Closing' },
+      ],
+      modules: [
+        { code: 'LEADS_101', skillCode: 'LEADS_GEN', title: 'Leads', description: '<i>Satu</i> baris' },
+        { code: 'LEADS_102', skillCode: 'LEADS_GEN', title: 'Leads 2', description: '' },
+      ],
+    });
+    expect(rows.skills.map((s) => s.description)).toEqual(['8 cara mendapat calon nasabah', null]);
+    expect(rows.modules.map((m) => m.description)).toEqual(['Satu baris', null]);
+    expect(defaultTrainingTaxonomy().skills.every((s) => s.description === null)).toBe(true);
+
+    const problems = trainingTaxonomyProblems({
+      categories: [{ code: 'SALES', label: 'Sales' }],
+      skills: [{ code: 'LEADS_GEN', categoryCode: 'SALES', label: 'Leads', description: 'x'.repeat(161) }],
+      modules: [{ code: 'LEADS_101', skillCode: 'LEADS_GEN', title: 'Leads', description: 'x'.repeat(161) }],
+    });
+    expect(englishAll(problems)).toEqual([
+      expect.stringContaining('description must be at most 160 characters.'),
+      expect.stringContaining('description must be at most 160 characters.'),
+    ]);
+  });
+
+  it('P19.6-T4 AC-2 a skill or module with no description at all (written before the field) reads split; one with a description, or null, as it stands', () => {
+    expect(namedAs('Leads generation: 8 cara mendapat calon nasabah', undefined))
+      .toEqual({ name: 'Leads generation', description: '8 cara mendapat calon nasabah' });
+    expect(namedAs('Leads generation: 8 cara', null)).toEqual({ name: 'Leads generation: 8 cara', description: null });
+    expect(namedAs(' Closing ', undefined)).toEqual({ name: 'Closing', description: null });
+    const rows = trainingSeedDocuments('kpm-1', {
+      categories: [{ code: 'SALES', label: 'Sales: jual' }],
+      skills: [{ code: 'LEADS_GEN', categoryCode: 'SALES', label: 'Leads generation: 8 cara' }],
+      modules: [{ code: 'LEADS_101', skillCode: 'LEADS_GEN', title: 'Media sosial: dari konten ke janji temu' }],
+    });
+    // A category is never split: its description is its own field, and always was.
+    expect(rows.categories[0]).toMatchObject({ label: 'Sales: jual', description: null });
+    expect(rows.skills[0]).toMatchObject({ label: 'Leads generation', description: '8 cara' });
+    expect(rows.modules[0]).toMatchObject({ title: 'Media sosial', description: 'dari konten ke janji temu' });
   });
 });

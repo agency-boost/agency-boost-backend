@@ -5,7 +5,7 @@ const MODULE = __dirname;
 
 /**
  * Files of the events module allowed to reach a Mongoose model directly, each with the reason. Everything else reads
- * and writes through the tenant repositories (invariant §1; the Phase 18.5 exit review).
+ * and writes through the tenant repositories (invariant §1; the Phase 18.2 exit review).
  */
 const ALLOWED = new Map<string, string>([
   ['event.repository.ts', 'the repositories for the four events collections: each injects its own model'],
@@ -22,7 +22,7 @@ function sources(): string[] {
 }
 
 /**
- * **The events services use no raw Mongoose model** (invariant §1; the Phase 18.5 exit review, 15). `repositories.tenancy
+ * **The events services use no raw Mongoose model** (invariant §1; the Phase 18.2 exit review, 15). `repositories.tenancy
  * .spec.ts` holds the tenant-scoped models across the codebase; this holds every model, in this module, so a service
  * reaching past its repository — even to a collection that is not tenant-scoped — is a decision written down here.
  */
@@ -33,14 +33,14 @@ describe('the events module reaches its data through repositories (invariant §1
     expect(files.length).toBeGreaterThan(10);
   });
 
-  it('P18.5-T5 AC-9 no file but the allowed ones injects or opens a Mongoose model', () => {
+  it('P18.2-T5 AC-9 no file but the allowed ones injects or opens a Mongoose model', () => {
     const offenders = files
       .filter((file) => !ALLOWED.has(file))
       .filter((file) => RAW.some((pattern) => pattern.test(readFileSync(join(MODULE, file), 'utf8'))));
     expect(offenders).toEqual([]);
   });
 
-  it('P18.5-T5 AC-9 the guest service’s one model is the company’s, and only the company’s', () => {
+  it('P18.2-T5 AC-9 the guest service’s one model is the company’s, and only the company’s', () => {
     const source = readFileSync(join(MODULE, 'event-guest.service.ts'), 'utf8');
     expect([...source.matchAll(/@InjectModel\((\w+)\.name\)/g)].map((m) => m[1])).toEqual(['Company']);
   });
@@ -50,17 +50,23 @@ describe('the events module reaches its data through repositories (invariant §1
   });
 
   /*
-   * **The readings' importers, guarded** (P18.6-T1 AC-3; the phase file's *Risks*, 1): `EventReadings` — the roll
+   * **The readings' importers, guarded** (P18.3-T1 AC-3; the phase file's *Risks*, 1): `EventReadings` — the roll
    * call's computation, `attendanceOfMany` among it — is a service port with no route. Outside this module exactly
    * one file reads it: the compliance tree's *Events* category (`app.module.ts` registers the provider, and reads
    * nothing). Another reader is a decision, written down here.
+   *
+   * *Added 2026-11-06 (P19.5-T3 AC-3, ADR-0215):* the KPM's *Advanced analytics* → *Event* section reads each event's
+   * feedback NPS through the same port (`advanced-analytics.service.ts`) — counts and scores, no route of its own.
    */
-  it('P18.6-T1 AC-3 outside the events module, only the compliance tree’s Events category imports the readings', () => {
+  it('P18.3-T1 AC-3 outside the events module, only the compliance tree’s Events category imports the readings', () => {
     const SRC = join(MODULE, '../..');
     const importers = globSync('**/*.ts', { cwd: SRC })
       .map((f) => f.replace(/\\/g, '/'))
       .filter((f) => !f.endsWith('.spec.ts') && !f.startsWith('modules/events/') && f !== 'app.module.ts')
       .filter((f) => /from '[^']*events\/event-readings'/.test(readFileSync(join(SRC, f), 'utf8')));
-    expect(importers).toEqual(['modules/reporting/compliance/events.category.ts']);
+    expect(importers.sort()).toEqual([
+      'modules/reporting/advanced-analytics/advanced-analytics.service.ts',
+      'modules/reporting/compliance/events.category.ts',
+    ]);
   });
 });

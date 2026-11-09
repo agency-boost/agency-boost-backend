@@ -196,6 +196,15 @@ export class Goal {
   @Prop({ type: String, default: null })
   apeAchievedTypedBy!: string | null;
 
+  /**
+   * **When the figure above last changed** (P19.1-T4 AC-11; ADR-0195 §3): written by a save that changes it and by the
+   * member's own estimate (`PUT /goals/:period/ape-estimate`). The Summary's *Diganti data produksi resmi (diunggah …)*
+   * shows only when the office's figure was written after it. `null`, and absent on a row from before the field, reads
+   * as the plan's `savedAt`. Not on a revision.
+   */
+  @Prop({ type: Date, default: null })
+  apeAchievedTypedAt!: Date | null;
+
   @Prop({ type: Number, required: true, default: 0 })
   caseSizeMinor!: number;
 

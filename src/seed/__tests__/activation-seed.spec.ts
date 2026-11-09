@@ -3,7 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SOURCE_READER } from '@/common/i18n/reader';
 import { addDays } from '@/common/time/local-day';
-import type { ActivationView } from '@/modules/activation/activation-progress.view';
+import type { ActivationView, NewHireDetailView } from '@/modules/activation/activation-progress.view';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { ACTIVATION_TICK_NOTES, SARI_NOTE_TO_RINA } from '../activation-fixture';
@@ -36,7 +36,7 @@ async function as(email: string): Promise<RequestContext> {
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: directs,
-  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.10-T4)
 }
 
 const item = (view: ActivationView, code: string) => view.aspects.flatMap((a) => a.items).find((i) => i.code === code)!;
@@ -49,7 +49,8 @@ describe.each([
   const today = clock.localDateFor(TZ);
   let first: SeedResult;
   let wired: ReturnType<typeof configModule>;
-  const mine = async (email: string) => wired.activationProgress.mine(await as(email));
+  // Every seeded activation is inside its first year, so its own read is the full view (P19.9-T3 AC-5).
+  const mine = async (email: string) => wired.activationProgress.mine(await as(email)) as Promise<ActivationView>;
 
   beforeAll(async () => {
     await startMongo();
@@ -62,7 +63,7 @@ describe.each([
   it('Seed: nine activations, dated from the office’s today, each pinned to its office’s published checklist', async () => {
     expect(first.activation.today).toBe(today);
     // Phase 18.1's cohort adds the twelve graduated long ago, written beside these nine (`cohort-fixture.ts`).
-    // P18.96-T6 adds Lukman's and Tari's (`activation-3m-fixture.ts`).
+    // P18.8-T6 adds Lukman's and Tari's (`activation-3m-fixture.ts`).
     expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2);
     expect(first.activation.activations.every((a) => a.templateVersion === 1 && a.items.length === 16 && a.origin === 'backfill')).toBe(true);
   });
@@ -70,7 +71,7 @@ describe.each([
   it('Seed: Rina, day 59 — her three links complete from her own data, ticks of hers and Sari’s, and Sari’s note', async () => {
     const rina = await mine('rina@kpm0417.test');
     const sari = await memberOf('sari@kpm0417.test');
-    // P18.96-T4: ten of sixteen — her closings tick *Close first case* and the milestone, her four 1:1s the check-in.
+    // P18.8-T4: ten of sixteen — her closings tick *Close first case* and the milestone, her four 1:1s the check-in.
     expect(rina).toMatchObject({ day: 59, startDate: addDays(today, -58), state: 'open', done: 11, pct: 69, overdue: false });
     for (const code of ['GOAL_SETTING', 'ADD_PROSPECTS', 'ACTIVITY_TRACKER_WEEKLY', 'FIRST_CASE_CLOSED', 'INDEPENDENT_AGENT_MILESTONE', 'WEEKLY_CHECK_IN']) {
       expect([code, item(rina, code).done, item(rina, code).source]).toEqual([code, true, 'link']);
@@ -96,7 +97,7 @@ describe.each([
     expect(siti).toMatchObject({ state: 'graduated', pct: 100, day: 102, graduatedBy: { name: 'Siti Rahmawati' } });
     expect(await col('auditLog').countDocuments({ action: 'activation.graduated', targetMembershipId: siti.hire.membershipId })).toBe(1);
 
-    // P18.96-T4 AC-5: his first case ticks itself from his existing closing, the production file's — nine of sixteen.
+    // P18.8-T4 AC-5: his first case ticks itself from his existing closing, the production file's — nine of sixteen.
     expect(await mine('dimas@kpm0417.test')).toMatchObject({ day: 95, overdue: true, done: 9, pct: 56 });
     const indah = await mine('indah@kpm0417.test');
     expect(indah).toMatchObject({ day: 98, overdue: true, done: 15, firstCaseClosed: true });
@@ -200,7 +201,7 @@ describe.each([
     ]));
   }
 
-  it('P18.96-T2 AC-2 the report’s seven are new hires, joined on their activation’s start; every other member is an existing agent', async () => {
+  it('P18.8-T2 AC-2 the report’s seven are new hires, joined on their activation’s start; every other member is an existing agent', async () => {
     const seen = await classification();
     const starts = new Map((await col('activationProgress').find({ deletedAt: null }).toArray())
       .map((a) => [a.membershipId as string, a.startDate as string]));
@@ -228,7 +229,7 @@ describe.each([
     }
   });
 
-  it('P18.96-T2 AC-2 migration 0040 finds nothing to do on the seed, and over it with the fields taken away gives the same answer, twice', async () => {
+  it('P18.8-T2 AC-2 migration 0040 finds nothing to do on the seed, and over it with the fields taken away gives the same answer, twice', async () => {
     const seeded = await classification();
     const waiting = await col('memberships').countDocuments({ status: 'pending', joinedAs: null });
     expect(await membershipJoinDate(mongoose.connection.db!)).toEqual({ newHires: 0, existingAgents: 0, waiting });
@@ -243,25 +244,25 @@ describe.each([
     expect(await membershipJoinDate(mongoose.connection.db!)).toEqual({ newHires: 0, existingAgents: 0, waiting });
   });
 
-  // ------------------------------------------------------------------ P18.96-T4: first sales and data-backed items
+  // ------------------------------------------------------------------ P18.8-T4: first sales and data-backed items
 
   const firstSaleOf = async (email: string) => {
     const row = await memberOf(email);
     return { date: row.firstSaleDate ?? null, source: row.firstSaleSource ?? null, joinDate: row.joinDate as string };
   };
 
-  it('P18.96-T4 AC-5 Dimas’s Close first case independently ticks itself from his existing closing — the file’s, the same on his leader’s detail', async () => {
+  it('P18.8-T4 AC-5 Dimas’s Close first case independently ticks itself from his existing closing — the file’s, the same on his leader’s detail', async () => {
     const dimas = await mine('dimas@kpm0417.test');
     const lastMonthStart = `${addDays(`${today.slice(0, 7)}-01`, -1).slice(0, 7)}-01`;
     expect(item(dimas, 'FIRST_CASE_CLOSED')).toMatchObject({
       done: true, source: 'link', waiting: false, record: { collection: 'monthlyAgentData' }, link: { kind: 'sales:first', label: 'Sales data' },
     });
     expect(await firstSaleOf('dimas@kpm0417.test')).toMatchObject({ date: lastMonthStart, source: 'monthly_file' });
-    const detail = await wired.newHires.detail(await as('agus@kpm0417.test'), dimas.hire.membershipId);
+    const detail = await wired.newHires.detail(await as('agus@kpm0417.test'), dimas.hire.membershipId) as NewHireDetailView;
     expect(item(detail, 'FIRST_CASE_CLOSED')).toMatchObject({ done: true, source: 'link', record: item(dimas, 'FIRST_CASE_CLOSED').record });
   });
 
-  it('P18.96-T4 Seed: Novi’s first sale is on day 20, from a lead paid and issued; Raka’s only sale is on day 120', async () => {
+  it('P18.8-T4 Seed: Novi’s first sale is on day 20, from a lead paid and issued; Raka’s only sale is on day 120', async () => {
     const novi = await firstSaleOf('novi@kpm0417.test');
     expect(novi).toMatchObject({ source: 'lead', date: addDays(novi.joinDate, 19) });
     const raka = await firstSaleOf('raka@kpm0417.test');
@@ -271,7 +272,7 @@ describe.each([
     expect(noviView.done).toBe(10);
   });
 
-  it('P18.96-T4 Seed: Rina’s four 1:1s complete her check-in from coaching; Indah’s, ticked by Agus, waits for data', async () => {
+  it('P18.8-T4 Seed: Rina’s four 1:1s complete her check-in from coaching; Indah’s, ticked by Agus, waits for data', async () => {
     expect(item(await mine('rina@kpm0417.test'), 'WEEKLY_CHECK_IN')).toMatchObject({
       done: true, source: 'link', waiting: false, record: { collection: 'coachingSessions' }, doneBy: { name: 'Sari Puspita' },
     });
@@ -280,7 +281,7 @@ describe.each([
     });
   });
 
-  it('P18.96-T4 AC-1 migration 0042 finds nothing to write over the seed: the seed’s first sales are its own', async () => {
+  it('P18.8-T4 AC-1 migration 0042 finds nothing to write over the seed: the seed’s first sales are its own', async () => {
     const result = await membershipFirstSale(mongoose.connection.db!);
     expect(result.written).toBe(0);
   });

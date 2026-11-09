@@ -3,6 +3,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { freshItemState } from '@/modules/activation/activation-rules';
 import { ActivationReadings } from '@/modules/activation/activation-readings';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { byKode } from '@/modules/production/upload-columns';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule, provisionOffice } from '../../../../test/config-module';
@@ -35,7 +36,7 @@ const TENANT_COLLECTIONS = new Set([
 interface Query { collection: string; method: string; args: unknown[] }
 
 /**
- * **P18.6-T1 AC-11, P18.6-T2 AC-9 — the compliance tree, measured at the office's ceiling** (`performance-and-scale.md`):
+ * **P18.3-T1 AC-11, P18.3-T2 AC-9 — the compliance tree, measured at the office's ceiling** (`performance-and-scale.md`):
  * an office of **500 members** — the Owner at the root, nine AB agencies, each with two AAB units — beside one of
  * **50**, each holding every kind of record every category reads: training done, half-done and untouched; goals;
  * a fortnight of logging; activations open, overdue, graduated and expired; this year's events with RSVPs, claims,
@@ -51,7 +52,7 @@ interface Query { collection: string; method: string; args: unknown[] }
  * Each office is read once per category before anything is measured: a read heals an activation's newly met links and
  * may freeze a campaign window that just became final — writes once, never on the reads that follow.
  */
-describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2 AC-9)', () => {
+describe('the compliance tree, measured at 500 members (P18.3-T1 AC-11, P18.3-T2 AC-9)', () => {
   let wired: ReturnType<typeof configModule>;
   let compliance: ComplianceService;
   const owners: Record<'A' | 'B', RequestContext> = {} as never;
@@ -161,8 +162,11 @@ describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2
           });
         }
         ['2026-07', '2026-08', '2026-09'].forEach((month, m) => months.push({
-          kpmId, membershipId: p.id, month, agentCode: `T${i}`, deletedAt: null, apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 7)),
-          policyCountMonthly: cell(1), persistencyMonthly: cell(90), recruitmentMonthly: cell(1), newActiveAgentsMonthly: cell(0),
+          kpmId, membershipId: p.id, month, agentCode: `T${i}`, deletedAt: null,
+          ...byKode({
+            apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 7)),
+            policyCountMonthly: cell(1), persistencyMonthly: cell(90), recruitmentMonthly: cell(1), newActiveAgentsMonthly: cell(0),
+          }),
         }));
         if (i % 2 === 0) for (const campaignCode of ['APE_SPRINT', 'MDRT_QUALIFICATION', 'JULY_PUSH']) {
           chases.push({ kpmId, membershipId: p.id, campaignCode, chasing: true, deletedAt: null });
@@ -270,7 +274,7 @@ describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2
     return times[Math.ceil(0.95 * times.length) - 1];
   };
 
-  it('P18.6-T1 AC-11 the tree lists every member of each office: 500 and 50, every chip computed', async () => {
+  it('P18.3-T1 AC-11 the tree lists every member of each office: 500 and 50, every chip computed', async () => {
     for (const [owner, people] of [[owners.A, 500], [owners.B, 50]] as const) {
       const view = await compliance.read(owner, { category: 'activity' });
       expect(view.people).toBe(people);
@@ -278,7 +282,7 @@ describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2
     }
   });
 
-  it.each([...COMPLIANCE_CATEGORIES])('P18.6-T1 AC-11, P18.6-T2 AC-9 %s sends the same queries for 50 members as for 500: none per member', async (category) => {
+  it.each([...COMPLIANCE_CATEGORIES])('P18.3-T1 AC-11, P18.3-T2 AC-9 %s sends the same queries for 50 members as for 500: none per member', async (category) => {
     const large = await counted(() => read(category)(owners.A));
     const small = await counted(() => read(category)(owners.B));
     const shape = (qs: Query[]) => qs.map((q) => `${q.collection}.${q.method}`).sort();
@@ -291,7 +295,7 @@ describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2
     expect(large.filter((q) => /^(insert|update|findOneAndUpdate|bulkWrite|replace)/.test(q.method) && q.collection !== 'auditLog')).toEqual([]);
   });
 
-  it.each([...COMPLIANCE_CATEGORIES])('P18.6-T1 AC-11 %s scans no tenant collection: every query explained', async (category) => {
+  it.each([...COMPLIANCE_CATEGORIES])('P18.3-T1 AC-11 %s scans no tenant collection: every query explained', async (category) => {
     const db = mongoose.connection.db!;
     const scans: string[] = [];
     for (const q of await counted(() => read(category)(owners.A))) {
@@ -312,7 +316,7 @@ describe('the compliance tree, measured at 500 members (P18.6-T1 AC-11, P18.6-T2
     expect(scans).toEqual([]);
   }, 120_000);
 
-  it('P18.6-T1 AC-11, P18.6-T2 AC-9 the budget: every category under 3 s at the ceiling, p95 of twenty', async () => {
+  it('P18.3-T1 AC-11, P18.3-T2 AC-9 the budget: every category under 3 s at the ceiling, p95 of twenty', async () => {
     const results: Record<string, number> = {};
     for (const category of COMPLIANCE_CATEGORIES) results[category] = await p95(() => read(category)(owners.A));
     // eslint-disable-next-line no-console

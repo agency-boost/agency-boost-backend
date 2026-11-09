@@ -74,6 +74,13 @@ export class ActivationTemplate {
   @Prop({ type: [ActivationAspectSchema], default: [] })
   aspects!: ActivationAspect[];
 
+  /**
+   * **What made this version** (ADR-0208 §5): `{ source: 'template_push' }` for a version the Super Admin's push of the
+   * template wrote; `null` for the office's own drafts and publishes, and for provisioning's version 1.
+   */
+  @Prop({ type: Object, default: null })
+  origin!: { source: 'template_push' } | null;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 

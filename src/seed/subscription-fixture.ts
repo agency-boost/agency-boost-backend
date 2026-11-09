@@ -12,8 +12,8 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | Office | Its subscription | Who to sign in as, and what they see |
  * |---|---|---|
- * | **0417** BSD City | ends **three months** after the seed's today; Rp 350,000 a leader; at most **10** leaders, **9** used (the Owner, the Admin, Agus, Sari, Dewi and Arief; and since Phase 18's reporting fixture, Yosef, Winda and Satria) | `superadmin@agencyboost.test` at `/admin/tenants`: the row reads *9 / 10*, its end date three months on |
- * | **0555** Kelapa Gading | ends **five days** after today; Rp 400,000 a leader; **no limit** | the list's near end: *Active*, its end five days away, *2* leaders |
+ * | **0417** BSD City | *Tahunan*; ends **three months** after the seed's today; Rp 350,000 a leader; at most **10** leaders, **9** used (the Owner, the Admin, Agus, Sari, Dewi and Arief; and since Phase 18's reporting fixture, Yosef, Winda and Satria) | `superadmin@agencyboost.test` at `/admin/tenants`: the row reads *9 / 10*, its end date three months on |
+ * | **0555** Kelapa Gading | *6 bulan*; ends **five days** after today; Rp 400,000 a leader; **no limit** | the list's near end: *Active*, its end five days away, *2* leaders |
  * | **0601** Cikarang (new) | **ended ten days ago**, not kept active | `owner@kpm0601.test` and `agent@kpm0601.test`: the page saying the subscription ended and to contact AgencyBoost, at whatever address they open. The list reads *Ended* |
  * | **0602** Bekasi Barat (new) | **ended three days ago, kept active**; at its limit of **2** leaders (the Owner and Sinta, an AAB) | `owner@kpm0602.test`: everything works; at `/people/members`, promoting Joko (Agent) to AAB is refused with the limit's words. The list reads *Ended — kept active* and *2 / 2* |
  * | **0603** Tangerang (new) | six months to run; Rp 350,000 a leader; a limit of **10**, and **13** used — the Owner and nine AABs, then three Agents AgencyBoost approved past the limit (ADR-0157); a fourth asked for and waiting | `superadmin@agencyboost.test` at `/admin/tenants`: *13 / 10*, *3 over*; at `/admin/leader-limit-requests`, Rizky waiting and the three approved. `owner@kpm0603.test` at Rizky's page: *Waiting for AgencyBoost's approval* |
@@ -36,7 +36,11 @@ function shift(date: string, by: { months?: number; days?: number; years?: numbe
   return DateTime.fromISO(date, { zone: ZONE }).plus(by).toISODate() as string;
 }
 
-/** A subscription of a whole period ending on `endDate`: a year, or six months. */
+/**
+ * A subscription of a whole period ending on `endDate`: a year, or six months — and **its plan, that period**
+ * (P19.4-T3, ADR-0211 §1): *Tahunan* for a year, *6 bulan* for six months, so `/admin/billing` reads a plan on every
+ * seeded row.
+ */
 function ending(
   endDate: string,
   period: { years?: number; months?: number },
@@ -47,6 +51,7 @@ function ending(
     endDate,
     currency: 'IDR',
     ...rest,
+    plan: period.years ? 'annual' : 'six_months',
   };
 }
 
@@ -106,7 +111,7 @@ export const LEADER_LIMIT_PEOPLE: readonly { email: string; fullName: string; pr
 ];
 
 /** The two offices this fixture makes, by derived id. */
-/** The Owner's reason on each approved promotion past 0603's limit, as typed (P18.98-T7: in Bahasa Indonesia). */
+/** The Owner's reason on each approved promotion past 0603's limit, as typed (P18.10-T7: in Bahasa Indonesia). */
 export const SUBSCRIPTION_PROMOTION_REASON = 'Sudah memimpin tim akhir pekan';
 
 export const SUBSCRIPTION_OFFICES = {
@@ -223,6 +228,7 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
   SUBSCRIPTIONS at /admin/tenants  (Super Admin; from src/seed/subscription-fixture.ts, dated from the
              office's today ${today}. A subscription is written only where an office has none, so one
              edited in a walk is kept: run with --reset to date them from today)
+    (at /admin/billing each reads its plan: 0555 and 0601 6 bulan, the other three Tahunan)
     KPM 0417 · BSD City          ends ${plan['0417'].endDate}, Rp 350,000 a leader, Leaders 9 / 10 — the Owner,
                                  the Admin, Agus, Sari, Dewi, Arief, Yosef, Winda and Satria
     KPM 0555 · Kelapa Gading     ends ${plan['0555'].endDate}, five days on; no limit, so Leaders reads the count
@@ -245,7 +251,7 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
 }
 
 /**
- * **0603 · Tangerang: thirteen leaders on a limit of ten** (ADR-0157, P18.8-T2). The Owner and nine AABs fill the
+ * **0603 · Tangerang: thirteen leaders on a limit of ten** (ADR-0157, P18.5-T2). The Owner and nine AABs fill the
  * limit; Irfan, Siska and Fajar joined as Agents and were made AABs past it, each on an approved request and a
  * promotion on the role change log with the Owner's reason; Rizky, an Agent, waits on the Owner's request.
  * Written only where missing, like the rest: people by address, requests by subject.

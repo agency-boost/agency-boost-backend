@@ -48,7 +48,7 @@ export interface OfficeHeader {
  * (`MemberNames.byReadMemberships`; two more until 2026-10-29, the memberships read again whole) — whatever the
  * office's size; `everyone` is the one read alone, for a reader that names nobody.
  *
- * **Each with the instant their join date begins** (ADR-0172 §1, P18.96-T5 AC-1), in the office's zone (invariant §9),
+ * **Each with the instant their join date begins** (ADR-0172 §1, P18.8-T5 AC-1), in the office's zone (invariant §9),
  * so every count of people it feeds counts a member from the day they joined rather than the day the system let them
  * in. A caller that holds the office's zone passes it; one that does not costs one read of the office's row.
  */
@@ -76,11 +76,23 @@ export class OfficePeople {
   }
 
   /**
-   * **A reader of KPM analytics** (ADR-0159 §2, P18.8-T5 AC-4): the Owner, an Admin, or a **Core Leader** — tagged,
+   * **A reader of KPM analytics** (ADR-0159 §2, P18.5-T5 AC-4): the Owner, an Admin, or a **Core Leader** — tagged,
    * on a leader rung, as the context reads it on every request. Any other member of the office holding the grant —
    * an AB or an AAB not tagged — is answered **`404 NOT_FOUND`**, the forum's rule: the refusal does not say there
    * is a reading they are kept from. `TENANT_NO_MEMBERSHIP` first, as `require`.
    */
+  /**
+   * **A platform read of one KPM** (ADR-0207 §4; P19.4-T3): the Super Admin, the office named, no membership, read-only
+   * (`RequestContext.platformRead`) — what every `…ForOffice` read asks before it runs the KPM's own functions. Anything
+   * else is refused as a read with no office is: `TENANT_NO_MEMBERSHIP`. The route's own guard has already asked for
+   * `platform_kpm_figures:read` or `platform_members:read`; this is the second wall, so the method cannot be reached
+   * with a member's context, or a writable one.
+   */
+  static requirePlatformRead(ctx: RequestContext): string {
+    if (!ctx.isPlatformRead || !ctx.kpmId) throw new NoMembershipException();
+    return ctx.kpmId;
+  }
+
   static requireAnalyticsReader(ctx: RequestContext): string {
     const me = OfficePeople.require(ctx);
     const office = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;

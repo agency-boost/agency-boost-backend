@@ -64,6 +64,12 @@ export class MemberPersonalDto implements MemberPersonal {
 
   @ApiProperty({ type: String, nullable: true, enum: ['full_time', 'part_time'], description: 'How they work in this office.' })
   workStatus!: WorkStatus | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: 'Prudential',
+    description: 'The office’s company, which the page names beside the company join month: *Bergabung di Prudential*.',
+  })
+  companyName!: string | null;
 }
 
 export class DirectoryMemberDto implements DirectoryMember {
@@ -488,7 +494,7 @@ export class RoleChangeEntryDto implements RoleChangeEntry {
  *
  * This was `IssuedInviteDto` and carried `label`, `autoApprove`, `maxUses`, `useCount`,
  * `expiresAt`, `revokedAt` and a derived `state` — every one of them a way to bound a
- * credential somebody could mint again (P3.6-T1).
+ * credential somebody could mint again (P3.2-T1).
  */
 export class MyLeaderCodeDto implements MyLeaderCode {
   @ApiProperty({ type: String, example: 'JOR417' })

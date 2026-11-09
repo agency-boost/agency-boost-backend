@@ -11,7 +11,7 @@ import { ActivationProgressService } from './activation-progress.service';
 import { SalesEvents } from './sales-events.port';
 
 /**
- * **Each person's `firstSaleDate`, kept** (ADR-0171 §1, P18.96-T4 AC-1): `SalesEvents`, which the leads and the
+ * **Each person's `firstSaleDate`, kept** (ADR-0171 §1, P18.8-T4 AC-1): `SalesEvents`, which the leads and the
  * production modules signal, answered here.
  *
  * For every member named: their closings and the production file's policy months are read — one query each for all
@@ -21,7 +21,7 @@ import { SalesEvents } from './sales-events.port';
  * so a data-backed item ticks from the same write.
  *
  * **One exception moves it later, or clears it: a first sale read from the file that the file no longer shows**
- * (the P18.96 exit review, M4; ADR-0171 §1 as noted). An import reverted, or a month's policies corrected to none or
+ * (the P18.8 exit review, M4; ADR-0171 §1 as noted). An import reverted, or a month's policies corrected to none or
  * cleared, takes away the month a `monthly_file` first sale named — a wrong file, put right. That one is recomputed
  * from what remains (closings, other months of the file) and written, or cleared when nothing does — **while the
  * member's 3M result is not kept**. A kept result stays, and so does the first sale it was decided by: a decided 3M
@@ -40,7 +40,7 @@ export class FirstSaleService extends SalesEvents {
     private readonly days: TenantDay,
     private readonly clock: Clock,
     private readonly activations: ActivationProgressService,
-    // P18.96-T6 AC-1: a 3M result already decided is kept before the first sale it was decided by moves.
+    // P18.8-T6 AC-1: a 3M result already decided is kept before the first sale it was decided by moves.
     private readonly results: Activation3MService,
   ) {
     super();
@@ -101,7 +101,7 @@ export class FirstSaleService extends SalesEvents {
       moves.push({ membershipId, next });
     }
     /*
-     * P18.96-T6 AC-1 (ADR-0171 §2): a new hire whose 3M activation is decided — past day 90, or gone — keeps the result
+     * P18.8-T6 AC-1 (ADR-0171 §2): a new hire whose 3M activation is decided — past day 90, or gone — keeps the result
      * the records gave before this sale lands, so a closing logged with an earlier day or a late production file
      * activates nobody after the fact. One read and at most two writes for every member here, before any of the writes.
      */

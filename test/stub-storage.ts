@@ -39,7 +39,7 @@ export class StubStorage extends StoragePort {
       uploadUrl: 'https://storage.googleapis.com/stub-bucket/',
       storageKey,
       signature: 'sig',
-      // Shaped as `GcsAdapter`'s V4 POST policy (P18.7-T2): the one key, and the Content-Type pinned to the
+      // Shaped as `GcsAdapter`'s V4 POST policy (P18.4-T2): the one key, and the Content-Type pinned to the
       // type the service checked — which is how a route's narrower list reaches storage.
       fields: {
         'Content-Type': params.mimeType,
@@ -101,6 +101,7 @@ export class StubStorage extends StoragePort {
     if (held) return { ...held, sent: false };
     const object = { storageKey, mimeType: params.mimeType, bytes: params.body.length };
     this.objects.set(storageKey, object);
+    this.bodies.set(storageKey, params.body);
     this.puts.push(storageKey);
     return { ...object, sent: true };
   }
@@ -119,6 +120,22 @@ export class StubStorage extends StoragePort {
   /** Make storage report that a key holds nothing, as a dropped upload would. */
   loseUpload(storageKey: string): void {
     this.objects.delete(storageKey);
+  }
+
+  /** The bytes storage "holds" under a key, for the routes that read an object back (P19.6-T1). */
+  private bodies = new Map<string, Buffer>();
+
+  /** Make a key hold these bytes, as a browser's upload would (P19.6-T1's branding images). */
+  holdBytes(storageKey: string, body: Buffer, mimeType: string): void {
+    this.objects.set(storageKey, { storageKey, mimeType, bytes: body.length });
+    this.bodies.set(storageKey, body);
+  }
+
+  async read(storageKey: string, maxBytes: number): Promise<Buffer | null> {
+    const body = this.bodies.get(storageKey);
+    if (!body) return this.objects.has(storageKey) ? Buffer.alloc(0) : null;
+    if (body.length > maxBytes) throw new Error(`Storage holds ${body.length} bytes under ${storageKey}.`);
+    return body;
   }
 
   /** Make storage report something other than what the client claimed. */

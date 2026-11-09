@@ -32,7 +32,7 @@ describe('measured conversion rates (ADR-0055)', () => {
       .toEqual({ leadToAppointmentRate: 0.5, closingRate: 0.2 });
   });
 
-  it('P18.9-T2 AC-2 sums a role bound to [A, B]: the replaced activity and its replacement', () => {
+  it('P18.6-T2 AC-2 sums a role bound to [A, B]: the replaced activity and its replacement', () => {
     const binding = { ...DEFAULT, appointments: ['SELL_PRESENTATION', 'SALES_MEETING'] };
     // 6 + 4 meetings over 40 leads; 2 submissions over those 10.
     expect(measuredRates(

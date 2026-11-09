@@ -6,6 +6,7 @@ import {
   NotificationPreferencesSchema,
 } from '@/modules/notifications/notification.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
+import { AccountLinkSchema } from '@/modules/auth/account-link.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -37,14 +38,14 @@ import {
 } from '@/modules/training/training-category.schema';
 import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
 import {
-  TrainingContentFileSchema, TrainingContentLinkSchema, TrainingContentSchema,
+  TrainingContentFileSchema, TrainingContentHistoryEntrySchema, TrainingContentLinkSchema, TrainingContentSchema,
   TrainingModuleSchema,
 } from '@/modules/training/training-module.schema';
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
 import {
-  AttackPlanSchema, CommissionYearSchema, ProductSchema,
+  AttackPlanSchema, CommissionYearSchema, ObjectionSchema, ProductSchema,
 } from '@/modules/products/product.schema';
 import {
   KpmProductConfigSchema, ProductDocumentRefSchema,
@@ -67,6 +68,7 @@ import { PolicySchema } from '@/modules/production/policy.schema';
 import { ProductionMonthSchema } from '@/modules/production/production-month.schema';
 import { DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
 import { DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
+import { UnregisteredAgentDataSchema } from '@/modules/production/unregistered-agent-data.schema';
 import {
   MetricValueSchema, MonthlyAgentDataSchema,
 } from '@/modules/production/monthly-agent-data.schema';
@@ -92,11 +94,19 @@ import {
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
+import { KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
 import {
   LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
+import { SurveyRunSchema } from '@/modules/surveys/survey-run.schema';
+import { SurveyParticipationSchema } from '@/modules/surveys/survey-participation.schema';
+import { SurveyResponseSchema } from '@/modules/surveys/survey-response.schema';
+import { AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
+import { QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { ProposalSchema } from '@/modules/proposals/proposal.schema';
+import { KpmBrandingSchema } from '@/modules/branding/kpm-branding.schema';
 
 /**
  * An index on a tenant-scoped collection that does not lead with `kpmId` invites a
@@ -116,7 +126,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['joinRequests', JoinRequestSchema],
   // ADR-0157: tenant-scoped, unlike `kpmRequests` — the office exists and the subject is its member.
   ['leaderLimitRequests', LeaderLimitRequestSchema],
-  // P18.96-T3 (ADR-0170): a leader's invites — opened by `(kpmId, tokenHash)` — and the requests to move a member.
+  // P18.8-T3 (ADR-0170): a leader's invites — opened by `(kpmId, tokenHash)` — and the requests to move a member.
   ['memberInvites', MemberInviteSchema],
   ['transferRequests', TransferRequestSchema],
   ['groups', GroupSchema],
@@ -134,7 +144,7 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
-  // P18.5-T5, T6: one row per (event, membership) each — the RSVP, the claim and the confirmation; the answer.
+  // P18.2-T5, T6: one row per (event, membership) each — the RSVP, the claim and the confirmation; the answer.
   ['eventRsvps', EventRsvpSchema],
   ['eventFeedback', EventFeedbackSchema],
   ['activityLogs', ActivityLogSchema],
@@ -145,8 +155,9 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['productionMonths', ProductionMonthSchema],
   ['dataUploadBatches', DataUploadBatchSchema],
   ['dataUploadRows', DataUploadRowSchema],
+  ['unregisteredAgentData', UnregisteredAgentDataSchema],
   ['campaigns', CampaignSchema],
-  // P18.5-T7, T8: a member's chase, one per campaign; a final standing, one per campaign, window and member.
+  // P18.2-T7, T8: a member's chase, one per campaign; a final standing, one per campaign, window and member.
   ['campaignChases', CampaignChaseSchema],
   ['campaignStandings', CampaignStandingSchema],
   ['capabilityCatalogs', CapabilityCatalogSchema],
@@ -161,12 +172,25 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
   // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
   ['kpmRecruitTargets', KpmRecruitTargetSchema],
+  // P19.3-T2 (UI-149): an office's setup marks, unique per (office, mark), `kpmId`-led.
+  ['kpmSetupMarks', KpmSetupMarkSchema],
   // Phase 18.1 (D-forum-model, D-share): an office's leader meetings — the list by date, one number per live meeting —
   // and the links that share one, opened by `(kpmId, tokenHash)`. Every index `kpmId`-led.
   ['leaderMeetings', LeaderMeetingSchema],
   ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
-  // P18.5-T1 AC-2: one member's progress on one module, unique per (office, member, module), every index `kpmId`-led.
+  // P18.2-T1 AC-2: one member's progress on one module, unique per (office, member, module), every index `kpmId`-led.
   ['trainingProgress', TrainingProgressSchema],
+  // P19.5-T4 (ADR-0216): a KPM's survey runs, its invitations and its sent forms, every index `kpmId`-led.
+  ['surveyRuns', SurveyRunSchema],
+  ['surveyParticipation', SurveyParticipationSchema],
+  ['surveyResponses', SurveyResponseSchema],
+  // P19.5-T3 (ADR-0215 §6, §7): the KPM's targets and its Quant runs, every index `kpmId`-led.
+  ['analyticsTargets', AnalyticsTargetSchema],
+  ['quantRuns', QuantRunSchema],
+  // P19.7-T2 (ADR-0221 §1): an agent's proposals, items inside; every index `kpmId`-led; deleted by `deletedAt`.
+  ['proposals', ProposalSchema],
+  // P19.6-T1 (ADR-0218 §1, §12): a KPM's own branding, one live row; `kpmId`-led; *Kembalikan ke default* soft-deletes it.
+  ['kpmBranding', KpmBrandingSchema],
 ];
 
 /**
@@ -251,6 +275,11 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'trainingContentHistoryEntry (subdocument)',
+    TrainingContentHistoryEntrySchema,
+    'a subdocument of trainingModules (P19.4-T1): no collection and no _id of its own',
   ],
   [
     'capabilityEntry (subdocument)',
@@ -358,10 +387,21 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of products, for the same reason',
   ],
   [
+    'objection (subdocument)',
+    ObjectionSchema,
+    'one objection card inside a product\'s attack plan (P19.4-T4, ADR-0209 §9): no collection and no _id of its own',
+  ],
+  [
     'authTokens',
     AuthTokenSchema,
     'issued against a global identity before any office is chosen: refresh, email ' +
       'verification and password reset all predate membership',
+  ],
+  [
+    'accountLinks',
+    AccountLinkSchema,
+    'two logins of one person, linked (ADR-0199 §3): logins are global (invariant 2), and a link may join a Super '
+      + 'Admin\'s login, which belongs to no office, to an office\'s — there is no tenant to scope it to',
   ],
   // P11-T5: the parts of a coaching session. Each lives inside the session it belongs to.
   [
@@ -477,7 +517,7 @@ const CROSS_TENANT_INDEXES: Record<string, string> = {
     'the leader code a joiner types before they belong anywhere. There is no tenant to ' +
     'scope the lookup to — it is the code that names the office — so it is unique ' +
     'globally and indexed that way. `inviteCodes` carried the same index for the same ' +
-    'reason until P3.6-T1 retired it.',
+    'reason until P3.2-T1 retired it.',
   'notifications:userId,readAt,createdAt':
     "the recipient's own inbox. kpmId is nullable here because email verification and " +
     'password reset are sent before a user has joined any KPM, so the inbox query is ' +
@@ -505,10 +545,12 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [TrainingContentSchema, 'TrainingContentSchema'],
   [TrainingContentFileSchema, 'TrainingContentFileSchema'],
   [TrainingContentLinkSchema, 'TrainingContentLinkSchema'],
+  [TrainingContentHistoryEntrySchema, 'TrainingContentHistoryEntrySchema'],
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
   [ProductSchema, 'ProductSchema'],
+  [ObjectionSchema, 'ObjectionSchema'],
   [KpmProductConfigSchema, 'KpmProductConfigSchema'],
   [EventTypeSchema, 'EventTypeSchema'],
   [EventSchema, 'EventSchema'],
@@ -529,6 +571,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [ProductionMonthSchema, 'ProductionMonthSchema'],
   [DataUploadBatchSchema, 'DataUploadBatchSchema'],
   [DataUploadRowSchema, 'DataUploadRowSchema'],
+  [UnregisteredAgentDataSchema, 'UnregisteredAgentDataSchema'],
   [MetricValueSchema, 'MetricValueSchema'],
   [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
@@ -554,6 +597,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
+  [AccountLinkSchema, 'AccountLinkSchema'],
   [CompanySchema, 'CompanySchema'],
   [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],
@@ -587,12 +631,20 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
   [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
+  [KpmSetupMarkSchema, 'KpmSetupMarkSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
   [LeaderMeetingSchema, 'LeaderMeetingSchema'],
   [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
   [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
+  [SurveyRunSchema, 'SurveyRunSchema'],
+  [SurveyParticipationSchema, 'SurveyParticipationSchema'],
+  [SurveyResponseSchema, 'SurveyResponseSchema'],
+  [AnalyticsTargetSchema, 'AnalyticsTargetSchema'],
+  [QuantRunSchema, 'QuantRunSchema'],
+  [ProposalSchema, 'ProposalSchema'],
+  [KpmBrandingSchema, 'KpmBrandingSchema'],
   [TrainingProgressSchema, 'TrainingProgressSchema'],
 ]);
 

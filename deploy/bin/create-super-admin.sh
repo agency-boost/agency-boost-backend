@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Create an environment's first Super Admin, on a database that has none (P18.7-T1/T3, ADR-0152,
+# Create an environment's first Super Admin, on a database that has none (P18.4-T1/T3, ADR-0152,
 # ADR-0155). Production starts dark (plan decision D11), and this is the one way in. Run it once, by
 # hand, over IAP SSH:
 #

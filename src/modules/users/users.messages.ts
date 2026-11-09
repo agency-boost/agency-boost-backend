@@ -1,7 +1,7 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **What is wrong with a person's own record, in both languages** (P18.98-T5 AC-3; ADR-0158 §2): a date of birth and
+ * **What is wrong with a person's own record, in both languages** (P18.10-T5 AC-3; ADR-0158 §2): a date of birth and
  * the month somebody joined their insurer — refused the same way by registration, `/profile` and the roster file.
  */
 export const USERS_REFUSALS = refusals('modules/users', {

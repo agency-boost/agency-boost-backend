@@ -16,8 +16,9 @@ export type PreviousValue = Pick<
 /**
  * One line of an imported file, and what it did (P9-T4, AC-1).
  *
- * **This is what makes revert possible.** `values` is what the import wrote, keyed by the month row's
- * own field — `apeMonthly`, `persistencyYtd` — and `previousValues` is what each of those held a
+ * **This is what makes revert possible.** `values` is what the import wrote, keyed by the cell — the kode for a month's
+ * figure, `<KODE>_YTD` for an uploaded year to date (`cellKey`, P19.5-T2; migration `upload-values-by-kode` re-keyed the
+ * older rows from `apeMonthly`, `persistencyYtd`) — and `previousValues` is what each of those held a
  * moment before, provenance and source included. Written **before** a single figure changes, so the
  * way back exists before the way forward is taken.
  *
@@ -44,12 +45,20 @@ export class DataUploadRow {
   @Prop({ type: String, required: true })
   agentCode!: string;
 
-  /** `null` for a row no member answered to. */
+  /** `null` for a row no member answered to — refused, or held apart as *Belum terdaftar*. */
   @Prop({ type: String, default: null })
   membershipId!: string | null;
 
-  @Prop({ type: String, enum: ['ready', 'refused'], required: true })
-  status!: 'ready' | 'refused';
+  /** `held` (P19.5-T2; ADR-0214 §8): a code no member holds, kept in `unregisteredAgentData` under `unknownAgent: 'flag'`. */
+  @Prop({ type: String, enum: ['ready', 'refused', 'held'], required: true })
+  status!: 'ready' | 'refused' | 'held';
+
+  /** A held row's code, as `unregisteredAgentData` keys it; and whether the held month existed before this import. */
+  @Prop({ type: String, default: null })
+  heldAgentCode!: string | null;
+
+  @Prop({ type: Boolean, default: false })
+  heldRowExisted!: boolean;
 
   @Prop({ type: Object, default: () => ({}) })
   values!: Record<string, number>;
@@ -57,8 +66,9 @@ export class DataUploadRow {
   @Prop({ type: Object, default: () => ({}) })
   previousValues!: Record<string, PreviousValue>;
 
+  /** Each issue as the preview said it; `kode` and `ytd` since P19.5-T2 (`metric` and `cadence` on older rows). */
   @Prop({ type: [Object], default: [] })
-  issues!: { code: string; message: string; metric: string | null; cadence: string | null }[];
+  issues!: { code: string; message: string; kode?: string | null; ytd?: boolean | null; metric?: string | null; cadence?: string | null }[];
 
   @Prop({ type: Date, default: null })
   deletedAt!: Date | null;

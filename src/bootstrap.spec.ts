@@ -104,7 +104,7 @@ describe('configureApp', () => {
 
     /*
      * The refusal is `400 VALIDATION_FAILED` with `details.violations`, as Nest's own was — now a `DomainException`
-     * whose sentences the error filter writes in the reader's language (P18.98-T5 AC-3; `validationRefusal`).
+     * whose sentences the error filter writes in the reader's language (P18.10-T5 AC-3; `validationRefusal`).
      */
     it('rejects an unknown field rather than dropping it silently', async () => {
       const pipe = pipeFrom({ NODE_ENV: 'production' });
@@ -145,7 +145,7 @@ describe('configureApp', () => {
       });
     });
 
-    it('P18.95-T5 (UI-030) lets a browser keep a preflight for ten minutes, not Chrome’s five seconds', () => {
+    it('P18.7-T5 (UI-030) lets a browser keep a preflight for ten minutes, not Chrome’s five seconds', () => {
       const r = recordingApp({ NODE_ENV: 'production', CORS_ORIGINS: 'https://a.example' });
       configureApp(r.app);
       expect(r.enableCors.mock.calls[0][0]).toMatchObject({ maxAge: 600 });
@@ -161,24 +161,24 @@ describe('configureApp', () => {
   });
 
   /*
-   * P18.7-T1 (ADR-0152): behind Caddy the socket is always the proxy, so without this every client
+   * P18.4-T1 (ADR-0152): behind Caddy the socket is always the proxy, so without this every client
    * shares one `req.ip`, one login bucket, and one address on every session row.
    */
-  describe('trust proxy (P18.7-T1)', () => {
-    it('P18.7-T1 trusts no proxy by default', () => {
+  describe('trust proxy (P18.4-T1)', () => {
+    it('P18.4-T1 trusts no proxy by default', () => {
       const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: false });
       configureApp(r.app);
       expect(r.expressSet).toHaveBeenCalledWith('trust proxy', false);
     });
 
-    it('P18.7-T1 trusts the configured number of hops', () => {
+    it('P18.4-T1 trusts the configured number of hops', () => {
       const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: 1 });
       configureApp(r.app);
       expect(r.expressSet).toHaveBeenCalledWith('trust proxy', 1);
     });
 
     it.each([undefined, 'true', true, '1', 0, -1])(
-      'P18.7-T1 trusts nothing when handed %j, which validation never produces',
+      'P18.4-T1 trusts nothing when handed %j, which validation never produces',
       (value) => {
         const r = recordingApp({ NODE_ENV: 'production', TRUST_PROXY: value });
         configureApp(r.app);

@@ -23,11 +23,14 @@ const MONTHS = Array.from({ length: 21 }, (_, i) => new Date(Date.UTC(2025, i, 1
 const office = (kpmId = KPM_A) => RequestContext.tenantRead(kpmId, 'year-to-date-spec');
 const imported = (value: number | null) => ({ value, provenance: value === null ? null : 'imported', sourceBatchId: null });
 const row = (membershipId: string, month: string, cells: Record<string, unknown>, more: Record<string, unknown> = {}) => ({
-  kpmId: KPM_A, membershipId, month, agentCode: membershipId.slice(-3), deletedAt: null, ...cells, ...more,
+  kpmId: KPM_A, membershipId, month, agentCode: membershipId.slice(-3), deletedAt: null, templateVersion: 1, ...cells, ...more,
 });
-/** A month's own APE and policies beside its year to date, as the file carries them. */
-const filed = (ytd: number, ape: number, policies: number) => ({
-  apeYtd: imported(ytd * M), apeMonthly: imported(ape * M), policyCountMonthly: imported(policies),
+/**
+ * A month's own APE and policies, by kode (P19.5-T2), beside the year to date the file carried — kept as a check in
+ * `ytdValues` and summed by nothing: every year to date below is the months' APE added (R4).
+ */
+const filed = (ytd: number, ape: number, policies: number, extra: Record<string, unknown> = {}) => ({
+  values: { APE: imported(ape * M), POLICY_COUNT: imported(policies), ...extra }, ytdValues: { APE: imported(ytd * M) },
 });
 const held = (minor: number, month: string, corrected = false): HeldFigure => ({
   minor, provenance: corrected ? 'corrected' : 'imported', month, correctedBy: corrected ? OWNER : null, correctedAt: corrected ? AT : null,
@@ -51,13 +54,13 @@ describe('the month cells and the year to date, from one read (ProductionReading
     wired = configModule(NOW);
     await clearCollections();
     await mongoose.connection.db!.collection('monthlyAgentData').insertMany([
-      // Rina: last year in three months; this year with a month missing (February, August), a cell never given (April),
-      // a correction (May), a figure emptied by hand (June) — and October's, after the range.
+      // Rina: last year in three months; this year with a month missing (February, August), a zero (April), a month
+      // corrected (May), one emptied by hand (June) — and October's, after the range.
       row(RINA, '2025-01', filed(10, 10, 1)), row(RINA, '2025-06', filed(60, 50, 2)), row(RINA, '2025-12', filed(120, 60, 3)),
-      row(RINA, '2026-01', { ...filed(15, 15, 1), persistencyMonthly: imported(92) }), row(RINA, '2026-03', filed(45, 30, 2)),
-      row(RINA, '2026-04', { apeYtd: imported(null), apeMonthly: imported(0), policyCountMonthly: imported(0) }),
-      row(RINA, '2026-05', { ...filed(75, 30, 1), apeYtd: { value: 75 * M, provenance: 'corrected', sourceBatchId: null, correctedBy: OWNER, correctedAt: AT, reason: 'Restated' } }),
-      row(RINA, '2026-06', { apeYtd: { value: null, provenance: 'corrected', correctedBy: OWNER, correctedAt: AT, reason: 'Wrong agent' } }),
+      row(RINA, '2026-01', filed(15, 15, 1, { PERSISTENCY: imported(92) })), row(RINA, '2026-03', filed(45, 30, 2)),
+      row(RINA, '2026-04', { values: { APE: imported(0), POLICY_COUNT: imported(0) } }),
+      row(RINA, '2026-05', { values: { APE: { value: 30 * M, provenance: 'corrected', sourceBatchId: null, correctedBy: OWNER, correctedAt: AT, reason: 'Restated' }, POLICY_COUNT: imported(1) } }),
+      row(RINA, '2026-06', { values: { APE: { value: null, provenance: 'corrected', correctedBy: OWNER, correctedAt: AT, reason: 'Wrong agent' } } }),
       row(RINA, '2026-07', filed(105, 30, 1)), row(RINA, '2026-09', filed(135, 30, 2)), row(RINA, '2026-10', filed(150, 15, 1)),
       // Budi left in April: his file stops there.
       row(BUDI, '2026-01', filed(20, 20, 1)), row(BUDI, '2026-02', filed(40, 20, 1)), row(BUDI, '2026-03', filed(60, 20, 1)),
@@ -91,11 +94,17 @@ describe('the month cells and the year to date, from one read (ProductionReading
 
   it('answers monthCellsFor’s cells, in one query for the whole list', async () => {
     const { result, queries } = await counted(() => readings().monthCellsAndYearToDateFor(office(), IDS, RANGE));
-    expect(queries).toEqual(['monthlyAgentData.find']);
+    // One read of the rows; beside it, since P19.5-T2, the KPM's own configuration, read live for the custom kodes
+    // (ADR-0214 §3, §6) — an office row, and its template's when it has one.
+    expect(queries.filter((q) => q.startsWith('monthlyAgentData'))).toEqual(['monthlyAgentData.find']);
+    expect(queries.filter((q) => !q.startsWith('monthlyAgentData')).every((q) => /^(kpms|templates|companyTemplates)\./.test(q))).toBe(true);
     expect(result.cells).toEqual(await readings().monthCellsFor(office(), IDS, RANGE));
     // Spelled out for two: a leaver's file stops with him, and nobody's row is no month at all.
     expect([...result.cells.get(BUDI)!.keys()].sort()).toEqual(['2026-01', '2026-02', '2026-03', '2026-04']);
-    expect(result.cells.get(RINA)!.get('2026-01')).toEqual({ apeMonthly: 15 * M, policyCountMonthly: 1, persistencyMonthly: 92 });
+    // P19.3-T1: and a leader row's unit persistency, none on this row (ADR-0201 §2).
+    expect(result.cells.get(RINA)!.get('2026-01')).toEqual({
+      apeMonthly: 15 * M, policyCountMonthly: 1, persistencyMonthly: 92, unitPersistencyMonthly: null,
+    });
     expect(result.cells.get(NOBODY)).toEqual(new Map());
   });
 
@@ -116,21 +125,22 @@ describe('the month cells and the year to date, from one read (ProductionReading
     }
   });
 
-  it('January is its own figure, never last December’s; a month with no figure held reads the latest before it', async () => {
+  it('P19.5-T2 AC-7 the year to date is the months held, added: January is its own, never last December’s', async () => {
     const read = await readings().monthCellsAndYearToDateFor(office(), IDS, RANGE);
     const through = (month: string) => read.apeYearToDateThrough(IDS, month);
-    // December: the year's latest.
+    // December: 10 + 50 + 60, the year's months — the figure the file's own YTD said, too.
     expect(through('2025-12').get(RINA)).toEqual(held(120 * M, '2025-12'));
     // January: Rina's own; Dewi has none, whatever last December held.
     expect(through('2026-01').get(RINA)).toEqual(held(15 * M, '2026-01'));
     expect(through('2026-01').get(DEWI)).toBeNull();
-    // No February row: January's. April's cell never given: March's. June's emptied by hand: May's correction, whose.
+    // No February row: January's sum. April's zero is a month held. June's emptied by hand adds nothing; May's
+    // correction makes the sum corrected, and names it.
     expect(through('2026-02').get(RINA)).toEqual(held(15 * M, '2026-01'));
-    expect(through('2026-04').get(RINA)).toEqual(held(45 * M, '2026-03'));
+    expect(through('2026-04').get(RINA)).toEqual(held(45 * M, '2026-04'));
     expect(through('2026-06').get(RINA)).toEqual(held(75 * M, '2026-05', true));
     // No August row here — another office's is not hers; September's own, and October's after it never read.
-    expect(through('2026-08').get(RINA)).toEqual(held(105 * M, '2026-07'));
-    expect(through('2026-09').get(RINA)).toEqual(held(135 * M, '2026-09'));
+    expect(through('2026-08').get(RINA)).toEqual(held(105 * M, '2026-07', true));
+    expect(through('2026-09').get(RINA)).toEqual(held(135 * M, '2026-09', true));
   });
 
   it('a leaver’s year to date stays the last one their file gave; a deleted row is never read; nobody is null', async () => {
@@ -179,7 +189,7 @@ describe('the month cells and the year to date, from one read (ProductionReading
 
     it('answers for every month of the years read what standingsFor answers from ledgersFor, for every member', async () => {
       const { result: read, queries } = await counted(() => readings().monthCellsAndYearToDateFor(office(), IDS, YEARS));
-      expect(queries).toEqual(['monthlyAgentData.find']);
+      expect(queries.filter((q) => q.startsWith('monthlyAgentData'))).toEqual(['monthlyAgentData.find']);
       for (const month of EVERY_MONTH) {
         const mine = read.standingsFor(IDS, month);
         const hydrated = await readings().standingsFor(office(), IDS, month);
@@ -191,16 +201,16 @@ describe('the month cells and the year to date, from one read (ProductionReading
       const read = await readings().monthCellsAndYearToDateFor(office(), IDS, YEARS);
       // September, asked in September: October's year to date is the year's latest, as `ledgersFor` reads the year.
       expect(read.standingsFor([RINA], '2026-09').get(RINA)).toEqual({
-        yearToDate: held(150 * M, '2026-10'), throughLastMonth: held(105 * M, '2026-07'), thisMonth: held(30 * M, '2026-09'),
+        yearToDate: held(150 * M, '2026-10', true), throughLastMonth: held(105 * M, '2026-07', true), thisMonth: held(30 * M, '2026-09'),
       });
       // January: its own month and the year's latest; nothing before it, whatever last December held.
       expect(read.standingsFor([RINA, DEWI], '2026-01')).toEqual(new Map([
-        [RINA, { yearToDate: held(150 * M, '2026-10'), throughLastMonth: null, thisMonth: held(15 * M, '2026-01') }],
+        [RINA, { yearToDate: held(150 * M, '2026-10', true), throughLastMonth: null, thisMonth: held(15 * M, '2026-01') }],
         [DEWI, { yearToDate: held(30 * M, '2026-03'), throughLastMonth: null, thisMonth: null }],
       ]));
-      // May's own APE beside its corrected year to date; June's emptied by hand holds no month of its own.
+      // June's emptied by hand holds no month of its own.
       expect(read.standingsFor([RINA], '2026-06').get(RINA)).toEqual({
-        yearToDate: held(150 * M, '2026-10'), throughLastMonth: held(75 * M, '2026-05', true), thisMonth: null,
+        yearToDate: held(150 * M, '2026-10', true), throughLastMonth: held(75 * M, '2026-05', true), thisMonth: null,
       });
       // A leaver's year stops with his file; a deleted row is never read; nobody is nothing at all.
       expect(read.standingsFor([BUDI, TARI, NOBODY], '2026-05')).toEqual(new Map([

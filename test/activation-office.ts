@@ -31,7 +31,7 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { User } from '@/modules/users/user.schema';
 import { configModule, provisionOffice } from './config-module';
 import {
-  buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, type CoachingOffice, type Who,
+  buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, writtenMonthRows, type CoachingOffice, type Who,
 } from './coaching-office';
 import { NO_CLASS, productionPipe, session, StubAuth } from './http-permissions';
 import { listenOnLoopback } from './listen';
@@ -98,7 +98,7 @@ export async function startActivationHarness(): Promise<ActivationHarness> {
     providers: [
       { provide: ActivationProgressService, useValue: wired.activationProgress },
       { provide: NewHiresService, useValue: wired.newHires },
-      // P18.96-T4: a data-backed item's tick, with its record.
+      // P18.8-T4: a data-backed item's tick, with its record.
       { provide: ActivationItemRecords, useValue: wired.activationRecords },
       { provide: GoalService, useValue: wired.goals },
       { provide: LeadService, useValue: wired.leadRecords },
@@ -122,7 +122,7 @@ export async function startActivationHarness(): Promise<ActivationHarness> {
 
   const clock = wired.clock as FixedClock;
   const col = (name: string) => mongoose.connection.db!.collection(name);
-  // P18.96-T4: what the office was built with, so a spec's own coaching sessions can go and the fixture's stay.
+  // P18.8-T4: what the office was built with, so a spec's own coaching sessions can go and the fixture's stay.
   const builtAt = new Date();
   const versionOne = new Map<string, Awaited<ReturnType<typeof wired.activation.publishedNow>>>();
   for (const kpmId of [KPM_A, KPM_B]) {
@@ -170,7 +170,7 @@ export async function startActivationHarness(): Promise<ActivationHarness> {
     reset: async () => {
       clock.set(ROSTER_NOW);
       /*
-       * P18.96-T6: *Mark left* removes a new hire (ADR-0169 §4 as amended), so whoever a spec marked is put back as built —
+       * P18.8-T6: *Mark left* removes a new hire (ADR-0169 §4 as amended), so whoever a spec marked is put back as built —
        * active, their `joined` edge open again, the `removed` event their leaving opened gone.
        */
       const marked = (await col('memberships').find({ leftAt: { $ne: null } }).toArray()).map((m) => String(m._id));
@@ -186,17 +186,19 @@ export async function startActivationHarness(): Promise<ActivationHarness> {
       await col('memberships').updateMany({}, {
         $unset: {
           joinDate: '', joinedAs: '',
-          // P18.96-T4: nobody's first sale but what a spec writes.
+          // P18.8-T4: nobody's first sale but what a spec writes.
           firstSaleDate: '', firstSaleSource: '', firstSaleRecordCollection: '', firstSaleRecordId: '',
-          // P18.96-T6: nobody has left, and no 3M result is kept.
+          // P18.8-T6: nobody has left, and no 3M result is kept.
           leftAt: '', activation3M: '', activation3MLockedAt: '',
         },
       });
-      // P18.96-T4: the sessions and the file's policies a spec wrote go; the fixture's months and 1:1s stay.
+      // P18.8-T4: the sessions and the file's policies a spec wrote go; the fixture's months and 1:1s stay.
       await col('coachingSessions').deleteMany({ createdAt: { $gt: builtAt } });
       await col('monthlyAgentData').deleteMany({ agentCode: { $nin: ['INDAH', 'DIMAS', 'RINA', 'SARI'] } });
-      await col('monthlyAgentData').updateMany({}, { $unset: { policyCountMonthly: '' } });
+      await col('monthlyAgentData').updateMany({}, { $unset: { 'values.POLICY_COUNT': '' } });
+      // P19.5-T2: the months a spec reopened or wrote go back to how the fixture's upload left them.
       await col('productionMonths').deleteMany({});
+      await col('productionMonths').insertMany(writtenMonthRows());
       await col('auditLog').deleteMany({});
       await col('leads').deleteMany({});
       // The coaching office's own goals and fortnight of log — Indah's, Dimas's and Rina's — stay; specs

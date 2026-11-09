@@ -16,7 +16,7 @@ import { User, UserDocument, UserSchema } from '@/modules/users/user.schema';
 import { listenOnLoopback } from '../../../test/listen';
 import { startMongo, stopMongo } from '../../../test/mongo';
 import { AuthToken, AuthTokenDocument, AuthTokenSchema } from './auth-token.schema';
-import { AuthController } from './auth.controller';
+import { AuthController, REFRESH_LIMIT } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
 import { RateLimiter } from './rate-limiter';
@@ -29,7 +29,7 @@ const PASSWORD = 'correct horse battery';
 const LOGIN_LIMIT = 2;
 
 /**
- * **The API behind one proxy, and the cookie on the wrong site** (P18.7-T1, ADR-0152), over HTTP.
+ * **The API behind one proxy, and the cookie on the wrong site** (P18.4-T1, ADR-0152), over HTTP.
  *
  * Booted through `configureApp`, the function `main.ts` calls, so `trust proxy` is set exactly as the
  * VM sets it, and `req.ip` is the one Express derives, not one a test made up. The configuration is the
@@ -78,7 +78,7 @@ function refreshCookieFrom(res: request.Response): string {
   return cookie.split(';')[0];
 }
 
-describe('the API behind a proxy, and the refresh cookie on a foreign origin (P18.7-T1)', () => {
+describe('the API behind a proxy, and the refresh cookie on a foreign origin (P18.4-T1)', () => {
   let uri: string;
   let dbName: string;
   let users: Model<UserDocument>;
@@ -127,7 +127,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
       server = await app({ TRUST_PROXY: 1 });
     });
 
-    it('P18.7-T1 two clients behind the proxy do not share a login bucket', async () => {
+    it('P18.4-T1 two clients behind the proxy do not share a login bucket', async () => {
       // Client A spends its budget, and is then refused.
       for (let n = 0; n < LOGIN_LIMIT; n += 1) {
         await failFrom(server, '203.0.113.10', n).expect(401);
@@ -143,13 +143,14 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
     it('ADR-0168, the permission review: garbage refresh tokens from one address do not lock out another', async () => {
       const garbageFrom = (ip: string, n: number) => request(server.getHttpServer()).post('/api/v1/auth/refresh')
         .set('X-Forwarded-For', ip).send({ refreshToken: `not-a-token-${n}` });
-      for (let n = 0; n < 60; n += 1) await garbageFrom('203.0.113.30', n).expect(401);
+      // The session limit, per address for a token that names no session (P19-T5: 30 a minute, was 60 an hour).
+      for (let n = 0; n < REFRESH_LIMIT; n += 1) await garbageFrom('203.0.113.30', n).expect(401);
       expect((await garbageFrom('203.0.113.30', 99).expect(429)).body.error.code).toBe('AUTH_RATE_LIMITED');
       // Another browser with a dead cookie is still told its session ended.
       expect((await garbageFrom('198.51.100.40', 0).expect(401)).body.error.code).toBe('AUTH_SESSION_ENDED');
     });
 
-    it('P18.7-T1 takes the hop the proxy wrote, not the one a client sent ahead of it', async () => {
+    it('P18.4-T1 takes the hop the proxy wrote, not the one a client sent ahead of it', async () => {
       // A client that sends its own X-Forwarded-For: Caddy appends the address it saw, and that one counts.
       for (let n = 0; n < LOGIN_LIMIT; n += 1) {
         await request(server.getHttpServer()).post('/api/v1/auth/login')
@@ -163,7 +164,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
         .expect(429);
     });
 
-    it('P18.7-T1 the session row records the client\'s address, at sign-in and at each refresh', async () => {
+    it('P18.4-T1 the session row records the client\'s address, at sign-in and at each refresh', async () => {
       await aVerifiedUser('rina.proxy@kpm0417.test');
       const login = await request(server.getHttpServer()).post('/api/v1/auth/login')
         .set('X-Forwarded-For', '203.0.113.55')
@@ -190,7 +191,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
       server = await app({ TRUST_PROXY: false });
     });
 
-    it('P18.7-T1 a forged X-Forwarded-For buys no new bucket: the socket is the client', async () => {
+    it('P18.4-T1 a forged X-Forwarded-For buys no new bucket: the socket is the client', async () => {
       for (let n = 0; n < LOGIN_LIMIT; n += 1) {
         await failFrom(server, `203.0.113.${100 + n}`, n).expect(401);
       }
@@ -199,7 +200,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
       expect(refused.body.error.code).toBe('AUTH_RATE_LIMITED');
     });
 
-    it('P18.7-T1 and the session row records the socket\'s address, not the header', async () => {
+    it('P18.4-T1 and the session row records the socket\'s address, not the header', async () => {
       await aVerifiedUser('rina.direct@kpm0417.test');
       // This app's IP bucket is spent by the test above; a success needs a fresh one, so boot another.
       const fresh = await app({ TRUST_PROXY: false });
@@ -238,7 +239,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
 
     const live = async () => tokens.countDocuments({ kind: 'refresh', usedAt: null, revokedAt: null }).exec();
 
-    it('P18.7-T1 refuses a refresh from a foreign origin with 403 AUTH_ORIGIN_REFUSED, and rotates nothing', async () => {
+    it('P18.4-T1 refuses a refresh from a foreign origin with 403 AUTH_ORIGIN_REFUSED, and rotates nothing', async () => {
       const before = await live();
       const res = await request(server.getHttpServer()).post('/api/v1/auth/refresh')
         .set('Origin', STAGING).set('Cookie', cookie)
@@ -253,7 +254,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
         .expect(200);
     });
 
-    it('P18.7-T1 refuses a sign-out from a foreign origin, and the session survives it', async () => {
+    it('P18.4-T1 refuses a sign-out from a foreign origin, and the session survives it', async () => {
       const res = await request(server.getHttpServer()).post('/api/v1/auth/logout')
         .set('Origin', STAGING).set('Cookie', cookie)
         .expect(403);
@@ -265,7 +266,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
         .expect(200);
     });
 
-    it('P18.7-T1 lets the app\'s own origin refresh and sign out', async () => {
+    it('P18.4-T1 lets the app\'s own origin refresh and sign out', async () => {
       const refreshed = await request(server.getHttpServer()).post('/api/v1/auth/refresh')
         .set('Origin', APP).set('Cookie', cookie)
         .expect(200);
@@ -276,7 +277,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
         .expect(204);
     });
 
-    it('P18.7-T1 lets a request with no Origin through: a server or curl, not a page', async () => {
+    it('P18.4-T1 lets a request with no Origin through: a server or curl, not a page', async () => {
       const refreshed = await request(server.getHttpServer()).post('/api/v1/auth/refresh')
         .set('Cookie', cookie)
         .expect(200);
@@ -285,7 +286,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
         .expect(204);
     });
 
-    it('P18.7-T1 leaves a foreign origin with no cookie alone: there is no session for it to spend', async () => {
+    it('P18.4-T1 leaves a foreign origin with no cookie alone: there is no session for it to spend', async () => {
       // A sign-out with nothing to sign out is a 204 wherever it comes from, as it was before.
       await request(server.getHttpServer()).post('/api/v1/auth/logout').set('Origin', STAGING).expect(204);
       // A refresh with no cookie and no body is refused for the reason it always was.
@@ -299,7 +300,7 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
      * Swagger UI at `/api/docs` on staging is a page this API serves, and it posts to the API it came from.
      * Its origin is the API's own, which `CORS_ORIGINS` (the app's) does not list (the review's L3).
      */
-    it('P18.7-T1 lets the API\'s own origin through, as Caddy forwards it', async () => {
+    it('P18.4-T1 lets the API\'s own origin through, as Caddy forwards it', async () => {
       const own = 'https://staging-api.agencyboost.id';
       await request(server.getHttpServer()).post('/api/v1/auth/refresh')
         .set('Host', 'staging-api.agencyboost.id').set('X-Forwarded-Proto', 'https').set('Origin', own)
@@ -336,34 +337,34 @@ describe('the API behind a proxy, and the refresh cookie on a foreign origin (P1
       .set('X-Forwarded-For', '192.0.2.9')
       .send({ email: 'rina.login@kpm0417.test', password: PASSWORD });
 
-    it('P18.7-T1 refuses a sign-in from a foreign origin with no cookie, and sets none', async () => {
+    it('P18.4-T1 refuses a sign-in from a foreign origin with no cookie, and sets none', async () => {
       const res = await signIn().set('Origin', STAGING).expect(403);
       expect(res.body.error.code).toBe('AUTH_ORIGIN_REFUSED');
       expect(res.headers['set-cookie']).toBeUndefined();
     });
 
-    it('P18.7-T1 refuses it with a cookie too, and leaves the cookie\'s session alone', async () => {
+    it('P18.4-T1 refuses it with a cookie too, and leaves the cookie\'s session alone', async () => {
       const cookie = refreshCookieFrom(await signIn().set('Origin', APP).expect(200));
       const res = await signIn().set('Origin', STAGING).set('Cookie', cookie).expect(403);
       expect(res.body.error.code).toBe('AUTH_ORIGIN_REFUSED');
       await request(server.getHttpServer()).post('/api/v1/auth/refresh').set('Origin', APP).set('Cookie', cookie).expect(200);
     });
 
-    it('P18.7-T1 a refused sign-in spends nothing of the limiter\'s budget', async () => {
+    it('P18.4-T1 a refused sign-in spends nothing of the limiter\'s budget', async () => {
       for (let n = 0; n < LOGIN_LIMIT + 2; n += 1) {
         await signIn().set('Origin', STAGING).expect(403);
       }
       await signIn().set('Origin', APP).expect(200);
     });
 
-    it('P18.7-T1 lets the app\'s own origin sign in, and a request with no Origin', async () => {
+    it('P18.4-T1 lets the app\'s own origin sign in, and a request with no Origin', async () => {
       const fromApp = await signIn().set('Origin', APP).expect(200);
       expect(refreshCookieFrom(fromApp)).toMatch(/^agencyboost_refresh=/);
       await signIn().expect(200);
     });
   });
 
-  it('P18.7-T1 with the proxy untrusted, the API\'s own https origin reads as http and is refused: it fails closed', async () => {
+  it('P18.4-T1 with the proxy untrusted, the API\'s own https origin reads as http and is refused: it fails closed', async () => {
     const server = await app({ TRUST_PROXY: false });
     const res = await request(server.getHttpServer()).post('/api/v1/auth/login')
       .set('Host', 'staging-api.agencyboost.id').set('X-Forwarded-Proto', 'https')

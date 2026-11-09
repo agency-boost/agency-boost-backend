@@ -24,7 +24,7 @@ export const NO_END = new Date(8_640_000_000_000_000);
 const OUTSIDE: ComplianceCell = { status: null, done: null, on: null, second: null };
 
 /**
- * **One member's cell for one event** (P18.6-T2 AC-2) — the roll call's `EVENT_ATTENDANCE_STATUS` as the code, so the
+ * **One member's cell for one event** (P18.3-T2 AC-2) — the roll call's `EVENT_ATTENDANCE_STATUS` as the code, so the
  * tree and the roll call cannot disagree. `event` is the attendance reading's own, read with the row's status.
  *
  * - Before the end: `registered` (done, the event's day) or `not_registered`.
@@ -56,7 +56,7 @@ export function eventOrder(a: Pick<EventFacts, 'phase' | 'startsAt' | 'id'>, b: 
 }
 
 /**
- * **Events in the Owner's compliance tree** (P18.6-T1 AC-3, P18.6-T2 AC-1, AC-2; D-window, D-chips).
+ * **Events in the Owner's compliance tree** (P18.3-T1 AC-3, P18.3-T2 AC-1, AC-2; D-window, D-chips).
  *
  * - **The catalog**: the office's events starting this year in its zone **and every one not started yet, whatever
  *   its year** (the exit review, round 2: members RSVP before an event starts, so the Owner sees it from then) —

@@ -73,7 +73,7 @@ function checkLink(raw: unknown, where: ChecklistPlace, violations: FieldSentenc
     return `${ACTIVATION_TRAINING_LINK_PREFIX}${moduleCode.toUpperCase()}`;
   }
 
-  // P18.96-T4: a data kind is bound by an item's code (`ACTIVATION_CODE_BOUND_LINKS`), never stored on one.
+  // P18.8-T4: a data kind is bound by an item's code (`ACTIVATION_CODE_BOUND_LINKS`), never stored on one.
   if (isActivationDataLink(link)) {
     violations.push(SAY.dataLinkNotChosen({ where, link }));
     return null;

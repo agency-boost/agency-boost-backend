@@ -24,7 +24,7 @@ describe('ADR-0163 — a cascade stage binds at most BINDING_CODES_MAX codes', (
     ]);
   });
 
-  it('P18.98-T5 AC-3 says each problem in Indonesian too, the cascade’s three activities as the client names them', () => {
+  it('P18.10-T5 AC-3 says each problem in Indonesian too, the cascade’s three activities as the client names them', () => {
     const binding = { leads: ['LEAD', 'LEAD'], appointments: ['LEAD', 'GHOST'], closings: [] };
     expect(indonesianAll(bindingProblems(binding, known(['LEAD'])))).toEqual([
       'Set appointment menyebut LEAD dua kali.',

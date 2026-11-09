@@ -1,4 +1,5 @@
 import type { RequestContext } from '@/common/context/request-context';
+import type { NewHireDetailView } from '@/modules/activation/activation-progress.view';
 import type { TrainingProgressView } from '@/modules/training/training-progress.view';
 import {
   LISTED, seedTreeRecords, startComplianceHarness, stopComplianceHarness, type ComplianceHarness, type ComplianceWho,
@@ -6,7 +7,7 @@ import {
 import type { ComplianceView } from './compliance.service';
 
 /**
- * **Exit tests 1 and 4: every chip and every status equals what the screen that owns the fact says** (P18.6-T1 AC-4
+ * **Exit tests 1 and 4: every chip and every status equals what the screen that owns the fact says** (P18.3-T1 AC-4
  * to AC-7, AC-12; invariant §8). For one office, per category, against the owning surface's own read:
  *
  * - **training** — the Owner's and a coach's *Training* tab (`GET /training/progress?for=`) and the learner's own,
@@ -18,7 +19,7 @@ import type { ComplianceView } from './compliance.service';
  * The one unplaced member, Oscar, has a goal set, logged this week, every module done and a graduated activation:
  * the Overview counts him and the tree does not, which is the difference each test names.
  */
-describe('the compliance tree against the surfaces that own each fact (P18.6-T1, exit tests 1 and 4)', () => {
+describe('the compliance tree against the surfaces that own each fact (P18.3-T1, exit tests 1 and 4)', () => {
   let h: ComplianceHarness;
   const read = (ctx: RequestContext, query: { category?: 'training' | 'goals' | 'activity' | 'activation'; item?: string }) =>
     h.compliance.read(ctx, query);
@@ -36,7 +37,7 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
 
   afterAll(() => stopComplianceHarness(h));
 
-  it('P18.6-T1 AC-12 the tree leaves exactly the unplaced out of the Overview’s members', async () => {
+  it('P18.3-T1 AC-12 the tree leaves exactly the unplaced out of the Overview’s members', async () => {
     const owner = h.ctx('OWNER');
     const overview = await h.wired.kpmOverview.read(owner);
     const view = await read(owner, {});
@@ -45,8 +46,8 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
     expect(rows(view).map((r) => r.membershipId)).not.toContain(h.id('ORPHAN'));
   });
 
-  describe('P18.6-T1 AC-4 — training, against the Training tab', () => {
-    it('P18.6-T1 AC-4 every listed member’s status on every offered module equals the Owner’s read of their Training tab', async () => {
+  describe('P18.3-T1 AC-4 — training, against the Training tab', () => {
+    it('P18.3-T1 AC-4 every listed member’s status on every offered module equals the Owner’s read of their Training tab', async () => {
       const owner = h.ctx('OWNER');
       const tabs = new Map<ComplianceWho, TrainingProgressView>();
       for (const who of LISTED) tabs.set(who, await h.wired.trainingProgress.progress(owner, h.id(who)));
@@ -56,12 +57,14 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
           expect([code, who, cellOf(view, who).status]).toEqual([code, who, statusIn(tabs.get(who)!, code)]);
         }
       }
-      // The chip: every offered module done, as the tab's `allOfferedDone` says.
-      const view = await read(owner, {});
-      expect(chip(view, 'training').count).toBe(LISTED.filter((who) => tabs.get(who)!.allOfferedDone).length);
+      // The chip (P19.3-T3 AC-9, UI-093): the members done on the module shown, as each one's tab says it.
+      for (const code of h.sales) {
+        const view = await read(owner, { category: 'training', item: code });
+        expect([code, chip(view, 'training').count]).toEqual([code, LISTED.filter((who) => statusIn(tabs.get(who)!, code) === 'done').length]);
+      }
     });
 
-    it('P18.6-T1 AC-4 exit test 4: after each kind of write, the tree, the learner’s own read and the coach’s tab agree', async () => {
+    it('P18.3-T1 AC-4 exit test 4: after each kind of write, the tree, the learner’s own read and the coach’s tab agree', async () => {
       const owner = h.ctx('OWNER');
       const learner = h.ctx('NINA');
       const coach = h.ctx('SARI');
@@ -76,8 +79,8 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
     });
   });
 
-  describe('P18.6-T1 AC-5 — goals, against the Overview', () => {
-    it('P18.6-T1 AC-5 the chip is the Overview’s headcount less its members without a goal, less the unplaced', async () => {
+  describe('P18.3-T1 AC-5 — goals, against the Overview', () => {
+    it('P18.3-T1 AC-5 the chip is the Overview’s headcount less its members without a goal, less the unplaced', async () => {
       const owner = h.ctx('OWNER');
       const overview = await h.wired.kpmOverview.read(owner);
       const goals = chip(await read(owner, { category: 'goals' }), 'goals');
@@ -87,15 +90,15 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
       expect(goals.count).toBe(3);
     });
 
-    it('P18.6-T1 AC-5 the Overview’s figure did not move when it was re-pointed at the one predicate (OD-160)', async () => {
+    it('P18.3-T1 AC-5 the Overview’s figure did not move when it was re-pointed at the one predicate (OD-160)', async () => {
       // Sari's goal targets nothing, so it is no goal, as it was before: the Overview counts her without one.
       const overview = await h.wired.kpmOverview.read(h.ctx('OWNER'));
       expect(overview.production.ytd.membersWithoutGoal).toBe(17 - 4);
     });
   });
 
-  describe('P18.6-T1 AC-6 — activity, against the Overview', () => {
-    it('P18.6-T1 AC-6 the chip is the Overview’s logged this week, less the unplaced; each row the same predicate', async () => {
+  describe('P18.3-T1 AC-6 — activity, against the Overview', () => {
+    it('P18.3-T1 AC-6 the chip is the Overview’s logged this week, less the unplaced; each row the same predicate', async () => {
       const owner = h.ctx('OWNER');
       const overview = await h.wired.kpmOverview.read(owner);
       const view = await read(owner, { category: 'activity' });
@@ -109,8 +112,8 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
     });
   });
 
-  describe('P18.6-T1 AC-7 — activation, against the roster and the detail', () => {
-    it('P18.6-T1 AC-7 each hire’s status equals their detail’s, read by a leader who coaches them', async () => {
+  describe('P18.3-T1 AC-7 — activation, against the roster and the detail', () => {
+    it('P18.3-T1 AC-7 each hire’s status equals their detail’s, read by a leader who coaches them', async () => {
       const owner = h.ctx('OWNER');
       const view = await read(owner, { category: 'activation' });
       const coachOf: Partial<Record<ComplianceWho, ComplianceWho>> = {
@@ -128,7 +131,8 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
       };
       const seen = new Set<string>();
       for (const [who, coach] of Object.entries(coachOf) as [ComplianceWho, ComplianceWho][]) {
-        const detail = await h.wired.newHires.detail(h.ctx(coach), h.id(who));
+        // Inside the first year, so the full view (P19.9-T3 AC-5).
+        const detail = await h.wired.newHires.detail(h.ctx(coach), h.id(who)) as NewHireDetailView;
         const key = `${detail.state}|${detail.overdue}`;
         seen.add(key);
         expect([who, cellOf(view, who)]).toEqual([who, {
@@ -146,10 +150,10 @@ describe('the compliance tree against the surfaces that own each fact (P18.6-T1,
       }
     });
 
-    it('P18.6-T1 AC-7 every hire on a leader’s roster reads Overdue in the tree exactly when the roster’s checklist is', async () => {
+    it('P18.3-T1 AC-7 every hire on a leader’s roster reads Overdue in the tree exactly when the roster’s checklist is', async () => {
       const view = await read(h.ctx('OWNER'), { category: 'activation' });
       const roster = await h.wired.newHires.roster(h.ctx('AGUS'));
-      // P18.96-T6: the roster lists the year's new hires by 3M result, each with their checklist's state and overdue.
+      // P18.8-T6: the roster lists the year's new hires by 3M result, each with their checklist's state and overdue.
       const hires = [...roster.sections.inProgress, ...roster.sections.activated, ...roster.sections.notActivated]
         .filter((r) => r.checklist !== null);
       expect(hires.map((r) => r.hire.membershipId)).toEqual(expect.arrayContaining([h.id('BUDI'), h.id('RINA')]));

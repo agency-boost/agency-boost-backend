@@ -11,7 +11,7 @@ import {
 const idNumber = (n: number): string => formatNumber(n, undefined, 'id');
 
 /**
- * **The recruitment module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a plan's brief, read from its
+ * **The recruitment module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a plan's brief, read from its
  * address; the pitch materials' checklists; and a company's playbook, refused field by field. *Recruitment*,
  * *Playbook* and *Pitch* stay as the glossary keeps them (§A.6); *brief* is the loanword Indonesian offices use. A
  * parameter or a field is named as the API names it — `motivation`, `body.profiles.retiree.tagline` — in both.
@@ -39,7 +39,7 @@ export const RECRUITMENT_REFUSALS = refusals('modules/recruitment', {
     /*
      * ---- the pitch materials (`recruitment-pitch.service.ts`) ----
      * A slot's title is the platform's (`RECRUITMENT_MESSAGES`, below), written in the refusal's own language — until
-     * P18.98-T7 it was the registry's English in both.
+     * P18.10-T7 it was the registry's English in both.
      */
     noSuchItem: ({ title, item }: { title: Sentence; item: string }) => ({
       en: (figures) => `${render(title, { language: 'en', figures })} has no item "${item}" to confirm.`,
@@ -80,11 +80,15 @@ export const RECRUITMENT_REFUSALS = refusals('modules/recruitment', {
       en: `Must hold ${min} to ${max} benefits.`,
       id: `Harus berisi ${idNumber(min)} sampai ${idNumber(max)} manfaat.`,
     }),
-    /** The refusal's own message: every violation, its field's path then its sentence, in the reader's language. */
-    cannotSave: ({ violations }: { violations: readonly { field: string; message: Sentence }[] }) => ({
-      en: (figures) => `This playbook cannot be saved: ${violations
+    /**
+     * The refusal's own message: every violation, its field's path then its sentence, in the reader's language. Said at
+     * *Terbitkan* since the playbook became a template section (ADR-0210 §1): a draft saves as it is typed, and only
+     * the published version must be whole.
+     */
+    cannotPublish: ({ violations }: { violations: readonly { field: string; message: Sentence }[] }) => ({
+      en: (figures) => `This playbook cannot be published: ${violations
         .map((v) => `${v.field} — ${render(v.message, { language: 'en', figures })}`).join('; ')}`,
-      id: `Playbook ini tidak dapat disimpan: ${violations
+      id: `Playbook ini tidak dapat diterbitkan: ${violations
         .map((v) => `${v.field} — ${render(v.message, readerIn('id'))}`).join('; ')}`,
     }),
   },
@@ -99,7 +103,7 @@ const CHIP = (vocabulary: readonly { code: string; label: string }[], code: stri
   vocabulary.find((c) => c.code === code)!.label;
 
 /**
- * **The recruitment module's own words, in both languages** (P18.98-T7; ADR-0179 §7): what the API serves of the
+ * **The recruitment module's own words, in both languages** (P18.10-T7; ADR-0179 §7): what the API serves of the
  * registry (`domain/constants/recruitment.ts`) — the six pitch slots' titles and lines, *Opportunity Overview*'s
  * checklist, and the brief's chips — written for the request's reader. Each English is the registry's, read from it,
  * byte for byte; the codes do not change. **None of them is the company's**: the playbook a plan is built from — a
@@ -107,7 +111,7 @@ const CHIP = (vocabulary: readonly { code: string; label: string }[], code: stri
  *
  * *FAQ* is the loanword Indonesian already uses (§B.0 rule 5), the same in both. *Agent*, *AAB* and *AB* are the roles
  * (§A.5); *pitch*, *coaching* and *KPM* stay English (§A.5, §A.6). The Indonesian has no approved row yet: chosen in
- * §B.0's voice and listed for the product owner (P18.98-T7).
+ * §B.0's voice and listed for the product owner (P18.10-T7).
  */
 export const RECRUITMENT_MESSAGES = messages('modules/recruitment', {
   /*

@@ -16,7 +16,6 @@ import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
-import { scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { CalendarAutoItems, type CalendarTaskView, type JoinedEvent } from './calendar-auto-items';
@@ -167,7 +166,7 @@ export class CalendarService {
    * - **With `for`**, a compared pane: `COACH(reader, member)` resolved now, 404 outside it — a peer, a
    *   peer AAB's agent, another office's member, a member who left, nobody's id, and the reader
    *   themselves, since compare never reaches oneself. An empty `for` is the DTO's 400, never the
-   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.95-T8 AC-2: it was Week
+   *   reader's own calendar. A week or a month alike (*amended 2026-10-26, P18.7-T8 AC-2: it was Week
    *   only — the client asked for compare in Month, UI-020*). In *Who reads what*'s projection
    *   (`comparedView`), and one §3.5 entry, surface `calendar`, with the period's `from` and `to`,
    *   written last, so a refused read writes none. **Each organiser in the period who hides their
@@ -221,7 +220,7 @@ export class CalendarService {
         membershipId: subject.membershipId,
         name: names.get(subject.membershipId) ?? '',
         rung: { code: subject.orgLevelCode, label: labels.get(subject.orgLevelCode) ?? subject.orgLevelCode },
-        // A person who hides their details hides their number as well (the Phase 18.99 exit review, L2), as their tasks
+        // A person who hides their details hides their number as well (the Phase 18.11 exit review, L2), as their tasks
         // and events go out as *Sibuk*: the WhatsApp beside their tasks is part of what they chose not to show.
         phone: hidden.has(subject.membershipId) ? null : phones.get(subject.membershipId) ?? null,
       },
@@ -616,11 +615,13 @@ export class CalendarService {
   }
 
   /**
-   * Everybody the reader coaches now — **when their role holds the downline read**. An Agent coaches
-   * nobody on the calendar, as in coaching, whatever the tree says: no chip of theirs opens a session.
+   * Everybody the reader coaches now. **The tree alone decides** since every upline coaches (P19.9-T6, ADR-0234):
+   * every rung that reads a calendar holds `coaching_session:create` over its downline, an Agent who leads included, so
+   * a 1:1 they organise links its coachees' chips to the session as an AB's does; an Owner or Admin on no rung is
+   * refused every calendar route before this. An Agent still compares nobody: the compare read is
+   * `calendar_entry:read`'s, which that decision did not reach, and this set opens no compared entry for them.
    */
   private async coachedBy(ctx: RequestContext, me: string): Promise<Set<string>> {
-    if (scopeFor(ctx, 'calendar_entry:read') !== 'own-downline') return new Set();
     return new Set((await this.coach.coacheesOf(ctx, me)).map((c) => c.membershipId));
   }
 

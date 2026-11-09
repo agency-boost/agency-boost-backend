@@ -59,15 +59,15 @@ describe('P11-T4 AC-4 — the week’s targets are the month’s, pro-rated', ()
   );
 
   it('P11-T4 AC-4 asks nothing of a week whose month needs nothing more: the year was met before it began (ADR-0047)', async () => {
-    // Budi's Rp 500 M goal, and Rp 600 M on file through August.
+    // Budi's Rp 500 M goal, and Rp 600 M on file through August — P19.5-T2 (ADR-0214 §10): the months' sum, January's
+    // Rp 550 M and August's Rp 50 M, where the file's YTD column carried it before.
     const [goal] = await db().collection('goals').find({ membershipId: office.id.INDAH }).toArray();
     const { _id: _ignored, ...copy } = goal;
     await db().collection('goals').insertOne({ ...copy, membershipId: office.id.BUDI });
-    await db().collection('monthlyAgentData').insertOne({
-      kpmId: KPM_A, membershipId: office.id.BUDI, month: '2026-08', agentCode: 'BUDI', deletedAt: null,
-      apeMonthly: { value: 50 * M, provenance: 'imported', sourceBatchId: null },
-      apeYtd: { value: 600 * M, provenance: 'imported', sourceBatchId: null },
-    });
+    await db().collection('monthlyAgentData').insertMany(([['2026-01', 550], ['2026-08', 50]] as const).map(([month, ape]) => ({
+      kpmId: KPM_A, membershipId: office.id.BUDI, month, agentCode: 'BUDI', deletedAt: null, templateVersion: 1,
+      values: { APE: { value: ape * M, provenance: 'imported', sourceBatchId: null } },
+    })));
 
     expect(await proRatedSummary('BUDI')).toEqual({ leads: 0, appointments: 0, policies: 0 });
     expect((await weekTargets('BUDI')).map((t) => t.target)).toEqual([0, 0, 0]);

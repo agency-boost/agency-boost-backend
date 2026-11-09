@@ -1,5 +1,5 @@
 /**
- * **The first sale and the data-backed checklist items, seeded** (P18.96-T4; ADR-0171 §1, §3;
+ * **The first sale and the data-backed checklist items, seeded** (P18.8-T4; ADR-0171 §1, §3;
  * `functional/activation.md`, *Data-backed items — Seed*). Defined here, inserted by `demo.ts`; every row's `_id` is
  * derived (`seedObjectId`), so a re-run writes nothing and a row a walk changed is never written over.
  *
@@ -150,7 +150,7 @@ export function buildFirstSaleFixture(input: FirstSaleFixtureInput): FirstSaleFi
   }];
 
   const guide = [
-    'FIRST SALE and the data-backed checklist items (P18.96-T4; ADR-0171)',
+    'FIRST SALE and the data-backed checklist items (P18.8-T4; ADR-0171)',
     '  dimas@kpm0417.test   Closing case pertama secara mandiri ticks from the production file: Completed from Sales data',
     `  novi@kpm0417.test    first sale on day 20 (${noviClosed}), Ibu Sekar Ayuningtyas, paid and issued`,
     `  raka@kpm0417.test    only sale on day 120 (${rakaClosed}), Pak Darto Wibisono — Teraktivasi late, outside the 3M rate`,

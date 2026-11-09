@@ -5,7 +5,7 @@ import type { AgendaSection, LeaderMeetingAgenda, LeaderMeetingAgendaItem } from
 import { LEADER_MEETINGS_MESSAGES as SAY, MONTH_NAMES } from './leader-meetings.messages';
 
 /**
- * **The words a new meeting is given are its maker's** (P18.98-T5 AC-6; ADR-0179 §7): the first agenda, and the rows
+ * **The words a new meeting is given are its maker's** (P18.10-T5 AC-6; ADR-0179 §7): the first agenda, and the rows
  * *+ Add item* and *+ Add action item* make, are written in the language of the person who makes them — `reader`,
  * the request's — and stored as text. From then they are the office's: copied as stored, edited as typed, and read
  * as stored in both languages (ADR-0179 §5). A call with no reader is English, as before the phase; the service hands
@@ -25,7 +25,7 @@ export function meetingMonth(meetingDate: string, language: Language = 'en'): st
 
 /**
  * ***"Prepare {month} performance data"*** (`KPM_Owner.html:2501`), **naming the meeting's own month** — *October* for
- * a meeting on 27 October (ADR-0176 §11, amending ADR-0130 §3; P18.97-T2 AC-4, the client's UI-015, who read the month
+ * a meeting on 27 October (ADR-0176 §11, amending ADR-0130 §3; P18.9-T2 AC-4, the client's UI-015, who read the month
  * before as a date left behind) — in `reader`'s language: *Siapkan data kinerja Oktober*.
  */
 export const preparePerformanceData = (meetingDate: string, reader: Reader = SOURCE_READER): string =>
@@ -41,7 +41,7 @@ function monthItemLanguage(text: string): Language | null {
 }
 
 /**
- * **An agenda item's text for a new meeting** (ADR-0176 §11; P18.97-T2 AC-4): the month item re-dated to the new
+ * **An agenda item's text for a new meeting** (ADR-0176 §11; P18.9-T2 AC-4): the month item re-dated to the new
  * meeting's month, **in the language it was written in** — the agenda is copied as stored; every other item, and a
  * month item a leader reworded, as typed.
  */
@@ -85,8 +85,8 @@ function item(itemId: string, text: string, pic: string): LeaderMeetingAgendaIte
 /**
  * **What a new meeting's agenda starts from** (D-forum-model, ADR-0130 §3): the office's latest meeting's — each
  * item's text and PIC, in its three sections, **every box unticked**, each item a new one with an id of its own, **its
- * month item re-dated to the new meeting's month** (ADR-0176 §11; P18.97-T2 AC-4) — or, in an office with none, the
- * first agenda above, **in the language of the person making the meeting** (P18.98-T5 AC-6). Nothing of the tracker
+ * month item re-dated to the new meeting's month** (ADR-0176 §11; P18.9-T2 AC-4) — or, in an office with none, the
+ * first agenda above, **in the language of the person making the meeting** (P18.10-T5 AC-6). Nothing of the tracker
  * is carried: a new meeting has no rows.
  */
 export function startingAgenda(

@@ -6,7 +6,7 @@ const KPM_A = '66f0000000000000000000a1';
 const KPM_B = '66f0000000000000000000b1';
 
 /**
- * **ADR-0160 §2 for offices that already exist** (P18.8-T9 AC-2): the four benchmarks, *Set appointment to
+ * **ADR-0160 §2 for offices that already exist** (P18.5-T9 AC-2): the four benchmarks, *Set appointment to
  * meeting*'s name and its unit move in the working copy, the newest snapshot agents read, and every Company
  * template — each only where it still holds the seeded value, the formula untouched, no version moving, and a
  * second run doing nothing.
@@ -65,7 +65,7 @@ describe('0033 — the client’s benchmarks and Set appointment to meeting (ADR
     ]);
   });
 
-  it('P18.8-T9 AC-2 moves the seeded values in the working copy, the newest snapshot and the templates, versions kept', async () => {
+  it('P18.5-T9 AC-2 moves the seeded values in the working copy, the newest snapshot and the templates, versions kept', async () => {
     // A's four; B's fifth, whose benchmark and unit are the seed's though its name is the Owner's.
     expect(await up(db())).toEqual({ ratios: 5, snapshots: 1, templates: 1 });
 
@@ -88,7 +88,7 @@ describe('0033 — the client’s benchmarks and Set appointment to meeting (ADR
     expect(templates[2].payload.ratios[0].benchmark).toBe(0.25);
   });
 
-  it('P18.8-T9 AC-2 leaves an Owner’s own values alone, each field on its own', async () => {
+  it('P18.5-T9 AC-2 leaves an Owner’s own values alone, each field on its own', async () => {
     await up(db());
     const b = await db().collection('ratioDefinitions').find({ kpmId: KPM_B }).toArray();
     expect(fields(b)).toEqual([
@@ -100,7 +100,7 @@ describe('0033 — the client’s benchmarks and Set appointment to meeting (ADR
     expect((await db().collection('configSnapshots').findOne({ kpmId: KPM_B }))!.payload.ratios[0].benchmark).toBe(0.2);
   });
 
-  it('P18.8-T9 AC-2 moves no unit onto a ratio an Owner turned into a balance', async () => {
+  it('P18.5-T9 AC-2 moves no unit onto a ratio an Owner turned into a balance', async () => {
     await db().collection('ratioDefinitions').updateOne(
       { kpmId: KPM_A, code: 'MEETING_PER_APPROACH' }, { $set: { comparison: 'band', displayUnit: 'decimal' } },
     );
@@ -109,12 +109,12 @@ describe('0033 — the client’s benchmarks and Set appointment to meeting (ADR
       .toMatchObject({ comparison: 'band', displayUnit: 'decimal', benchmark: 0.5 });
   });
 
-  it('P18.8-T9 AC-2 is idempotent: a second run writes nothing', async () => {
+  it('P18.5-T9 AC-2 is idempotent: a second run writes nothing', async () => {
     await up(db());
     expect(await up(db())).toEqual({ ratios: 0, snapshots: 0, templates: 0 });
   });
 
-  it('P18.8-T9 AC-2 passes over a snapshot published without ratios', async () => {
+  it('P18.5-T9 AC-2 passes over a snapshot published without ratios', async () => {
     await db().collection('configSnapshots').insertOne({
       kpmId: KPM_B, version: 2, sourceVersion: 1, publishedAt: new Date(), publishedBy: null, deletedAt: null, payload: { activity: [] },
     });

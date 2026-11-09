@@ -327,8 +327,14 @@ describe('COACH(actor, subject) — P11-T3', () => {
     });
 
     it('P11-T3 AC-3: `own` reaches only the caller — an Agent naming somebody else is 404, not 403', async () => {
-      await expect(coach.subject(as(m.AGENT, 'AGENT'), m.DIRECT, 'activity_log:read_raw'))
+      // `lead:read_aggregate_counts` holds `own` alone for an Agent (`activity_log:read_raw` did until P19.9-T6 gave
+      // them `own-downline`), so this is the `own` arm and not COACH answering for an Agent who leads nobody.
+      await expect(coach.subject(as(m.AGENT, 'AGENT'), m.DIRECT, 'lead:read_aggregate_counts'))
         .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND', message: 'Membership not found.' });
+      // …and an Agent-class caller who does lead people (the AAB's membership, on the Agent's class) is refused
+      // somebody they coach on the same grant: `own` never consults COACH.
+      await expect(coach.subject(as(m.AAB, 'AGENT'), m.DEEP, 'lead:read_aggregate_counts'))
+        .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
     it('P11-T3 AC-3: no grant at all reaches nobody, rather than falling back to the caller', async () => {
@@ -418,17 +424,18 @@ describe('COACH(actor, subject) — P11-T3', () => {
     });
 
     it('Phase 15: `own` alone is the caller and nobody below — never a fallback to COACH; no grant is nobody', async () => {
-      // `lead:read` holds `own` alone for an Agent; this one leads nobody, and COACH would answer nobody anyway,
-      // so the AB below, holding `own` alone by the same grant shape, is the case that matters.
-      expect(await coach.unitOf(as(m.AGENT, 'AGENT'), 'lead:read')).toEqual({ office: false, below: [], self: true });
+      // `lead:delete` holds `own` alone for every field rung (`lead:read` did for an Agent until P19.9-T6 gave them
+      // `own-downline`); this Agent leads nobody, and COACH would answer nobody anyway, so the AB below — who leads
+      // people, holding `own` alone on this grant — is the case that matters.
+      expect(await coach.unitOf(as(m.AGENT, 'AGENT'), 'lead:delete')).toEqual({ office: false, below: [], self: true });
       const find = jest.spyOn(members, 'find');
       try {
-        expect(await coach.unitOf(as(m.AB, 'AGENT'), 'lead:read')).toEqual({ office: false, below: [], self: true });
+        expect(await coach.unitOf(as(m.AB, 'AB'), 'lead:delete')).toEqual({ office: false, below: [], self: true });
         expect(find).not.toHaveBeenCalled();
       } finally {
         find.mockRestore();
       }
-      expect(await coach.unitOf(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS }), 'lead:read'))
+      expect(await coach.unitOf(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS }), 'lead:delete'))
         .toEqual({ office: false, below: [], self: false });
     });
   });
@@ -441,7 +448,10 @@ describe('COACH(actor, subject) — P11-T3', () => {
 
     it('P11-T3: the whole office as null for own-kpm, the caller alone for own, nobody for no grant', async () => {
       expect(await coach.reach(ownerOfA(), 'lead:read_aggregate_counts')).toBeNull();
-      expect(await coach.reach(as(m.AGENT, 'AGENT'), 'lead:read')).toEqual([m.AGENT]);
+      // `own` alone, on a grant an Agent still holds at `own` only (`lead:read` gained `own-downline` in P19.9-T6).
+      expect(await coach.reach(as(m.AGENT, 'AGENT'), 'lead:read_aggregate_counts')).toEqual([m.AGENT]);
+      // …even for an Agent-class caller who leads people: `own` is the caller, never COACH.
+      expect(await coach.reach(as(m.AAB, 'AGENT'), 'lead:read_aggregate_counts')).toEqual([m.AAB]);
       expect(await coach.reach(as(m.AB, 'AB', { orgLevelCode: 'UNKNOWN_RUNG', hierarchyRole: NO_CLASS }), 'lead:read')).toEqual([]);
     });
 

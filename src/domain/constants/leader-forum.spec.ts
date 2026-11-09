@@ -1,5 +1,6 @@
 import {
-  LEADER_MEETING_LIMITS, LEADER_MEETING_SHARE_DAYS, LEADER_MEETING_SHARE_TOKEN_BYTES, LEADER_MEETING_TARGET_RATE_DECIMALS,
+  ACTIVATION_3M, LEADER_MEETING_LIMITS, LEADER_MEETING_SHARE_DAYS, LEADER_MEETING_SHARE_TOKEN_BYTES,
+  LEADER_MEETING_TARGET_RATE_DECIMALS, NEW_AGENT_ACTIVATION_MONTHS_AFTER_JOIN,
 } from '@/domain/constants';
 
 describe('the Strategic Leader Forum’s constants (Phase 18.1, §B)', () => {
@@ -18,7 +19,13 @@ describe('the Strategic Leader Forum’s constants (Phase 18.1, §B)', () => {
     expect('22 (3 @ unit)'.length).toBeLessThanOrEqual(LEADER_MEETING_LIMITS.targetMax);
   });
 
-  it('P18.97-T1 AC-10 a Monthly Target’s rate is typed and kept to two places (ADR-0175 §4)', () => {
+  it('P18.9-T1 AC-10 a Monthly Target’s rate is typed and kept to two places (ADR-0175 §4)', () => {
     expect(LEADER_MEETING_TARGET_RATE_DECIMALS).toBe(2);
+  });
+
+  it('P19.3-T1 AC-7 D7’s window is the join month and the 3 calendar months after it (ADR-0202 §1, §B.21)', () => {
+    expect(NEW_AGENT_ACTIVATION_MONTHS_AFTER_JOIN).toBe(3);
+    // Not New Hires' clock: 90 days from the join date, a first paid-and-issued case (ADR-0171).
+    expect(ACTIVATION_3M.DAYS).toBe(90);
   });
 });

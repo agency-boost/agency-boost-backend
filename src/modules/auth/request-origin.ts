@@ -1,6 +1,6 @@
 /**
  * **Whether a request to sign in, refresh or sign out came from a page this API does not serve**
- * (P18.7-T1, ADR-0152).
+ * (P18.4-T1, ADR-0152).
  *
  * Every host lives on one registrable domain: `agencyboost.id`, `staging.agencyboost.id`,
  * `api.agencyboost.id` and `staging-api.agencyboost.id`. That is what lets the refresh cookie stay

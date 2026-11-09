@@ -12,7 +12,7 @@ export interface MembershipJoinDateResult {
 }
 
 /**
- * **Every membership's join date, and who it makes them** (ADR-0169 §6, P18.96-T2 AC-2).
+ * **Every membership's join date, and who it makes them** (ADR-0169 §6, P18.8-T2 AC-2).
  *
  * From the deploy that brings it, every membership made active is written `joinDate` (an office date) and
  * `joinedAs` (`new_hire` or `existing_agent`, decided once). This gives the memberships made before it theirs:

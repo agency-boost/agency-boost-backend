@@ -78,7 +78,7 @@ export function latestFinalized(session: {
 
 /**
  * ***Follow up with {name}*** when a lead's next action carries no note (`Overall.html:11057`): the
- * prototype's words for a dated lead with nothing written beside the date — **for `reader`** (P18.98-T5
+ * prototype's words for a dated lead with nothing written beside the date — **for `reader`** (P18.10-T5
  * AC-4, AC-6): the request's, live; the finalizing leader's, when the session stores them. A note is the
  * lead's own, as typed.
  */
@@ -180,7 +180,7 @@ export interface FinalizeRefusal {
 
 /**
  * The prototype's sentence for each (`Overall.html:11111-11117`), which the refusal's message carries — in both
- * languages (P18.98-T5 AC-2).
+ * languages (P18.10-T5 AC-2).
  */
 export function finalizeSentence(refusal: FinalizeRefusal): Sentence<'COACHING_SESSION_INCOMPLETE'> {
   const SAY = COACHING_REFUSALS.COACHING_SESSION_INCOMPLETE;

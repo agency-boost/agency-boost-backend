@@ -6,7 +6,7 @@
  *
  * | Account | What it shows |
  * |---|---|
- * | `agus@kpm0417.test` (AB) | **This week, in the prototype's rhythm**: *Standup unit mingguan* on Monday and Thursday, 9:00 to 9:30 — two entries, since nothing recurs; *Sinkronisasi AAB — Sari Puspita* and *Cek pipeline* on Monday, which with the standup and his client review make **four lines on one day**, so Month draws *"+1 more…"* — or *"+2 more…"* when seeded on a Monday, his 1:1 with Indah today being a fifth; *Review goal — rencana Q4* with Sari and Arief; *Blok waktu telepon prospek* (Task); a two-day *Kunjungan klien — Surabaya* (Travel); his own *Review klien — keluarga Hartono* with an address in its notes (`Calendar_Section.html:490-491`). **Compare** with Sari: her client visit in full (ADR-0093), and the Owner's entry she attends as *Busy*. **His block on Indah** (*Block time*), with its notice. **His 1:1 with Indah today**, the day his draft with her is open |
+ * | `agus@kpm0417.test` (AB) | **This week, in the prototype's rhythm**: *Standup unit mingguan* on Monday and Thursday, 9:00 to 9:30 — two entries, since nothing recurs; *Sinkronisasi AAB — Sari Puspita* and *Cek pipeline* on Monday, which with the standup and his client review make **four lines on one day**, so Month draws *"+1 more…"* — or *"+2 more…"* when seeded on a Monday, his 1:1 with Indah today being a fifth; *Review goal — rencana Q4* with Sari and Arief; *Blok waktu telepon prospek* (Task); a two-day *Kunjungan klien — Surabaya* (Travel); his own *Review klien — keluarga Hartono* with an address in its notes (`Calendar_Section.html:490-491`). **Compare** with Sari: her client visit in full (ADR-0093), and the Owner's entry she attends as *Busy*. **His block on Indah** (*Block time*), with its notice. **His 1:1 with Indah today**, the day his draft with her is open. ***Kickoff tim 2026*** **four days after the run, 09:00 to 13:00** — the long event the 7 November Calendar mockup opens from the Agenda and draws in 3 Hari and Week (P19.8-T3 AC-9) |
  * | `sari@kpm0417.test` (AAB) | *Kunjungan klien — keluarga Tanjung*, a *Client meeting* with an address in its notes — **the OD-87 state** a leader walks in compare; a *Blok waktu follow up leads*; a **pending** invitation to Agus's goal review, with its inbox notice; an **accepted** one to his standups; her weekly *Coaching 1:1* with Rina on the days of her seeded sessions; *Rapat singkat unit*, which Rina **declined** |
  * | `rina@kpm0417.test` (Agent, under Sari) | Her own *Pertemuan klien — Pak Gunadi* and a task; Sari's 1:1s, whose detail links nowhere for her; the declined huddle, gone from her grid and readable from its invitation notice, read when she answered |
  * | `indah@kpm0417.test` (Agent, under Agus) | A task; the standups, **accepted**; Agus's block, read with *Close* alone, with its *Time was blocked on your calendar* notice; his 1:1 with her today |
@@ -38,7 +38,7 @@ import { mondayOf, timingOf } from '@/modules/calendar/calendar-time';
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **The entries' words**, as their organisers typed them — in Bahasa Indonesia since P18.98-T7 (OD-238). Every row is
+ * **The entries' words**, as their organisers typed them — in Bahasa Indonesia since P18.10-T7 (OD-238). Every row is
  * keyed by its derived `_id`, never by what it says, so a database seeded before keeps its English and gets no second
  * row; the seed's spec reads its titles from here.
  */
@@ -72,6 +72,7 @@ export const CALENDAR_WORDS = {
   followUpCallsNotes: 'Di meja — tiga leads hangat',
   leadersReview: 'Review leader cabang',
   weeklyTask: 'Review catatan aktivitas mingguan',
+  kickoff: 'Kickoff tim 2026',
 } as const;
 const T = CALENDAR_WORDS;
 
@@ -186,6 +187,9 @@ export function buildCalendarFixture(input: CalendarFixtureInput): CalendarFixtu
     { slot: 'w0:block-indah', by: 'agus', type: 'coaching', title: T.blockOnIndah, notes: T.meetingRoom('2'), date: day(2), start: '15:00', end: '15:30', with: [['indah', 'placed']] },
     // His 1:1 with Indah today, the day his draft with her is open.
     { slot: 'today:one-to-one-indah', by: 'agus', type: 'coaching', title: T.oneToOne('Indah Permatasari'), notes: T.meetingRoom('2'), date: today, start: '13:00', end: '14:00', with: [['indah', 'accepted']] },
+    // P19.8-T3 AC-9: a morning-long event later in the Agenda's seven days — the mockup's *Kickoff 2026*, 09.00–13.00 —
+    // in 3 Hari's and Week's grid from 07.00, and the one the mockup opens its detail from.
+    { slot: 'ahead:kickoff', by: 'agus', type: 'meeting', title: T.kickoff, notes: T.meetingRoom('A'), date: addDays(today, 4), start: '09:00', end: '13:00' },
   );
 
   // ---- This week: Sari, Rina, Indah and the Owner.

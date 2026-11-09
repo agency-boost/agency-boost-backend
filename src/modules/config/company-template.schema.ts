@@ -17,8 +17,38 @@ export const TEMPLATE_KINDS = [
   // level, and an office's are the office's.
   'event_types',
   'campaign_kinds',
+  /**
+   * **The recruitment playbook, a template section** (ADR-0210 §1; the 11-03 handover's B1-11). Held by a named template
+   * like the seven office kinds, drafted and published like them, and copied by *Salin dari…* — but **never copied into
+   * an office**: each KPM reads its template's published playbook live (ADR-0210 §4), so no push and no `seededFrom`.
+   */
+  'recruitment_playbook',
+  /**
+   * **The template's *Advanced analytics* section** (P19.5-T1; ADR-0214 §1): the Data upload's columns and rules, the
+   * sections a KPM's page shows, the surveys' template half and the thresholds. Held, drafted, published and copied like
+   * the playbook — and, like it, **never copied into an office**: every KPM on the template reads its published version
+   * live (`AnalyticsConfigReader`), so the push never carries it. No collection of its own: `analyticsConfigs` is this
+   * kind's rows.
+   */
+  'advanced_analytics',
+  /**
+   * **The template's *Tampilan*** (P19.6-T1; ADR-0218 §3): a default logo, two colours and mascot for every KPM on the
+   * template. Held, drafted, published and copied like the playbook — and, like it, **never copied into an office**:
+   * every KPM reads its template's published version live (`BrandingReader`), and its own setting always wins (no lock).
+   */
+  'branding',
 ] as const;
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
+
+/**
+ * **Where a published version came from, when a migration wrote it** (ADR-0210 §5): the company-level
+ * `recruitmentPlaybooks` record migration `0056` moved into the template, by id and at the version it had. Absent on
+ * every version anybody drafted and published. What makes the migration's second run leave the kind alone.
+ */
+export interface MigratedFrom {
+  recruitmentPlaybookId: string;
+  version: number;
+}
 
 /**
  * Which published version of one template kind an office was built from (P5-T12, ADR-0115 §4).
@@ -94,6 +124,17 @@ export class CompanyTemplate {
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;
 
+  /**
+   * **How many times the kind's working copy has been written** (P19-T6 AC-2; the 11-03 handover's B1-10) — what a
+   * stale draft save is refused against. `version` cannot be: a draft's is the number it *will* be published as, and
+   * stays put through every save. A draft starts at the revision of the newest published row plus one and moves on
+   * every save; publishing keeps it, since the content does not change; the next draft goes on from it. So the
+   * revision of what a reader opened — the draft, else the newest published, else `0` for nothing — only grows.
+   * A row written before the field reads as `0`.
+   */
+  @Prop({ type: Number, default: 0 })
+  revision!: number;
+
   @Prop({ type: String, enum: ['draft', 'published', 'archived'], default: 'draft', index: true })
   status!: 'draft' | 'published' | 'archived';
 
@@ -103,6 +144,10 @@ export class CompanyTemplate {
 
   @Prop({ type: Date, default: null })
   publishedAt!: Date | null;
+
+  /** The record a migration moved here (ADR-0210 §5), or `null`: a version somebody drafted and published. */
+  @Prop({ type: Object, default: null })
+  migratedFrom!: MigratedFrom | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

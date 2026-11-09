@@ -44,7 +44,7 @@ function sourceIn(language: 'en' | 'id', source: BrokenSource): string {
 const list = (codes: readonly string[]) => codes.join(', ');
 
 /**
- * **The Super Admin's templates, and the offices made from them, refused in both languages** (P18.98-T5 AC-2, AC-3):
+ * **The Super Admin's templates, and the offices made from them, refused in both languages** (P18.10-T5 AC-2, AC-3):
  * a kind's publish, the named templates, copying one across companies, and provisioning's whole-source check. A
  * template is a *template*, its kinds' settings keep their names (`TEMPLATE_SECTIONS`), and a template's name, as the
  * Super Admin typed it, stays as typed.
@@ -79,6 +79,11 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
         + 'up as configuration, and it renders as ∞ on every agent’s screen.',
       id: `${code} tidak memiliki apa pun di penyebutnya. Itu pembagian dengan nol yang menyamar sebagai konfigurasi, `
         + 'dan akan tampil sebagai ∞ di layar setiap agent.',
+    }),
+    /* P19.8-T4 (ADR-0229 §5): a type's *Nama singkat* in the template's activity section, refused as an office's is. */
+    typeShortLabel: ({ code, max }: { code: string; max: number }) => ({
+      en: `${code}: the short name must be text of at most ${max} characters, or empty.`,
+      id: `${code}: nama singkat harus berupa teks paling banyak ${max} karakter, atau kosong.`,
     }),
     taxonomyEmpty: {
       en: 'A taxonomy with no categories or no types would give every new office an empty '
@@ -166,8 +171,19 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
     },
     /** The DTO's own sentence (`field`), its values as the API takes them. */
     fromShape: {
-      en: 'from must be "empty", "defaults", or { templateId } naming one of the company’s templates',
-      id: 'from harus "empty", "defaults", atau { templateId } yang menyebut salah satu template perusahaan',
+      en: 'from must be "empty", "defaults", or { templateId, rungMap? } naming one of the company’s templates',
+      id: 'from harus "empty", "defaults", atau { templateId, rungMap? } yang menyebut salah satu template perusahaan',
+    },
+    /** A rung map (ADR-0213 §4) sending a rung to one the company's ladder does not have live. */
+    rungMapTarget: ({ codes }: { codes: readonly string[] }) => ({
+      en: `rungMap names ${list(codes)}, which ${codes.length === 1 ? 'is' : 'are'} not an active rung on this company’s `
+        + 'ladder. Map each missing role to one of the company’s active rungs.',
+      id: `rungMap menyebut ${list(codes)}, yang bukan jenjang aktif di susunan jenjang perusahaan ini. Petakan setiap `
+        + 'peran yang tidak ada ke salah satu jenjang aktif perusahaan.',
+    }),
+    rungMapShape: {
+      en: 'rungMap must map each role code to one role code, as { "SBP": "BP" }',
+      id: 'rungMap harus memetakan setiap kode peran ke satu kode peran, seperti { "SBP": "BP" }',
     },
   },
   VERSION_CONFLICT: {
@@ -176,6 +192,13 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
         + 'Reload the templates and try again.',
       id: 'Template default perusahaan ini berubah saat perubahan ini sedang disimpan, dan tidak ada yang diubah. '
         + 'Muat ulang daftar template, lalu coba lagi.',
+    },
+    /** A draft save pinned to a revision somebody else has saved or published past (P19-T6 AC-2). */
+    draftMoved: {
+      en: 'Someone else saved this section after you opened it, and nothing was saved. '
+        + 'Reload to see what is stored now.',
+      id: 'Orang lain menyimpan bagian ini setelah Anda membukanya, dan tidak ada yang disimpan. '
+        + 'Muat ulang untuk melihat yang tersimpan sekarang.',
     },
   },
   TEMPLATE_IS_DEFAULT: {
@@ -192,10 +215,14 @@ export const TEMPLATE_REFUSALS = refusals('modules/config/templates', {
         + 'default terlebih dahulu, lalu arsipkan template ini.',
     }),
   },
+  /*
+   * SA UI-017's words (P19.4-T3 AC-12; Appendix A): *"Nama ini sudah dipakai template lain."*, shown under the name field
+   * of every dialog that names a template — archived templates count. `name` stays in `details`.
+   */
   TEMPLATE_NAME_TAKEN: {
-    taken: ({ name }: { name: string }) => ({
-      en: `This company already has a template called ${name}. Choose another name.`,
-      id: `Perusahaan ini sudah memiliki template bernama ${name}. Pilih nama lain.`,
+    taken: (_values: { name: string }) => ({
+      en: 'This name is already used by another template.',
+      id: 'Nama ini sudah dipakai template lain.',
     }),
   },
   TEMPLATE_RUNG_UNKNOWN: {
@@ -234,7 +261,7 @@ const SIDES = {
 } as const;
 
 /**
- * **What *Save as template* left out of an office's settings, and why** (P18.98-T5 AC-4; the exit review of P13.2,
+ * **What *Save as template* left out of an office's settings, and why** (P18.10-T5 AC-4; the exit review of P13.2,
  * finding 2): one sentence each, naming the codes, written for the person who saved — in the answer, which the office
  * page shows, and in the audit row.
  */

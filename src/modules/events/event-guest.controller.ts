@@ -16,7 +16,7 @@ const OUTSIDE =
   + 'answer `404`, deliberately indistinguishable: a `403` would confirm the event exists.';
 
 /**
- * **The agent's *KPM Events*** (`/events`, its modal at `/events/[eventId]`; P18.5-T5, P18.5-T6; roles §3.11;
+ * **The agent's *KPM Events*** (`/events`, its modal at `/events/[eventId]`; P18.2-T5, P18.2-T6; roles §3.11;
  * `functional/events.md`). Field routes, apart from the office's settings: no invitee list and no confirmation ever
  * reaches a member. A read-only support session reads and is refused every write by its verb.
  */

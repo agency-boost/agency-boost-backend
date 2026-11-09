@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '@/common/auth/auth.decorators';
-import { CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_METRICS, isCampaignMetric } from '@/domain/constants';
+import { CAMPAIGN_EVALUATION_PHASE, REQUIREMENT_METRICS, comparePhases, isCampaignMetric } from '@/domain/constants';
 import { MetricDefinitionDto } from './campaign.response.dto';
 
 /**
@@ -44,8 +44,8 @@ export class MetricRegistryController {
        * Whether it is measured by the time campaigns are evaluated, so a screen can say so rather
        * than imply it is.
        */
-      computed: metric.phase <= CAMPAIGN_EVALUATION_PHASE,
-      // P18.5-T8 AC-1, D-evaluable: a campaign requirement may name it. Separate from `requirable`, which is this list.
+      computed: comparePhases(metric.phase, CAMPAIGN_EVALUATION_PHASE) <= 0,
+      // P18.2-T8 AC-1, D-evaluable: a campaign requirement may name it. Separate from `requirable`, which is this list.
       campaign: isCampaignMetric(metric.key),
     }));
   }

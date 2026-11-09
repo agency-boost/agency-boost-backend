@@ -83,9 +83,9 @@ export interface EventFeedbackReading {
 }
 
 /**
- * **The events module's readings** (P18.5-T5 AC-8, P18.5-T6 AC-5) — one computation of the audience as at the start,
+ * **The events module's readings** (P18.2-T5 AC-8, P18.2-T6 AC-5) — one computation of the audience as at the start,
  * `EVENT_ATTENDANCE_STATUS`, `EVENT_ATTENDANCE_RATE` and `EVENT_NPS`, read by the Owner's roll call and *Feedback
- * Summary* here and by Phase 18.6's compliance tree (a service port, no route). **No permission is checked here**:
+ * Summary* here and by Phase 18.3's compliance tree (a service port, no route). **No permission is checked here**:
  * the caller has decided who may read; every query goes through the tenant repositories, so nothing outside the
  * caller's office is reachable. `null` for an event this office does not hold.
  */
@@ -114,7 +114,7 @@ export class EventReadings {
   }
 
   /**
-   * **The roll call's reading for many events at once** (P18.6-T1 AC-3, P18.6-T2 AC-2): for each event the office
+   * **The roll call's reading for many events at once** (P18.3-T1 AC-3, P18.3-T2 AC-2): for each event the office
    * holds, exactly what `attendance` answers — the audience as at its start, each member's `EVENT_ATTENDANCE_STATUS`,
    * whether they answered, the rate and the counts. Keyed by event id; an id the office does not hold, or one that is
    * not an id at all, is absent. Archived events are answered, as `attendance` answers them: the caller decides

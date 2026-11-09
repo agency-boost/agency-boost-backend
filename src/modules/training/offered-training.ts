@@ -22,9 +22,9 @@ export interface OfferedCatalog {
 }
 
 /**
- * **What a member is offered: the office's published snapshot's training** (P18.5-T1 AC-3; `functional/training.md`,
+ * **What a member is offered: the office's published snapshot's training** (P18.2-T1 AC-3; `functional/training.md`,
  * *Offered*). One definition, read by every learner route, the coach's read, the activation evaluator's orphan rule
- * (D-orphan) and 18.6's tree, so none of them can disagree about what a member could have done.
+ * (D-orphan) and 18.3's tree, so none of them can disagree about what a member could have done.
  *
  * **The snapshot, not the live rows.** A draft is never offered; a module archived or unpublished is offered until
  * the office publishes that; a module published in the working copy is not offered until the office publishes it

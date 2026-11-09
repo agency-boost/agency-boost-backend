@@ -46,9 +46,17 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     monthsLeft: 4, apeAchievedMinor: 0, caseSizeMinor: 18 * M, leadsToApptPct: 30, closingRatePct: 30, ...over,
   });
   const cell = (value: number | null, provenance: string | null = 'imported') => ({ value, provenance, sourceBatchId: null });
-  const production = (month: string, cells: Record<string, unknown>, { kpmId = KPM, membershipId = ME } = {}) =>
+  /**
+   * One month's row, its figures by kode (P19.5-T2; ADR-0214 §9). **A year to date is the months held, summed** (§10):
+   * where a fixture here had a file's YTD column say what came before, January now holds that balance, so the year — and
+   * every target taken from it — is the figure it was.
+   */
+  const production = (
+    month: string, values: Record<string, unknown>,
+    { kpmId = KPM, membershipId = ME, ytdValues = {} as Record<string, unknown> } = {},
+  ) =>
     mongoose.connection.db!.collection('monthlyAgentData').insertOne({
-      kpmId, membershipId, month, agentCode: 'PRU-103', deletedAt: null, ...cells,
+      kpmId, membershipId, month, agentCode: 'PRU-103', deletedAt: null, templateVersion: 1, values, ytdValues,
     } as never);
   const day = (localDate: string, counts: Record<string, number>, { kpmId = KPM, membershipId = ME } = {}) =>
     mongoose.connection.db!.collection('activityLogs').insertOne({
@@ -58,7 +66,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     } as never);
 
   it('AC-5: measures nobody against a plan they never saved — no goal, no attainment, no pace', async () => {
-    await production('2026-08', { apeYtd: cell(200 * M) });
+    await production('2026-01', { APE: cell(200 * M) });
 
     const view = await wired.summary.read(agent());
 
@@ -69,8 +77,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('AC-1, AC-3, AC-4: this month and this year against the plan, the gap, and the pace', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(200 * M) });
-    await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(230 * M) });
+    await production('2026-01', { APE: cell(200 * M) });
+    await production('2026-09', { APE: cell(30 * M) });
     await day('2026-09-02', { SELL_SUBMISSION: 1 });
     await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 4 });
     await day('2026-08-31', { SELL_SUBMISSION: 9 }); // last month, but inside the last 30 days: the pace's
@@ -97,7 +105,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('AC-1: says this month is not uploaded yet rather than zero, and still knows its target', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(200 * M) });
+    await production('2026-01', { APE: cell(200 * M) });
 
     const view = await wired.summary.read(agent());
 
@@ -106,10 +114,10 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('AC-1: holds this month’s target when this month’s own figure arrives (ADR-0056)', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(200 * M) });
+    await production('2026-01', { APE: cell(200 * M) });
     const before = (await wired.summary.read(agent())).monthly.targetMinor;
 
-    await production('2026-09', { apeMonthly: cell(60 * M), apeYtd: cell(260 * M) });
+    await production('2026-09', { APE: cell(60 * M) });
     const after = await wired.summary.read(agent());
 
     expect(after.monthly.targetMinor).toBe(before);
@@ -118,7 +126,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('AC-1: says a figure corrected by hand is one', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-09', { apeMonthly: cell(40 * M, 'corrected'), apeYtd: cell(40 * M, 'corrected') });
+    await production('2026-09', { APE: cell(40 * M, 'corrected') });
 
     const view = await wired.summary.read(agent());
 
@@ -126,7 +134,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     expect(view.yearly.source).toEqual({ provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: null });
   });
 
-  it('Phase 15 (OD-137, option 2): names who corrected each figure and when, from the cell it came from', async () => {
+  it('P19.5-T2 AC-7 Phase 15 (OD-137, option 2): names who corrected each figure and when, from the cells it came from', async () => {
     const db = mongoose.connection.db!;
     const LEADER = '66f000000000000000000201';
     const GONE = '66f000000000000000000299';
@@ -137,19 +145,22 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     } as never);
     await wired.goals.save(agent(), plan());
     const by = (membershipId: string, at: string) => ({ correctedBy: membershipId, correctedAt: new Date(at), reason: 'From the report' });
-    await production('2026-09', {
-      apeMonthly: { ...cell(40 * M, 'corrected'), ...by(LEADER, '2026-09-13T04:00:00Z') },
-      // Corrected by somebody the office can no longer name: when, and not who.
-      apeYtd: { ...cell(90 * M, 'corrected'), ...by(GONE, '2026-09-12T04:00:00Z') },
-    });
+    /*
+     * P19.5-T2 AC-7 (ADR-0214 §10): the year is the months summed — January's Rp 50 M and September's Rp 40 M, the
+     * Rp 90 M the file's YTD cell held — and its source is the latest correction among them. January's, by somebody the
+     * office can no longer name, came after September's: the year says when, and not who.
+     */
+    await production('2026-09', { APE: { ...cell(40 * M, 'corrected'), ...by(LEADER, '2026-09-12T04:00:00Z') } });
+    await production('2026-01', { APE: { ...cell(50 * M, 'corrected'), ...by(GONE, '2026-09-13T04:00:00Z') } });
 
     const view = await wired.summary.read(agent());
     expect(view.monthly.source).toEqual({
       provenance: 'corrected', month: '2026-09',
-      correctedBy: { membershipId: LEADER, name: 'Sari Puspita' }, correctedAt: '2026-09-13T04:00:00.000Z',
+      correctedBy: { membershipId: LEADER, name: 'Sari Puspita' }, correctedAt: '2026-09-12T04:00:00.000Z',
     });
+    expect(view.yearly).toMatchObject({ actualMinor: 90 * M });
     expect(view.yearly.source).toEqual({
-      provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: '2026-09-12T04:00:00.000Z',
+      provenance: 'corrected', month: '2026-09', correctedBy: null, correctedAt: '2026-09-13T04:00:00.000Z',
     });
   });
 
@@ -157,7 +168,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     await wired.goals.save(agent(), plan({ apeAchievedMinor: 120 * M }));
     let view = await wired.summary.read(agent());
     expect(view.yearly.source).toEqual({ provenance: 'self_reported', month: null, correctedBy: null, correctedAt: null });
-    await production('2026-09', { apeMonthly: cell(40 * M), apeYtd: cell(90 * M) });
+    await production('2026-01', { APE: cell(50 * M) });
+    await production('2026-09', { APE: cell(40 * M) });
     view = await wired.summary.read(agent());
     expect([view.monthly.source, view.yearly.source]).toEqual([
       { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
@@ -176,29 +188,35 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     expect(view.monthly).toMatchObject({ targetMinor: 95 * M, actualMinor: null });
   });
 
-  it('AC-1: takes the year so far from this month’s file when it is the office’s first', async () => {
-    // No file through August: September's is the first, and its year to date says what came before.
+  it('P19.5-T2 AC-7 AC-1: when this month’s file is the office’s first, the year so far is that month — never its YTD column', async () => {
+    /*
+     * No file through August: September's is the first. Its YTD column said Rp 510 M, and before P19.5-T2 the year so
+     * far was taken from it (480 before September, a target of 5 a month, met). A year to date is now the months held,
+     * summed (ADR-0214 §10): the column is kept as a check and read by no figure, so nothing came before September.
+     */
     await wired.goals.save(agent(), plan());
-    await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(510 * M) });
+    await production('2026-09', { APE: cell(30 * M) }, { ytdValues: { APE: cell(510 * M) } });
 
     const view = await wired.summary.read(agent());
 
-    // 510 − 30 = 480 before September: 20 left over four months is 5 a month, and 30 is past it.
-    expect(view.monthly).toMatchObject({ targetMinor: 5 * M, actualMinor: 30 * M, targetMet: true });
-    expect(view.yearly.targetMet).toBe(true);
-    expect(view.pace?.targetMet).toBe(true);
+    // Nothing before September: 500 over the four months left is 125 a month, and 30 is short of it.
+    expect(view.monthly).toMatchObject({ targetMinor: 125 * M, actualMinor: 30 * M, targetMet: false });
+    expect(view.yearly).toMatchObject({ actualMinor: 30 * M, targetMet: false });
+    expect(view.pace?.targetMet).toBe(false);
   });
 
   it('AC-3: a year made before this month began leaves the month met, not blank (ADR-0047)', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(520 * M) });
-    await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(550 * M) });
+    await production('2026-01', { APE: cell(520 * M) });
+    await production('2026-09', { APE: cell(30 * M) });
 
     const view = await wired.summary.read(agent());
 
     expect(view.monthly).toEqual({
       targetMinor: 0, actualMinor: 30 * M, attainmentPct: null, gapMinor: 0, overMinor: 30 * M, policiesNeeded: 0,
       targetMet: true, source: { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
+      // P19.1-T4: the office's figure, so nothing to count as 0.
+      production: 'official', withoutProduction: null,
     });
     expect(view.pace).toMatchObject({ targetMet: true, neededPerWeek: 0 });
   });
@@ -229,7 +247,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('AC-3: says the year is made, needs nothing more, and the pace asks for nothing (ADR-0047)', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-09', { apeMonthly: cell(90 * M), apeYtd: cell(520 * M) });
+    await production('2026-01', { APE: cell(430 * M) });
+    await production('2026-09', { APE: cell(90 * M) });
 
     const view = await wired.summary.read(agent());
 
@@ -239,8 +258,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('P13.1-T5 AC-1, AC-3: says reached only when the APE is — closings past their target still need the APE’s policies', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(200 * M) });
-    await production('2026-09', { apeMonthly: cell(60 * M), apeYtd: cell(260 * M) }); // 60 of 75
+    await production('2026-01', { APE: cell(200 * M) });
+    await production('2026-09', { APE: cell(60 * M) }); // 60 of 75
     await day('2026-09-10', { SELL_SUBMISSION: 6 }); // past a closing target of 5
 
     const view = await wired.summary.read(agent());
@@ -249,7 +268,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     expect(view.pace).toMatchObject({ targetMet: false, closingsLast30Days: 6, policiesNeeded: 1, neededPerWeek: 1 });
 
     await mongoose.connection.db!.collection('monthlyAgentData').updateOne(
-      { month: '2026-09' }, { $set: { 'apeMonthly.value': 80 * M } },
+      { month: '2026-09' }, { $set: { 'values.APE.value': 80 * M } },
     );
     expect((await wired.summary.read(agent())).pace?.targetMet).toBe(true);
   });
@@ -257,7 +276,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
   it('P13.1-T5 AC-1, AC-2: on the 3rd the pace is there, over the last 30 days — last month’s included', async () => {
     at('2026-09-03T02:00:00Z');
     await wired.goals.save(agent(), plan());
-    await production('2026-08', { apeYtd: cell(200 * M) });
+    await production('2026-01', { APE: cell(200 * M) });
     await day('2026-09-02', { SELL_SUBMISSION: 1 });
     await day('2026-08-20', { SELL_SUBMISSION: 2 });
     await day('2026-08-04', { SELL_SUBMISSION: 5 }); // 4 August to 3 September is 31 days: outside
@@ -286,8 +305,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
   it('counts nobody else’s production or days, and no other office’s under the same member id', async () => {
     await wired.goals.save(agent(), plan());
-    await production('2026-09', { apeMonthly: cell(10 * M), apeYtd: cell(10 * M) });
-    await production('2026-09', { apeMonthly: cell(99 * M), apeYtd: cell(99 * M) }, { kpmId: OTHER_KPM });
+    await production('2026-09', { APE: cell(10 * M) });
+    await production('2026-09', { APE: cell(99 * M) }, { kpmId: OTHER_KPM });
     await day('2026-09-10', { SELL_SUBMISSION: 1 });
     await day('2026-09-10', { SELL_SUBMISSION: 40 }, { kpmId: OTHER_KPM });
     await day('2026-09-10', { SELL_SUBMISSION: 40 }, { membershipId: 'someone-else' });
@@ -309,7 +328,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     it('AC-1: this month against the cascade on this month’s fixed target, the year to date against the year’s', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeYtd: cell(200 * M) });
+      await production('2026-01', { APE: cell(200 * M) });
       await day('2026-09-02', { LEADS_CONTACTED: 12, SELL_PRESENTATION: 4, SELL_SUBMISSION: 1 });
       await day('2026-09-10', { LEADS_CONTACTED: 8, SELL_PRESENTATION: 2, SELL_SUBMISSION: 1 });
       await day('2026-08-31', { LEADS_CONTACTED: 100, SELL_PRESENTATION: 30, SELL_SUBMISSION: 9 }); // the year's, not the month's
@@ -339,10 +358,10 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     it('AC-1: holds this month’s chip targets when this month’s own APE arrives (ADR-0056)', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeYtd: cell(200 * M) });
+      await production('2026-01', { APE: cell(200 * M) });
       const before = (await wired.summary.read(agent())).activity.monthly.targets;
 
-      await production('2026-09', { apeMonthly: cell(60 * M), apeYtd: cell(260 * M) });
+      await production('2026-09', { APE: cell(60 * M) });
 
       expect((await wired.summary.read(agent())).activity.monthly.targets).toEqual(before);
     });
@@ -360,7 +379,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     it('AC-1: a year made before this month began leaves the chips met at 0, not unmeasured (ADR-0047)', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeYtd: cell(520 * M) });
+      await production('2026-01', { APE: cell(520 * M) });
       await day('2026-09-10', { SELL_SUBMISSION: 2 });
 
       const month = chips((await wired.summary.read(agent())).activity.monthly);
@@ -528,10 +547,10 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     });
 
     /*
-     * P18.8-T15 AC-4 (the client's UI review, UI-002): an AB with 71 open on Leads Management read *No active leads
+     * P18.5-T15 AC-4 (the client's UI review, UI-002): an AB with 71 open on Leads Management read *No active leads
      * yet* here, since the card is their own. `unitOpen` is what Leads Management lists them besides their own.
      */
-    describe('P18.8-T15 AC-4 — the open leads a leader reads elsewhere', () => {
+    describe('P18.5-T15 AC-4 — the open leads a leader reads elsewhere', () => {
       const DOWNLINE = '66f000000000000000000199';
       const below = () => mongoose.connection.db!.collection('memberships').insertOne({
         _id: new mongoose.Types.ObjectId(DOWNLINE), kpmId: KPM, userId: 'u-below', role: 'agent', orgLevelCode: 'AGENT',
@@ -539,7 +558,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       } as never);
       const asAb = () => agent({ orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1 });
 
-      it('P18.8-T15 AC-4 counts the open leads of the people an AB leads, when their own card is empty', async () => {
+      it('P18.5-T15 AC-4 counts the open leads of the people an AB leads, when their own card is empty', async () => {
         await below();
         await lead('Theirs, open', { ownerMembershipId: DOWNLINE });
         await lead('Theirs, open too', { ownerMembershipId: DOWNLINE });
@@ -551,14 +570,14 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
         expect(view.leads).toEqual({ rows: [], total: 0, unitOpen: 2 });
       });
 
-      it('P18.8-T15 AC-4 counts none in another office, under the same ids', async () => {
+      it('P18.5-T15 AC-4 counts none in another office, under the same ids', async () => {
         await below();
         await lead('Another office’s', { kpmId: OTHER_KPM, ownerMembershipId: DOWNLINE });
 
         expect((await wired.summary.read(asAb())).leads.unitOpen).toBe(0);
       });
 
-      it('P18.8-T15 AC-4 counts nothing while the reader has open leads of their own: the sentence never reads', async () => {
+      it('P18.5-T15 AC-4 counts nothing while the reader has open leads of their own: the sentence never reads', async () => {
         await below();
         await lead('Mine');
         await lead('Theirs', { ownerMembershipId: DOWNLINE });
@@ -566,11 +585,19 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
         expect((await wired.summary.read(asAb())).leads).toMatchObject({ total: 1, unitOpen: 0 });
       });
 
-      it('P18.8-T15 AC-4 an Agent who leads somebody reads only their own leads on Leads Management, so 0', async () => {
+      // Was *an Agent who leads somebody reads only their own leads on Leads Management, so 0*: P19.9-T6 (ADR-0234) gave
+      // the Agent `lead:read` at `own-downline`, so their downline's leads are in their reach as an AB's are.
+      it('P18.5-T15 AC-4, P19.9-T6 an Agent who leads somebody counts their downline’s open leads, as an AB does', async () => {
         await below();
         await lead('Theirs', { ownerMembershipId: DOWNLINE });
 
-        expect((await wired.summary.read(agent({ directCount: 1 }))).leads.unitOpen).toBe(0);
+        expect((await wired.summary.read(agent({ directCount: 1 }))).leads.unitOpen).toBe(1);
+      });
+
+      it('P18.5-T15 AC-4 an Agent who leads nobody counts nobody else’s', async () => {
+        await lead('Somebody else’s', { ownerMembershipId: DOWNLINE });
+
+        expect((await wired.summary.read(agent())).leads.unitOpen).toBe(0);
       });
     });
 
@@ -637,7 +664,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
     it('AC-1, AC-3: each rule that fired, from the reader’s pace, leads and ratios, in the fixed priority', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeYtd: cell(200 * M) });
+      await production('2026-01', { APE: cell(200 * M) });
       // One closing in the last 30 days against a target of 5 (ADR-0109). Ten presentations, one submission:
       // a selling success rate of 0.10 against 0.30, over enough of them to say so.
       await day('2026-09-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 10 });
@@ -695,7 +722,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     });
   });
 
-  describe('P18.8-T11 — an earlier month or year, read whole (ADR-0161 §4)', () => {
+  describe('P18.5-T11 — an earlier month or year, read whole (ADR-0161 §4)', () => {
     /** The office opened at 00:00 on 1 June 2025 in Jakarta — still 31 May in UTC. */
     beforeEach(() => mongoose.connection.db!.collection('kpms').updateOne(
       { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2025-05-31T17:00:00Z') } },
@@ -703,11 +730,11 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     const closings = (activity: { targets: { key: string; logged: number }[] }) =>
       activity.targets.find((t) => t.key === 'closings')!.logged;
 
-    it('P18.8-T11 AC-1, AC-3 a month this year: its own APE against its target as it began, the whole month, no pace', async () => {
+    it('P18.5-T11 AC-1, AC-3 a month this year: its own APE against its target as it began, the whole month, no pace', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-07', { apeYtd: cell(170 * M) });
-      await production('2026-08', { apeMonthly: cell(30 * M), apeYtd: cell(200 * M) });
-      await production('2026-09', { apeMonthly: cell(30 * M), apeYtd: cell(230 * M) });
+      await production('2026-01', { APE: cell(170 * M) });
+      await production('2026-08', { APE: cell(30 * M) });
+      await production('2026-09', { APE: cell(30 * M) });
       await day('2026-08-05', { SELL_SUBMISSION: 2 });
       await day('2026-08-31', { SELL_SUBMISSION: 1 }); // the month's last day: in a month read whole
       await day('2026-09-02', { SELL_SUBMISSION: 5 }); // September's: not August's
@@ -729,13 +756,13 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(view.insights.map((i) => i.rule)).not.toContain('BEHIND_PACE');
     });
 
-    it('P18.8-T11 AC-1, AC-3 a year that has ended: the whole year, its December, its own goal, no pace', async () => {
+    it('P18.5-T11 AC-1, AC-3 a year that has ended: the whole year, its December, its own goal, no pace', async () => {
       at('2025-06-10T02:00:00Z');
       await wired.goals.save(agent(), plan({ period: '2025' }));
       at(NOW.toISOString());
-      await production('2025-11', { apeYtd: cell(400 * M) });
-      await production('2025-12', { apeMonthly: cell(50 * M), apeYtd: cell(450 * M) });
-      await production('2026-01', { apeMonthly: cell(10 * M), apeYtd: cell(10 * M) });
+      await production('2025-01', { APE: cell(400 * M) });
+      await production('2025-12', { APE: cell(50 * M) });
+      await production('2026-01', { APE: cell(10 * M) });
       await day('2025-12-31', { SELL_SUBMISSION: 2 });
       await day('2026-01-01', { SELL_SUBMISSION: 9 }); // the next year's first day
 
@@ -752,9 +779,9 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       expect(view.activity.monthly).toMatchObject({ from: '2025-12-01', to: '2025-12-31' });
     });
 
-    it('P18.8-T11 AC-1 this month asked by name is this month: to today, with its pace', async () => {
+    it('P18.5-T11 AC-1 this month asked by name is this month: to today, with its pace', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeYtd: cell(200 * M) });
+      await production('2026-01', { APE: cell(200 * M) });
 
       const named = await wired.summary.read(agent(), undefined, { month: '2026-09' });
       const plain = await wired.summary.read(agent());
@@ -770,17 +797,19 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       [{ month: '2025-05' }, 'month'],
       [{ year: '2024' }, 'year'],
       [{ month: '2026-08', year: '2026' }, 'year'],
-    ])('P18.8-T11 AC-1 refuses %j 400, naming the field and the range there is', async (asked, field) => {
+    ])('P18.5-T11 AC-1 refuses %j 400, naming the field and the range there is', async (asked, field) => {
       await expect(wired.summary.read(agent(), undefined, asked)).rejects.toMatchObject({
         status: 400, code: 'VALIDATION_FAILED',
         details: { field, earliest: field === 'year' ? '2025' : '2025-06', latest: field === 'year' ? '2026' : '2026-09' },
       });
     });
 
-    it('P18.8-T11 AC-1 reads nothing of another office’s month — the same member id there included', async () => {
+    it('P18.5-T11 AC-1 reads nothing of another office’s month — the same member id there included', async () => {
       await wired.goals.save(agent(), plan());
-      await production('2026-08', { apeMonthly: cell(30 * M), apeYtd: cell(200 * M) });
-      await production('2026-08', { apeMonthly: cell(99 * M), apeYtd: cell(999 * M) }, { kpmId: OTHER_KPM });
+      await production('2026-01', { APE: cell(170 * M) });
+      await production('2026-08', { APE: cell(30 * M) });
+      await production('2026-01', { APE: cell(900 * M) }, { kpmId: OTHER_KPM });
+      await production('2026-08', { APE: cell(99 * M) }, { kpmId: OTHER_KPM });
       await day('2026-08-20', { SELL_SUBMISSION: 40 }, { kpmId: OTHER_KPM });
 
       const view = await wired.summary.read(agent(), undefined, { month: '2026-08' });

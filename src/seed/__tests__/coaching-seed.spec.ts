@@ -22,7 +22,7 @@ import {
   COACHING_CAST, pacingFloor, type CoacheeKey, type RosterStatus,
 } from '../coaching-cast';
 import { ROSTER_PLAN, seedObjectId, type CoachingFixture, type LastOneToOne } from '../coaching-fixture';
-import { seedDemo, type SeedResult } from '../demo';
+import { AGENT_LEADER_0555, seedDemo, type SeedResult } from '../demo';
 import { backfillCoachingSnapshots } from '../coaching-snapshots';
 import { LEADER_LIMIT_PEOPLE, SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
 import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
@@ -99,20 +99,17 @@ async function statusOf(membershipId: string, today: string) {
   }) : 0;
   if (!goal || annual <= 0) return { status: 'no_goal_set' as RosterStatus, projected: null, attainment: null, floor: null, logged: 0 };
 
+  // The year to date as the product reads it since P19.5-T2 (R4): the APE of the months held, added.
   const rows = col('monthlyAgentData');
   const previous = m === 1 ? null : `${year}-${String(m - 1).padStart(2, '0')}`;
-  const [through] = previous
-    ? await rows.find({ kpmId, membershipId, month: { $gte: `${year}-01`, $lte: previous }, 'apeYtd.value': { $ne: null } })
-      .sort({ month: -1 }).limit(1).toArray()
-    : [];
-  const [latest] = await rows.find({ kpmId, membershipId, month: { $gte: `${year}-01`, $lte: `${year}-12` }, 'apeYtd.value': { $ne: null } })
-    .sort({ month: -1 }).limit(1).toArray();
-  const thisMonth = await rows.findOne({ kpmId, membershipId, month, 'apeMonthly.value': { $ne: null } });
+  const held = await rows.find({ kpmId, membershipId, month: { $gte: `${year}-01`, $lte: month }, 'values.APE.value': { $ne: null } }).toArray();
+  const sumOf = (list: typeof held) => (list.length ? list.reduce((n, r) => n + (r.values.APE.value as number), 0) : null);
+  const through = previous ? sumOf(held.filter((r) => r.month <= previous)) : null;
+  const thisMonth = held.find((r) => r.month === month) ?? null;
   const before = ytdBeforeThisMonth({
     month: m,
-    throughLastMonthMinor: through ? through.apeYtd.value : null,
-    thisMonth: thisMonth && latest?.month === month
-      ? { ytdMinor: latest.apeYtd.value, monthlyMinor: thisMonth.apeMonthly.value } : null,
+    throughLastMonthMinor: through,
+    thisMonth: thisMonth ? { ytdMinor: sumOf(held) as number, monthlyMinor: thisMonth.values.APE.value } : null,
     ownFigureMinor: null,
   });
   const target = monthlyApeTarget(annual, before, m);
@@ -124,7 +121,7 @@ async function statusOf(membershipId: string, today: string) {
     .reduce((total, entry) => total + entry.count, 0), 0);
   const sum = counts.leads + counts.appointments + counts.policies;
   const projected = sum > 0 ? (counts.policies * logged) / sum : 0;
-  const attainment = thisMonth ? thisMonth.apeMonthly.value / target : 0;
+  const attainment = thisMonth ? thisMonth.values.APE.value / target : 0;
   const floor = pacingFloor(goal as unknown as Parameters<typeof pacingFloor>[0]);
   // `MAA_PROJECTED_SUBMISSIONS_MIN` is 1 (§B.4); P11-T6 makes it a constant with its own test.
   const status: RosterStatus = projected < 1 ? 'needs_attention'
@@ -153,9 +150,9 @@ const WOMEN = [
   'admin@kpm0417.test', 'sari@kpm0417.test', 'dewi@kpm0417.test', 'rina@kpm0417.test', 'pending@kpm0417.test',
   'removed@kpm0417.test', 'indah@kpm0417.test', 'siti@kpm0417.test', 'novi@kpm0417.test', 'agent@kpm0555.test',
   'maya@agencyboost.test', 'newcomer@agencyboost.test',
-  // P13.2: offices 0601 and 0602, and P18.8's 0603 (`subscription-fixture.ts`).
+  // P13.2: offices 0601 and 0602, and P18.5's 0603 (`subscription-fixture.ts`).
   ...subscriptionPeople('she'),
-  // P18.96-T6: Tari, Arief's new hire marked left (`activation-3m-fixture.ts`).
+  // P18.8-T6: Tari, Arief's new hire marked left (`activation-3m-fixture.ts`).
   'tari@kpm0417.test',
   // P13.2-T6: office 0701 (`template-fixture.ts`).
   ...templatePeople('she'),
@@ -164,12 +161,22 @@ const MEN = [
   'owner@kpm0417.test', 'agus@kpm0417.test', 'budi@kpm0417.test', 'untagged@kpm0417.test', 'dimas@kpm0417.test',
   'arief@kpm0417.test', 'wahyu@kpm0417.test', 'owner@kpm0555.test', 'owner@kpm0999.test', 'ade@agencyboost.test',
   'tomi@agencyboost.test',
-  // P18.96-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
+  // P19-T1: the address not verified yet, in no office.
+  'unverified@agencyboost.test',
+  // P19-T3: Rudi, the Allianz Life applicant whose request arrived as Prudential (UI-165).
+  'rudi@agencyboost.test',
+  // P18.8-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
   'lukman@kpm0417.test',
+  // P19.9-T6: Fajar, the agent Lina recruited in 0555 — the demo's Agent who leads somebody (`demo.ts`).
+  AGENT_LEADER_0555.email,
   ...subscriptionPeople('he'),
   ...templatePeople('he'),
 ];
-const OPERATORS = ['superadmin@agencyboost.test', 'root@agencyboost.test'];
+const OPERATORS = [
+  'superadmin@agencyboost.test', 'root@agencyboost.test',
+  // P19.2-T1 AC-8: the Owner's own Super Admin login, linked to his field login — an operator account, coached by nobody.
+  'wilson@agencyboost.test',
+];
 
 /** The emails holding each pronoun, sorted. */
 async function pronouns(): Promise<Record<string, string[]>> {
@@ -214,7 +221,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const directs = await col('memberships').find({ kpmId: await office(), leaderId: String(agus._id), status: 'active' }).toArray();
     const agents = directs.filter((d) => d.role === 'agent');
     const aabs = directs.filter((d) => d.role === 'aab');
-    // P18.96-T6 adds Lukman, a new hire not activated (`activation-3m-fixture.ts`).
+    // P18.8-T6 adds Lukman, a new hire not activated (`activation-3m-fixture.ts`).
     const lukman = String((await memberOf('lukman@kpm0417.test'))._id);
     expect(agents.map((a) => String(a._id)).sort()).toEqual([ids.indah, ids.dimas, ids.siti, lukman].sort());
     expect(aabs.map((a) => String(a._id)).sort()).toEqual([ids.sari, ids.dewi, ids.arief].sort());
@@ -226,7 +233,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const kpmId = await office();
     const under = async (id: string) => (await col('memberships').find({ kpmId, leaderId: id, status: 'active' }).toArray())
       .map((m) => String(m._id)).sort();
-    // P18.96-T6's Tari, Arief's new hire, was marked left — and so removed (`activation-3m-fixture.ts`): not his now.
+    // P18.8-T6's Tari, Arief's new hire, was marked left — and so removed (`activation-3m-fixture.ts`): not his now.
     expect(await under(ids.arief)).toEqual([ids.novi, ids.wahyu].sort());
     expect(await under(ids.sari)).toEqual(expect.arrayContaining([ids.rina, ids.budi, ids.yanti]));
     expect(await under(ids.dewi)).toEqual([]);
@@ -361,7 +368,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     expect(await col('users').findOne({ email: 'newcomer@agencyboost.test' })).toMatchObject({ agentCode: '80019' });
   });
 
-  it('P18.8-T4 every seeded person records the four, as the import and registration would take them, and the operators none', async () => {
+  it('P18.5-T4 every seeded person records the four, as the import and registration would take them, and the operators none', async () => {
     const today = '2026-10-02';
     const people = await col('users').find({ deletedAt: null }).toArray();
     expect(people.length).toBeGreaterThan(20);
@@ -386,6 +393,15 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     for (const person of COACHING_CAST) {
       expect((await col('users').findOne({ email: person.email }))!.gender).toBe(person.pronoun === 'she' ? 'female' : 'male');
     }
+  });
+
+  it('P19-T1 AC-4 seeds one account whose address is not verified yet, in no office, to sign in and see the banner', async () => {
+    const yoga = await col('users').findOne({ email: 'unverified@agencyboost.test' });
+    expect(yoga).toMatchObject({ fullName: 'Yoga Pratama', status: 'invited', emailVerifiedAt: null, agentCode: '81901' });
+    expect(await new PasswordService().verify(yoga!.passwordHash, 'demo password field')).toBe(true);
+    expect(await col('memberships').countDocuments({ userId: String(yoga!._id) })).toBe(0);
+    // Everybody else signs in verified, as the demo always has.
+    expect(await col('users').countDocuments({ emailVerifiedAt: null, email: { $ne: 'unverified@agencyboost.test' } })).toBe(0);
   });
 
   it('P11-T7 the demo people have their own pronouns, so coaching writes she and he; the operators keep they', async () => {
@@ -493,7 +509,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const coaches = new Set((await col('memberships').find({ userId: { $in: accounts.map((a) => String(a._id)) } }).toArray())
       .map((m) => String(m._id)));
     const kpm0417 = String((await col('kpms').findOne({ code: '0417' }))!._id);
-    // P18.96-T4: Rina's fourth 1:1 is the first-sale fixture's (`first-sale-fixture.ts`), not the coaching fixture's.
+    // P18.8-T4: Rina's fourth 1:1 is the first-sale fixture's (`first-sale-fixture.ts`), not the coaching fixture's.
     const firstSales = new Set(first.firstSales.sessions.map((row) => row._id));
     return (s: { _id?: unknown; coachMembershipId: string; kpmId: string }) =>
       coaches.has(s.coachMembershipId) || s.kpmId !== kpm0417 || firstSales.has(String(s._id));
@@ -557,7 +573,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     } as never));
     const rows = [...view.directAgents, ...view.units.flatMap((u) => [u.head, ...u.members])];
 
-    // P18.96-T6: and Lukman Hakim, a new hire with no goal (`activation-3m-fixture.ts`).
+    // P18.8-T6: and Lukman Hakim, a new hire with no goal (`activation-3m-fixture.ts`).
     expect(view.directAgents.map((r) => r.name)).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Lukman Hakim', 'Siti Rahmawati']);
     expect(view.units.map((u) => u.head.name)).toEqual(['Arief Hidayat', 'Dewi Lestari', 'Sari Puspita']);
     for (const key of KEYS) {
@@ -852,10 +868,10 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
   });
 
   /*
-   * P18.95-T7 AC-4 (the client's UI review, UI-030): an event's reminder names its time and place, from the event the
+   * P18.7-T7 AC-4 (the client's UI review, UI-030): an event's reminder names its time and place, from the event the
    * office holds; and the three inboxes open on one notice repeated, the line `/notifications` draws with its count.
    */
-  it('P18.95-T7 AC-4 every reminder names its event’s time and place, and each inbox opens on three in a row', async () => {
+  it('P18.7-T7 AC-4 every reminder names its event’s time and place, and each inbox opens on three in a row', async () => {
     const kpmId = await office();
     const reminders = await col('notifications').find({ kpmId, templateId: NotificationTemplate.EVENT_REMINDER }).toArray();
     expect(reminders.length).toBeGreaterThan(9);
@@ -880,7 +896,7 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       const as = new RequestContext(String(member.userId), 'none', {
         membershipId: String(member._id), kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
         status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
-      } as never).withReader(SOURCE_READER); // English words, Indonesian figures: the API's own English (P18.98-T5)
+      } as never).withReader(SOURCE_READER); // English words, Indonesian figures: the API's own English (P18.10-T5)
       const { items } = await inboxes.inbox(as);
       // Among the newest, after anything this morning's run sent (Rina's finalized session): three in a row, unread.
       const first = items.findIndex((i) => i.title === 'Kickoff 2026 is coming up');
@@ -897,10 +913,10 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
   });
 
   /*
-   * P18.8-T15 AC-3 (the client's UI review, UI-003): Agus's inbox said *Wilson Tanoto set your goal* seven times beside
+   * P18.5-T15 AC-3 (the client's UI review, UI-003): Agus's inbox said *Wilson Tanoto set your goal* seven times beside
    * a Summary saying he has no goal. A *set your goal* notice is written for a goal a leader saved, and nothing else.
    */
-  it('P18.8-T15 AC-3 writes a set-your-goal notice only for a goal a leader actually saved, by the leader who saved it', async () => {
+  it('P18.5-T15 AC-3 writes a set-your-goal notice only for a goal a leader actually saved, by the leader who saved it', async () => {
     const kpmId = await office();
     const notices = await col('notifications').find({ kpmId, templateId: NotificationTemplate.GOAL_SET_BY_LEADER }).toArray();
     expect(notices.length).toBeGreaterThan(0);

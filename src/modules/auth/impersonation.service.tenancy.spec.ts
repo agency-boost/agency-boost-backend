@@ -12,7 +12,6 @@ import { PasswordService } from './password.service';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { ImpersonationService, IMPERSONATION_MAX_MINUTES } from './impersonation.service';
-import { SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
 import { Hs256TokenSigner } from './token-signer';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 
@@ -216,71 +215,40 @@ describe('ImpersonationService', () => {
       expect(await mongoose.model(AuditLog.name).countDocuments({})).toBe(0);
     });
   });
-  describe('read-only by default (P4-T10, §3.13)', () => {
+  describe('a session only looks (P4-T10, §3.13; P19.4-T2, ADR-0206 §3)', () => {
     it('starts every session read-only, whoever starts it', async () => {
-      // The operator who wants to write is not the one who decides they may.
       const target = await makeUser();
       const { readOnly } = await service.start(superAdmin, String(target._id), 'ticket 42');
       expect(readOnly).toBe(true);
     });
 
-    it('lets a second Super Admin approve writing', async () => {
+    it('P19.4-T2 AC-1 answers the start with the token, its expiry, the session and readOnly — no purpose, no scope', async () => {
       const target = await makeUser();
       const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-      const second = new RequestContext('sa-2', 'super_admin', null);
-
-      await service.elevate(second, started.sessionId, 'Their taxonomy has a duplicate code.');
-
-      const live = await service.liveSession(started.accessToken);
-      expect(live?.readOnly).toBe(false);
-      expect(live?.elevatedByUserId).toBe('sa-2');
+      expect(Object.keys(started).sort()).toEqual(['accessToken', 'expiresAt', 'readOnly', 'sessionId']);
+      expect(await service.liveSession(started.accessToken)).toMatchObject({
+        readOnly: true, purpose: 'support', writeScope: [], elevatedByUserId: null, endReason: null,
+      });
     });
 
-    it('refuses the operator who started it, which is the whole rule', async () => {
-      /*
-       * A two-person rule that lets one person be both is a one-person rule with extra
-       * steps. This is the assertion the control actually rests on.
-       */
-      const target = await makeUser();
-      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-
-      await expect(service.elevate(superAdmin, started.sessionId, 'I need to fix it.'))
-        .rejects.toThrow('not the one running the session');
+    it('P19.4-T2 AC-1 the elevation a second Super Admin could approve is gone', () => {
+      // `POST /admin/impersonation/:sessionId/elevate` answers 404 (`auth.e2e.int.spec.ts`); the method is gone too.
+      expect((service as unknown as Record<string, unknown>).elevate).toBeUndefined();
     });
 
-    it('refuses somebody who is not a Super Admin at all', async () => {
+    it('P19.4-T2 AC-1 treats a row that could write as no session: a setup one, or one elevated before the deploy', async () => {
       const target = await makeUser();
-      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-      await expect(service.elevate(owner, started.sessionId, 'Let me in.'))
-        .rejects.toThrow('Only a Super Admin');
-    });
-
-    it('refuses an approver who is themselves inside a session', async () => {
-      // Otherwise a session could approve itself by impersonating another Super Admin.
-      const target = await makeUser();
-      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-      const inSession = new RequestContext('sa-2', 'super_admin', null, 'sa-3');
-
-      await expect(service.elevate(inSession, started.sessionId, 'A good reason here.'))
-        .rejects.toThrow('End your own support session');
-    });
-
-    it('demands a reason the Owner can read', async () => {
-      const target = await makeUser();
-      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-      const second = new RequestContext('sa-2', 'super_admin', null);
-      await expect(service.elevate(second, started.sessionId, '   '))
-        .rejects.toThrow('Say why this session needs to write');
-    });
-
-    it('refuses to elevate a session that has ended', async () => {
-      const target = await makeUser();
-      const started = await service.start(superAdmin, String(target._id), 'ticket 42');
-      await service.end(new RequestContext(String(target._id), 'none', null, 'sa-1'));
-
-      const second = new RequestContext('sa-2', 'super_admin', null);
-      await expect(service.elevate(second, started.sessionId, 'Too late for this.'))
-        .rejects.toThrow('Support session');
+      const Sessions = mongoose.model(ImpersonationSession.name);
+      for (const [over, live] of [
+        [{ purpose: 'setup', writeScope: ['tenant_config:write'] }, false],
+        [{ readOnly: false, elevatedByUserId: 'sa-2' }, false],
+        [{}, true],
+      ] as const) {
+        clock.advance(1000);
+        const started = await service.start(superAdmin, String(target._id), 'ticket 42');
+        await Sessions.updateOne({ _id: started.sessionId }, { $set: over });
+        expect([over, Boolean(await service.liveSession(started.accessToken))]).toEqual([over, live]);
+      }
     });
   });
 
@@ -358,11 +326,6 @@ describe('ImpersonationService', () => {
         .resolves.toMatchObject({ readOnly: true });
     });
 
-    it('refuses an id that is not an id, rather than answering 500', async () => {
-      const second = new RequestContext('sa-2', 'super_admin', null);
-      await expect(service.elevate(second, 'not-an-id', 'A good enough reason.'))
-        .rejects.toThrow('Support session');
-    });
   });
 
   /*
@@ -412,7 +375,7 @@ describe('ImpersonationService', () => {
       expect((await service.liveSession(first.accessToken))?.get('_id').toString()).toBe(first.sessionId);
     });
 
-    it('collides whatever the second start asks for: its reason and its kind are not in the token', async () => {
+    it('collides whatever reason the second start gives, or whether it names support: neither is in the token', async () => {
       const owner = await makeUser();
       await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0421', branchName: 'BSD', timezone: 'Asia/Jakarta', status: 'active',
@@ -420,7 +383,7 @@ describe('ImpersonationService', () => {
       } as never);
 
       await service.start(superAdmin, String(owner._id), 'Ticket 42');
-      await expect(service.start(superAdmin, String(owner._id), 'Setting up', 60, 'setup'))
+      await expect(service.start(superAdmin, String(owner._id), 'Looking at their overview', 60, 'support'))
         .rejects.toMatchObject({ code: 'IMPERSONATION_JUST_STARTED' });
       expect(await Sessions().countDocuments({})).toBe(1);
     });
@@ -451,10 +414,12 @@ describe('ImpersonationService', () => {
   });
 
   /*
-   * ADR-0162 (P18.9-T1 AC-1, AC-4, AC-6): **a setup session** — for an active office's Owner or one of its
-   * Admins, read-only with the setup screens' permissions as its scope, started by one Super Admin alone.
+   * **No setup session** (P19.4-T2 AC-1, AC-5, AC-7; ADR-0206 §3, superseding ADR-0162). Each old *"a setup session may"*
+   * is pinned the other way round: `setup` is refused, and nothing is written for it; a session as the Owner of a new
+   * office only looks; and what does not change — the reason, the 60 minutes, the notices, the audit entry — is asked
+   * again here.
    */
-  describe('a setup session (P18.9-T1, ADR-0162)', () => {
+  describe('P19.4-T2 view-as only looks (ADR-0206)', () => {
     async function anOffice(status = 'active') {
       const ownerUser = await makeUser({ fullName: 'Rina Owner' });
       const kpm = await mongoose.model(Kpm.name).create({
@@ -472,93 +437,62 @@ describe('ImpersonationService', () => {
       return { kpmId, owner: String(ownerUser._id), join };
     }
 
-    it('AC-1 starts one as the Owner: read-only, with the setup scope on the row', async () => {
-      const { owner } = await anOffice();
-      const started = await service.start(superAdmin, owner, 'Setting up activity types', 60, 'setup');
-
-      expect(started).toMatchObject({ readOnly: true, purpose: 'setup', writeScope: [...SETUP_SESSION_WRITE_SCOPE] });
-      const row = await service.liveSession(started.accessToken);
-      expect(row).toMatchObject({ readOnly: true, purpose: 'setup', elevatedByUserId: null });
-      expect([...(row?.writeScope ?? [])]).toEqual([...SETUP_SESSION_WRITE_SCOPE]);
-    });
-
-    it('AC-1 starts one as one of the office\'s Admins', async () => {
-      const { join } = await anOffice();
+    it('P19.4-T2 AC-1 refuses a setup session 400 VALIDATION_FAILED naming purpose, and writes nothing', async () => {
+      const { owner, join } = await anOffice();
       const admin = await makeUser();
       await join(String(admin._id), { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'x' } });
-      await expect(service.start(superAdmin, String(admin._id), 'Their lead statuses', 30, 'setup'))
-        .resolves.toMatchObject({ purpose: 'setup' });
-    });
-
-    it('AC-1 refuses one as anybody else, 409, and starts nothing; a support session as them starts as before', async () => {
-      const { join } = await anOffice();
-      const agent = await makeUser();
-      await join(String(agent._id));
-      const nobody = await makeUser();
       const told = notified.length;
 
-      for (const target of [String(agent._id), String(nobody._id)]) {
-        const refused = await service.start(superAdmin, target, 'Setup', 60, 'setup').catch((e) => e);
-        expect(refused).toMatchObject({ code: 'IMPERSONATION_SETUP_TARGET', details: { purpose: 'setup' } });
-        expect(refused.getStatus()).toBe(409);
+      // As the Owner and as an Admin — the two a setup session acted as — and as anybody else.
+      for (const target of [owner, String(admin._id), String((await makeUser())._id)]) {
+        const refused = await service.start(superAdmin, target, 'Setting up activity types', 60, 'setup').catch((e) => e);
+        expect(refused).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'purpose' } });
+        expect(refused.getStatus()).toBe(400);
+        expect(refused.message).toBe(
+          'A support session only looks: there is no setup session. Start one with no purpose, or with support.',
+        );
       }
       expect(await mongoose.model(ImpersonationSession.name).countDocuments({})).toBe(0);
       expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'impersonation.started' })).toBe(0);
       expect(notified).toHaveLength(told);
-
-      await expect(service.start(superAdmin, String(agent._id), 'Ticket 42')).resolves
-        .toMatchObject({ purpose: 'support', writeScope: [] });
     });
 
-    it('AC-1 refuses one into an office that is not active, under the office\'s own code', async () => {
+    it('P19.4-T2 AC-7 (Overview case 9) a session as a new office\'s Owner, with no purpose or support, only looks', async () => {
+      const { owner } = await anOffice();
+      await expect(service.start(superAdmin, owner, 'Melihat saja')).resolves.toMatchObject({ readOnly: true });
+      clock.advance(1000);
+      const named = await service.start(superAdmin, owner, 'Melihat saja', 30, 'support');
+      expect(await service.liveSession(named.accessToken)).toMatchObject({ readOnly: true, purpose: 'support', writeScope: [] });
+    });
+
+    it('P19.4-T2 AC-5 refuses a session into an office that is not active, under the office\'s own code, as before', async () => {
       const { owner } = await anOffice('suspended');
-      await expect(service.start(superAdmin, owner, 'Setup', 60, 'setup'))
+      await expect(service.start(superAdmin, owner, 'Ticket 42'))
         .rejects.toMatchObject({ code: 'IMPERSONATION_OFFICE_UNAVAILABLE' });
     });
 
-    it('AC-4 records the purpose and the session on impersonation.started, in the office', async () => {
+    it('P19.4-T2 AC-5 records impersonation.started in the office with the reason, the length and the session', async () => {
       const { kpmId, owner } = await anOffice();
-      const setup = await service.start(superAdmin, owner, 'Setting up', 60, 'setup');
+      const started = await service.start(superAdmin, owner, 'Checking their overview', 30);
       const row = await mongoose.model(AuditLog.name).findOne({ action: 'impersonation.started' });
       expect(row?.get('kpmId')).toBe(kpmId);
       expect(row?.get('actorUserId')).toBe('sa-1');
-      expect(row?.get('after')).toMatchObject({
-        reason: 'Setting up', minutes: 60, readOnly: true, purpose: 'setup', sessionId: setup.sessionId,
-        writeScope: [...SETUP_SESSION_WRITE_SCOPE],
+      expect(row?.get('after')).toEqual({
+        reason: 'Checking their overview', minutes: 30, readOnly: true, sessionId: started.sessionId,
       });
-
-      // A support session's entry names its purpose and its session too. A second later, or it is the same token.
-      await mongoose.model(AuditLog.name).deleteMany({});
-      clock.set(new Date(NOW.getTime() + 1000));
-      const support = await service.start(superAdmin, owner, 'Ticket 42');
-      expect((await mongoose.model(AuditLog.name).findOne({ action: 'impersonation.started' }))?.get('after'))
-        .toMatchObject({ purpose: 'support', sessionId: support.sessionId, writeScope: [] });
     });
 
-    it('AC-4 tells the person and the Owner that it is a setup session', async () => {
+    it('P19.4-T2 AC-5 tells the person and the Owner, with a support session\'s notice', async () => {
       const { owner, join } = await anOffice();
       const admin = await makeUser();
       await join(String(admin._id), { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'x' } });
       payloads = [];
 
-      await service.start(superAdmin, String(admin._id), 'Their products', 60, 'setup');
+      await service.start(superAdmin, String(admin._id), 'Their products', 60);
       expect(payloads).toEqual([
-        { userId: String(admin._id), payload: { reason: 'Their products', isSubject: true, purpose: 'setup' } },
-        { userId: owner, payload: { reason: 'Their products', isSubject: false, purpose: 'setup' } },
+        { userId: String(admin._id), payload: { reason: 'Their products', isSubject: true, purpose: 'support' } },
+        { userId: owner, payload: { reason: 'Their products', isSubject: false, purpose: 'support' } },
       ]);
-    });
-
-    it('AC-6 one Super Admin suffices to start it, and elevating it still needs a second', async () => {
-      const { owner } = await anOffice();
-      const started = await service.start(superAdmin, owner, 'Setting up', 60, 'setup');
-
-      await expect(service.elevate(superAdmin, started.sessionId, 'I need to change a role too.'))
-        .rejects.toThrow('not the one running the session');
-      expect((await service.liveSession(started.accessToken))?.readOnly).toBe(true);
-
-      await service.elevate(new RequestContext('sa-2', 'super_admin', null), started.sessionId, 'A role needs fixing.');
-      const elevated = await service.liveSession(started.accessToken);
-      expect([elevated?.readOnly, elevated?.purpose, elevated?.elevatedByUserId]).toEqual([false, 'setup', 'sa-2']);
     });
   });
 

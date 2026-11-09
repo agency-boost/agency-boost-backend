@@ -19,7 +19,7 @@ const KPM_A = '66f0000000000000000000a1';
 const NOW = new Date('2026-10-29T02:00:00.000Z');
 
 /*
- * The English the seed gave before P18.98-T7, laid over today's seed — what migration 0037 wrote into the Template
+ * The English the seed gave before P18.10-T7, laid over today's seed — what migration 0037 wrote into the Template
  * company's Default template in every environment made before OD-238. Read from the constants, never retyped.
  */
 const A = SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238;
@@ -57,7 +57,7 @@ function english(kind: string): Payload {
     case 'training_taxonomy':
       return {
         categories: rows(p, 'categories').map((c) => ({
-          // *Motivation* (UI V1, P18.99-T10) was never seeded in English: it reads as the seed gives it.
+          // *Motivation* (UI V1, P18.11-T10) was never seeded in English: it reads as the seed gives it.
           ...c,
           label: T.categories[String(c.code)]?.label ?? c.label,
           description: T.categories[String(c.code)]?.description ?? c.description,
@@ -109,13 +109,13 @@ const ALL_ENGLISH = new Set([
 ]);
 
 /**
- * **The platform's Default template in Bahasa Indonesia** (P18.98-T7; OD-238, option 1; ADR-0179 §5): migration 0046
+ * **The platform's Default template in Bahasa Indonesia** (P18.10-T7; OD-238, option 1; ADR-0179 §5): migration 0046
  * rewrites the Template company's Default template where it still holds the seeded English — every version, by code,
  * field by field — and touches nothing else: not an office's own configuration or snapshot, not an insurer's template,
  * not a template saved from an office, not a field the Super Admin edited. Twice is once, and an empty database, or
  * one 0037 made from today's seed, is given nothing.
  */
-describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)', () => {
+describe('0046 — the Default template in Bahasa Indonesia (P18.10-T7, OD-238)', () => {
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   const templates = () => db().collection('companyTemplates');
   const defaults = { companyId: TEMPLATE_LIBRARY.companyId, templateId: TEMPLATE_LIBRARY.defaultTemplateId };
@@ -154,7 +154,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(changed).toBe(ENGLISH_FIELDS);
   });
 
-  it('P18.98-T7 rewrites every kind of the Default template still holding the seeded English, versions kept', async () => {
+  it('P18.10-T7 rewrites every kind of the Default template still holding the seeded English, versions kept', async () => {
     await templates().insertMany(OFFICE_TEMPLATE_KINDS.map((kind) => doc(kind, english(kind))));
 
     // Six kinds carry words; `ratio_set`'s names are metric names, kept English (§A.4), and it is not rewritten.
@@ -177,7 +177,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(strings(row!.payload).join(' ')).not.toContain('Prudential');
   });
 
-  it('P18.98-T7 rewrites the drafts and later versions too, leaving every field the Super Admin edited', async () => {
+  it('P18.10-T7 rewrites the drafts and later versions too, leaving every field the Super Admin edited', async () => {
     const pipeline = english('lead_pipeline');
     const edited = {
       statuses: (pipeline.statuses as Row[]).map((s) => (s.code === 'PAID_AND_ISSUED' ? { ...s, label: 'Lunas dan terbit' }
@@ -215,7 +215,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(aspects[1].label).toBe('2. Persiapan awal');
   });
 
-  it('P18.98-T7 finds a lead status by code within its pipeline, never the same code in the other ladder', async () => {
+  it('P18.10-T7 finds a lead status by code within its pipeline, never the same code in the other ladder', async () => {
     await templates().insertOne(doc('lead_pipeline', {
       statuses: [
         { pipeline: 'sales', code: 'NOT_APPROACHED', label: 'Not yet approached', rank: 1 },
@@ -228,7 +228,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(statuses.map((s) => s.label)).toEqual(['Not yet approached', 'Not yet approached', 'Belum didekati']);
   });
 
-  it('P18.98-T7 never touches an office, its snapshots, an insurer’s template, another named template or a deleted row', async () => {
+  it('P18.10-T7 never touches an office, its snapshots, an insurer’s template, another named template or a deleted row', async () => {
     await db().collection('leadStatuses').insertMany((english('lead_pipeline').statuses as Row[]).map((s) => ({
       kpmId: KPM_A, ...s, version: 1, status: 'active', archivedAt: null, deletedAt: null,
     })));
@@ -255,7 +255,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(await everything()).toEqual(before);
   });
 
-  it('P18.98-T7 is idempotent: a second run writes nothing and changes nothing', async () => {
+  it('P18.10-T7 is idempotent: a second run writes nothing and changes nothing', async () => {
     await templates().insertMany(OFFICE_TEMPLATE_KINDS.map((kind) => doc(kind, english(kind))));
     await up(db());
     const after = await everything();
@@ -263,7 +263,7 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(await everything()).toEqual(after);
   });
 
-  it('P18.98-T7 reads past a payload without the lists, or with a row that is not one', async () => {
+  it('P18.10-T7 reads past a payload without the lists, or with a row that is not one', async () => {
     await templates().insertMany([
       doc('activation_checklist', {}),
       doc('capability_ladder', { milestones: 'none', grids: [null, { code: 'PERSONAL_SELLING', label: 'Personal selling' }] }),
@@ -274,12 +274,12 @@ describe('0046 — the Default template in Bahasa Indonesia (P18.98-T7, OD-238)'
     expect(ladder.grids).toEqual([null, { code: 'PERSONAL_SELLING', label: 'Penjualan pribadi' }]);
   });
 
-  it('P18.98-T7 on an empty database reads nothing and creates nothing', async () => {
+  it('P18.10-T7 on an empty database reads nothing and creates nothing', async () => {
     expect(await up(db())).toEqual({ templates: 0, fields: 0 });
     expect(await db().listCollections().toArray()).toEqual([]);
   });
 
-  it('P18.98-T7 a fresh install starts Indonesian: 0037 makes the Default template from the seed, and 0046 writes none', async () => {
+  it('P18.10-T7 a fresh install starts Indonesian: 0037 makes the Default template from the seed, and 0046 writes none', async () => {
     await templateCompany(db(), NOW);
     const made = await everything();
 

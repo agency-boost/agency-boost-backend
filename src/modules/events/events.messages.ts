@@ -8,7 +8,7 @@ const idNumber = (n: number): string => formatNumber(n, undefined, 'id');
 const typeAt = (n: number) => ({ en: `Event type ${n}`, id: `Jenis event ${n}` });
 
 /**
- * **The events module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): an event type and an event as the Owner
+ * **The events module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): an event type and an event as the Owner
  * writes them, a template's list of types, the member's RSVP, claim and answer, and the roll call. *Event* and *RSVP*
  * stay as the glossary keeps them (§A.6); the reader is *Anda* (§B.0), attendance *kehadiran* and feedback *masukan*
  * (§B.1). A field is named as the API names it — `endsAt`, `audience.scope` — in both languages.

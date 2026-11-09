@@ -63,19 +63,19 @@ export function isLiveFeatureLink(link: string | null): link is ActivationFeatur
     && ACTIVATION_LINK_KINDS[link as ActivationFeatureLink].live;
 }
 
-/** The module a live training link binds, or `null` for anything else (P18.5-T3 AC-1). */
+/** The module a live training link binds, or `null` for anything else (P18.2-T3 AC-1). */
 export function liveTrainingModule(link: string | null): string | null {
   const code = trainingLinkModuleCode(link);
   return code && ACTIVATION_TRAINING_LINK.live ? code : null;
 }
 
-/** A link this engine completes: a live feature link, a live training link, or — since P18.96-T4 — a data kind. */
+/** A link this engine completes: a live feature link, a live training link, or — since P18.8-T4 — a data kind. */
 function isEvaluated(link: string | null): boolean {
   return isLiveFeatureLink(link) || liveTrainingModule(link) !== null || isActivationDataLink(link);
 }
 
 /**
- * **What an item still waits on its link for** (P18.96-T4 AC-4): an item not done — and **a data-backed item ticked by
+ * **What an item still waits on its link for** (P18.8-T4 AC-4): an item not done — and **a data-backed item ticked by
  * hand**, whose tick reads *waiting for data* until its data confirms it; the evaluation then attributes it to the
  * link and the tick is replaced, as a link's completion is never replaced. Any other done item is the engine's no more.
  */
@@ -85,7 +85,7 @@ function stillWaits(state: { done: boolean; source: string | null } | undefined,
 }
 
 /**
- * **The auto-completion engine** (P13-T3; ADR-0031, D-links): the three feature links and — since P18.5-T3 —
+ * **The auto-completion engine** (P13-T3; ADR-0031, D-links): the three feature links and — since P18.2-T3 —
  * every training link, evaluated against the records the hire's office holds.
  *
  * - **`feature:goals`** — any goal saved on the hire's membership, by them or by a leader with `?for=`
@@ -95,12 +95,12 @@ function stillWaits(state: { done: boolean; source: string | null } | undefined,
  * - **`feature:activity`** — `ACTIVATION_ACTIVITY_WEEKS` consecutive Monday-to-Sunday office weeks from
  *   the start date, each with a day logged above zero; an all-zero day counts for none, a corrected day
  *   as corrected (ADR-0042).
- * - **`training:<moduleCode>`** (P18.5-T3 AC-2) — the hire's `trainingProgress` row for that module is `done`,
+ * - **`training:<moduleCode>`** (P18.2-T3 AC-2) — the hire's `trainingProgress` row for that module is `done`,
  *   attributed to the hire (only they write it), at its `completedAt`. Whether the module is still offered
  *   does not matter here: a `done` record made earlier still completes it (D-orphan); being offered decides
  *   only whether the item may also be ticked by hand (`mayTickByHand`).
  *
- * - **`sales:first`, `sales:closings:3`, `coaching:weekly:4`** (P18.96-T4 AC-2, ADR-0171 §3) — the platform's three
+ * - **`sales:first`, `sales:closings:3`, `coaching:weekly:4`** (P18.8-T4 AC-2, ADR-0171 §3) — the platform's three
  *   data-backed items, bound by their codes (`effectiveAutoLink`): the hire's first sale since joining, from the data
  *   (`firstSaleOf` with `dataOnly` — a sales lead the leads flow took to *Paid and issued*, else the production file's
  *   first month with a policy); the `ACTIVATION_INDEPENDENT_CLOSINGS`th sales lead the leads flow took to *Paid and
@@ -115,9 +115,9 @@ function stillWaits(state: { done: boolean; source: string | null } | undefined,
  * passes nothing else.
  *
  * **Bounded reads** (AC-7): one query per kind for every target at once, through the seams that exist —
- * `LeadReadings`, `ActivityReadings`, `TrainingProgressReadings`, the goals repository and, since P18.96-T4,
+ * `LeadReadings`, `ActivityReadings`, `TrainingProgressReadings`, the goals repository and, since P18.8-T4,
  * `ProductionReadings` and `CoachingReadings` — within the office,
- * and none at all for a kind no target is still waiting on (P18.5-T3 AC-7: one progress query for every
+ * and none at all for a kind no target is still waiting on (P18.2-T3 AC-7: one progress query for every
  * training item waiting, skipped when none is).
  *
  * **A read-only support session writes nothing** (the Phase 13 exit review, N3): it is answered the links
@@ -132,9 +132,9 @@ export class ActivationLinkEngine {
     private readonly leads: LeadReadings,
     private readonly activity: ActivityReadings,
     private readonly clock: Clock,
-    // P18.5-T3: the training kind's records, through training's own port.
+    // P18.2-T3: the training kind's records, through training's own port.
     private readonly training: TrainingProgressReadings,
-    // P18.96-T4: the data kinds' records — the production file's policies and the coaching sessions.
+    // P18.8-T4: the data kinds' records — the production file's policies and the coaching sessions.
     private readonly production: ProductionReadings,
     private readonly coaching: CoachingReadings,
   ) {}
@@ -154,7 +154,7 @@ export class ActivationLinkEngine {
     const onGoals = whoWaitsOn('feature:goals');
     const onLeads = whoWaitsOn('feature:leads');
     const onActivity = whoWaitsOn('feature:activity');
-    // P18.96-T4: one read of closings and one of the file for every target still waiting on a sale, one of sessions.
+    // P18.8-T4: one read of closings and one of the file for every target still waiting on a sale, one of sessions.
     const onSales = whoWaitsOn('sales:first', 'sales:closings:3');
     const onCoaching = whoWaitsOn('coaching:weekly:4');
     // Every training item still waiting, across every target: one query for their modules' `done` rows.
@@ -227,7 +227,7 @@ export class ActivationLinkEngine {
       }
       switch (link as ActivationNamedLink) {
         /*
-         * P18.96-T4 AC-2 (ADR-0171 §3): the data kinds, **from the data** — a closing logged by a hand tick is that
+         * P18.8-T4 AC-2 (ADR-0171 §3): the data kinds, **from the data** — a closing logged by a hand tick is that
          * tick's record, and not what confirms it (`firstSaleOf`'s `dataOnly`). Since the join date, the start.
          */
         case 'sales:first': {
@@ -282,7 +282,7 @@ export class ActivationLinkEngine {
         set[`${at}.recordId`] = completion.recordId;
         /*
          * Never over a link already met, by a write racing this one: `done: false` — or, for a data-backed item ticked
-         * by hand and *waiting for data* (P18.96-T4 AC-4), any source but the link's, which this replaces.
+         * by hand and *waiting for data* (P18.8-T4 AC-4), any source but the link's, which this replaces.
          */
         arrayFilters.push(data
           ? { [`i${n}.code`]: code, [`i${n}.source`]: { $ne: 'link' } }

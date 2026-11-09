@@ -58,7 +58,7 @@ const as = (membershipId: string, rung: Rung, over: Record<string, unknown> = {}
 );
 
 /**
- * **The Group Tree's *Hari ini*, over HTTP** (UI V1, Phase 18.99 T9; UI-059, O-5): `GET /members/tree` carries each
+ * **The Group Tree's *Hari ini*, over HTTP** (UI V1, Phase 18.11 T9; UI-059, O-5): `GET /members/tree` carries each
  * person's activity count for the office's today — the total Activity Management saved — and their photo.
  *
  * ```

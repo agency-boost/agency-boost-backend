@@ -101,7 +101,8 @@ describe('exit criterion 2: the §3.5 entry, per route (P11-T10 AC-7)', () => {
     // P13.1-T9: the *Activity* tab, a coachee's Dashboard.
     { route: 'GET /activity/dashboard?for=', surface: 'activity_dashboard', call: (h, g) => h().get('/activity/dashboard').query({ for: g.coachee }) },
     { route: 'GET /leads?owner=', surface: 'leads', call: (h, g) => h().get('/leads').query({ owner: g.coachee }) },
-    { route: 'GET /leads, a leader’s list (ADR-0089)', surface: 'leads', call: (h) => h().get('/leads') },
+    // The downline's rows are *Leads milik: Tim* since P19.9-T1 (ADR-0232 §3); the entry is as it was.
+    { route: 'GET /leads?scope=team, a leader’s list (ADR-0089)', surface: 'leads', call: (h) => h().get('/leads').query({ scope: 'team' }) },
     // Phase 11 exit review, N2: one lead of the coachee's, opened by its id.
     { route: 'GET /leads/:id (N2), a lead the reader does not own', surface: 'leads', call: (h, g) => h().get(`/leads/${g.leadId}`) },
     { route: 'GET /coaching/sessions/:sessionId', surface: 'coaching_session', call: (h, g) => h().get(`/coaching/sessions/${g.sessionId}`) },

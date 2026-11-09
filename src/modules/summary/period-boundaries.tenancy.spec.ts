@@ -158,7 +158,7 @@ describe('Phase 10’s periods, at midnight in Jakarta (P10-T8)', () => {
       expect(after).toMatchObject({ year: '2027', month: '2027-01', activity: { yearly: { from: '2027-01-01', to: '2027-01-01' } } });
     });
 
-    it('P18.8-T11 AC-1 September closes at midnight in Jakarta: current to 23:59, read whole and with no pace at 00:01', async () => {
+    it('P18.5-T11 AC-1 September closes at midnight in Jakarta: current to 23:59, read whole and with no pace at 00:01', async () => {
       // Opened in August, in the office's zone (`TenantDay.calendar`).
       await mongoose.connection.db!.collection('kpms').updateOne(
         { _id: new mongoose.Types.ObjectId(KPM) }, { $set: { createdAt: new Date('2026-07-31T17:00:00Z') } },

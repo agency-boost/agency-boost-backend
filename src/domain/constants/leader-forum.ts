@@ -37,10 +37,18 @@ export const LEADER_MEETING_LIMITS = {
 } as const;
 
 /**
- * **The places a *Monthly Target*'s rate is typed and kept to** (P18.97-T1 AC-10, ADR-0175 §4): a rate per unit — *1*,
+ * **The places a *Monthly Target*'s rate is typed and kept to** (P18.9-T1 AC-10, ADR-0175 §4): a rate per unit — *1*,
  * *2,5*, *0,75* — to two places, refused with more (`400 VALIDATION_FAILED`, `SaveMonthlyTargetDto`), and its value, the
  * rate times the meeting's *# of units*, rounded to the same two, so the product of two decimals carries no binary
  * noise (`monthlyTargetOf`). *APE*'s, in IDR minor units, is held to whole sen besides. Not served in `limits`: the
  * screen's copy (`frontend/src/lib/leader-meeting-tabs.ts`) is read against this one by its spec (invariant §7).
  */
 export const LEADER_MEETING_TARGET_RATE_DECIMALS = 2;
+
+/**
+ * **`NEW_AGENT_ACTIVATION_3M_PCT`'s window** (P19.3-T1; ADR-0202 §1, the data sources' D7, *"their first policy in the
+ * join month or the 3 months after"*): a new agent is activated by a policy in their join month **or this many calendar
+ * months after it** — four months in all, in the office's calendar. The forum's *3M new agent %* and Phase 19.5's Quant
+ * B1 read it. Not `ACTIVATION_3M.DAYS` (90 days from the join date, a first paid-and-issued case), which New Hires keeps.
+ */
+export const NEW_AGENT_ACTIVATION_MONTHS_AFTER_JOIN = 3;

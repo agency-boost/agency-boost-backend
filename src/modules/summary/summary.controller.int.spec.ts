@@ -47,7 +47,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     session.current = OWNER;
     await clearCollections();
     await mongoose.model(Goal.name).syncIndexes();
-    // Opened at 00:00 on 1 January 2026 in Jakarta, still 31 December in UTC (P18.8-T11).
+    // Opened at 00:00 on 1 January 2026 in Jakarta, still 31 December in UTC (P18.5-T11).
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
       _id: FIXTURE_KPM, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta',
       createdAt: new Date('2025-12-31T17:00:00Z'),
@@ -73,7 +73,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(res.body.activity[period]).toHaveProperty('total');
       expect(res.body.activity[period]).toHaveProperty('sections');
     }
-    // P10-T6: the reader's own open leads, and how many; P18.8-T15 AC-4: and those of anybody they lead.
+    // P10-T6: the reader's own open leads, and how many; P18.5-T15 AC-4: and those of anybody they lead.
     expect(res.body.leads).toEqual({ rows: [], total: 0, unitOpen: 0 });
     // P10-T7: nobody has logged anything here, so the one card is that rule's — named, with its facts.
     expect(res.body.insights).toEqual([
@@ -91,13 +91,13 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     expect(res.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining('membershipId')]));
   });
 
-  describe('the period, by month or year (P18.8-T11, ADR-0161 §4)', () => {
-    it('P18.8-T11 AC-1 says which period it is, and which there are, unasked', async () => {
+  describe('the period, by month or year (P18.5-T11, ADR-0161 §4)', () => {
+    it('P18.5-T11 AC-1 says which period it is, and which there are, unasked', async () => {
       const res = await request(app.getHttpServer()).get('/summary').expect(200);
       expect(res.body.period).toEqual({ firstMonth: '2026-01', thisMonth: '2026-09', currentMonth: true, currentYear: true });
     });
 
-    it.each(EVERY_MEMBER)('P18.8-T11 AC-1 answers %s an earlier month, read whole, with no pace', async (_name, who) => {
+    it.each(EVERY_MEMBER)('P18.5-T11 AC-1 answers %s an earlier month, read whole, with no pace', async (_name, who) => {
       session.current = who;
       const res = await request(app.getHttpServer()).get('/summary').query({ month: '2026-08' }).expect(200);
 
@@ -108,7 +108,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(res.body.activity.monthly).toMatchObject({ from: '2026-08-01', to: '2026-08-31' });
     });
 
-    it('P18.8-T11 AC-1 answers a year: this one, to today', async () => {
+    it('P18.5-T11 AC-1 answers a year: this one, to today', async () => {
       const res = await request(app.getHttpServer()).get('/summary').query({ year: '2026' }).expect(200);
       expect(res.body).toMatchObject({ year: '2026', month: '2026-09', period: { currentMonth: true, currentYear: true } });
     });
@@ -118,7 +118,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       ['a month without its year', { month: '08' }, 'month'],
       ['a year of two digits', { year: '26' }, 'year'],
       ['a month twice', { month: ['2026-08', '2026-07'] }, 'month'],
-    ])('P18.8-T11 AC-1 refuses %s at the pipe, by name', async (_what, query, name) => {
+    ])('P18.5-T11 AC-1 refuses %s at the pipe, by name', async (_what, query, name) => {
       const res = await request(app.getHttpServer()).get('/summary').query(query).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
       expect(res.body.error.details.violations).toEqual(expect.arrayContaining([expect.stringContaining(name)]));
@@ -130,23 +130,23 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       ['before the office', { month: '2025-12' }, { field: 'month', earliest: '2026-01', latest: '2026-09' }],
       ['a year before the office', { year: '2025' }, { field: 'year', earliest: '2026', latest: '2026' }],
       ['a month and a year together', { month: '2026-08', year: '2026' }, { field: 'year' }],
-    ])('P18.8-T11 AC-1 refuses %s 400 VALIDATION_FAILED, saying what there is', async (_what, query, details) => {
+    ])('P18.5-T11 AC-1 refuses %s 400 VALIDATION_FAILED, saying what there is', async (_what, query, details) => {
       const res = await request(app.getHttpServer()).get('/summary').query(query).expect(400);
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details });
     });
   });
 
   /*
-   * **The period's refusals in the reader's language, each month in the reader's figures** (P18.98-T5 AC-1, AC-7):
-   * *Okt 2026* in Indonesian — for a reader who has chosen nothing too, since the default went live (P18.98-T4's
+   * **The period's refusals in the reader's language, each month in the reader's figures** (P18.10-T5 AC-1, AC-7):
+   * *Okt 2026* in Indonesian — for a reader who has chosen nothing too, since the default went live (P18.10-T4's
    * exit) — and *Oct 2026* for an English reader, whether the screen says so or the saved choice does. A year is a name,
    * the same in both.
    */
-  describe('P18.98-T5 AC-7 the period in Indonesian', () => {
+  describe('P18.10-T5 AC-7 the period in Indonesian', () => {
     const summary = () => request(app.getHttpServer()).get('/summary');
     afterEach(() => { savedLanguage.current = null; });
 
-    it('P18.98-T5 AC-7 refuses a month to come, and one before the office, in Indonesian, each month in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a month to come, and one before the office, in Indonesian, each month in Indonesian', async () => {
       const future = await summary().set('Accept-Language', 'id').query({ month: '2026-10' }).expect(400);
       expect(future.body.error).toMatchObject({
         code: 'VALIDATION_FAILED',
@@ -159,7 +159,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(year.body.error.message).toBe('2027 belum dimulai: tahun terakhir yang ada adalah 2026.');
     });
 
-    it('P18.98-T5 AC-1 writes the months in the reader’s figures: Indonesian for nobody’s choice, English for an English reader', async () => {
+    it('P18.10-T5 AC-1 writes the months in the reader’s figures: Indonesian for nobody’s choice, English for an English reader', async () => {
       // No header and nothing saved: nobody's choice, Bahasa Indonesia, words and figures (the default is live).
       const unchosen = await summary().set('Accept-Language', '').query({ month: '2026-10' }).expect(400);
       expect(unchosen.body.error.message).toBe('Okt 2026 belum dimulai: bulan terakhir yang ada adalah Sep 2026.');
@@ -173,7 +173,7 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(chosen.body.error.message).toBe('Oct 2026 has not begun yet: the latest month is Sep 2026.');
     });
 
-    it('P18.98-T5 AC-7 refuses the query’s shapes with its own sentences, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses the query’s shapes with its own sentences, in Indonesian', async () => {
       const res = await summary().set('Accept-Language', 'id').query({ month: '2026-13', year: '26' }).expect(400);
       expect(res.body.error).toMatchObject({
         code: 'VALIDATION_FAILED',

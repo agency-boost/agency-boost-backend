@@ -8,7 +8,7 @@ export const TRANSFER_REQUEST_STATUSES = ['pending', 'approved', 'declined', 'ca
 export type TransferRequestStatus = (typeof TRANSFER_REQUEST_STATUSES)[number];
 
 /**
- * **A request to move a member to another leader** (ADR-0170 §4, P18.96-T3 AC-3; `functional/org-hierarchy.md`,
+ * **A request to move a member to another leader** (ADR-0170 §4, P18.8-T3 AC-3; `functional/org-hierarchy.md`,
  * *Adding an agent*): what *+ Add agent* makes for an agent code whose holder already reports to somebody else in the
  * office. **No leader moves a member directly.** The office's Owner and Admins decide it: approving moves the member
  * through `HierarchyService.reparent`, which closes their edge and opens one under the new leader (invariant §5);
@@ -38,7 +38,7 @@ export class TransferRequest {
   requestedByMembershipId!: string;
 
   /**
-   * **The name whoever asked typed in *+ Add agent*** (the P18.96 exit review, M3), trimmed — which may not be the
+   * **The name whoever asked typed in *+ Add agent*** (the P18.8 exit review, M3), trimmed — which may not be the
    * account's. It is all whoever asked is shown of the person: the agent code finds somebody in another leader's unit,
    * and answering with their own name and leader would let anybody typing codes learn a peer's unit. The office's
    * deciders see both, to spot a code typed for the wrong person. `null` on a request made before it was kept.

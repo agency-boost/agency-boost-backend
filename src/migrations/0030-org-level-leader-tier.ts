@@ -18,7 +18,7 @@ export interface OrgLevelLeaderTierResult {
 }
 
 /**
- * **Every rung's leader tier** (P18.8-T1, ADR-0156 §1).
+ * **Every rung's leader tier** (P18.5-T1, ADR-0156 §1).
  *
  * `companyOrgLevels.leaderTier` decides the class a member is given when placed on the rung, and RBAC, *Leaders
  * used* and the Owner's agency and unit partitions read the class. Until this field, the class was the rung's code

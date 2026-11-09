@@ -4,7 +4,7 @@ import { NotificationTemplate, TEMPLATE_CHANNELS } from './notification.types';
 
 /**
  * **The notices' English, as the API wrote it** (`SOURCE_READER`: English words, Indonesian figures) unless a test names
- * another reader. A reader who has chosen nothing reads Bahasa Indonesia since the default went live (P18.98-T4's exit),
+ * another reader. A reader who has chosen nothing reads Bahasa Indonesia since the default went live (P18.10-T4's exit),
  * so the copy pinned below names its reader rather than leaning on the default; nobody's choice is pinned at the end.
  */
 const describeNotification = (templateId: string, payload: Record<string, unknown>, reader: Reader = SOURCE_READER) =>
@@ -46,11 +46,11 @@ describe('inbox copy', () => {
   });
 
   /*
-   * **P18.96-T1 AC-3: the name the sender writes.** `requestLeader` stores `askerName`; the template read `fullName`
+   * **P18.8-T1 AC-3: the name the sender writes.** `requestLeader` stores `askerName`; the template read `fullName`
    * alone, so every request a real person sent read *"Somebody asked to join your unit"*. The seed and older rows
    * carry `fullName`, and still read.
    */
-  it('P18.96-T1 AC-3 a join request names who asked, from askerName as the sender writes it, else fullName', () => {
+  it('P18.8-T1 AC-3 a join request names who asked, from askerName as the sender writes it, else fullName', () => {
     expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', membershipId: 'm1' }))
       .toEqual({ title: 'Rina Wijaya asked to join your unit', detail: 'Approve or decline it under Review requests on New hires.' });
     expect(describeNotification(NotificationTemplate.JOIN_REQUEST_RECEIVED, { askerName: 'Rina Wijaya', fullName: 'Old' }).title)
@@ -61,7 +61,7 @@ describe('inbox copy', () => {
       .toBe('Somebody asked to join your unit');
   });
 
-  it('P18.96-T1 AC-3 a member tagged reads that a leader added them; a leader whose code was used reads who joined', () => {
+  it('P18.8-T1 AC-3 a member tagged reads that a leader added them; a leader whose code was used reads who joined', () => {
     expect(describeNotification(NotificationTemplate.MEMBER_TAGGED_BY_LEADER, { leaderMembershipId: 'm1', via: 'tagged' }))
       .toEqual({
         title: 'A leader added you to their unit',
@@ -110,7 +110,7 @@ describe('inbox copy', () => {
       reason: 'Ticket 42.', isSubject: true, purpose: 'support',
     })).toEqual({
       title: 'Somebody from AgencyBoost is looking at your screens',
-      detail: 'Ticket 42. They can only look, unless a second person approves otherwise.',
+      detail: 'Ticket 42. They can only look: nothing can be changed in the session.',
     });
   });
 
@@ -129,7 +129,7 @@ describe('inbox copy', () => {
     });
   });
 
-  it('P18.8-T2 AC-5 tells whoever asked how AgencyBoost decided a leader past the limit (ADR-0157 §3)', () => {
+  it('P18.5-T2 AC-5 tells whoever asked how AgencyBoost decided a leader past the limit (ADR-0157 §3)', () => {
     expect(describeNotification(NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED, { subjectName: 'Budi' })).toEqual({
       title: 'AgencyBoost approved your request for Budi',
       detail: 'The change is made: they are a leader now, past your office’s limit.',
@@ -173,27 +173,27 @@ describe('inbox copy', () => {
   });
 
   /*
-   * **An event's reminder names its time and place** (P18.95-T7 AC-4; the client's UI review, UI-030). It read *"Check
+   * **An event's reminder names its time and place** (P18.7-T7 AC-4; the client's UI review, UI-030). It read *"Check
    * the time and where it is."* — the two things the reader opened it for, left for them to find.
    */
-  describe('P18.95-T7 AC-4 an event reminder names its time and place', () => {
+  describe('P18.7-T7 AC-4 an event reminder names its time and place', () => {
     const kickoff = {
       eventId: '66f0000000000000000000e1', title: 'Kickoff 2026',
       startsAt: '2026-11-09T02:00:00.000Z', timezone: 'Asia/Jakarta', location: 'Kantor KPM',
     };
 
-    it('P18.95-T7 AC-4 its start on the office’s clock and where it is, through the shared formatter', () => {
+    it('P18.7-T7 AC-4 its start on the office’s clock and where it is, through the shared formatter', () => {
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, kickoff)).toEqual({
         title: 'Kickoff 2026 is coming up', detail: '9 Nov 2026, 09.00 · Kantor KPM',
       });
     });
 
-    it('P18.95-T7 AC-4 the office’s zone decides the day: 18:30 UTC is the next morning in Jakarta', () => {
+    it('P18.7-T7 AC-4 the office’s zone decides the day: 18:30 UTC is the next morning in Jakarta', () => {
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: '2026-11-08T18:30:00.000Z' }).detail)
         .toBe('9 Nov 2026, 01.30 · Kantor KPM');
     });
 
-    it('P18.95-T7 AC-4 either half alone, when the payload holds only one', () => {
+    it('P18.7-T7 AC-4 either half alone, when the payload holds only one', () => {
       const { location: _place, ...timed } = kickoff;
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, timed).detail).toBe('9 Nov 2026, 09.00');
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, location: '   ' }).detail).toBe('9 Nov 2026, 09.00');
@@ -201,13 +201,13 @@ describe('inbox copy', () => {
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, placed).detail).toBe('Kantor KPM');
     });
 
-    it('P18.95-T7 AC-4 a time it cannot read is left out, never written in the server’s zone or as Invalid', () => {
+    it('P18.7-T7 AC-4 a time it cannot read is left out, never written in the server’s zone or as Invalid', () => {
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: 'Not/AZone' }).detail).toBe('Kantor KPM');
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, startsAt: 'soon' }).detail).toBe('Kantor KPM');
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { ...kickoff, timezone: undefined }).detail).toBe('Kantor KPM');
     });
 
-    it('P18.95-T7 AC-4 a reminder written with its title alone keeps the words it had', () => {
+    it('P18.7-T7 AC-4 a reminder written with its title alone keeps the words it had', () => {
       expect(describeNotification(NotificationTemplate.EVENT_REMINDER, { title: 'Leader Forum' }).detail)
         .toBe('Check the time and where it is.');
     });
@@ -231,8 +231,8 @@ describe('inbox copy', () => {
       }
     });
 
-    it('P18.96-T1 AC-3 a join request opens the leader’s request inbox, whatever its payload holds', () => {
-      // P18.96-T3 AC-5: the inbox moved to New hires' Review requests, as ADR-0170 §5 places it.
+    it('P18.8-T1 AC-3 a join request opens the leader’s request inbox, whatever its payload holds', () => {
+      // P18.8-T3 AC-5: the inbox moved to New hires' Review requests, as ADR-0170 §5 places it.
       expect(JOIN_REQUEST_INBOX).toBe('/new-hires?review=requests');
       for (const payload of [{}, { askerName: 'Rina Wijaya', membershipId: SESSION }, { fullName: 'Putri' }]) {
         expect(inboxAddress(NotificationTemplate.JOIN_REQUEST_RECEIVED, payload)).toBe('/new-hires?review=requests');
@@ -244,8 +244,12 @@ describe('inbox copy', () => {
         NotificationTemplate.COACHING_SESSION_FINALIZED, NotificationTemplate.CALENDAR_INVITATION,
         NotificationTemplate.CALENDAR_BLOCK_PLACED, NotificationTemplate.CALENDAR_ENTRY_CHANGED,
         NotificationTemplate.JOIN_REQUEST_RECEIVED,
-        // P18.96-T3: a transfer waits on All Members; an accepted invite is on New hires.
+        // P18.8-T3: a transfer waits on All Members; an accepted invite is on New hires.
         NotificationTemplate.TRANSFER_REQUEST_RECEIVED, NotificationTemplate.MEMBER_INVITE_ACCEPTED,
+        // P19.4-T1 (ADR-0208 §7): a template applied opens the settings it changed.
+        NotificationTemplate.TEMPLATE_APPLIED,
+        // P19.5-T1 (AA UI-019): the template's Data upload changed opens the Data upload.
+        NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED,
       ];
       for (const id of IN_APP_TEMPLATES.filter((t) => !ADDRESSED.includes(t))) {
         expect([id, inboxAddress(id, { sessionId: SESSION, entryId: SESSION, date: '2026-10-05' })]).toEqual([id, null]);
@@ -323,8 +327,8 @@ describe('inbox copy', () => {
   });
 });
 
-describe('P18.96-T3 the notices of joining by invite and of a transfer (ADR-0170)', () => {
-  it('P18.96-T3 AC-4 an accepted invite tells the leader who joined, and opens New hires', () => {
+describe('P18.8-T3 the notices of joining by invite and of a transfer (ADR-0170)', () => {
+  it('P18.8-T3 AC-4 an accepted invite tells the leader who joined, and opens New hires', () => {
     expect(describeNotification(NotificationTemplate.MEMBER_INVITE_ACCEPTED, { joinerName: 'Hendra Wijaya' })).toEqual({
       title: 'Hendra Wijaya accepted your invite and joined your unit', detail: 'They are in your unit now, with the join date you gave.',
     });
@@ -332,14 +336,14 @@ describe('P18.96-T3 the notices of joining by invite and of a transfer (ADR-0170
     expect(inboxAddress(NotificationTemplate.MEMBER_INVITE_ACCEPTED, {})).toBe('/new-hires');
   });
 
-  it('P18.96-T3 AC-3 a transfer request names who asked and who would move, and opens All Members on Pending', () => {
+  it('P18.8-T3 AC-3 a transfer request names who asked and who would move, and opens All Members on Pending', () => {
     expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, { requesterName: 'Agus Prasetyo', memberName: 'Lina Marlina' }))
       .toEqual({ title: 'Agus Prasetyo asked to move Lina Marlina into their unit', detail: 'Approve or decline it on All Members, under Pending.' });
     expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {}).title).toBe('A leader asked to move a member into their unit');
     expect(inboxAddress(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {})).toBe('/people/members?tab=pending');
   });
 
-  it('P18.96-T3 AC-3 a decision reads by whom it is for: whoever asked, the member who moved, the leader they left', () => {
+  it('P18.8-T3 AC-3 a decision reads by whom it is for: whoever asked, the member who moved, the leader they left', () => {
     const base = { memberName: 'Lina Marlina', toLeaderName: 'Agus Prasetyo' };
     expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...base, decision: 'approved', audience: 'requester' }).title)
       .toBe('Your request to move Lina Marlina was approved');
@@ -360,11 +364,11 @@ describe('P18.96-T3 the notices of joining by invite and of a transfer (ADR-0170
 });
 
 /**
- * **P18.98-T5 AC-4 — the inbox in the reader's language** (ADR-0179 §7): every row composed when it is read, in the
+ * **P18.10-T5 AC-4 — the inbox in the reader's language** (ADR-0179 §7): every row composed when it is read, in the
  * reader's language, so a notice stored before the phase reads in it too. A name and a reason in the payload are shown
  * as typed; the words around them, and the fallbacks for a payload that holds none, are ours.
  */
-describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
+describe('P18.10-T5 AC-4 the inbox in the reader’s language', () => {
   const ID = readerIn('id');
   const say = (templateId: string, payload: Record<string, unknown> = {}) => describeNotification(templateId, payload, ID);
 
@@ -458,7 +462,7 @@ describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
       .toBe('Impor roster Dia hanya dapat mengubah pengaturan KPM, mengimpor anggota, dan mengunggah file produksi.');
     expect(say(NotificationTemplate.IMPERSONATION_STARTED, { isSubject: true })).toEqual({
       title: 'Seseorang dari AgencyBoost sedang melihat layar Anda',
-      detail: 'Sesi dukungan telah dimulai. Dia hanya dapat melihat, kecuali orang kedua menyetujui sebaliknya.',
+      detail: 'Sesi dukungan telah dimulai. Dia hanya dapat melihat: tidak ada yang bisa diubah dalam sesi ini.',
     });
     expect(say(NotificationTemplate.IMPERSONATION_STARTED)).toEqual({
       title: 'Sesi dukungan dimulai di KPM Anda', detail: 'Seseorang dari AgencyBoost sedang membantu seorang anggota.',
@@ -483,5 +487,77 @@ describe('P18.98-T5 AC-4 the inbox in the reader’s language', () => {
       const id = describeNotification(templateId, {}, ID);
       expect({ templateId, same: en.title === id.title }).toEqual({ templateId, same: false });
     }
+  });
+});
+
+describe('P19.4-T1 a template applied to the office, told to its Owner and Admins (ADR-0208 §7)', () => {
+  const ID = readerIn('id');
+
+  it('P19.4-T1 AC-6 names the template and the settings changed, by their own names, in both languages', () => {
+    const payload = { templateName: 'Prudential template', kinds: ['activity_taxonomy', 'training_taxonomy'], awaitingPublish: false };
+    expect(describeNotification(NotificationTemplate.TEMPLATE_APPLIED, payload)).toEqual({
+      title: 'The Prudential template settings were applied to your KPM',
+      detail: "AgencyBoost updated Activity types, Training from your company's template. Your agents see it now.",
+    });
+    expect(describeNotification(NotificationTemplate.TEMPLATE_APPLIED, payload, ID)).toEqual({
+      title: 'Pengaturan Prudential template diterapkan ke KPM Anda',
+      detail: 'AgencyBoost memperbarui Activity types, Training dari template perusahaan Anda. Agen Anda sudah melihatnya.',
+    });
+  });
+
+  it('P19.4-T1 AC-6 says the settings wait for the office\u2019s own publish when they do, and falls back for a payload it cannot read', () => {
+    expect(describeNotification(NotificationTemplate.TEMPLATE_APPLIED, { kinds: ['event_types'], awaitingPublish: true }, ID).detail)
+      .toBe('AgencyBoost memperbarui Events dari template perusahaan Anda. Agen Anda melihatnya setelah Anda menerbitkan pengaturan.');
+    expect(describeNotification(NotificationTemplate.TEMPLATE_APPLIED, {}, ID)).toEqual({
+      title: 'Pengaturan template perusahaan diterapkan ke KPM Anda',
+      detail: 'AgencyBoost memperbarui beberapa pengaturan dari template perusahaan Anda. Agen Anda sudah melihatnya.',
+    });
+  });
+
+  it('P19.4-T1 AC-6 is in-app only, and opens the settings it changed: Training first, else the first section applied', () => {
+    expect(TEMPLATE_CHANNELS[NotificationTemplate.TEMPLATE_APPLIED]).toEqual(['in_app']);
+    expect(IN_APP_TEMPLATES).toContain(NotificationTemplate.TEMPLATE_APPLIED);
+    expect(inboxAddress(NotificationTemplate.TEMPLATE_APPLIED, { kinds: ['activity_taxonomy', 'training_taxonomy'] }))
+      .toBe('/kpm/settings/training');
+    expect(inboxAddress(NotificationTemplate.TEMPLATE_APPLIED, { kinds: ['lead_pipeline'] })).toBe('/kpm/settings/lead-statuses');
+    expect(inboxAddress(NotificationTemplate.TEMPLATE_APPLIED, { kinds: ['nonsense'] })).toBeNull();
+    expect(inboxAddress(NotificationTemplate.TEMPLATE_APPLIED, {})).toBeNull();
+  });
+});
+
+describe('P19.5-T1 the template’s Data upload changed, told to the Owner and the Admins (AA UI-019; ADR-0214 §4)', () => {
+  const ID = readerIn('id');
+  const payload = {
+    templateName: 'Prudential template', version: 2,
+    newColumns: [
+      { kode: 'FYC', label: { id: 'Komisi tahun pertama', en: 'First year commission' }, effectiveFrom: '2026-12' },
+      { kode: 'FYP2', label: { id: 'FYP kedua', en: '' }, effectiveFrom: '2027-01' },
+    ],
+  };
+
+  it('P19.5-T1 AC-17 says the mockup’s sentence: the new columns by name, from their first month, in both languages', () => {
+    expect(describeNotification(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, payload, ID)).toEqual({
+      title: 'Template data upload berubah: 2 kolom baru (Komisi tahun pertama, FYP kedua) mulai Des 2026',
+      detail: 'Kolom mengikuti Prudential template v2.',
+    });
+    expect(describeNotification(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, payload)).toEqual({
+      title: 'Data upload template changed: 2 new columns (First year commission, FYP kedua) from Dec 2026',
+      detail: 'Columns follow Prudential template v2.',
+    });
+  });
+
+  it('P19.5-T1 AC-17 names the version where no column is new, and falls back for a payload it cannot read', () => {
+    expect(describeNotification(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, { ...payload, newColumns: [] }, ID).title)
+      .toBe('Template data upload berubah ke v2.');
+    expect(describeNotification(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, {}, ID)).toEqual({
+      title: 'Template data upload berubah ke v0.',
+      detail: 'Kolom mengikuti template perusahaan v0.',
+    });
+  });
+
+  it('P19.5-T1 AC-17 is in-app only, and opens the Data upload', () => {
+    expect(TEMPLATE_CHANNELS[NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED]).toEqual(['in_app']);
+    expect(IN_APP_TEMPLATES).toContain(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED);
+    expect(inboxAddress(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, payload)).toBe('/kpm/data-upload');
   });
 });

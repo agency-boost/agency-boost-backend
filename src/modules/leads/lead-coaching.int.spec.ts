@@ -139,7 +139,9 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
     it.each([
       ['a peer AAB, an agent of another unit', 'PEER_AAB', 'RINA'],
       ['an Agent, a colleague', 'INDAH', 'DIMAS'],
-      ['an Agent who leads, their own report', 'LUKAS', 'TARI'],
+      // P19.9-T6 (ADR-0234): an Agent who leads reaches their own report now — below — and nobody else.
+      ['an Agent who leads, a colleague outside their downline', 'LUKAS', 'INDAH'],
+      ['an Agent who leads, their own leader', 'LUKAS', 'AGUS'],
       ['the Admin, who leads nobody: `lead:read` reaches no row of anybody else (§3.7)', 'ADMIN', 'RINA'],
       ['an AB, a member who has left', 'AGUS', 'LEFT'],
       ['office B’s AB, a member of office A (cross-tenant)', 'B_AB', 'RINA'],
@@ -150,6 +152,18 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
 
       expect(res.body.error.code).toBe('NOT_FOUND');
       expect(await reads()).toHaveLength(0);
+    });
+
+    it('P19.9-T6 AC-2 an Agent who leads reads their report’s leads, as an AB does, and the read is recorded', async () => {
+      await leadOf('TARI', 'Tari’s');
+      await leadOf('INDAH', 'Indah’s');
+      as('LUKAS');
+      const res = await http().get('/leads').query({ owner: office.id.TARI }).expect(200);
+
+      expect(res.body.rows.map((r: { name: string }) => r.name)).toEqual(['Tari’s']);
+      expect(await reads()).toEqual([expect.objectContaining({
+        actorMembershipId: office.id.LUKAS, targetMembershipId: office.id.TARI,
+      })]);
     });
 
     it('P11-T4 refuses a Super Admin by name, not by a 500', async () => {
@@ -421,9 +435,24 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
       expect(await stored(added.id)).toMatchObject({ deletedAt: null });
     });
 
+    it('P19.9-T6 AC-2 an Agent who leads adds to their report’s pipeline and edits it pinned, under their own name (ADR-0234)', async () => {
+      as('LUKAS');
+      const added = (await http().post('/leads').query({ owner: office.id.TARI }).send({ name: 'Ibu Ratna' }).expect(201)).body;
+      const edited = (await http().patch(`/leads/${added.id}`)
+        .send({ remarks: 'Coached by Lukas.', version: added.version }).expect(200)).body;
+
+      expect(await stored(added.id)).toMatchObject({
+        ownerMembershipId: office.id.TARI, createdBy: office.id.LUKAS, updatedBy: office.id.LUKAS, remarks: 'Coached by Lukas.',
+      });
+      expect(edited.version).toBe(added.version + 1);
+      // Never a delete: `lead:delete` stays the owner's alone (§3.7).
+      await http().delete(`/leads/${added.id}`).expect(404);
+    });
+
     it.each([
       ['a peer AAB, an agent of another unit', 'PEER_AAB'],
       ['an Agent, a colleague', 'INDAH'],
+      ['an Agent who leads, outside their downline (P19.9-T6)', 'LUKAS'],
       ['office B’s AB (cross-tenant)', 'B_AB'],
     ] as [string, Who][])('staging review 2026-10-31: %s cannot edit a lead an AAB added for their agent — 404, unchanged', async (_name, caller) => {
       as('SARI');
@@ -437,6 +466,7 @@ describe('P11-T4 — a coachee’s leads, over HTTP', () => {
       ['the caller named as owner', 'AGUS', 'AGUS'],
       ['a peer AAB, an agent of another unit', 'PEER_AAB', 'RINA'],
       ['an Agent, a colleague', 'INDAH', 'DIMAS'],
+      ['an Agent who leads, a colleague outside their downline (P19.9-T6)', 'LUKAS', 'DIMAS'],
       ['an AB, a member who has left', 'AGUS', 'LEFT'],
       ['office B’s AB, a member of office A (cross-tenant)', 'B_AB', 'RINA'],
     ] as [string, Who, Who][])('P11-T4 is 404 outside COACH: %s — and nothing is created', async (_name, caller, owner) => {

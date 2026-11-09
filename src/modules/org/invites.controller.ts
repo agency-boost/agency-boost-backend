@@ -36,7 +36,7 @@ function appOriginOf(config: ConfigService): string {
 }
 
 /**
- * **+ Add agent, on `/new-hires`** (ADR-0170 §1–§4, P18.96-T3 AC-1 to AC-3): the one form's entry point, the invites it
+ * **+ Add agent, on `/new-hires`** (ADR-0170 §1–§4, P18.8-T3 AC-1 to AC-3): the one form's entry point, the invites it
  * makes and the transfers it asks for. Every route is `member:invite` — an AB's or AAB's own unit, the Owner's and an
  * Admin's office — and reaches nothing outside it (404).
  *
@@ -147,7 +147,7 @@ export class NewHireAgentsController {
 }
 
 /**
- * **An invite's link** (ADR-0170 §3, P18.96-T3 AC-4): what it opens before anybody is signed in, and accepting it as a
+ * **An invite's link** (ADR-0170 §3, P18.8-T3 AC-4): what it opens before anybody is signed in, and accepting it as a
  * signed-in account the code belongs to. Registration on the link is `POST /auth/register` with `inviteToken`.
  */
 @ApiTags('joining an office')
@@ -218,7 +218,7 @@ export class InviteLinkController {
 }
 
 /**
- * **Transfer requests, decided by the office** (ADR-0170 §4, P18.96-T3 AC-3): the Owner's and an Admin's queue on
+ * **Transfer requests, decided by the office** (ADR-0170 §4, P18.8-T3 AC-3): the Owner's and an Admin's queue on
  * *All Members* › *Pending*, and the decision. `member:transfer_approve`, `own-kpm`; another office's request is 404.
  */
 @ApiTags('joining an office')

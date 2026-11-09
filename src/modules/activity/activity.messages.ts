@@ -5,7 +5,7 @@ import { messages, refusals } from '@/common/i18n/sentence';
 const idCount = (n: number) => formatNumber(n, undefined, 'id');
 
 /**
- * **The activity module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a day logged, saved and corrected,
+ * **The activity module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a day logged, saved and corrected,
  * the codes a day may count, and the dashboard's and the summary's ranges. A day is written in the reader's figures
  * (*12 Mei 2026*). An activity type is a *jenis aktivitas*, a rung a *jenjang*, the office *KPM* (glossary §B.9); a
  * code and a field are named as the API names them (`ROLLING_7D`, `from`).
@@ -103,7 +103,7 @@ export const ACTIVITY_REFUSALS = refusals('modules/activity', {
 });
 
 /**
- * **The words the activity module writes into its answers** (P18.98-T5 AC-4), composed for the request's reader:
+ * **The words the activity module writes into its answers** (P18.10-T5 AC-4), composed for the request's reader:
  * the dashboard's section for a count no category holds, and a balance ratio's tag. Every other label is the
  * office's own (a category, a type), shown as typed (glossary §F).
  */

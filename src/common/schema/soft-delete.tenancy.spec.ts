@@ -6,6 +6,7 @@ import {
 } from '@/modules/notifications/notification.schema';
 import { UserSchema } from '@/modules/users/user.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
+import { AccountLinkSchema } from '@/modules/auth/account-link.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -36,14 +37,14 @@ import {
 } from '@/modules/training/training-category.schema';
 import { TrainingSkillSchema } from '@/modules/training/training-skill.schema';
 import {
-  TrainingContentFileSchema, TrainingContentLinkSchema, TrainingContentSchema,
+  TrainingContentFileSchema, TrainingContentHistoryEntrySchema, TrainingContentLinkSchema, TrainingContentSchema,
   TrainingModuleSchema,
 } from '@/modules/training/training-module.schema';
 import {
   ActivationAspectSchema, ActivationItemSchema, ActivationTemplateSchema,
 } from '@/modules/activation/activation-template.schema';
 import {
-  AttackPlanSchema, CommissionYearSchema, ProductSchema,
+  AttackPlanSchema, CommissionYearSchema, ObjectionSchema, ProductSchema,
 } from '@/modules/products/product.schema';
 import {
   KpmProductConfigSchema, ProductDocumentRefSchema,
@@ -66,6 +67,7 @@ import { PolicySchema } from '@/modules/production/policy.schema';
 import { ProductionMonthSchema } from '@/modules/production/production-month.schema';
 import { DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
 import { DataUploadRowSchema } from '@/modules/production/data-upload-row.schema';
+import { UnregisteredAgentDataSchema } from '@/modules/production/unregistered-agent-data.schema';
 import {
   MetricValueSchema, MonthlyAgentDataSchema,
 } from '@/modules/production/monthly-agent-data.schema';
@@ -95,7 +97,15 @@ import {
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
+import { SurveyRunSchema } from '@/modules/surveys/survey-run.schema';
+import { SurveyParticipationSchema } from '@/modules/surveys/survey-participation.schema';
+import { SurveyResponseSchema } from '@/modules/surveys/survey-response.schema';
+import { AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
+import { QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { ProposalSchema } from '@/modules/proposals/proposal.schema';
+import { KpmBrandingSchema } from '@/modules/branding/kpm-branding.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
+import { KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -107,6 +117,8 @@ import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.s
 
 const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['users', UserSchema],
+  // UI-169 item 5 (ADR-0199 §3, §5): removing a link soft-deletes it, so who linked what stays readable.
+  ['accountLinks', AccountLinkSchema],
   ['companies', CompanySchema],
   ['companyOrgLevels', CompanyOrgLevelSchema],
   ['kpms', KpmSchema],
@@ -119,7 +131,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['joinRequests', JoinRequestSchema],
   // ADR-0157: a leader past the office's limit, waiting for AgencyBoost.
   ['leaderLimitRequests', LeaderLimitRequestSchema],
-  // P18.96-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
+  // P18.8-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
   ['memberInvites', MemberInviteSchema],
   ['transferRequests', TransferRequestSchema],
   ['groups', GroupSchema],
@@ -141,7 +153,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmProductConfigs', KpmProductConfigSchema],
   ['eventTypes', EventTypeSchema],
   ['events', EventSchema],
-  // P18.5-T5, T6: a member's RSVP, claim and confirmation, and their answer — PDP erasure is P19-T1's cascade, never a delete.
+  // P18.2-T5, T6: a member's RSVP, claim and confirmation, and their answer — PDP erasure is P20-T1's cascade, never a delete.
   ['eventRsvps', EventRsvpSchema],
   ['eventFeedback', EventFeedbackSchema],
   ['activityLogs', ActivityLogSchema],
@@ -152,6 +164,7 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['productionMonths', ProductionMonthSchema],
   ['dataUploadBatches', DataUploadBatchSchema],
   ['dataUploadRows', DataUploadRowSchema],
+  ['unregisteredAgentData', UnregisteredAgentDataSchema],
   ['campaigns', CampaignSchema],
   ['campaignChases', CampaignChaseSchema],
   ['campaignStandings', CampaignStandingSchema],
@@ -160,25 +173,38 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['qualificationRules', QualificationRuleSchema],
   // P11-T5. A finalized session is a dated record of the office; nothing hard-deletes one (AC-9).
   ['coachingSessions', CoachingSessionSchema],
-  // P11-T9. A note is cleared by a save and never deleted by a route; P19-T1's erasure reaches both.
+  // P11-T9. A note is cleared by a save and never deleted by a route; P20-T1's erasure reaches both.
   ['coachingProfiles', CoachingProfileSchema],
   ['leaderNotes', LeaderNoteSchema],
-  // P12-T2. A delete sets `deletedAt` and the entry leaves every calendar; P19-T1's erasure reaches it.
+  // P12-T2. A delete sets `deletedAt` and the entry leaves every calendar; P20-T1's erasure reaches it.
   ['calendarEvents', CalendarEventSchema],
-  // P13-T1 AC-8. No route deletes an activation; a graduated or expired one is kept, and P19-T1 reaches it.
+  // P13-T1 AC-8. No route deletes an activation; a graduated or expired one is kept, and P20-T1 reaches it.
   ['activationProgress', ActivationProgressSchema],
   // Phase 17. A company's playbook is configuration, never hard-deleted (invariant §3); an office's pitch
-  // document is replaced, never removed — *Replace* is the only change (D-replace) — and P19-T1 reaches it.
+  // document is replaced, never removed — *Replace* is the only change (D-replace) — and P20-T1 reaches it.
   ['recruitmentPlaybooks', RecruitmentPlaybookSchema],
   ['kpmRecruitmentPitchDocuments', RecruitmentPitchSlotSchema],
   // Phase 18 (D-recruit): an office's recruitment target per month, unique per (office, month), `kpmId`-led.
   ['kpmRecruitTargets', KpmRecruitTargetSchema],
+  // P19.3-T2 (UI-149): an office's setup marks, unique per (office, mark), `kpmId`-led.
+  ['kpmSetupMarks', KpmSetupMarkSchema],
   // Phase 18.1. *Delete meeting* writes `deletedAt` (ADR-0130 §5); a link expires or is revoked and stays the record
-  // of who shared what (ADR-0131 §4). P19-T1's erasure cascade reaches both.
+  // of who shared what (ADR-0131 §4). P20-T1's erasure cascade reaches both.
   ['leaderMeetings', LeaderMeetingSchema],
   ['leaderMeetingShareLinks', LeaderMeetingShareLinkSchema],
-  // P18.5-T1 AC-2. No route deletes a member's progress; P19-T1's erasure cascade and export reach it.
+  // P18.2-T1 AC-2. No route deletes a member's progress; P20-T1's erasure cascade and export reach it.
   ['trainingProgress', TrainingProgressSchema],
+  // P19.5-T4 (ADR-0216): a run is cancelled by `deletedAt`; nothing of a survey is hard-deleted.
+  ['surveyRuns', SurveyRunSchema],
+  ['surveyParticipation', SurveyParticipationSchema],
+  ['surveyResponses', SurveyResponseSchema],
+  // P19.5-T3 (ADR-0215 §6, §7): a target is cleared to `null`, a run frozen; neither is hard-deleted.
+  ['analyticsTargets', AnalyticsTargetSchema],
+  ['quantRuns', QuantRunSchema],
+  // P19.7-T2 (ADR-0221 §1): an agent's proposals, items inside; every index `kpmId`-led; deleted by `deletedAt`.
+  ['proposals', ProposalSchema],
+  // P19.6-T1 (ADR-0218 §1, §12): a KPM's own branding, one live row; `kpmId`-led; *Kembalikan ke default* soft-deletes it.
+  ['kpmBranding', KpmBrandingSchema],
 ];
 
 /**
@@ -211,6 +237,11 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'trainingContentLink (subdocument)',
     TrainingContentLinkSchema,
     'a subdocument of a module\'s content, for the same reason',
+  ],
+  [
+    'trainingContentHistoryEntry (subdocument)',
+    TrainingContentHistoryEntrySchema,
+    'a subdocument of trainingModules (P19.4-T1): it is deleted with the module that holds it, and is itself the kept history (ADR-0208 §3)',
   ],
   [
     'capabilityEntry (subdocument)',
@@ -319,6 +350,11 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     CommissionYearSchema,
     'a subdocument of products, for the same reason',
   ],
+  [
+    'objection (subdocument)',
+    ObjectionSchema,
+    'one objection card inside a product\'s attack plan (P19.4-T4, ADR-0209 §9): deleted with the product that holds it',
+  ],
   ['authTokens', AuthTokenSchema, 'self-expiring: revokedAt and expiresAt already model the lifecycle'],
   // P11-T5: the parts of a coaching session, each deleted with the session that holds it.
   [
@@ -378,7 +414,7 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
   [
     'leaderNoteRevision (subdocument)',
     LeaderNoteRevisionSchema,
-    'a text a note save replaced. **Append-only and never removed** apart from the note, which P19-T1\'s '
+    'a text a note save replaced. **Append-only and never removed** apart from the note, which P20-T1\'s '
       + 'erasure cascade reaches whole',
   ],
   // P12-T2: one member on a calendar entry, held inside the entry it belongs to.
@@ -399,7 +435,7 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'activationNote (subdocument)',
     ActivationNoteSchema,
     'the coaching note on a hire\'s activation: replaced by the next save, never removed apart from the '
-      + 'activation, which P19-T1\'s erasure cascade reaches whole',
+      + 'activation, which P20-T1\'s erasure cascade reaches whole',
   ],
   [
     'pitchConfirmation (subdocument)',
@@ -450,6 +486,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [TrainingContentSchema, 'TrainingContentSchema'],
   [TrainingContentFileSchema, 'TrainingContentFileSchema'],
   [TrainingContentLinkSchema, 'TrainingContentLinkSchema'],
+  [TrainingContentHistoryEntrySchema, 'TrainingContentHistoryEntrySchema'],
   [ActivationTemplateSchema, 'ActivationTemplateSchema'],
   [ActivationAspectSchema, 'ActivationAspectSchema'],
   [ActivationItemSchema, 'ActivationItemSchema'],
@@ -474,6 +511,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ProductionMonthSchema, 'ProductionMonthSchema'],
   [DataUploadBatchSchema, 'DataUploadBatchSchema'],
   [DataUploadRowSchema, 'DataUploadRowSchema'],
+  [UnregisteredAgentDataSchema, 'UnregisteredAgentDataSchema'],
   [MetricValueSchema, 'MetricValueSchema'],
   [GoalRevisionSchema, 'GoalRevisionSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
@@ -491,6 +529,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ProductDocumentRefSchema, 'ProductDocumentRefSchema'],
   [AttackPlanSchema, 'AttackPlanSchema'],
   [CommissionYearSchema, 'CommissionYearSchema'],
+  [ObjectionSchema, 'ObjectionSchema'],
   [MembershipSchema, 'MembershipSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
@@ -500,6 +539,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
+  [AccountLinkSchema, 'AccountLinkSchema'],
   [CoachingSessionSchema, 'CoachingSessionSchema'],
   [CoachingLastWeekSchema, 'CoachingLastWeekSchema'],
   [CoachingLastWeekItemSchema, 'CoachingLastWeekItemSchema'],
@@ -521,6 +561,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [RecruitmentPlaybookSchema, 'RecruitmentPlaybookSchema'],
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
   [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
+  [KpmSetupMarkSchema, 'KpmSetupMarkSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
   [LeaderMeetingSchema, 'LeaderMeetingSchema'],
   [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
@@ -528,6 +569,13 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
   [TrainingProgressSchema, 'TrainingProgressSchema'],
+  [SurveyRunSchema, 'SurveyRunSchema'],
+  [SurveyParticipationSchema, 'SurveyParticipationSchema'],
+  [SurveyResponseSchema, 'SurveyResponseSchema'],
+  [AnalyticsTargetSchema, 'AnalyticsTargetSchema'],
+  [QuantRunSchema, 'QuantRunSchema'],
+  [ProposalSchema, 'ProposalSchema'],
+  [KpmBrandingSchema, 'KpmBrandingSchema'],
 ]);
 
 describe('soft delete', () => {

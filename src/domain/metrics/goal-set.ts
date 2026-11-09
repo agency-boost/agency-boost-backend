@@ -1,7 +1,7 @@
 import { rateOver, type Rate } from './rate';
 
 /**
- * **A goal set**, and `GOAL_SET_RATE` (Phase 18.6, P18.6-T1 AC-5; OD-160 → option 1) — the PRD's *"Agents with a goal
+ * **A goal set**, and `GOAL_SET_RATE` (Phase 18.3, P18.3-T1 AC-5; OD-160 → option 1) — the PRD's *"Agents with a goal
  * set for the current period ≥80%"* (`prd.md` §8), and the Overview's *"{n} members have no goal set…"*.
  *
  * **A member has a goal set when they saved a goal for the office's current year whose annual APE target is above

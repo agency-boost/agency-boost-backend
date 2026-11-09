@@ -252,7 +252,7 @@ export class RoleChangeService {
   }
 
   /**
-   * **The senior rung a refused change involves, by the name a role is called** (ADR-0167 §10, OD-205; P18.95-T9
+   * **The senior rung a refused change involves, by the name a role is called** (ADR-0167 §10, OD-205; P18.7-T9
    * AC-1): the rung asked for when the change is onto it, the one they stand on when it is off it — `shortOfRung`,
    * so the default ladder says *AB* and a company's own rung its own name. Read only to word the refusal; a rung
    * since taken off the ladder is named by its code.

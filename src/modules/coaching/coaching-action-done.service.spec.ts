@@ -21,7 +21,7 @@ const session = (done: string[] = []) => ({
 });
 
 /**
- * **The coachee's tick, its every branch** (UI-104 point 4; the Phase 18.99 exit review, T1): the HTTP spec
+ * **The coachee's tick, its every branch** (UI-104 point 4; the Phase 18.11 exit review, T1): the HTTP spec
  * (`calendar-auto-items.int.spec.ts`) walks who may reach it; this pins what the service does once reached — nobody's
  * membership, a tick that changes nothing, and a session that went between the read and the write.
  */

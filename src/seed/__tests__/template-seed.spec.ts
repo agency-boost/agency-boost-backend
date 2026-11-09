@@ -6,6 +6,10 @@ import { configModule, provisionFrom } from '../../../test/config-module';
 import { up as namedTemplates } from '@/migrations/0023-named-templates';
 import { SEED_CAPABILITY_STAGES, SEED_PRODUCTS } from '@/domain/constants';
 import { TEMPLATE_LIBRARY } from '@/modules/tenants/template-library';
+import { OFFICE_TEMPLATE_KINDS } from '@/modules/config/template-defaults';
+
+/** The seven office kinds and the recruitment playbook (ADR-0210 §1): what this spec counts, whatever a later kind adds. */
+const T5_KINDS = [...OFFICE_TEMPLATE_KINDS, 'recruitment_playbook'] as const;
 import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
 import { BSD_CITY_SETTINGS, seedTemplateCopyFixture } from '../template-copy-fixture';
 import { seedDemo } from '../demo';
@@ -50,7 +54,20 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       name: 'Prudential template', isDefault: true, status: 'active', origin: { kind: 'migration' },
     });
     // Each kind published: the seed's own event types, and the rest as version 1 of the defaults.
-    expect(Object.values(template.publishedVersions).every((v) => v === 1)).toBe(true);
+    // *Amended 2026-11-05 (P19.4-T1, ADR-0208 §1):* training is version 2, the version that carries the company's
+    // material (`training-fixture.ts`, `seedTemplateMaterial`; pinned in `training-seed.spec.ts`).
+    // *Amended 2026-11-06 (P19.6-T4, ADR-0220 §4):* training is version 3 and capability version 2 — the newer names
+    // `training-names-fixture.ts` publishes so 0417's Owner has something for *Sinkron dari template* to show.
+    // *Amended 2026-11-06 (P19.6-T1, ADR-0218 §3):* the ninth section, *Tampilan* (`branding`), is never published by
+    // the migration or the seed — its default is "nothing set", so 0417 and the others show AgencyBoost's look; the
+    // seed brands 0555 itself (`branding-fixture.ts`), not the template.
+    const {
+      training_taxonomy: training, capability_ladder: capability, branding, ...rest
+    } = template.publishedVersions;
+    expect(Object.values(rest).every((v) => v === 1)).toBe(true);
+    expect(training).toBe(3);
+    expect(capability).toBe(2);
+    expect(branding).toBeNull();
     // The offices created before named templates — 0417, 0555, 0999, 0601, 0602 — are its.
     expect(template.officeCount).toBe(await col('kpms').countDocuments({ companyId: prudentialId, deletedAt: null }));
 
@@ -68,7 +85,10 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
     expect(templates[0]).toMatchObject({
       name: 'Sejahtera Baru Life template', isDefault: true, origin: { kind: 'empty' }, officeCount: 0,
     });
-    expect(Object.values(templates[0].publishedVersions).every((v) => v === null)).toBe(true);
+    // Nothing but *Advanced analytics*, whose four system columns are never missing (P19.5-T1; ADR-0214 §9).
+    const { advanced_analytics: analytics, ...rest } = templates[0].publishedVersions;
+    expect(Object.values(rest).every((v) => v === null)).toBe(true);
+    expect(analytics).toBe(1);
   });
 
   it('puts every template row under a template, and campaign kinds under none', async () => {
@@ -155,6 +175,16 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
     expect(view).toMatchObject({ startDate: '2026-09-30', state: 'open', total: 1 });
   });
 
+  it('P19.4-T5 AC-2 gives Allianz Life an archived rung nothing names — ABP, which /admin/org-levels lets the Super Admin delete', async () => {
+    const allianz = String((await col('companies').findOne({ slug: 'allianz-life' }))!._id);
+    expect(await col('companyOrgLevels').findOne({ companyId: allianz, code: 'ABP', deletedAt: null }))
+      .toMatchObject({ label: 'Associate Business Partner', status: 'archived' });
+    const named = { $or: [{ orgLevelCode: 'ABP' }, { appliesToOrgLevelCodes: 'ABP' }, { 'payload.ratios.appliesToOrgLevelCodes': 'ABP' }] };
+    for (const name of ['memberships', 'ratioDefinitions', 'activityCategories', 'companyTemplates', 'qualificationRules']) {
+      expect([name, await col(name).countDocuments(named)]).toEqual([name, 0]);
+    }
+  });
+
   describe('P13.2-T7: BSD City settings, saved from 0417 into Prudential', () => {
     const kpm0417 = async () => String((await col('kpms').findOne({ code: '0417' }))!._id);
 
@@ -168,7 +198,9 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
         id: BSD_CITY_SETTINGS._id, status: 'active', officeCount: 0,
         origin: { kind: 'office', kpmId: await kpm0417(), companyId: prudentialId },
       });
-      expect(Object.values(saved.publishedVersions)).toEqual(Array(7).fill(1));
+      // Saved from an office, which holds no playbook (ADR-0210 §4): its *Rekrutmen* is *Kosong*.
+      expect(OFFICE_TEMPLATE_KINDS.map((kind) => saved.publishedVersions[kind])).toEqual(Array(7).fill(1));
+      expect(saved.publishedVersions.recruitment_playbook).toBeNull();
     });
 
     it('ADR-0185: holds one change waiting — its lead stages a draft version 2, the rest as published', async () => {
@@ -177,9 +209,12 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       expect(Object.values(saved.sections).filter((s) => s.hasDraft)).toHaveLength(1);
       const draft = await wired.templateService.read(prudentialId, 'lead_pipeline', BSD_CITY_SETTINGS._id);
       expect(draft).toMatchObject({ status: 'draft', version: 2, publishedVersion: 1 });
-      // The default stays as published: one template of each kind for the walk to compare.
+      // The default stays as published: one template of each kind for the walk to compare — but *Advanced analytics*,
+      // where migration 0057 offers Prudential's §3 seed (`^[0-9]{8}$`) as a draft beside version 1 (P19.5-T1 AC-3).
       const prudential = (await wired.namedTemplates.list(prudentialId)).find((t) => t.isDefault)!;
-      expect(Object.values(prudential.sections).some((s) => s.hasDraft)).toBe(false);
+      const { advanced_analytics: analytics, ...rest } = prudential.sections;
+      expect(Object.values(rest).some((s) => s.hasDraft)).toBe(false);
+      expect(analytics).toEqual({ publishedVersion: 1, hasDraft: true });
     });
 
     it('holds what 0417\u2019s agents read: its published activity types, by code', async () => {
@@ -207,7 +242,7 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
   });
 
   /** Last, because its `--reset` run starts the database over. */
-  describe('P18.9-T3: the Template company (ADR-0164), made by migration 0037', () => {
+  describe('P18.6-T3: the Template company (ADR-0164), made by migration 0037', () => {
     const library = TEMPLATE_LIBRARY.companyId;
 
     async function expectTheLibrary() {
@@ -219,9 +254,12 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
         id: TEMPLATE_LIBRARY.defaultTemplateId, name: 'Default template', isDefault: true,
         origin: { kind: 'defaults' }, officeCount: 0,
       });
-      expect(Object.values(templates[0].publishedVersions)).toEqual(Array(7).fill(1));
+      // Seven kinds and, since migration 0056 ran in the seed, the playbook moved into it (ADR-0210 §5).
+      expect(T5_KINDS.map((kind) => templates[0].publishedVersions[kind])).toEqual(Array(8).fill(1));
       expect(await col('products').countDocuments({ companyId: library, deletedAt: null })).toBe(SEED_PRODUCTS.length);
       expect(await col('recruitmentPlaybooks').countDocuments({ companyId: library, deletedAt: null })).toBe(1);
+      expect(await col('recruitmentPlaybooks').findOne({ companyId: library }))
+        .toMatchObject({ migratedTo: { templateId: TEMPLATE_LIBRARY.defaultTemplateId, version: 1 } });
       expect(await col('qualificationRules').countDocuments({ companyId: library, deletedAt: null })).toBeGreaterThan(0);
       const ladder = await col('companyOrgLevels').find({ companyId: library, deletedAt: null }).sort({ displayOrder: 1 }).toArray();
       expect(ladder.map((r) => [r.code, r.leaderTier])).toEqual([['AGENT', null], ['AAB', 'associate'], ['AB', 'senior']]);
@@ -236,7 +274,8 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       await seedDemo({ clock, reset: true, log: quiet });
       await expectTheLibrary();
       expect(await col('companies').countDocuments({ kind: 'template' })).toBe(1);
-      expect(await col('companyTemplates').countDocuments({ companyId: library })).toBe(7);
+      expect(await col('companyTemplates').countDocuments({ companyId: library, kind: { $in: [...T5_KINDS] } }))
+        .toBe(8);
     }, RUN_MS);
   });
 });

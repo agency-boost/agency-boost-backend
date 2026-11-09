@@ -7,7 +7,7 @@ import { up as campaignKinds } from '@/migrations/0027-campaign-kinds';
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **Campaigns, as their chasers live them** (Phase 18.5, P18.5-T7 AC-11, P18.5-T8, P18.5-T9; the phase file's *Seed*):
+ * **Campaigns, as their chasers live them** (Phase 18.2, P18.2-T7 AC-11, P18.2-T8, P18.2-T9; the phase file's *Seed*):
  * 0417's seasonal and structural campaigns — running, upcoming and ended — and the chases across the coaching cast,
  * beside the two campaigns Phase 5 seeded. Every window counts from the run's month in Jakarta, in whole office months.
  * **No member, activity day, goal or production month is added**: every row is a campaign or a chase, which nothing
@@ -98,9 +98,10 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
   const months = await db.collection('monthlyAgentData').find({
     kpmId, deletedAt: null, membershipId: { $in: Object.values(cast) }, month: { $gte: `${M.slice(0, 4)}-01`, $lte: M },
   }).toArray();
-  const cell = (who: string, month: string, field: string): number | null => {
+  // A month's figure by kode (P19.5-T2; ADR-0214 §9).
+  const cell = (who: string, month: string, kode: string): number | null => {
     const row = months.find((r) => r.membershipId === who && r.month === month);
-    return (row?.[field] as { value?: number | null } | undefined)?.value ?? null;
+    return ((row?.values as Record<string, { value?: number | null }> | undefined)?.[kode])?.value ?? null;
   };
   const sum = (who: string, from: string, to: string, field: string) => {
     let total = 0;
@@ -108,14 +109,11 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
     return total;
   };
   const sprintFrom = addMonths(M, -2);
-  const rinaSprintApe = sum(cast.rina, sprintFrom, M, 'apeMonthly');
+  const rinaSprintApe = sum(cast.rina, sprintFrom, M, 'APE');
   const sprintApe = Math.max(JT, Math.floor((0.8 * rinaSprintApe) / JT) * JT);
-  const sprintHires = sum(cast.rina, sprintFrom, M, 'recruitmentMonthly') + 1;
-  const ytd = (who: string) => {
-    const held = months.filter((r) => r.membershipId === who && (r.apeYtd as { value?: number | null })?.value != null)
-      .sort((a, b) => String(b.month).localeCompare(String(a.month)));
-    return held.length > 0 ? (held[0].apeYtd as { value: number }).value : 0;
-  };
+  const sprintHires = sum(cast.rina, sprintFrom, M, 'RECRUITMENT') + 1;
+  // The year to date as the product reads it (R4): the APE of this year's months held.
+  const ytd = (who: string) => sum(who, `${M.slice(0, 4)}-01`, M, 'APE');
   const topYtd = Math.max(ytd(cast.rina), ytd(cast.agus), ytd(cast.dimas));
   const mdrtApe = topYtd > 0 ? Math.floor(topYtd / JT) * JT : 2_400 * JT;
   /*
@@ -134,10 +132,10 @@ export async function seedCampaignsFixture(deps: CampaignsFixtureDeps): Promise<
       .reduce((t, e) => t + e.count, 0);
   };
   const candidates: { metricKey: string; unit: string; title: string; rina: number | null; budi: number | null }[] = [
-    { metricKey: 'ROLLING_PERSISTENCY', unit: 'percentage', title: 'Persistency Push', rina: cell(cast.rina, last, 'persistencyMonthly'), budi: cell(cast.budi, last, 'persistencyMonthly') },
-    { metricKey: 'APE_ACHIEVED', unit: 'idr_minor', title: 'APE Push', rina: cell(cast.rina, last, 'apeMonthly'), budi: cell(cast.budi, last, 'apeMonthly') },
-    { metricKey: 'NEW_HIRES', unit: 'count', title: 'New Hire Push', rina: cell(cast.rina, last, 'recruitmentMonthly'), budi: cell(cast.budi, last, 'recruitmentMonthly') },
-    { metricKey: 'NEW_ACTIVE_AGENTS', unit: 'count', title: 'New Agent Push', rina: cell(cast.rina, last, 'newActiveAgentsMonthly'), budi: cell(cast.budi, last, 'newActiveAgentsMonthly') },
+    { metricKey: 'ROLLING_PERSISTENCY', unit: 'percentage', title: 'Persistency Push', rina: cell(cast.rina, last, 'PERSISTENCY'), budi: cell(cast.budi, last, 'PERSISTENCY') },
+    { metricKey: 'APE_ACHIEVED', unit: 'idr_minor', title: 'APE Push', rina: cell(cast.rina, last, 'APE'), budi: cell(cast.budi, last, 'APE') },
+    { metricKey: 'NEW_HIRES', unit: 'count', title: 'New Hire Push', rina: cell(cast.rina, last, 'RECRUITMENT'), budi: cell(cast.budi, last, 'RECRUITMENT') },
+    { metricKey: 'NEW_ACTIVE_AGENTS', unit: 'count', title: 'New Agent Push', rina: cell(cast.rina, last, 'NEW_ACTIVE_AGENTS'), budi: cell(cast.budi, last, 'NEW_ACTIVE_AGENTS') },
     { metricKey: 'CASCADE_ACTIVITY_TOUCHES', unit: 'count', title: 'Touches Push', rina: await touches(cast.rina), budi: await touches(cast.budi) },
   ];
   const chosen = candidates.find((c) => c.rina !== null && c.rina > 0 && (c.budi === null || c.rina > c.budi));

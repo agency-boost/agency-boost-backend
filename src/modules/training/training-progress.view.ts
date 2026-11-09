@@ -12,6 +12,8 @@ export type TrainingCountsView = TrainingCompletion;
 export interface TrainingModuleRowView {
   code: string;
   title: string;
+  /** *Deskripsi singkat* (P19.6-T4, ADR-0220 §2): drawn in grey under the title, or `null`. */
+  description: string | null;
   /** The kinds its live content holds, File · Video · Link order; empty when it holds nothing. */
   formats: TrainingItemKind[];
   status: TrainingStatus;
@@ -32,9 +34,11 @@ export interface TrainingArchivedModuleView {
 export interface TrainingSkillProgressView extends TrainingCountsView {
   code: string;
   label: string;
+  /** *Deskripsi singkat* (P19.6-T4, ADR-0220 §2): drawn in grey under the name, or `null`. */
+  description: string | null;
   /**
    * `false` for a skill no longer offered that still holds the member's history, and for a skill of a category with no
-   * published module (P18.97-T4 AC-9), which offers nothing.
+   * published module (P18.9-T4 AC-9), which offers nothing.
    */
   offered: boolean;
   modules: TrainingModuleRowView[];
@@ -46,7 +50,7 @@ export interface TrainingCategoryProgressView extends TrainingCountsView {
   label: string;
   description: string | null;
   /**
-   * `false` for a category no longer offered — or one with no published module (P18.97-T4 AC-9) — that still holds the
+   * `false` for a category no longer offered — or one with no published module (P18.9-T4 AC-9) — that still holds the
    * member's history. One with no published module and no history is left out of the read.
    */
   offered: boolean;
@@ -76,6 +80,8 @@ export interface TrainingItemView {
 export interface TrainingModulePageView {
   code: string;
   title: string;
+  /** *Deskripsi singkat* (P19.6-T4, ADR-0220 §2), or `null`. */
+  description: string | null;
   category: { code: string; label: string };
   skill: { code: string; label: string };
   items: TrainingItemView[];

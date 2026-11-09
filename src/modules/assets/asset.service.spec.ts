@@ -3,7 +3,7 @@ import { RequestContext } from '@/common/context/request-context';
 import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn } from '@/common/i18n/reader';
 import { AssetService } from './asset.service';
-import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from '@/domain/constants';
+import { ASSET_LIMITS, DOCUMENT_MIME_TYPES, TRAINING_FILE_MIME_TYPES } from '@/domain/constants';
 import {
   AssetOwner, ownerSegment, SignedUpload, StoragePort, StoredObject,
 } from './storage.port';
@@ -182,10 +182,10 @@ describe('AssetService', () => {
     });
 
     /*
-     * P18.7-T2 (the code review's L6): storage reports the type the bytes are (`content-sniff.ts`), which may differ
+     * P18.4-T2 (the code review's L6): storage reports the type the bytes are (`content-sniff.ts`), which may differ
      * from the claim — a PNG saved as `.jpg` — and the route's own list is what decides whether the file stays.
      */
-    it('P18.7-T2 a PNG claimed as a JPEG, on an image route: accepted, and recorded as image/png', async () => {
+    it('P18.4-T2 a PNG claimed as a JPEG, on an image route: accepted, and recorded as image/png', async () => {
       const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'image/jpeg' });
       storage.stored = { storageKey: 'k', mimeType: 'image/png', bytes: 2048 };
 
@@ -197,7 +197,7 @@ describe('AssetService', () => {
       });
     });
 
-    it('P18.7-T2 a JPEG on a PDF-only route: refused 415 by the route’s list, and nothing recorded', async () => {
+    it('P18.4-T2 a JPEG on a PDF-only route: refused 415 by the route’s list, and nothing recorded', async () => {
       const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
       storage.stored = { storageKey: 'k', mimeType: 'image/jpeg', bytes: 2048 };
 
@@ -209,7 +209,7 @@ describe('AssetService', () => {
     it.each([
       ['the whole allow-list', ASSET_LIMITS.ALLOWED_MIME_TYPES],
       ['a PDF-only route', DOCUMENT_MIME_TYPES],
-    ])('P18.7-T2 an .exe claimed as a PDF — storage reports octet-stream — on %s: refused, and nothing recorded', async (_route, allowed) => {
+    ])('P18.4-T2 an .exe claimed as a PDF — storage reports octet-stream — on %s: refused, and nothing recorded', async (_route, allowed) => {
       const { service, assets, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'application/pdf' });
       storage.stored = { storageKey: 'k', mimeType: 'application/octet-stream', bytes: 4096 };
 
@@ -228,7 +228,7 @@ describe('AssetService', () => {
     });
   });
 
-  it('P18.98-T5 AC-2 says each refusal in both languages: the English as it always was, and Indonesian', async () => {
+  it('P18.10-T5 AC-2 says each refusal in both languages: the English as it always was, and Indonesian', async () => {
     const said = async (call: Promise<unknown>) => {
       const refusal = (await call.catch((err: unknown) => err)) as DomainException;
       return [refusal.code, refusal.message, refusal.messageFor(readerIn('id'))];
@@ -254,6 +254,70 @@ describe('AssetService', () => {
       'ASSET_NOT_UPLOADED', 'That file never finished uploading. Try again.', 'File itu tidak selesai diunggah. Coba lagi.',
     ]);
     expect(storage.removed).toEqual([]);
+  });
+
+  describe('P19.6-T2 HTML only where a route names it (ADR-0217 §1)', () => {
+    const html = { folder: 'training', filename: 'lesson.html', mimeType: 'text/html', bytes: 40_000 };
+
+    it('P19.6-T2 AC-1 refuses text/html on a route that names no list, before anything is signed', async () => {
+      const { service, created, storage } = makeService();
+      const signing = jest.spyOn(storage, 'createSignedUpload');
+      await expect(service.requestUpload(ctx, html))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415 });
+      expect(signing).not.toHaveBeenCalled();
+      expect(created).toHaveLength(0);
+    });
+
+    it.each([['a training file’s list', TRAINING_FILE_MIME_TYPES], ['a document’s list', DOCUMENT_MIME_TYPES]])(
+      'P19.6-T2 AC-1 signs text/html on %s, and asks storage for that list', async (_list, allowed) => {
+        const { service, storage } = makeService();
+        const signing = jest.spyOn(storage, 'createSignedUpload');
+        await service.requestUpload(ctx, html, allowed);
+        expect(signing).toHaveBeenCalledWith(expect.objectContaining({ mimeType: 'text/html', allowedMimeTypes: allowed }));
+      },
+    );
+
+    it('P19.6-T2 AC-1 confirms an HTML file on its route, and refuses one storage holds as octet-stream', async () => {
+      const { service, storage } = makeService({ _id: 'a1', uploadState: 'pending', mimeType: 'text/html' });
+      storage.stored = { storageKey: 'k', mimeType: 'text/html', bytes: 40_000 };
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/training/1', TRAINING_FILE_MIME_TYPES))
+        .resolves.toMatchObject({ mimeType: 'text/html', uploadState: 'confirmed' });
+      // A file claimed as HTML whose bytes are not a document (`content-sniff.ts`).
+      storage.stored = { storageKey: 'k', mimeType: 'application/octet-stream', bytes: 40_000 };
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/training/1', TRAINING_FILE_MIME_TYPES))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415 });
+      // And an HTML file is refused on a route that names no list.
+      storage.stored = { storageKey: 'k', mimeType: 'text/html', bytes: 40_000 };
+      await expect(service.confirmUpload(ctx, 'dev/kpm-a/events/1'))
+        .rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED', status: 415 });
+    });
+
+    function companyService(stored: StoredObject) {
+      const storage = new StubStorage();
+      storage.stored = stored;
+      const assets = {
+        createCompanyAsset: jest.fn(async (d: Record<string, unknown>) => d),
+        findCompanyAsset: jest.fn(async () => ({ _id: 'a1', uploadState: 'pending' })),
+        updateCompanyAsset: jest.fn(async (_c: string, _k: string, set: Record<string, unknown>) => set),
+      };
+      const service = new AssetService(assets as never, storage, new FixedClock(new Date('2026-09-04T00:00:00Z')));
+      return { service, assets, storage };
+    }
+
+    it('P19.6-T2 AC-1 the company’s upload takes the template’s training list, and refuses HTML without it', async () => {
+      const { service, assets, storage } = companyService({ storageKey: 'k', mimeType: 'text/html', bytes: 40_000 });
+      const signing = jest.spyOn(storage, 'createSignedUpload');
+      await expect(service.requestCompanyUpload('co-1', html)).rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED' });
+      expect(signing).not.toHaveBeenCalled();
+
+      await service.requestCompanyUpload('co-1', html, 'tpl-1', TRAINING_FILE_MIME_TYPES);
+      expect(signing).toHaveBeenCalledWith(expect.objectContaining({ allowedMimeTypes: TRAINING_FILE_MIME_TYPES }));
+      expect(assets.createCompanyAsset).toHaveBeenCalledWith(expect.objectContaining({ templateId: 'tpl-1', mimeType: 'text/html' }));
+
+      await expect(service.confirmCompanyUpload('co-1', 'k', TRAINING_FILE_MIME_TYPES))
+        .resolves.toMatchObject({ mimeType: 'text/html', uploadState: 'confirmed' });
+      await expect(service.confirmCompanyUpload('co-1', 'k')).rejects.toMatchObject({ code: 'ASSET_TYPE_NOT_ALLOWED' });
+    });
   });
 
   describe('orphan reporting', () => {

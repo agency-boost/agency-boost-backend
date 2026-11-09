@@ -6,11 +6,11 @@ import {
 } from './index';
 
 /**
- * **Two languages, Indonesian by default** (ADR-0179 §1, P18.98-T1 AC-1): pinned so a change to either fails here
+ * **Two languages, Indonesian by default** (ADR-0179 §1, P18.10-T1 AC-1): pinned so a change to either fails here
  * before it changes what anybody reads. Documented once in `docs/00-product/metrics-and-definitions.md` §B.27; the
  * frontend's copy is read against this module by its `contract.spec.ts`.
  */
-describe('P18.98-T1 the languages (ADR-0179 §1)', () => {
+describe('P18.10-T1 the languages (ADR-0179 §1)', () => {
   it('AC-1 speaks two languages, Bahasa Indonesia and English, by their ISO 639-1 codes', () => {
     expect([...LANGUAGES]).toEqual(['id', 'en']);
   });
@@ -28,11 +28,11 @@ describe('P18.98-T1 the languages (ADR-0179 §1)', () => {
 });
 
 /**
- * **P18.98-T2 AC-1: the stored choice, read** (ADR-0179 §2). `users.locale` is `'id'`, `'en'` or `null`; nothing ever
+ * **P18.10-T2 AC-1: the stored choice, read** (ADR-0179 §2). `users.locale` is `'id'`, `'en'` or `null`; nothing ever
  * wrote it before the switch (ADR-0016), so every existing account holds `null`, and **there is no migration**: a `null`
  * reads as Indonesian here, wherever the API reads a person's language.
  */
-describe('P18.98-T2 a stored language, read', () => {
+describe('P18.10-T2 a stored language, read', () => {
   it('AC-1 reads a person who has chosen nothing — null, every account made before the switch — as Bahasa Indonesia', () => {
     expect(languageOf(null)).toBe('id');
     expect(languageOf(undefined)).toBe('id');
@@ -50,13 +50,13 @@ describe('P18.98-T2 a stored language, read', () => {
 });
 
 /**
- * **P18.98-T5 AC-1 — the live rule, and the same switch as the frontend's** (ADR-0179's dated note of 2026-10-29). The
- * Indonesian default went live for the API and the screens together, at P18.98-T4's exit (2026-10-29): a reader who has
+ * **P18.10-T5 AC-1 — the live rule, and the same switch as the frontend's** (ADR-0179's dated note of 2026-10-29). The
+ * Indonesian default went live for the API and the screens together, at P18.10-T4's exit (2026-10-29): a reader who has
  * chosen nothing reads Bahasa Indonesia, from both halves. Before it a reader who had chosen nothing read English, so
  * nothing turned Indonesian before the screens did; `unchosenLanguage(false)` still says so.
  */
-describe('P18.98-T5 the Indonesian default, live with the screens', () => {
-  it('AC-1 is live: one constant, true since P18.98-T4’s exit', () => {
+describe('P18.10-T5 the Indonesian default, live with the screens', () => {
+  it('AC-1 is live: one constant, true since P18.10-T4’s exit', () => {
     expect(LANGUAGE_LIVE).toBe(true);
   });
 

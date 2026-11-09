@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Provision the one GCP project AgencyBoost's staging and production share, around the VM that is
-# already running there (P18.7-T3, ADR-0152, ADR-0153, ADR-0155).
+# already running there (P18.4-T3, ADR-0152, ADR-0153, ADR-0155).
 #
 #   deploy/gcp/provision.sh --project <id> [options]
 #
@@ -161,7 +161,7 @@ ensure_sa() {
 # must never be given cloud-platform. Both APIs run as it (ADR-0155: an accepted risk while dark).
 ensure_sa "$runtime_sa" "AgencyBoost APIs on the VM (staging and production)"
 for env in "${envs[@]}"; do
-  # Per environment, and split by job (P18.7 review, M6): the builder may push that environment's images
+  # Per environment, and split by job (P18.4 review, M6): the builder may push that environment's images
   # and nothing else; the deployer may SSH in and run that environment's deploy, and push nothing.
   ensure_sa "$(builder_sa "$env")" "GitHub Actions builder, $env: push images"
   ensure_sa "$(deployer_sa "$env")" "GitHub Actions deployer, $env: SSH to the VM"
@@ -200,7 +200,7 @@ ensure_role() {
     run gcloud iam roles update "$1" --project="$project" --permissions="$3" >/dev/null
   else
     run gcloud iam roles create "$1" --project="$project" --stage=GA \
-      --title="$2" --description="$2 (P18.7, ADR-0152)" --permissions="$3" >/dev/null
+      --title="$2" --description="$2 (P18.4, ADR-0152)" --permissions="$3" >/dev/null
   fi
 }
 
@@ -253,7 +253,7 @@ for env in "${envs[@]}"; do
   # The browser posts uploads straight to the bucket from that environment's app (ADR-0153).
   run gcloud storage buckets update "gs://$bucket" --cors-file="$here/cors.$env.json"
   # Create and read, never delete: a replayed upload form cannot overwrite what it already wrote, and
-  # erasure (P19-T1) gets a signer of its own.
+  # erasure (P20-T1) gets a signer of its own.
   bind_bucket "$bucket" "$runtime_sa" roles/storage.objectCreator
   bind_bucket "$bucket" "$runtime_sa" roles/storage.objectViewer
 done
@@ -271,10 +271,10 @@ EOF
 run gcloud storage buckets update "gs://$backups" --lifecycle-file="$work/lifecycle.json"
 # Versioning stays off, so a name can be written once and nothing replaces what is under it.
 run gcloud storage buckets update "gs://$backups" --no-versioning
-# Create, list and read, never delete (P18.7 review, M1). `gcloud storage cp` reads the destination before it
+# Create, list and read, never delete (P18.4 review, M1). `gcloud storage cp` reads the destination before it
 # writes, which objectCreator alone does not allow, and **lists the bucket to do so**: without
 # storage.objects.list every upload was refused with "does not have storage.objects.list access", and no
-# backup reached the bucket from staging's first deploy until 2026-11-02 (P18.7-T8's pre-flight). Listing shows
+# backup reached the bucket from staging's first deploy until 2026-11-02 (P18.4-T8's pre-flight). Listing shows
 # only the names, which are timestamps of objects this role may read anyway. Overwriting needs delete, so this
 # role cannot replace a backup either: a VM that is compromised can add a backup and never remove one.
 ensure_role agencyboostBackupWriter "AgencyBoost backup writer" \
@@ -283,7 +283,7 @@ bind_bucket "$backups" "$runtime_sa" "projects/$project/roles/agencyboostBackupW
 
 # --- Artifact Registry -----------------------------------------------------------------------------
 
-# A repository per environment (P18.7 review). Only that environment's gh-builder may push to it, so
+# A repository per environment (P18.4 review). Only that environment's gh-builder may push to it, so
 # no staging identity can put an image where production pulls from; the VM reads both. Tags are
 # immutable: once pushed, a tag names one digest for good.
 cat >"$work/cleanup.json" <<'EOF'
@@ -393,7 +393,7 @@ else
     --display-name="GitHub Actions"
 fi
 mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id,attribute.environment=assertion.environment,attribute.ref=assertion.ref,attribute.workflow_ref=assertion.workflow_ref"
-# A token is exchanged at all only when everything about it matches one environment (P18.7 review, M6):
+# A token is exchanged at all only when everything about it matches one environment (P18.4 review, M6):
 # this repository and its owner, by numeric id; then either staging, from development, through
 # deploy.yml or seed-staging.yml, or production, from main, through deploy.yml. workflow_ref is
 # `<owner>/<repo>/.github/workflows/<file>@<ref>`; it is matched by its end, so a rename of the
@@ -430,7 +430,7 @@ done
 # --- alerting ------------------------------------------------------------------------------------------
 
 # A failed backup logs AGENCYBOOST_BACKUP_FAILED (agencyboost-backup-failed.service), which the Ops
-# Agent carries to Cloud Logging. With --alert-email, that line mails the operators (P18.7 review, M1).
+# Agent carries to Cloud Logging. With --alert-email, that line mails the operators (P18.4 review, M1).
 # Through the Monitoring REST API with curl, because the gcloud commands for alert policies are alpha.
 if [[ -n $alert_email ]]; then
   policy_name="AgencyBoost backup failed"

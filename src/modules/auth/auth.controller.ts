@@ -20,7 +20,9 @@ import { corsOriginsOf } from '@/config/cors-origins';
 import { initialsOf, User, UserDocument } from '@/modules/users/user.schema';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { MembershipRepository } from '@/modules/org/membership.repository';
-import { refreshCookieOptions } from '@/modules/auth/refresh-cookie';
+import {
+  LINKED_REFRESH_COOKIE, REFRESH_COOKIE, REFRESH_COOKIE_MAX_AGE_MS, refreshCookieOptions,
+} from '@/modules/auth/refresh-cookie';
 import { isForeignOrigin, ownOriginOf } from '@/modules/auth/request-origin';
 import { AccessTokenDto } from '@/modules/auth/session.response.dto';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
@@ -28,7 +30,9 @@ import { ActivationNav, activationNavFor } from '@/modules/activation/activation
 import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
 import { InvitesService } from '@/modules/org/invites.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
+import { BrandingReader } from '@/modules/branding/branding-reader';
 import { AuthService } from './auth.service';
+import { AccountLinksService } from './account-links.service';
 import { RateLimiter } from './rate-limiter';
 import {
   ChangeEmailDto, ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
@@ -45,10 +49,9 @@ import {
  *
  * Swagger still works: the browser holds the cookie, so /auth/refresh and /auth/logout
  * succeed from the UI without pasting anything.
+ *
+ * Its name, and the linked login's beside it (ADR-0199 §4), live in `refresh-cookie.ts` with their attributes.
  */
-const REFRESH_COOKIE = 'agencyboost_refresh';
-
-const REFRESH_COOKIE_MAX_AGE_MS = 30 * 86_400_000;
 
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const FORGOT_LIMIT = 3;
@@ -65,16 +68,21 @@ const EMAIL_CHANGE_LIMIT = 5;
 const EMAIL_CHANGE_WINDOW_SECONDS = 60 * 60;
 
 /**
- * Refreshing, per session, per hour (P4-T13).
+ * Refreshing, per session, **per minute** (P4-T13; *changed 2026-11-04*, P19-T5 AC-3, UI-125).
  *
- * A refresh rotates the token, so a healthy client asks about four times an hour on a
- * fifteen-minute access token. Sixty is far above that and far below a loop: it catches a
- * client stuck in one without ever refusing a person using the product.
+ * A refresh rotates the token, and a healthy client asks about four times an hour on a fifteen-minute access token —
+ * **plus once for every page the browser loads in full**: the access token lives in memory only, so typing an address,
+ * reloading, or opening a link in a new tab costs a refresh. It was sixty an hour, and that was production's 429s: a
+ * Super Admin walking the console by address at four window sizes spent the hour's sixty, every refresh after was
+ * `429` for the rest of the hour, and the app read each as *no session* and sent them to sign in (the phase file's
+ * *Progress*, AC-3). Thirty a minute is a page load every two seconds, sustained, and still far below a client stuck in
+ * a loop, which asks many times a second; and a refusal now lasts a minute at most, which the client waits out
+ * (`retryAfterSeconds`, `api-client.ts`) without signing anybody out.
  */
-const REFRESH_LIMIT = 60;
-const REFRESH_WINDOW_SECONDS = 60 * 60;
+export const REFRESH_LIMIT = 30;
+export const REFRESH_WINDOW_SECONDS = 60;
 
-/** What `/auth/refresh` and `/auth/logout` answer a page on a foreign origin (P18.7-T1), as Swagger shows it. */
+/** What `/auth/refresh` and `/auth/logout` answer a page on a foreign origin (P18.4-T1), as Swagger shows it. */
 const ORIGIN_REFUSED_RESPONSE = {
   status: HttpStatus.FORBIDDEN,
   description:
@@ -94,10 +102,10 @@ const REFRESH_REFUSED =
   + 'session to refresh. `AUTH_SESSION_ENDED`: a refresh token was presented and no longer works — unknown or '
   + 'malformed, expired, revoked or already rotated away; which of them is not said.';
 
-/** The limiter's key for sign-ups from one client address (`REGISTRATION`; the P18.96 exit review, L2). */
+/** The limiter's key for sign-ups from one client address (`REGISTRATION`; the P18.8 exit review, L2). */
 export const registrationLimitKey = (ip: string): string => `register:ip:${ip}`;
 
-/** What `/auth/login` answers a page on a foreign origin (P18.7-T1), cookie or not. */
+/** What `/auth/login` answers a page on a foreign origin (P18.4-T1), cookie or not. */
 const LOGIN_ORIGIN_REFUSED_RESPONSE = {
   status: HttpStatus.FORBIDDEN,
   description:
@@ -122,12 +130,12 @@ export class AuthController {
      */
     @Optional() @Inject(ActivationNav) private readonly activationNav: ActivationNav | null = null,
     /*
-     * P18.8-T6 AC-1: the groups and the office on the sidebar's profile line (ADR-0159 §5). Optional by its token,
+     * P18.5-T6 AC-1: the groups and the office on the sidebar's profile line (ADR-0159 §5). Optional by its token,
      * as the port above, so a harness without it answers the role alone.
      */
     @Optional() @Inject(ProfileLineReader) private readonly profileLine: ProfileLineReader | null = null,
     /*
-     * P18.96-T3 AC-4: registration on a leader's invite joins the office. By its token, as the ports above, so a
+     * P18.8-T3 AC-4: registration on a leader's invite joins the office. By its token, as the ports above, so a
      * harness that never registers on an invite builds this without the org module's graph.
      */
     @Optional() @Inject(InvitesService) private readonly invites: InvitesService | null = null,
@@ -137,6 +145,16 @@ export class AuthController {
      * a spec that builds this controller for something else reads no photo, `null`, and the initials are drawn.
      */
     @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
+    /*
+     * **The linked login** (UI-169 item 5; ADR-0199 §3): `GET /auth/me`'s `linkedLogin`. Optional, as the readers above
+     * are: a harness that builds this controller for something else answers `null`, no link.
+     */
+    @Optional() @Inject(AccountLinksService) private readonly accountLinks: AccountLinksService | null = null,
+    /*
+     * **The KPM's branding** (P19.6-T1 AC-12; ADR-0218 §8): `GET /auth/me`'s `branding`, so the colours arrive with the
+     * session and no second call is made. Optional, as the readers above: a harness without it answers `null`.
+     */
+    @Optional() @Inject(BrandingReader) private readonly branding: BrandingReader | null = null,
   ) {}
 
   /**
@@ -171,6 +189,11 @@ export class AuthController {
     res.clearCookie(REFRESH_COOKIE, this.refreshCookieOptions());
   }
 
+  /** The linked login's parked session (ADR-0199 §4), cleared with the same attributes it was set with. */
+  private clearLinkedRefreshCookie(res: Response): void {
+    res.clearCookie(LINKED_REFRESH_COOKIE, this.refreshCookieOptions());
+  }
+
   /**
    * Cookie first; an explicit body value is accepted for non-browser clients.
    *
@@ -193,7 +216,7 @@ export class AuthController {
   }
 
   /**
-   * **A page on another origin may not set, spend or end this browser's session** (P18.7-T1, ADR-0152).
+   * **A page on another origin may not set, spend or end this browser's session** (P18.4-T1, ADR-0152).
    *
    * Allowed: the origins `CORS_ORIGINS` lists, and the API's own (Swagger UI at `/api/docs` posts to the
    * API it is served from). Refused: any other `Origin`. No `Origin` at all is not a page and is let
@@ -261,17 +284,17 @@ export class AuthController {
     type: ApiErrorEnvelope,
   })
   async register(@Body() dto: RegisterDto, @Req() req: Request) {
-    // Per client address, before anything is read (the P18.96 exit review, L2): a script making accounts, or walking
+    // Per client address, before anything is read (the P18.8 exit review, L2): a script making accounts, or walking
     // agent codes against `AGENT_CODE_TAKEN`, is stopped here, as an invite link's banner stops one walking tokens.
     this.limit(registrationLimitKey(req.ip ?? 'unknown'), REGISTRATION.MAX_PER_ADDRESS, REGISTRATION.WINDOW_SECONDS);
     const { inviteToken, ...input } = dto;
     if (!inviteToken || !this.invites) {
-      // The verification email in the language of the page that asked (P18.98-T5 AC-5).
+      // The verification email in the language of the page that asked (P18.10-T5 AC-5).
       await this.auth.register(input, readerOfRequest(req));
       return { status: 'verification_sent' };
     }
     /*
-     * **On a leader's invite** (ADR-0170 §3, P18.96-T3 AC-4): the invite's insurer and code, whatever the form sent,
+     * **On a leader's invite** (ADR-0170 §3, P18.8-T3 AC-4): the invite's insurer and code, whatever the form sent,
      * and the membership made at once under the leader — for an account made here and now. An address that already
      * exists answers as it always has, and joins nobody to anything: that would let anybody holding a link attach
      * somebody else's account to an office.
@@ -327,7 +350,7 @@ export class AuthController {
    * The body is **optional**: the refresh token normally arrives in the
    * `agencyboost_refresh` cookie, and `RefreshDto` is the fallback for a client that
    * cannot hold one. `dto?:` is erased before Swagger sees it, so the document said
-   * required until P3.5-T11 — a generated client would have refused to call it without a
+   * required until P3.1-T11 — a generated client would have refused to call it without a
    * body it does not have.
    */
   @ApiBody({ type: RefreshDto, required: false })
@@ -380,18 +403,23 @@ export class AuthController {
    * The body is **optional**: the refresh token normally arrives in the
    * `agencyboost_refresh` cookie, and `RefreshDto` is the fallback for a client that
    * cannot hold one. `dto?:` is erased before Swagger sees it, so the document said
-   * required until P3.5-T11 — a generated client would have refused to call it without a
+   * required until P3.1-T11 — a generated client would have refused to call it without a
    * body it does not have.
    */
   @ApiBody({ type: RefreshDto, required: false })
   // The three routes somebody on a generated password may reach: see who they are,
-  // replace it, or leave (P3.6-T4).
+  // replace it, or leave (P3.2-T4).
   @AllowTemporaryPassword()
   @Post('logout')
   // Signing out is always available, support session or not.
   @AllowWhileReadOnly()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'End this session' })
+  @ApiOperation({
+    summary: 'End this session',
+    description:
+      '**Ends both sessions this browser holds** where a linked login is signed in on it too (`agencyboost_refresh_linked`): '
+      + 'leaving is leaving. Both cookies are cleared.',
+  })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: '' })
   @ApiResponse(ORIGIN_REFUSED_RESPONSE)
   async logout(
@@ -399,17 +427,35 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto?: RefreshDto,
   ) {
-    this.refuseForeignOriginWithCookie(req);
-    const fromCookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const cookies = req.cookies as Record<string, string> | undefined;
+    const linked = cookies?.[LINKED_REFRESH_COOKIE];
+    // A page on another origin may end neither session (P18.4-T1): the parked one is this browser's as much.
+    if (linked) this.refuseForeignOrigin(req);
+    else this.refuseForeignOriginWithCookie(req);
+    const fromCookie = cookies?.[REFRESH_COOKIE];
     const token = fromCookie ?? dto?.refreshToken;
     if (token) await this.auth.logout(token);
+    /*
+     * ***Keluar* ends both** (UI-169 item 5; ADR-0199 §4): the linked login's session parked here is revoked as the
+     * active one is, and both cookies go. *Sign out everywhere* and a password change end one login's sessions only.
+     */
+    if (linked) await this.auth.logout(linked);
     this.clearRefreshCookie(res);
+    if (linked) this.clearLinkedRefreshCookie(res);
   }
 
   @Public()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Consume a verification token' })
+  @ApiOperation({
+    summary: 'Verify an address with its link\'s token',
+    description:
+      'ADR-0190 (UI-163). Sent when *Verifikasi email saya* is pressed on `/verify-email/[token]`, never when the '
+      + 'page loads, so a mail scanner that opens the link spends nothing. `200 { status: \'verified\' }` verifies the '
+      + 'address — and answers the same for **an address already verified**, whatever state its link is in (pressed '
+      + 'again, an older mail, after a reset). A token that names nobody, or one that expired or was spent before the '
+      + 'address was verified, is `400 AUTH_TOKEN_INVALID`.',
+  })
   async verifyEmail(@Body() dto: TokenDto) {
     await this.auth.verifyEmail(dto.token);
     return { status: 'verified' };
@@ -441,7 +487,7 @@ export class AuthController {
   })
   async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     this.limit(`forgot:${dto.email.toLowerCase()}`, FORGOT_LIMIT, FORGOT_WINDOW_SECONDS);
-    // The reset email in the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
+    // The reset email in the language of the page that asked, for a person who has saved none (P18.10-T5 AC-5).
     await this.auth.forgotPassword(dto.email, readerOfRequest(req));
     return { status: 'accepted' };
   }
@@ -451,10 +497,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Set a new password with a reset token',
-    description: 'Revokes every existing session.',
+    description:
+      'Revokes every existing session. Marks the address verified where it was not — the link proved the mailbox — and '
+      + 'emails *Kata sandi Anda diubah* to it (ADR-0190 §3, §5).',
   })
-  async resetPassword(@Body() dto: ResetPasswordDto) {
-    await this.auth.resetPassword(dto.token, dto.newPassword);
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
+    // The password-changed mail in the language of the page that asked, for a person who has saved none.
+    await this.auth.resetPassword(dto.token, dto.newPassword, readerOfRequest(req));
     return { status: 'reset' };
   }
 
@@ -525,17 +574,19 @@ export class AuthController {
 
   @ApiBearerAuth()
   // The three routes somebody on a generated password may reach: see who they are,
-  // replace it, or leave (P3.6-T4).
+  // replace it, or leave (P3.2-T4).
   @AllowTemporaryPassword()
   @Post('change-password')
   @RefuseInSupportSession()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Change your password',
-    description: 'Revokes your other sessions. Refused `403 PERM_DENIED` in any support session.',
+    description:
+      'Revokes your other sessions, and emails *Kata sandi Anda diubah* to your address (ADR-0190 §5). Refused '
+      + '`403 PERM_DENIED` in any support session.',
   })
-  async changePassword(@Ctx() ctx: RequestContext, @Body() dto: ChangePasswordDto) {
-    await this.auth.changePassword(ctx.userId, dto.currentPassword, dto.newPassword);
+  async changePassword(@Ctx() ctx: RequestContext, @Body() dto: ChangePasswordDto, @Req() req: Request) {
+    await this.auth.changePassword(ctx.userId, dto.currentPassword, dto.newPassword, readerOfRequest(req));
     return { status: 'changed' };
   }
 
@@ -557,14 +608,14 @@ export class AuthController {
   })
   async requestEmailChange(@Ctx() ctx: RequestContext, @Body() dto: ChangeEmailDto, @Req() req: Request) {
     this.limit(`email-change:${ctx.userId}`, EMAIL_CHANGE_LIMIT, EMAIL_CHANGE_WINDOW_SECONDS);
-    // Both emails in the language of the page that asked, for a person who has saved none (P18.98-T5 AC-5).
+    // Both emails in the language of the page that asked, for a person who has saved none (P18.10-T5 AC-5).
     await this.auth.requestEmailChange(ctx.userId, dto.newEmail, dto.currentPassword, readerOfRequest(req));
     return { status: 'accepted' };
   }
 
   @ApiBearerAuth()
   // The three routes somebody on a generated password may reach: see who they are,
-  // replace it, or leave (P3.6-T4).
+  // replace it, or leave (P3.2-T4).
   @AllowTemporaryPassword()
   @Get('me')
   @ApiOperation({
@@ -594,13 +645,18 @@ export class AuthController {
         avatarUrl: this.avatarLinks ? await this.avatarLinks.linkFor(user?.avatarUrl) : null,
         initials: initialsOf(user?.fullName ?? ''),
         platformRole: ctx.platformRole,
+        /*
+         * **Whether the address is verified** (P19-T1 AC-4; UI-163, ADR-0190 §4): an account signs in before it is, and
+         * every shell says *"Verifikasi email Anda · Kirim ulang"* while this is `false`.
+         */
+        emailVerified: Boolean(user?.emailVerifiedAt),
         // What a person records (ADR-0158): `null` is *Not recorded* — somebody who arrived before it was asked.
         dateOfBirth: user?.dateOfBirth ?? null,
         gender: user?.gender ?? null,
         companyJoinMonth: user?.companyJoinMonth ?? null,
         workStatus: ctx.membershipId ? (membership?.workStatus ?? null) : (user?.registeredWorkStatus ?? null),
         /*
-         * **The language in force, and whether it was chosen** (ADR-0179 §2; P18.98-T2 AC-1, AC-5). `locale` is never
+         * **The language in force, and whether it was chosen** (ADR-0179 §2; P18.10-T2 AC-1, AC-5). `locale` is never
          * `null`: a person who has chosen nothing reads Bahasa Indonesia (`languageOf`). `localeChosen` says which it
          * is, because the app treats the two apart at sign-in — a saved choice wins over the browser's cookie and
          * rewrites it, and an account with none keeps the language the browser already had, writing nothing.
@@ -610,21 +666,19 @@ export class AuthController {
       },
       /*
        * The context's membership — its `isCoreLeader` the effective flag, the tag on a leader rung (ADR-0159 §4) — and
-       * what the sidebar's profile line says after the role (§5, P18.8-T6): the member's live tag groups, A to Z, and
+       * what the sidebar's profile line says after the role (§5, P18.5-T6): the member's live tag groups, A to Z, and
        * their office's code and branch.
        */
       membership: ctx.membership
         ? { ...ctx.membership, isCoreLeader: ctx.isCoreLeader, groups: line.groups, office: line.office }
         : null,
       isImpersonating: ctx.isImpersonating,
-      // So the banner can say which kind of session this is (P4-T10).
+      // `true` in every session (P4-T10; ADR-0206 §4): the banner says it only looks. The setup session's purpose and
+      // write scope are gone from here with it (P19.4-T2).
       impersonationReadOnly: ctx.impersonationReadOnly,
-      // And why it was started, with what a setup session may write besides reading (ADR-0162).
-      impersonationPurpose: ctx.impersonationPurpose,
-      impersonationWriteScope: ctx.impersonationWriteScope,
       impersonatedBy: ctx.impersonatorUserId,
       /*
-       * The reason every other route is answering 403 (P3.6-T4).
+       * The reason every other route is answering 403 (P3.2-T4).
        *
        * `/auth/me` is one of the three routes a temporary password may reach, so it is
        * the only place the client can learn what state it is in. Carried here rather than
@@ -640,6 +694,17 @@ export class AuthController {
        */
       activation: nav.activation,
       newHires: nav.newHires,
+      /*
+       * **The caller's other login** (UI-169 item 5; ADR-0199 §3): its address, its name and its views, for the account
+       * menu's switcher — `null` with no link, and always in a support session (§7).
+       */
+      linkedLogin: this.accountLinks ? await this.accountLinks.linkedLoginFor(ctx) : null,
+      /*
+       * **What the session's KPM shows** (P19.6-T1 AC-12; ADR-0218 §8): its version, its palette (`null`: AgencyBoost's
+       * colours), the logo's size, which images and poses it has, and a lesson's colours (ADR-0217 §5) — for the KPM the
+       * session is in, a view-as session's included (AC-17); `null` with no KPM.
+       */
+      branding: this.branding ? await this.branding.forSession(ctx) : null,
     };
   }
 
@@ -655,14 +720,14 @@ export class AuthController {
       + 'empty or `null` clears it) — each optional, none of the others clearable. A birth date must be in the '
       + 'past and at least 18 years ago and a join month not in the future, else `400 VALIDATION_FAILED` naming the field; a `locale` that is not `id` or `en`, `null` '
       + 'included, is `400 VALIDATION_FAILED` with `details.violations`. Work status is written on your membership '
-      + 'in your office, and on your account until you have one. **Refused `403 PERM_DENIED` in any support '
-      + 'session**, read-only, setup or elevated: a person\'s own account, their language included, is theirs to '
-      + 'change.',
+      + 'in your office, and on your account until you have one. **Refused in any support session**, '
+      + '`403 IMPERSONATION_READ_ONLY` as every write of one is (ADR-0206 §4): a person\'s own account, their language '
+      + 'included, is theirs to change.',
   })
   async updateMe(@Ctx() ctx: RequestContext, @Body() dto: UpdateProfileDto) {
     const { workStatus, ...account } = dto;
     /*
-     * **The person's own word, in no session's hands** (P18.8-T4 AC-6, ADR-0162 §4): `@RefuseInSupportSession`
+     * **The person's own word, in no session's hands** (P18.5-T4 AC-6, ADR-0162 §4): `@RefuseInSupportSession`
      * refuses the whole route in any session, so a birth date, a gender or a work status — and the name and
      * pronoun beside them — are never recorded in their name. It refused the four fields alone until ADR-0162.
      */

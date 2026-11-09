@@ -84,12 +84,24 @@ export abstract class StoragePort {
    * honest source for an object's real type and size is what storage holds. A client's
    * claim is a claim — and a vendor that only keeps the claim (Cloud Storage keeps the
    * form's `Content-Type`) has the type read from the stored bytes by its adapter
-   * (`content-sniff.ts`, P18.7-T2), reporting `application/octet-stream` where they
+   * (`content-sniff.ts`, P18.4-T2), reporting `application/octet-stream` where they
    * disagree.
    */
   abstract describe(storageKey: string): Promise<StoredObject | null>;
 
   abstract remove(storageKey: string): Promise<void>;
+
+  /**
+   * **An object's bytes, at most `maxBytes` of them, or `null` where storage holds nothing** (P19.6-T1; ADR-0218 §2,
+   * §4): a KPM's branding images are read whole — an upload at confirm, to check and resize it (1 MB at most), and a
+   * size made from one, for the public route that serves it from the private bucket. A larger object throws rather
+   * than being read. Not abstract, so a stub that never reads keeps compiling; an adapter that cannot read refuses.
+   */
+  async read(storageKey: string, maxBytes: number): Promise<Buffer | null> {
+    void storageKey;
+    void maxBytes;
+    throw new Error('This storage cannot read an object back.');
+  }
 
   /**
    * **A second, independent copy of a stored object, under another owner's folder** (P13.2-T7,

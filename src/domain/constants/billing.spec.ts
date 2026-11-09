@@ -1,4 +1,7 @@
-import { BILLING_ANNUAL_DISCOUNT_PCT, BILLING_CURRENCY, BILLING_PRICE_TIERS, MINOR_UNITS_PER_MAJOR } from './index';
+import {
+  BILLING_ANNUAL_DISCOUNT_PCT, BILLING_CURRENCY, BILLING_PRICE_TIERS, MINOR_UNITS_PER_MAJOR, SUBSCRIPTION_PLAN_MONTHS,
+  SUBSCRIPTION_PLANS,
+} from './index';
 
 /**
  * **The quote tool's price table, pinned** (P13.2-T2 AC-1; ADR-0111 §3).
@@ -83,5 +86,12 @@ describe('the price table (Billing_Subscription.html:420-426)', () => {
       }
       expect(monthly(84, rate)).toBeLessThanOrEqual(monthly(101, rate));
     });
+  });
+});
+
+describe('a subscription’s plan (P19.4-T3; ADR-0211 §1)', () => {
+  it('P19.4-T3 AC-10 is six months or annual, and runs 6 or 12 months — the quote’s two periods', () => {
+    expect(SUBSCRIPTION_PLANS).toEqual(['six_months', 'annual']);
+    expect(SUBSCRIPTION_PLAN_MONTHS).toEqual({ six_months: 6, annual: 12 });
   });
 });

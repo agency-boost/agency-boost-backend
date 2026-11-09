@@ -23,14 +23,14 @@ import { OrgLevelService } from './org-level.service';
 const NOW = new Date('2026-10-26T03:00:00Z');
 
 /**
- * **A rung's leader tier over HTTP** (P18.8-T1 AC-1, AC-2; ADR-0156 §1, §5): the create and update routes take
+ * **A rung's leader tier over HTTP** (P18.5-T1 AC-1, AC-2; ADR-0156 §1, §5): the create and update routes take
  * `leaderTier`; a change while any live membership stands on the rung — in any office of the company — is refused
  * `409 ORG_LEVEL_TIER_IN_USE` with the count and nothing written; nobody but the Super Admin reaches either.
  *
  * `OrgLevelService` is real over a real database, its membership count through the named unscoped method; the
  * controller's other collaborators are inert, since no route here reaches them.
  */
-describe('POST and PATCH /admin/org-levels — the leader tier (P18.8-T1)', () => {
+describe('POST and PATCH /admin/org-levels — the leader tier (P18.5-T1)', () => {
   let app: INestApplication;
   let companies: mongoose.Model<Company>;
   let levels: mongoose.Model<CompanyOrgLevel>;
@@ -164,7 +164,7 @@ describe('POST and PATCH /admin/org-levels — the leader tier (P18.8-T1)', () =
     expect(refused.body.error.message).toContain('1 person stands on Unit Manager');
   });
 
-  it('P18.98-T5 AC-7 refuses the change in Indonesian for an Indonesian reader, the count and the label as they are', async () => {
+  it('P18.10-T5 AC-7 refuses the change in Indonesian for an Indonesian reader, the count and the label as they are', async () => {
     const [rung] = (await add({ code: 'SM', label: 'Senior Manager' }).expect(201)).body;
     await stand(rung.orgLevelId, 'SM', '66f0000000000000000000a1');
     await stand(rung.orgLevelId, 'SM', '66f0000000000000000000b1');

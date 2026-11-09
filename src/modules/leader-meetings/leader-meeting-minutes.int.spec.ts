@@ -50,9 +50,9 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
   afterEach(() => (wired.clock as FixedClock).set(ROSTER_NOW));
 
   describe('P18.1-T2 AC-5, ADR-0130 §3 the agenda a new meeting starts from', () => {
-    it('P18.1-T2 AC-5, P18.97-T2 AC-4 an office’s first: the prototype’s ten, PICs empty, the meeting’s own month; no rows, nothing written', async () => {
+    it('P18.1-T2 AC-5, P18.9-T2 AC-4 an office’s first: the prototype’s ten, PICs empty, the meeting’s own month; no rows, nothing written', async () => {
       // Made by a context with no reader: nobody's choice, so the stored words are Bahasa Indonesia since the default
-      // went live (P18.98-T4's exit; P18.98-T5 AC-6) — the catalogue's, in the prototype's order.
+      // went live (P18.10-T4's exit; P18.10-T5 AC-6) — the catalogue's, in the prototype's order.
       const first = await office.forum.create(office.ownerOfB(), { title: 'Strategic Check-in — #1', date: '2026-10-13' });
       expect(first.number).toBe(1);
       const view = await office.forum.read(office.ownerOfB(), first.id);
@@ -86,7 +86,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       expect([copied.actionItems, copied.writtenIn]).toEqual([[], false]);
     });
 
-    it('P18.97-T2 AC-4 every new meeting re-dates the month item, a copied agenda included — across a year’s edge — and copies the rest as typed', async () => {
+    it('P18.9-T2 AC-4 every new meeting re-dates the month item, a copied agenda included — across a year’s edge — and copies the rest as typed', async () => {
       as('OWNER');
       const december = (await http().post('/leader-meetings').send({ title: 'December', date: '2026-12-29' }).expect(201)).body;
       const decemberAgenda = (await read(december.id)).agenda;
@@ -303,11 +303,11 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
     });
   });
 
-  describe('P18.97-T1 AC-10 the Monthly Target cells, typed as a rate per unit (ADR-0175 §4)', () => {
+  describe('P18.9-T1 AC-10 the Monthly Target cells, typed as a rate per unit (ADR-0175 §4)', () => {
     /** Rp 1 *miliar* in sen: *APE (Rp M)*'s rate, typed in the row's unit, travels in minor units. */
     const MILIAR = 1_000_000_000 * 100;
 
-    it('P18.97-T1 AC-10 a rate × the meeting’s # of units; never typed is version 0; a stale write 409; cleared with null; audited', async () => {
+    it('P18.9-T1 AC-10 a rate × the meeting’s # of units; never typed is version 0; a stale write 409; cleared with null; audited', async () => {
       const { id } = await make('Targets', '2026-10-05');
       as('ADMIN');
       const units = (await read(id)).scorecard.chips.units;
@@ -333,7 +333,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       ]);
     });
 
-    it('P18.97-T1 AC-10 a rate that is not a number is refused 400 VALIDATION_FAILED — a text, the old free text included — and nothing is written', async () => {
+    it('P18.9-T1 AC-10 a rate that is not a number is refused 400 VALIDATION_FAILED — a text, the old free text included — and nothing is written', async () => {
       const { id } = await make('Refused targets', '2026-10-06');
       as('OWNER');
       const before = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(id) });
@@ -358,7 +358,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       expect(await auditOf(id, 'leader_meeting.monthly_target_saved')).toEqual([]);
     });
 
-    it('P18.97-T1 AC-10 an editor alone types one: the Owner, an Admin and a Core Leader yes; an untagged member 404, a read-only session 403, another office 404', async () => {
+    it('P18.9-T1 AC-10 an editor alone types one: the Owner, an Admin and a Core Leader yes; an untagged member 404, a read-only session 403, another office 404', async () => {
       const { id } = await make('Who types targets', '2026-10-07');
       const write = async (version: number) => http().put(`/leader-meetings/${id}/monthly-targets/case_submission`).send({ rate: 2, version });
       let version = 0;
@@ -396,7 +396,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
       await http().patch(`/leader-meetings/${meeting.id}/agenda-items/${item.id}`).send({ pic: bold, version: 2 }).expect(200);
       const row = (await http().post(`/leader-meetings/${meeting.id}/action-items`).expect(201)).body;
       await http().patch(`/leader-meetings/${meeting.id}/action-items/${row.id}`).send({ action: script, version: 1 }).expect(200);
-      // A target is a number since P18.97-T1 (AC-10): markup is refused as any text is, and nothing is stored.
+      // A target is a number since P18.9-T1 (AC-10): markup is refused as any text is, and nothing is stored.
       expect((await http().put(`/leader-meetings/${meeting.id}/monthly-targets/ape`).send({ rate: bold, version: 0 }).expect(400)).body.error.code)
         .toBe('VALIDATION_FAILED');
       const after = await read(meeting.id);
@@ -429,9 +429,9 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
     });
   });
 
-  /** **The minutes' refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
-  describe('P18.98-T5 AC-7 the minutes’ refusals in Indonesian', () => {
-    it('P18.98-T5 AC-7 one field per write, a row with no target, ape in sen, a rate that is no number', async () => {
+  /** **The minutes' refusals in Bahasa Indonesia** (P18.10-T5 AC-7): the codes and details as in English. */
+  describe('P18.10-T5 AC-7 the minutes’ refusals in Indonesian', () => {
+    it('P18.10-T5 AC-7 one field per write, a row with no target, ape in sen, a rate that is no number', async () => {
       const { id } = await make('Refused in Indonesian', '2026-10-06');
       as('OWNER');
       const view = await read(id);
@@ -451,7 +451,7 @@ describe('the minutes, written field by field (P18.1-T2 AC-5 to AC-8)', () => {
         .toEqual(expect.arrayContaining(['rate must be a number, or null to clear it']));
     });
 
-    it('P18.98-T5 AC-7 the tracker’s rows changed since, and an item no longer in the meeting: 409, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 the tracker’s rows changed since, and an item no longer in the meeting: 409, in Indonesian', async () => {
       const { id } = await make('Conflicts in Indonesian', '2026-10-07');
       as('OWNER');
       const row = (await http().post(`/leader-meetings/${id}/action-items`).expect(201)).body;

@@ -1,8 +1,8 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { addDays } from '@/common/time/local-day';
 import {
-  activationDay, activationEndsOn, activationState, activityWeeksCompletedOn, firstCaseClosed, isOverdue,
-  nthOneOnOne, officeMondayOf, progressOf,
+  activationDay, activationEndsOn, activationFirstYearEndsOn, activationState, activityWeeksCompletedOn, firstCaseClosed,
+  firstYearOf, firstYearOver, isOverdue, nthOneOnOne, officeMondayOf, progressOf,
 } from './activation-rules';
 
 const J = 'Asia/Jakarta';
@@ -54,6 +54,45 @@ describe('the activation’s arithmetic (Phase 13)', () => {
     });
   });
 
+  describe('the first year (OD-289, P19.9-T3 AC-5)', () => {
+    it('P19.9-T3 AC-5 ends twelve calendar months after the join date, in the office’s zone', () => {
+      expect(activationFirstYearEndsOn(J, '2025-11-08')).toBe('2026-11-08');
+      expect(activationFirstYearEndsOn(J, '2026-01-01')).toBe('2027-01-01');
+      expect(activationFirstYearEndsOn('America/New_York', '2026-03-08')).toBe('2027-03-08');
+    });
+
+    it('P19.9-T3 AC-5 a month-end join ends on the last day of the shorter month: 29 February 2028 → 28 February 2029', () => {
+      expect(activationFirstYearEndsOn(J, '2028-02-29')).toBe('2029-02-28');
+    });
+
+    it('P19.9-T3 AC-5 is over on the day it ends and every day after; the day before is still the first year', () => {
+      const ends = activationFirstYearEndsOn(J, '2025-11-08');
+      expect([firstYearOver('2026-11-07', ends), firstYearOver('2026-11-08', ends), firstYearOver('2027-01-01', ends)])
+        .toEqual([false, true, true]);
+    });
+
+    it('P19.9-T3 AC-5 (exit review L3) firstYearOf counts from the join date, the activation’s start only without one', () => {
+      // The two differ: the join date decides.
+      expect(firstYearOf(J, '2026-09-14', '2025-09-14', '2025-10-01'))
+        .toEqual({ joinDate: '2025-09-14', endsOn: '2026-09-14', over: true });
+      expect(firstYearOf(J, '2026-09-14', '2025-10-01', '2025-09-14'))
+        .toEqual({ joinDate: '2025-10-01', endsOn: '2026-10-01', over: false });
+      // No join date on the membership: the activation's start.
+      for (const none of [null, undefined, '']) {
+        expect(firstYearOf(J, '2026-09-14', none, '2025-09-14')).toEqual({ joinDate: '2025-09-14', endsOn: '2026-09-14', over: true });
+      }
+      // Neither: nothing to count from, never over.
+      expect(firstYearOf(J, '2026-09-14', null, null)).toEqual({ joinDate: null, endsOn: null, over: false });
+    });
+
+    it('P19.9-T3 AC-5 is always past the activation’s own end, so nothing on it is open by then', () => {
+      for (const join of ['2025-01-31', '2025-08-31', '2026-02-28', '2028-02-29']) {
+        const ends = activationFirstYearEndsOn(J, join);
+        expect([join, activationState(null, ends, activationEndsOn(J, join))]).toEqual([join, 'expired']);
+      }
+    });
+  });
+
   describe('overdue (P13-T1 AC-4)', () => {
     it('P13-T1 AC-4 is a day past the window below 100%, and only while open', () => {
       expect(isOverdue(91, 90, 99, 'open')).toBe(true);
@@ -81,7 +120,7 @@ describe('the activation’s arithmetic (Phase 13)', () => {
       expect(progress.aspects[0].items.map((i) => [i.item.code, i.done])).toEqual([['A1', true], ['A2', true]]);
     });
 
-    it('P18.97-T3 F-254 rounds an exact half up in integers: 23 of 40 items is 58%, which Math.round read 57', () => {
+    it('P18.9-T3 F-254 rounds an exact half up in integers: 23 of 40 items is 58%, which Math.round read 57', () => {
       const forty = [{ code: 'X', label: '1. X', items: Array.from({ length: 40 }, (_, i) => ({ code: `X${i}` })) }];
       const progress = progressOf(forty, new Set(Array.from({ length: 23 }, (_, i) => `X${i}`)));
       expect([progress.done, progress.total, progress.pct]).toEqual([23, 40, 58]);
@@ -145,16 +184,16 @@ describe('the activation’s arithmetic (Phase 13)', () => {
   });
 });
 
-describe('nthOneOnOne — Weekly 1-on-1 check-in (P18.96-T4 AC-2)', () => {
+describe('nthOneOnOne — Weekly 1-on-1 check-in (P18.8-T4 AC-2)', () => {
   const s = (date: string, sessionId: string) => ({ date, sessionId });
 
-  it('P18.96-T4 AC-2 is the fourth 1:1 since the start, oldest first, and null before it', () => {
+  it('P18.8-T4 AC-2 is the fourth 1:1 since the start, oldest first, and null before it', () => {
     const three = [s('2026-08-10', 'b'), s('2026-08-03', 'a'), s('2026-08-17', 'c')];
     expect(nthOneOnOne(three, '2026-08-01', 4)).toBeNull();
     expect(nthOneOnOne([...three, s('2026-08-24', 'd')], '2026-08-01', 4)).toEqual(s('2026-08-24', 'd'));
   });
 
-  it('P18.96-T4 AC-2 counts none before the start, and two on one day as two, by id', () => {
+  it('P18.8-T4 AC-2 counts none before the start, and two on one day as two, by id', () => {
     const sessions = [s('2026-07-31', 'x'), s('2026-08-03', 'a'), s('2026-08-03', 'b'), s('2026-08-04', 'c'), s('2026-08-05', 'd')];
     expect(nthOneOnOne(sessions, '2026-08-01', 4)).toEqual(s('2026-08-05', 'd'));
     expect(nthOneOnOne(sessions, '2026-08-01', 2)).toEqual(s('2026-08-03', 'b'));

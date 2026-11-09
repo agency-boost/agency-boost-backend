@@ -19,6 +19,8 @@ const VIEW: HomeView = {
   activity: { today: 0, yesterday: 5, days: [], total: 18 },
   schedule: { meetings: 2, tasks: 3 },
   actions: [],
+  leads: 7,
+  newHires: 0,
   leader: null,
 };
 
@@ -29,7 +31,7 @@ const NOBODY = new RequestContext('u-none', 'none', {
 } as never);
 
 /**
- * **`GET /home` over HTTP** (Phase 18.99 T11; UI-100): who the API lets in, positive and negative. What it answers is
+ * **`GET /home` over HTTP** (Phase 18.11 T11; UI-100): who the API lets in, positive and negative. What it answers is
  * `home.tenancy.spec.ts`'s, on real rows.
  */
 describe('UI-100 GET /home — who may read it', () => {
@@ -71,7 +73,7 @@ describe('UI-100 GET /home — who may read it', () => {
 
   it('UI-100 a Super Admin belongs to no office: the read refuses them before it reads anything', async () => {
     // The real service, with nothing behind it: it must refuse before it touches a dependency.
-    const service = new HomeService(...(Array.from({ length: 13 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
+    const service = new HomeService(...(Array.from({ length: 15 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
     await expect(service.read(SUPER_ADMIN)).rejects.toBeInstanceOf(NoMembershipException);
   });
 });

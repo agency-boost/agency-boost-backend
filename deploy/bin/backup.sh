@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# A logical backup of each environment's database into the backups bucket (P18.7-T3, ADR-0152,
+# A logical backup of each environment's database into the backups bucket (P18.4-T3, ADR-0152,
 # ADR-0155, plan decision D4). agencyboost-backup.timer runs it nightly; it is also safe by hand:
 #
 #   sudo /opt/agencyboost/bin/backup.sh
@@ -19,11 +19,11 @@
 # each snapshot covers both. A dump survives what a snapshot does not: the disk and its snapshots
 # deleted, a disk whose data was already wrong when snapshotted, or a restore that needs one database or
 # one collection rather than a whole disk. It does **not** survive the project being deleted, because
-# the bucket is in the same project (P18.7 review, L7). A backups bucket in a separate project, or a
-# locked retention policy, is a P19-T6 option.
+# the bucket is in the same project (P18.4 review, L7). A backups bucket in a separate project, or a
+# locked retention policy, is a P20-T6 option.
 #
 # A failure is reported: agencyboost-backup.service's OnFailure= logs AGENCYBOOST_BACKUP_FAILED,
-# which the alert provision.sh --alert-email creates mails to the operators (P18.7 review, M1). One
+# which the alert provision.sh --alert-email creates mails to the operators (P18.4 review, M1). One
 # database failing does not stop the other's backup; the run fails at the end if either did.
 #
 # **Dumped to a file first, then uploaded, rather than streamed into the bucket.** The VM's account

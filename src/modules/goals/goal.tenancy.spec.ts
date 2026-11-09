@@ -501,11 +501,11 @@ describe('the goal record (P8-T1)', () => {
     });
 
     /*
-     * **The two percentages are the office's benchmarks** (ADR-0160 §3, P18.8-T10 AC-1): *Closing rate* its
+     * **The two percentages are the office's benchmarks** (ADR-0160 §3, P18.5-T10 AC-1): *Closing rate* its
      * *Selling success rate*, *Appointment to Sales meeting* its *Set appointment to meeting* — each office's own,
      * read through the tenant-scoped repository, and only for a plan nobody has saved.
      */
-    describe('P18.8-T10 AC-1 — the defaults are the office’s benchmarks', () => {
+    describe('P18.5-T10 AC-1 — the defaults are the office’s benchmarks', () => {
       const ratio = (kpmId: string, code: string, benchmark: number, over: Record<string, unknown> = {}) => ({
         kpmId, code, label: code, numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION'], benchmark,
         comparison: 'gte', displayUnit: 'percent', displayOrder: 1, version: 1, status: 'active', archivedAt: null,

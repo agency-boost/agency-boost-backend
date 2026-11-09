@@ -2,8 +2,9 @@ import { addDays, endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { rateOver, type Rate } from './rate';
 
 /**
- * The Overview's two engagement cards (Phase 18; OD-142 → option 2, D-figures): `ACTIVITY_LOGGED_THIS_MONTH`
- * and `ACTIVITY_COMPLIANCE_RATE` over the office.
+ * The Overview's logging figures (Phase 18; OD-142 → option 2, D-figures): `ACTIVITY_COMPLIANCE_RATE` over the office —
+ * *Pengguna aktif* on every screen since P19.3-T1 (ADR-0200 §3), never *active*. `ACTIVITY_LOGGED_THIS_MONTH`, the
+ * first card's count, is retired: that tile counts production (`MAA_COUNT_IN_UNIT`, *Aktif bulan ini*).
  *
  * **Both read one fact per member**: the latest day they saved, on or before a day — `ACTIVITY_COMPLIANCE_7D`'s
  * and `ACTIVITY_COMPLIANCE_MONTH`'s own question, *did this person report* (ADR-0042: an all-zero day counts,
@@ -18,10 +19,11 @@ export function loggedWithin(latestOnOrBefore: LocalDate | null | undefined, win
 }
 
 /**
- * `ACTIVITY_LOGGED_THIS_MONTH` (OD-142): of the members given, how many logged at least once in the window —
- * this calendar month to today on the card — over all of them. *"Logged at least one activity this month"*.
+ * **`ACTIVITY_COMPLIANCE_RATE` as a count**: of the members given, how many logged at least once in the window, over all
+ * of them, with the share. *Pengguna aktif* over that window. (Until P19.3-T1 this was `ACTIVITY_LOGGED_THIS_MONTH`'s
+ * function, the same count over the calendar month; that name is retired, ADR-0200 §3.)
  */
-export function activityLogged(
+export function loggedCount(
   members: readonly string[],
   latest: ReadonlyMap<string, LocalDate>,
   window: { from: LocalDate; to: LocalDate },
@@ -39,7 +41,7 @@ export function activityComplianceRate(
   latest: ReadonlyMap<string, LocalDate>,
   window: { from: LocalDate; to: LocalDate },
 ): { logged: number; notLogged: number; pct: number | null } {
-  const { count, of, pct } = activityLogged(members, latest, window);
+  const { count, of, pct } = loggedCount(members, latest, window);
   return { logged: count, notLogged: of - count, pct };
 }
 

@@ -45,7 +45,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
   const aCampaign = (over: Record<string, unknown> = {}) => ({
     code: 'YEAR_END_DRIVE',
     title: 'Year-End Star Club Drive',
-    // Whole office months (P18.5-T7, D-windows): 00:00 on 1 October to 23:59 on 31 December, Jakarta.
+    // Whole office months (P18.2-T7, D-windows): 00:00 on 1 October to 23:59 on 31 December, Jakarta.
     startsAt: '2026-09-30T17:00:00Z',
     endsAt: '2026-12-31T16:59:59Z',
     reward: 'Extra unit budget',
@@ -67,7 +67,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
         value: 50_000_000_000,
         // A client sending its own could label sen as rupiah and every screen would be wrong.
         unit: 'idr_minor',
-        // P18.5-T8 AC-1: a campaign can measure it.
+        // P18.2-T8 AC-1: a campaign can measure it.
         measured: true,
       });
     });
@@ -85,17 +85,17 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       // Accepting it would be a campaign nobody could ever qualify for, failing silently. The
       // Owner reads the refusal, so it says what is true now, not our schedule (P10.1-T2 AC-3).
       // Event NPS is the Owner's reporting metric (Phase 18). It came after campaign evaluation
-      // (14) until the 2026-10-08 re-plan moved campaigns to 18.5, after it; no metric registered
+      // (14) until the 2026-10-08 re-plan moved campaigns to 18.2, after it; no metric registered
       // today is refused, and the rule stays for one registered later. So the evaluation is placed
       // before Event NPS for this test alone (the sets are pinned by key in `registry.spec.ts`).
-      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: number }, 'CAMPAIGN_EVALUATION_PHASE', 17);
+      jest.replaceProperty(metricsModule as { CAMPAIGN_EVALUATION_PHASE: string }, 'CAMPAIGN_EVALUATION_PHASE', '17');
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
       }))).rejects.toThrow(/Event NPS is not measured yet, so a campaign asking for it could never qualify anybody/);
     });
 
-    it('P18.5-T8 AC-1 refuses Event NPS through the service: measured, but two figures per event, never a member’s (D-evaluable)', async () => {
-      // It was taken from the 2026-10-08 re-plan until P18.5-T8: measured before campaigns are evaluated is not enough.
+    it('P18.2-T8 AC-1 refuses Event NPS through the service: measured, but two figures per event, never a member’s (D-evaluable)', async () => {
+      // It was taken from the 2026-10-08 re-plan until P18.2-T8: measured before campaigns are evaluated is not enough.
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [{ metricKey: 'EVENT_NPS', comparator: 'gte', value: 50 }],
       }))).rejects.toThrow(/Event NPS is not something a campaign can measure/);
@@ -146,7 +146,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('P18.5-T8 review item 15 refuses a company-scoped campaign as a validation failure — deferred beyond v1, ADR-0146', async () => {
+    it('P18.2-T8 review item 15 refuses a company-scoped campaign as a validation failure — deferred beyond v1, ADR-0146', async () => {
       expect(() => wired.campaigns.refuseCompanyScope('company')).toThrow(expect.objectContaining({
         code: 'VALIDATION_FAILED', status: 400,
       }));
@@ -178,7 +178,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
 
       const ab = moc.find((r) => r.code === 'MOC_AB')!;
       expect(ab.appliesToOrgLevelCodes).toEqual(['AB']);
-      // Net APE **and** both Monthly2 AA counts, **or** five direct ABs — the carrier's own "or".
+      // APE (*Net APE* until P19.3-T1) **and** both Monthly2 AA counts, **or** five direct ABs — the carrier's own "or".
       expect(ab.groupMode).toBe('any');
       expect(ab.criteriaGroups).toHaveLength(2);
       expect(ab.criteriaGroups[0].criteria[0].value).toBe(60_000_000_000);
@@ -199,7 +199,8 @@ describe('campaigns and carrier rules (P5-T7)', () => {
 
       expect(moc.find((r) => r.code === 'MOC_AB')!.waitingOnMetrics).toEqual([]);
       expect(moc.find((r) => r.code === 'MOC_AB')!.criteriaGroups[0].criteria.map((c) => c.metricKey))
-        .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY']);
+        // P19.3-T1 (ADR-0201 §1, D5): APE is APE — `NET_APE` is `MOC_APE`, the same bar.
+        .toEqual(['MOC_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY']);
       // A rule a carrier states with an input nothing registers still says so, its unit the carrier's — the
       // seeding that recorded Phase 5's waits, kept for the next metric a carrier names before it is measured.
       const seeded = metricsModule.SEED_MOC_RULES[1].criteriaGroups[0].criteria as unknown as { metricKey: string; comparator: string; value: number }[];
@@ -216,6 +217,21 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       // And a tier built on a registry metric waits on nothing.
       const tiers = await wired.campaigns.listRules(member(KPM_A), 'production_club');
       expect(tiers.every((t) => t.waitingOnMetrics.length === 0)).toBe(true);
+    });
+
+    it('P19.3-T1 AC-5 names the APE criterion by its registered name, and a rule still holding NET_APE by its successor', async () => {
+      const moc = await wired.campaigns.listRules(member(KPM_A), 'moc');
+      const ab = moc.find((r) => r.code === 'MOC_AB')!;
+      expect(ab.criteriaGroups[0].criteria[0]).toMatchObject({ metricKey: 'MOC_APE', metricName: 'APE, MOC scope' });
+      const rules = mongoose.connection.db!.collection('qualificationRules');
+      const stored = await rules.findOne({ _id: new mongoose.Types.ObjectId(ab.id) });
+      await rules.updateOne({ _id: stored!._id }, { $set: { 'criteriaGroups.0.criteria.0.metricKey': 'NET_APE' } });
+      try {
+        const again = (await wired.campaigns.listRules(member(KPM_A), 'moc')).find((r) => r.code === 'MOC_AB')!;
+        expect(again.criteriaGroups[0].criteria[0]).toMatchObject({ metricKey: 'NET_APE', metricName: 'APE, MOC scope' });
+      } finally {
+        await rules.updateOne({ _id: stored!._id }, { $set: { 'criteriaGroups.0.criteria.0.metricKey': 'MOC_APE' } });
+      }
     });
 
     it('shows an office only its own company’s rules', async () => {
@@ -239,11 +255,11 @@ describe('campaigns and carrier rules (P5-T7)', () => {
     });
   });
 
-  describe('P18.5-T8 review — the Owner’s writes', () => {
+  describe('P18.2-T8 review — the Owner’s writes', () => {
     const col = () => mongoose.connection.db!.collection('campaigns');
     const audit = (action: string) => mongoose.connection.db!.collection('auditLog').find({ action }).sort({ _id: -1 }).limit(1).next();
 
-    it('P18.5-T8 review item 9 refuses two requirements on one metric', async () => {
+    it('P18.2-T8 review item 9 refuses two requirements on one metric', async () => {
       await expect(wired.campaigns.create(member(KPM_A), aCampaign({
         requirements: [
           { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 100 }, { metricKey: 'APE_ACHIEVED', comparator: 'lte', value: 900 },
@@ -251,14 +267,14 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       }))).rejects.toThrow(/APE achieved is asked for already/);
     });
 
-    it('P18.5-T8 review item 8 stores an end typed to the minute, or the next midnight, as the day’s last instant', async () => {
+    it('P18.2-T8 review item 8 stores an end typed to the minute, or the next midnight, as the day’s last instant', async () => {
       const made = await wired.campaigns.create(member(KPM_A), aCampaign({ endsAt: '2026-12-31T16:59:00Z' }));
       expect(made.endsAt).toBe('2026-12-31T16:59:59.999Z');
       const edited = await wired.campaigns.update(member(KPM_A), made.id, { endsAt: '2027-01-31T17:00:00Z' });
       expect(edited.endsAt).toBe('2027-01-31T16:59:59.999Z');
     });
 
-    it('P18.5-T8 review item 14 refuses a code already used, in words that name no office', async () => {
+    it('P18.2-T8 review item 14 refuses a code already used, in words that name no office', async () => {
       await wired.campaigns.create(member(KPM_A), aCampaign());
       const refusal = wired.campaigns.create(member(KPM_A), aCampaign());
       await expect(refusal).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
@@ -266,7 +282,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       await expect(wired.campaigns.create(member(KPM_A), aCampaign())).rejects.not.toThrow(/office|KPM/);
     });
 
-    it('P18.5-T8 review item 12 audits a create, an edit and an archive with before and after', async () => {
+    it('P18.2-T8 review item 12 audits a create, an edit and an archive with before and after', async () => {
       const made = await wired.campaigns.create(member(KPM_A), aCampaign());
       expect(await audit('campaign.created')).toMatchObject({
         before: null, after: { code: 'YEAR_END_DRIVE', title: 'Year-End Star Club Drive', kind: 'seasonal', reward: 'Extra unit budget' },
@@ -279,7 +295,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       expect(await audit('campaign.archived')).toMatchObject({ before: { status: 'active' }, after: { status: 'archived' } });
     });
 
-    it('P18.5-T8 review item 10 a campaign written before today’s rules can still be edited: only what the edit changes is held to them', async () => {
+    it('P18.2-T8 review item 10 a campaign written before today’s rules can still be edited: only what the edit changes is held to them', async () => {
       // Mid-month dates over the file, and a requirement outside the evaluable set — as Phase 5 could write.
       const legacy = await col().insertOne({
         kpmId: KPM_A, code: 'LEGACY', title: 'Legacy', description: '', startsAt: new Date('2026-08-15T00:00:00Z'),
@@ -316,7 +332,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       expect(fixed.appliesToOrgLevelCodes).toEqual(['SENIOR_AB']);
     });
 
-    it('P18.5-T8 review — an edit of nothing is 404; a structural edit takes its section; a race lost is 404', async () => {
+    it('P18.2-T8 review — an edit of nothing is 404; a structural edit takes its section; a race lost is 404', async () => {
       await expect(wired.campaigns.update(member(KPM_A), '66f0000000000000000000ff', { title: 'X' })).rejects.toMatchObject({ status: 404 });
       const mdrt = await wired.campaigns.create(member(KPM_A), aCampaign({
         code: 'MDRT_QUALIFICATION', kind: 'structural', subtype: 'ongoing', window: 'calendar_year', endsAt: null,
@@ -329,14 +345,14 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       lost.mockRestore();
     });
 
-    it('P18.5-T8 review — an office with no row: its zone the platform’s, the rungs as named, and no carrier rules', async () => {
+    it('P18.2-T8 review — an office with no row: its zone the platform’s, the rungs as named, and no carrier rules', async () => {
       const nowhere = member('66f0000000000000000000d9');
       const made = await wired.campaigns.create(nowhere, aCampaign({ appliesToOrgLevelCodes: ['AGENT'] }));
       expect(made.appliesToOrgLevelCodes).toEqual(['AGENT']);
       await expect(wired.campaigns.listRules(nowhere)).rejects.toMatchObject({ status: 404 });
     });
 
-    it('P18.5-T8 review — a stored requirement on a metric the registry no longer has keeps its key as its name', async () => {
+    it('P18.2-T8 review — a stored requirement on a metric the registry no longer has keeps its key as its name', async () => {
       await col().insertOne({
         kpmId: KPM_A, code: 'GONE', title: 'Gone', description: '', startsAt: new Date('2026-09-30T17:00:00Z'),
         endsAt: new Date('2026-10-31T16:59:59.999Z'), kind: 'seasonal', subtype: null, window: 'campaign_dates',
@@ -348,7 +364,7 @@ describe('campaigns and carrier rules (P5-T7)', () => {
       expect(gone.requirements[0]).toMatchObject({ metricKey: 'GONE_METRIC', metricName: 'GONE_METRIC', measured: false });
     });
 
-    it('P18.5-T8 review item 20 a Super Admin outside a support session is refused both settings reads: no office', async () => {
+    it('P18.2-T8 review item 20 a Super Admin outside a support session is refused both settings reads: no office', async () => {
       const root = RequestContext.platform('root');
       await expect(wired.campaigns.list(root, true)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP', status: 403 });
       await expect(wired.campaigns.listRules(root)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP', status: 403 });

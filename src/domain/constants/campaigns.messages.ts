@@ -11,7 +11,7 @@ import type { Language } from './language';
 export const CALENDAR_YEAR_DAYS: Readonly<Record<Language, string>> = { id: '1 Jan – 31 Des', en: '1 Jan – 31 Dec' };
 
 /**
- * **The campaigns' fixed words, in both languages** (P18.98-T5 AC-4): what a window reads as on the card and in the
+ * **The campaigns' fixed words, in both languages** (P18.10-T5 AC-4): what a window reads as on the card and in the
  * dialog, and *Chasing MDRT*'s header tooltip. *MDRT* and *Campaign* stay as the glossary keeps them (§A.5, §A.6;
  * §C6: the name kept, the sentence around it translated); *Standing* is a standing programme, *Selalu aktif* as
  * §B.3 writes *Always on*; *mengejar* is to chase a campaign.

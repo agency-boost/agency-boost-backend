@@ -28,7 +28,7 @@ describe('PRODUCING_AGENTS (P18.1-T1 AC-4; OD-144, ADR-0136)', () => {
       expect(during(m({ status: 'removed', removedAt: null }))).toBe(false);
     });
 
-    it('P18.96-T5 AC-1 by the join date, joinedAt only where there is none (ADR-0172 §1)', () => {
+    it('P18.8-T5 AC-1 by the join date, joinedAt only where there is none (ADR-0172 §1)', () => {
       // Started on 20 September, let in on 3 October: September is one of theirs; August is not.
       const hire = m({ joinDateStart: at('2026-09-19T17:00:00Z'), joinedAt: at('2026-10-03T03:00:00Z') });
       expect(during(hire)).toBe(true);

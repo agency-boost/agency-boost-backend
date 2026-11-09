@@ -18,12 +18,12 @@ type Roster = {
 };
 
 /**
- * **P18.96-T6 — 3M activation and `/new-hires`, over HTTP** (ADR-0171 §2, ADR-0173). The activation harness: the
+ * **P18.8-T6 — 3M activation and `/new-hires`, over HTTP** (ADR-0171 §2, ADR-0173). The activation harness: the
  * permission guard in front of the real services, the leads' routes for a first sale, and the production file's
  * corrections through the services. The clock is Monday 14 September 2026, 10:00 in Jakarta; the year listed runs from
  * 15 September 2025.
  */
-describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', () => {
+describe('P18.8-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', () => {
   let h: ActivationHarness;
   const id = (who: Who) => h.id(who);
   const oid = (who: Who) => new mongoose.Types.ObjectId(id(who));
@@ -55,7 +55,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
     const owner = h.office.as('OWNER');
     const state = await h.wired.productionMonths.reopen(owner, month);
     return h.wired.productionCorrections.correct(owner, {
-      month, membershipId: id(who), metric: 'policyCount', cadence: 'monthly', value, revision: state.revision,
+      month, membershipId: id(who), kode: 'POLICY_COUNT', ytd: false, value, revision: state.revision,
       reason: 'The carrier confirmed the policy',
     });
   };
@@ -73,17 +73,71 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
   // ------------------------------------------------------------------ AC-3: the year, and the sections
 
   describe('AC-3 the year of new hires, in three sections', () => {
-    it('P18.96-T6 AC-3 lists the new hires who joined in the last twelve months — never an existing agent, never one older', async () => {
-      await h.start('INDAH', '2025-09-15'); // the first day of the year listed
-      await h.start('DIMAS', '2025-09-14'); // twelve months back to the day: off the page, in the data
+    it('P19.9-T3 AC-1 lists this calendar year’s new hires by default — never an existing agent, never last year’s', async () => {
+      // Amends P18.8-T6 AC-3 (ADR-0233, ADR-0173 §1): a calendar year, where it was the last twelve months.
+      await h.start('INDAH', '2026-01-01'); // the first day of the year listed
+      await h.start('DIMAS', '2025-12-31'); // last year's last day: on Tahun lalu, not here
       await h.start('BUDI', '2026-07-15');
       await existingAgent('RINA', '2026-08-01'); // joined lately, as an existing agent: never listed
       const r = await roster();
-      expect(r.window).toEqual({ from: '2025-09-15', to: TODAY });
+      expect(r.window).toEqual({ from: '2026-01-01', to: TODAY });
       expect(names(rows(r)).sort()).toEqual(['Budi Santoso', 'Indah Permatasari']);
-      expect(r).toMatchObject({ today: TODAY, days: 90 });
-      // Still in the data: off the page is not gone.
-      expect(await member('DIMAS')).toMatchObject({ joinedAs: 'new_hire', joinDate: '2025-09-14' });
+      expect(r).toMatchObject({ today: TODAY, year: 'current', days: 90 });
+      // Still in the data: off this year is not gone.
+      expect(await member('DIMAS')).toMatchObject({ joinedAs: 'new_hire', joinDate: '2025-12-31' });
+    });
+
+    it('P19.9-T3 AC-2 year=previous lists all of last year, 1 January to 31 December, with its own figures', async () => {
+      await h.start('INDAH', '2025-01-01');
+      await h.start('DIMAS', '2025-12-31');
+      await h.start('TARI', '2024-12-31'); // before last year: in neither
+      await h.start('BUDI', '2026-07-15');
+      h.as('AGUS');
+      const r = (await h.http().get('/new-hires?year=previous').expect(200)).body as Roster & { year: string };
+      expect(r).toMatchObject({ today: TODAY, year: 'previous', window: { from: '2025-01-01', to: '2025-12-31' } });
+      expect(names(rows(r)).sort()).toEqual(['Dimas Pratama', 'Indah Permatasari']);
+      // Both past day 90 with no first sale: the year's own 3M figures, not this year's.
+      expect(r.activation3M.all).toMatchObject({ notActivated: 2, activated: 0, pct: 0 });
+      expect(r.activation3M.byMonth.map((m) => m.month)).toEqual(['2025-12', '2025-01']);
+      // And `current`, named, is the default's answer.
+      const current = (await h.http().get('/new-hires?year=current').expect(200)).body as Roster;
+      expect(names(rows(current))).toEqual(['Budi Santoso']);
+    });
+
+    it('P19.9-T3 AC-2 a year with nobody is a 200 with empty sections while the other year has somebody; 404 only when neither has', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('SARI');
+      const last = (await h.http().get('/new-hires?year=previous').expect(200)).body as Roster;
+      expect(last).toMatchObject({
+        year: 'previous', units: [], sections: { inProgress: [], activated: [], notActivated: [] },
+        activation3M: { all: { activated: 0, notActivated: 0, late: 0, inProgress: 0, pct: null }, byMonth: [] },
+      });
+      // Only last year has somebody: this year is the empty one now.
+      await h.col('memberships').updateOne({ _id: oid('BUDI') }, { $set: { joinDate: '2025-06-01' } });
+      expect(rows((await h.http().get('/new-hires').expect(200)).body as Roster)).toEqual([]);
+      // Before last year: nobody in either, and the page is the empty one.
+      await h.col('memberships').updateOne({ _id: oid('BUDI') }, { $set: { joinDate: '2024-06-01' } });
+      for (const year of ['current', 'previous']) {
+        expect((await h.http().get(`/new-hires?year=${year}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+      }
+    });
+
+    it('P19.9-T3 AC-2 a year it does not know, or a parameter of another name, is refused by name', async () => {
+      await h.start('BUDI', '2026-07-15');
+      h.as('SARI');
+      for (const query of ['year=2025', 'year=last', 'month=2026-01']) {
+        const res = await h.http().get(`/new-hires?${query}`).expect(400);
+        expect([query, res.body.error.code]).toEqual([query, 'VALIDATION_FAILED']);
+      }
+    });
+
+    it('P19.9-T3 AC-2 one read recorded per new hire shown — the year shown, never the other', async () => {
+      await h.start('BUDI', '2026-07-15');
+      await h.start('RINA', '2025-07-18');
+      h.as('SARI');
+      await h.http().get('/new-hires?year=previous').expect(200);
+      const reads = await h.col('auditLog').find({ action: 'activity_log.read_raw', 'after.surface': 'activation' }).toArray();
+      expect(reads.map((r) => r.targetMembershipId)).toEqual([id('RINA')]);
     });
 
     it('UI-023 sections by status: a first sale by day 90 Teraktivasi at once, after it Teraktivasi late; no sale past day 90 not', async () => {
@@ -112,7 +166,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(row(r, 'INDAH').checklist).toMatchObject({ state: 'open', overdue: true, total: 16 });
     });
 
-    it('P18.96-T6 AC-1 a first sale on day 90 activates, on the office’s day; one at 00:30 on day 91 in Jakarta does not', async () => {
+    it('P18.8-T6 AC-1 a first sale on day 90 activates, on the office’s day; one at 00:30 on day 91 in Jakarta does not', async () => {
       await h.start('BUDI', '2026-06-01'); // day 90 is 29 August
       await sold('BUDI', 'Ibu Ratna', '2026-08-29T03:00:00Z');
       await h.start('RINA', '2026-06-01');
@@ -124,7 +178,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(row(r, 'RINA').firstSaleDate).toBe('2026-08-30');
     });
 
-    it('P18.96-T6 AC-3 a new hire placed as an AAB has no checklist, and is listed with their result', async () => {
+    it('P18.8-T6 AC-3 a new hire placed as an AAB has no checklist, and is listed with their result', async () => {
       await newHireWithoutChecklist('NINA', '2026-08-01');
       await h.start('DODI', '2026-08-10');
       const r = await roster('SARI');
@@ -136,7 +190,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
   // ------------------------------------------------------------------ AC-2: the share, by month and unit
 
   describe('AC-2 the 3M activation %, for the reader, each unit, and each join month', () => {
-    it('P18.96-T6 AC-2 activated ÷ (activated + not activated) for everybody listed and each unit, by join month', async () => {
+    it('P18.8-T6 AC-2 activated ÷ (activated + not activated) for everybody listed and each unit, by join month', async () => {
       await h.start('INDAH', '2026-06-10');
       await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z'); // June: activated
       await h.start('DIMAS', '2026-06-01'); // June: not activated
@@ -246,7 +300,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
   // ------------------------------------------------------------------ AC-1: the lock
 
   describe('AC-1 the result is kept once decided, and never moves', () => {
-    it('P18.96-T6 AC-1 a read keeps each decided result on the membership; one in progress keeps nothing', async () => {
+    it('P18.8-T6 AC-1 a read keeps each decided result on the membership; one in progress keeps nothing', async () => {
       await h.start('INDAH', '2026-06-10');
       await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z');
       await h.start('DIMAS', '2026-06-01');
@@ -257,7 +311,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect((await member('DIMAS')).activation3MLockedAt).toEqual(h.clock.now());
     });
 
-    it('P18.96-T6 AC-1 a closing logged after day 90 with an earlier day moves the first sale, and not the result', async () => {
+    it('P18.8-T6 AC-1 a closing logged after day 90 with an earlier day moves the first sale, and not the result', async () => {
       await h.start('DIMAS', '2026-06-01'); // day 106, nothing read yet: nothing kept
       expect((await member('DIMAS')).activation3M ?? null).toBeNull();
       h.as('AGUS');
@@ -268,13 +322,13 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(row(await roster(), 'DIMAS')).toMatchObject({ firstSaleDate: '2026-07-01', activation3M: 'not_activated' });
     });
 
-    it('P18.96-T6 AC-1 a production file uploaded after day 90 for a month inside it does not activate them', async () => {
+    it('P18.8-T6 AC-1 a production file uploaded after day 90 for a month inside it does not activate them', async () => {
       await h.start('DIMAS', '2026-06-01');
       await policies('DIMAS', '2026-07', 1);
       expect(await member('DIMAS')).toMatchObject({ firstSaleDate: '2026-07-01', firstSaleSource: 'monthly_file', activation3M: 'not_activated' });
     });
 
-    it('P18.96-T6 AC-1 inside the 90 days a late record counts: the result is decided from it on day 91', async () => {
+    it('P18.8-T6 AC-1 inside the 90 days a late record counts: the result is decided from it on day 91', async () => {
       await h.start('BUDI', '2026-07-15'); // day 62
       await policies('BUDI', '2026-07', 1);
       expect((await member('BUDI')).activation3M ?? null).toBeNull();
@@ -282,7 +336,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(row(await roster('SARI'), 'BUDI')).toMatchObject({ firstSaleDate: '2026-07-15', activation3M: 'activated' });
     });
 
-    it('P18.96-T6 AC-1 a join date corrected after day 90 moves the date and leaves the result', async () => {
+    it('P18.8-T6 AC-1 a join date corrected after day 90 moves the date and leaves the result', async () => {
       await h.start('DIMAS', '2026-06-01');
       h.as('AGUS');
       await h.http().put(`/new-hires/${id('DIMAS')}/start-date`).send({ startDate: '2026-08-01' }).expect(200);
@@ -291,14 +345,14 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(names(r.sections.notActivated)).toEqual(['Dimas Pratama']);
     });
 
-    it('P18.96-T6 AC-1 a read-only support session is answered the same result and keeps nothing', async () => {
+    it('P18.8-T6 AC-1 a read-only support session is answered the same result and keeps nothing', async () => {
       await h.start('DIMAS', '2026-06-01');
       const r = await roster(h.supporting('AGUS'));
       expect(row(r, 'DIMAS').activation3M).toBe('not_activated');
       expect((await member('DIMAS')).activation3M ?? null).toBeNull();
     });
 
-    it('P18.96-T6 AC-1 the read keeps every decided result in at most two writes, whatever their number', async () => {
+    it('P18.8-T6 AC-1 the read keeps every decided result in at most two writes, whatever their number', async () => {
       for (const who of ['INDAH', 'DIMAS', 'RINA', 'BUDI', 'DODI'] as const) await h.start(who, '2026-05-01');
       await sold('INDAH', 'Pak Yusuf', '2026-06-01T03:00:00Z');
       const writes = jest.spyOn(h.wired.memberships, 'updateMany');
@@ -322,8 +376,8 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
 
   // ------------------------------------------------------------------ the exit review: the file's first sale
 
-  describe('the P18.96 exit review: a first sale the file no longer shows (M4)', () => {
-    it('P18.96-T8 M4 a month’s policies corrected to none recompute a first sale the file gave: in progress, it is gone, and day 91 decides not activated', async () => {
+  describe('the P18.8 exit review: a first sale the file no longer shows (M4)', () => {
+    it('P18.8-T8 M4 a month’s policies corrected to none recompute a first sale the file gave: in progress, it is gone, and day 91 decides not activated', async () => {
       await h.start('BUDI', '2026-07-15'); // day 62
       await policies('BUDI', '2026-07', 1);
       expect(await member('BUDI')).toMatchObject({ firstSaleDate: '2026-07-15', firstSaleSource: 'monthly_file' });
@@ -334,7 +388,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(row(await roster('SARI'), 'BUDI')).toMatchObject({ firstSaleDate: null, activation3M: 'not_activated' });
     });
 
-    it('P18.96-T8 M4 what remains is the first sale: a later month of the file, or a closing', async () => {
+    it('P18.8-T8 M4 what remains is the first sale: a later month of the file, or a closing', async () => {
       await h.start('BUDI', '2026-07-15');
       await policies('BUDI', '2026-07', 1);
       await policies('BUDI', '2026-08', 2);
@@ -345,7 +399,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       expect(await member('BUDI')).toMatchObject({ firstSaleDate: '2026-08-20', firstSaleSource: 'lead' });
     });
 
-    it('P18.96-T8 M4 a kept 3M result stays, and so does the first sale it was decided by', async () => {
+    it('P18.8-T8 M4 a kept 3M result stays, and so does the first sale it was decided by', async () => {
       await h.start('INDAH', '2026-06-10');
       h.clock.set(new Date('2026-08-01T03:00:00Z')); // day 53: the file lands inside the 90 days
       await policies('INDAH', '2026-07', 1);
@@ -358,7 +412,7 @@ describe('P18.96-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', 
       });
     });
 
-    it('P18.96-T8 M4 a first sale from a closing is never moved by the file', async () => {
+    it('P18.8-T8 M4 a first sale from a closing is never moved by the file', async () => {
       await h.start('BUDI', '2026-07-15');
       await sold('BUDI', 'Ibu Ratna', '2026-08-20T03:00:00Z');
       await policies('BUDI', '2026-08', 1); // the 1st of August: earlier, from the file

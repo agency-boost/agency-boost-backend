@@ -5,7 +5,7 @@ import { ASSETS_REFUSALS } from './assets.messages';
 import { SignedUpload, StoragePort, StoredObject } from './storage.port';
 
 /**
- * **Storage where there is none** (P18.7-T2, plan decision D12): bound when `GCS_BUCKET` is unset, which
+ * **Storage where there is none** (P18.4-T2, plan decision D12): bound when `GCS_BUCKET` is unset, which
  * `env.validation.ts` allows only for `NODE_ENV` `development` or `test`. A developer's API boots and every screen
  * works without a bucket; whatever needs one — an upload's signature, a file's link, a template copy that carries
  * files — is refused with `STORAGE_NOT_CONFIGURED`, before anything is written (the asset service signs before it
@@ -39,6 +39,10 @@ export class UnconfiguredStorage extends StoragePort {
   }
 
   async remove(): Promise<void> {
+    return this.refuse();
+  }
+
+  async read(): Promise<Buffer | null> {
     return this.refuse();
   }
 

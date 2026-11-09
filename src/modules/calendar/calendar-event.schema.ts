@@ -61,7 +61,7 @@ export const CalendarAttendeeSchema = SchemaFactory.createForClass(CalendarAtten
  * for nothing.
  *
  * Personal data under UU 27/2022 — a client's name and address can be typed into it, and every ancestor
- * of its organiser reads it (ADR-0093). P19-T1's erasure and export cascade reaches it.
+ * of its organiser reads it (ADR-0093). P20-T1's erasure and export cascade reaches it.
  */
 @Schema({ ...configSchemaOptions, collection: 'calendarEvents' })
 export class CalendarEvent {

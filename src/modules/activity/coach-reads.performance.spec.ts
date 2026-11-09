@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
+import { byKode } from '@/modules/production/upload-columns';
 
 /** 10:00 on 14 September 2026 in Jakarta. */
 const NOW = new Date('2026-09-14T03:00:00Z');
@@ -73,7 +74,8 @@ describe('P11-T4 AC-7 — a coachee’s ratios and week, measured', () => {
         });
         MONTHS.forEach((month, i) => production.push({
           kpmId, membershipId: id, month, agentCode: `PRU-${a}`, deletedAt: null,
-          apeMonthly: cell(20 * M * scale), apeYtd: cell(20 * M * scale * (i + 1)),
+          // P19.5-T2 (ADR-0214 §10): the year is the months summed — the file's YTD is kept as a check, read by no figure.
+          templateVersion: 1, ...byKode({ apeMonthly: cell(20 * M * scale), apeYtd: cell(20 * M * scale * (i + 1)) }),
         }));
         for (const [m, days] of [[1, 31], [2, 28], [3, 31], [4, 30], [5, 31], [6, 30], [7, 31], [8, 31], [9, 14]]) {
           for (let d = 1; d <= days; d += 1) {

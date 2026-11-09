@@ -24,7 +24,7 @@ export interface ActivationStanding {
 }
 
 /**
- * **`ActivationReadings` — every activation of many members, in one read** (Phase 18.6, P18.6-T1 AC-7): the port the
+ * **`ActivationReadings` — every activation of many members, in one read** (Phase 18.3, P18.3-T1 AC-7): the port the
  * Owner's compliance tree reads an office's activations through, so it never reads `activationProgress` itself and
  * never asks per member.
  *

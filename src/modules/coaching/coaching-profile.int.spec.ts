@@ -9,7 +9,7 @@ import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  ADMIN, declaredPermissions, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
+  ADMIN, declaredPermissions, NO_CLASS, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import {
@@ -57,9 +57,12 @@ describe('the Leader Notes tab over HTTP (P11-T9)', () => {
   const putNote = (subject: Who, body: unknown) => http().put(`/coaching/coachees/${id(subject)}/leader-notes`).send(body as object);
   const audits = (action: string) => col('auditLog').find({ action }).toArray();
 
-  /** An Owner or an Admin on the Agent rung: the office role, and no hierarchy grant to read through. */
+  /**
+   * An Owner or an Admin on no rung: the office role, and no hierarchy grant to read through. It stood on the Agent rung
+   * until P19.9-T6 gave that rung the coach's grants (ADR-0234); one on it now reads as that Agent (§1.1).
+   */
   const officeRole = (role: 'owner' | 'admin') => new RequestContext(`u-${role}-agent`, 'none', {
-    membershipId: new mongoose.Types.ObjectId().toString(), kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+    membershipId: new mongoose.Types.ObjectId().toString(), kpmId: KPM_A, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS,
     status: 'active', isKpmOwner: role === 'owner', isKpmAdmin: role === 'admin', directCount: 0,
   });
 
@@ -137,11 +140,11 @@ describe('the Leader Notes tab over HTTP (P11-T9)', () => {
       });
     });
 
-    it('P11-T9 the coachee never reads their own profile: an Agent at the guard, a leader as not found', async () => {
+    it('P11-T9 the coachee never reads their own profile: not found, an Agent as a leader (P19.9-T6: the guard no longer refuses the rung)', async () => {
       as('RINA');
-      expect((await getProfile('RINA').expect(403)).body.error.code).toBe('PERM_DENIED');
-      expect((await putProfile('RINA', { version: 0, milestoneCodes: [], skillCodes: [] }).expect(403)).body.error.code)
-        .toBe('PERM_DENIED');
+      expect((await getProfile('RINA').expect(404)).body.error.code).toBe('NOT_FOUND');
+      expect((await putProfile('RINA', { version: 0, milestoneCodes: [], skillCodes: [] }).expect(404)).body.error.code)
+        .toBe('NOT_FOUND');
       as('SARI');
       expect((await getProfile('SARI').expect(404)).body.error.code).toBe('NOT_FOUND');
       expect((await putProfile('SARI', { version: 0, milestoneCodes: [], skillCodes: [] }).expect(404)).body.error.code)
@@ -280,10 +283,12 @@ describe('the Leader Notes tab over HTTP (P11-T9)', () => {
       expect(await audits(LEADER_NOTE_READ_ACTION)).toEqual([]);
     });
 
-    it('P11-T9 AC-5 coachee_cannot_read_leader_notes: an Agent at the guard, and a coachee who leads as not found', async () => {
+    it('P11-T9 AC-5 coachee_cannot_read_leader_notes: an Agent, and a coachee who leads, as not found (P19.9-T6)', async () => {
+      // The Agent rung holds `leader_notes:read` since P19.9-T6 (ADR-0234): the guard lets Rina through, and the reader
+      // predicate, which tests the subject first, answers her as it answers a leader.
       as('RINA');
-      const agent = await getNotes('RINA').expect(403);
-      expect(agent.body.error.code).toBe('PERM_DENIED');
+      const agent = await getNotes('RINA').expect(404);
+      expect(agent.body.error.code).toBe('NOT_FOUND');
       expect(JSON.stringify(agent.body)).not.toContain('ON-RINA');
 
       // Sari leads Rina, Budi and Nina's unit, and holds `leader_notes:read`; she is still the subject.
@@ -393,10 +398,20 @@ describe('the Leader Notes tab over HTTP (P11-T9)', () => {
       expect(await audits(LEADER_NOTE_SAVED_ACTION)).toEqual([]);
     });
 
-    it('P11-T9 an Agent holds no grant to write a note', async () => {
+    // Was *an Agent holds no grant to write a note* (403 at the guard): P19.9-T6 (ADR-0234) — every upline coaches.
+    it('P19.9-T6 AC-1 an Agent who leads writes a note about their report, reads it back, and reaches nobody else', async () => {
       as('LUKAS');
-      // Lukas is an agent who leads Tari: the guard still refuses the rung.
-      expect((await putNote('TARI', { version: 0, text: 'x' }).expect(403)).body.error.code).toBe('PERM_DENIED');
+      const saved = (await putNote('TARI', { version: 0, text: 'LUKAS-ON-TARI: strong opener.' }).expect(200)).body;
+      expect(saved).toMatchObject({ version: 1 });
+      expect((await getNotes('TARI').expect(200)).body.mine).toMatchObject({ text: 'LUKAS-ON-TARI: strong opener.' });
+      await putNote('INDAH', { version: 0, text: 'x' }).expect(404);
+      await getNotes('INDAH').expect(404);
+      // Tari never reads it, an Agent like him.
+      as('TARI');
+      expect(JSON.stringify((await getNotes('TARI').expect(404)).body)).not.toContain('LUKAS-ON-TARI');
+      // Agus, above Lukas, reads it: he coaches its author.
+      as('AGUS');
+      expect((await getNotes('TARI').expect(200)).body.others.map((n: { text: string }) => n.text)).toContain('LUKAS-ON-TARI: strong opener.');
     });
   });
 });

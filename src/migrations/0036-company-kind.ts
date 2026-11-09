@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 /**
- * **Every company that already exists is an insurer** (ADR-0164 §1, P18.9-T3 AC-1).
+ * **Every company that already exists is an insurer** (ADR-0164 §1, P18.6-T3 AC-1).
  *
  * `companies.kind` tells an insurer from the *Template library*, the one company migration `0037` makes to
  * hold the platform's templates. Every company before it was made by `POST /admin/companies` or the demo seed

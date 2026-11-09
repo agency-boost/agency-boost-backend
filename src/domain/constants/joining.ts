@@ -3,7 +3,7 @@ import type { Sentence } from '@/common/i18n/sentence';
 import { JOINING_REFUSALS } from './joining.messages';
 
 /**
- * **A person's join date in an office, and who it makes them** (ADR-0169, P18.96-T2).
+ * **A person's join date in an office, and who it makes them** (ADR-0169, P18.8-T2).
  *
  * `memberships.joinDate` is an office date the leader gives when the person is added or approved, the office's today
  * by default. `memberships.joinedAs` is decided from it **once**, when it is first set, and nothing recomputes it: a
@@ -25,7 +25,7 @@ export const JOINING = {
 } as const;
 
 /**
- * **A leader's invite to somebody who is not in the office yet** (ADR-0170 §2, P18.96-T3 AC-2). Documented once in
+ * **A leader's invite to somebody who is not in the office yet** (ADR-0170 §2, P18.8-T3 AC-2). Documented once in
  * `docs/00-product/metrics-and-definitions.md` and pinned by `joining.spec.ts`.
  */
 export const INVITES = {
@@ -39,7 +39,7 @@ export const INVITES = {
 } as const;
 
 /**
- * **Sign-ups from one address** (the P18.96 exit review, L2): `POST /auth/register` — on an invite's link or without
+ * **Sign-ups from one address** (the P18.8 exit review, L2): `POST /auth/register` — on an invite's link or without
  * one — is limited per client address, as an invite link's banner is, so one place cannot script accounts or walk a
  * list of agent codes against `AGENT_CODE_TAKEN`. Twenty an hour lets an office's onboarding session sign up on one
  * Wi-Fi and stops a script within minutes. Documented once in `docs/00-product/metrics-and-definitions.md` and pinned
@@ -53,9 +53,11 @@ export const REGISTRATION = {
 } as const;
 
 /**
- * **3M activation and the year `/new-hires` lists** (ADR-0171 §2, ADR-0173; P18.96-T6). Documented once in
- * `docs/00-product/metrics-and-definitions.md` (*3M activation*) and pinned by `joining.spec.ts`; the frontend
- * re-declares none of it.
+ * **3M activation** (ADR-0171 §2, ADR-0173; P18.8-T6). Documented once in `docs/00-product/metrics-and-definitions.md`
+ * (*3M activation*) and pinned by `activation-3m.spec.ts`; the frontend re-declares none of it.
+ *
+ * *Changed 2026-11-08 (ADR-0233, OD-288): `WINDOW_MONTHS` — the rolling twelve months `/new-hires` listed — is retired.
+ * The page lists a calendar year (`newHiresYear`), which needs no number.*
  */
 export const ACTIVATION_3M = {
   /**
@@ -64,11 +66,6 @@ export const ACTIVATION_3M = {
    * which paces the checklist and is the office's to change, and not `JOINING.NEW_HIRE_MAX_DAYS_BACK`, which classifies.
    */
   DAYS: 90,
-  /**
-   * **`/new-hires` lists the new hires who joined within this many calendar months before the office's today** — a
-   * join date after the same day twelve months back (ADR-0173 §1). Older ones leave the page and stay in the data.
-   */
-  WINDOW_MONTHS: 12,
 } as const;
 
 /** `memberships.joinedAs` (ADR-0169 §3). The screens say *New hire* and *Existing agent*. */
@@ -87,7 +84,7 @@ export function joinedAsFor(joinDate: LocalDate, today: LocalDate): JoinedAs {
 /**
  * **What is wrong with a join date a leader gave**, or `null` when nothing is: a real calendar day, not after the
  * office's today, and not before `JOINING.EARLIEST_JOIN_DATE`. The sentence names the field, as the shared envelope's
- * other refusals do, in both languages (P18.98-T5 AC-3).
+ * other refusals do, in both languages (P18.10-T5 AC-3).
  */
 export function joinDateViolation(value: unknown, today: LocalDate): Sentence<'VALIDATION_FAILED'> | null {
   if (!isLocalDate(value)) return JOINING_REFUSALS.VALIDATION_FAILED.notADate;

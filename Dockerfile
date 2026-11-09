@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# The AgencyBoost API image (P18.7-T3, ADR-0152).
+# The AgencyBoost API image (P18.4-T3, ADR-0152).
 #
 #   docker build --target runtime -t agencyboost-api .   # what the VM runs
 #   docker build --target tools   -t agencyboost-tools . # the same tree with dev dependencies, for the seed
@@ -66,6 +66,8 @@ WORKDIR /app
 # Owned by root and only readable by the process: the API never writes to its own code.
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# P19.7-T3 (ADR-0222 §3): the proposal PDF's three Inter files and their licence, read once when the API starts.
+COPY --from=build /app/assets ./assets
 COPY package.json ./
 
 # No NODE_ENV here. The environment file on the VM states it (staging or production), and an image
@@ -74,7 +76,7 @@ USER node
 EXPOSE 3001
 
 # Readiness, not liveness: `/api/health/ready` answers 503 while the database is unreachable
-# (P18.7-T1), and this is what `deploy.sh` waits on before it calls a deploy good. Node's own fetch,
+# (P18.4-T1), and this is what `deploy.sh` waits on before it calls a deploy good. Node's own fetch,
 # because the slim image has no curl and installing one for a probe is attack surface for nothing.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

@@ -6,12 +6,14 @@ import {
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 import {
-  DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, ROSTER_UPLOAD, SUBSCRIPTION, type LeaderTier,
+  AGENT_CODE_PATTERN, DEFAULT_TENANT_TIMEZONE, LEADER_TIERS, ROSTER_UPLOAD, SUBSCRIPTION, SUBSCRIPTION_PLANS, type LeaderTier,
+  type SubscriptionPlan,
 } from '@/domain/constants';
 import { field } from '@/common/validation/violations';
+import { PHONE_FIELD_SHAPE, phoneFromBody } from '@/modules/users/phone-input';
 import { TENANTS_REFUSALS } from './tenants.messages';
 
-/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them to the pipe. */
+/** The DTOs' own sentences, in both languages (P18.10-T5 AC-3): `field` carries them to the pipe. */
 const SAY = TENANTS_REFUSALS.VALIDATION_FAILED;
 
 /**
@@ -177,6 +179,78 @@ export class UpdateOrgLevelDto {
   @IsOptional()
   @IsEnum(['active', 'archived'])
   status?: 'active' | 'archived';
+
+  @ApiPropertyOptional({
+    example: 3,
+    minimum: 0,
+    description: 'The rung\'s `version` as read, `0` for a rung never changed. A rung changed since is '
+      + 'refused `409 VERSION_CONFLICT` with `details.expectedVersion` and `details.actualVersion`, and nothing is '
+      + 'written. Absent, unchecked.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  expectedVersion?: number;
+}
+
+/** `DELETE /admin/org-levels/:id?expectedVersion=` (ADR-0213 §2): the rung as read, or unchecked. */
+export class DeleteOrgLevelQueryDto {
+  @ApiPropertyOptional({
+    example: 4,
+    minimum: 0,
+    description: 'The rung\'s `version` as read. A rung changed since — restored, renamed — is refused `409 '
+      + 'VERSION_CONFLICT`, nothing written. Absent, unchecked.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  expectedVersion?: number;
+}
+
+/**
+ * ***Pemilik KPM*** (ADR-0212 §1; P19.4-T3 AC-6; the setup spec's A-R1, A2): the person who will run the KPM, named
+ * when it is made — or, through *Ganti pemilik*, given later. *Nama* and *No. WhatsApp* are required; the invitation
+ * goes **by email** (ADR-0010), so without one the Owner waits, named (`kpms.pendingOwner`, *Belum diundang*).
+ */
+export class OwnerInputDto {
+  @ApiProperty({ example: 'Wulan Kartika', minLength: 2, maxLength: 120 })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(2, { message: field(SAY.ownerNameShort) })
+  @MaxLength(120)
+  fullName!: string;
+
+  @ApiProperty({
+    example: '0812 7700 6020',
+    description: 'Their WhatsApp number — **stored and shown, never a channel**: nothing is sent by WhatsApp or SMS '
+      + '(ADR-0212 §4). Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 '
+      + 'to 13 digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `owner.phone`.',
+  })
+  @Transform(({ value }) => phoneFromBody(value))
+  @Matches(PHONE_FIELD_SHAPE, { message: field(SAY.ownerPhoneShape) })
+  phone!: string;
+
+  @ApiPropertyOptional({
+    example: 'wulan.kartika@example.test',
+    description: 'Where the invitation goes. An existing account with it becomes the Owner (its company, an agent '
+      + 'code and a verified address required, ADR-0191 §5); with none, an account is made for it with no usable '
+      + 'password. Absent: no account, the Owner waits named (`pendingOwner`).',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() || undefined : value))
+  @IsEmail()
+  email?: string;
+
+  @ApiPropertyOptional({
+    example: '70045001',
+    description: '*Kode agen pemilik*: their code at the insurer. Required to make a new account (the Owner is the '
+      + 'KPM’s root AB under it); an existing account keeps its own.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
+  @Matches(AGENT_CODE_PATTERN, { message: field(SAY.ownerAgentCodeShape) })
+  agentCode?: string;
 }
 
 export class CreateKpmDto {
@@ -243,6 +317,25 @@ export class CreateKpmDto {
   @ValidateNested()
   @Type(() => StartFromDto)
   startFrom?: StartFromDto;
+
+  @ApiPropertyOptional({
+    type: () => OwnerInputDto,
+    description: '***Pemilik KPM*** (ADR-0212 §1): made the KPM\u2019s Owner as one unit with it — a refusal of the Owner '
+      + 'leaves no KPM. Absent (*"Lewati, nanti saja"*): a KPM with no Owner, under *Perlu perhatian Anda*.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OwnerInputDto)
+  owner?: OwnerInputDto;
+
+  @ApiPropertyOptional({
+    default: true,
+    description: '*"Kirim undangan … sekarang"*: email the Owner a one-time link to choose a password, alive for '
+      + '`ROSTER_INVITATION.TTL_DAYS`. Only an Owner with an account who has never signed in is sent one.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sendInvitation?: boolean;
 }
 
 export class AssignOwnerDto {
@@ -267,6 +360,25 @@ export class AssignOwnerDto {
   @IsOptional()
   @IsString()
   userId?: string;
+
+  @ApiPropertyOptional({
+    type: () => OwnerInputDto,
+    description: '*Ganti pemilik* to somebody named here (ADR-0212 §3): `owner.email` required. An account with it is '
+      + 'made the Owner under the same refusals; with none, an account is made for it and the Owner invited. Instead '
+      + 'of `email`/`userId`.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OwnerInputDto)
+  owner?: OwnerInputDto;
+
+  @ApiPropertyOptional({
+    default: true,
+    description: 'With `owner`: email the new Owner their invitation (an account that has signed in is sent none).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sendInvitation?: boolean;
 }
 
 export class SetStatusDto {
@@ -343,17 +455,18 @@ export class UpdateSubscriptionDto {
   })
   @IsBoolean()
   keepActiveAfterEnd!: boolean;
-}
 
-export class AuditQueryDto {
-  @ApiPropertyOptional({
+  @ApiProperty({
+    required: false, nullable: true, enum: SUBSCRIPTION_PLANS, example: 'annual',
     description:
-      'Super Admin only: narrow the log to one office. Omitted reads the platform-level ' +
-      'log. Ignored for anyone else, who always reads their own office.',
+      '*Paket* (ADR-0211 §1): `six_months` (*6 bulan*) or `annual` (*Tahunan*), a label — nothing renews '
+      + 'or is charged from it. `null` clears it; **absent keeps the plan the office has**, so a client sending the '
+      + 'five fields alone changes no plan. Audited with the other fields.',
   })
+  // The type here; an unknown value is `validateSubscription`'s, named under its field.
   @IsOptional()
   @IsString()
-  kpmId?: string;
+  plan?: SubscriptionPlan | null;
 }
 
 /**
@@ -368,6 +481,30 @@ export class ApproveKpmRequestDto {
   @IsString()
   @Matches(/^\d{4}$/, { message: field(SAY.kpmCodeShape) })
   code!: string;
+
+  @ApiPropertyOptional({
+    example: '65b1f0c2a4d3e5f6a7b8c9d0',
+    description:
+      'The company the office is for, when the Super Admin corrects it on the card (ADR-0191 §2). Absent, '
+      + 'the request\'s. The applicant must belong to it: `409 TENANT_COMPANY_MISMATCH` otherwise, before anything is '
+      + 'written.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  companyId?: string;
+
+  @ApiPropertyOptional({
+    type: () => StartFromDto,
+    description:
+      '*Mulai dari* (ADR-0213 §3): what the office starts from, offered on the card when the company has **no template** '
+      + 'yet — a built-in template (`{ kind: "template", templateLibrary: true, templateId? }`) or *Kosong* (`{ kind: '
+      + '"empty" }`). Absent: the company\'s default template, or the built-in default where it has none. `defaults` is '
+      + 'refused `400`, as on `POST /admin/tenants`.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StartFromDto)
+  startFrom?: StartFromDto;
 }
 
 export class DeclineKpmRequestDto {
@@ -383,9 +520,15 @@ export class DeclineKpmRequestDto {
 
 /** Somebody with no office asking for one. */
 export class CreateKpmRequestDto {
-  @ApiProperty({ example: '65b1f0c2a4d3e5f6a7b8c9d0' })
+  @ApiPropertyOptional({
+    example: '65b1f0c2a4d3e5f6a7b8c9d0',
+    description:
+      'Only for an account that signed up with no company (ADR-0191 §1). Otherwise the request is for the '
+      + 'company the applicant signed up with, and naming another is `409 TENANT_COMPANY_MISMATCH`.',
+  })
+  @IsOptional()
   @IsMongoId()
-  companyId!: string;
+  companyId?: string;
 
   @ApiProperty({ example: 'Surabaya Branch' })
   @IsString()
@@ -397,6 +540,36 @@ export class CreateKpmRequestDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+}
+
+/**
+ * `GET /admin/tenants/code-availability`: the company and the code being typed. The code's shape is the
+ * one *New office* takes; an approval narrows it to four digits.
+ */
+export class CodeAvailabilityQueryDto {
+  @ApiProperty({ example: '65b1f0c2a4d3e5f6a7b8c9d0' })
+  @IsMongoId()
+  companyId!: string;
+
+  @ApiProperty({ example: '1001' })
+  @IsString()
+  @Matches(/^[A-Za-z0-9-]{1,16}$/)
+  code!: string;
+}
+
+/** `GET /admin/accounts?q=`: part of a name or an email address, at least two characters. */
+export class AccountSearchQueryDto {
+  @ApiProperty({ example: 'victor' })
+  @IsString()
+  @MaxLength(100)
+  q!: string;
+}
+
+/** *Pindahkan ke perusahaan lain* (ADR-0191 §5). */
+export class MoveCompanyDto {
+  @ApiProperty({ example: '65b1f0c2a4d3e5f6a7b8c9d0', description: 'The insurer the office moves to.' })
+  @IsMongoId()
+  companyId!: string;
 }
 
 /**
@@ -440,6 +613,31 @@ export class RosterRowsDto {
   @IsString()
   @MaxLength(ROSTER_UPLOAD.MAX_TEXT_LENGTH)
   rows!: string;
+}
+
+/**
+ * **The pasted rows, imported** (P19.3-T4; ADR-0205 §10): the rows, and whether to mail each new person an invitation
+ * to choose their password. Absent is `true` — A3's checkbox is on by default.
+ */
+export class RosterImportDto extends RosterRowsDto {
+  @ApiPropertyOptional({
+    type: Boolean, default: true,
+    description: 'Mail each new person a one-time link to choose their password (email only, ADR-0010). Default `true`.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  invite?: boolean;
+}
+
+/**
+ * **The file's form fields, on `roster/file`** (P19.3-T4): `invite` beside `file`, as the form's text — `true` or
+ * `false`. Absent is `true`.
+ */
+export class RosterFileImportDto {
+  @ApiPropertyOptional({ enum: ['true', 'false'], default: 'true', description: 'As `RosterImportDto.invite`, as form text.' })
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  invite?: 'true' | 'false';
 }
 
 

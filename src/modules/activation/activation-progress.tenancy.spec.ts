@@ -307,16 +307,16 @@ describe('the activation instance (P13-T1)', () => {
   });
 
   /*
-   * P18.96-T2 (ADR-0169): every path that makes a membership active writes its join date and classification, once,
+   * P18.8-T2 (ADR-0169): every path that makes a membership active writes its join date and classification, once,
    * in the office's calendar — and only a new hire is given an activation, by a placement or by a heal.
    */
-  describe('the join date and who it makes them (P18.96-T2, ADR-0169)', () => {
+  describe('the join date and who it makes them (P18.8-T2, ADR-0169)', () => {
     /** The office's today at NOW: 23:30 UTC on the 14th is the 15th in Jakarta. */
     const TODAY = '2026-09-15';
     const read = async (kpmId: string, id: string) => (await members.findById(office(kpmId), id))!;
     const VALIDATION = { code: 'VALIDATION_FAILED', status: 400 };
 
-    it('P18.96-T2 AC-1 an approval with no date joins them today, in the office’s calendar, a new hire with an activation from it', async () => {
+    it('P18.8-T2 AC-1 an approval with no date joins them today, in the office’s calendar, a new hire with an activation from it', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const joiner = await member(KPM_A, 'agent', null, 'pending');
       expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: null, joinedAs: null });
@@ -326,7 +326,7 @@ describe('the activation instance (P13-T1)', () => {
       expect((await activations()).map((r) => [r.membershipId, r.startDate])).toEqual([[joiner.id, TODAY]]);
     });
 
-    it('P18.96-T2 AC-1 the boundary: 90 days back is a new hire, started on that day; 91 is an existing agent, with none', async () => {
+    it('P18.8-T2 AC-1 the boundary: 90 days back is a new hire, started on that day; 91 is an existing agent, with none', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const ninety = await member(KPM_A, 'agent', null, 'pending');
       const ninetyOne = await member(KPM_A, 'agent', null, 'pending');
@@ -339,7 +339,7 @@ describe('the activation instance (P13-T1)', () => {
       expect((await activations()).map((r) => [r.membershipId, r.startDate])).toEqual([[ninety.id, '2026-06-17']]);
     });
 
-    it('P18.96-T2 AC-1 the boundary is the office’s day: at 23:30 UTC on the 14th, 16 June is 91 days back, not the UTC day’s 90', async () => {
+    it('P18.8-T2 AC-1 the boundary is the office’s day: at 23:30 UTC on the 14th, 16 June is 91 days back, not the UTC day’s 90', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const joiner = await member(KPM_A, 'agent', null, 'pending');
       // Counted from the UTC date, the 14th, it would be 90 days back and a new hire: the office's 15th decides.
@@ -352,7 +352,7 @@ describe('the activation instance (P13-T1)', () => {
       expect((await read(KPM_A, earlier.id)).joinedAs).toBe('new_hire');
     });
 
-    it('P18.96-T2 AC-1 an existing agent may have joined years ago: accepted, classified once, given no activation', async () => {
+    it('P18.8-T2 AC-1 an existing agent may have joined years ago: accepted, classified once, given no activation', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const veteran = await member(KPM_A, 'agent', null, 'pending');
       await approvals.tag(leader.ctx, veteran.id, '2009-03-01');
@@ -363,7 +363,7 @@ describe('the activation instance (P13-T1)', () => {
       expect(await activations()).toEqual([]);
     });
 
-    it('P18.96-T2 AC-1 a date after the office’s today, before 1980 or not a day is refused 400 naming joinDate, and nothing is written', async () => {
+    it('P18.8-T2 AC-1 a date after the office’s today, before 1980 or not a day is refused 400 naming joinDate, and nothing is written', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const joiner = await member(KPM_A, 'agent', null, 'pending');
       const requestId = await requestFrom(joiner.id, leader.id);
@@ -383,7 +383,7 @@ describe('the activation instance (P13-T1)', () => {
       expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
     });
 
-    it('P18.96-T2 AC-1 is set once: somebody who already has a join date keeps it and their classification through a later placement', async () => {
+    it('P18.8-T2 AC-1 is set once: somebody who already has a join date keeps it and their classification through a later placement', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const other = await member(KPM_A, 'aab', null);
       const joiner = await member(KPM_A, 'agent', null, 'pending');
@@ -395,7 +395,7 @@ describe('the activation instance (P13-T1)', () => {
       expect(await read(KPM_A, joiner.id)).toMatchObject({ joinDate: '2026-09-01', joinedAs: 'new_hire' });
     });
 
-    it('P18.96-T2 AC-1 a leader’s code joins them today, a new hire; the roster import and the Owner are existing agents', async () => {
+    it('P18.8-T2 AC-1 a leader’s code joins them today, a new hire; the roster import and the Owner are existing agents', async () => {
       const leader = await member(KPM_A, 'aab', null);
       const userId = await person();
       await codes.redeem(new RequestContext(userId, 'none', null), leader.leaderCode);
@@ -418,7 +418,7 @@ describe('the activation instance (P13-T1)', () => {
       expect(await activations()).toHaveLength(1);
     });
 
-    it('P18.96-T2 AC-1 cross-tenant: office A approving or tagging office B’s member with a join date reaches nothing, and writes nothing there', async () => {
+    it('P18.8-T2 AC-1 cross-tenant: office A approving or tagging office B’s member with a join date reaches nothing, and writes nothing there', async () => {
       const leaderA = await member(KPM_A, 'aab', null);
       const leaderB = await member(KPM_B, 'aab', null);
       const joinerB = await member(KPM_B, 'agent', null, 'pending');

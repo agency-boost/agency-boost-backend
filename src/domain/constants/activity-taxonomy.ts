@@ -39,9 +39,25 @@ export interface SeedActivityType {
   readonly code: string;
   readonly categoryCode: string;
   readonly label: string;
+  /**
+   * ***Nama singkat*** (P19.8-T4, ADR-0229 §5; MOB UI-180): the one line the Unit Dashboard's activity table shows, the
+   * full `label` on tap. A second field beside the name, never the name reworded; `null` for none, and the table then
+   * shows the name on up to two lines. At most {@link ACTIVITY_TEXT}`.SHORT_LABEL_MAX` characters.
+   */
+  readonly shortLabel: string | null;
   readonly description: string | null;
   readonly displayOrder: number;
 }
+
+/**
+ * **An activity type's *Nama singkat*** (P19.8-T4, ADR-0229 §5; MOB UI-180): one line at 13px in the activity table's
+ * 132px name column — at most `SHORT_LABEL_MAX` characters of plain text, `null` for none. The office's and the template's
+ * writes refuse a longer one (`400 VALIDATION_FAILED`). Pinned in `activity-taxonomy.spec.ts`; documented in
+ * `metrics-and-definitions.md`.
+ */
+export const ACTIVITY_TEXT = {
+  SHORT_LABEL_MAX: 20,
+} as const;
 
 /**
  * `KPM_Owner.html:1340-1440`. Five sections, and four summary tiles.
@@ -57,7 +73,7 @@ export interface SeedActivityType {
  * with no second field for the Owner to remember. Only a tile of two or more sections carries a
  * code and a label.
  *
- * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5): the platform's Default template is
+ * **In Bahasa Indonesia since P18.10-T7** (OD-238, option 1; ADR-0179 §5): the platform's Default template is
  * written in the client's default language, so a new office starts in it. The prototype's English section names
  * are `SEEDED_ACTIVITY_WORDINGS_BEFORE_OD_238`'s, which migration `0046` recognises in the Template company's
  * Default template. *Recruitment* stays, kept English by the approved glossary (§A.6).
@@ -89,13 +105,16 @@ export const SEED_ACTIVITY_CATEGORIES: readonly SeedActivityCategory[] = [
 /**
  * The twelve. Labels verbatim from `KPM_Owner.html`, descriptions included where it has them — but
  * for items 3, 7 and 8, renamed at the client's request (below; `prototype-parity.md`), and item 7's
- * description, dropped with its rename (ADR-0160 §1).
+ * description, dropped with its rename (ADR-0160 §1). **Each with its *Nama singkat*** (P19.8-T4, ADR-0229 §5): the
+ * owner's approved words of 7 November 2026 (MOB UI-180), by code — what a new office is given, and what migration
+ * `0060` writes into an office still holding none.
  */
 export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
   {
     code: 'LEADS_GEN_ACTIVITY',
     categoryCode: 'LEADS_GENERATION',
     label: 'Melakukan aktivitas leads generation',
+    shortLabel: 'Leads generation',
     description: 'networking, canvassing, posting social media, dll',
     displayOrder: 1,
   },
@@ -103,6 +122,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'LEADS_NEW_PROSPECT',
     categoryCode: 'LEADS_GENERATION',
     label: 'Mendapatkan calon prospek baru',
+    shortLabel: 'Prospek baru',
     description: null,
     displayOrder: 2,
   },
@@ -115,6 +135,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
      * and the item it counts now says so. The description stays the prototype's.
      */
     label: 'Set Appointment',
+    shortLabel: 'Set appointment',
     description: 'telepon, WhatsApp, tatap muka, dll',
     displayOrder: 3,
   },
@@ -122,6 +143,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'SELL_PRESENTATION',
     categoryCode: 'SELLING',
     label: 'Melakukan presentasi penjualan untuk calon atau existing nasabah',
+    shortLabel: 'Presentasi',
     description: null,
     displayOrder: 4,
   },
@@ -129,6 +151,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'SELL_FOLLOWUP',
     categoryCode: 'SELLING',
     label: 'Melakukan diskusi follow up dari presentasi penjualan sebelumnya',
+    shortLabel: 'Follow up',
     description: null,
     displayOrder: 5,
   },
@@ -136,6 +159,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'SELL_SUBMISSION',
     categoryCode: 'SELLING',
     label: 'Submission polis',
+    shortLabel: 'Submission polis',
     description: null,
     displayOrder: 6,
   },
@@ -152,6 +176,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
      * either seeded wording, and leaves an Owner's own; the code does not move (invariant §3).
      */
     label: 'Melakukan presentasi recruitment',
+    shortLabel: 'Presentasi rekrut',
     description: null,
     displayOrder: 7,
   },
@@ -160,6 +185,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     categoryCode: 'RECRUITMENT',
     // `KPM_Owner.html` reads *"… dari presentasi NBO sebelumnya"*; the client's word since ADR-0160 §1.
     label: 'Melakukan diskusi follow up dari presentasi recruitment sebelumnya',
+    shortLabel: 'Follow up rekrut',
     description: null,
     displayOrder: 8,
   },
@@ -167,6 +193,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'RECRUIT_AGENT_CODE',
     categoryCode: 'RECRUITMENT',
     label: 'Proses NPA',
+    shortLabel: 'Proses NPA',
     description: null,
     displayOrder: 9,
   },
@@ -174,11 +201,12 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'DEV_TRAINING_ATTEND',
     categoryCode: 'PERSONAL_DEVELOPMENT',
     /*
-     * **Our own words name no company** (the approved glossary's §C1, OD-237; P18.98-T7): `KPM_Owner.html:1422`
+     * **Our own words name no company** (the approved glossary's §C1, OD-237; P18.10-T7): `KPM_Owner.html:1422`
      * reads *"… dari KPM atau Prudential"*, and the platform's default is every company's starting point. The
      * company's name stays where it is data — `companies.name`, and the demo company.
      */
     label: 'Menghadiri meeting atau training dari KPM atau perusahaan',
+    shortLabel: 'Meeting / training',
     description: null,
     displayOrder: 10,
   },
@@ -186,6 +214,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     code: 'DEV_COACHING_RECEIVED',
     categoryCode: 'PERSONAL_DEVELOPMENT',
     label: '1-on-1 coaching dengan leader saya',
+    shortLabel: '1-on-1 dgn leader',
     description: null,
     displayOrder: 11,
   },
@@ -196,6 +225,7 @@ export const SEED_ACTIVITY_TYPES: readonly SeedActivityType[] = [
     // `KPM_Owner.html:1440`. Dropped when this was first transcribed, and it is the one
     // description an agent most needs: without it the item reads as a category heading
     // rather than as something to log.
+    shortLabel: 'Team development',
     description: '1-on-1 coaching, unit meeting, role-play, JFW, memberikan training',
     displayOrder: 12,
   },
@@ -221,7 +251,7 @@ export const SEEDED_ACTIVITY_WORDINGS_BEFORE_ADR_0160: Readonly<Record<
 };
 
 /**
- * **The words the seed gave before P18.98-T7** (OD-238, option 1; the approved glossary's §C1), per code — kept only
+ * **The words the seed gave before P18.10-T7** (OD-238, option 1; the approved glossary's §C1), per code — kept only
  * so migration `0046` and the prototype spec can recognise the Template company's Default template where it still
  * holds them. No office and no template is given them any more.
  *
@@ -283,11 +313,11 @@ export interface SeedLeadStatus {
  *
  * The office owns these flags from provisioning onward, like every other field here.
  *
- * **Both first statuses say the same words** (ADR-0167 §10, OD-205; P18.95-T9 AC-6): the prototype's
+ * **Both first statuses say the same words** (ADR-0167 §10, OD-205; P18.7-T9 AC-6): the prototype's
  * recruitment ladder says *Not approached*, and the client asked for one wording. The code stays
  * `NOT_APPROACHED`, because a lead holds it.
  *
- * **In Bahasa Indonesia since P18.98-T7** (OD-238, option 1; ADR-0179 §5), in the approved glossary's words:
+ * **In Bahasa Indonesia since P18.10-T7** (OD-238, option 1; ADR-0179 §5), in the approved glossary's words:
  * *Follow-up* and *AAJI* are kept English (§A.6, §C11), *Dibayar dan diterbitkan* is §B.10's *paid and issued*,
  * *Agen aktif baru* its *new active agent*. The English is `SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238`'s.
  */
@@ -309,7 +339,7 @@ export const SEED_LEAD_STATUSES: readonly SeedLeadStatus[] = [
 
 /**
  * **The wording the seed gave before ADR-0167 §10** (2026-10-26; OD-205; the client's UI review, UI-027;
- * P18.95-T9 AC-6), per code — kept only so migration `0038` and the prototype spec can recognise the words an
+ * P18.7-T9 AC-6), per code — kept only so migration `0038` and the prototype spec can recognise the words an
  * office never changed. No office is given them any more.
  *
  * The recruitment pipeline's first status said the prototype's *Not approached*, where the sales pipeline's says
@@ -323,7 +353,7 @@ export const SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167: Readonly<Record<
 };
 
 /**
- * **The words the seed gave before P18.98-T7** (OD-238, option 1), per pipeline and code — the prototype's English
+ * **The words the seed gave before P18.10-T7** (OD-238, option 1), per pipeline and code — the prototype's English
  * (`Overall.html:5366-5367`), but for the recruitment pipeline's first status, which said the sales pipeline's words
  * since ADR-0167 §10. Kept only so migration `0046` can recognise the Template company's Default template where it
  * still holds them, so `0038` still writes the words it was written for, and for the prototype spec. *Follow-up* is

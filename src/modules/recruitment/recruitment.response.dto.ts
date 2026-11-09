@@ -108,6 +108,14 @@ export class PitchFileDto {
 
   @ApiProperty({ type: String, format: 'date', example: '2026-09-12', description: 'The day it was attached, in the office’s calendar.' })
   uploadedOn!: string;
+
+  @ApiProperty({
+    type: String,
+    example: 'application/pdf',
+    description: 'What storage holds, as confirmed (ADR-0040): `application/pdf`, or `text/html`, which a reader draws '
+      + 'only inside a sandboxed frame and never opens on its own (ADR-0217 §4).',
+  })
+  mimeType!: string;
 }
 
 export class PitchChecklistItemDto {
@@ -186,46 +194,10 @@ export class PitchDocumentUrlDto {
   expiresAt!: string;
 }
 
-export class PlaybookUpdatedByDto {
-  @ApiProperty({ type: String })
-  name!: string;
-}
-
-export class RecruitmentPlaybookDto {
-  @ApiProperty({ type: String })
-  companyId!: string;
-
-  @ApiProperty({ type: Number })
-  version!: number;
-
-  @ApiProperty({ type: 'object', additionalProperties: true, description: 'The whole playbook, as saved.' })
-  body!: Record<string, unknown>;
-
-  @ApiProperty({ type: String, format: 'date-time' })
-  updatedAt!: string;
-
-  @ApiProperty({ type: PlaybookUpdatedByDto, nullable: true, description: 'Null for the words the company was given.' })
-  updatedBy!: PlaybookUpdatedByDto | null;
-}
-
 export class RecruitmentPlaybookLimitsDto {
   @ApiProperty({ type: Number, example: 600, description: 'The most characters any text may hold, once trimmed (at least 1).' })
   textMax!: number;
 
   @ApiProperty({ type: Number, example: 6, description: 'The most benefits a profile may list (at least 1).' })
   benefitsMax!: number;
-}
-
-export class RecruitmentPlaybookAdminDto {
-  @ApiProperty({ type: RecruitmentPlaybookDto, nullable: true, description: 'Null for a company with none.' })
-  playbook!: RecruitmentPlaybookDto | null;
-
-  @ApiProperty({ type: 'object', additionalProperties: true, description: 'The AgencyBoost words, to start from.' })
-  defaults!: Record<string, unknown>;
-
-  @ApiProperty({ type: RecruitmentVocabularyDto })
-  vocabulary!: RecruitmentVocabularyDto;
-
-  @ApiProperty({ type: RecruitmentPlaybookLimitsDto, description: 'The bounds a save is held to.' })
-  limits!: RecruitmentPlaybookLimitsDto;
 }

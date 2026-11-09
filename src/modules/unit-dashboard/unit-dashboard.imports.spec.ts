@@ -29,23 +29,25 @@ function reached(entries: readonly string[]): Set<string> {
 
 /**
  * **Nothing on the Unit Dashboard reads training or events, and of campaigns only the chases** (P15-T1 AC-11, amended
- * by P18.5-T7 AC-8): the *Chasing MDRT* column and *Campaigns they're chasing* arrive with campaigns (OD-138,
+ * by P18.2-T7 AC-8): the *Chasing MDRT* column and *Campaigns they're chasing* arrive with campaigns (OD-138,
  * ADR-0122), through **one named reader**, `CampaignChaseReadings`. Not only the module's own imports: **nothing it
  * reaches, at any depth**, so a dependency cannot bring in a campaign's standings, its evaluation or the agent's
  * routes behind it.
  */
-describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or event, and of campaigns the chase reader alone', () => {
+describe('P15-T1 AC-11, P18.2-T7 AC-8 the Unit Dashboard reads no training or event, and of campaigns the chase reader alone', () => {
   const MODULE = __dirname;
   const code = readdirSync(MODULE).filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts')).map((f) => join(MODULE, f));
   const rel = (f: string) => f.slice(SRC.length + 1);
 
   it('P15-T1 AC-11 the module has code to check', () => {
-    // Its sentences in both languages since P18.98-T5: `unit-dashboard.messages.ts`, the catalogue. The Activities tab's
-    // read and its rules since UI V1 (Phase 18.99 T4): `unit-activities.*`, `unit-figures.ts` — walked like the rest.
+    // Its sentences in both languages since P18.10-T5: `unit-dashboard.messages.ts`, the catalogue. The Activities tab's
+    // read and its rules since UI V1 (Phase 18.11 T4): `unit-activities.*`, `unit-figures.ts` — walked like the rest.
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
       'unit-activities.controller.ts', 'unit-activities.response.dto.ts', 'unit-activities.service.ts',
       'unit-dashboard.controller.ts', 'unit-dashboard.dto.ts', 'unit-dashboard.messages.ts',
       'unit-dashboard.response.dto.ts', 'unit-dashboard.service.ts', 'unit-figures.ts',
+      // P19.1-T6 (UI-155): the Potensi tab's read, its query, its shapes — walked like the rest.
+      'unit-potensi.controller.ts', 'unit-potensi.dto.ts', 'unit-potensi.response.dto.ts', 'unit-potensi.service.ts',
     ]);
   });
 
@@ -56,12 +58,12 @@ describe('P15-T1 AC-11, P18.5-T7 AC-8 the Unit Dashboard reads no training or ev
     expect([...files].map(rel).filter((f) => /^modules\/(training|events)\//.test(f))).toEqual([]);
   });
 
-  it('P18.5-T7 AC-8 imports one file of the campaigns module, the chase reader, and reaches only what it reads', () => {
+  it('P18.2-T7 AC-8 imports one file of the campaigns module, the chase reader, and reaches only what it reads', () => {
     const direct = [...new Set(code.flatMap(importsOf))].map(rel).filter((f) => f.startsWith('modules/campaigns/'));
     expect(direct).toEqual(['modules/campaigns/campaign-chase-readings.ts']);
     const campaigns = [...reached(code)].map(rel).filter((f) => f.startsWith('modules/campaigns/')).sort();
     // The reader, the two repositories and schemas it reads, and the words it composes the MDRT tooltip with — held
-    // in both languages in the module's catalogue since P18.98-T5, which is sentences and nothing else.
+    // in both languages in the module's catalogue since P18.10-T5, which is sentences and nothing else.
     expect(campaigns).toEqual([
       'modules/campaigns/campaign-chase-readings.ts',
       'modules/campaigns/campaign-chase.repository.ts',

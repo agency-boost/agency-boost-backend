@@ -28,7 +28,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
     units: { kind: string; leader: { membershipId: string; name: string } | null }[];
   };
   /**
-   * P18.96-T6 (ADR-0173): the roster is sections by 3M result now, each row naming its unit. `shape` keeps the D-group
+   * P18.8-T6 (ADR-0173): the roster is sections by 3M result now, each row naming its unit. `shape` keeps the D-group
    * grouping these tests pin — the units in their order, each with its rows by day, highest first.
    */
   const shape = (r: Awaited<ReturnType<typeof roster>>) => {
@@ -69,7 +69,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         ['aab', 'Nina Lestari', ['Dodi Kurniawan 14']],
         ['aab', 'Sari Puspita', ['Budi Santoso 62', 'Rina Wijaya 59']],
       ]);
-      // P18.96-T6: past day 90 with no first sale, Indah is not activated; her checklist is overdue as before.
+      // P18.8-T6: past day 90 with no first sale, Indah is not activated; her checklist is overdue as before.
       expect(rowOf(r, 'Indah Permatasari')).toEqual({
         hire: { membershipId: id('INDAH'), name: 'Indah Permatasari' }, unit: { kind: 'direct', leader: null },
         joinDate: '2026-06-10', day: 97, firstSaleDate: null, firstSaleDay: null, firstSaleSource: null, status: 'not_yet',
@@ -117,11 +117,11 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
     it('P13-T5 AC-2 Active Agent is FIRST_CASE_CLOSED done, whoever ticked it', async () => {
       await sixHires();
       h.as('SARI');
-      // P18.96-T4 AC-3: ticked by hand with the closing it names, logged in Budi's leads — waiting for data, and done.
+      // P18.8-T4 AC-3: ticked by hand with the closing it names, logged in Budi's leads — waiting for data, and done.
       await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
         .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(200);
       const budi = rowOf(await roster(), 'Budi Santoso');
-      // Two of sixteen: the closing is a lead in his pipeline, so *Add prospects* completes from it too. P18.96-T6: the
+      // Two of sixteen: the closing is a lead in his pipeline, so *Add prospects* completes from it too. P18.8-T6: the
       // row carries his first sale — the logged closing's day — where the *Active Agent* ✓ was. UI-023: a first sale by day
       // 90 is Teraktivasi at once, and a closing logged from the checklist is the leader's own record — `manual` (D-26).
       expect(budi).toMatchObject({
@@ -129,7 +129,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       });
     });
 
-    it('P18.96-T6 AC-3 a graduated or expired checklist no longer takes its hire off: the year lists them, by result', async () => {
+    it('P18.8-T6 AC-3 a graduated or expired checklist no longer takes its hire off: the year lists them, by result', async () => {
       // Amends P13-T5 AC-3 (ADR-0173 §1): the page lists new hires of the last twelve months, not open activations.
       await h.start('RINA', '2026-07-18', { graduatedAt: new Date('2026-09-10T02:00:00Z'), graduatedByMembershipId: id('RINA') });
       await h.start('BUDI', '2026-03-10');
@@ -302,6 +302,109 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       }
       expect(await h.col('activationProgress').findOne({ membershipId: id('B_AGENT') })).toMatchObject({ startDate: '2026-08-01', note: null, version: 1 });
     });
+
+    /*
+     * **The first year only** (P19.9-T3 AC-4, AC-5; OD-289, ADR-0233): every reader opens a new hire on this detail; from
+     * the join date plus twelve calendar months it is served empty — the person, their join date and leader, and nothing
+     * of the checklist — and so is a new hire New Hires lists who has no activation at all.
+     */
+    describe('P19.9-T3 AC-5 served empty past the first year', () => {
+      const SARI_AS_LEADER = () => ({ membershipId: id('SARI'), name: 'Sari Puspita', role: 'aab' });
+
+      it('P19.9-T3 AC-5 Rina, joined twelve months ago to the day, is empty: the person, her dates and leader, nothing of her checklist, no read recorded', async () => {
+        await h.start('RINA', '2025-09-14');
+        h.as('SARI');
+        const view = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        expect(view).toEqual({
+          empty: 'first_year_over', hire: { membershipId: id('RINA'), name: 'Rina Wijaya' }, today: TODAY,
+          joinDate: '2025-09-14', firstYearEndsOn: '2026-09-14', leader: SARI_AS_LEADER(),
+        });
+        expect(await reads()).toEqual([]);
+        // A coach two levels up reads the same, with her leader named as hers.
+        h.as('AGUS');
+        expect((await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body).toMatchObject({
+          empty: 'first_year_over', leader: SARI_AS_LEADER(),
+        });
+      });
+
+      it.each([
+        ['joined a year ago, her activation started later', '2025-09-14', '2025-10-01', true],
+        ['joined within the year, her activation started a year ago', '2025-10-01', '2025-09-14', false],
+      ])('P19.9-T3 AC-5 (exit review L3) %s: the leader’s detail and her own page count the year from the join date alike', async (_case, joinDate, startDate, over) => {
+        await h.start('RINA', startDate);
+        await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('RINA')) }, { $set: { joinDate } });
+        h.as('SARI');
+        const leaders = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        h.as('RINA');
+        const hers = (await h.http().get('/activation/me').expect(200)).body;
+
+        const year = (v: Record<string, unknown>) => (v.empty ? [v.empty, v.joinDate, v.firstYearEndsOn] : 'whole activation');
+        expect(year(leaders)).toEqual(over ? ['first_year_over', joinDate, '2026-09-14'] : 'whole activation');
+        expect(year(hers)).toEqual(year(leaders));
+      });
+
+      it('P19.9-T3 AC-5 the day before, still her first year: the whole activation, as before', async () => {
+        await h.start('RINA', '2025-09-15');
+        h.as('SARI');
+        const view = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+        expect(view).not.toHaveProperty('empty');
+        expect(view).toMatchObject({ state: 'expired', startDate: '2025-09-15', newHire: { joinDate: '2025-09-15' } });
+        expect(view.aspects.length).toBeGreaterThan(0);
+      });
+
+      it('P19.9-T3 AC-5 every write on an activation past its first year is refused, ACTIVATION_CLOSED, and nothing changes', async () => {
+        await h.start('RINA', '2025-09-01');
+        const before = await h.col('activationProgress').findOne({ membershipId: id('RINA') });
+        h.as('SARI');
+        for (const res of [
+          await h.http().put(`/new-hires/${id('RINA')}/items/CRM_SETUP`).send({ done: true }),
+          await h.http().put(`/new-hires/${id('RINA')}/start-date`).send({ startDate: '2025-09-20' }),
+          await h.http().put(`/new-hires/${id('RINA')}/note`).send({ text: 'Too late.' }),
+        ]) {
+          expect([res.status, res.body.error.code]).toEqual([409, 'ACTIVATION_CLOSED']);
+        }
+        expect(await h.col('activationProgress').findOne({ membershipId: id('RINA') })).toEqual(before);
+      });
+
+      it('P19.9-T3 AC-5 a new hire New Hires lists with no activation at all opens empty too, not a 404', async () => {
+        // Nina, placed as a new hire at the AAB rung: listed, with no checklist (ADR-0103).
+        await h.col('memberships').updateOne(
+          { _id: new mongoose.Types.ObjectId(id('NINA')) }, { $set: { joinedAs: 'new_hire', joinDate: '2026-08-01' } },
+        );
+        h.as('SARI');
+        expect(Object.values((await roster()).sections).flat().map((r) => r.hire.name)).toContain('Nina Lestari');
+        const listed = (await reads()).length;
+        expect((await h.http().get(`/new-hires/${id('NINA')}`).expect(200)).body).toEqual({
+          empty: 'no_activation', hire: { membershipId: id('NINA'), name: 'Nina Lestari' }, today: TODAY,
+          joinDate: '2026-08-01', firstYearEndsOn: '2027-08-01', leader: SARI_AS_LEADER(),
+        });
+        // Past her first year with none, it is the first year that says so.
+        await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('NINA')) }, { $set: { joinDate: '2025-08-01' } });
+        expect((await h.http().get(`/new-hires/${id('NINA')}`).expect(200)).body).toMatchObject({ empty: 'first_year_over' });
+        // The roster's own reads, and none for the empty detail.
+        expect(await reads()).toHaveLength(listed);
+      });
+
+      it('P19.9-T3 AC-5 an existing agent with no activation is still 404 — not a new hire, so on no list', async () => {
+        h.as('AGUS');
+        expect((await h.http().get(`/new-hires/${id('DIMAS')}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+      });
+
+      it('P19.9-T3 AC-5 the empty answer keeps the reach: a peer, a sibling, the hire herself and another office are 404', async () => {
+        await h.start('RINA', '2025-09-01');
+        await h.start('B_AGENT', '2025-01-10');
+        for (const [who, target] of [['PEER_AB', 'RINA'], ['DEWI', 'RINA'], ['RINA', 'RINA'], ['OWNER', 'B_AGENT']] as const) {
+          h.as(who);
+          expect([who, target, (await h.http().get(`/new-hires/${id(target)}`).expect(404)).body.error.code])
+            .toEqual([who, target, 'NOT_FOUND']);
+        }
+        // Office B's own leader reads its own empty one.
+        h.as('B_AB');
+        expect((await h.http().get(`/new-hires/${id('B_AGENT')}`).expect(200)).body).toMatchObject({
+          empty: 'first_year_over', hire: { name: 'Bayu Saputra' },
+        });
+      });
+    });
   });
 
   describe('a leader’s tick (OD-121)', () => {
@@ -390,7 +493,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         startDate: '2026-07-01', day: 76, endsOn: '2027-01-01',
         startCorrected: { by: { membershipId: id('SARI'), name: 'Sari Puspita' }, at: h.clock.now().toISOString() },
       });
-      // P18.96-T2 AC-3: one audit row, the activation's start and the membership's join date before and after.
+      // P18.8-T2 AC-3: one audit row, the activation's start and the membership's join date before and after.
       expect((await writes()).map((r) => [r.action, r.targetId, r.targetMembershipId, r.before, r.after])).toEqual([
         ['activation.start_date_corrected', String(doc._id), id('RINA'),
           { startDate: '2026-07-18', joinDate: '2026-07-18' }, { startDate: '2026-07-01', joinDate: '2026-07-01' }],
@@ -399,7 +502,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       expect((await h.http().get('/activation/me').expect(200)).body.startCorrected.by.membershipId).toBe(id('SARI'));
     });
 
-    it('P18.96-T2 AC-3 the correction moves the membership’s join date with the start, and never reclassifies', async () => {
+    it('P18.8-T2 AC-3 the correction moves the membership’s join date with the start, and never reclassifies', async () => {
       await h.start('RINA', '2026-07-18');
       const rina = () => h.col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id('RINA')) });
       expect(await rina()).toMatchObject({ joinDate: '2026-07-18', joinedAs: 'new_hire' });
@@ -413,7 +516,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       expect(await rina()).toMatchObject({ joinDate: '2025-09-14' });
     });
 
-    it('P18.96-T2 AC-3 a correction in another office reaches nobody, and moves no join date there', async () => {
+    it('P18.8-T2 AC-3 a correction in another office reaches nobody, and moves no join date there', async () => {
       await h.start('B_AGENT', '2026-08-01');
       h.as('SARI');
       const res = await h.http().put(`/new-hires/${id('B_AGENT')}/start-date`).send({ startDate: '2026-07-01' });
@@ -430,14 +533,14 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       for (const bad of ['2026-09-15', '2025-09-13', '2026-02-30', '14/09/2026', 20260914, null]) {
         expect([bad, (await put(bad).expect(400)).body.error.code]).toEqual([bad, 'VALIDATION_FAILED']);
       }
-      // The bounds in the sentence are written as ADR-0167 §1 writes a date (P18.95-T1 AC-4).
+      // The bounds in the sentence are written as ADR-0167 §1 writes a date (P18.7-T1 AC-4).
       expect((await put('2026-09-15').expect(400)).body.error.message).toBe(
-        // P18.96-T2 AC-5: the date is named as the reader knows it, the join date.
+        // P18.8-T2 AC-5: the date is named as the reader knows it, the join date.
         'The join date must be a day from 14 Sep 2025 to 14 Sep 2026: no later than today, and no more than 365 days before it.',
       );
     });
 
-    it('P18.98-T5 AC-7 refuses a join date out of bounds in Indonesian, the bounds in Indonesian figures', async () => {
+    it('P18.10-T5 AC-7 refuses a join date out of bounds in Indonesian, the bounds in Indonesian figures', async () => {
       await h.start('RINA', '2026-07-18');
       h.as('SARI');
       const said = 'Tanggal bergabung harus berupa hari dari 14 Sep 2025 sampai 14 Sep 2026: tidak setelah hari ini, dan tidak '
@@ -503,7 +606,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
       }
     });
 
-    it('P18.98-T5 AC-7 refuses a note out of bounds in Indonesian: its bound written the Indonesian way', async () => {
+    it('P18.10-T5 AC-7 refuses a note out of bounds in Indonesian: its bound written the Indonesian way', async () => {
       await h.start('RINA', '2026-07-18');
       h.as('SARI');
       const said = 'text harus 1 sampai 1.000 karakter, tanpa spasi di awal dan akhir.';

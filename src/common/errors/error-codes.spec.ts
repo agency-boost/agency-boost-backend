@@ -28,13 +28,13 @@ describe('ErrorCode (P11-T3 AC-3)', () => {
 });
 
 /**
- * **P18.98-T5 AC-2, AC-7 — every code says its refusal in both languages** (ADR-0179 §7). Every catalogue the API has
+ * **P18.10-T5 AC-2, AC-7 — every code says its refusal in both languages** (ADR-0179 §7). Every catalogue the API has
  * (`*.messages.ts`, found by reading the tree, so a new one needs no registering) is loaded; then every `ErrorCode`
  * must be filed in one, in English and Indonesian, or be one nothing raises. `tsc` already refuses a throw site whose
  * sentence is filed under another code, or that writes its words inline; this is the other half — a code with no
  * sentence at all.
  */
-describe('P18.98-T5 every code’s refusal, in both languages', () => {
+describe('P18.10-T5 every code’s refusal, in both languages', () => {
   const src = join(__dirname, '../..');
   const catalogueFiles = globSync('**/*.messages.ts', { cwd: src });
 
@@ -49,6 +49,7 @@ describe('P18.98-T5 every code’s refusal, in both languages', () => {
    */
   const NOT_RAISED: Readonly<Partial<Record<ErrorCodeValue, string>>> = {
     CONFIG_RATIO_FORMULA_FIXED: 'Retired by ADR-0024, kept and never reused: a client may still branch on it.',
+    IMPERSONATION_SETUP_TARGET: 'Retired by ADR-0206 (P19.4-T2): there is no setup session, so nothing raises it; kept and never reused.',
     ORG_INVITE_EXHAUSTED: 'Catalogued for an invite with a use limit; every invite is single-use, answered ORG_INVITE_EXPIRED.',
     PERM_OUT_OF_SCOPE: 'P11-T3 AC-3: a subject outside the grant is answered NOT_FOUND, never this.',
     RATE_LIMITED: 'The generic limit: the API limits only signing in and registering, under AUTH_RATE_LIMITED.',
@@ -70,6 +71,11 @@ describe('P18.98-T5 every code’s refusal, in both languages', () => {
     'modules/recruitment:howtojoinTitle',
     'modules/recruitment:companyTitle',
     'modules/recruitment:agencyTitle',
+    // A skipped import row's cell (ADR-0205 §5): `{column}: {problem}` — the column is the file's own header, A3's
+    // Indonesian words in either language, and the problem a sentence already written for the reader. No word to translate.
+    'modules/tenants roster rows:cell',
+    // *Proposal*, the audit log's kind of target (P19.7-T3): the product's word, kept English in both (glossary §A).
+    'modules/audit/targets:proposals',
   ]);
 
   /**

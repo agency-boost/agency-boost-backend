@@ -24,7 +24,7 @@ async function as(code: string, email: string, flags: { owner?: boolean; admin?:
   return new RequestContext(String(member.userId), 'none', {
     membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
     status: 'active', isKpmOwner: flags.owner ?? false, isKpmAdmin: flags.admin ?? false, directCount: 0,
-  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.98-T4)
+  } as never).withReader(SOURCE_READER); // the API's English, as asserted here: nobody's choice reads Indonesian (P18.10-T4)
 }
 
 /**
@@ -64,10 +64,11 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(overview.production.agencies[0].name).toBe('Satria Nugraha');
     expect(overview.production.agencies).toHaveLength(5);
     expect(agency('Yosef Tambunan').aabUnits.map((u) => u.head.name)).toEqual(['Winda Anggraeni']);
-    expect(agency('Yosef Tambunan').manpower).toEqual({ aab: 1, agents: 8, total: 10 });
+    // P19.3-T1 AC-4 (D3): Yosef counted once, as AB.
+    expect(agency('Yosef Tambunan').manpower).toEqual({ ab: 1, aab: 1, agents: 8, total: 10 });
   });
 
-  it('P18-T1 AC-13, P18.97-T3 AC-5 the leaderboard ranks every AB: the four who lead somebody, then Maya Halim, No team', () => {
+  it('P18-T1 AC-13, P18.9-T3 AC-5 the leaderboard ranks every AB: the four who lead somebody, then Maya Halim, No team', () => {
     expect(overview.coaching.leaderboard.slice(0, 4).map((l) => l.name).sort())
       .toEqual(['Agus Prasetyo', 'Satria Nugraha', 'Wilson Tanoto', 'Yosef Tambunan']);
     // UI-017: Maya Halim, the Admin on the AB rung, leads nobody — listed last, no rate; *Showing 4 of 5 ABs*.
@@ -79,11 +80,14 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
 
   it('P18-T1 AC-13 who hasn’t logged: the ones who never have first — Agus, Lukman, Raka — then the longest silent', async () => {
     const list = await wired.kpmOverview.notLogged(await as('0417', 'owner@kpm0417.test', { owner: true }));
-    // P18.96-T6 adds two new hires who have logged nothing (`activation-3m-fixture.ts`): Lukman, and Tari after him.
+    // P18.8-T6 adds two new hires who have logged nothing (`activation-3m-fixture.ts`): Lukman, and Tari after him.
+    // P19.3-T2 AC-2: *Belum mencatat · 7 hari* names five, then the longest silent — Maya, and Pandu after her.
     expect(list.members.map((m) => [m.name, m.daysSince])).toEqual([
-      ['Agus Prasetyo', null], ['Lukman Hakim', null], ['Raka Aditama', null],
+      ['Agus Prasetyo', null], ['Lukman Hakim', null], ['Raka Aditama', null], ['Maya Halim', 13], ['Pandu Wirawan', 12],
     ]);
-    expect(list.total).toBeGreaterThan(4);
+    expect(list.total).toBeGreaterThan(5);
+    // Each row carries its leader (*"Agent · ke Satria"*): Raka is Satria's.
+    expect(list.members.find((m) => m.name === 'Raka Aditama')!.leader).toMatchObject({ name: 'Satria Nugraha' });
   });
 
   it('P18-T1 AC-13 the Owner and Maya logged weeks ago and not since; Gilang left Yosef’s agency last month', async () => {
@@ -95,11 +99,12 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     const gilang = (await col('memberships').findOne({ agentCode: '87015' }))!;
     expect(gilang).toMatchObject({ status: 'removed' });
     expect((gilang.removedAt as Date).toISOString().slice(0, 7)).toBe('2026-09');
-    // On every file this year to July; the Overview's year to date holds it, the analytics' total says how much (OD-74).
+    // On every file this year to July; the Overview's year to date holds it (OD-74), and since P19.3-T3 AC-5 the
+    // analytics' total holds it too: one production total per KPM (ADR-0204 §1, OWN case 2).
     const files = await col('monthlyAgentData').find({ membershipId: String(gilang._id), month: { $gte: '2026-01' } }).sort({ month: 1 }).toArray();
     expect(files.map((f) => f.month)).toEqual(['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']);
-    expect(analytics.total.leaversExcludedMinor).toBe(files.at(-1)!.apeYtd.value);
-    expect(overview.production.ytd.achievedMinor).toBe((analytics.total.apeAnnual.achievedMinor ?? 0) + files.at(-1)!.apeYtd.value);
+    expect(files.at(-1)!.values.APE.value).toBeGreaterThan(0);
+    expect(analytics.total.apeAnnual.achievedMinor).toBe(overview.production.ytd.achievedMinor);
   });
 
   it('P18-T1 AC-13 the recruitment target is 15, set by the Owner this month; late stages and two closed won last month', async () => {
@@ -110,13 +115,44 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(entry).toMatchObject({ before: null, after: { month: '2026-10', target: 15 } });
   });
 
-  it('P18-T1 AC-13 a year of files: the month before last empty, nothing waited on, a projection to run on', () => {
+  it('P19.3-T2 AC-4 seed: 0417 is running — no Siapkan KPM card, and all seven stored as done', async () => {
+    expect(overview.setup).toBeNull();
+    const kpm = await col('kpms').findOne({ code: '0417' });
+    expect(await col('kpmSetupMarks').countDocuments({ kpmId: String(kpm!._id), deletedAt: null })).toBe(5);
+  });
+
+  it('P19.3-T2 AC-4 AC-5 seed: 0701 shows Siapkan KPM at 2 dari 7 — Branch info reviewed, a member besides the Owner', async () => {
+    const kpm = await col('kpms').findOne({ code: '0701' });
+    const owner = await col('users').findOne({ email: 'owner@kpm0701.test' });
+    const member = (await col('memberships').findOne({ kpmId: String(kpm!._id), userId: String(owner!._id), status: 'active' }))!;
+    const hadi = new RequestContext(String(member.userId), 'none', {
+      membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
+      status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 1,
+    } as never).withReader(SOURCE_READER);
+    const view = await wired.kpmOverview.read(hadi);
+    expect(view.setup).toMatchObject({ done: 2, openMonth: { month: '2026-10', closesOn: '2026-11-07' }, target: null });
+    expect(view.setup!.steps.filter((s) => s.done).map((s) => s.key)).toEqual(['branch-info', 'import']);
+    // Nothing ever uploaded: *"Belum diunggah"* and October, still open, named.
+    expect(view.production.ytd).toMatchObject({ achievedMinor: null });
+    expect(view.production.ytd.missingMonths).toContain('2026-10');
+  });
+
+  it('P18-T1 AC-13 a year of files: the month before last empty, nothing waited on, a projection to run on', async () => {
     // October held: the year to date waits on nothing (item 3), August's gap covered by October's own.
     expect(overview.production.ytd.missingMonths).toEqual([]);
-    // October held, August not: the year to date as of October covers ten months, the missing one included.
-    expect(overview.production.projectionMinor).toBe(Math.round((overview.production.ytd.achievedMinor! / 10) * 12));
+    // P19.3-T1 AC-12: October, this month, is in progress (D8), so the projection runs from September — the year to date
+    // as of September covers nine months, August's missing one included.
+    expect(overview.production.projectionThrough).toBe('2026-09');
+    const kpm = await col('kpms').findOne({ code: '0417' });
+    // The year to date as the product reads it since P19.5-T2 (R4): every month's APE held, January to September.
+    const rows = await col('monthlyAgentData')
+      .find({ kpmId: String(kpm!._id), deletedAt: null, month: { $gte: '2026-01', $lte: '2026-09' }, 'values.APE.value': { $ne: null } })
+      .toArray();
+    const throughSeptember = rows.reduce((sum, r) => sum + (r.values.APE.value as number), 0);
+    expect(overview.production.projectionMinor).toBe(Math.round((throughSeptember / 9) * 12));
+    // P19.3-T3 AC-7 (UI-091): the chart ends with this month, October, held.
     expect(analytics.monthly.map((m) => [m.month, m.apeMinor === null])).toEqual([
-      ['2026-04', false], ['2026-05', false], ['2026-06', false], ['2026-07', false], ['2026-08', true], ['2026-09', false],
+      ['2026-05', false], ['2026-06', false], ['2026-07', false], ['2026-08', true], ['2026-09', false], ['2026-10', false],
     ]);
   });
 
@@ -128,13 +164,14 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(yosef.aabUnits[0].moc).toMatchObject({ status: 'unknown', missing: 'Not uploaded yet: Rolling Persistency — DU.' });
     expect(yosef.aabUnits[0].moc!.criteria.find((c) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 2, met: true });
     expect(analytics.mocRulesText).toBe(
-      'AAB: Net APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (Net APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+      // P19.3-T1 AC-5: *APE*, never *Net APE*.
+      'AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     );
     const satria = agency('Satria Nugraha');
     expect(satria.moc!.status).toBe('not_met');
     expect(satria.moc!.criteria.filter((c) => c.met === false).map((c) => c.code))
-      .toEqual(['NET_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY', 'DIRECT_AB_COUNT']);
+      .toEqual(['MOC_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY', 'DIRECT_AB_COUNT']);
     expect(satria.club).toBeNull();
   });
 
@@ -159,11 +196,13 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(office('0701').members).toBeGreaterThan(0);
   });
 
-  it('P18-T1 AC-12 0555’s Owner reads 0555’s own figures; its two members joined two months ago', async () => {
+  it('P18-T1 AC-12 0555’s Owner reads 0555’s own figures; two members joined two months ago, and Fajar after them', async () => {
     const b = await wired.kpmOverview.read(await as('0555', 'owner@kpm0555.test', { owner: true }));
     expect(b.office.code).toBe('0555');
-    expect(b.composition).toMatchObject({ total: 2, newThisMonth: 0 });
-    expect(b.engagement.loggedThisMonth.lastMonthToDate).not.toBeNull();
+    // P19.9-T6: three since Lina, an Agent, recruited Fajar (`demo.ts`, `AGENT_LEADER_0555`) — 45 days back, not this month.
+    expect(b.composition).toMatchObject({ total: 3, newThisMonth: 0 });
+    // P19.3-T2 (ADR-0200 §3): logging is the week's *Pengguna aktif* alone; 0555's three members are counted in it.
+    expect(b.engagement.loggedThisWeek.logged + b.engagement.loggedThisWeek.notLogged).toBe(3);
     expect(b.production.ytd.achievedMinor).not.toBeNull();
     expect(b.coaching.coverage30d.count).toBeGreaterThan(0);
   });

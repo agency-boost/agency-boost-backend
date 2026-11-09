@@ -6,12 +6,12 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  buildCoachingOffice, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
+  buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from '../../../test/coaching-office';
 import { HomeService, type HomeView } from './home.service';
 
 /**
- * **Home's read on real rows** (UI V1, Phase 18.99 T11; UI-100, UI-101; `functional/home.md`): office 0417 (KPM A) beside
+ * **Home's read on real rows** (UI V1, Phase 18.11 T11; UI-100, UI-101; `functional/home.md`): office 0417 (KPM A) beside
  * 0555 (KPM B), the coaching roster's office (`test/coaching-office.ts`) — *today* is Monday 14 September 2026, 10:00 in
  * Jakarta. Every figure is held against the screen it must equal: the Unit Dashboard's tile, the Calendar's today, the
  * activity log's saved totals.
@@ -24,7 +24,7 @@ import { HomeService, type HomeView } from './home.service';
  *                            └── NINA ── DODI
  * ```
  */
-describe('GET /home, on real rows (Phase 18.99 T11)', () => {
+describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   let home: HomeService;
@@ -44,6 +44,7 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
       wired.activityReadings,
       wired.memberships,
       new LeadRepository(mongoose.model(Lead.name, LeadSchema) as never),
+      wired.leadReadings,
       wired.calendar,
       wired.subjectReads,
       // UI-111: a stored photo is a key, signed into a link per read; here a link the test can read.
@@ -51,6 +52,9 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
         new Map(keys.filter((k): k is string => !!k).map((k) => [k, `https://signed.test/${k}`])) } as never,
       wired.clock,
       wired.users as never,
+      wired.orgLevels,
+      // P19.9-T3 AC-6: *New hires* is `/new-hires`' own count.
+      wired.newHires,
     );
 
     // Indah's day: a lead whose next action is today, a meeting at 15:00 today, one tomorrow, one declined.
@@ -162,6 +166,23 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
       expect([indah.phone, indah.photoUrl]).toEqual([null, null]);
     });
 
+    it('P19.9-T2 AC-2 names each person’s rung, the code and the company’s own label, from the roster already read', async () => {
+      const view = await read('AGUS');
+      const rung = (who: Who) => view.leader!.team.find((p) => p.membershipId === office.id[who])!.rung;
+      expect(rung('SARI')).toEqual({ code: 'AAB', label: 'AAB' });
+      expect(rung('DEWI')).toEqual({ code: 'AAB', label: 'AAB' });
+      expect(rung('RINA')).toEqual({ code: 'AGENT', label: 'Agent' });
+      expect(rung('LUKAS')).toEqual({ code: 'AGENT', label: 'Agent' });
+      // The company's own words: a ladder that calls its Agent rung *Business Partner* is read as it says.
+      await db().collection('companyOrgLevels').updateOne({ companyId: COMPANY, code: 'AGENT' }, { $set: { label: 'Business Partner' } });
+      try {
+        expect((await read('AGUS')).leader!.team.find((p) => p.membershipId === office.id.RINA)!.rung)
+          .toEqual({ code: 'AGENT', label: 'Business Partner' });
+      } finally {
+        await db().collection('companyOrgLevels').updateOne({ companyId: COMPANY, code: 'AGENT' }, { $set: { label: 'Agent' } });
+      }
+    });
+
     it('UI-101 records each person on the list as read, surface home, over yesterday and today — and nobody for an agent', async () => {
       const entries = () => db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
       const before = await entries();
@@ -188,11 +209,130 @@ describe('GET /home, on real rows (Phase 18.99 T11)', () => {
     });
   });
 
+  /*
+   * **Home by role** (P19.8-T2 AC-10; ADR-0228 §4; OD-283, OD-284 by their defaults): *Leads* and *New hires* are every
+   * reader's; the leader's block every leader's by role, a leader with nobody yet at zero. *Tim saya*'s own figures
+   * (`members`, `recruitmentPipeline`) left the answer with the block (ADR-0228 §2).
+   */
+  describe('P19.8-T2 AC-10 Home by role', () => {
+    const zero = { count: 0, of: 0 };
+    const ZERO_BLOCK = { activeAgent: { ...zero, unit: zero, aab: zero }, coached7d: { ...zero, unit: zero, aab: zero }, team: [] };
+
+    it('P19.8-T2 AC-10 an AAB who leads nobody gets the leader block at zero, not null — and nobody is recorded as read', async () => {
+      const before = await db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
+      const view = await read('DEWI');
+      expect(view.leader).toEqual(ZERO_BLOCK);
+      expect(view.newHires).toBe(0);
+      expect(await db().collection('auditLog').countDocuments({ 'after.surface': 'home' })).toBe(before);
+    });
+
+    it('P19.8-T2 AC-10 every leader by role gets the block — an AB, an AAB, the Owner and an Admin with nobody — an Agent none', async () => {
+      for (const who of ['AGUS', 'SARI', 'OWNER'] as Who[]) {
+        const view = await read(who);
+        expect({ who, team: view.leader!.team.length > 0 }).toEqual({ who, team: true });
+      }
+      // Maya runs the office and leads nobody: the block at zero, as Dewi's.
+      expect((await read('ADMIN')).leader).toEqual(ZERO_BLOCK);
+      for (const who of ['INDAH', 'RINA', 'DODI'] as Who[]) {
+        const view = await read(who);
+        expect({ who, leader: view.leader }).toEqual({ who, leader: null });
+        expect({ who, newHires: view.newHires }).toEqual({ who, newHires: 0 });
+      }
+    });
+
+    it('P19.9-T1 AC-5 OD-283 Leads is every open lead the reader owns, any type and any stage — what /leads opens on — not a won, a lost or a deleted one, not another member’s, not another office’s', async () => {
+      const lead = (over: Record<string, unknown>) => ({
+        kpmId: KPM_A, ownerMembershipId: office.id.INDAH, type: 'recruitment', name: 'Calon', statusCode: null, outcome: null,
+        commitments: [], nextActionDate: null, nextActionNote: null, version: 1, deletedAt: null,
+        dateRegistered: new Date('2026-09-01T02:00:00Z'), contact: { phone: null, email: null }, transitions: [], ...over,
+      });
+      // The office's terminal Recruit stage is the fixture's own, provisioned from the default pipeline. A second row on
+      // (kpmId, code) inserted here would pass only while the unique index had not been built yet.
+      expect(await db().collection('leadStatuses').findOne({
+        kpmId: KPM_A, pipeline: 'recruitment', code: 'NEW_ACTIVE_AGENT', isTerminal: true, status: 'active', deletedAt: null,
+      })).not.toBeNull();
+      const { insertedIds } = await db().collection('leads').insertMany([
+        lead({ name: 'Calon satu', statusCode: 'MEETING_SCHEDULED' }),
+        lead({ name: 'Calon dua', outcome: 'lost' }),
+        lead({ name: 'Calon tiga', deletedAt: new Date('2026-09-02T02:00:00Z') }),
+        // On the office's terminal stage, and one of no type yet: both open leads on /leads, so both on the tile (R1).
+        lead({ name: 'Calon empat', statusCode: 'NEW_ACTIVE_AGENT' }),
+        lead({ name: 'Belum dipilih', type: null }),
+        // Another member's, and another office's under Indah's id.
+        lead({ name: 'Calon Dimas', ownerMembershipId: office.id.DIMAS }),
+        lead({ name: 'Calon kantor B', kpmId: KPM_B }),
+        lead({ name: 'Klien kantor B', kpmId: KPM_B, type: 'sales' }),
+      ]);
+      try {
+        // Ibu Wiwik and Pak Teddy (sales, open), Calon satu, Calon empat and Belum dipilih: five. Ibu Closed (won), Calon
+        // dua (lost), Ibu Deleted and the rest: none. P19.8-T2's Sales + Recruit read three here.
+        const view = await read('INDAH');
+        expect(view.leads).toBe(5);
+        // Exactly what /leads opens on: *Leads milik: Saya*, *Semua* (P19.9-T1 AC-1, AC-2).
+        const list = await wired.leadRecords.list(office.as('INDAH'), { scope: 'own', outcome: 'open' });
+        expect(view.leads).toBe(list.total);
+        // A leader's downline's leads are theirs, never the leader's (OD-286: they are *Tim*, not *Saya*).
+        expect((await read('AGUS')).leads).toBe(0);
+        expect((await wired.leadRecords.list(office.as('AGUS'), { scope: 'own', outcome: 'open' })).total).toBe(0);
+      } finally {
+        await db().collection('leads').deleteMany({ _id: { $in: Object.values(insertedIds) } });
+      }
+    });
+
+    it('P19.8-T2 AC-10 an Agent has Leads too, and office B’s reader never counts office A’s', async () => {
+      const view = await read('B_AB');
+      expect(view.leads).toBe(0);
+      expect((await read('INDAH')).leads).toBe(2);
+    });
+
+    it('P19.8-T2 AC-10 with a team, the leader block is the Unit Dashboard’s rows', async () => {
+      const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
+      expect(view.leader!.team.length).toBe(dashboard.tiles.team.total - 1);
+      expect(Object.keys(view.leader!).sort()).toEqual(['activeAgent', 'coached7d', 'team']);
+    });
+
+    it('P19.9-T3 AC-6 OD-288 New hires is what /new-hires opens on — this calendar year’s new hires in reach — not last year’s, and not the Unit Dashboard’s', async () => {
+      // Dimas joined this year as a new hire, Indah last year; neither has a first sale.
+      const set = (who: Who, joinDate: string | null, joinedAs: string | null) => db().collection('memberships')
+        .updateOne({ _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: { joinDate, joinedAs } });
+      await set('DIMAS', '2026-03-01', 'new_hire');
+      await set('INDAH', '2025-11-20', 'new_hire');
+      try {
+        const [view, roster, last, dashboard] = await Promise.all([
+          read('AGUS'), wired.newHires.roster(office.as('AGUS')), wired.newHires.roster(office.as('AGUS'), 'previous'),
+          wired.unitDashboard.read(office.as('AGUS')),
+        ]);
+        const listed = (r: typeof roster) => Object.values(r.sections).flat().map((row) => row.hire.membershipId);
+        expect(listed(roster)).toEqual([office.id.DIMAS]);
+        expect(view.newHires).toBe(1);
+        expect(listed(last)).toEqual([office.id.INDAH]);
+        // The dashboard's *Tim Anda* keeps its own rule: every new hire before a first sale, whatever the year.
+        expect(dashboard.tiles.team.newHires).toBe(2);
+        // Sari coaches neither, and an Agent nobody: 0 — as `/new-hires` would answer them nobody.
+        expect([(await read('SARI')).newHires, (await read('INDAH')).newHires]).toEqual([0, 0]);
+        // Office B's reader never counts office A's.
+        expect((await read('B_AB')).newHires).toBe(0);
+      } finally {
+        await set('DIMAS', null, null);
+        await set('INDAH', null, null);
+      }
+    });
+
+    it('P19.8-T2 AC-7 an agenda row’s id opens the Calendar’s own detail, and only for its reader: another office’s read is 404', async () => {
+      const view = await read('INDAH');
+      const row = view.actions.find((a) => a.kind === 'agenda' && a.source === 'entry')!;
+      expect(row).toBeDefined();
+      const id = (row as { id: string }).id;
+      const entry = await wired.calendar.readOne(office.as('INDAH'), id);
+      expect(entry.title).toBe('Weekly unit huddle');
+      await expect(wired.calendar.readOne(office.as('B_AB'), id)).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   describe('UI-100 the reader’s own blocks', () => {
     it('UI-100 an agent sees no leader tiles and no Laporan tim', async () => {
       expect((await read('INDAH')).leader).toBeNull();
-      // An AAB who leads nobody is an agent here too.
-      expect((await read('DEWI')).leader).toBeNull();
+      expect((await read('RINA')).leader).toBeNull();
     });
 
     it('UI-100 Aktivitas saya and the chart are the seven office days ending today, from the saved totals', async () => {

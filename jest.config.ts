@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import type { Config } from 'jest';
 
 // Coverage thresholds are the ratchet from docs/03-engineering/testing-strategy.md.
@@ -7,7 +8,7 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   testRegex: '\\.spec\\.ts$',
-  // P18.7-T2: `*.live.spec.ts` reaches a real bucket and runs only under `pnpm test:storage-live`, which
+  // P18.4-T2: `*.live.spec.ts` reaches a real bucket and runs only under `pnpm test:storage-live`, which
   // replaces this list. Every other script — the full run, coverage, integration, tenancy — leaves it out.
   //
   // `*.performance.spec.ts` runs only under `pnpm test:performance`, one suite at a time, which replaces this
@@ -55,7 +56,7 @@ const config: Config = {
     // read whose data, so it is permissions code held to the permissions floor, although it lives in
     // `modules/org` beside the tree — whose own floor is lower, and says why.
     './src/modules/org/coach-resolver.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
-    // P18.97-T8 L2 (the Phase 18.97 exit permission review): which memberships a reader may see — the roster, one
+    // P18.9-T8 L2 (the Phase 18.9 exit permission review): which memberships a reader may see — the roster, one
     // member's read, their reports, the *Rejoined* mark, the tree and a removal's destination all narrow through it —
     // and who administers the office, the Owner's grant and revoke. Permissions code, held where the resolver is
     // although `modules/org` around them is not. `reader-visibility.ts` was `visibleTo` and its compositions inside
@@ -144,30 +145,30 @@ const config: Config = {
     // the four entries above follow, and the same bargain. The threshold is the debt made
     // visible, not the debt hidden.
     './src/modules/activation/': { lines: 95, branches: 90, functions: 95, statements: 95 },
-    // Phase 18.5 (the permission review, item 18): the agent's campaigns brought the module to the domain floor, and
+    // Phase 18.2 (the permission review, item 18): the agent's campaigns brought the module to the domain floor, and
     // the two files that decide what a member sees of a chase are pinned whole.
     './src/modules/campaigns/': { lines: 95, branches: 95, functions: 95, statements: 95 },
     './src/modules/campaigns/campaign-agent.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/campaigns/campaign-chase-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
-    // Phase 18.6 (P18.6-T2): the override of a final standing and the port the compliance tree reads, pinned whole.
+    // Phase 18.3 (P18.3-T2): the override of a final standing and the port the compliance tree reads, pinned whole.
     './src/modules/campaigns/campaign-standing-overrides.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/campaigns/campaign-standings-reader.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
-    // Phase 18.6 (P18.6-T2): the compliance tree's Events and Campaigns categories, 100 / 100 / 100 / 100 over their own specs.
+    // Phase 18.3 (P18.3-T2): the compliance tree's Events and Campaigns categories, 100 / 100 / 100 / 100 over their own specs.
     './src/modules/reporting/compliance/events.category.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/reporting/compliance/campaigns.category.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
-    // Phase 18.5 (the exit review, 14): the members' events brought the module to the domain floor — 99.1 / 95.9 / 100
+    // Phase 18.2 (the exit review, 14): the members' events brought the module to the domain floor — 99.1 / 95.9 / 100
     // / 99.1 over its own specs alone — and the four files that decide who an event is for, what a member writes, and
     // what the Owner reads and confirms are pinned whole.
     './src/modules/events/': { lines: 95, branches: 95, functions: 95, statements: 95 },
     './src/modules/events/event-audience.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-guest.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
-    // Phase 18.99 (the exit review, T1): the coachee's tick from Calendar — who may write it, a tick that changes nothing,
+    // Phase 18.11 (the exit review, T1): the coachee's tick from Calendar — who may write it, a tick that changes nothing,
     // and the session gone between the read and the write — pinned whole by its own spec.
     './src/modules/coaching/coaching-action-done.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-roll-call.service.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/events/event-readings.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/products/': { lines: 95, branches: 84, functions: 95, statements: 95 },
-    // Raised at Phase 18.5 (training progress, a business-rule module now; the exit review's B3): `training-content.ts`,
+    // Raised at Phase 18.2 (training progress, a business-rule module now; the exit review's B3): `training-content.ts`,
     // the gap this note used to explain, has its own spec, and the module measured 99.6 / 96.0 / 97.6 / 99.2 over its
     // own and activation's specs. The two files that decide what a learner is offered and who may set or read a status
     // — what is offered, and the progress service — are pinned whole.
@@ -262,8 +263,8 @@ const config: Config = {
     './src/modules/reporting/kpm-recruit-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/org/membership.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
-     * Phase 18.6: the Owner's compliance tree — who is listed where, every category's status and chip, and what a read
-     * discloses. Business rules over other modules' readers, so the reporting floor (P18.6-T1 asks ≥95% branch); it
+     * Phase 18.3: the Owner's compliance tree — who is listed where, every category's status and chip, and what a read
+     * discloses. Business rules over other modules' readers, so the reporting floor (P18.3-T1 asks ≥95% branch); it
      * measured 100 on every figure the day it landed. Activation's bulk reader answers every hire's activation of an
      * office in one read — what the tree discloses of them — so it is held whole, as the partition is.
      */
@@ -273,7 +274,7 @@ const config: Config = {
     // It decides access, so it is held where the permissions are.
     './src/modules/leader-meetings/leader-meeting-people.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
-     * Phase 18.7 (P18.7-T2, ADR-0153): storage. The adapter decides what an upload may be and what a file is
+     * Phase 18.4 (P18.4-T2, ADR-0153): storage. The adapter decides what an upload may be and what a file is
      * confirmed as, and the sniff is the one check standing where Cloudinary read the bytes itself (ADR-0040), so
      * both are held whole; so is the choice between the bucket and the storage that refuses. All four measured
      * 100 on every figure the day they landed.
@@ -283,7 +284,7 @@ const config: Config = {
     './src/modules/assets/unconfigured-storage.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/assets/storage.provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
-     * Phase 18.99 T18 (ADR-0182): which provider sends the mail, and with what. Boot validation, the adapter and the
+     * Phase 18.11 T18 (ADR-0182): which provider sends the mail, and with what. Boot validation, the adapter and the
      * test command all decide from it, so a branch wrong here is mail that silently stops, or a password sent before
      * TLS; held whole, as the storage choice is. It measured 100 on every figure the day it landed.
      */
@@ -319,8 +320,19 @@ const config: Config = {
    * index builds behind the drops — a 42 s `syncIndexes`, one full run in three failed. A database
    * per worker, wiped rather than dropped (`test/mongo.ts`), ended it; `TEST_DB_TRACE=1` shows any
    * slow operation on the shared server if it comes back.
+   *
+   * **And never more workers than cores** (2026-11-06). GitHub's runner for this private repository has two vCPUs
+   * and 7 GB. Four workers there, beside `mongod` and the PDF and image specs, starved each other: suites ran four to
+   * ten times their local time, 30 s hooks timed out, and one run lost its runner (*"starves it for CPU/Memory"*). The
+   * database's ceiling stays 4; the machine's is its cores.
    */
-  maxWorkers: 4,
+  maxWorkers: Math.min(4, availableParallelism()),
+  /*
+   * **A worker that has grown past 1 GB is replaced after its suite** (2026-11-06): each integration suite boots a
+   * Nest application, and what a few hundred of them leave behind in one worker reached the runner's heap limit late
+   * in the run, where every hook slowed to a timeout. Jest restarts it between suites; nothing inside a suite changes.
+   */
+  workerIdleMemoryLimit: '1GB',
 };
 
 export default config;

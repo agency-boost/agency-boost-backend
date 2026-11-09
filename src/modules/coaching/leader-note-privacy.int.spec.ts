@@ -170,10 +170,11 @@ describe('exit criterion 3: no leader note reaches its subject, over every coach
     expect(found).toEqual([`/coaching/coachees/${id('SARI')}/leader-notes`]);
   });
 
-  it('P11-T9 AC-5 the notes read and the profile read answer the subject not found, or refuse them at the guard', async () => {
+  it('P11-T9 AC-5 the notes read and the profile read answer the subject not found, an Agent as a leader (P19.9-T6)', async () => {
+    // Rina, an Agent, was refused at the guard until the Agent rung held the coach's grants (ADR-0234): not found now.
     session.current = office.as('RINA');
-    await request(app.getHttpServer()).get(`/coaching/coachees/${id('RINA')}/leader-notes`).expect(403);
-    await request(app.getHttpServer()).get(`/coaching/coachees/${id('RINA')}/profile`).expect(403);
+    await request(app.getHttpServer()).get(`/coaching/coachees/${id('RINA')}/leader-notes`).expect(404);
+    await request(app.getHttpServer()).get(`/coaching/coachees/${id('RINA')}/profile`).expect(404);
     session.current = office.as('SARI');
     await request(app.getHttpServer()).get(`/coaching/coachees/${id('SARI')}/leader-notes`).expect(404);
     await request(app.getHttpServer()).get(`/coaching/coachees/${id('SARI')}/profile`).expect(404);

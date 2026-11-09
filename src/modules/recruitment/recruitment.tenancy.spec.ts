@@ -85,20 +85,32 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       office(KPM_A, PRUDENTIAL, '0417'), office(KPM_B, PRUDENTIAL, '0555'),
       office(KPM_ALLIANZ, ALLIANZ, '0999'), office(KPM_BLANK, BLANK, '0701'),
     ]);
-    await wired.recruitmentPlaybooks.seedForCompany(PRUDENTIAL);
-    await wired.recruitmentPlaybooks.seedForCompany(ALLIANZ);
+    // ADR-0210: the playbook is a template section. Each insurer's default template holds the AgencyBoost words,
+    // published as version 1 (*New template* from the defaults); the blank company's holds none.
+    prudentialDefault = (await wired.namedTemplates.create(SA, PRUDENTIAL, { name: 'Prudential template', from: 'defaults' })).id;
+    allianzDefault = (await wired.namedTemplates.create(SA, ALLIANZ, { name: 'Allianz template', from: 'defaults' })).id;
+    await wired.namedTemplates.create(SA, BLANK, { name: 'Sejahtera template', from: 'empty' });
   });
+
+  const SA = RequestContext.platform('root');
+  let prudentialDefault = '';
+  let allianzDefault = '';
+
+  /** A template's playbook drafted with `change` applied to the AgencyBoost words, and published: the console's path. */
+  async function publishPlaybook(companyId: string, templateId: string, change: (body: Record<string, unknown>) => void) {
+    const body = defaultPlaybookBody() as unknown as Record<string, unknown>;
+    change(body);
+    await wired.templateService.saveDraft(SA, companyId, 'recruitment_playbook', body, templateId);
+    await wired.templateService.publish(SA, companyId, 'recruitment_playbook', templateId);
+  }
 
   const plan = (ctx: RequestContext, query: Record<string, string> = {}) => wired.recruitmentPlans.attackPlan(ctx, query);
   const BRIEF = { type: 'retiree', motivation: 'flexibility,leadership', hesitation: 'no-network,time' };
 
-  /** Allianz rewords its next action through the console, as T8 writes it. */
+  /** Allianz rewords its next action in its template's *Rekrutmen* section and publishes it (ADR-0210 §1). */
   async function allianzRewords(): Promise<string> {
-    const body = defaultPlaybookBody() as unknown as Record<string, unknown>;
     const words = 'Book them on Thursday’s Allianz opportunity evening, and call the day before.';
-    await wired.recruitmentPlaybooks.save(RequestContext.platform('root'), ALLIANZ, {
-      version: 1, body: { ...body, nextAction: words },
-    });
+    await publishPlaybook(ALLIANZ, allianzDefault, (body) => { body.nextAction = words; });
     return words;
   }
 
@@ -157,10 +169,15 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       expect(await plan(member(KPM_BLANK))).toMatchObject({ hasPlaybook: false, plan: null });
     });
 
-    it('P17-T8 AC-5 every office of the company reads a saved word on its next plan', async () => {
-      const body = defaultPlaybookBody() as unknown as { profiles: Record<string, { tagline: string }> };
-      body.profiles.retiree.tagline = 'Back at work after a career elsewhere, on hours of their own.';
-      await wired.recruitmentPlaybooks.save(RequestContext.platform('root'), PRUDENTIAL, { version: 1, body });
+    it('P17-T8 AC-5, P19.4-T5 AC-8 every office made from the template reads a published word on its next plan', async () => {
+      const tagline = 'Back at work after a career elsewhere, on hours of their own.';
+      // A draft reaches nobody (ADR-0210 §4) …
+      const draft = defaultPlaybookBody() as unknown as { profiles: Record<string, { tagline: string }> };
+      draft.profiles.retiree.tagline = tagline;
+      await wired.templateService.saveDraft(SA, PRUDENTIAL, 'recruitment_playbook', draft as never, prudentialDefault);
+      expect((await plan(member(KPM_A), BRIEF)).plan!.profile.tagline).toBe(SEED_RECRUITMENT_PLAYBOOK.profiles.retiree.tagline);
+      // … and *Terbitkan* reaches every office made from the template at once: no push.
+      await wired.templateService.publish(SA, PRUDENTIAL, 'recruitment_playbook', prudentialDefault);
       for (const kpmId of [KPM_A, KPM_B]) {
         expect((await plan(member(kpmId), BRIEF)).plan!.profile.tagline)
           .toBe('Back at work after a career elsewhere, on hours of their own.');
@@ -182,6 +199,55 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
   });
 
+  describe('P19.4-T5 AC-8 the playbook of the template each office was made from (ADR-0210 §4)', () => {
+    const startedFrom = (kpmId: string, from: Record<string, unknown>) =>
+      mongoose.model(Kpm.name, KpmSchema).updateOne({ _id: kpmId }, { $set: { startedFrom: from } }).exec();
+
+    it('P19.4-T5 AC-8 an office made from another template of its company reads that template’s, live; the default’s office keeps the default’s', async () => {
+      const second = await wired.namedTemplates.create(SA, PRUDENTIAL, { name: 'Prudential — Jakarta', from: 'defaults' });
+      await publishPlaybook(PRUDENTIAL, second.id, (body) => { body.nextAction = 'Bawa ke BOP Jakarta hari Kamis.'; });
+      await startedFrom(KPM_B, { source: 'template', templateId: second.id, templateName: second.name });
+
+      expect((await plan(member(KPM_B), BRIEF)).plan!.nextAction).toBe('Bawa ke BOP Jakarta hari Kamis.');
+      expect((await plan(member(KPM_A), BRIEF)).plan!.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK.nextAction);
+    });
+
+    it('P19.4-T5 AC-8 an office made from a built-in template, or from Kosong, reads its company’s default template’s', async () => {
+      await startedFrom(KPM_A, { source: 'template', templateId: allianzDefault, templateName: 'x', companyId: ALLIANZ });
+      await startedFrom(KPM_B, { source: 'empty', templateId: null, templateName: null });
+      await allianzRewords();
+      for (const kpmId of [KPM_A, KPM_B]) {
+        expect((await plan(member(kpmId), BRIEF)).plan!.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK.nextAction);
+      }
+    });
+
+    it('P19.4-T5 AC-11 never another company’s: a record naming Allianz’s template as its own reads Prudential’s default (cross-company)', async () => {
+      const allianzWords = await allianzRewords();
+      // A forged or stale record, the other company's template with no company named: the company filter wins.
+      await startedFrom(KPM_A, { source: 'template', templateId: allianzDefault, templateName: 'Allianz template' });
+      const read = await plan(member(KPM_A), BRIEF);
+      expect(read.plan!.nextAction).toBe(SEED_RECRUITMENT_PLAYBOOK.nextAction);
+      expect(JSON.stringify(read)).not.toContain(allianzWords);
+    });
+
+    it('P19.4-T5 AC-8 a template with no published playbook gives ADR-0125’s empty state; a draft is never read', async () => {
+      const bare = await wired.namedTemplates.create(SA, PRUDENTIAL, { name: 'Prudential — kosong', from: 'empty' });
+      await startedFrom(KPM_B, { source: 'template', templateId: bare.id, templateName: bare.name });
+      expect(await plan(member(KPM_B), BRIEF)).toMatchObject({ hasPlaybook: false, plan: null });
+
+      await wired.templateService.saveDraft(SA, PRUDENTIAL, 'recruitment_playbook', defaultPlaybookBody() as never, bare.id);
+      expect(await plan(member(KPM_B), BRIEF)).toMatchObject({ hasPlaybook: false, plan: null });
+    });
+
+    it('P19.4-T5 AC-8 an archived template’s last published playbook is still read by the offices made from it', async () => {
+      const second = await wired.namedTemplates.create(SA, PRUDENTIAL, { name: 'Prudential — lama', from: 'defaults' });
+      await publishPlaybook(PRUDENTIAL, second.id, (body) => { body.nextAction = 'Kata-kata template lama.'; });
+      await startedFrom(KPM_B, { source: 'template', templateId: second.id, templateName: second.name });
+      await wired.namedTemplates.archive(SA, PRUDENTIAL, second.id);
+      expect((await plan(member(KPM_B), BRIEF)).plan!.nextAction).toBe('Kata-kata template lama.');
+    });
+  });
+
   describe('nothing stored, nothing else read (P17-T2 AC-7, D-store)', () => {
     it('P17-T2 AC-7 a plan read leaves every collection as it found it, and writes no audit row', async () => {
       // Something of everything nearby: an office's pitch, its files, an earlier audit row.
@@ -196,10 +262,10 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       expect(await db().collection('auditLog').countDocuments({})).toBe(audit);
     });
 
-    it('P17-T2 AC-7 reads the office’s own row for its company and the company’s playbook — nothing else, and writes nothing', async () => {
+    it('P17-T2 AC-7, P19.4-T5 AC-8 reads the office’s own row, its template and that template’s playbook — nothing else, and writes nothing', async () => {
       await attachTo(KPM_A, 'opportunity', 'Opportunity_Overview_v3.pdf');
       const touched = await touchedBy(() => plan(member(KPM_A), BRIEF));
-      expect([...new Set(touched.map((t) => t.collection))].sort()).toEqual(['kpms', 'recruitmentPlaybooks']);
+      expect([...new Set(touched.map((t) => t.collection))].sort()).toEqual(['companyTemplates', 'kpms', 'templates']);
       expect(touched.every((t) => ['findOne', 'find'].includes(t.method))).toBe(true);
     });
 
@@ -235,7 +301,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
   const pitchRows = () => db().collection('kpmRecruitmentPitchDocuments').find({}).sort({ _id: 1 }).toArray();
 
   describe('the read (P17-T4 AC-5)', () => {
-    it('P17-T4 AC-5, P18.97-T5 AC-2 the six slots in order, each with its words, null where nothing is held, version 0', async () => {
+    it('P17-T4 AC-5, P18.9-T5 AC-2 the six slots in order, each with its words, null where nothing is held, version 0', async () => {
       const view = await read(KPM_A);
       expect(view.slots.map((s) => [s.slot, s.title, s.line, s.required, s.state, s.file, s.version])).toEqual(
         RECRUITMENT_PITCH_SLOTS.map((s) => [s.code, s.title, s.line, s.required, 'missing', null, 0]),
@@ -270,7 +336,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
   });
 
-  describe('P18.98-T7 the slots’ words in the reader’s language (ADR-0179 §7)', () => {
+  describe('P18.10-T7 the slots’ words in the reader’s language (ADR-0179 §7)', () => {
     it('serves each line and checklist label in Indonesian to an Indonesian reader, each title its English name (UI-107); codes, states and order as they are', async () => {
       const view = await wired.recruitmentPitch.read(inIndonesian(member(KPM_A)));
       expect(view.slots.map((s) => [s.slot, s.title, s.required, s.state])).toEqual([
@@ -608,7 +674,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
      * Every slot state across the two offices, as the seed holds them: 0417 the prototype's pitch — Opportunity
      * Overview with two ticks (partial), Proof & Credibility (uploaded), FAQ and How to Join missing — and its
      * Company Profile, its Agency Profile empty; 0555 all four, Opportunity Overview's four ticked (complete), and
-     * both optional documents (P18.97-T5 AC-5).
+     * both optional documents (P18.9-T5 AC-5).
      */
     async function twoOffices() {
       const a = await attachTo(KPM_A, 'opportunity', 'Opportunity_Overview_v3.pdf');
@@ -623,7 +689,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       return keys;
     }
 
-    it('P17-T4 AC-6, P18.97-T5 AC-2 exit test 2 — every slot state, every role, two offices: six slots read, a link only for the reader’s own filled slot, 300 seconds, else 404', async () => {
+    it('P17-T4 AC-6, P18.9-T5 AC-2 exit test 2 — every slot state, every role, two offices: six slots read, a link only for the reader’s own filled slot, 300 seconds, else 404', async () => {
       const keys = await twoOffices();
       const expected: Record<string, Record<string, string>> = {
         [KPM_A]: { opportunity: 'partial', proof: 'uploaded', faq: 'missing', howtojoin: 'missing', company: 'uploaded', agency: 'missing' },
@@ -696,9 +762,9 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
   });
 
-  // ---------------------------------------------------------------- the two optional documents (P18.97-T5)
+  // ---------------------------------------------------------------- the two optional documents (P18.9-T5)
 
-  describe('P18.97-T5 — Company Profile and Agency Profile, optional (ADR-0177 §2, §3; UI-042)', () => {
+  describe('P18.9-T5 — Company Profile and Agency Profile, optional (ADR-0177 §2, §3; UI-042)', () => {
     const OPTIONAL = ['company', 'agency'] as const;
     /** The four required slots, done: Opportunity Overview complete, the other three uploaded. */
     async function fourDone(kpmId: string) {
@@ -707,7 +773,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       for (const code of ['proof', 'faq', 'howtojoin']) await attachTo(kpmId, code, `${code}.pdf`);
     }
 
-    it('P18.97-T5 AC-2 every role reads six slots, the two optional after the four, each saying so, empty ones missing at version 0', async () => {
+    it('P18.9-T5 AC-2 every role reads six slots, the two optional after the four, each saying so, empty ones missing at version 0', async () => {
       for (const role of ROLES) {
         const view = await read(KPM_A, role);
         expect([role, view.slots.map((s) => [s.slot, s.title, s.required, s.state, s.file, s.checklist, s.version])]).toEqual([role, [
@@ -721,7 +787,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       }
     });
 
-    it.each(OPTIONAL)('P18.97-T5 AC-2 %s is signed into the office’s folder, attached, replaced and opened as the four are', async (code) => {
+    it.each(OPTIONAL)('P18.9-T5 AC-2 %s is signed into the office’s folder, attached, replaced and opened as the four are', async (code) => {
       const first = await attachTo(KPM_A, code, `${code}-v1.pdf`);
       expect(first).toMatchObject({ slot: code, required: false, state: 'uploaded', version: 1, checklist: [], file: { name: `${code}-v1.pdf`, bytes: 1024, uploadedOn: TODAY_IN_JAKARTA } });
       const [row] = await pitchRows();
@@ -743,13 +809,13 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       expect(entry!.before).toMatchObject({ storageKey: row.storageKey, version: 1, confirmed: [] });
     });
 
-    it.each(OPTIONAL)('P18.97-T5 AC-2 %s has no checklist: a tick on it is 400, nothing written', async (code) => {
+    it.each(OPTIONAL)('P18.9-T5 AC-2 %s has no checklist: a tick on it is 400, nothing written', async (code) => {
       await attachTo(KPM_A, code, `${code}.pdf`);
       expect(await refusalOf(tick(KPM_A, code, 'career-path', true, 1))).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
       expect((await pitchRows())[0].confirmations).toEqual([]);
     });
 
-    it('P18.97-T5 AC-3 uploading and replacing an optional document moves nothing on the banner, at 0 of 4 or at 4 of 4', async () => {
+    it('P18.9-T5 AC-3 uploading and replacing an optional document moves nothing on the banner, at 0 of 4 or at 4 of 4', async () => {
       const before = (await read(KPM_A)).summary;
       expect(before).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
       for (const code of OPTIONAL) {
@@ -766,7 +832,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       expect((await read(KPM_B)).summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
     });
 
-    it('P18.97-T5 AC-2 another office’s optional document is 404 — its link and an attach naming its file — with nothing written', async () => {
+    it('P18.9-T5 AC-2 another office’s optional document is 404 — its link and an attach naming its file — with nothing written', async () => {
       // 0555 holds both; 0417 holds neither.
       for (const code of OPTIONAL) await attachTo(KPM_B, code, `Kelapa Gading ${code}.pdf`);
       const theirs = Object.fromEntries((await pitchRows()).map((r) => [r.slot, r.storageKey as string]));
@@ -786,7 +852,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
         .toEqual([['company', 'missing'], ['agency', 'missing']]);
     });
 
-    it('P18.97-T5 AC-2 a Super Admin outside a support session is refused the optional slots as every other', async () => {
+    it('P18.9-T5 AC-2 a Super Admin outside a support session is refused the optional slots as every other', async () => {
       const root = RequestContext.platform('root');
       for (const code of OPTIONAL) {
         for (const work of [

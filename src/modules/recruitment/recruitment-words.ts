@@ -21,7 +21,7 @@ function overlay(body: unknown, seed: unknown, id: unknown): unknown {
 }
 
 /**
- * **A company's playbook for its reader** (UI V1, UI-107; Phase 18.99 T13): for a reader in Indonesian, every word the
+ * **A company's playbook for its reader** (UI V1, UI-107; Phase 18.11 T13): for a reader in Indonesian, every word the
  * company still holds as the platform wrote it (`SEED_RECRUITMENT_PLAYBOOK`, byte for byte, at the same place) is served
  * in the platform's Indonesian (`SEED_RECRUITMENT_PLAYBOOK_ID`); a word the company typed is shown as typed (ADR-0179
  * §5). An English reader reads the playbook as stored. Only the plan's read uses this: the Super Admin's editor shows

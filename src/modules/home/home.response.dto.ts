@@ -91,6 +91,13 @@ class HomeSplitDto implements SplitFigure {
   @ApiProperty({ type: HomeCountOfDto, description: 'Every AAB unit below them.' }) aab!: HomeCountOfDto;
 }
 
+/** A person's rung on *Laporan aktivitas tim*'s *Group* tab (P19.9-T2 AC-2; ADR-0235). */
+class HomeRungDto {
+  @ApiProperty({ example: 'AAB', description: 'The rung’s code on the company’s ladder.' }) code!: string;
+  @ApiProperty({ example: 'AAB', description: 'The company’s own label for it; the code where the ladder has none.' })
+  label!: string;
+}
+
 class HomeTeamPersonDto implements HomeTeamPerson {
   @ApiProperty() membershipId!: string;
   @ApiProperty({ example: 'Lukman Hakim' }) name!: string;
@@ -98,6 +105,11 @@ class HomeTeamPersonDto implements HomeTeamPerson {
   @ApiProperty({ type: String, nullable: true, description: 'A signed link to their photo, never the stored key.' })
   photoUrl!: string | null;
   @ApiProperty({ description: 'In the reader’s Unit; everybody is in the Group.' }) inUnit!: boolean;
+  @ApiProperty({
+    type: HomeRungDto,
+    description: 'Their rung, which the *Group* tab names in the company’s short words — *AB*, *AAB*, *Agent* (ADR-0235).',
+  })
+  rung!: HomeRungDto;
   @ApiProperty({ type: Number, nullable: true, description: 'Yesterday’s saved total; `null` for no saved day.' })
   yesterday!: number | null;
   @ApiProperty({ type: Number, nullable: true }) today!: number | null;
@@ -107,7 +119,10 @@ class HomeLeaderDto {
   @ApiProperty({ type: HomeSplitDto, description: 'Exactly the Unit Dashboard’s *Active Agent* tile.' }) activeAgent!: HomeSplitDto;
   @ApiProperty({ type: HomeSplitDto, description: 'Members coached in the last 7 days (`COACHED_7D`), out of manpower.' })
   coached7d!: HomeSplitDto;
-  @ApiProperty({ type: [HomeTeamPersonDto], description: 'Nobody-reported first, then not today, then the rest.' })
+  @ApiProperty({
+    type: [HomeTeamPersonDto],
+    description: '*Laporan aktivitas tim*: everybody in your Group but you — nobody-reported first, then not today, then the rest.',
+  })
   team!: HomeTeamPersonDto[];
 }
 
@@ -129,10 +144,30 @@ export class HomeDto implements HomeView {
         { $ref: getSchemaPath(HomeAgendaActionDto) },
       ],
     },
-    description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’.',
+    description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’. An agenda '
+      + 'row’s `id` is the Calendar’s own: an entry’s opens `GET /calendar/entries/{id}`, a joined event’s `/events/{id}`.',
   })
   actions!: HomeView['actions'];
-  @ApiProperty({ type: HomeLeaderDto, nullable: true, description: '`null` for somebody who leads nobody.' })
+  @ApiProperty({
+    minimum: 0,
+    example: 7,
+    description: '*Leads* (`OWN_OPEN_LEADS`): every open lead you own, any type and any stage — what `/leads` opens on '
+      + '(`GET /leads?scope=own&outcome=open`’s `total`). Every reader’s.',
+  })
+  leads!: number;
+  @ApiProperty({
+    minimum: 0,
+    example: 1,
+    description: '*New hires*: your Group’s new hires before a first sale (ADR-0172 §1), the Unit Dashboard’s count; 0 when '
+      + 'you lead nobody.',
+  })
+  newHires!: number;
+  @ApiProperty({
+    type: HomeLeaderDto,
+    nullable: true,
+    description: 'Every leader by role — an AB, an AAB, an Owner or an Admin — at zero with no team yet (ADR-0189 §4); '
+      + '`null` for an Agent who leads nobody.',
+  })
   leader!: HomeLeaderDto | null;
 }
 

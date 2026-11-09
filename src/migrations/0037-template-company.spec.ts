@@ -22,9 +22,9 @@ const NOW = new Date('2026-10-26T02:00:00Z');
 const LATER = new Date('2026-10-27T02:00:00Z');
 
 /**
- * **P18.9-T3 AC-2 — the *Template* company** (ADR-0164 §1, §2).
+ * **P18.6-T3 AC-2 — the *Template* company** (ADR-0164 §1, §2).
  *
- * Made once, from the AgencyBoost defaults as Phase 18.8 left them, with everything a company created with the
+ * Made once, from the AgencyBoost defaults as Phase 18.5 left them, with everything a company created with the
  * defaults is given — so the migrations before it find each part on their next run and add nothing — and never
  * again: a second run, and every run after the Super Admin has changed it, writes nothing. Another company
  * holding the slug stops it, naming that company. (The whole list twice on an empty database:
@@ -56,7 +56,7 @@ describe('0037 — the Template company', () => {
     return state;
   }
 
-  it('P18.9-T3 AC-2 makes the company: kind template, slug template, the defaults recorded, last of its parts', async () => {
+  it('P18.6-T3 AC-2 makes the company: kind template, slug template, the defaults recorded, last of its parts', async () => {
     expect(await up(db(), NOW)).toEqual({
       created: true,
       rungs: DEFAULT_ORG_LADDER.length,
@@ -74,7 +74,7 @@ describe('0037 — the Template company', () => {
     });
   });
 
-  it('P18.9-T3 AC-2 gives it the ladder with its leader tiers, the products, the carrier rules and the playbook', async () => {
+  it('P18.6-T3 AC-2 gives it the ladder with its leader tiers, the products, the carrier rules and the playbook', async () => {
     await up(db(), NOW);
 
     const rungs = await col('companyOrgLevels').find({ companyId: libraryId }).sort({ displayOrder: 1 }).toArray();
@@ -101,7 +101,7 @@ describe('0037 — the Template company', () => {
       .toMatchObject({ body: SEED_RECRUITMENT_PLAYBOOK, version: 1, deletedAt: null });
   });
 
-  it('P18.9-T3 AC-2 holds Default template, the default, each kind published as version 1 of the defaults as 18.8 left them', async () => {
+  it('P18.6-T3 AC-2 holds Default template, the default, each kind published as version 1 of the defaults as 18.5 left them', async () => {
     await up(db(), NOW);
 
     const template = await col('templates').findOne({ _id: new mongoose.Types.ObjectId(templateId) });
@@ -118,7 +118,7 @@ describe('0037 — the Template company', () => {
     // No `campaign_kinds` row: the tab reads the platform's, as every company made with the defaults does.
     expect(rows.some((r) => r.kind === 'campaign_kinds')).toBe(false);
 
-    // Phase 18.8 and P18.9-T2, as they stand: the client's words, the new benchmarks and the binding.
+    // Phase 18.5 and P18.6-T2, as they stand: the client's words, the new benchmarks and the binding.
     const taxonomy = rows.find((r) => r.kind === 'activity_taxonomy')!.payload;
     expect(taxonomy.bindings).toEqual(defaultBinding());
     expect(taxonomy.types.find((t: { code: string }) => t.code === 'LEADS_CONTACTED').label).toBe('Set Appointment');
@@ -126,7 +126,7 @@ describe('0037 — the Template company', () => {
     expect(ratios.find((r) => r.code === 'SELLING_SUCCESS_RATE')!.benchmark).toBe(RATIO_BENCHMARKS.SELLING_SUCCESS_RATE);
   });
 
-  it('P18.9-T3 AC-2 runs twice with the same result as running once', async () => {
+  it('P18.6-T3 AC-2 runs twice with the same result as running once', async () => {
     await up(db(), NOW);
     const first = await everything();
 
@@ -136,7 +136,7 @@ describe('0037 — the Template company', () => {
     expect(await everything()).toEqual(first);
   });
 
-  it('P18.9-T3 AC-2 leaves the earlier migrations nothing to give it on their next run', async () => {
+  it('P18.6-T3 AC-2 leaves the earlier migrations nothing to give it on their next run', async () => {
     await companyKind(db());
     await up(db(), NOW);
     const first = await everything();
@@ -156,7 +156,7 @@ describe('0037 — the Template company', () => {
     expect(after).toEqual(first);
   });
 
-  it('P18.9-T3 AC-2 touches no company that is already there', async () => {
+  it('P18.6-T3 AC-2 touches no company that is already there', async () => {
     const { insertedId } = await col('companies').insertOne({
       name: 'Prudential', slug: 'prudential', kind: 'insurer', usesPlatformDefaults: true, deletedAt: null,
     });
@@ -170,7 +170,7 @@ describe('0037 — the Template company', () => {
     }
   });
 
-  it('P18.9-T3 AC-2 does nothing once the company exists, its slug changed and its parts edited since', async () => {
+  it('P18.6-T3 AC-2 does nothing once the company exists, its slug changed and its parts edited since', async () => {
     await up(db(), NOW);
     await col('companies').updateOne({ _id: new mongoose.Types.ObjectId(libraryId) }, { $set: { slug: 'template-library' } });
     await col('products').updateMany({ companyId: libraryId, code: SEED_PRODUCTS[0].code }, { $set: { deletedAt: LATER } });
@@ -181,7 +181,7 @@ describe('0037 — the Template company', () => {
     expect(await everything()).toEqual(edited);
   });
 
-  it('P18.9-T3 AC-2 finishes a run that stopped part-way, under the same ids, without a second of anything', async () => {
+  it('P18.6-T3 AC-2 finishes a run that stopped part-way, under the same ids, without a second of anything', async () => {
     // A run that wrote the ladder, three products and the first kind, and stopped before the company.
     await up(db(), NOW);
     await col('companies').deleteMany({});
@@ -205,7 +205,7 @@ describe('0037 — the Template company', () => {
     expect(await col('companyTemplates').countDocuments({ companyId: libraryId, templateId })).toBe(OFFICE_TEMPLATE_KINDS.length);
   });
 
-  it('P18.9-T3 AC-2 stops, naming the company, when an insurer already holds the slug — and writes nothing', async () => {
+  it('P18.6-T3 AC-2 stops, naming the company, when an insurer already holds the slug — and writes nothing', async () => {
     await col('companies').insertOne({ name: 'Template Life', slug: 'template', kind: 'insurer', deletedAt: null });
 
     await expect(up(db(), NOW)).rejects.toThrow(
@@ -217,7 +217,7 @@ describe('0037 — the Template company', () => {
     expect(await col('companies').countDocuments({})).toBe(1);
   });
 
-  it('P18.9-T3 AC-2 is not stopped by a deleted company that once held the slug', async () => {
+  it('P18.6-T3 AC-2 is not stopped by a deleted company that once held the slug', async () => {
     await col('companies').insertOne({ name: 'Old Template', slug: 'template', kind: 'insurer', deletedAt: NOW });
     expect(await up(db(), NOW)).toMatchObject({ created: true });
   });

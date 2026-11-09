@@ -50,7 +50,7 @@ export interface CapabilityGrid {
 
 /**
  * The five, in the prototype's own wording (`Unit_Section_Coaching.html:1718-1721`) — **written in Bahasa Indonesia
- * since P18.98-T7** (OD-238, option 1; ADR-0179 §5), as the grids are. The four stages keep their English names: they
+ * since P18.10-T7** (OD-238, option 1; ADR-0179 §5), as the grids are. The four stages keep their English names: they
  * are the ladder's titles, as the role ladder's *Agency Builder* is (the approved glossary's §A.5), and a milestone
  * names them as they are. The English is `SEEDED_CAPABILITY_LABELS_BEFORE_OD_238`'s.
  */
@@ -162,7 +162,7 @@ export const SEED_CAPABILITY_GRIDS: readonly CapabilityGrid[] = [
 ];
 
 /**
- * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English
+ * **The words the seed gave before P18.10-T7** (OD-238, option 1), per code — the prototype's English
  * (`Unit_Section_Coaching.html:1718-1721` and its four grids). Kept only so migration `0046` can recognise the Template
  * company's Default template where it still holds them, and for the specs. No office and no template is given them
  * any more. The four stages' names and the *Recruitment* grid are kept English, so they are not here.

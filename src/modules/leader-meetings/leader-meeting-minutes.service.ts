@@ -63,13 +63,13 @@ export class LeaderMeetingMinutes {
     private readonly people: LeaderMeetingPeople,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    // P18.97-T1 AC-10: a target's write answers its value, `rate × # of units` — the meeting's units, read here.
+    // P18.9-T1 AC-10: a target's write answers its value, `rate × # of units` — the meeting's units, read here.
     private readonly scorecards: LeaderScorecardService,
   ) {}
 
   /**
    * *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section — in the adder's language,
-   * stored as text (P18.98-T5 AC-6).
+   * stored as text (P18.10-T5 AC-6).
    */
   async addAgendaItem(ctx: RequestContext, meetingId: string, section: AgendaSection): Promise<AgendaItem> {
     const meeting = await this.writable(ctx, meetingId);
@@ -178,7 +178,7 @@ export class LeaderMeetingMinutes {
   }
 
   /**
-   * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4, reversing ADR-0129 §5's free text; P18.97-T1
+   * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4, reversing ADR-0129 §5's free text; P18.9-T1
    * AC-10): the five rows that take one — *APE*, *Manpower*, *FLC*, *Avg. monthly AA* and *Case submission* — a number
    * from 0 in the row's unit, or `null` to clear it. *APE*'s is IDR minor units, held to whole sen (invariant §9); a
    * count's is checked to two places by the request. Any other row is refused 400 — *New AA*'s included: its targets

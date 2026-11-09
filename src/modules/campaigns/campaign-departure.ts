@@ -6,7 +6,7 @@ import { MemberDeparture } from '@/modules/org/member-departure.port';
 import { CampaignChaseRepository } from './campaign-chase.repository';
 
 /**
- * **A leaver's chases close** (P18.5-T7 AC-5; ADR-0136): when a member leaves, every chase they had on is dropped,
+ * **A leaver's chases close** (P18.2-T7 AC-5; ADR-0136): when a member leaves, every chase they had on is dropped,
  * `closedBy: 'departure'`, so no *chasing* list, ✓ or chip names somebody who is no longer in the office. **A window
  * that ended before they left still counts them**: its freeze reads the chase as it stood at the window's end, and
  * the close is after it (`campaign-evaluation.ts`, ADR-0143 §2) — so a leaver between a window's end and its freeze

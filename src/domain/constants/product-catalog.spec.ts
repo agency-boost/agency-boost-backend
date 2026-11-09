@@ -3,6 +3,8 @@ import {
   PRODUCT_BUDGET_BANDS, PRODUCT_BUDGET_BAND_LABELS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_LUMP_SUM_BUDGET_BAND,
   PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PRODUCT_TAGLINE_MAX_LENGTH, SCRIPT_OVERRIDE_FIELDS,
   SEED_PRODUCTS, SEED_REPLY_BY_NEED, PRODUCT_DOCUMENT_FOLDER, PRODUCT_DOCUMENT_LABEL_MAX_LENGTH, RECRUITMENT,
+  PRODUCT_CURRENCIES, PRODUCT_DEFAULT_CURRENCIES, PRODUCT_KINDS, PRODUCT_OBJECTIONS_MAX,
+  PRODUCT_OBJECTION_TEXT_MAX_LENGTH, seedObjectionsOf,
 } from '@/domain/constants';
 
 /**
@@ -81,7 +83,7 @@ describe('the seeded product catalog (P5-T4)', () => {
     for (const band of PRODUCT_BUDGET_BANDS) expect(PRODUCT_BUDGET_BAND_LABELS[band]).toBeTruthy();
   });
 
-  it('P18.95-T6 AC-3 the lump-sum option and its encoding: band 7, its own option, the number every address and product keeps', () => {
+  it('P18.7-T6 AC-3 the lump-sum option and its encoding: band 7, its own option, the number every address and product keeps', () => {
     // The last band, and the only one that is not a monthly premium (UI-030): the brief asks it apart.
     expect(PRODUCT_LUMP_SUM_BUDGET_BAND).toBe(7);
     expect(PRODUCT_BUDGET_BANDS.at(-1)).toBe(PRODUCT_LUMP_SUM_BUDGET_BAND);
@@ -155,12 +157,13 @@ describe('the seeded product catalog (P5-T4)', () => {
     for (const reply of Object.values(SEED_REPLY_BY_NEED)) expect(reply.length).toBeGreaterThan(0);
   });
 
-  it('holds the description for approval with the seven script fields, and the name for nobody (OD-136)', () => {
+  it('holds the description for approval with the script fields, and the name for nobody (OD-136)', () => {
+    // Six since P19.4-T4: the one pair became `objections`, a list of cards (ADR-0209 §9).
     expect(SCRIPT_OVERRIDE_FIELDS).toEqual([
-      'goodFit', 'opening', 'benefits', 'fullScript', 'objectionTheySay', 'objectionYouSay',
-      'nextAction',
+      'goodFit', 'opening', 'benefits', 'fullScript', 'objections', 'nextAction',
     ]);
-    expect(APPROVED_PRODUCT_FIELDS).toEqual(['description', ...SCRIPT_OVERRIDE_FIELDS]);
+    // P19.7-T1 AC-3 (ADR-0225 §5): the proposal's FAQ and plan highlights, held for approval with the script.
+    expect(APPROVED_PRODUCT_FIELDS).toEqual(['description', ...SCRIPT_OVERRIDE_FIELDS, 'faq', 'planHighlights']);
     expect(OVERRIDABLE_PRODUCT_FIELDS).toEqual(['displayName', ...APPROVED_PRODUCT_FIELDS]);
     expect(APPROVED_PRODUCT_FIELDS).not.toContain('displayName');
   });
@@ -205,5 +208,30 @@ describe('an office’s own product documents (P17-T9)', () => {
     expect(PRODUCT_DOCUMENT_FOLDER).toBe('products');
     expect(PRODUCT_DOCUMENT_FOLDER).not.toBe(RECRUITMENT.PITCH_UPLOAD_FOLDER);
     expect(PRODUCT_DOCUMENT_LABEL_MAX_LENGTH).toBe(200);
+  });
+
+  describe('P19.4-T4 (ADR-0209) a base or a rider, its currencies, its objection cards', () => {
+    it('P19.4-T4 AC-3 has two kinds, base and rider, and no rider among the categories (rule 1)', () => {
+      expect(PRODUCT_KINDS).toEqual(['base', 'rider']);
+      expect(PRODUCT_CATEGORIES).not.toContain('rider');
+    });
+
+    it('P19.4-T4 AC-12 sells in IDR, USD or both, IDR first, and IDR by default (B1-4)', () => {
+      expect(PRODUCT_CURRENCIES).toEqual(['IDR', 'USD']);
+      expect(PRODUCT_DEFAULT_CURRENCIES).toEqual(['IDR']);
+    });
+
+    it('P19.4-T4 AC-1 holds at most ten cards, each side at most 1000 characters (metrics Part B)', () => {
+      expect(PRODUCT_OBJECTIONS_MAX).toBe(10);
+      expect(PRODUCT_OBJECTION_TEXT_MAX_LENGTH).toBe(1000);
+    });
+
+    it('P19.4-T4 AC-1 stores each seed product’s one pair as one card, and an empty pair as none', () => {
+      for (const product of SEED_PRODUCTS) {
+        const plan = product.defaultAttackPlan;
+        expect(seedObjectionsOf(plan)).toEqual([{ objection: plan.objectionTheySay, answer: plan.objectionYouSay }]);
+      }
+      expect(seedObjectionsOf({ objectionTheySay: '', objectionYouSay: '' })).toEqual([]);
+    });
   });
 });

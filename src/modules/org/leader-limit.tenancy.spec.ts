@@ -4,6 +4,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { SOURCE_READER } from '@/common/i18n/reader';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
+import { AuthToken, AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { PasswordService } from '@/modules/auth/password.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevel, CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
@@ -48,6 +49,8 @@ describe('the leader limit', () => {
   let leaderCodes: LeaderCodeService;
   let approvals: ApprovalsService;
   let roster: RosterImportService;
+  /** A roster import over another hierarchy service: the race below swaps in one that promotes somebody mid-commit. */
+  let rosterOver: (h: HierarchyService) => RosterImportService;
   let tenants: TenantService;
   let users: mongoose.Model<User>;
   let kpms: mongoose.Model<Kpm>;
@@ -85,9 +88,12 @@ describe('the leader limit', () => {
     approvals = new ApprovalsService(
       members, hierarchy, requests, historyRepo, users as never, audit, notifications as never, clock,
     );
-    roster = new RosterImportService(
-      members, hierarchy, kpms as never, users as never, new PasswordService(), audit, clock,
+    const tokens = mongoose.models[AuthToken.name] ?? mongoose.model(AuthToken.name, AuthTokenSchema);
+    rosterOver = (h) => new RosterImportService(
+      members, h, kpms as never, users as never, new PasswordService(), audit, clock, orgLevels, historyRepo,
+      notifications as never, tokens as never,
     );
+    roster = rosterOver(hierarchy);
     // Only what assigning an Owner reads is real; the rest are inert.
     const Service = TenantService as unknown as new (...deps: unknown[]) => TenantService;
     tenants = new Service(
@@ -129,6 +135,8 @@ describe('the leader limit', () => {
     const u = await users.create({
       email: email ?? `p${seq}@kpm.test`, passwordHash: 'x', fullName: `Person ${seq}`, status: 'active',
       platformRole: 'none', companyId, agentCode: `PRU-${5000 + seq}`,
+      // ADR-0190 §4 (P19-T3): only a verified address may be made an office's Owner.
+      emailVerifiedAt: new Date('2026-10-01T00:00:00Z'),
     });
     return String(u._id);
   }
@@ -145,7 +153,7 @@ describe('the leader limit', () => {
       membershipId, kpmId: row!.kpmId, orgLevelCode: row!.orgLevelCode, hierarchyRole: row!.role,
       status: row!.status as 'active', isKpmOwner: over.owner ?? false, isKpmAdmin: over.admin ?? false,
       directCount: row!.directCounts?.total ?? 0,
-    }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+    }).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
   }
 
   const used = (kpmId: string) => countLeadersUsed(members, office(kpmId));
@@ -286,88 +294,89 @@ describe('the leader limit', () => {
     });
   });
 
+  /*
+   * **The member import under the limit** (P13.2-T4 AC-4, as P19.3-T4 keeps it; ADR-0205 §9). Since A3 a row past the
+   * limit is **skipped** with its words, and the rest of the file imports; a write the limit refuses while the commit
+   * runs — the office filled in another tab — undoes the whole commit and answers the limit's own code.
+   */
   describe('AC-4: the roster import', () => {
     const HEADER = ROSTER_TEMPLATE_HEADER;
+    /** A3's columns: code, name, rung, upline, number, email. */
+    const row = (code: string, name: string, rung: string, up = '') => `${code},${name},${rung},${up},,${name.toLowerCase()}@kpm.test`;
+    const rowsOf = (preview: { rows: { agentCode: string; outcome: string; messages: string[] }[] }) =>
+      preview.rows.map((r) => [r.agentCode, r.outcome]);
 
-    it('the preview names each row past the limit by its line and role column, so nothing commits', async () => {
-      await limit(KPM_A, 2);
-      await join(KPM_A, 'ab');
-      const file = [
-        HEADER,
-        'Ana,ana@kpm.test,9001,aab,,1990-01-01,2020-01,full-time,female',
-        'Budi,budi@kpm.test,9002,agent,9001,1990-01-01,2020-01,full-time,female',
-        'Citra,citra@kpm.test,9003,ab,,1990-01-01,2020-01,full-time,female',
-        'Dodi,dodi@kpm.test,9004,aab,9003,1990-01-01,2020-01,full-time,female',
-      ].join('\n');
-
-      // Read in the API's English, as asserted: nobody's choice is Bahasa Indonesia since P18.98-T4's exit.
-      const asSa = await roster.preview(RequestContext.platform('sa-1').withReader(SOURCE_READER), KPM_A, file);
-      expect(asSa.willCreate).toBe(0);
-      expect(asSa.issues.map((i) => [i.line, i.column])).toEqual([[4, 'role'], [5, 'role']]);
-      expect(asSa.issues[0].message).toMatch(/limit is 2/);
-      expect(asSa.issues[0].message).toMatch(/Edit subscription on the offices list/);
-      expect(asSa.issues[0].message).not.toMatch(/LEADER_LIMIT_REACHED/);
-
-      const ownerCtx = await as((await members.find(office(KPM_A), { role: 'ab' }))[0].id, { owner: true });
-      const asOwner = await roster.preview(ownerCtx, KPM_A, file);
-      // P18.8-T2 AC-9 (ADR-0157 §5): a row past the limit is still refused, and the way through that asks is named.
-      expect(asOwner.issues[0].message).toMatch(/Import them as an Agent, then promote them on their page/);
-      expect(asOwner.issues[0].message).toMatch(/asks AgencyBoost to approve it/);
-
-      // Committed anyway, against the preview's advice: refused whole, with the limit's own code.
-      await expect(roster.commit(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject(LIMIT);
-      expect(await used(KPM_A)).toBe(1);
-      expect(await users.countDocuments({ email: 'ana@kpm.test' })).toBe(0);
-    });
-
-    it('the commit refuses with the code when the office filled up after the preview, creating nobody', async () => {
+    it('the preview skips each row past the limit with its words, in the file’s order, and the rest import', async () => {
       await limit(KPM_A, 2);
       const root = await join(KPM_A, 'ab');
-      const file = [HEADER, 'Ana,ana@kpm.test,9001,aab,,1990-01-01,2020-01,full-time,female'].join('\n');
-      expect((await roster.preview(RequestContext.platform('sa-1'), KPM_A, file)).issues).toEqual([]);
+      const file = [HEADER, row('9001', 'Ana', 'aab', ''), row('9002', 'Budi', 'agent', '9001'), row('9003', 'Citra', 'ab'), row('9004', 'Dodi', 'aab', '9003')]
+        .join('\n');
+
+      // The office's Owner imports since P19.4-T2 (ADR-0206 §2); the Super Admin did until then, with words of its own.
+      const ownerCtx = await as(root, { owner: true });
+      const asOwner = await roster.preview(ownerCtx, KPM_A, file);
+      // Ana is an AAB with no upline: A3 asks one of her. The limit then counts Citra, the only leader left in.
+      expect(rowsOf(asOwner)).toEqual([['9001', 'skipped'], ['9002', 'skipped'], ['9003', 'imported'], ['9004', 'skipped']]);
+      const dodi = asOwner.rows[3].messages[0];
+      expect(dodi).toMatch(/limit is 2/);
+      expect(dodi).not.toMatch(/LEADER_LIMIT_REACHED/);
+      // P18.5-T2 AC-9 (ADR-0157 §5): a row past the limit is skipped, never queued, and the way through that asks is named.
+      expect(dodi).toMatch(/Import them as an Agent, then promote them on their page/);
+      expect(dodi).toMatch(/asks AgencyBoost to approve it/);
+      // And the Super Admin imports nothing at all.
+      await expect(roster.preview(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject({ code: 'PERM_DENIED' });
+
+      // Committed: the rows the preview let in, and no other.
+      await roster.commit(ownerCtx, KPM_A, file);
+      expect(await used(KPM_A)).toBe(2);
+      expect(await users.countDocuments({ email: 'dodi@kpm.test', deletedAt: null })).toBe(0);
+      expect(await users.countDocuments({ email: 'citra@kpm.test', deletedAt: null })).toBe(1);
+    });
+
+    it('the commit checks the limit again: a row the office filled up for after the preview is skipped', async () => {
+      await limit(KPM_A, 2);
+      const root = await join(KPM_A, 'ab');
+      const rootCode = (await members.findById(office(KPM_A), root))!.agentCode;
+      const file = [HEADER, row('9001', 'Ana', 'aab', rootCode), row('9005', 'Eko', 'agent', rootCode)].join('\n');
+      const ownerCtx = await as(root, { owner: true });
+      expect(rowsOf(await roster.preview(ownerCtx, KPM_A, file))).toEqual([['9001', 'imported'], ['9005', 'imported']]);
 
       await join(KPM_A, 'aab', root);
-      await expect(roster.commit(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject({
-        ...LIMIT, details: { maxLeaders: 2, leadersUsed: 2 },
-      });
-      expect(await users.countDocuments({ email: 'ana@kpm.test' })).toBe(0);
+      const result = await roster.commit(ownerCtx, KPM_A, file);
+      expect(rowsOf(result)).toEqual([['9001', 'skipped'], ['9005', 'imported']]);
+      expect(await users.countDocuments({ email: 'ana@kpm.test', deletedAt: null })).toBe(0);
     });
   });
 
   describe('exit review: a roster row refused mid-commit leaves no account behind', () => {
     const HEADER = ROSTER_TEMPLATE_HEADER;
 
-    it('the office fills while the loop runs: the refused row’s account is never made', async () => {
+    it('the office fills while the commit runs: the limit’s code, and the whole commit undone (ADR-0205 §9)', async () => {
       await limit(KPM_A, 3);
       const root = await join(KPM_A, 'ab');
       const agent = await join(KPM_A, 'agent', root);
 
-      // A promotion in another tab, landing between the first row and the second.
-      let hashed = 0;
-      const passwords = {
-        hash: async (plain: string) => {
-          hashed += 1;
-          if (hashed === 2) await hierarchy.setLevel(office(KPM_A), agent, 'aab');
-          return `hash:${plain}`;
-        },
+      // A promotion in another tab, landing between the first row's write and the second's.
+      let calls = 0;
+      const racing = Object.create(hierarchy) as HierarchyService;
+      racing.createWithAccount = async (...args: Parameters<HierarchyService['createWithAccount']>) => {
+        calls += 1;
+        if (calls === 2) await hierarchy.setLevel(office(KPM_A), agent, 'aab');
+        return hierarchy.createWithAccount(...args);
       };
-      const racing = new RosterImportService(
-        members, hierarchy, kpms as never, users as never, passwords as never,
-        new AuditService(mongoose.model(AuditLog.name) as never), new FixedClock(NOW),
-      );
-      const file = [
-        HEADER,
-        'Ana,ana@kpm.test,9001,ab,,1990-01-01,2020-01,full-time,female',
-        'Budi,budi@kpm.test,9002,aab,,1990-01-01,2020-01,full-time,female',
-      ].join('\n');
+      const file = [HEADER, '9001,Ana,ab,,,ana@kpm.test', '9002,Budi,aab,9001,,budi@kpm.test'].join('\n');
 
-      await expect(racing.commit(RequestContext.platform('sa-1'), KPM_A, file)).rejects.toMatchObject({
+      const ownerCtx = await as(root, { owner: true });
+      await expect(rosterOver(racing).commit(ownerCtx, KPM_A, file)).rejects.toMatchObject({
         ...LIMIT, details: { maxLeaders: 3, leadersUsed: 3 },
       });
-      expect(await users.countDocuments({ email: 'ana@kpm.test' })).toBe(1);
-      // The refused row: no account, so the same file's row imports once the limit is raised.
-      expect(await users.countDocuments({ email: 'budi@kpm.test' })).toBe(0);
-      expect(await used(KPM_A)).toBe(3);
+      // Nobody of the file is left: Ana's account and membership were undone with the refusal, and Budi's never made.
+      expect(await users.countDocuments({ email: 'ana@kpm.test', deletedAt: null })).toBe(0);
+      expect(await users.countDocuments({ email: 'budi@kpm.test', deletedAt: null })).toBe(0);
+      expect(await used(KPM_A)).toBe(2);
+      // So the same file imports once the limit is raised.
+      await limit(KPM_A, 4);
+      await expect(roster.commit(ownerCtx, KPM_A, file)).resolves.toMatchObject({ counts: { imported: 2 } });
     });
   });
 

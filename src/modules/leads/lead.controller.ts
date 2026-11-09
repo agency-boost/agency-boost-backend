@@ -17,7 +17,7 @@ import { LeadService } from './lead.service';
  * waiting for a consumer, which is the rule `check-api-consumers.py` enforces and the reason
  * P7-T1 shipped with none at all. `GET /leads/summary` lost its only caller when `/leads` went back to
  * the prototype and was retired with it (P10.1-T4); `PATCH /leads/order`, the screen's drag handles,
- * arrived with P18.8-T7.
+ * arrived with P18.5-T7.
  *
  * **Moving and closing are separate routes on separate permissions**, because they are separate
  * acts: a status says where somebody is, an outcome says the work stopped and how it ended. The
@@ -53,6 +53,8 @@ export class LeadController {
       + 'state, sort on one key, and page. The Leads table sorts on name, type, status and '
       + 'registration, and asks for every page in turn. **Scoped to what your grant reaches**: '
       + 'your own, plus your unit or your downline. A lead outside it is a 404, never a 403. '
+      + '**`scope` chooses within it** (*Leads milik*, since 2026-11-08): `own`, your own leads — also what an '
+      + 'omitted `scope` reads — or `team`, everybody else your grant reaches. '
       + 'A page holding somebody else’s leads writes one entry to the audit log for each person '
       + 'whose leads it shows; your own write none.\n\n'
       + '`owner` narrows it to one member’s leads — yours, or somebody you coach, for the coaching '
@@ -168,12 +170,18 @@ export class LeadController {
     summary: 'Close a lead, or reopen it',
     description:
       '`won` needs the stage that closes the pipeline (`LEAD_STATUS_NOT_FINAL` otherwise); '
-      + '`lost` is allowed at any stage; `null` reopens. The two prototype screens disagree about '
-      + 'the second and the stricter reading of each half is taken (§3.7).\n\n'
+      + '`lost` is allowed at any stage **below** it and refused on it (`LEAD_STATUS_FINAL`, UI-160, ADR-0194): move '
+      + 'the lead back first. `null` reopens.\n\n'
       + PINNED,
   })
   @ApiResponse({ status: 200, type: LeadResponseDto })
   @ApiResponse({ status: 409, description: `${STALE} \`LEAD_ALREADY_CLOSED\` — reopen it first.`, type: ApiErrorEnvelope })
+  @ApiResponse({
+    status: 422,
+    description: '`LEAD_STATUS_NOT_FINAL` — `won` below the stage that closes the pipeline. `LEAD_STATUS_FINAL` — `lost` '
+      + 'on it: move the lead back to an earlier stage first. `details.statusCode` names the stage.',
+    type: ApiErrorEnvelope,
+  })
   async setOutcome(
     @Ctx() ctx: RequestContext, @Param('id') id: string, @Body() body: SetLeadOutcomeDto,
   ) {

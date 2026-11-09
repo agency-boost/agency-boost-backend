@@ -13,7 +13,7 @@ export interface TrainingOpened {
 }
 
 /**
- * **One member's progress on one training module** (P18.5-T1, ERD `trainingProgress`): the status they set,
+ * **One member's progress on one training module** (P18.2-T1, ERD `trainingProgress`): the status they set,
  * when they started and finished, and which of its items they have opened.
  *
  * - **Keyed by the membership and the module's code** (invariants §2, §4): never a `userId`, never a position or
@@ -24,11 +24,11 @@ export interface TrainingOpened {
  * - **`status` is the member's own word** (OD-149): the three-way toggle, set rather than toggled. *Done* back
  *   to *Not started* is allowed.
  * - **`startedAt`** is set the first time the status leaves `not_started`, and kept. **`completedAt`** is set on
- *   each move to `done` and cleared on leaving it — the date 18.6's tree prints, and the instant an activation
+ *   each move to `done` and cleared on leaving it — the date 18.3's tree prints, and the instant an activation
  *   item bound to the module records (ADR-0031).
  * - **`opened`** holds the first open of each item (D-opened). Opening is not audited: this is its record.
  *
- * Personal data: P19-T1's erasure cascade and export reach it. Soft delete only (invariant §6); no route
+ * Personal data: P20-T1's erasure cascade and export reach it. Soft delete only (invariant §6); no route
  * deletes a row.
  */
 @Schema({ ...configSchemaOptions, collection: 'trainingProgress' })
@@ -88,5 +88,5 @@ TrainingProgressSchema.index(
   { unique: true, partialFilterExpression: { deletedAt: null } },
 );
 
-/** The bounded reads of many members' rows of one module — the activation evaluator's, and 18.6's tree's. */
+/** The bounded reads of many members' rows of one module — the activation evaluator's, and 18.3's tree's. */
 TrainingProgressSchema.index({ kpmId: 1, moduleCode: 1, status: 1 });

@@ -59,8 +59,8 @@ describe('P18.1-T3 AC-1 a shared link’s token is redacted from every logged UR
   });
 });
 
-describe('P18.96-T3 AC-4 an invite link’s token is redacted from every logged URL', () => {
-  it('P18.96-T3 AC-4 the token’s segment of /invites/{token} and its /accept is replaced; a leader’s invite id is not', () => {
+describe('P18.8-T3 AC-4 an invite link’s token is redacted from every logged URL', () => {
+  it('P18.8-T3 AC-4 the token’s segment of /invites/{token} and its /accept is replaced; a leader’s invite id is not', () => {
     const token = `66f0000000000000000000a1.${TOKEN}`;
     expect(redactUrl(`/api/v1/invites/${token}`)).toBe(`/api/v1/invites/${REDACTED}`);
     expect(redactUrl(`/api/v1/invites/${token}/accept`)).toBe(`/api/v1/invites/${REDACTED}/accept`);

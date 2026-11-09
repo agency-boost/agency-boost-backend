@@ -7,13 +7,13 @@ const ctx = RequestContext.forJob('66f0000000000000000000a1', 'readings-spec');
 const at = new Date('2026-09-02T03:00:00Z');
 
 const aModule = (code: string, skillCode: string, displayOrder = 1) => ({
-  id: code, code, skillCode, title: `Title ${code}`, publishState: 'published' as const, displayOrder, version: 1, status: 'active' as const,
+  id: code, code, skillCode, title: `Title ${code}`, description: null, publishState: 'published' as const, displayOrder, version: 1, status: 'active' as const,
 });
 /** Sales offered with one skill and one module; everything else is history. */
 const OFFERED: TrainingCategoryView[] = [{
   id: 'c1', code: 'SALES', label: 'Sales', description: 'Structured modules — tracked here.', displayOrder: 1, version: 1, status: 'active',
   skills: [{
-    id: 's1', code: 'CLOSING', categoryCode: 'SALES', label: 'Closing', displayOrder: 4, version: 1, status: 'active',
+    id: 's1', code: 'CLOSING', categoryCode: 'SALES', label: 'Closing', description: null, displayOrder: 4, version: 1, status: 'active',
     modules: [aModule('CLOSING_TECHNIQUES', 'CLOSING')],
   }],
 }];
@@ -26,11 +26,11 @@ const progress = (moduleCode: string, status = 'done', completedAt: Date | null 
 });
 
 /**
- * **`TrainingProgressReadings`'s edges** (P18.5-T2 AC-3, AC-4): the bounded read answering nothing for nobody without
+ * **`TrainingProgressReadings`'s edges** (P18.2-T2 AC-3, AC-4): the bounded read answering nothing for nobody without
  * a query, and D-history placed under the skill and category it belonged to — in their order, outside every count —
  * with a module whose place cannot be found left out rather than drawn somewhere wrong.
  */
-describe('TrainingProgressReadings (P18.5-T2)', () => {
+describe('TrainingProgressReadings (P18.2-T2)', () => {
   const build = (rows: unknown[], live: { modules?: unknown[]; skills?: unknown[]; categories?: unknown[] } = {}) => {
     const find = jest.fn().mockResolvedValue(rows);
     const modules = { find: jest.fn().mockImplementation(async (_c, filter: { code: { $in: string[] }; status?: string }) => (
@@ -46,7 +46,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     return { readings, find, modules };
   };
 
-  it('P18.5-T2 AC-3 asks nothing for nobody, and nothing for no module', async () => {
+  it('P18.2-T2 AC-3 asks nothing for nobody, and nothing for no module', async () => {
     const { readings, find } = build([]);
     expect(await readings.rowsOf(ctx, [])).toEqual([]);
     expect(await readings.rowsOf(ctx, ['m1'], { moduleCodes: [] })).toEqual([]);
@@ -54,7 +54,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  it('P18.5-T2 AC-3 one query for many members, de-duplicated, filtered by module and status', async () => {
+  it('P18.2-T2 AC-3 one query for many members, de-duplicated, filtered by module and status', async () => {
     const { readings, find } = build([]);
     await readings.rowsOf(ctx, ['m1', 'm2', 'm1'], { moduleCodes: ['A', 'A', 'B'], status: 'done' });
     expect(find).toHaveBeenCalledTimes(1);
@@ -63,7 +63,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     });
   });
 
-  it('P18.5-T2 AC-3 performance: 500 members are read in a constant number of queries — never one per member', async () => {
+  it('P18.2-T2 AC-3 performance: 500 members are read in a constant number of queries — never one per member', async () => {
     const members = Array.from({ length: 500 }, (_, i) => `m${i}`);
     const rows = members.flatMap((m) => [{ ...progress('CLOSING_TECHNIQUES'), membershipId: m, _id: `r-${m}` }]);
     const { readings, find, modules } = build(rows);
@@ -75,7 +75,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     expect(modules.find).toHaveBeenCalledTimes(1);
   });
 
-  it('P18.5-T2 AC-4 places history under withdrawn skills of a withdrawn category, each in its order, outside the counts', async () => {
+  it('P18.2-T2 AC-4 places history under withdrawn skills of a withdrawn category, each in its order, outside the counts', async () => {
     const { readings } = build(
       [progress('RETAIN_TWO'), progress('RETAIN_ONE'), progress('SECOND_SKILL'), progress('CLOSING_TECHNIQUES', 'in_progress', null)],
       {
@@ -105,7 +105,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     expect(view.categories[0].skills[0].modules[0]).toMatchObject({ code: 'CLOSING_TECHNIQUES', status: 'in_progress', completedAt: null });
   });
 
-  it('P18.5-T2 AC-4 a module whose skill or category cannot be found is left out, never drawn somewhere wrong', async () => {
+  it('P18.2-T2 AC-4 a module whose skill or category cannot be found is left out, never drawn somewhere wrong', async () => {
     const { readings } = build(
       [progress('NO_SKILL'), progress('NO_CATEGORY'), progress('GONE')],
       {
@@ -118,7 +118,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     expect(view.categories[0].skills.flatMap((s) => s.archived)).toEqual([]);
   });
 
-  it('P18.5 exit review (training review 2) a done module set back to draft is not history: neither offered nor archived', async () => {
+  it('P18.2 exit review (training review 2) a done module set back to draft is not history: neither offered nor archived', async () => {
     const { readings } = build(
       [progress('BACK_TO_DRAFT')],
       {
@@ -132,7 +132,7 @@ describe('TrainingProgressReadings (P18.5-T2)', () => {
     expect(JSON.stringify(view)).not.toContain('BACK_TO_DRAFT');
   });
 
-  it('P18.5-T2 AC-2 a done row with no completion date reads done, dated nothing', async () => {
+  it('P18.2-T2 AC-2 a done row with no completion date reads done, dated nothing', async () => {
     const { readings } = build([progress('CLOSING_TECHNIQUES', 'done', null)]);
     const view = await readings.of(ctx, 'm1');
     expect(view.categories[0].skills[0].modules[0]).toMatchObject({ status: 'done', completedAt: null });

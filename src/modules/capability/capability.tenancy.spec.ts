@@ -251,7 +251,7 @@ describe('the capability catalog (P5-T8)', () => {
         .toEqual(expect.arrayContaining([expect.stringMatching(/has no items/)]));
     });
 
-    it('P18.98-T5 AC-7 says each problem in Indonesian too, naming the place as the screen does', () => {
+    it('P18.10-T5 AC-7 says each problem in Indonesian too, naming the place as the screen does', () => {
       const payload = defaultCapabilityLadder();
       payload.stages[0].requiredMilestoneCodes = ['NOT_A_MILESTONE'];
       (payload.grids[2].items[0] as { code: string }).code = '';

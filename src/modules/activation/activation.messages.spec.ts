@@ -5,11 +5,11 @@ import { english, indonesian } from '../../../test/i18n';
 import { ACTIVATION_MESSAGES, ACTIVATION_REFUSALS, completesWhenOf, dataLinkLabelOf } from './activation.messages';
 
 /**
- * **P18.98-T5 — the activation module's words, in both languages** (ADR-0179 §7). The routes' own specs read most of
+ * **P18.10-T5 — the activation module's words, in both languages** (ADR-0179 §7). The routes' own specs read most of
  * these as a request does; this pins what no route reaches on its own — a plural, a count past a thousand — and that
  * each link kind's English is the registry's, byte for byte.
  */
-describe('P18.98-T5 the activation catalogue', () => {
+describe('P18.10-T5 the activation catalogue', () => {
   it('UI-025 Mark left is retired: none of its refusals is in the catalogue any more', () => {
     for (const code of ['NOT_A_NEW_HIRE', 'NEW_HIRE_HAS_REPORTS', 'NEW_HIRE_NOT_MARKABLE', 'NEW_HIRE_ALREADY_LEFT']) {
       expect([code, code in ACTIVATION_REFUSALS]).toEqual([code, false]);

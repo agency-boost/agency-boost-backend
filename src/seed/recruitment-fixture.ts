@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { Clock } from '@/common/clock/clock.port';
 import { RECRUITMENT, RECRUITMENT_PITCH_SLOTS, type RecruitmentPitchSlotCode } from '@/domain/constants';
 import { up as recruitmentPlaybook, type RecruitmentPlaybookResult } from '@/migrations/0025-recruitment-playbook';
+import { up as playbookIntoTemplate, type PlaybookIntoTemplateResult } from '@/migrations/0056-playbook-into-template';
 import { Asset, AssetSchema } from '@/modules/assets/asset.schema';
 import { GcsAdapter, storageRefusal } from '@/modules/assets/gcs.adapter';
 import { StoragePort } from '@/modules/assets/storage.port';
@@ -20,11 +21,11 @@ import { seedObjectId } from './coaching-fixture';
  *
  * | What | Its state | Who to sign in as, and what they see |
  * |---|---|---|
- * | **Prudential's playbook** | the AgencyBoost words — the prototype's, verbatim — version 1, as a company started from the defaults is given them | `rina@kpm0417.test` (Agent), `sari@` (AAB), `agus@` (AB) at `/recruitment/attack-plan`: the four briefs below; `superadmin@agencyboost.test` at `/admin/companies` → *Prudential* → *Template* → *Recruitment*: the words, to edit |
- * | **Allianz Life's playbook** | the same words, version 1; Allianz has no office | the Super Admin's *Recruitment* tab for Allianz Life. The cross-company test rewords one in a fixture, not here |
- * | **Sejahtera Baru Life** (`template-fixture.ts`, created blank) | **no playbook** | `owner@kpm0701.test` (Hadi Gunawan) and `agent@kpm0701.test` (Nadia Putri): the playbook-empty state on *Attack Plan*; the Super Admin's tab: *Start from the AgencyBoost words* or *Start from nothing* |
- * | **0417 BSD City's pitch** — the prototype's own (`:626-661`), and one optional document (P18.97-T5 AC-5) | *Opportunity Overview*: `Opportunity_Overview_v3.pdf`, *Career Path Ladder* ticked by the Owner and *Support provided* by the Admin — *Uploaded · needs confirmation*; *Proof & Credibility*: `Proof_and_Credibility_2026.pdf`, *Uploaded*; *FAQ* and *How to Join* *Missing*; ***Company Profile***: `Company_Profile_2026.pdf`, *Uploaded*; ***Agency Profile*** empty, *Not uploaded yet* — both tagged *Optional* | `owner@kpm0417.test` and `admin@kpm0417.test` (Maya Halim) at `/kpm/settings/recruitment-pitch`: the ring *1/4*, *"Recruitment Pitch is incomplete"*, *"2 missing, 1 needs checking."* — the optional two counted in neither; *Replace* clears the two ticks. Rina, Sari and Agus at `/recruitment/pitch-materials`: the same six cards, read-only — *View PDF* on the three uploaded, every file *< 1 KB* (the one-page demonstration PDFs) |
- * | **0555 Kelapa Gading's pitch** | all four uploaded, *Opportunity Overview*'s four items ticked by its Owner; ***Company Profile*** and ***Agency Profile*** both uploaded (P18.97-T5 AC-5) | `owner@kpm0555.test`, `agent@kpm0555.test`: *4/4*, *"Recruitment Pitch is complete"*, six uploaded cards |
+ * | **Prudential's playbook** | the AgencyBoost words — the prototype's, verbatim — version 1, written as the company record it was before P19.4-T5 and moved by migration `0056` into its default template and every template a KPM was made from, published (ADR-0210 §5) | `rina@kpm0417.test` (Agent), `sari@` (AAB), `agus@` (AB) at `/recruitment/attack-plan`: the four briefs below; `superadmin@agencyboost.test` at `/admin/companies` → *Prudential* → a template → *Rekrutmen*: the words, to edit as a draft and *Terbitkan* |
+ * | **Allianz Life's playbook** | the same words, version 1, in its default template; Allianz has no office | the Super Admin's *Rekrutmen* section of Allianz Life's template. The cross-company test rewords one in a fixture, not here |
+ * | **Sejahtera Baru Life** (`template-fixture.ts`, created blank) | **no playbook** in any of its templates | `owner@kpm0701.test` (Hadi Gunawan) and `agent@kpm0701.test` (Nadia Putri): the playbook-empty state on *Attack Plan*; the Super Admin's *Rekrutmen* section, *Kosong*: *Mulai dari kata-kata AgencyBoost* or *Mulai dari kosong* |
+ * | **0417 BSD City's pitch** — the prototype's own (`:626-661`), and one optional document (P18.9-T5 AC-5) | *Opportunity Overview*: `Opportunity_Overview_v3.pdf`, *Career Path Ladder* ticked by the Owner and *Support provided* by the Admin — *Uploaded · needs confirmation*; *Proof & Credibility*: `Proof_and_Credibility_2026.pdf`, *Uploaded*; *FAQ* and *How to Join* *Missing*; ***Company Profile***: `Company_Profile_2026.pdf`, *Uploaded*; ***Agency Profile*** empty, *Not uploaded yet* — both tagged *Optional* | `owner@kpm0417.test` and `admin@kpm0417.test` (Maya Halim) at `/kpm/settings/recruitment-pitch`: the ring *1/4*, *"Recruitment Pitch is incomplete"*, *"2 missing, 1 needs checking."* — the optional two counted in neither; *Replace* clears the two ticks. Rina, Sari and Agus at `/recruitment/pitch-materials`: the same six cards, read-only — *View PDF* on the three uploaded, every file *< 1 KB* (the one-page demonstration PDFs) |
+ * | **0555 Kelapa Gading's pitch** | all four uploaded, *Opportunity Overview*'s four items ticked by its Owner; ***Company Profile*** and ***Agency Profile*** both uploaded (P18.9-T5 AC-5) | `owner@kpm0555.test`, `agent@kpm0555.test`: *4/4*, *"Recruitment Pitch is complete"*, six uploaded cards |
  * | **0701 Cempaka Putih** | no pitch document | Hadi and Nadia: *0/4*, *"4 missing."*; the two optional cards *Not uploaded yet*, never *Missing* |
  * | **0417's own PRUMapan brochure** (P17-T9) | `Brosur_PRUMapan_BSD.pdf` in *PRUMapan*'s *Brochure* slot, the office's own file | `rina@kpm0417.test` at `/product-catalog/PRUMAPAN` → *Documents*: the brochure opens; the Owner at `/kpm/settings/products`: the row reads as the office's, with *Replace* and *Use Prudential's* |
  *
@@ -47,9 +48,10 @@ import { seedObjectId } from './coaching-fixture';
  * **Written once, until `--reset`.** Every `_id` is derived (`seedObjectId`); a playbook is written only for a
  * company with none, a slot only where the office holds nothing in it — one replaced in a walk is the walk's —
  * and the brochure only where nobody has set or given back 0417's *Brochure* (its audit rows are the marker,
- * as `sales-tools-fixture.ts`'s are). Each write leaves the audit row its service would have. **Migration
- * `0025-recruitment-playbook` runs here**, as a deployed database meets it: on a fresh seed it finds both
- * companies already given their words, and Sejahtera Baru Life blank.
+ * as `sales-tools-fixture.ts`'s are). Each write leaves the audit row its service would have. **Migrations
+ * `0025-recruitment-playbook` and `0056-playbook-into-template` run here**, as a deployed database meets them: on a
+ * fresh seed `0025` finds both companies already given their words, and Sejahtera Baru Life blank; `0056` then moves
+ * each company's words into its templates — the record kept, marked `migratedTo` — and a re-run moves nothing.
  */
 
 const RECOMPILE = { overwriteModels: true } as const;
@@ -67,7 +69,7 @@ interface SeededSlot {
 
 /**
  * What each office's pitch holds (*Seed*): 0417 the prototype's and its *Company Profile*, its *Agency Profile*
- * left empty; 0555 complete, with both optional documents; 0701 nothing (P18.97-T5 AC-5, ADR-0177 §2).
+ * left empty; 0555 complete, with both optional documents; 0701 nothing (P18.9-T5 AC-5, ADR-0177 §2).
  */
 export const RECRUITMENT_SEED_PITCH: Readonly<Record<'0417' | '0555', readonly SeededSlot[]>> = {
   '0417': [
@@ -133,7 +135,7 @@ export function demonstrationPdf(lines: readonly string[]): Buffer {
 }
 
 /**
- * **The storage the seed writes through, where one is configured** (D-seed; P18.7-T2, ADR-0153) — detected
+ * **The storage the seed writes through, where one is configured** (D-seed; P18.4-T2, ADR-0153) — detected
  * the way the API detects it: a `GCS_BUCKET` that names a bucket, the key prefix defaulting to `dev` as
  * `env.validation.ts` defaults it, and `GCS_PROJECT_ID` only if set. `null` otherwise — the API's
  * `UnconfiguredStorage` case — and the run says so. Credentials are Application Default Credentials, as the
@@ -183,6 +185,8 @@ export interface RecruitmentFixture {
   files: 'stored' | 'skipped: storage is not configured' | `skipped: storage refused (${string})`;
   /** What migration `0025` did on this run: nothing on a fresh seed. */
   migration: RecruitmentPlaybookResult;
+  /** What migration `0056` did on this run: both companies' words moved on a fresh seed, nothing on a re-run. */
+  moved: PlaybookIntoTemplateResult;
   guide: string;
 }
 
@@ -210,6 +214,8 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
   }
   // As a deployed database meets it: on a fresh seed, both companies are current and the blank one blank.
   const migration = await recruitmentPlaybook(mongoose.connection.db!, now);
+  // And into the templates (ADR-0210 §5): the playbook is a template section since P19.4-T5.
+  const moved = await playbookIntoTemplate(mongoose.connection.db!, now);
 
   // ------------------------------------------------ the files, only where storage is
 
@@ -343,11 +349,12 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
       + 'PRUMapan\'s brochure at /kpm/settings/products';
   const guide = `
   RECRUITMENT at /recruitment/attack-plan and /recruitment/pitch-materials  (from src/seed/recruitment-fixture.ts;
-             the office's side at /kpm/settings/recruitment-pitch, the playbook on the Super Admin's
-             Company template → Recruitment)
+             the office's side at /kpm/settings/recruitment-pitch, the playbook in the Super Admin's
+             template → Rekrutmen)
     Pitch files                  ${fileLine}
-    Playbooks                    Prudential and Allianz Life: the AgencyBoost words, version 1. Sejahtera Baru
-                                 Life: none — 0701's agents meet the playbook-empty state
+    Playbooks                    Prudential and Allianz Life: the AgencyBoost words, version 1, in their
+                                 templates (moved by migration 0056). Sejahtera Baru Life: none — 0701's agents
+                                 meet the playbook-empty state
     KPM 0417 · BSD City          rina@ (Agent), sari@ (AAB), agus@ (AB): both tabs, the pitch read-only.
                                  Opportunity Overview "Uploaded · needs confirmation" (Career Path by the Owner,
                                  Support by the Admin, Maya Halim), Proof & Credibility uploaded, FAQ and How to
@@ -366,5 +373,5 @@ export async function seedRecruitmentFixture(deps: RecruitmentFixtureDeps): Prom
                                  ?type=other-insurer&motivation=full-career&hesitation=stable-job
 `;
 
-  return { written, sent, files, migration, guide };
+  return { written, sent, files, migration, moved, guide };
 }

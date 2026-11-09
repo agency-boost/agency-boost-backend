@@ -2,7 +2,7 @@ import { formatNumber } from '@/common/format/format';
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **What the file store refuses, in both languages** (P18.98-T5 AC-2): an upload by somebody in no office, one too
+ * **What the file store refuses, in both languages** (P18.10-T5 AC-2): an upload by somebody in no office, one too
  * large or of a type not taken, one that never finished, and a server with no storage at all. A *file* stays *file*
  * and *upload* is *unggah* (the approved glossary's §B.0).
  */

@@ -104,7 +104,7 @@ describe('an office’s product decisions (P5-T5)', () => {
         bestFor: 'Anybody at all',
         defaultAttackPlan: {
           goodFit: 'Anybody at all', opening: 'The company’s new opening', benefits: [],
-          fullScript: 'x', objectionTheySay: 'y', objectionYouSay: 'z', nextAction: 'q?',
+          fullScript: 'x', objections: [{ objection: 'y', answer: 'z' }], nextAction: 'q?',
         },
       });
 
@@ -477,7 +477,7 @@ describe('an office’s product decisions (P5-T5)', () => {
       expect(row.documents[1].label).toBe('Illustration / Simulation');
     });
 
-    it('P18.98-T7 names each slot in the reader’s language; an office’s own file keeps the name it was given', async () => {
+    it('P18.10-T7 names each slot in the reader’s language; an office’s own file keeps the name it was given', async () => {
       const ctx = member(KPM_A);
       await wired.kpmProducts.setDocument(ctx, mapanId, 'brochure', { storageKey: await upload(ctx), label: 'Brosur kami' });
       const inIndonesian = await mine(member(KPM_A).withReader(readerIn('id')));

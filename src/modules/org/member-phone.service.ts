@@ -26,7 +26,7 @@ export interface MemberPhone {
  *   has left — is `404`, never `403`. A leader naming themselves fills their own missing number, as `PATCH /auth/me` would.
  * - **What**: `users.phone`, the person's account (identity is global, ADR-0002), as `+62` and its digits — the DTO has
  *   already read what was typed (`phoneFromBody`). The same number the person sees on *Profil saya*.
- * - **Only a missing number** (the Phase 18.99 exit review, M1): a number already on file is `409 MEMBER_PHONE_ON_FILE`
+ * - **Only a missing number** (the Phase 18.11 exit review, M1): a number already on file is `409 MEMBER_PHONE_ON_FILE`
  *   and stays as it is — changing it is the person's own act, on *Profil saya* (`PATCH /auth/me`). The empty-number
  *   condition is in the update's filter, not a read before it, so two leaders saving at once cannot overwrite each
  *   other: the second write matches nothing and is refused the same way.

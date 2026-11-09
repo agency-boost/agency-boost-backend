@@ -1,7 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { TRAINING_PUBLISH_STATES, type TrainingPublishState } from '@/domain/constants';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TRAINING_PUBLISH_STATES, TRAINING_TEXT, type TrainingPublishState } from '@/domain/constants';
 import type {
-  TrainingCategoryView, TrainingModuleView, TrainingSkillView,
+  ModuleMaterial, TrainingCategoryView, TrainingModuleView, TrainingSkillView,
 } from './training.service';
 
 /** The wire shape of one training module. `implements` the view, so the two cannot drift. */
@@ -23,6 +23,15 @@ export class TrainingModuleDto implements TrainingModuleView {
   title!: string;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    maxLength: TRAINING_TEXT.DESCRIPTION_MAX,
+    example: 'Daftar 100 nama untuk dihubungi',
+    description: '*Deskripsi singkat* (ADR-0220 §1): the grey line under the name, plain text, or `null`.',
+  })
+  description!: string | null;
+
+  @ApiProperty({
     enum: TRAINING_PUBLISH_STATES,
     description:
       'Whether agents are offered the module **at all**. Not when: that is the office\'s own '
@@ -38,6 +47,14 @@ export class TrainingModuleDto implements TrainingModuleView {
 
   @ApiProperty({ type: String, enum: ['active', 'archived'] })
   status!: 'active' | 'archived';
+
+  @ApiPropertyOptional({
+    enum: ['own', 'company', 'none'],
+    description:
+      'The settings list only: where the material agents are shown comes from — `own`, the office\'s replacement; '
+      + '`company`, the template\'s; `none`, no file, video or link. What *x / y modul punya materi* counts.',
+  })
+  material?: ModuleMaterial;
 }
 
 export class TrainingSkillDto implements TrainingSkillView {
@@ -52,6 +69,15 @@ export class TrainingSkillDto implements TrainingSkillView {
 
   @ApiProperty({ type: String, example: 'Prospecting' })
   label!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    maxLength: TRAINING_TEXT.DESCRIPTION_MAX,
+    example: '8 cara mendapat calon nasabah',
+    description: '*Deskripsi singkat* (ADR-0220 §1): the grey line under the name, plain text, or `null`.',
+  })
+  description!: string | null;
 
   @ApiProperty({ type: Number, description: 'Within its category.' })
   displayOrder!: number;

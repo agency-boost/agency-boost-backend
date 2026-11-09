@@ -62,8 +62,9 @@ export interface CoachingRosterView {
  *
  * **Everyone the reader coaches, and nobody else**: `CoachResolver.coacheesOf`, which is `COACH` — the
  * reader's whole downline on the current edges, at any depth, every link active, never themselves
- * (ADR-0074). A reader who coaches nobody — an Agent, an AAB who leads nobody, an Owner or an Admin who
- * stands above nobody — gets an empty roster, not an error: the grant on `coaching_session:read` is
+ * (ADR-0074). An Agent who leads somebody is answered their downline as any upline is (P19.9-T6, ADR-0234). A
+ * reader who coaches nobody — an Agent or an AAB who leads nobody, an Owner or an Admin who stands above
+ * nobody — gets an empty roster, not an error: the grant on `coaching_session:read` is
  * theirs, and there is simply nobody on it. An Owner who is also the root AB coaches the whole office as
  * that AB, which is the hierarchy and not an Owner grant.
  *

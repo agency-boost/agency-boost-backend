@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { byKode } from '@/modules/production/upload-columns';
 import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
@@ -83,8 +84,9 @@ describe('the Unit Dashboard, measured (P15-T1 AC-8)', () => {
         cascadeMapping: { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' },
       });
       MONTHS.forEach((month, m) => months.push({
-        kpmId: KPM_A, membershipId: id, month, agentCode: `S${i}`, deletedAt: null,
-        apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 1)),
+        // By kode since P19.5-T2: the year to date is the months' sum, which these make 20 M a month (R4).
+        kpmId: KPM_A, membershipId: id, month, agentCode: `S${i}`, deletedAt: null, templateVersion: 1,
+        ...byKode({ apeMonthly: cell(20 * M), apeYtd: cell(20 * M * (m + 1)) }),
       }));
       for (let d = 1; d <= DAYS; d += 1) {
         logs.push({

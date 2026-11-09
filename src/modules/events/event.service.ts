@@ -66,8 +66,8 @@ export interface EventView {
 /**
  * The events an office runs (P5-T6, ADR-0034).
  *
- * **Nothing per-person lives here** (AC-6). RSVP, attendance and feedback are Phase 18.5's (P18.5-T5,
- * P18.5-T6; were P14-T3, P14-T4), each its own per-member record — the prototype keeps all three on
+ * **Nothing per-person lives here** (AC-6). RSVP, attendance and feedback are Phase 18.2's (P18.2-T5,
+ * P18.2-T6; were P14-T3, P14-T4), each its own per-member record — the prototype keeps all three on
  * the shared event object, so with two users the second overwrites the first's RSVP and reads the
  * first's feedback as their own.
  */
@@ -80,7 +80,7 @@ export class EventService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     /*
-     * P18.5-T5 AC-9: the office's zone from `kpms.timezone`, not a constant (invariant §9) — and the members'
+     * P18.2-T5 AC-9: the office's zone from `kpms.timezone`, not a constant (invariant §9) — and the members'
      * rows, which an edit moving an ended event back into the future must not orphan.
      */
     private readonly tenantDay: TenantDay,
@@ -163,7 +163,7 @@ export class EventService {
   }
 
   /**
-   * **The patch is checked against the event it changes** (P18.5-T5 exit review): the dates as they will stand —
+   * **The patch is checked against the event it changes** (P18.2-T5 exit review): the dates as they will stand —
    * the stored ones overlaid with the patch — so a patch carrying `startsAt` alone cannot end an event before it
    * starts or slip past the answered-event guard; and the invitees **added** by the patch, never the ones already
    * on the event, so a past *Chosen people* event whose invitee has since left stays editable and keeps them.
@@ -233,7 +233,7 @@ export class EventService {
   }
 
   /**
-   * **An ended event that people have answered keeps what its answers were given against** (P18.5-T5 AC-9; the exit
+   * **An ended event that people have answered keeps what its answers were given against** (P18.2-T5 AC-9; the exit
    * review): `409 EVENT_HAS_RESPONSES` for an edit that would
    *
    * - **end it in the future** — its claims, confirmations and feedback would describe an event that has not
@@ -315,7 +315,7 @@ export class EventService {
     if (scope === 'select_leaders') {
       // The **graph's** definition, never the role enum: an AAB with nobody under them leads
       // nobody, and inviting them on the strength of a job title is OD-50's class of defect.
-      // *P18.5-T5 (D-picker):* read from the active members' leaders — the picker's own `leads`, one definition —
+      // *P18.2-T5 (D-picker):* read from the active members' leaders — the picker's own `leads`, one definition —
       // rather than the `directCounts` cache, which a seeded or migrated row can hold stale.
       const leading = new Set((await this.memberships.find(
         ctx, { status: 'active', leaderId: { $in: inviteeMembershipIds } }, { projection: { leaderId: 1 } },
@@ -353,7 +353,7 @@ export class EventService {
    * its own — an agent travelling would see yesterday's event under today.
    */
   private view(row: EventDocument, timezone: string): EventView {
-    // From `endsAt` an event is past (P18.5-T5): one boundary for the badge and for every write that turns on it.
+    // From `endsAt` an event is past (P18.2-T5): one boundary for the badge and for every write that turns on it.
     const phase: EventPhase = eventPhase(row, this.clock.now());
 
     return {

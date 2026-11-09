@@ -37,7 +37,7 @@ export const EVENT_PHASES = ['upcoming', 'running', 'past'] as const;
 export type EventPhase = (typeof EVENT_PHASES)[number];
 
 /**
- * The event types an office starts with, from the prototype's own list — **in Bahasa Indonesia since P18.98-T7**
+ * The event types an office starts with, from the prototype's own list — **in Bahasa Indonesia since P18.10-T7**
  * (OD-238, option 1; ADR-0179 §5). *Recruitment* is kept English (the approved glossary, §A.6); *training* in a
  * sentence is *pelatihan* (§B.10). The English is `SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238`'s.
  */
@@ -50,7 +50,7 @@ export const SEED_EVENT_TYPES = [
 ] as const;
 
 /**
- * **The words the seed gave before P18.98-T7** (OD-238, option 1), per code — the prototype's English. Kept only so
+ * **The words the seed gave before P18.10-T7** (OD-238, option 1), per code — the prototype's English. Kept only so
  * migration `0046` can recognise the Template company's Default template where it still holds them, and for the
  * specs. *Recruitment* is kept English, so it is not here.
  */
@@ -62,7 +62,7 @@ export const SEEDED_EVENT_TYPE_LABELS_BEFORE_OD_238: Readonly<Record<string, str
 };
 
 /**
- * **What a member is to an event they were invited to** — `EVENT_ATTENDANCE_STATUS` (P18.5-T5 AC-8; D-status, OD-31).
+ * **What a member is to an event they were invited to** — `EVENT_ATTENDANCE_STATUS` (P18.2-T5 AC-8; D-status, OD-31).
  *
  * `unconfirmed` is D-status's value: a member who RSVP'd or said they came, after the event ended, whom no confirmer
  * has marked yet. Calling them a *no-show* because nobody has checked is the dishonesty exit test 2 guards against from
@@ -87,7 +87,7 @@ export const NPS = {
 } as const;
 
 /**
- * The longest *Why?* or *How can we improve?* answer, in characters after trimming (P18.5-T6 AC-3). Either beyond it
+ * The longest *Why?* or *How can we improve?* answer, in characters after trimming (P18.2-T6 AC-3). Either beyond it
  * is refused `400`, never cut. Served as `limits.feedbackTextMax`.
  */
 export const EVENT_FEEDBACK_TEXT_MAX = 1000;

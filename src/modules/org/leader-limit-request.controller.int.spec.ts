@@ -28,11 +28,11 @@ const supporting = (readOnly: boolean) =>
   new RequestContext(OWNER.userId, 'none', OWNER.membership, 'root', null, false, readOnly);
 
 /**
- * **The leader-limit request routes over HTTP** (P18.8-T2 AC-3 to AC-5, ADR-0157): who the API refuses — the
+ * **The leader-limit request routes over HTTP** (P18.5-T2 AC-3 to AC-5, ADR-0157): who the API refuses — the
  * decorators and the real `PermissionsGuard` — and what the production pipe turns away. What the service does
  * with a request is `leader-limit-request.tenancy.spec.ts`'s; here it is a spy that answers `[]`.
  */
-describe('P18.8-T2 — the leader-limit request routes, over HTTP', () => {
+describe('P18.5-T2 — the leader-limit request routes, over HTTP', () => {
   let app: INestApplication;
   const calls: string[] = [];
   const spy = (name: string) => async () => { calls.push(name); return []; };
@@ -72,7 +72,7 @@ describe('P18.8-T2 — the leader-limit request routes, over HTTP', () => {
 
   it('declares the permission each route needs', () => {
     expect(declaredPermissions(OrgController)).toMatchObject({
-      // UI V1 (UI-012, D-14; the Phase 18.99 exit review, T1): *Search agent* reads on the roster's own grant.
+      // UI V1 (UI-012, D-14; the Phase 18.11 exit review, T1): *Search agent* reads on the roster's own grant.
       search: 'member:read_profile',
       leaderLimitRequests: 'leader_limit_request:read',
       cancelLeaderLimitRequest: 'leader_limit_request:create',

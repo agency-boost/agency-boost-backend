@@ -6,7 +6,7 @@ import { HttpStatus } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { AssetDocument } from './asset.schema';
 import { AssetRepository } from './asset.repository';
-import { ASSET_LIMITS } from '@/domain/constants';
+import { ASSET_LIMITS, DEFAULT_UPLOAD_MIME_TYPES } from '@/domain/constants';
 import { ASSETS_REFUSALS } from './assets.messages';
 import { SignedUpload, StoragePort, StoredObject } from './storage.port';
 
@@ -26,10 +26,11 @@ export class AssetService {
     ctx: RequestContext,
     params: { folder: string; filename: string; mimeType: string; bytes: number },
     /**
-     * A narrower list than `ALLOWED_MIME_TYPES` for a route that takes one kind of file — a PDF for a
-     * pitch or product document (`DOCUMENT_MIME_TYPES`, Phase 17). Refused as any other type is.
+     * The route's own list — a pitch or product document's (`DOCUMENT_MIME_TYPES`, Phase 17), a training file's
+     * (`TRAINING_FILE_MIME_TYPES`). Absent, `DEFAULT_UPLOAD_MIME_TYPES`: **no HTML unless the route names it**
+     * (P19.6-T2, ADR-0217 §1). Refused as any other type is.
      */
-    allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+    allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
   ): Promise<SignedUpload> {
     const kpmId = ctx.kpmId;
     if (!kpmId) {
@@ -45,7 +46,7 @@ export class AssetService {
       owner: { kind: 'kpm', kpmId },
       ...params,
       // A route's narrower list goes to the vendor too (Phase 17, N5); the whole allow-list is not sent.
-      ...(allowed === ASSET_LIMITS.ALLOWED_MIME_TYPES ? {} : { allowedMimeTypes: allowed }),
+      ...(allowed === DEFAULT_UPLOAD_MIME_TYPES ? {} : { allowedMimeTypes: allowed }),
     });
     await this.assets.create(ctx, {
       storageKey: signed.storageKey,
@@ -76,7 +77,7 @@ export class AssetService {
     ctx: RequestContext,
     storageKey: string,
     /** The narrower list the upload was signed under, checked again against what storage reports. */
-    allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+    allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
   ): Promise<AssetDocument> {
     const asset = await this.assets.findOne(ctx, { storageKey });
     if (!asset) {
@@ -148,14 +149,20 @@ export class AssetService {
   async requestCompanyUpload(
     companyId: string,
     params: { folder: string; filename: string; mimeType: string; bytes: number },
+    /** The template whose *Training* section the file is for (ADR-0208 §1); absent for any other company file. */
+    templateId: string | null = null,
+    /** The route's own list, as `requestUpload`'s (a template's training file: `TRAINING_FILE_MIME_TYPES`). */
+    allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
   ): Promise<SignedUpload> {
-    this.refuseBeyondLimits(params.mimeType, params.bytes);
+    this.refuseBeyondLimits(params.mimeType, params.bytes, allowed);
 
     const signed = await this.storage.createSignedUpload({
       owner: { kind: 'company', companyId }, ...params,
+      ...(allowed === DEFAULT_UPLOAD_MIME_TYPES ? {} : { allowedMimeTypes: allowed }),
     });
     await this.assets.createCompanyAsset({
       companyId,
+      templateId,
       storageKey: signed.storageKey,
       mimeType: params.mimeType,
       bytes: params.bytes,
@@ -169,12 +176,17 @@ export class AssetService {
     return signed;
   }
 
-  async confirmCompanyUpload(companyId: string, storageKey: string): Promise<AssetDocument> {
+  async confirmCompanyUpload(
+    companyId: string,
+    storageKey: string,
+    /** The list the upload was signed under, checked again against what storage reports (ADR-0040). */
+    allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
+  ): Promise<AssetDocument> {
     const asset = await this.assets.findCompanyAsset(companyId, storageKey);
     if (!asset) {
       throw new NotFoundException('Asset');
     }
-    const stored = await this.requireStored(storageKey);
+    const stored = await this.requireStored(storageKey, allowed);
     return (await this.assets.updateCompanyAsset(companyId, storageKey, {
       mimeType: stored.mimeType, bytes: stored.bytes, uploadState: 'confirmed',
     }))!;
@@ -237,7 +249,7 @@ export class AssetService {
   }
 
   private async requireStored(
-    storageKey: string, allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+    storageKey: string, allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
   ): Promise<StoredObject> {
     const stored = await this.storage.describe(storageKey);
     if (!stored) {
@@ -270,7 +282,7 @@ export class AssetService {
    * does not get past the second (ADR-0040).
    */
   private refuseBeyondLimits(
-    mimeType: string, bytes: number, allowed: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES,
+    mimeType: string, bytes: number, allowed: readonly string[] = DEFAULT_UPLOAD_MIME_TYPES,
   ): void {
     if (bytes > ASSET_LIMITS.MAX_BYTES) {
       throw new DomainException(

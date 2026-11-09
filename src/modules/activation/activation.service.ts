@@ -35,7 +35,7 @@ interface LinkedModule {
 }
 
 /**
- * **Where a training link's title is read from, by who reads it** (the Phase 18.5 exit review, B2):
+ * **Where a training link's title is read from, by who reads it** (the Phase 18.2 exit review, B2):
  *
  * - `settings` — the office's working taxonomy, drafts included: the Owner's and the Admins' settings read
  *   (`activation_settings:read`), which names what they are editing;
@@ -57,7 +57,7 @@ export interface ActivationLinkView {
   label: string;
   /**
    * Where *"Go to {label} →"* sends a reader, or `null` for a training link to a module the reader is not offered —
-   * withdrawn, or not yet published — whose page would be a 404: draw no *Go to* (the Phase 18.5 exit review).
+   * withdrawn, or not yet published — whose page would be a 404: draw no *Go to* (the Phase 18.2 exit review).
    */
   route: string | null;
   completesWhen: string;
@@ -67,7 +67,7 @@ export interface ActivationLinkView {
    */
   live: boolean;
   /**
-   * **The form a hand tick opens** (P18.96-T4 AC-3): `closing` — *Which case?* — or `one_on_one` — *Log 1:1* — for
+   * **The form a hand tick opens** (P18.8-T4 AC-3): `closing` — *Which case?* — or `one_on_one` — *Log 1:1* — for
    * a data-backed item, which is ticked by hand only with its record; `null` for every other link.
    */
   form: ActivationRecordForm | null;
@@ -128,7 +128,7 @@ export class ActivationService {
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    // The Phase 18.5 exit review (B2): a field reader's link titles come from what the office offers.
+    // The Phase 18.2 exit review (B2): a field reader's link titles come from what the office offers.
     private readonly offered: OfferedTraining,
   ) {}
 
@@ -166,7 +166,7 @@ export class ActivationService {
   }
 
   /**
-   * **The published version as `GET /kpm/config` carries it to every member** (the Phase 18.5 exit review, B2): its
+   * **The published version as `GET /kpm/config` carries it to every member** (the Phase 18.2 exit review, B2): its
    * training links named from the modules that snapshot will offer, never from a draft. `null` before the first
    * publish.
    */
@@ -358,12 +358,12 @@ export class ActivationService {
             .sort((a, b) => a.displayOrder - b.displayOrder)
             .map((item) => {
               /*
-               * P18.96-T4 AC-2 (ADR-0171 §3): a field reader's item reads the kind its code is bound to where it
+               * P18.8-T4 AC-2 (ADR-0171 §3): a field reader's item reads the kind its code is bound to where it
                * stores none — *Close first case independently* and its two siblings complete from the office's
                * sales and coaching records, and no published version is edited for it. The settings read keeps
                * what is stored in `autoLink`: it is what the Owner edits and saves back.
                *
-               * P18.96-T7 G2: **its `link` is what completes the item, in every read** — the settings' too, so the
+               * P18.8-T7 G2: **its `link` is what completes the item, in every read** — the settings' too, so the
                * Owner's screen draws the three as data-backed (*From Sales data*) rather than *No link (manual)*,
                * while the stored `autoLink` it saves back stays `null`.
                */
@@ -411,7 +411,7 @@ export class ActivationService {
   }
 
   /**
-   * A link, resolved — **its words written for the reader** (P18.98-T5 AC-4): what completes it, and a data kind's
+   * A link, resolved — **its words written for the reader** (P18.10-T5 AC-4): what completes it, and a data kind's
    * source-line label. A feature link's label is a page's name and a training link's the module's own title, the same
    * in both languages.
    */
@@ -428,14 +428,14 @@ export class ActivationService {
         kind: link,
         // The module's own title, or its code where the module has since been removed from view.
         label: module?.title ?? moduleCode,
-        // *Go to {module} →* lands on the module's page (P18.5-T3 AC-5); nowhere for a module the reader is not offered.
+        // *Go to {module} →* lands on the module's page (P18.2-T3 AC-5); nowhere for a module the reader is not offered.
         route: module?.routable
           ? `/training/${encodeURIComponent(module.categoryCode)}/${encodeURIComponent(moduleCode)}`
           : null,
       };
     }
 
-    // P18.96-T4: a data kind resolves from its own registry, with no route — its way in is its own form.
+    // P18.8-T4: a data kind resolves from its own registry, with no route — its way in is its own form.
     if (isActivationDataLink(link)) {
       return {
         ...ACTIVATION_DATA_LINK_KINDS[link],

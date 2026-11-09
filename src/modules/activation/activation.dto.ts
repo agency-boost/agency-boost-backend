@@ -9,7 +9,7 @@ import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { field } from '@/common/validation/violations';
 import { ACTIVATION_BOUNDS } from './activation-input';
 
-/** `code: A code is 3–40 characters…` — the shared sentence, naming the field, in both languages (P18.98-T5 AC-3). */
+/** `code: A code is 3–40 characters…` — the shared sentence, naming the field, in both languages (P18.10-T5 AC-3). */
 const CODE_FIELD_MESSAGE = field(VALIDATION_REFUSALS.VALIDATION_FAILED.fieldCodeShape({ field: 'code' }));
 
 /**

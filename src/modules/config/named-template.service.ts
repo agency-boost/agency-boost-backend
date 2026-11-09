@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -11,6 +11,7 @@ import type { Sentence } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { CompanyTemplate, CompanyTemplateDocument } from './company-template.schema';
 import {
   NamedTemplate, NamedTemplateDocument, type TemplateOrigin,
@@ -18,20 +19,21 @@ import {
 import { OfficeCounter, standingOf, type TemplateScope } from './office-counter.port';
 import type { TemplateKinds } from './office-template';
 import {
-  OFFICE_TEMPLATE_KINDS, platformDefaultPayload, type OfficeTemplateKind,
+  NAMED_TEMPLATE_KINDS, OFFICE_TEMPLATE_KINDS, platformDefaultPayload, type NamedTemplateKind, type OfficeTemplateKind,
 } from './template-defaults';
+import { mapRungs, type RungMap } from './template-rungs';
 import { TEMPLATE_REFUSALS } from './template.messages';
 
 /**
  * How a new template starts (ADR-0115 §5): empty, the AgencyBoost defaults, or **a copy of one of the
  * company's templates** (P13.2-T7).
  */
-export type NewTemplateFrom = 'empty' | 'defaults' | { templateId: string };
+export type NewTemplateFrom = 'empty' | 'defaults' | { templateId: string; rungMap?: RungMap };
 
 /** One template's kinds as published now, and which version of each that was. */
 export interface PublishedKinds {
   kinds: TemplateKinds;
-  versions: Partial<Record<OfficeTemplateKind, number>>;
+  versions: Partial<Record<NamedTemplateKind, number>>;
 }
 
 /**
@@ -69,15 +71,16 @@ export interface NamedTemplateView {
   archivedAt: string | null;
   origin: TemplateOrigin;
   /**
-   * The newest published version of each of its seven kinds, `null` where it has published none —
-   * which an office made from it gets **empty** (ADR-0115 §3).
+   * The newest published version of each of its kinds — the seven an office copies and the recruitment playbook
+   * (ADR-0210 §1) — `null` where it has published none: an office made from it gets **empty** (ADR-0115 §3), and its
+   * KPMs' agents meet the playbook-empty state.
    */
-  publishedVersions: Record<OfficeTemplateKind, number | null>;
+  publishedVersions: Record<NamedTemplateKind, number | null>;
   /**
-   * **Each of its seven kinds: its newest published version and whether a draft waits** (ADR-0185 §3), for the
-   * template's card and its checklist — one read for the list, never one per kind.
+   * **Each of its kinds: its newest published version and whether a draft waits** (ADR-0185 §3), for the template's
+   * card and its checklist — one read for the list, never one per kind.
    */
-  sections: Record<OfficeTemplateKind, TemplateSectionState>;
+  sections: Record<NamedTemplateKind, TemplateSectionState>;
   /** The live offices it answers for: started from it, and for the migration's, those before 13.2. */
   officeCount: number;
   createdAt: string;
@@ -111,6 +114,11 @@ export class NamedTemplateService {
     private readonly officesOf: OfficeCounter,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /**
+     * The company's ladder, for a copy's rung map (ADR-0213 §4) and for nothing else. `@Optional` because the specs that
+     * build this by hand copy without one; a map sent without it is refused as a server fault, never applied unchecked.
+     */
+    @Optional() private readonly orgLevels?: OrgLevelService,
   ) {}
 
   /** Every template of the company, archived ones too — the default first, then by name. */
@@ -139,7 +147,7 @@ export class NamedTemplateService {
   ): Promise<NamedTemplateView> {
     this.require(ctx);
     const name = await this.checkNewName(companyId, input.name);
-    if (typeof input.from === 'object') return this.copy(ctx, companyId, name, input.from.templateId);
+    if (typeof input.from === 'object') return this.copy(ctx, companyId, name, input.from.templateId, input.from.rungMap);
 
     // Its kinds first, the template last, as every copy writes it (exit review, finding 5).
     const template = await this.writeTemplate(
@@ -166,10 +174,24 @@ export class NamedTemplateService {
    * is how it comes back into use. One audit row names the source and the copy.
    */
   private async copy(
-    ctx: RequestContext, companyId: string, name: string, sourceId: string,
+    ctx: RequestContext, companyId: string, name: string, sourceId: string, rungMap?: RungMap,
   ): Promise<NamedTemplateView> {
     const source = await this.find(companyId, sourceId);
-    const { kinds, versions } = await this.publishedKindsOf(companyId, String(source._id));
+    const published = await this.publishedKindsOf(companyId, String(source._id));
+    const { versions } = published;
+    let { kinds } = published;
+    /*
+     * **A rung map, where one is sent** (ADR-0213 §4): within a company the ladder is shared, so nothing is refused for
+     * a rung left unmapped — but a template may name a rung the company has archived since, and the map moves it.
+     */
+    let applied: Record<string, string> = {};
+    if (rungMap && Object.keys(rungMap).length) {
+      const ladder = this.orgLevels;
+      if (!ladder) throw new Error('NamedTemplateService was built without the ladder, and a rung map needs it.');
+      ({ kinds, rungMap: applied } = await mapRungs(
+        kinds, rungMap, () => ladder.activeCodesFor(companyId), { refuseUnmapped: false },
+      ));
+    }
     const template = await this.writeTemplate(
       ctx, companyId, name, { kind: 'copy', templateId: String(source._id) }, kinds,
     );
@@ -181,15 +203,19 @@ export class NamedTemplateService {
         companyId, name, from: 'copy', isDefault: false,
         source: { companyId, templateId: String(source._id), name: source.name, versions },
         filesDuplicated: 0,
+        ...(Object.keys(applied).length ? { rungMap: applied } : {}),
       },
     });
     return this.viewOf(companyId, template);
   }
 
   /**
-   * **A company's first template**, made with the company (ADR-0115 §1, §3): its default, named
-   * *"{Company name} template"*. `usesPlatformDefaults` decides what it holds — every kind a published
-   * version 1 of the AgencyBoost defaults, or nothing — and now decides nothing else about an office.
+   * **A company's first template**, its default, named *"{Company name} template"*: every kind a published version 1 of
+   * the AgencyBoost defaults, or nothing, by `usesPlatformDefaults`.
+   *
+   * **Creating a company makes none any more** (ADR-0213 §3, B1-8): a new company opens on *"+ Template baru"*, and the
+   * first template it makes becomes its default (`writeTemplate`). This stays for what sets a company up whole in one
+   * step — the specs' fixtures and the demo seed's — and is audited like any template made.
    */
   async createFirst(ctx: RequestContext, company: CompanyDocument): Promise<NamedTemplateDocument> {
     const companyId = String(company._id);
@@ -226,7 +252,8 @@ export class NamedTemplateService {
 
     const name = input.name !== undefined ? this.cleanName(input.name) : template.name;
     const renaming = name !== template.name;
-    if (renaming && template.status === 'active') await this.refuseNameTaken(companyId, name, templateId);
+    // An archived template's rename is checked too (P19.4-T3 AC-12; SA UI-017): names are unique archived ones included.
+    if (renaming) await this.refuseNameTaken(companyId, name, templateId);
     if (input.isDefault === false && template.isDefault) {
       // A company always has exactly one default: it moves by making another the default.
       throw this.isDefault(TEMPLATE_REFUSALS.TEMPLATE_IS_DEFAULT.cannotStopBeingDefault({ name: template.name }));
@@ -344,7 +371,8 @@ export class NamedTemplateService {
 
   /**
    * **A new template's name, checked before anything is written**: the company exists (`404`), the
-   * name is cleaned, and no active template of the company has it (`409 TEMPLATE_NAME_TAKEN`).
+   * name is cleaned, and no template of the company has it, archived ones included (`409 TEMPLATE_NAME_TAKEN`; P19.4-T3
+   * AC-12).
    */
   async checkNewName(companyId: string, raw: string): Promise<string> {
     await this.requireCompany(companyId);
@@ -356,6 +384,32 @@ export class NamedTemplateService {
   /** The company exists and is not deleted, or `404`. */
   async checkCompany(companyId: string): Promise<void> {
     await this.requireCompany(companyId);
+  }
+
+  /**
+   * **The companies whose default template has at least one published section** (P19.4-T3 AC-12; SA UI-017): what
+   * takes *"Dimulai kosong"* off `/admin/companies`. A section counts when one of its kinds holds a published version
+   * that is not deleted. *Advanced analytics* is left out: every template is made holding the platform's version 1 of
+   * it (ADR-0214 §9), so it says nothing about whether anybody has filled the company's template. Two reads, whatever
+   * the number of companies.
+   */
+  async withPublishedDefault(companyIds: readonly string[]): Promise<Set<string>> {
+    if (companyIds.length === 0) return new Set();
+    const defaults = await this.named
+      .find({ companyId: { $in: [...companyIds] }, isDefault: true, deletedAt: null }, { _id: 1, companyId: 1 })
+      .lean()
+      .exec();
+    if (defaults.length === 0) return new Set();
+    const published = await this.rows
+      .distinct('templateId', {
+        templateId: { $in: defaults.map((t) => String(t._id)) },
+        kind: { $in: NAMED_TEMPLATE_KINDS.filter((kind) => kind !== 'advanced_analytics' && kind !== 'branding') },
+        status: 'published',
+        deletedAt: null,
+      })
+      .exec();
+    const filled = new Set((published as unknown[]).map(String));
+    return new Set(defaults.filter((t) => filled.has(String(t._id))).map((t) => String(t.companyId)));
   }
 
   /**
@@ -405,13 +459,13 @@ export class NamedTemplateService {
    * work in progress. The named read a copy and an import make of a template (ADR-0115 §6).
    */
   async publishedKindsOf(companyId: string, templateId: string): Promise<PublishedKinds> {
-    const rows = await Promise.all(OFFICE_TEMPLATE_KINDS.map((kind) => this.rows
+    const rows = await Promise.all(NAMED_TEMPLATE_KINDS.map((kind) => this.rows
       .findOne({ companyId, templateId, kind, status: 'published', deletedAt: null })
       .sort({ version: -1 })
       .exec()));
     const kinds: TemplateKinds = {};
     const versions: PublishedKinds['versions'] = {};
-    OFFICE_TEMPLATE_KINDS.forEach((kind, i) => {
+    NAMED_TEMPLATE_KINDS.forEach((kind, i) => {
       const row = rows[i];
       if (!row) return;
       kinds[kind] = structuredClone(row.payload);
@@ -435,13 +489,25 @@ export class NamedTemplateService {
     name: string,
     origin: TemplateOrigin,
     kinds: TemplateKinds,
-    /** Only a company's first template is made the default, with the company. */
+    /** Made the default whatever the company holds: `createFirst`'s. */
     isDefault = false,
   ): Promise<NamedTemplateDocument> {
     const _id = new Types.ObjectId();
     const templateId = String(_id);
     const now = this.clock.now();
-    const rows = OFFICE_TEMPLATE_KINDS.filter((kind) => kinds[kind]).map((kind) => ({
+    /*
+     * **A company's first template becomes its default** (ADR-0213 §3): a new company is made with none, and approving a
+     * KPM request starts the office from the default. Two first templates made at once meet the one-default index, and
+     * the second is the `409 VERSION_CONFLICT` it answers — never a company with two defaults.
+     */
+    const makeDefault = isDefault || !(await this.named.exists({ companyId, isDefault: true, deletedAt: null }).exec());
+    /*
+     * **The *Advanced analytics* section is never empty** (P19.5-T1; ADR-0214 §9): R1's four system columns can never be
+     * missing, so a template made with none of it — *Kosong*, *Simpan sebagai template* from an office, a source that
+     * held none — gets version 1 of the platform's. A copy that carries one keeps its source's.
+     */
+    if (!kinds.advanced_analytics) kinds = { ...kinds, advanced_analytics: platformDefaultPayload('advanced_analytics') };
+    const rows = NAMED_TEMPLATE_KINDS.filter((kind) => kinds[kind]).map((kind) => ({
       companyId, templateId, kind, version: 1, status: 'published' as const,
       payload: structuredClone(kinds[kind]!), publishedAt: now,
       deletedAt: null, createdBy: ctx.userId, updatedBy: ctx.userId,
@@ -449,7 +515,7 @@ export class NamedTemplateService {
     try {
       if (rows.length) await this.rows.insertMany(rows);
       return await this.named.create({
-        _id, companyId, name, isDefault, status: 'active', archivedAt: null, origin,
+        _id, companyId, name, isDefault: makeDefault, status: 'active', archivedAt: null, origin,
         deletedAt: null, createdBy: ctx.userId, updatedBy: ctx.userId,
       });
     } catch (err) {
@@ -492,15 +558,26 @@ export class NamedTemplateService {
     return name;
   }
 
+  /**
+   * **No two templates of a company share a name, archived ones included** (P19.4-T3 AC-12; SA UI-017, *"Manulife
+   * template ★ Default"* beside *"Manulife template · Diarsipkan"*): `409 TEMPLATE_NAME_TAKEN`, *"Nama ini sudah dipakai
+   * template lain."*, compared as the index compares — case and accents aside — and before anything is written. It held
+   * active templates alone until then.
+   *
+   * **The index still covers active templates only** (`companyId_1_name_1_active`): a pair written before this rule —
+   * production's Manulife has one — would stop an index over every template from being built, and an archived
+   * template's name is part of the record, not something to rewrite. This check is the rule; the index is the backstop
+   * for two creations at once, where both are active.
+   */
   private async refuseNameTaken(companyId: string, name: string, except: string | null): Promise<void> {
     const clash = await this.named
       .findOne({
-        companyId, name, status: 'active', deletedAt: null,
+        companyId, name, deletedAt: null,
         ...(except ? { _id: { $ne: except } } : {}),
       })
       .collation(NAME_COLLATION)
       .exec();
-    if (clash) throw this.nameTaken(name);
+    if (clash) throw this.nameTaken(name, clash.status === 'archived');
   }
 
   /** `company_template:write`, or `403 PERM_DENIED` — before anything is read or written. */
@@ -593,12 +670,13 @@ export class NamedTemplateService {
     return new DomainException(ErrorCode.TEMPLATE_IS_DEFAULT, why, HttpStatus.CONFLICT);
   }
 
-  private nameTaken(name: string): DomainException {
+  /** `details.archived`: the template holding the name is an archived one (P19.4-T3 AC-12). */
+  private nameTaken(name: string, archived = false): DomainException {
     return new DomainException(
       ErrorCode.TEMPLATE_NAME_TAKEN,
       TEMPLATE_REFUSALS.TEMPLATE_NAME_TAKEN.taken({ name }),
       HttpStatus.CONFLICT,
-      { name },
+      { name, archived },
     );
   }
 
@@ -623,9 +701,9 @@ export class NamedTemplateService {
     return templates.map((t) => {
       const id = String(t._id);
       const sections = states.get(id)!;
-      const publishedVersions = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [
+      const publishedVersions = Object.fromEntries(NAMED_TEMPLATE_KINDS.map((kind) => [
         kind, sections[kind].publishedVersion,
-      ])) as Record<OfficeTemplateKind, number | null>;
+      ])) as Record<NamedTemplateKind, number | null>;
       const stamps = t as unknown as { createdAt?: Date; updatedAt?: Date };
       return {
         id,
@@ -651,9 +729,9 @@ export class NamedTemplateService {
    */
   private async sectionsOf(
     companyId: string, templateIds: string[],
-  ): Promise<Map<string, Record<OfficeTemplateKind, TemplateSectionState>>> {
+  ): Promise<Map<string, Record<NamedTemplateKind, TemplateSectionState>>> {
     const rows = await this.rows
-      .aggregate<{ _id: { templateId: string; kind: OfficeTemplateKind; status: 'draft' | 'published' }; version: number }>([
+      .aggregate<{ _id: { templateId: string; kind: NamedTemplateKind; status: 'draft' | 'published' }; version: number }>([
         {
           $match: {
             companyId, status: { $in: ['draft', 'published'] }, deletedAt: null,
@@ -670,18 +748,18 @@ export class NamedTemplateService {
 
     return new Map(templateIds.map((id) => {
       const mine = rows.filter((r) => r._id.templateId === id);
-      const sections = Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, {
+      const sections = Object.fromEntries(NAMED_TEMPLATE_KINDS.map((kind) => [kind, {
         publishedVersion: mine.find((r) => r._id.kind === kind && r._id.status === 'published')?.version ?? null,
         hasDraft: mine.some((r) => r._id.kind === kind && r._id.status === 'draft'),
-      }])) as Record<OfficeTemplateKind, TemplateSectionState>;
+      }])) as Record<NamedTemplateKind, TemplateSectionState>;
       return [id, sections];
     }));
   }
 }
 
-/** Each of the seven kinds as a published version 1 of the AgencyBoost defaults. */
+/** Each of a template's kinds as a published version 1 of the AgencyBoost defaults — the playbook's words too. */
 function defaultKinds(): TemplateKinds {
-  return Object.fromEntries(OFFICE_TEMPLATE_KINDS.map((kind) => [kind, platformDefaultPayload(kind)]));
+  return Object.fromEntries(NAMED_TEMPLATE_KINDS.map((kind) => [kind, platformDefaultPayload(kind)]));
 }
 
 /** A duplicate key on one of the two unique indexes: the active name, or the one default. */

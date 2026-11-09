@@ -98,7 +98,15 @@ describe('validating a subscription (AC-1)', () => {
   };
 
   it('keeps a valid subscription, IDR its currency', () => {
-    expect(validateSubscription(valid)).toEqual({ ...valid, currency: 'IDR' });
+    // No plan sent is none here; the service keeps the office's own (P19.4-T3, ADR-0211 §1).
+    expect(validateSubscription(valid)).toEqual({ ...valid, currency: 'IDR', plan: null });
+  });
+
+  it('P19.4-T3 AC-10 takes a plan, six months or annual, or none', () => {
+    expect(validateSubscription({ ...valid, plan: 'six_months' }).plan).toBe('six_months');
+    expect(validateSubscription({ ...valid, plan: 'annual' }).plan).toBe('annual');
+    expect(validateSubscription({ ...valid, plan: null }).plan).toBeNull();
+    expect(refusedOn({ plan: 'monthly' as never })).toEqual({ code: 'VALIDATION_FAILED', field: 'plan', status: 400 });
   });
 
   it('takes no subscription at all: every field empty, keep active off', () => {

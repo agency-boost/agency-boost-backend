@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
@@ -8,6 +8,10 @@ import { NamedTemplateService } from './named-template.service';
 import { TemplateCopyService } from './template-copy.service';
 import { TemplateService } from './template.service';
 import { CreateTemplateDto, ImportTemplateDto, UpdateTemplateDto } from './named-template.dto';
+import { ConfirmUploadDto, RequestUploadDto } from '@/modules/training/training.dto';
+import { TemplateMaterialService } from './template-material.service';
+import { TemplatePushService } from './template-push.service';
+import { ApplyTemplateDto, SaveTemplateModuleContentDto, TemplateOfficesQuery } from './template-push.dto';
 
 /**
  * **A company's named templates** (ADR-0115 §3, §5, §7; P13.2-T6) — and, since P13.2-T7, a copy of one
@@ -29,6 +33,9 @@ export class NamedTemplateController {
     private readonly copies: TemplateCopyService,
     /** A template's kinds, published together (ADR-0185 §3): *Terbitkan semua*. */
     private readonly kinds: TemplateService,
+    /** ADR-0208: the *Training* section's material, and the push to the KPMs made from the template. */
+    private readonly material: TemplateMaterialService,
+    private readonly push: TemplatePushService,
   ) {}
 
   @Get()
@@ -141,21 +148,135 @@ export class NamedTemplateController {
   @Get(':templateId/offices')
   @RequirePermission('company_template:read')
   @ApiOperation({
-    summary: 'The offices a template answers for, and what each is behind on',
+    summary: 'The offices a template answers for, and where each stands',
     description:
       'Every live office started from the template — and, for the template each company was given when '
       + 'templates were named, the offices created before then — by code, with `behind`, the kinds the '
       + 'template has since published a newer version of than the office was built from, and `unrecorded`, '
-      + 'the kinds the office has no record of (ADR-0185 §4). What the checklist\u2019s *N KPM memakai versi '
-      + 'lama* lists. Information only: nothing reaches an office (ADR-0115 §6). 404 for a template that is '
-      + 'not the company\u2019s.',
+      + 'the kinds the office has no record of (ADR-0185 §4). **With `?kind=`** (one kind, or several separated by '
+      + 'commas) each office also says where it stands on them (ADR-0208 §4): `state` and, per kind, `unchanged`, '
+      + '`changed` — it differs, by code, on the fields an Owner edits, from the version of this template it was last '
+      + 'given, with what it added, removed or changed — or `current`, already on the newest version; for training, '
+      + '`ownMaterialModules`, the modules showing the office\u2019s own material. What the publish dialog lists. 400 for '
+      + 'a kind that is not one; 404 for a template that is not the company\u2019s.',
   })
   async offices(
     @Ctx() ctx: RequestContext,
     @Param('companyId') companyId: string,
     @Param('templateId') templateId: string,
+    @Query() query: TemplateOfficesQuery,
   ) {
+    if (query.kind) return this.push.standings(ctx, companyId, templateId, [query.kind]);
     return this.templates.offices(ctx, companyId, templateId);
+  }
+
+  @Post(':templateId/apply')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Apply the template to offices that already exist',
+    description:
+      '*Terapkan juga ke KPM yang sudah ada* (ADR-0208 §4, §5): each of `kinds`, as the template\u2019s newest published '
+      + 'version, written into each of `kpmIds` — every one an office made from this template, of its own company. '
+      + 'Items are matched by code: written as the template has them, an item only the office has archived, an item '
+      + 'new to it added; codes, and agents\u2019 progress by code, kept. A training module\u2019s company material '
+      + 'becomes the template\u2019s; the office\u2019s own is kept unless the office is in `replaceChanged`, when it '
+      + 'moves to the module\u2019s history. The server works out again which offices changed a section themselves: '
+      + 'one not in `replaceChanged` is refused `TEMPLATE_APPLY_UNCONFIRMED` and nothing is written for it, the others '
+      + 'go ahead. Each office then publishes a new version, its origin the push — unless it had changes of its own '
+      + 'waiting (`awaitingPublish`). Per office and kind: `applied`, `skipped` (already current) or `refused`. Audited '
+      + 'per office and kind in its own log and once in the platform\u2019s; the Owner and the Admins are told in the '
+      + 'app. 409 TEMPLATE_APPLY_UNCONFIRMED when every office was refused that way and nothing was written; 400 for '
+      + 'no kind or no office, a kind the template has published nothing of, an archived template, or a built-in one; '
+      + '404 for a template that is not the company\u2019s, or an office that is not one of its.',
+  })
+  async apply(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Body() dto: ApplyTemplateDto,
+  ) {
+    return this.push.apply(ctx, companyId, templateId, dto);
+  }
+
+  @Post(':templateId/training/uploads')
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'A signed upload for a template\u2019s training material',
+    description:
+      'The *Training* section\u2019s material (ADR-0208 §1): `.pdf .png .jpg .jpeg .webp .csv .xlsx .html` up to 25 '
+      + 'MB, or a `.mp4` video. An HTML lesson is confirmed by its first bytes and drawn only in a sandboxed frame '
+      + '(ADR-0217). The file is the company\u2019s — stored under its folder, recorded as this template\u2019s '
+      + 'upload — and its bytes go straight from the browser to storage. The limits are checked before a signature is '
+      + 'issued. Audited. 400 for an archived template; 404 for a template that is not the company\u2019s.',
+  })
+  async requestMaterialUpload(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Body() dto: RequestUploadDto,
+  ) {
+    return this.material.requestUpload(ctx, companyId, templateId, dto);
+  }
+
+  @Post(':templateId/training/uploads/confirm')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'Confirm a template\u2019s material arrived',
+    description:
+      'Asks storage what landed and records that, not what the browser claimed (ADR-0040). Audited. 409 '
+      + 'ASSET_NOT_UPLOADED when nothing arrived; 404 for a key this template did not ask for — another '
+      + 'template\u2019s, another company\u2019s, or none.',
+  })
+  async confirmMaterialUpload(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Body() dto: ConfirmUploadDto,
+  ) {
+    return this.material.confirmUpload(ctx, companyId, templateId, dto.storageKey);
+  }
+
+  @Get(':templateId/training/files/url')
+  @RequirePermission('company_template:read')
+  @ApiOperation({
+    summary: 'A short-lived link to one of a template\u2019s training files, for the editor\u2019s preview',
+    description:
+      'ADR-0217 §4: the Super Admin previews an HTML lesson in the sandboxed frame before it reaches any office. '
+      + 'Signed for 300 seconds on the storage host, never the app\u2019s. The file must be the company\u2019s and this '
+      + 'template\u2019s — uploaded into it, or named by its *Training* section as it now stands; anything else is 404, so '
+      + 'knowing a key buys nothing. 409 ASSET_NOT_CONFIRMED for an upload not yet confirmed.',
+  })
+  async materialFileUrl(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Query('storageKey') storageKey: string,
+  ) {
+    return this.material.fileUrl(ctx, companyId, templateId, storageKey);
+  }
+
+  @Put(':templateId/training/modules/:code/content')
+  @RequirePermission('company_template:write')
+  @ApiOperation({
+    summary: 'A module\u2019s material, in the template\u2019s draft',
+    description:
+      'The whole material of one module of the *Training* section — files, videos, links — written into the '
+      + 'section\u2019s draft, which goes live with *Terbitkan* (ADR-0208 §1). By module **code**. Every file a '
+      + 'confirmed upload of this company; links `https` only. `expectedRevision` pins it to the draft the editor '
+      + 'read: 409 VERSION_CONFLICT past it, nothing written. Answers the section\u2019s draft as it now stands. '
+      + 'Audited. 400 for a module the section does not hold, an archived template, or a file that is not the '
+      + 'company\u2019s; 404 for a template that is not the company\u2019s.',
+  })
+  async saveModuleMaterial(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId') companyId: string,
+    @Param('templateId') templateId: string,
+    @Param('code') code: string,
+    @Body() dto: SaveTemplateModuleContentDto,
+  ) {
+    return this.material.saveModuleContent(ctx, companyId, templateId, code, dto, dto.expectedRevision);
   }
 
   @Post(':templateId/archive')

@@ -96,6 +96,22 @@ function goal(kpmId: string, membershipId: string) {
 const cell = (value: number) => ({ value, provenance: 'imported', sourceBatchId: null });
 
 /**
+ * **The months the office's production was written in, as a real upload leaves them** (P19.5-T2; ADR-0214 §11): one
+ * `productionMonths` row per month the fixture holds figures for, revision 1, first written on the day the story
+ * implies — January and August at their month's end, September on the roster's today. Without them a month the office
+ * holds would read as never written, and so open (`'history'`) whatever its date; with them August locks on its
+ * schedule, 7 September. A spec that empties `productionMonths` puts these back.
+ */
+export function writtenMonthRows(): Record<string, unknown>[] {
+  const at = (day: string) => new Date(`${day}T10:00:00Z`);
+  return ([['2026-01', '2026-01-31'], ['2026-08', '2026-08-31'], ['2026-09', ROSTER_TODAY]] as const).map(([month, on]) => ({
+    kpmId: KPM_A, month, revision: 1, lockOverride: null, lockChangedAt: null, lockChangedBy: null,
+    firstWrittenOn: on, asOf: null, deletedAt: null, createdBy: null, updatedBy: null,
+    createdAt: at(on), updatedAt: at(on),
+  }));
+}
+
+/**
  * Build the office on the database the caller started. Everybody's status this month, by design:
  *
  * | Who | Goal | September's APE | Cascade codes logged | Status |
@@ -151,14 +167,24 @@ export async function buildCoachingOffice(wired: ReturnType<typeof configModule>
   // The three goal holders' year: August on file for everybody, September for the three.
   const goals = (['INDAH', 'DIMAS', 'RINA'] as const).map((who) => goal(KPM_A, id[who]));
   await db.collection('goals').insertMany(goals);
+  /*
+   * P19.5-T2 (ADR-0214 §10): a year to date is the sum of the months held, never the file's YTD column. The year so far
+   * was Rp 160 M at the end of August when the file carried it; January's Rp 140 M is what makes the months add to it, so
+   * every figure read from this office — September's Rp 85 M target included — is the one it was, and February to July
+   * still hold nothing.
+   */
   const september: Partial<Record<Who, number>> = { INDAH: 80, DIMAS: 20, RINA: 80, SARI: 90 };
+  const row = (who: Who, month: string, ape: number) => ({
+    kpmId: KPM_A, membershipId: id[who], month, agentCode: who, deletedAt: null,
+    templateId: null, templateVersion: 1, asOf: null, values: { APE: cell(ape * M) }, ytdValues: {},
+  });
   const months = (Object.keys(september) as Who[]).flatMap((who) => [
-    { kpmId: KPM_A, membershipId: id[who], month: '2026-08', agentCode: who, deletedAt: null,
-      apeMonthly: cell(20 * M), apeYtd: cell(160 * M) },
-    { kpmId: KPM_A, membershipId: id[who], month: '2026-09', agentCode: who, deletedAt: null,
-      apeMonthly: cell(september[who]! * M), apeYtd: cell((160 + september[who]!) * M) },
+    row(who, '2026-01', 140),
+    row(who, '2026-08', 20),
+    row(who, '2026-09', september[who]!),
   ]);
   await db.collection('monthlyAgentData').insertMany(months);
+  await db.collection('productionMonths').insertMany(writtenMonthRows());
 
   // A fortnight of log: a cascade count on twelve days for INDAH and DIMAS, recruiting only for RINA.
   const logs: Record<string, unknown>[] = [];

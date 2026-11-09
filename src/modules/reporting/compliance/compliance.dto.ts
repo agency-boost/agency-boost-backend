@@ -1,12 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Length } from 'class-validator';
+import { IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
 import { COMPLIANCE_CATEGORIES, type ComplianceCategoryKey } from './compliance-category';
 
 /** An item's bound: module and campaign codes are at most 40 characters, an event's id 24. */
 export const COMPLIANCE_ITEM_MAX = 100;
 
 /**
- * `category` and `item`, and nothing else (P18.6-T1 AC-1): a category it does not know, an empty or over-long item, or
+ * `category`, `item` and `group`, and nothing else (P18.3-T1 AC-1; `group` since P19.3-T3): a category it does not know, an empty or over-long item, or
  * a parameter of any other name is 400 `VALIDATION_FAILED`, named in `details`. An `item` on a single-item category is
  * refused by the service, with the same code.
  */
@@ -32,4 +32,15 @@ export class ComplianceQueryDto {
   @IsString()
   @Length(1, COMPLIANCE_ITEM_MAX)
   item?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      '*Lihat untuk* (UI-152, OD-258): one of the office’s custom groups, by id — the tree, the six counts and '
+      + 'the sub-line are then over that group’s members today. An unknown or archived group, or another office’s, is 404.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  group?: string;
 }

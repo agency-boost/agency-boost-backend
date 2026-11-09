@@ -52,7 +52,9 @@ export async function up(
     }) - result.modifiedCount;
     edited += await products.countDocuments({
       code: seed.code,
-      'defaultAttackPlan.objectionYouSay': { $nin: [reply, seed.differentiator] },
+      // A row that holds a reply at all: since P19.4-T4 a product holds cards (`0054-product-objection-cards`), and
+      // `$nin` alone would count each of those as a reply somebody edited.
+      'defaultAttackPlan.objectionYouSay': { $exists: true, $nin: [reply, seed.differentiator] },
     });
   }
 

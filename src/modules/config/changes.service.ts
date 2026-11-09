@@ -23,7 +23,7 @@ import {
 } from '@/modules/training/training-input';
 import { CONFIG_REFUSALS } from './config.messages';
 
-/** The batch's own refusals, in both languages (P18.98-T5 AC-3). */
+/** The batch's own refusals, in both languages (P18.10-T5 AC-3). */
 const SAY = CONFIG_REFUSALS.VALIDATION_FAILED;
 
 /**
@@ -507,7 +507,7 @@ export class ConfigChangeService {
    * A batch of twenty edits reporting only *"Nothing to change"* sends an Owner to read
    * their own form looking for which row meant it.
    *
-   * **The original's words in both languages** (P18.98-T5 AC-3): its sentence, after the op's number, under its own
+   * **The original's words in both languages** (P18.10-T5 AC-3): its sentence, after the op's number, under its own
    * code and status. The details travel with the refusal as given, sentences and all — a mismatched tile names its code
    * and its labels (ADR-0064), a form's violations are written for the reader — and a screen pointing at the field
    * needs them as much as a single route's does. Anything that is no refusal of ours keeps its own English.

@@ -134,7 +134,7 @@ export class CoachingReadings {
       { projection: { coacheeMembershipId: 1, coachMembershipId: 1, status: 1, date: 1 } },
     );
     return rows.map((row) => ({
-      // P18.96-T4: which session, so the checklist's *Weekly 1-on-1 check-in* can name the fourth.
+      // P18.8-T4: which session, so the checklist's *Weekly 1-on-1 check-in* can name the fourth.
       sessionId: String(row._id),
       coacheeMembershipId: row.coacheeMembershipId,
       coachMembershipId: row.coachMembershipId,

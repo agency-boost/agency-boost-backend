@@ -1,7 +1,7 @@
 /**
  * **Whether a ratio's formula has moved from its standard** (ADR-0024), on its own so a reader can ask it without the
  * configuration service behind it: the activity module's ratio views, which the Unit Dashboard's *Activities* tab reads
- * (UI V1, Phase 18.99 T4) and which must reach nothing of training or events (P15-T1 AC-11). `ratio.service.ts`
+ * (UI V1, Phase 18.11 T4) and which must reach nothing of training or events (P15-T1 AC-11). `ratio.service.ts`
  * re-exports it, unchanged.
  */
 

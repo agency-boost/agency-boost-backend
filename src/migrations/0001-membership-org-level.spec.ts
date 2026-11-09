@@ -3,7 +3,7 @@ import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0001-membership-org-level';
 
 /**
- * P3.5-T8. `memberships.orgLevelId` is required, and every row written before it existed
+ * P3.1-T8. `memberships.orgLevelId` is required, and every row written before it existed
  * has none — so the field is only the stored truth once this has run.
  */
 describe('0001 — backfilling the membership org level', () => {

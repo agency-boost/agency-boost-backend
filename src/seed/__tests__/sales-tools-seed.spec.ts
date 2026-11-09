@@ -4,10 +4,13 @@ import { RequestContext } from '@/common/context/request-context';
 import { SEED_PRODUCTS, SEED_REPLY_BY_NEED } from '@/domain/constants';
 import { up as attackPlanReply } from '@/migrations/0024-attack-plan-reply';
 import { up as productNamePlaceholder } from '@/migrations/0039-product-name-placeholder';
+import { up as productKindAndCurrency } from '@/migrations/0053-product-kind-and-currency';
+import { up as productObjectionCards } from '@/migrations/0054-product-objection-cards';
+import { ProductCatalogService } from '@/modules/products/product-catalog.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  SALES_TOOLS_COMMISSION, SALES_TOOLS_DECISIONS, SALES_TOOLS_NOT_SET, salesToolsConfigId,
+  SALES_TOOLS_COMMISSION, SALES_TOOLS_DECISIONS, SALES_TOOLS_NOT_SET, SALES_TOOLS_RIDER, salesToolsConfigId,
   seedSalesToolsFixture,
 } from '../sales-tools-fixture';
 import { EMPTY_OFFICE } from '../template-fixture';
@@ -59,7 +62,7 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
       const shelf = await shelfOf(owner0417);
       const by = (code: string) => shelf.find((p) => p.code === code)!;
 
-      // P18.95-T6 AC-4 (UI-023): no placeholder rename — the office reads the company's name.
+      // P18.7-T6 AC-4 (UI-023): no placeholder rename — the office reads the company's name.
       expect(by('PRUMAPAN').displayName).toEqual({ value: 'PRUMapan', overridden: false });
       expect(by('PRUSMART_PLAN').active).toEqual({ value: false, overridden: true });
       expect(by('PRUFUTURE').reviewState).toBe('pending');
@@ -82,7 +85,7 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
       const row = await rowOf(owner0417, code);
 
       expect(row).toMatchObject({ reviewState: 'approved', description: { value: description, overridden: true } });
-      // Laid onto the row P5 seeded, which renames nothing since P18.95-T6: the company's name, the office's words.
+      // Laid onto the row P5 seeded, which renames nothing since P18.7-T6: the company's name, the office's words.
       expect(row.displayName).toEqual({ value: 'PRUMapan', overridden: false });
       const served = await wired.kpmProducts.effectiveScript(agent0417, row.productId);
       expect(served).toMatchObject({ source: 'kpm', description });
@@ -144,7 +147,8 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
 
   it('seeds the push-back’s reply as the need’s, and migration 0024 finds nothing to rewrite', async () => {
     const mapan = await col('products').findOne({ companyId: prudentialId, code: 'PRUMAPAN' });
-    expect(mapan!.defaultAttackPlan.objectionYouSay).toBe(SEED_REPLY_BY_NEED.retirement);
+    // The pair as its one card since P19.4-T4 (ADR-0209 §9).
+    expect(mapan!.defaultAttackPlan.objections[0].answer).toBe(SEED_REPLY_BY_NEED.retirement);
 
     for (let run = 0; run < 2; run += 1) {
       expect(await attackPlanReply(mongoose.connection.db!, clock.now()))
@@ -152,12 +156,46 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
     }
   });
 
-  it('P18.95-T6 AC-4 the name fix + migration: no office’s product is named with the placeholder, and 0039 finds nothing to clear', async () => {
+  it('P18.7-T6 AC-4 the name fix + migration: no office’s product is named with the placeholder, and 0039 finds nothing to clear', async () => {
     expect(await col('kpmProductConfigs').countDocuments({ 'overrides.displayName': /\(nama kami\)/ })).toBe(0);
     expect(await col('products').countDocuments({ name: /\(nama kami\)/ })).toBe(0);
     for (let run = 0; run < 2; run += 1) {
       expect(await productNamePlaceholder(mongoose.connection.db!, clock.now())).toEqual({ cleared: 0 });
     }
+  });
+
+  describe('P19.4-T4 a rider on the demo shelf (ADR-0209 §1–§3, §6)', () => {
+    const catalog = () => new ProductCatalogService(wired.kpmProducts, wired.clock);
+
+    it('P19.4-T4 AC-10 seeds PRUPersonal Accident D&D Plus as a rider on PRUMapan and PRUTect Care', async () => {
+      const rider = await col('products').findOne({ companyId: prudentialId, code: SALES_TOOLS_RIDER.code });
+      const bases = await Promise.all(SALES_TOOLS_RIDER.bases.map(async (code) =>
+        String((await col('products').findOne({ companyId: prudentialId, code }))!._id)));
+      expect(rider).toMatchObject({ kind: 'rider', attachesTo: bases, currencies: ['IDR'] });
+    });
+
+    it('P19.4-T4 AC-5 keeps it out of 0417’s list and shows it inside PRUMapan as "Bisa ditambah"', async () => {
+      const { products } = await catalog().catalog(agent0417);
+      expect(products.map((p) => p.code)).not.toContain(SALES_TOOLS_RIDER.code);
+      expect((await catalog().product(agent0417, 'PRUMAPAN')).riders)
+        .toEqual([{ code: SALES_TOOLS_RIDER.code, name: 'PRUPersonal Accident D&D Plus' }]);
+      await expect(catalog().product(agent0417, SALES_TOOLS_RIDER.code)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('P19.4-T4 AC-8 sits under its bases on 0417’s settings with no switch of its own: on, as its bases are', async () => {
+      const row = await rowOf(owner0417, SALES_TOOLS_RIDER.code);
+      expect(row).toMatchObject({ kind: 'rider', sellable: true });
+      expect(row.active).toEqual({ value: true, overridden: false });
+    });
+
+    it('P19.4-T4 AC-2, AC-3 a seeded database leaves both product migrations nothing more to do', async () => {
+      for (let run = 0; run < 2; run += 1) {
+        expect(await productKindAndCurrency(mongoose.connection.db!))
+          .toEqual({ kind: 0, attachesTo: 0, currencies: 0 });
+        expect(await productObjectionCards(mongoose.connection.db!, clock.now()))
+          .toEqual({ products: 0, split: 0, empty: 0, overrides: 0 });
+      }
+    });
   });
 
   it('leaves office 0701’s company with no product: the empty shelf', async () => {

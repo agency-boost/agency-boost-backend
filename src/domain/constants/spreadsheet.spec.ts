@@ -1,4 +1,4 @@
-import { PRODUCTION_UPLOAD, ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './index';
+import { PRODUCTION_UPLOAD, ROSTER_INVITATION, ROSTER_UPLOAD, SPREADSHEET, XLSX_MIME_TYPE } from './index';
 
 /**
  * A workbook's bounds and the roster upload's (ADR-0184), pinned so a change fails here before it reaches a reader.
@@ -17,6 +17,10 @@ describe('the spreadsheet bounds (ADR-0184)', () => {
 
   it('pins the roster upload: a file of a megabyte, and pasted rows of 512,000 characters', () => {
     expect(ROSTER_UPLOAD).toEqual({ MAX_BYTES: 1_048_576, MAX_TEXT_LENGTH: 512_000 });
+  });
+
+  it('P19.3-T4 AC-11 pins the member import’s invitation link: seven days (§B.31, ADR-0205 §10)', () => {
+    expect(ROSTER_INVITATION).toEqual({ TTL_DAYS: 7 });
   });
 
   it('holds the roster file to the Data upload’s ceiling, so the two imports refuse the same size alike', () => {

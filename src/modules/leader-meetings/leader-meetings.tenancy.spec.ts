@@ -96,7 +96,7 @@ describe('the Strategic Leader Forum, isolated (invariant §1)', () => {
     await office.tag('B_AGENT', true);
     try {
       session.current = office.as('B_AGENT');
-      // Tagged on an Agent's rung, in their own office: no Core Leader (ADR-0159 §1, P18.8-T5 AC-1).
+      // Tagged on an Agent's rung, in their own office: no Core Leader (ADR-0159 §1, P18.5-T5 AC-1).
       expect((await http().get(`/leader-meetings/${sides['0555'].view.id}`).expect(404)).body.error.code).toBe('NOT_FOUND');
       // Moved to a leader rung, the same tag makes one.
       await memberships.updateOne(row, { $set: { role: 'aab' } });

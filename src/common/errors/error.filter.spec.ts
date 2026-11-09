@@ -154,11 +154,11 @@ describe('DomainExceptionFilter', () => {
 });
 
 /**
- * **P18.98-T5 AC-2, AC-3 — every refusal in the reader's language** (ADR-0179 §7): the sentence, every sentence in
+ * **P18.10-T5 AC-2, AC-3 — every refusal in the reader's language** (ADR-0179 §7): the sentence, every sentence in
  * `details`, and the filter's own — written for the reader `AuthGuard` resolved, else the header's. `code` and every
  * other detail are the same in both languages.
  */
-describe('P18.98-T5 the refusal in the reader’s language', () => {
+describe('P18.10-T5 the refusal in the reader’s language', () => {
   const filter = new DomainExceptionFilter();
   const SAY = refusals('error.filter spec', {
     VALIDATION_FAILED: {

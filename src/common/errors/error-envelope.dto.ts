@@ -7,7 +7,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * same object and a divergence is a defect. It lives as a class rather than an interface
  * because Swagger generates schemas from decorated classes — a TypeScript interface is
  * erased before the document is built, which is why every failure in this API was
- * undocumented until P3.5-T11.
+ * undocumented until P3.1-T11.
  */
 export class ApiErrorBody {
   @ApiProperty({

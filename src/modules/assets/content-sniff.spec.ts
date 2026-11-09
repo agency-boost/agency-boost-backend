@@ -14,53 +14,55 @@ const SAMPLES: Record<string, Buffer> = {
   'video/mp4': Buffer.concat([bytes(0x00, 0x00, 0x00, 0x20), text('ftypisom'), bytes(0x00, 0x00, 0x02, 0x00)]),
   'text/csv': text('nama,kode_agen,ape\nRina,AG-0417-01,18000000\n'),
   [XLSX]: Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00), text('[Content_Types].xml')]),
+  // One of the owner's lessons opens so (`revisions/2026-11-03/files/training-modules/`, P19.6-T2).
+  'text/html': text('<!DOCTYPE html>\n<html lang="id">\n<head><meta charset="utf-8">'),
 };
-/** Every type bytes alone identify: all of them but CSV, which only a claim can name. */
-const BINARY = Object.keys(SAMPLES).filter((t) => t !== 'text/csv');
+/** Every type bytes alone identify: all of them but CSV and HTML, which only a claim can name. */
+const BINARY = Object.keys(SAMPLES).filter((t) => t !== 'text/csv' && t !== 'text/html');
 
 /** A Windows executable's first bytes — the file a renamed `.pdf` is in the live suite's case. */
 const EXE = Buffer.concat([text('MZ'), bytes(0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00)]);
 
-describe('P18.7-T2 content sniffing — the accepted type a file’s first bytes are (ADR-0040, ADR-0153, review L6)', () => {
-  it('P18.7-T2 holds a signature for exactly ALLOWED_MIME_TYPES: no accepted type unchecked, none checked that is not accepted', () => {
+describe('P18.4-T2 content sniffing — the accepted type a file’s first bytes are (ADR-0040, ADR-0153, review L6)', () => {
+  it('P18.4-T2 holds a signature for exactly ALLOWED_MIME_TYPES: no accepted type unchecked, none checked that is not accepted', () => {
     expect([...SNIFFED_TYPES].sort()).toEqual([...ASSET_LIMITS.ALLOWED_MIME_TYPES].sort());
     expect(new Set(SNIFFED_TYPES).size).toBe(SNIFFED_TYPES.length);
     expect(Object.keys(SAMPLES).sort()).toEqual([...ASSET_LIMITS.ALLOWED_MIME_TYPES].sort());
   });
 
-  it('P18.7-T2 reads a 4 KB sample — enough for every signature, never the whole file', () => {
+  it('P18.4-T2 reads a 4 KB sample — enough for every signature, never the whole file', () => {
     expect(SNIFF_SAMPLE_BYTES).toBe(4096);
   });
 
-  it.each(Object.entries(SAMPLES))('P18.7-T2 confirms %s claimed as itself', (mimeType, sample) => {
+  it.each(Object.entries(SAMPLES))('P18.4-T2 confirms %s claimed as itself', (mimeType, sample) => {
     expect(sniffedContentType(mimeType, sample)).toBe(mimeType);
   });
 
   describe('L6: the bytes win over the claim, and the route’s list decides', () => {
-    it('P18.7-T2 a PNG or a WebP saved as .jpg is reported as what it is', () => {
+    it('P18.4-T2 a PNG or a WebP saved as .jpg is reported as what it is', () => {
       expect(sniffedContentType('image/jpeg', SAMPLES['image/png'])).toBe('image/png');
       expect(sniffedContentType('image/jpeg', SAMPLES['image/webp'])).toBe('image/webp');
       expect(sniffedContentType('image/png', SAMPLES['image/jpeg'])).toBe('image/jpeg');
     });
 
-    it('P18.7-T2 a JPEG claimed as a PDF is reported as a JPEG — which a PDF-only route then refuses', () => {
+    it('P18.4-T2 a JPEG claimed as a PDF is reported as a JPEG — which a PDF-only route then refuses', () => {
       expect(sniffedContentType('application/pdf', SAMPLES['image/jpeg'])).toBe('image/jpeg');
     });
 
     it.each(BINARY.flatMap((type) => [...ASSET_LIMITS.ALLOWED_MIME_TYPES, '', 'application/x-unknown']
       .filter((claim) => claim !== type).map((claim) => [type, claim])))(
-      'P18.7-T2 identifies %s from its bytes under the claim %j',
+      'P18.4-T2 identifies %s from its bytes under the claim %j',
       (type, claim) => {
         expect(sniffedContentType(claim, SAMPLES[type])).toBe(type);
       },
     );
 
-    it('P18.7-T2 a file claimed as CSV whose bytes are a binary type is that type', () => {
+    it('P18.4-T2 a file claimed as CSV whose bytes are a binary type is that type', () => {
       expect(sniffedContentType('text/csv', SAMPLES['image/png'])).toBe('image/png');
       expect(sniffedContentType('text/csv', SAMPLES[XLSX])).toBe(XLSX);
     });
 
-    it('P18.7-T2 never detects a CSV under another claim: text has no signature, only the claim names it', () => {
+    it('P18.4-T2 never detects a CSV under another claim: text has no signature, only the claim names it', () => {
       for (const claim of ['application/pdf', 'image/jpeg', XLSX, 'text/plain', '']) {
         expect(sniffedContentType(claim, SAMPLES['text/csv'])).toBe(OCTET_STREAM);
       }
@@ -68,68 +70,118 @@ describe('P18.7-T2 content sniffing — the accepted type a file’s first bytes
   });
 
   it.each([...ASSET_LIMITS.ALLOWED_MIME_TYPES, 'application/x-msdownload', ''].map((t) => [t]))(
-    'P18.7-T2 refuses an executable claimed as %j: octet-stream, which every allow-list refuses at confirm',
+    'P18.4-T2 refuses an executable claimed as %j: octet-stream, which every allow-list refuses at confirm',
     (claim) => {
       expect(sniffedContentType(claim, EXE)).toBe(OCTET_STREAM);
       expect(ASSET_LIMITS.ALLOWED_MIME_TYPES).not.toContain(OCTET_STREAM);
     },
   );
 
-  it.each(ASSET_LIMITS.ALLOWED_MIME_TYPES.map((t) => [t]))('P18.7-T2 refuses an empty sample claimed as %s', (claim) => {
+  it.each(ASSET_LIMITS.ALLOWED_MIME_TYPES.map((t) => [t]))('P18.4-T2 refuses an empty sample claimed as %s', (claim) => {
     expect(sniffedContentType(claim, Buffer.alloc(0))).toBe(OCTET_STREAM);
   });
 
-  it('P18.7-T2 refuses bytes that are no accepted type, whatever the claim', () => {
-    expect(sniffedContentType('text/html', text('<html></html>'))).toBe(OCTET_STREAM);
+  it('P18.4-T2 refuses bytes that are no accepted type, whatever the claim', () => {
+    // An HTML page claimed as anything but HTML is no accepted type (P19.6-T2: only the claim names it).
+    expect(sniffedContentType('text/plain', text('<html></html>'))).toBe(OCTET_STREAM);
     expect(sniffedContentType('image/jpeg', text('GIF89a'))).toBe(OCTET_STREAM);
     expect(sniffedContentType('constructor', text('plain words'))).toBe(OCTET_STREAM);
   });
 
   describe('the order the signatures are tried', () => {
-    it('P18.7-T2 an anchored signature beats the text %PDF- further in', () => {
+    it('P18.4-T2 an anchored signature beats the text %PDF- further in', () => {
       const zip = Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00), text('notes/%PDF-1.4.txt')]);
       expect(sniffedContentType('application/pdf', zip)).toBe(XLSX);
       const jpeg = Buffer.concat([SAMPLES['image/jpeg'], text('Exif comment: %PDF-')]);
       expect(sniffedContentType('application/pdf', jpeg)).toBe('image/jpeg');
     });
 
-    it('P18.7-T2 a text file claimed as CSV with %PDF- in its first 1024 bytes reads as a PDF — the bytes win, and the route decides', () => {
+    it('P18.4-T2 a text file claimed as CSV with %PDF- in its first 1024 bytes reads as a PDF — the bytes win, and the route decides', () => {
       expect(sniffedContentType('text/csv', text('nama,catatan\nRina,%PDF-1.4 attached\n'))).toBe('application/pdf');
     });
   });
 
   describe('each signature’s edges', () => {
-    it('P18.7-T2 a PDF header anywhere in the first 1024 bytes, and not after', () => {
+    it('P18.4-T2 a PDF header anywhere in the first 1024 bytes, and not after', () => {
       expect(sniffedContentType('application/pdf', Buffer.concat([Buffer.alloc(1019, 0x20), text('%PDF-')]))).toBe('application/pdf');
       expect(sniffedContentType('application/pdf', Buffer.concat([Buffer.alloc(1020, 0x20), text('%PDF-1.7')]))).toBe(OCTET_STREAM);
       expect(sniffedContentType('application/pdf', text('%PDF'))).toBe(OCTET_STREAM);
     });
 
-    it('P18.7-T2 a WebP needs both RIFF and WEBP — a WAV is RIFF too', () => {
+    it('P18.4-T2 a WebP needs both RIFF and WEBP — a WAV is RIFF too', () => {
       expect(sniffedContentType('image/webp', Buffer.concat([text('RIFF'), bytes(0, 0, 0, 0), text('WAVE')]))).toBe(OCTET_STREAM);
       expect(sniffedContentType('image/webp', text('RIFF'))).toBe(OCTET_STREAM);
     });
 
-    it('P18.7-T2 an MP4’s ftyp at offset 4 exactly', () => {
+    it('P18.4-T2 an MP4’s ftyp at offset 4 exactly', () => {
       expect(sniffedContentType('video/mp4', text('ftypisom'))).toBe(OCTET_STREAM);
       expect(sniffedContentType('video/mp4', bytes(0, 0, 0))).toBe(OCTET_STREAM);
     });
 
-    it('P18.7-T2 a JPEG and a PNG truncated before their signature ends are not either', () => {
+    it('P18.4-T2 a JPEG and a PNG truncated before their signature ends are not either', () => {
       expect(sniffedContentType('image/jpeg', bytes(0xff, 0xd8))).toBe(OCTET_STREAM);
       expect(sniffedContentType('image/png', bytes(0x89, 0x50, 0x4e, 0x47))).toBe(OCTET_STREAM);
     });
 
-    it('P18.7-T2 a CSV with a NUL byte anywhere in the sample is binary, not text', () => {
+    it('P18.4-T2 a CSV with a NUL byte anywhere in the sample is binary, not text', () => {
       expect(sniffedContentType('text/csv', Buffer.concat([text('a,b\n'), bytes(0x00), text('c,d\n')]))).toBe(OCTET_STREAM);
       // UTF-8 names, as an office's roster carries them, are still text.
       expect(sniffedContentType('text/csv', Buffer.from('nama\nSiti Nurhaliza — Café\n', 'utf8'))).toBe('text/csv');
     });
 
-    it('P18.7-T2 any zip passes as a spreadsheet at this layer — the documented limit', () => {
+    it('P18.4-T2 any zip passes as a spreadsheet at this layer — the documented limit', () => {
       const docx = Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00), text('word/document.xml')]);
       expect(sniffedContentType(XLSX, docx)).toBe(XLSX);
       expect(sniffedContentType(XLSX, bytes(0x50, 0x4b, 0x05, 0x06))).toBe(OCTET_STREAM);
+    });
+  });
+
+  describe('P19.6-T2 an HTML page — confirmed by its claim and its first bytes (ADR-0217 §2)', () => {
+    it.each([
+      ['a doctype', '<!doctype html><html></html>'],
+      ['a doctype in capitals', '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">'],
+      ['an <html> tag', '<html lang="id"><body>Pelajaran</body></html>'],
+      ['white space first', ' \t\r\n\f<!DOCTYPE html>'],
+      ['comments first', '<!-- dibuat 2026-11-03 -->\n<!-- v2 --><!DOCTYPE html>'],
+    ])('P19.6-T2 AC-1 confirms an HTML file claimed as text/html that opens with %s', (_case, opening) => {
+      expect(sniffedContentType('text/html', text(opening))).toBe('text/html');
+    });
+
+    it('P19.6-T2 AC-1 confirms one with a UTF-8 byte-order mark before its doctype', () => {
+      expect(sniffedContentType('text/html', Buffer.concat([bytes(0xef, 0xbb, 0xbf), text('<!doctype html>')]))).toBe('text/html');
+    });
+
+    it.each([
+      ['plain words', 'Pelajaran 1: daftar prospek'],
+      ['a fragment with no document', '<div><script>alert(1)</script></div>'],
+      ['a comment that never closes', '<!-- belum selesai <!doctype html>'],
+      ['an SVG', '<svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+      ['an empty file', ''],
+    ])('P19.6-T2 AC-1 refuses a file claimed as HTML that is not one — %s — as octet-stream', (_case, body) => {
+      expect(sniffedContentType('text/html', text(body))).toBe(OCTET_STREAM);
+    });
+
+    it('P19.6-T2 AC-1 refuses an HTML page with a NUL byte in its sample: binary, not text', () => {
+      expect(sniffedContentType('text/html', Buffer.concat([text('<!doctype html><p>'), bytes(0x00)]))).toBe(OCTET_STREAM);
+    });
+
+    it('P19.6-T2 AC-1 never detects HTML under another claim: only the claim names it', () => {
+      for (const claim of ['text/plain', 'application/pdf', 'application/xhtml+xml', '']) {
+        expect(sniffedContentType(claim, SAMPLES['text/html'])).toBe(OCTET_STREAM);
+      }
+      // Claimed as CSV it is text, and so a CSV: served as an attachment, never rendered (`gcs.adapter.ts`).
+      expect(sniffedContentType('text/csv', SAMPLES['text/html'])).toBe('text/csv');
+    });
+
+    it('P19.6-T2 AC-1 a PDF or an image claimed as HTML is the PDF or the image, and the route’s list decides', () => {
+      expect(sniffedContentType('text/html', SAMPLES['application/pdf'])).toBe('application/pdf');
+      expect(sniffedContentType('text/html', SAMPLES['image/png'])).toBe('image/png');
+      expect(sniffedContentType('text/html', EXE)).toBe(OCTET_STREAM);
+    });
+
+    it('P19.6-T2 AC-1 HTML is tried after the PDF and before the CSV', () => {
+      expect(SNIFFED_TYPES.indexOf('text/html')).toBe(SNIFFED_TYPES.indexOf('application/pdf') + 1);
+      expect(SNIFFED_TYPES.indexOf('text/html')).toBe(SNIFFED_TYPES.indexOf('text/csv') - 1);
     });
   });
 });

@@ -74,6 +74,23 @@ export class MemberSearchQueryDto {
  * **A leader saves an agent's WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22): *Isi nomor
  * WhatsApp* on a person they coach. Required here — clearing a number is the person's own, on `PATCH /auth/me`.
  */
+/**
+ * **`GET /members/tree`'s `for`, and nothing else** (P19.3-T3; `/group-tree/[membershipId]`): the membership whose tree to
+ * read, as that leader sees it. Any other parameter is refused by name.
+ */
+export class OrgTreeQueryDto {
+  @ApiPropertyOptional({
+    maxLength: 64,
+    description:
+      'The **membership** whose Group Tree to read, read-only: for the Owner and an Admin any active member of the '
+      + 'office, for an AB or an AAB anybody in their downline. Omitted, your own.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  for?: string;
+}
+
 export class SetMemberPhoneDto {
   @ApiProperty({
     type: String,
@@ -138,11 +155,11 @@ export class InviteCodeQueryDto {
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * The pipe's refusal of a join date's shape: the same sentence the service refuses a date that is no real day with
- * (`joinDateViolation`), both languages (`field`, P18.98-T5 AC-3).
+ * (`joinDateViolation`), both languages (`field`, P18.10-T5 AC-3).
  */
 const JOIN_DATE_MESSAGE = field(JOINING_REFUSALS.VALIDATION_FAILED.notADate);
 
-/** The join date a leader gives when letting somebody in (ADR-0169, P18.96-T2), on an approval and on a tag. */
+/** The join date a leader gives when letting somebody in (ADR-0169, P18.8-T2), on an approval and on a tag. */
 const JOIN_DATE_PROPERTY = {
   type: String,
   format: 'date',

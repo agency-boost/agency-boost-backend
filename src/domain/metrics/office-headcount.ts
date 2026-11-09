@@ -8,7 +8,7 @@
  * members*, the analytics' *Manpower* and every rate's denominator read this, so the 187 and the 195 the
  * prototype draws cannot both be shipped.
  *
- * **A member counts from their join date** (ADR-0172 §1, ADR-0169 §5; P18.96-T5 AC-1): `memberships.joinDate`, the
+ * **A member counts from their join date** (ADR-0172 §1, ADR-0169 §5; P18.8-T5 AC-1): `memberships.joinDate`, the
  * office date their leader gave, is when they joined — `joinedAt` is only the system's stamp of when somebody let them
  * in, and the two can differ (a new hire approved a week after they started; a correction). The reader turns the join
  * date into the instant its office day begins (`joinDateStart`), and **`joinedAt` is the fallback** for a row with no

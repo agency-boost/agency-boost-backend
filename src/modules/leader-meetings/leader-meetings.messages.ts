@@ -17,9 +17,9 @@ export const MONTH_NAMES: Readonly<Record<Language, readonly string[]>> = {
 };
 
 /**
- * **The forum's refusals, in both languages** (P18.98-T5 AC-2, AC-3): making, moving and removing a meeting, and
+ * **The forum's refusals, in both languages** (P18.10-T5 AC-2, AC-3): making, moving and removing a meeting, and
  * writing its minutes field by field. A meeting is a ***rapat***, an action item a ***tindakan*** and the tracker the
- * ***Pelacak tindakan***, as the forum's screens say them (the glossary for approval's §B.10, P18.98-T4); *Monthly
+ * ***Pelacak tindakan***, as the forum's screens say them (the glossary for approval's §B.10, P18.10-T4); *Monthly
  * Target* stays (§A.4), and the reader is *Anda* (§B.0). A field is named as the API names it — `title`, `done`,
  * `rate` — in both.
  */
@@ -85,7 +85,7 @@ export const LEADER_MEETINGS_REFUSALS = refusals('modules/leader-meetings', {
 });
 
 /**
- * **The texts the forum stores for a new meeting, in both languages** (P18.98-T5 AC-6; ADR-0179 §7): the first
+ * **The texts the forum stores for a new meeting, in both languages** (P18.10-T5 AC-6; ADR-0179 §7): the first
  * agenda (ADR-0130 §3, the prototype's ten, `KPM_Owner.html:2500-2513`) and the rows *+ Add item* and *+ Add action
  * item* make (`:2863`, `:2869`). **Each is written once, in the language of whoever makes it, and stored as text**:
  * from then it is the office's, shown as stored in both languages and edited as typed (ADR-0179 §5). *RBDO/BDO* are

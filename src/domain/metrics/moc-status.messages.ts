@@ -14,11 +14,11 @@ const ALL_OF_THEM = [
 ];
 
 /**
- * **What MOC's dialog and the column's tooltip say, in both languages** (P18.98-T5 AC-4; `KPM_Owner.html:1248`,
+ * **What MOC's dialog and the column's tooltip say, in both languages** (P18.10-T5 AC-4; `KPM_Owner.html:1248`,
  * `:3302-3316`): the sentence about the paths, what is not uploaded, and the words that join a rule's criteria. The
- * criteria are the registry's names (*Net APE*, *Monthly2 AA*, *Rolling Persistency*, *Direct AB (AB on AB)*) and stay
- * English in both (the approved glossary's §A.4), as *MOC* does (§A.5); a rung is the company's code. *Not uploaded
- * yet* is §B.3's *Belum diunggah*.
+ * criteria are the registry's names (*APE* since P19.3-T1 — *Net APE* before it, ADR-0201 §1 — *Monthly2 AA*, *Rolling
+ * Persistency*, *Direct AB (AB on AB)*) and stay English in both (the approved glossary's §A.4), as *MOC* does (§A.5);
+ * a rung is the company's code. *Not uploaded yet* is §B.3's *Belum diunggah*.
  */
 export const MOC_MESSAGES = messages('domain/moc-status', {
   standardPath: {

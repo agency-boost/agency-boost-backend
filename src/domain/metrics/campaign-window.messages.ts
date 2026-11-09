@@ -8,8 +8,8 @@ import type { Language } from '@/domain/constants/language';
 const wholeYear = (figures: Language) => `${formatMonthName('2000-01', figures)} – ${formatMonthName('2000-12', figures)}`;
 
 /**
- * **The words a campaign's window is written in, in both languages** (P18.98-T5 AC-4): the card's open-ended duration
- * and the Personal Summary row's *Runs …* line (P18.95-T7 AC-1, ADR-0167 §7). Every month and day in them is a
+ * **The words a campaign's window is written in, in both languages** (P18.10-T5 AC-4): the card's open-ended duration
+ * and the Personal Summary row's *Runs …* line (P18.7-T7 AC-1, ADR-0167 §7). Every month and day in them is a
  * figure, written in the reader's figures (`common/format`); the words around them are the reader's language —
  * *Mulai* for *From*, *Berlangsung* for *Runs*.
  */

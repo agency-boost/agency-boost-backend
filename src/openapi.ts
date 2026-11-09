@@ -87,14 +87,15 @@ function describeFailuresAndPermissions(
       const shape = key ? RESPONSE_SHAPES[key] : undefined;
       const success = Object.keys(responses).find((c) => c.startsWith('2') && c !== '204');
       if (shape && success) {
-        const ref = { $ref: getSchemaPath(shape.type) };
+        const one = shape.type ? { $ref: getSchemaPath(shape.type) } : null;
+        // A second shape the operation may answer instead (`ResponseShape.or`): documented as one of the two.
+        const ref = one && shape.or ? { oneOf: [one, { $ref: getSchemaPath(shape.or) }] } : one;
         const existing = responses[success] as { description?: string } | undefined;
         responses[success] = {
           description: existing?.description ?? '',
           content: {
-            'application/json': {
-              schema: shape.isArray ? { type: 'array', items: ref } : ref,
-            },
+            // A shape with no class answers only as a file (P19.7-T3: the proposal's PDF).
+            ...(ref ? { 'application/json': { schema: shape.isArray ? { type: 'array', items: ref } : ref } } : {}),
             // A template asked for as a file is answered as that file (ADR-0184).
             ...Object.fromEntries((shape.files ?? []).map((type) => [type, { schema: { type: 'string', format: 'binary' } }])),
           },

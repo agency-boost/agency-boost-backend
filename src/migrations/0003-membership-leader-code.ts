@@ -3,7 +3,7 @@ import { emptyIfMissing } from './missing-collection';
 import { generateLeaderCode } from '@/modules/org/leader-code';
 
 /**
- * Give every membership its leader code (P3.6-T1).
+ * Give every membership its leader code (P3.2-T1).
  *
  * The code moved from `inviteCodes` onto the membership: one per person, generated with
  * it, never reissued and never withdrawn. Rows written before that have none.
@@ -44,7 +44,7 @@ export async function up(
   for (const membership of memberships) {
     // The oldest live invite they issued: if they made several, the one most likely to be
     // out in the world is the first they shared.
-    // No `inviteCodes` collection is no invite; any other failure stops the migration (P18.7-T1).
+    // No `inviteCodes` collection is no invite; any other failure stops the migration (P18.4-T1).
     const invite = await emptyIfMissing(db
       .collection('inviteCodes')
       .find({

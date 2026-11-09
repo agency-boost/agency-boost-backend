@@ -84,6 +84,15 @@ describe('the subscription seed', () => {
     expect(plan['0602'].endDate).toBe('2026-10-02');
   });
 
+  it('P19.4-T3 AC-10 gives every seeded subscription its plan: a year Tahunan, six months 6 bulan (ADR-0211 §1)', async () => {
+    expect(plan['0417'].plan).toBe('annual');
+    expect(plan['0555'].plan).toBe('six_months');
+    expect(plan['0601'].plan).toBe('six_months');
+    expect(plan['0602'].plan).toBe('annual');
+    expect(plan['0603'].plan).toBe('annual');
+    expect((await office('0555')).subscription?.plan).toBe('six_months');
+  });
+
   it('0417: three months to run, Rp 350,000 a leader, 9 of 10 leaders used', async () => {
     const kpm = await office('0417');
     expect(kpm.subscription).toEqual(plan['0417']);
@@ -126,7 +135,7 @@ describe('the subscription seed', () => {
     });
   });
 
-  it('P18.8-T2 0603: a limit of 10 and 13 used — three approved past it, a fourth waiting (ADR-0157)', async () => {
+  it('P18.5-T2 0603: a limit of 10 and 13 used — three approved past it, a fourth waiting (ADR-0157)', async () => {
     const kpm = await office('0603');
     expect(String(kpm._id)).toBe(SUBSCRIPTION_OFFICES['0603']._id);
     expect(kpm.subscription).toEqual(plan['0603']);
@@ -164,7 +173,7 @@ describe('the subscription seed', () => {
 
   it('the new offices add no hire to the activation demo: everybody in them joined over six months ago', () => {
     // The activation fixture's nine, and Phase 18.1's cohort of 0417's graduated hires (`cohort-fixture.ts`).
-    // And P18.96-T6's two new hires (`activation-3m-fixture.ts`), Lukman and Tari, in 0417.
+    // And P18.8-T6's two new hires (`activation-3m-fixture.ts`), Lukman and Tari, in 0417.
     expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2);
   });
 

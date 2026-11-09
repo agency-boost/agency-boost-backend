@@ -21,7 +21,7 @@ import { CALENDAR_VIEWS, type CalendarView } from './calendar-time';
 
 /**
  * `YYYY-MM-DD`. Whether it is a day at all — `2026-02-31` — the service checks. The messages are in both languages
- * (P18.98-T5 AC-3), and class-validator writes the field's name for `$property` in each.
+ * (P18.10-T5 AC-3), and class-validator writes the field's name for `$property` in each.
  */
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_MESSAGE = field(CALENDAR_REFUSALS.VALIDATION_FAILED.dayShape({ field: '$property' }));

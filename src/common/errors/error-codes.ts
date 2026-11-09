@@ -1,7 +1,7 @@
 /**
  * Stable, machine-readable error codes. Clients switch on these; `message` is written in the
  * reader's language — the request's `Accept-Language`, else the person's saved language
- * (P18.98-T5, ADR-0179 §7) — may change, and is never parsed. `code` and `details` are the
+ * (P18.10-T5, ADR-0179 §7) — may change, and is never parsed. `code` and `details` are the
  * same in both languages.
  *
  * Every code here has a row in docs/02-specs/api/error-catalog.md, and its sentence, in
@@ -20,7 +20,7 @@ export const ErrorCode = {
   AUTH_RATE_LIMITED: 'AUTH_RATE_LIMITED',
   /**
    * A refresh or a sign-out carrying the refresh cookie, sent from a page whose `Origin` is not one
-   * `CORS_ORIGINS` lists (P18.7-T1, ADR-0152). `403`. Every host shares the `agencyboost.id` site, so
+   * `CORS_ORIGINS` lists (P18.4-T1, ADR-0152). `403`. Every host shares the `agencyboost.id` site, so
    * the browser sends production's `SameSite=Lax` cookie from a staging page as well; CORS hides the
    * answer from that page but cannot stop the token rotating or the session ending. A request with
    * no `Origin` (a server, curl) is not refused.
@@ -41,6 +41,19 @@ export const ErrorCode = {
    * (the enumeration oracle) — but this route is behind a session and the password, and rate limited.
    */
   AUTH_EMAIL_TAKEN: 'AUTH_EMAIL_TAKEN',
+  /**
+   * **A login already has its one link** (UI-169 item 5; ADR-0199 §1): `POST /auth/links` from a login that is linked,
+   * and `POST /auth/links/confirm` when either login was linked since the link was sent. `409`. A login has at most one
+   * link — a pair — in v1; the first is removed before another is made. Never answered for the *other* address at the
+   * start, which says nothing about it (`202` whatever it is).
+   */
+  AUTH_LINK_EXISTS: 'AUTH_LINK_EXISTS',
+  /**
+   * **The other login has no live session on this browser** (ADR-0199 §4): `POST /auth/links/switch` with no
+   * `password`, and `agencyboost_refresh_linked` absent, another login's, or dead. `409`, not `401`: the caller is
+   * signed in, and a `401` would end their session. The switcher asks that login's password once and sends it.
+   */
+  AUTH_LINK_SIGN_IN_REQUIRED: 'AUTH_LINK_SIGN_IN_REQUIRED',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -84,6 +97,49 @@ export const ErrorCode = {
    * this gate load-bearing: it is the only thing standing between a dropdown and a closed sale.
    */
   LEAD_STATUS_NOT_FINAL: 'LEAD_STATUS_NOT_FINAL',
+  /**
+   * Marked **lost** at the stage that closes the pipeline (P19.1-T2 AC-10; UI-160; ADR-0194 §2) — the counterpart of
+   * `LEAD_STATUS_NOT_FINAL`. A case the office's ladder calls paid and issued, or a kandidat it calls joined, is a
+   * success; a lead that fell through there is moved back to an earlier stage first, which the history records.
+   */
+  LEAD_STATUS_FINAL: 'LEAD_STATUS_FINAL',
+  /**
+   * **An age at the next birthday outside `LEAD_AGE`** (P19.7-T1 AC-1; ADR-0224 §3): a lead's `age` on `POST /leads` or
+   * `PATCH /leads/:id` below 1 or above 100, `details: { min, max }`, nothing written. A value that is not a whole
+   * number is `VALIDATION_FAILED`. P19.7-T2 raises it for an insured's age too.
+   */
+  LEAD_AGE_OUT_OF_RANGE: 'LEAD_AGE_OUT_OF_RANGE',
+  /**
+   * **A KPM colour no text reads on** (P19.6-T1 AC-7; ADR-0218 §5; acceptance 2): `422`, on *Simpan*, the preview and a
+   * template's *Tampilan*, when neither white nor `#1B2B4B` reaches 4.5:1 on it. `details.field` names it, `primary` or
+   * `secondary`, with both ratios. Nothing is saved.
+   */
+  BRANDING_COLOUR_UNREADABLE: 'BRANDING_COLOUR_UNREADABLE',
+  /**
+   * **A branding picture refused at confirm** (P19.6-T1 AC-3, AC-4, AC-6; ADR-0218 §2): `422`, `details.reason`:
+   * `dimensions` (too small, or a square logo that is not square), `no_alpha` (a mascot without transparency),
+   * `svg_unsafe` (a script, a handler, an outside reference) or `unreadable`. Type and size are refused as every upload
+   * is, `ASSET_TYPE_NOT_ALLOWED` and `ASSET_TOO_LARGE`.
+   */
+  BRANDING_IMAGE_REFUSED: 'BRANDING_IMAGE_REFUSED',
+  /**
+   * **No proposal of yours by that id** (P19.7-T2; ADR-0221 §2): `404`, on every proposal route, for another member's
+   * proposal — a leader's downline's included, for every role — another KPM's, a deleted one, and an id that is nobody's.
+   * The four are one answer, so a proposal's existence is never confirmed to anybody but its owner.
+   */
+  PROPOSAL_NOT_FOUND: 'PROPOSAL_NOT_FOUND',
+  /**
+   * **A product a proposal may not put to a client** (P19.7-T2; ADR-0225 §7; ADR-0221 §4): `422`. On `POST
+   * /proposals/:id/items`, `details.reason` is `withdrawn`, `closed`, `rider`, `not_on_shelf`, `channel` or `age`; on
+   * `POST /proposals/:id/done`, `details.itemIds` names the items whose product is no longer offered. Nothing written.
+   */
+  PROPOSAL_PRODUCT_WITHDRAWN: 'PROPOSAL_PRODUCT_WITHDRAWN',
+  /**
+   * ***Simpan PDF* on a proposal with a gap** (P19.7-T2; ADR-0221 §4): `422`, `details.items: [{ itemId, missing }]` —
+   * a premium, an insured's name or age, a `chips` field's key — or `details.items: []` for a proposal with no product.
+   * Nothing written; the screen takes the agent to the first gap.
+   */
+  PROPOSAL_INCOMPLETE: 'PROPOSAL_INCOMPLETE',
   /** Already won or lost. Reopening is an explicit act, not a side effect of the next write. */
   LEAD_ALREADY_CLOSED: 'LEAD_ALREADY_CLOSED',
   /**
@@ -132,6 +188,12 @@ export const ErrorCode = {
    */
   TENANT_SUBSCRIPTION_ENDED: 'TENANT_SUBSCRIPTION_ENDED',
   /**
+   * **A quote with nobody to receive it** (ADR-0211 §5; P19.4-T3 AC-10): `POST /admin/tenants/:kpmId/quote` for a KPM
+   * with no Owner, or whose Owner's address is not verified (ADR-0190 §4). `409`, `details: { kpmId, reason:
+   * 'no_owner' | 'unverified' }`; the message says to print the quote instead. Nothing is sent and nothing is audited.
+   */
+  BILLING_QUOTE_NO_OWNER: 'BILLING_QUOTE_NO_OWNER',
+  /**
    * A support session refused at its start because the office of the person named is **suspended or
    * archived** (P13.2 exit review): every request of the session would meet `TENANT_SUSPENDED` or
    * `TENANT_ARCHIVED`. `409`, with `kpmCode`, `branch` and `reason` (`suspended` | `archived`) in its
@@ -141,12 +203,18 @@ export const ErrorCode = {
    */
   IMPERSONATION_OFFICE_UNAVAILABLE: 'IMPERSONATION_OFFICE_UNAVAILABLE',
   /**
-   * A **setup** session named somebody who is neither an office's Owner nor one of its Admins (ADR-0162 §1):
-   * a setup session acts as the person who configures an office, and anybody else has no settings to change.
-   * `409`, with `details: { purpose: 'setup' }`; nothing is written and nobody is told. A support session as
-   * the same person starts as before.
+   * **Retired** (P19.4-T2; ADR-0206 §5): a **setup** session named somebody who was neither an office's Owner nor one
+   * of its Admins (ADR-0162 §1). There is no setup session any more — `purpose: 'setup'` is `400 VALIDATION_FAILED` —
+   * so nothing raises it. Kept and never reused: a client may still branch on it.
    */
   IMPERSONATION_SETUP_TARGET: 'IMPERSONATION_SETUP_TARGET',
+  /**
+   * **A write made in a support session** (P19.4-T2; ADR-0206 §4; UI-151, Overview R4): every method but `GET`, `HEAD`
+   * and `OPTIONS`, on any route, whatever permission it declares or none, refused by `ViewOnlySessionGuard` before the
+   * route's own guards. `403`; nothing is written. The one route a session may post to is `POST /admin/impersonate/end`,
+   * and two reads sent as `POST` for their bodies (`@AllowWhileReadOnly()`). A session only looks.
+   */
+  IMPERSONATION_READ_ONLY: 'IMPERSONATION_READ_ONLY',
   /**
    * A second start by the same Super Admin as the same person **within one second** (ADR-0168 §4): `iat` is in
    * seconds, so the two tokens are identical and the second session row's `tokenHash` collides with the first's.
@@ -156,6 +224,12 @@ export const ErrorCode = {
   IMPERSONATION_JUST_STARTED: 'IMPERSONATION_JUST_STARTED',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
+  /**
+   * ***Kirim ulang undangan* with nobody to send it to** (ADR-0212 §2, §3; P19.4-T3 AC-6): the KPM has no Owner, its
+   * Owner is named with no email (`kpms.pendingOwner`), or its Owner has already signed in. `409`, `details.reason`
+   * `no_owner` · `no_email` · `signed_in`; nothing is sent.
+   */
+  TENANT_OWNER_NOT_INVITABLE: 'TENANT_OWNER_NOT_INVITABLE',
   /**
    * A company already holds that slug. Its own code rather than a generic conflict,
    * because the form derives the slug from the name now: two differently-punctuated
@@ -187,10 +261,36 @@ export const ErrorCode = {
    * was derived from the tier, so nobody is re-classed silently: `details.members` is how many to move first.
    */
   ORG_LEVEL_TIER_IN_USE: 'ORG_LEVEL_TIER_IN_USE',
+  /**
+   * A rung was to be deleted while something in its company still names it, or while it is live (ADR-0213 §2, P19.4-T5
+   * AC-2): `409`, nothing written. `details.references` lists the kinds of record and how many of each — empty for a
+   * live rung, which is archived first.
+   */
+  ORG_LEVEL_IN_USE: 'ORG_LEVEL_IN_USE',
   /** Somebody with an open request asked for a second office. */
   TENANT_REQUEST_ALREADY_OPEN: 'TENANT_REQUEST_ALREADY_OPEN',
   /** A KPM request was approved or declined already; the second decision says which. */
   TENANT_REQUEST_DECIDED: 'TENANT_REQUEST_DECIDED',
+  /**
+   * A KPM request is being approved by another press right now (ADR-0191 §3, P19-T3 AC-3). `409`; nothing is written.
+   * The approval holds a two-minute lease on the request, so a second press — another tab, another Super Admin — never
+   * creates a second office; once the first finishes, pressing again answers the office it made.
+   */
+  TENANT_REQUEST_IN_PROGRESS: 'TENANT_REQUEST_IN_PROGRESS',
+  /**
+   * **A person and an office of different companies** (ADR-0191 §1, §3; P19-T2 AC-3, P19-T3 AC-3): a KPM request for a
+   * company other than the one the applicant signed up with, or an Owner — by approval, *Ganti Owner* or a move —
+   * whose account belongs to another company than the office. `409`, `details: { userCompanyId, kpmCompanyId }`;
+   * nothing is written. An office admits only its own insurer's agents, so the alternative was the half-made office of
+   * UI-165.
+   */
+  TENANT_COMPANY_MISMATCH: 'TENANT_COMPANY_MISMATCH',
+  /**
+   * An office that holds people or records was to be **moved to another company or deleted** (ADR-0191 §5, P19-T3
+   * AC-6, AC-7). `409`, `details: { members, records }`; nothing is written. A move allows the Owner alone; a delete
+   * allows nobody and nothing — *Arsipkan* is the way for an office with either.
+   */
+  TENANT_NOT_EMPTY: 'TENANT_NOT_EMPTY',
 
   // Organisation. The rest of the ORG_* family in the error catalog lands with the task
   // that can actually throw it — a code no path produces is a contract we do not honour.
@@ -230,17 +330,17 @@ export const ErrorCode = {
   ORG_INVITE_EXHAUSTED: 'ORG_INVITE_EXHAUSTED',
   /**
    * *+ Add agent* for an agent code that already has an invite waiting in the company — this office's or another's
-   * (ADR-0170 §2, P18.96-T3 AC-2). `409`. An agent code belongs to one person, so two invites for it could only let
+   * (ADR-0170 §2, P18.8-T3 AC-2). `409`. An agent code belongs to one person, so two invites for it could only let
    * two people try to be them. Resend the one waiting, or cancel it first.
    */
   ORG_INVITE_PENDING: 'ORG_INVITE_PENDING',
   /**
-   * A transfer request for a member who already has one waiting (ADR-0170 §4, P18.96-T3 AC-3). `409`, one per member:
+   * A transfer request for a member who already has one waiting (ADR-0170 §4, P18.8-T3 AC-3). `409`, one per member:
    * two would let the Owner approve both and move them twice. `details.transferId` names the open one.
    */
   ORG_TRANSFER_PENDING: 'ORG_TRANSFER_PENDING',
   /**
-   * Approving a transfer request whose member **no longer reports to the leader it was asked from** (the P18.96 exit
+   * Approving a transfer request whose member **no longer reports to the leader it was asked from** (the P18.8 exit
    * review, L4): somebody moved them since. `409`, and the request is closed, `cancelled` — approving it would move
    * them from a unit nobody asked about. `details.transferId`. Whoever wants the move asks again.
    */
@@ -257,14 +357,14 @@ export const ErrorCode = {
   ORG_GROUP_OWNER_NOT_IN_KPM: 'ORG_GROUP_OWNER_NOT_IN_KPM',
   ORG_GROUP_NOT_FOUND: 'ORG_GROUP_NOT_FOUND',
   /**
-   * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.8-T5 AC-2). `400`. The tag is
+   * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.5-T5 AC-2). `400`. The tag is
    * a leader's: a Core Leader reads the whole office's analytics, and a tagged Agent would read every member's
    * production without leading anyone. Refused only when the tag is being **set**; a member already tagged and
    * since moved off a leader rung keeps the flag, and re-saving their other tags is not refused.
    */
   CORE_LEADER_NOT_A_LEADER: 'CORE_LEADER_NOT_A_LEADER',
   /**
-   * **A leader's *Isi nomor WhatsApp* for somebody who already has a number** (the Phase 18.99 exit review, M1).
+   * **A leader's *Isi nomor WhatsApp* for somebody who already has a number** (the Phase 18.11 exit review, M1).
    * `409`, from `PUT /members/:membershipId/phone`: a leader fills a missing number, and never replaces one — a number on
    * file is the person's own to change, on *Profil saya* (`PATCH /auth/me`). The write is conditional on the stored
    * number being empty, so two leaders saving at once cannot overwrite each other either. Nothing is written.
@@ -322,7 +422,10 @@ export const ErrorCode = {
    * at all, is refused whole. A row or a cell that is wrong is reported **inside the preview** and
    * the rest of the file still previews — the prototype discards eleven good values for one bad one.
    */
-  /** The header is not one this product issued. Nothing is previewed. */
+  /**
+   * The file cannot be read as the KPM's Data upload. *Since P19.5-T2* (ADR-0214 §5) only: no `Agent Code` column, no
+   * value column matched, or two headers on one kode. Nothing is previewed.
+   */
   UPLOAD_TEMPLATE_MISMATCH: 'UPLOAD_TEMPLATE_MISMATCH',
   /** Not a CSV at all, or unbalanced quotes; row-level for one row with more cells than the template. */
   UPLOAD_MALFORMED_CSV: 'UPLOAD_MALFORMED_CSV',
@@ -332,6 +435,26 @@ export const ErrorCode = {
   UPLOAD_DUPLICATE_AGENT_CODE: 'UPLOAD_DUPLICATE_AGENT_CODE',
   /** Cell-level: not a number, the wrong sign, the wrong mark, above 100, a fraction of a person. */
   UPLOAD_VALUE_OUT_OF_RANGE: 'UPLOAD_VALUE_OUT_OF_RANGE',
+  /**
+   * Cell-level (P19.3-T1, ADR-0201 §2): a value in a leader rows' column — *Unit Persistency (%)*, `UNIT_PERSISTENCY` —
+   * on a row whose member is not an AB or an AAB. Not stored; the row's other values import.
+   */
+  UPLOAD_LEADER_ONLY_VALUE: 'UPLOAD_LEADER_ONLY_VALUE',
+  /**
+   * Row-level (P19.5-T2; ADR-0214 §5 step 2, §7): the code does not match the KPM's template's `agentCodePattern`. The row
+   * is refused; the message gives the template's example.
+   */
+  UPLOAD_AGENT_CODE_PATTERN: 'UPLOAD_AGENT_CODE_PATTERN',
+  /**
+   * Row-level (P19.5-T2; R2, ADR-0214 §5 step 4): a column the file carries, required from its `effectiveFrom`, is blank
+   * for a month on or after it. The row is skipped (*"<label> wajib diisi"*). A column the file lacks is never this.
+   */
+  UPLOAD_REQUIRED_BLANK: 'UPLOAD_REQUIRED_BLANK',
+  /**
+   * Cell-level (P19.5-T2; ADR-0214 §5 step 7), a `ytd: 'upload'` column only: this month's YTD minus last month's held
+   * YTD is not this month's figure, within `ytdTolerancePct` % of the YTD. The YTD is refused; the month imports.
+   */
+  UPLOAD_YTD_MISMATCH: 'UPLOAD_YTD_MISMATCH',
   /** A write to a month past its window, or locked by hand, and not reopened (ADR-0050). */
   UPLOAD_MONTH_LOCKED: 'UPLOAD_MONTH_LOCKED',
   /** This very preview — the same file against the same month revision — was committed already. */
@@ -376,7 +499,7 @@ export const ErrorCode = {
   /** A graduation below 100%: every item, the linked ones included, is done first (OD-28). `409`. */
   ACTIVATION_INCOMPLETE: 'ACTIVATION_INCOMPLETE',
   /**
-   * A bare hand tick of a **data-backed item** (P18.96-T4 AC-3, ADR-0171 §3): *Close first case independently*, *Reach
+   * A bare hand tick of a **data-backed item** (P18.8-T4 AC-3, ADR-0171 §3): *Close first case independently*, *Reach
    * Independent Agent milestone* and *Weekly 1-on-1 check-in* are ticked by hand only with their record — the closing
    * it names, or the 1:1 — saved together. `422`, `details.code` and `details.form` (`closing` | `one_on_one`).
    */
@@ -402,6 +525,35 @@ export const ErrorCode = {
    * `details.codes`; raised before anything is written or copied.
    */
   TEMPLATE_RUNG_UNKNOWN: 'TEMPLATE_RUNG_UNKNOWN',
+  /**
+   * **A push that would replace a KPM's own changes without the second confirmation** (ADR-0208 §4): a KPM the server
+   * finds *changed by the KPM* when it applies, and the request did not list in `replaceChanged`. Nothing is written for
+   * that KPM. `409`, `details.kpmIds` and `details.codes`, when no KPM of the request was applied; otherwise the KPM's
+   * row of the answer carries the code.
+   */
+  TEMPLATE_APPLY_UNCONFIRMED: 'TEMPLATE_APPLY_UNCONFIRMED',
+
+  /*
+   * The template's *Advanced analytics* section (P19.5-T1; ADR-0214 §2, §7; `functional/advanced-analytics.md`). Each
+   * `409` names the column in `details` (`field`, `kode`); nothing of the draft is written.
+   */
+  /**
+   * **A system column deleted or changed** (R1, AA UI-011): a draft without one of `APE`, `POLICY_COUNT`, `RECRUITMENT`
+   * and `NEW_ACTIVE_AGENTS`, one marked otherwise, another kode marked `system`, or a system column's unit or YTD
+   * changed. `409`.
+   */
+  ANALYTICS_SYSTEM_COLUMN: 'ANALYTICS_SYSTEM_COLUMN',
+  /** **A column's unit changed while a KPM reading the template holds a value for its kode** (AA UI-017). `409`. */
+  ANALYTICS_UNIT_LOCKED: 'ANALYTICS_UNIT_LOCKED',
+  /** **A column's *Berlaku mulai* changed while a KPM holds a value for its kode** (ADR-0214 §2). `409`. */
+  ANALYTICS_EFFECTIVE_FROM_LOCKED: 'ANALYTICS_EFFECTIVE_FROM_LOCKED',
+  /** **Two current columns with one kode** (*"Kode ini sudah dipakai."*). `409`. */
+  ANALYTICS_KODE_TAKEN: 'ANALYTICS_KODE_TAKEN',
+  /**
+   * **A publish whose agent-code pattern some registered codes do not match** (AA UI-018, AT-10, Case 10): `409`,
+   * `details: { mismatched, total, examples }`, up to five examples; nothing is published.
+   */
+  ANALYTICS_CODE_PATTERN_MISMATCH: 'ANALYTICS_CODE_PATTERN_MISMATCH',
 
   /*
    * The Strategic Leader Forum (Phase 18.1; `functional/leader-forum.md`, *Errors*). Everything outside a
@@ -414,7 +566,7 @@ export const ErrorCode = {
   LEADER_MEETING_HAS_MINUTES: 'LEADER_MEETING_HAS_MINUTES',
 
   /*
-   * Campaigns (Phase 18.5; `functional/campaigns.md`, *Errors*). Another office's, an archived or an unknown campaign
+   * Campaigns (Phase 18.2; `functional/campaigns.md`, *Errors*). Another office's, an archived or an unknown campaign
    * is `NOT_FOUND`, never a campaign code.
    */
   /** A chase or a drop on a campaign that has ended (D-lists): an upcoming one is chaseable, as drawn. `409`. */
@@ -422,18 +574,18 @@ export const ErrorCode = {
   /** A chase by a rung the campaign does not apply to (`appliesToOrgLevelCodes`). `403`. */
   CAMPAIGN_NOT_ELIGIBLE: 'CAMPAIGN_NOT_ELIGIBLE',
   /**
-   * An override, or its clearing, before the campaign's window is final (P18.6-T2; ADR-0144 §4): the last month it
+   * An override, or its clearing, before the campaign's window is final (P18.3-T2; ADR-0144 §4): the last month it
    * reads has not locked, it is still running, or it never is (`rolling_12m`). `409`, `details.code`.
    */
   CAMPAIGN_STANDING_NOT_FINAL: 'CAMPAIGN_STANDING_NOT_FINAL',
   /**
-   * An override, or its clearing, of the caller's own standing (P18.6 exit review, round 1; ADR-0138's rule, as
+   * An override, or its clearing, of the caller's own standing (P18.3 exit review, round 1; ADR-0138's rule, as
    * `EVENT_ATTENDANCE_SELF`): nobody corrects their own result. `400`, `details.membershipId`; nothing is written.
    */
   CAMPAIGN_OVERRIDE_SELF: 'CAMPAIGN_OVERRIDE_SELF',
 
   /*
-   * Events (Phase 18.5, P18.5-T5 and T6; `functional/events.md`; OD-31). Outside a reader's audience or office, an
+   * Events (Phase 18.2, P18.2-T5 and T6; `functional/events.md`; OD-31). Outside a reader's audience or office, an
    * archived event and a membership outside the audience are `NOT_FOUND`, never one of these.
    */
   /** RSVP or cancel once the event has ended (`now >= endsAt`); a running event still takes both. `409`. */
@@ -449,6 +601,53 @@ export const ErrorCode = {
   /** Moving an ended event that has an RSVP, a claim, a confirmation or feedback back into the future. `409`. */
   EVENT_HAS_RESPONSES: 'EVENT_HAS_RESPONSES',
 
+  /*
+   * The company's products (P19.4-T4, ADR-0209). Each `409`, nothing written.
+   */
+  /**
+   * **A product's kind cannot change while it is attached** (ADR-0209 §2): a base some rider attaches to becoming a
+   * rider, or a rider still attached to a base becoming a base. `details: { riders }` or `{ bases }`, the count.
+   */
+  PRODUCT_KIND_IN_USE: 'PRODUCT_KIND_IN_USE',
+  /**
+   * **An office wrote a rider's configuration** (ADR-0209 §6; the riders spec's rule 6): a rider has no switch, words
+   * or documents of its own in an office — it is on exactly when one of its bases is. `details: { productId }`.
+   */
+  PRODUCT_IS_RIDER: 'PRODUCT_IS_RIDER',
+  /**
+   * **A withdrawn product something still references cannot be deleted** (ADR-0209 §10; B1-5, OD-264).
+   * `details.references`: the kinds and their counts — offices that sell it (`activations`), offices' scripts for it
+   * (`scriptApprovals`), and riders attached to it (`riders`).
+   */
+  PRODUCT_IN_USE: 'PRODUCT_IN_USE',
+
+  /*
+   * The surveys (P19.5-T4; ADR-0216; `functional/surveys.md`, *Data contract*). A run of another KPM, a cancelled one and
+   * an unknown id are answered as the run's own refusal or `NOT_FOUND`, never anything that says it exists.
+   */
+  /**
+   * **A survey route of a run the caller was not invited to** (C-R1, C2-5): every `/surveys/:runId` route, whoever asks
+   * — another KPM's run, a cancelled or unknown one included. `404`, so it says nothing of the run.
+   */
+  SURVEY_NOT_INVITED: 'SURVEY_NOT_INVITED',
+  /**
+   * **A write to a run that no longer takes it** (ADR-0216 §2, §5): an answer or *Kirim* after the run closed or after
+   * sending (`details.reason`: `closed`, `submitted`); a change or a cancel of a run that has opened (`opened`). `409`.
+   */
+  SURVEY_CLOSED: 'SURVEY_CLOSED',
+  /**
+   * **A run that cannot be started** (ADR-0216 §2): one of its kind already in the period (`period_taken`), dates
+   * outside one period of the template's cadence (`outside_cadence`), or its section off in the template
+   * (`section_off`). `409`, `details.reason`.
+   */
+  SURVEY_RUN_CONFLICT: 'SURVEY_RUN_CONFLICT',
+  /**
+   * **A person's survey answers that are not this reader's to see** (B4-6; ADR-0216 §3): a holder of
+   * `survey_answers:read` outside the person's line, and every view-as session, whoever it acts as. `403`. A person of
+   * another KPM is `NOT_FOUND`.
+   */
+  SURVEY_ANSWERS_HIDDEN: 'SURVEY_ANSWERS_HIDDEN',
+
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   VALIDATION_UNKNOWN_FIELD: 'VALIDATION_UNKNOWN_FIELD',
@@ -460,7 +659,7 @@ export const ErrorCode = {
   ASSET_NOT_CONFIRMED: 'ASSET_NOT_CONFIRMED',
   ASSET_NOT_UPLOADED: 'ASSET_NOT_UPLOADED',
   /**
-   * This instance has no storage bucket (P18.7-T2, D12): local development or a test without `GCS_BUCKET`. Every
+   * This instance has no storage bucket (P18.4-T2, D12): local development or a test without `GCS_BUCKET`. Every
    * upload signature, file link, copy and confirm is refused; nothing else is affected. `503` — see
    * `modules/assets/unconfigured-storage.ts` for why not `501`. Staging and production cannot raise it: they refuse
    * to boot without a bucket (`env.validation.ts`).

@@ -24,12 +24,12 @@ async function as(email: string, flags: { owner?: boolean } = {}): Promise<Reque
 }
 
 /**
- * **Phase 18.6 — the compliance fixture** (P18.6-T3 AC-1; `compliance-fixture.ts`, whose header says which account
+ * **Phase 18.3 — the compliance fixture** (P18.3-T3 AC-1; `compliance-fixture.ts`, whose header says which account
  * shows what): training for Phase 18's cast, and D-seed's override of Budi's final persistency standing. The seed run
  * as the command runs it, at 10:00 on Saturday 10 October 2026 in Jakarta — September locked on the 8th — read back
  * through the owning modules' own readings, and run a second time to prove it writes nothing.
  */
-describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 in Jakarta', () => {
+describe('Phase 18.3 the compliance seed — a run at 10:00 on 10 October 2026 in Jakarta', () => {
   const clock = new FixedClock(new Date('2026-10-10T03:00:00Z'));
   let wired: ReturnType<typeof configModule>;
   let seeded: SeedResult;
@@ -53,7 +53,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     return { done: category.done, inProgress: rows.filter((m) => m.status === 'in_progress').length };
   };
 
-  it('P18.6-T3 AC-1 writes twenty-five progress rows for Phase 18’s cast and the one override', async () => {
+  it('P18.3-T3 AC-1 writes twenty-five progress rows for Phase 18’s cast and the one override', async () => {
     expect(seeded.compliance.written).toBe(25 + 1);
     expect(seeded.compliance.override).toBe('set');
     const cast = ['arini', 'bonar', 'cahya', 'damar', 'elsa', 'yosef', 'winda', 'ikhsan', 'jihan', 'kemal', 'satria', 'oscar', 'pandu', 'raka'];
@@ -61,7 +61,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     expect(await col('trainingProgress').countDocuments({ kpmId: kpm0417, membershipId: { $in: ids } })).toBe(25);
   });
 
-  it('P18.6-T3 AC-1 Yosef’s agency a mix, Winda’s unit two each, Satria’s agency none', async () => {
+  it('P18.3-T3 AC-1 Yosef’s agency a mix, Winda’s unit two each, Satria’s agency none', async () => {
     expect(await sales('arini@kpm0417.test')).toEqual({ done: 10, inProgress: 0 });
     expect(await sales('bonar@kpm0417.test')).toEqual({ done: 5, inProgress: 0 });
     expect(await sales('cahya@kpm0417.test')).toEqual({ done: 0, inProgress: 1 });
@@ -72,7 +72,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     for (const who of ['satria', 'oscar', 'pandu', 'raka']) expect(await sales(`${who}@kpm0417.test`)).toEqual({ done: 0, inProgress: 0 });
   });
 
-  it('P18.6-T3 AC-1 the Training chip’s count moves from two to three: Agus, Siti and Arini have done everything offered', async () => {
+  it('P18.3-T3 AC-1 the Training chip’s count moves from two to three: Agus, Siti and Arini have done everything offered', async () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     const active = await col('memberships').find({ kpmId: kpm0417, status: 'active' }).toArray();
     const views = await wired.trainingReadings.ofMany(owner, active.map((m) => String(m._id)));
@@ -81,7 +81,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     expect(all).toEqual(['Agus Prasetyo', 'Arini Kusuma', 'Siti Rahmawati'].sort());
   });
 
-  it('P18.6-T3 AC-1 D-seed: Budi’s final standing reads Achieved, set by the Owner with the reason — the frozen Not met kept', async () => {
+  it('P18.3-T3 AC-1 D-seed: Budi’s final standing reads Achieved, set by the Owner with the reason — the frozen Not met kept', async () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     const budi = await as('budi@kpm0417.test');
     const stored = (await col('campaignStandings').findOne({ kpmId: kpm0417, campaignCode: 'PERSISTENCY_PUSH', membershipId: budi.membershipId }))!;
@@ -96,7 +96,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     expect(of(rina.membershipId!)).toMatchObject({ status: 'qualified', overridden: null });
   });
 
-  it('P18.6-T3 AC-1 D-seed through the campaigns module’s own write: frozen once and overridden once, both audited as the Owner', async () => {
+  it('P18.3-T3 AC-1 D-seed through the campaigns module’s own write: frozen once and overridden once, both audited as the Owner', async () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     const budi = await as('budi@kpm0417.test');
     const finalised = await col('auditLog').find({ kpmId: kpm0417, action: 'campaign_standing.finalised' }).toArray();
@@ -109,7 +109,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     })]);
   });
 
-  it('P18.6-T3 AC-1 the tree draws one overridden Achieved cell, named; Budi’s own dialog does not change (ADR-0147)', async () => {
+  it('P18.3-T3 AC-1 the tree draws one overridden Achieved cell, named; Budi’s own dialog does not change (ADR-0147)', async () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     const budi = await as('budi@kpm0417.test');
     const category = new CampaignsComplianceCategory(wired.campaignStandingsReader, new MemberNames(wired.memberships, wired.users as never));
@@ -143,13 +143,13 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
     expect(catalog.map((c) => c.code)).not.toContain('ARCHIVED_DRIVE');
   });
 
-  it('P18.6-T3 AC-1 the guide’s COMPLIANCE section says what it seeded', () => {
+  it('P18.3-T3 AC-1 the guide’s COMPLIANCE section says what it seeded', () => {
     expect(seeded.compliance.guide).toContain('COMPLIANCE at /kpm/analytics/compliance');
     expect(seeded.compliance.guide).toContain(COMPLIANCE_OVERRIDE_SEED.reason);
     expect(seeded.compliance.guide).toContain('Arini all ten Completed');
   });
 
-  it('P18.6-T3 AC-1 a second run writes nothing', async () => {
+  it('P18.3-T3 AC-1 a second run writes nothing', async () => {
     const audits = await col('auditLog').countDocuments({});
     const again = await seedDemo({ clock, log: quiet });
     expect(again.compliance).toMatchObject({ written: 0, override: 'set' });
@@ -186,7 +186,7 @@ describe('Phase 18.6 the compliance seed — a run at 10:00 on 10 October 2026 i
  * **Before the month locks**, D-seed's override is not written — nothing is final to correct — and the run says so;
  * nothing is frozen either. The training rows are written all the same.
  */
-describe('Phase 18.6 the compliance seed — a run on 5 October 2026, before September locks', () => {
+describe('Phase 18.3 the compliance seed — a run on 5 October 2026, before September locks', () => {
   const clock = new FixedClock(new Date('2026-10-05T03:00:00Z'));
   let seeded: SeedResult;
 
@@ -197,7 +197,7 @@ describe('Phase 18.6 the compliance seed — a run on 5 October 2026, before Sep
   }, RUN_MS);
   afterAll(stopMongo);
 
-  it('P18.6-T3 AC-1 skips the override and says why, freezing nothing', async () => {
+  it('P18.3-T3 AC-1 skips the override and says why, freezing nothing', async () => {
     expect(seeded.compliance.written).toBe(25);
     expect(seeded.compliance.override).toMatch(/^skipped: .* is not final until its month locks/);
     expect(seeded.compliance.guide).toContain('no override this run');

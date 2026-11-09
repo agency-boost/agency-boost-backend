@@ -1,7 +1,7 @@
 import { NPS } from '@/domain/constants';
 
 /**
- * `EVENT_NPS` (P18.5-T6 AC-6; `metrics-and-definitions.md`; `KPM_Owner.html:3754-3761`).
+ * `EVENT_NPS` (P18.2-T6 AC-6; `metrics-and-definitions.md`; `KPM_Owner.html:3754-3761`).
  *
  * **The prototype's single rounding**, `round(100·(P − D)/n)`: one definition, so the registry's earlier
  * `round(P/n·100) − round(D/n·100)` is gone — at n = 7, P = 4, D = 2 the two disagree (29 against 28), and the

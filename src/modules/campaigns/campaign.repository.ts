@@ -13,7 +13,7 @@ export class CampaignRepository extends TenantScopedRepository<CampaignDocument>
   }
 
   /**
-   * **Mark a window frozen, once** (P18.5-T8 AC-5): `true` for the one call that records it, `false` when it already
+   * **Mark a window frozen, once** (P18.2-T8 AC-5): `true` for the one call that records it, `false` when it already
    * was — so of two first reads at once only one writes the standings and the audit. Scoped like every write here;
    * neither `version` nor `updatedBy` moves — a freeze is not an edit of the campaign.
    */

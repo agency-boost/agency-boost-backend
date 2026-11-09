@@ -268,7 +268,7 @@ export class LeaderLimitRequestService {
     } catch (err) {
       if (err instanceof DomainException && err.code === ErrorCode.LEADER_LIMIT_REQUEST_STALE) {
         // The sentence the refusal was given, both languages (`givenDetails`); the stored reason is written in the
-        // deciding Super Admin's language, and shown as stored (P18.98-T5 AC-6).
+        // deciding Super Admin's language, and shown as stored (P18.10-T5 AC-6).
         const why = (err.givenDetails as { why?: StaleReason } | undefined)?.why ?? STALE_REASONS.noLongerApplies;
         const reason = render(LEADER_LIMIT_MESSAGES.closedAsStale({ why }), ctx.reader);
         await this.close(ctx, office, request, 'declined', reason, 'stale', 'approved');

@@ -1,6 +1,6 @@
 /**
  * **A criterion against a threshold, in three values** — the one rule MOC and a campaign's requirements are both
- * decided by (P18.5-T8 AC-4, invariant §8). Extracted from `moc-status.ts`, which re-exports it unchanged, so
+ * decided by (P18.2-T8 AC-4, invariant §8). Extracted from `moc-status.ts`, which re-exports it unchanged, so
  * `moc-status.spec.ts` still pins it there.
  *
  * `null` is *not known yet* — the file does not hold a month the figure is read over — and never ✕ on a guess.

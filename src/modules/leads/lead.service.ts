@@ -17,10 +17,12 @@ import { TenantDay, type OfficeDay } from '@/modules/tenants/tenant-day.service'
 import { ActivationEvents, signalActivation } from '@/modules/activation/activation-events.port';
 import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
-import { isLocalDate, type LocalDate } from '@/common/time/local-day';
+import { isLocalDate, localDayOf, type LocalDate } from '@/common/time/local-day';
 import type { FieldSentence } from '@/common/validation/fields';
 import { leadFlags, type LeadFlag } from './lead-attention';
+import { ageToday, ageWrite } from './lead-age';
 import { LEAD_REFUSALS } from './leads.messages';
+import type { LeadScope } from './lead.dto';
 import { checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
 import {
@@ -28,6 +30,9 @@ import {
 } from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
+import {
+  ProposalReadings, type LeadProposalNote, type LeadProposals,
+} from '@/modules/proposals/proposal-readings';
 
 /** What an agent may be told is asking for them. Derived, never stored. */
 export type { LeadFlag } from './lead-attention';
@@ -39,11 +44,15 @@ export const LEAD_PAGE_SIZE = 50;
 export interface LeadQuery {
   /** One member's leads: the caller's own, or a coachee's (P11-T4 AC-3). */
   owner?: string;
+  /** *Leads milik* (P19.9-T1 AC-3): `own` the caller's alone, `team` everybody else the grant reaches. Narrows only. */
+  scope?: LeadScope;
   search?: string;
   type?: 'sales' | 'recruitment' | 'unassigned';
   statusCode?: string;
   outcome?: 'won' | 'lost' | 'open';
   attention?: LeadFlag;
+  /** *Sudah ada proposal* / *Belum ada proposal* (P19.7-T2 AC-12): narrows to the caller's own leads first. */
+  hasProposal?: 'true' | 'false';
   sort?: LeadSortKey;
   dir?: 'asc' | 'desc';
   page?: number;
@@ -105,6 +114,12 @@ export interface LeadView {
   /** Every month this lead was promised for, oldest first. The archive, and it is the record. */
   committedMonths: string[];
   /**
+   * **Marked *Berhasil* inside the office's current month** (P19.1-T2 AC-8; UI-153 item 5): derived on read from
+   * `outcome` and `outcomeAt` on the office's calendar, never stored, so it clears on the 1st with the switch. With
+   * `thisMonth` it is the avatar's badge — yellow ✓ switched on and not closed, green ✓ switched on and closed this month.
+   */
+  closedThisMonth: boolean;
+  /**
    * Who last changed it, when that was not the agent whose lead it is (ADR-0044).
    *
    * `null` when the owner made the last change themselves — which is the ordinary case, and the
@@ -119,12 +134,27 @@ export interface LeadView {
    * the owner touched.
    */
   lastEditedBy: { membershipId: string; name: string | null } | null;
+  /**
+   * **Whose lead it is, by name** (P19.9-T1 AC-4; ADR-0232): `ownerMembershipId` and the account's name behind it, so a
+   * leader's card under *Leads milik: Tim* says *Milik Rina Wijaya*. Every row carries it, the caller's own too; `name`
+   * is `null` for a membership that can no longer be named, never a placeholder.
+   */
+  owner: { membershipId: string; name: string | null };
   remarks: string | null;
   nextActionDate: string | null;
   nextActionNote: string | null;
   outcome: 'won' | 'lost' | null;
   source: string | null;
   dateRegistered: string | null;
+  /**
+   * **The client's age at the next birthday, today** (P19.7-T1 AC-1; ADR-0224 §2): the stored age plus the whole years
+   * since `ageRecordedOn`, on the office's calendar — it moves up on each anniversary. `null` when none was given.
+   */
+  age: number | null;
+  /** The office's day the age was last written, `YYYY-MM-DD`; `null` with it. The server's, never a body's. */
+  ageRecordedOn: string | null;
+  /** `male`, `female`, or `null` (ADR-0224 §1). */
+  gender: 'male' | 'female' | null;
   version: number;
   /** Computed on read, so the screen and the service cannot disagree about what is overdue. */
   flags: LeadFlag[];
@@ -137,6 +167,12 @@ export interface LeadView {
    * match against.
    */
   overdueDays: number | null;
+  /**
+   * **The lead's proposals, for its owner alone** (P19.7-T2 AC-12; ADR-0221 §6; Acc. 4): how many live ones, and the item
+   * names of the latest that has a product — the card's *"PRUWell Medical +1"*. **`null` on a lead with none, and on every
+   * lead the caller does not own**: a leader reads a downline's lead, never what was proposed on it (decision 4).
+   */
+  proposals: LeadProposals | null;
 }
 
 /**
@@ -146,6 +182,8 @@ export interface LeadView {
  * record and out of the answer: the sheet does not say it.
  */
 export interface LeadMoveView {
+  /** `stage` since P19.7-T2, beside the owner's `proposal` notes (`LeadProposalNote`). */
+  kind: 'stage';
   at: string;
   fromStatusCode: string | null;
   toStatusCode: string;
@@ -153,7 +191,8 @@ export interface LeadMoveView {
 
 /** One lead read by its id (`GET /leads/:id`): the list's shape, and its moves (UI-105). The list never carries them. */
 export interface LeadDetailView extends LeadView {
-  history: LeadMoveView[];
+  /** Oldest first: its moves, and — on the owner's own read — its *"Proposal dibuat"* notes (P19.7-T2 AC-11). */
+  history: (LeadMoveView | LeadProposalNote)[];
 }
 
 /**
@@ -192,10 +231,15 @@ export class LeadService {
      */
     @Optional() @Inject(ActivationEvents) private readonly activation: ActivationEvents | null = null,
     /*
-     * P18.96-T4 AC-1: a sales lead reaching *Paid and issued*, or a closing logged from the checklist, may be the
+     * P18.8-T4 AC-1: a sales lead reaching *Paid and issued*, or a closing logged from the checklist, may be the
      * owner's first sale. A port the activation module answers; optional, failing open.
      */
     @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
+    /*
+     * P19.7-T2 (ADR-0221 §6): the owner's proposals on their own leads — the pill, the filter and the *Riwayat* notes.
+     * The proposals module's one named reader, optional so a harness without it reads every lead as having none.
+     */
+    @Optional() @Inject(ProposalReadings) private readonly proposalReadings: ProposalReadings | null = null,
   ) {}
 
   /**
@@ -344,6 +388,10 @@ export class LeadService {
       nextActionDate: input.nextActionDate ?? null,
       nextActionNote: input.nextActionNote ?? null,
       source: input.source ?? null,
+      // The client's age, recorded today when given, and the gender (ADR-0224 §3).
+      age: input.age ?? null,
+      ageRecordedOn: typeof input.age === 'number' ? day.today : null,
+      gender: input.gender ?? null,
       // A promise is a row with the month on it, so nothing has to clear it later (P7-T5).
       commitments: input.thisMonth
         ? [{ month: day.month, at: now, byMembershipId: membershipId }]
@@ -368,13 +416,12 @@ export class LeadService {
     });
     // P13-T3 AC-3: a lead of either type, added by the hire or by a leader in a session.
     await signalActivation(this.activation, ctx, ownerMembershipId, 'feature:leads');
-    return this.view(
-      created, day, ownerMembershipId === membershipId ? new Map() : await this.attribution(ctx, [created]),
-    );
+    // Named even on the caller's own lead: every answer carries its owner (P19.9-T1 AC-4).
+    return this.view(created, day, await this.attribution(ctx, [created]));
   }
 
   /**
-   * **A closing logged from the 90-day checklist** (P18.96-T4 AC-3; ADR-0171 §3): *Which case? → Log a new closing*,
+   * **A closing logged from the 90-day checklist** (P18.8-T4 AC-3; ADR-0171 §3): *Which case? → Log a new closing*,
    * a name and the day it was paid and issued. The owner's own, or — with `owner` — a coachee's, resolved on
    * `lead:create` exactly as `create`'s is (`coachedOwner`: `COACH` and nothing wider, anybody else a 404).
    *
@@ -449,7 +496,7 @@ export class LeadService {
   }
 
   /**
-   * **A member's closings, newest first** (P18.96-T4 AC-3): their sales leads that reached *Paid and issued*, with the
+   * **A member's closings, newest first** (P18.8-T4 AC-3): their sales leads that reached *Paid and issued*, with the
    * office day each first did — what the checklist's *Which case?* offers to name. The caller's own, or — with
    * `owner` — a member whose leads the caller reads (`lead:read`, `COACH`; anybody else a 404), recorded as any read
    * of somebody else's leads is (§3.5). Ids, names and days; nothing else of a lead leaves here.
@@ -485,6 +532,20 @@ export class LeadService {
       contact: next.contact,
       updatedBy: membershipId,
     };
+
+    /*
+     * **The age moves only when it differs from today's reading** (P19.7-T1 AC-1; ADR-0224 §3): saving the sheet with
+     * the age it shows leaves the age and its day as they were; another age is stored with today's day; `null` clears
+     * both. The gender is written as sent.
+     */
+    const aged = input.age === undefined ? null : ageWrite(lead, input.age, day.today);
+    if (aged) Object.assign($set, aged);
+    if (input.gender !== undefined) $set.gender = input.gender;
+    const changed = [
+      ...Object.keys(this.writable(input)),
+      ...(aged ? ['age'] : []),
+      ...(input.gender !== undefined && input.gender !== (lead.gender ?? null) ? ['gender'] : []),
+    ];
 
     /*
      * **Changing the ladder clears the rung, and the commitment with it.**
@@ -533,10 +594,11 @@ export class LeadService {
     const updated = await this.writeAt(ctx, lead, write);
 
     await this.record(ctx, 'lead.updated', id, {
-      fields: Object.keys(this.writable(input)),
+      // **The fields changed, never their values** (ADR-0224 §3, §8): an age or a gender is named, not copied.
+      fields: changed,
       hasContact: Boolean(next.contact.phone || next.contact.email),
     });
-    return this.view(updated, day, await this.attribution(ctx, [updated]));
+    return this.withOwnProposals(ctx, this.view(updated, day, await this.attribution(ctx, [updated])));
   }
 
   /**
@@ -574,7 +636,7 @@ export class LeadService {
 
     const wanted = statusCode.trim().toUpperCase();
     if (wanted === lead.statusCode) {
-      return this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead]));
+      return this.withOwnProposals(ctx, this.view(lead, await this.days.for(ctx), await this.attribution(ctx, [lead])));
     }
 
     const status = await this.publishedStage(ctx, wanted);
@@ -614,17 +676,18 @@ export class LeadService {
     await this.record(ctx, 'lead.status_changed', id, {
       from: lead.statusCode ?? null, to: wanted, byMembershipId: membershipId,
     });
-    // P18.96-T4 AC-1: a sales lead at *Paid and issued* may be its owner's first sale, and a closing (ADR-0171 §1).
+    // P18.8-T4 AC-1: a sales lead at *Paid and issued* may be its owner's first sale, and a closing (ADR-0171 §1).
     if (wanted === FIRST_SALE_STAGE_CODE && lead.type === 'sales') await signalSales(this.sales, ctx, [lead.ownerMembershipId]);
-    return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
+    return this.withOwnProposals(ctx, this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated])));
   }
 
   /**
    * Close a lead, or reopen one (P7-T3).
    *
-   * **Won needs the stage that closes the pipeline; lost needs nothing** (§3.7). The two prototype
-   * screens disagree — the agent screen allows Lost anywhere and gates Won, the coaching screen
-   * gates both — and the stricter reading of each half is taken.
+   * **Won needs the stage that closes the pipeline; lost is refused there** (§3.7; ADR-0194, UI-160). Until
+   * 2026-11-04 lost needed nothing: the two prototype screens disagree — the agent screen allows Lost anywhere and
+   * gates Won, the coaching screen gates both — and the stricter reading of each half was taken. The owner then asked
+   * for the mirror refusal: at the office's final stage *Tandai tidak berhasil* is refused, by the API as well.
    *
    * Reopening appends no transition: the lead has not moved, and a history that recorded it as a
    * move would be a stage nobody worked.
@@ -644,15 +707,29 @@ export class LeadService {
       );
     }
 
-    if (outcome === 'won') {
-      // The terminal flag the screen's ✓ read: the published ladder's (P13.1-T4 AC-10).
+    if (outcome) {
+      // The terminal flag the screen's buttons read: the published ladder's (P13.1-T4 AC-10), of the lead's own pipeline.
       const status = lead.statusCode ? await this.publishedStage(ctx, lead.statusCode) : null;
-      if (!status?.isTerminal) {
+      const terminal = Boolean(status?.isTerminal) && status?.pipeline === lead.type;
+      if (outcome === 'won' && !terminal) {
         throw new DomainException(
           ErrorCode.LEAD_STATUS_NOT_FINAL,
           LEAD_REFUSALS.LEAD_STATUS_NOT_FINAL.moveFirst,
           HttpStatus.UNPROCESSABLE_ENTITY,
           { statusCode: lead.statusCode ?? null },
+        );
+      }
+      /*
+       * **Lost is refused at the final stage** (P19.1-T2 AC-10; UI-160; ADR-0194 §2): a case the office's own ladder
+       * calls paid and issued — or a kandidat it calls joined — is a success, and the record may not say otherwise. The
+       * way out is a move back to an earlier stage, which the free jump allows and the history records (§5).
+       */
+      if (outcome === 'lost' && terminal) {
+        throw new DomainException(
+          ErrorCode.LEAD_STATUS_FINAL,
+          LEAD_REFUSALS.LEAD_STATUS_FINAL.moveBackFirst,
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          { statusCode: lead.statusCode },
         );
       }
     }
@@ -669,7 +746,7 @@ export class LeadService {
     await this.record(ctx, outcome ? 'lead.closed' : 'lead.reopened', id, {
       outcome, from: lead.outcome ?? null, statusCode: lead.statusCode ?? null,
     });
-    return this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated]));
+    return this.withOwnProposals(ctx, this.view(updated, await this.days.for(ctx), await this.attribution(ctx, [updated])));
   }
 
   /**
@@ -727,7 +804,7 @@ export class LeadService {
     const day = await this.days.for(ctx);
     const holds = Boolean(lead.nextActionDate || lead.nextActionNote?.trim());
     const kept = lead.nextActionDone ?? null;
-    if (done ? !holds : !kept || holds) return this.view(lead, day, await this.attribution(ctx, [lead]));
+    if (done ? !holds : !kept || holds) return this.withOwnProposals(ctx, this.view(lead, day, await this.attribution(ctx, [lead])));
 
     const write = done
       ? {
@@ -746,7 +823,7 @@ export class LeadService {
       };
     const updated = await this.writeAt(ctx, lead, write);
     await this.record(ctx, done ? 'lead.next_action_done' : 'lead.next_action_undone', id, {});
-    return this.view(updated, day, await this.attribution(ctx, [updated]));
+    return this.withOwnProposals(ctx, this.view(updated, day, await this.attribution(ctx, [updated])));
   }
 
   /**
@@ -767,7 +844,7 @@ export class LeadService {
   }
 
   /**
-   * **The caller's open leads, in the order they dragged them into** (P18.8-T7, ADR-0161 §1).
+   * **The caller's open leads, in the order they dragged them into** (P18.5-T7, ADR-0161 §1).
    *
    * **Every one of them, once each, and nothing else** — the contract every reorder in this product
    * has (`ActivityService.reorderTypes`, `LeadStatusService.reorder`): a single *move this one to place 4*
@@ -792,7 +869,7 @@ export class LeadService {
     const mine = new Set(open.map((lead) => String(lead._id)));
     const sent = new Set(ids);
 
-    // Field sentences, each in both languages, written for the reader in `details.violations` (P18.98-T5 AC-3).
+    // Field sentences, each in both languages, written for the reader in `details.violations` (P18.10-T5 AC-3).
     const SAY = LEAD_REFUSALS.VALIDATION_FAILED;
     const violations: FieldSentence[] = [];
     const strangers = ids.filter((id) => !mine.has(id)).length;
@@ -845,12 +922,20 @@ export class LeadService {
      * **Its moves, for the lead sheet's *Riwayat*** (UI V1, UI-105): on this read alone, never on the list, which would
      * carry every lead's whole history to draw a card that shows none of it.
      */
-    const history = (lead.transitions ?? []).map((move) => ({
+    const moves: LeadMoveView[] = (lead.transitions ?? []).map((move) => ({
+      kind: 'stage' as const,
       at: new Date(move.at).toISOString(),
       fromStatusCode: move.fromStatusCode ?? null,
       toStatusCode: move.toStatusCode,
     }));
-    return { ...view, history };
+    /*
+     * **The owner's *"Proposal dibuat · …"* notes** (P19.7-T2 AC-11; ADR-0221 §6): derived from the proposals ever
+     * finished, never written to the lead, so no lead version moves. Interleaved by date, and answered to the owner alone.
+     */
+    const own = lead.ownerMembershipId === ctx.membershipId && this.proposalReadings !== null;
+    const notes = own ? await this.proposalReadings!.notesOfLead(ctx, lead.ownerMembershipId, id) : [];
+    const history = [...moves, ...notes].sort((a, b) => a.at.localeCompare(b.at));
+    return { ...(await this.withOwnProposals(ctx, view)), history };
   }
 
   /**
@@ -858,7 +943,7 @@ export class LeadService {
    *
    * **`search`, `type` and `statusCode` narrow, and never widen.** Coaching's *Leads* card has sent the
    * first two since P11-T8 (the prototype's own search box and type filter, `Overall.html:4258-4266`), and
-   * `/leads` sends all three since P18.95-T4 (ADR-0167 §4, the client's UI review of 2026-10-26: UI-016). They
+   * `/leads` sends all three since P18.7-T4 (ADR-0167 §4, the client's UI review of 2026-10-26: UI-016). They
    * sit beside the owner filter below, never in place of it, so a search reaches only what the caller's
    * grant already reaches, in their own office (`lead-filters.int.spec.ts`).
    *
@@ -881,14 +966,34 @@ export class LeadService {
     const named = query.owner === undefined
       ? null
       : await this.coach.subject(ctx, query.owner, 'lead:read', 'Membership');
-    const owners = named ? [named.membershipId] : await this.ownersInScope(ctx, 'lead:read');
+    const reached = named ? [named.membershipId] : await this.ownersInScope(ctx, 'lead:read');
+    /*
+     * ***Leads milik: Saya · Tim*** (P19.9-T1 AC-2, AC-3; ADR-0232 §2–§3, OD-286): `scope` narrows what the grant reaches —
+     * `own` to the caller, `team` to everybody else in it — and never widens it. **Absent, the caller's own**, where it was
+     * the whole reach (P7-T7); beside `owner=` (the coaching tab's), absent narrows nothing, so that list is as it was.
+     */
+    const me = this.me(ctx);
+    const scope = query.scope ?? (named ? undefined : 'own');
+    const owners = scopedOwners(reached, scope, me);
 
     const filter: Record<string, unknown> = { deletedAt: null };
     // `null` is the whole office, which no row-reading grant produces — see `ownersInScope`.
     if (owners !== null) filter.ownerMembershipId = { $in: owners };
+    else if (scope === 'team') filter.ownerMembershipId = { $ne: me };
     if (query.type) filter.type = query.type === 'unassigned' ? null : query.type;
     if (query.statusCode) filter.statusCode = query.statusCode;
     if (query.outcome) filter.outcome = query.outcome === 'open' ? null : query.outcome;
+    if (query.hasProposal !== undefined) {
+      /*
+       * ***Sudah ada proposal* / *Belum ada proposal*** (P19.7-T2 AC-12; ADR-0221 §6): a proposal is its owner's alone, so
+       * either first narrows the list to the caller's own leads — nobody else's, whatever the grant reaches — and then to
+       * those with a live proposal, or without one. Beside every other filter.
+       */
+      const holdsOwn = owners === null ? scope !== 'team' : owners.includes(me);
+      filter.ownerMembershipId = holdsOwn ? me : { $in: [] };
+      const withOne = this.proposalReadings ? await this.proposalReadings.leadIdsWithProposals(ctx, me) : new Set<string>();
+      filter._id = query.hasProposal === 'true' ? { $in: [...withOne] } : { $nin: [...withOne] };
+    }
     if (query.search) {
       /*
        * Over the name and the remarks, which is where an agent looks for somebody. Escaped,
@@ -904,7 +1009,7 @@ export class LeadService {
     const found = await this.leads.find(ctx, filter, inMemory ? {} : {
       /*
        * MongoDB promises no order among equal keys, and `/leads` reads 200 at a time. **No `sort` is the
-       * owner's own order** (P18.8-T7 AC-3), `SAVED_ORDER`; a key asked for orders as it always did.
+       * owner's own order** (P18.5-T7 AC-3), `SAVED_ORDER`; a key asked for orders as it always did.
        */
       sort: query.sort ? { [query.sort]: dir, _id: dir } : SAVED_ORDER,
     });
@@ -942,8 +1047,13 @@ export class LeadService {
     // Names for this page only: the rows nobody is looking at cost nothing to attribute.
     const names = await this.attribution(ctx, shown);
 
+    // The caller's own rows carry their proposals (P19.7-T2 AC-12): one query for the page, none per lead.
+    const own = shown.filter((row) => row.ownerMembershipId === ctx.membershipId).map((row) => String(row._id));
+    const proposals = this.proposalReadings && own.length > 0
+      ? await this.proposalReadings.ofLeads(ctx, ctx.membershipId as string, own)
+      : new Map<string, LeadProposals>();
     const answer = {
-      rows: shown.map((row) => this.view(row, day, names)),
+      rows: shown.map((row) => ({ ...this.view(row, day, names), proposals: proposals.get(String(row._id)) ?? null })),
       total: attended.length,
       page,
       pageSize: size,
@@ -1056,10 +1166,11 @@ export class LeadService {
   }
 
   /**
-   * The names behind a page's proxy edits, in one read rather than one per row.
+   * The names behind a page's proxy edits **and its owners**, in one read rather than one per row.
    *
-   * Only the rows a leader actually touched cost anything: a lead whose last change was its own
-   * owner's contributes no id at all, so an agent working alone resolves nothing.
+   * A lead whose last change was its own owner's contributes no editor. *Changed 2026-11-08 (P19.9-T1 AC-4; ADR-0232):*
+   * every row names its owner now (`owner`), so the page's owners are asked for in the same batch — two reads for the
+   * page, whatever it holds, where an agent working alone resolved nothing.
    */
   private async attribution(
     ctx: RequestContext, rows: readonly LeadDocument[],
@@ -1067,7 +1178,7 @@ export class LeadService {
     const editors = rows
       .filter((r) => r.updatedBy && r.updatedBy !== r.ownerMembershipId)
       .map((r) => r.updatedBy as string);
-    return this.names.byMembershipId(ctx, editors);
+    return this.names.byMembershipId(ctx, [...editors, ...rows.map((r) => r.ownerMembershipId)]);
   }
 
   /** The stored row with the patch applied: the pair travels together, so one never erases the other. */
@@ -1107,12 +1218,17 @@ export class LeadService {
       statusCode: doc.statusCode,
       thisMonth: (doc.commitments ?? []).some((c) => c.month === day.month),
       committedMonths: (doc.commitments ?? []).map((c) => c.month),
+      closedThisMonth: doc.outcome === 'won' && doc.outcomeAt != null
+        && localDayOf(doc.outcomeAt, day.timezone).slice(0, 7) === day.month,
       remarks: doc.remarks,
       nextActionDate: doc.nextActionDate,
       nextActionNote: doc.nextActionNote,
       outcome: doc.outcome,
       source: doc.source,
       dateRegistered: doc.dateRegistered ? doc.dateRegistered.toISOString() : null,
+      age: ageToday(doc.age, doc.ageRecordedOn, day.today),
+      ageRecordedOn: doc.age === null || doc.age === undefined ? null : doc.ageRecordedOn ?? null,
+      gender: doc.gender ?? null,
       version: doc.version,
       flags: flags,
       /*
@@ -1121,10 +1237,23 @@ export class LeadService {
        * boundary. Jakarta has none; the next company's offices are not promised to.
        */
       lastEditedBy: editor ? { membershipId: editor, name: names.get(editor) ?? null } : null,
+      owner: { membershipId: doc.ownerMembershipId, name: names.get(doc.ownerMembershipId) ?? null },
       overdueDays: flags.includes('overdue') && doc.nextActionDate
         ? this.clock.daysBetween(day.timezone, doc.nextActionDate, day.today)
         : null,
+      // Filled for the owner by the reads and the writes that answer it (`withOwnProposals`, `list`).
+      proposals: null,
     };
+  }
+
+  /**
+   * **The owner's proposals on one lead a read or a write answers** (P19.7-T2 AC-12): so a row the screen redraws from a
+   * write's answer keeps its pill. Anybody but the owner — a leader writing a downline's lead — is answered `null`.
+   */
+  private async withOwnProposals(ctx: RequestContext, view: LeadView): Promise<LeadView> {
+    if (!this.proposalReadings || view.ownerMembershipId !== ctx.membershipId) return view;
+    const held = await this.proposalReadings.ofLeads(ctx, view.ownerMembershipId, [view.id]);
+    return { ...view, proposals: held.get(view.id) ?? null };
   }
 
   private async record(
@@ -1132,4 +1261,16 @@ export class LeadService {
   ): Promise<void> {
     await this.audit.record(ctx, { action, targetCollection: 'leads', targetId, after });
   }
+}
+
+/**
+ * **`scope` over the owners a list reaches** (P19.9-T1 AC-3; ADR-0232; OD-286 by its default): `own` keeps the caller
+ * alone, and only where the reach holds them; `team` everybody else it holds; none, all of them — `owner=`'s one member,
+ * which `list` alone leaves unscoped. **It narrows and never widens.** `null` — the whole office, which no row-reading grant gives a member today — narrows to the caller for
+ * `own` and stays the office for `team`, the caller left out by the list's own filter.
+ */
+export function scopedOwners(owners: string[] | null, scope: LeadScope | undefined, me: string): string[] | null {
+  if (scope === 'own') return owners === null || owners.includes(me) ? [me] : [];
+  if (scope === 'team') return owners === null ? null : owners.filter((id) => id !== me);
+  return owners;
 }

@@ -10,16 +10,16 @@ const rowsOf = (g: UnitGroup): UnitRow[] => [g.head, ...g.members, ...g.units.fl
 const everyRow = (v: UnitDashboardView): UnitRow[] => [...v.yourUnit.rows, ...v.units.flatMap(rowsOf)];
 
 /**
- * ***Chasing MDRT*** **and *Campaigns they're chasing*** on the Unit Dashboard (P18.5-T7 AC-7, AC-8; ADR-0122,
+ * ***Chasing MDRT*** **and *Campaigns they're chasing*** on the Unit Dashboard (P18.2-T7 AC-7, AC-8; ADR-0122,
  * ADR-0142 §3): ✓ is a chase of `MDRT_QUALIFICATION` not ended, the chips the chases not ended by title, both from the
  * campaigns module's one chase reader in the dashboard's one read — and only inside `campaign_qualification:read`'s
  * reach, the dashboard's own reach unchanged.
  */
-describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
+describe('the Unit Dashboard’s campaign parts (P18.2-T7)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   const db = () => mongoose.connection.db!;
-  /** Read in the API's English, as asserted below: nobody's choice is Bahasa Indonesia since P18.98-T4's exit. */
+  /** Read in the API's English, as asserted below: nobody's choice is Bahasa Indonesia since P18.10-T4's exit. */
   const read = (who: Who, query: { for?: string } = {}) => wired.unitDashboard.read(office.as(who).withReader(SOURCE_READER), query);
   const row = (v: UnitDashboardView, who: Who) => everyRow(v).find((r) => r.membershipId === office.id[who])!;
   const chase = (who: Who, code: string) => db().collection('campaignChases').insertOne({
@@ -51,7 +51,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
   }, 60_000);
   afterAll(stopMongo);
 
-  it('P18.5-T7 AC-7, AC-8 Sari’s unit: Rina ✓ with her chips by title; Budi —, his only chase ended', async () => {
+  it('P18.2-T7 AC-7, AC-8 Sari’s unit: Rina ✓ with her chips by title; Budi —, his only chase ended', async () => {
     const v = await read('SARI');
     expect(row(v, 'RINA')).toMatchObject({
       chasingMdrt: true,
@@ -61,7 +61,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     expect(row(v, 'SARI')).toMatchObject({ chasingMdrt: false, campaigns: [] });
   });
 
-  it('P18.5-T7 AC-7 two chips of one title are ordered by code, so two reads never shuffle them', async () => {
+  it('P18.2-T7 AC-7 two chips of one title are ordered by code, so two reads never shuffle them', async () => {
     const owner = office.as('OWNER');
     for (const code of ['ZETA_PUSH', 'ALPHA_PUSH']) {
       await wired.campaigns.create(owner, {
@@ -76,14 +76,14 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     ]);
   });
 
-  it('P18.5-T7 AC-7 Agus’s roster: his own ✓, Dimas ✓, Rina ✓ in Sari’s unit, the rest —', async () => {
+  it('P18.2-T7 AC-7 Agus’s roster: his own ✓, Dimas ✓, Rina ✓ in Sari’s unit, the rest —', async () => {
     const v = await read('AGUS');
     expect(Object.fromEntries(everyRow(v).map((r) => [r.name, r.chasingMdrt]))).toMatchObject({
       'Agus Salim': true, 'Dimas Pratama': true, 'Rina Wijaya': true, 'Budi Santoso': false, 'Indah Permatasari': false,
     });
   });
 
-  it('P18.5-T7 AC-7 the header tooltip is composed from the office’s MDRT campaign (ADR-0142 §3)', async () => {
+  it('P18.2-T7 AC-7 the header tooltip is composed from the office’s MDRT campaign (ADR-0142 §3)', async () => {
     expect((await read('AGUS')).mdrt).toEqual({
       running: true, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year — APE of Rp 2,4 M or more.',
     });
@@ -91,7 +91,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     expect((await read('RINA')).mdrt.running).toBe(true);
   });
 
-  it('P18.5-T7 AC-8 the reach is the dashboard’s, and the chases inside it are exactly campaign_qualification:read’s', async () => {
+  it('P18.2-T7 AC-8 the reach is the dashboard’s, and the chases inside it are exactly campaign_qualification:read’s', async () => {
     for (const leader of ['OWNER', 'AGUS', 'SARI', 'NINA', 'LUKAS', 'PEER_AB'] as const) {
       const ctx = office.as(leader);
       const v = await read(leader);
@@ -103,13 +103,16 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     }
   });
 
-  it('P18.5-T7 AC-8 an Agent-rung leader sees their own ✓ and — for a coachee their campaign read does not reach', async () => {
+  // Was *an Agent-rung leader sees their own ✓ and — for a coachee*: P19.9-T6 (ADR-0234) gave the Agent `own-downline`.
+  it('P18.2-T7 AC-8, P19.9-T6 AC-3 an Agent-rung leader reads their coachee’s chases too — every upline coaches', async () => {
     const v = await read('LUKAS');
     expect(row(v, 'LUKAS')).toMatchObject({ chasingMdrt: false, campaigns: [] });
-    expect(row(v, 'TARI')).toMatchObject({ chasingMdrt: null, campaigns: null });
+    // Her own chases, read — no longer the — of a row beyond the reader's reach.
+    expect(row(v, 'TARI').chasingMdrt).not.toBeNull();
+    expect(row(v, 'TARI').campaigns).not.toBeNull();
   });
 
-  it('P18.5-T8 review item 13 an MDRT campaign not yet begun is not running: the header says none is', async () => {
+  it('P18.2-T8 review item 13 an MDRT campaign not yet begun is not running: the header says none is', async () => {
     await db().collection('campaigns').updateOne({ kpmId: KPM_A, code: 'MDRT_QUALIFICATION' }, { $set: { startsAt: new Date('2026-10-01T00:00:00+07:00') } });
     expect((await read('AGUS')).mdrt).toEqual({
       running: false, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year. No MDRT campaign is running.',
@@ -117,7 +120,7 @@ describe('the Unit Dashboard’s campaign parts (P18.5-T7)', () => {
     await db().collection('campaigns').updateOne({ kpmId: KPM_A, code: 'MDRT_QUALIFICATION' }, { $set: { startsAt: new Date('2026-01-01T00:00:00+07:00') } });
   });
 
-  it('P18.5-T7 AC-7 says when the office runs no MDRT campaign, and nobody is ✓', async () => {
+  it('P18.2-T7 AC-7 says when the office runs no MDRT campaign, and nobody is ✓', async () => {
     await db().collection('campaigns').updateOne({ kpmId: KPM_A, code: 'MDRT_QUALIFICATION' }, { $set: { status: 'archived' } });
     const v = await read('AGUS');
     expect(v.mdrt).toEqual({ running: false, tooltip: 'Chasing MDRT (Million Dollar Round Table) this year. No MDRT campaign is running.' });

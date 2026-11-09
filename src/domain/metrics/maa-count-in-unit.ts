@@ -1,5 +1,6 @@
 /**
- * `MAA_COUNT_IN_UNIT` and `MONTHLY2_AA` (`metrics-and-definitions.md` §A.2, §A.7; Phase 18, D-period, OD-22).
+ * `MAA_COUNT_IN_UNIT` and `MONTHLY2_AA` (`metrics-and-definitions.md` §A.2, §A.7; Phase 18, D-period, OD-22; the
+ * average since P19.3-T1).
  *
  * Both count `MONTHLY_ACTIVE_AGENT` (`monthly-active-agent.ts`, ADR-0054) over a group's members: neither has a
  * definition of *active* of its own (invariant §8). Pure; the flags are the month table's cells read through
@@ -18,17 +19,22 @@ export function maaCountInUnit(flags: readonly (boolean | null)[], monthHeld: bo
 }
 
 /**
- * `MONTHLY2_AA` (OD-22 → option 1, as registered: *"the scope's members who were Monthly Active Agents in **each**
- * of the last two months the office's file holds"*) — and, over the Direct Unit and the Direct Group,
- * `MONTHLY2_AA_DU` and `MONTHLY2_AA_DG`. Each member's `MONTHLY_ACTIVE_AGENT` for the two months, `== true` in
- * both: **only active in both counts.** The caller passes `false` for a month the member was not yet a member, so
- * a new agent cannot count; a member the held month's file says nothing of is not active in it — the same reading
- * `MAA_COUNT_IN_UNIT` gives a month (the exit review, item 2). **`null` only while fewer than two months are
- * held** — the one *Not uploaded yet*.
+ * `MONTHLY2_AA` — and, over the Direct Unit and the Direct Group, `MONTHLY2_AA_DU` and `MONTHLY2_AA_DG` (§A.7; P19.3-T1,
+ * ADR-0201 §4, the data sources' Q6 default, *"Average monthly AA (D1)"*): **the mean, over the calendar year's months
+ * held up to the latest — the APE criterion's months — of the scope's members who were a Monthly Active Agent that
+ * month.** Each member's `MONTHLY_ACTIVE_AGENT` per month, in the months' order; the caller passes `false` for a month
+ * the member was not yet a member, so a new agent counts only from their month. A member the held month's file says
+ * nothing of (`null`) is not active in it — `MAA_COUNT_IN_UNIT`'s reading. **Exact**: compared with the company's
+ * threshold as it is, never rounded first. **`null` only when no month is held.**
+ *
+ * *Until P19.3-T1* it counted the members active in **each** of the last two months held (ADR-0134 §1), `null` with
+ * fewer than two.
  */
-export function monthly2ActiveCount(
-  members: readonly (readonly (boolean | null)[])[], monthsHeld: number, monthsNeeded: number,
-): number | null {
-  if (monthsHeld < monthsNeeded) return null;
-  return members.filter((flags) => flags.every((flag) => flag === true)).length;
+export function monthly2AverageCount(members: readonly (readonly (boolean | null)[])[], monthsHeld: number): number | null {
+  if (monthsHeld <= 0) return null;
+  let total = 0;
+  for (let month = 0; month < monthsHeld; month += 1) {
+    total += members.filter((flags) => flags[month] === true).length;
+  }
+  return total / monthsHeld;
 }

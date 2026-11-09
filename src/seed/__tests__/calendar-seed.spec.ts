@@ -93,13 +93,13 @@ describe.each([
     await expect(wired.calendar.readOne(rinaCtx, first.calendar.marked.declinedHuddle)).resolves.toMatchObject({ myAnswer: 'declined' });
   });
 
-  it('P18.95-T8 AC-2 Seed: Agus’s week holds a Zoom address and another meeting address, so Join Zoom and Join meeting can be walked', async () => {
+  it('P18.7-T8 AC-2 Seed: Agus’s week holds a Zoom address and another meeting address, so Join Zoom and Join meeting can be walked', async () => {
     const week = await wired.calendar.read(await as('agus@kpm0417.test'), {});
     expect(named(week, T.standup)!.notes).toBe(T.zoom);
     expect(named(week, T.goalReview)!.notes).toBe(T.goalReviewNotes);
   });
 
-  it('P18.95-T8 AC-2 Seed: Agus compares Sari’s month too — the same projection as her week, her client visit in full', async () => {
+  it('P18.7-T8 AC-2 Seed: Agus compares Sari’s month too — the same projection as her week, her client visit in full', async () => {
     const sari = await memberOf('sari@kpm0417.test');
     const month = await wired.calendar.read(await as('agus@kpm0417.test'), { view: 'month', for: String(sari._id) });
     expect(month.view).toBe('month');
@@ -172,6 +172,16 @@ describe.each([
     expect(perDay.get(first.calendar.marked.busiestDay)).toBeGreaterThan(3);
     const padding = month.days.filter((d) => !d.inPeriod).map((d) => d.date);
     expect(padding.some((date) => (perDay.get(date) ?? 0) > 0)).toBe(true);
+  });
+
+  it('P19.8-T3 AC-9 Seed: Agus’s Agenda from today holds Kickoff tim 2026 four days on, 09:00 to 13:00; his week two events at 09:00', async () => {
+    const agus = await as('agus@kpm0417.test');
+    const agenda = await wired.calendar.read(agus, { view: 'agenda', date: today });
+    const kickoff = named(agenda, T.kickoff)!;
+    expect([kickoff.date, kickoff.start, kickoff.end]).toEqual([addDays(today, 4), '09:00', '13:00']);
+    const week = await wired.calendar.read(agus, {});
+    const atNine = week.entries.filter((e) => 'title' in e && e.title === T.standup && e.start === '09:00');
+    expect(atNine).toHaveLength(2);
   });
 
   it('Seed: a second run on the same day writes nothing', async () => {

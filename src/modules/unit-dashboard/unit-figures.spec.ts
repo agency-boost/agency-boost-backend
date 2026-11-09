@@ -1,6 +1,6 @@
 import { activityPeriodOf, closingsIn, mondayOf, rosterScopes } from './unit-figures';
 
-/** The UI V1 rules of the Unit Dashboard (Phase 18.99 T4), pure. */
+/** The UI V1 rules of the Unit Dashboard (Phase 18.11 T4), pure. */
 describe('the Unit Dashboard’s UI V1 figures', () => {
   describe('UI-001 the Activities period', () => {
     it('UI-001 a week runs Monday to Sunday, whichever day names it', () => {

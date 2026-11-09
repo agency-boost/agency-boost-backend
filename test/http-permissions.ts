@@ -18,7 +18,7 @@ import { VALIDATION_PIPE_OPTIONS } from '@/bootstrap';
 
 /**
  * **The class of an Owner or Admin "with no field role"** — what every `officeOnly` harness gives the context beside
- * its `NO_RUNG`. A hierarchy grant matches the class since ADR-0156 (P18.8-T1), not the rung's code, so a context
+ * its `NO_RUNG`. A hierarchy grant matches the class since ADR-0156 (P18.5-T1), not the rung's code, so a context
  * that kept its `ab` while naming no rung would hold every AB grant. Impossible in data — every membership stands on
  * a rung and every rung gives a class — and exactly what the Owner and Admin columns of a matrix mean.
  */
@@ -60,7 +60,7 @@ export const EVERY_MEMBER: [string, RequestContext][] = [
 export const session: { current: RequestContext } = { current: SUPER_ADMIN };
 
 /**
- * **A saved language for whoever `session.current` is** (P18.98-T5 AC-1): what `users.locale` would hold. A spec that
+ * **A saved language for whoever `session.current` is** (P18.10-T5 AC-1): what `users.locale` would hold. A spec that
  * signs somebody in with a saved choice sets it; `StubAuth` reads it, as `ContextResolver` reads the row.
  */
 export const savedLanguage: { current: string | null } = { current: null };
@@ -71,7 +71,7 @@ export const savedLanguage: { current: string | null } = { current: null };
  * Which session is signed in — a real token, a real membership, impersonation — is
  * `auth.e2e.int.spec.ts`'s question. Whether `PermissionsGuard` then refuses is these specs'.
  *
- * **It resolves the request's reader as the guard does** (P18.98-T5 AC-1): the `Accept-Language` sent — `en` unless a
+ * **It resolves the request's reader as the guard does** (P18.10-T5 AC-1): the `Accept-Language` sent — `en` unless a
  * test sets another (`test/setup.ts`) — else `savedLanguage`, onto the request and the context alike.
  */
 export class StubAuth implements CanActivate {

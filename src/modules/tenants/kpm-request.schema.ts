@@ -57,9 +57,23 @@ export class KpmRequest {
   @Prop({ type: String, default: null, trim: true, maxlength: 500 })
   reason!: string | null;
 
-  /** What it became. Null until approved, and the only link back to the office. */
+  /**
+   * What it became. Null until approved, and the only link back to the office.
+   *
+   * **Written as soon as the office exists, before its Owner is set** (ADR-0191 §3, P19-T3 AC-3), so an approval that
+   * stops between the two is finished by the next press — the same office, never a second — and one that fails is
+   * undone by name. Cleared again when the office is undone.
+   */
   @Prop({ type: String, default: null })
   createdKpmId!: string | null;
+
+  /**
+   * **Machinery, never data**: when the approval now running started (ADR-0191 §3). There are no transactions
+   * (ADR-0002), so one press at a time holds the request; a second meets `TENANT_REQUEST_IN_PROGRESS`. A lease of two
+   * minutes, so an approval that died mid-way never locks a request for longer. `null` whenever nobody holds it.
+   */
+  @Prop({ type: Date, default: null })
+  approvingSince!: Date | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

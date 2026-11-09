@@ -1,12 +1,31 @@
 import * as heldMonths from './held-months';
-import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg } from './held-months';
+import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg, recruitmentMonthlyAvg } from './held-months';
 
 const M = 1_000_000 * 100;
 
 describe('the forum’s figures over the months held (P18.1-T1 AC-3, AC-4; OD-144)', () => {
-  it('P18.97-T1 AC-6 New AA (avg. monthly) is retired: nothing here computes it any more (ADR-0175 §2)', () => {
+  it('P18.9-T1 AC-6 New AA (avg. monthly) is retired: nothing here computes it any more (ADR-0175 §2)', () => {
     // Its scorecards keep the figures they froze (ADR-0129 §7); no function can recompute one.
-    expect(Object.keys(heldMonths).sort()).toEqual(['averageCaseSizeRealised', 'caseSubmissions', 'maaMonthlyAvg']);
+    // P19.3-T1 added `recruitmentMonthlyAvg`, the forum's FLC row (ADR-0203 §2).
+    expect(Object.keys(heldMonths).sort()).toEqual(['averageCaseSizeRealised', 'caseSubmissions', 'maaMonthlyAvg', 'recruitmentMonthlyAvg']);
+  });
+
+  it('P19.3-T1 AC-15 FLC (avg. monthly): the upload’s RECRUITMENT summed each month held, averaged; a single month its sum', () => {
+    // Three months held, one not: (4 + 0 + 5) ÷ 3.
+    expect(recruitmentMonthlyAvg([4, null, 0, 5])).toBe(3);
+    // A single month's column is that month's sum.
+    expect(recruitmentMonthlyAvg([7])).toBe(7);
+    expect(recruitmentMonthlyAvg([0])).toBe(0);
+    // No month held is pending data, never 0.
+    expect(recruitmentMonthlyAvg([null, null])).toBeNull();
+    expect(recruitmentMonthlyAvg([])).toBeNull();
+  });
+
+  it('P19.3-T1 AC-15 Avg. Case Size is recomputed over FY and YTD from the sums, never an average of each month’s size', () => {
+    // A year of two months: Rp 100 M over 1 policy, Rp 20 M over 4 — Rp 24 M a case, not the mean of 100 and 5.
+    const year = [{ apeMinor: 100 * M, policies: 1 }, { apeMinor: 20 * M, policies: 4 }];
+    expect(averageCaseSizeRealised(year)).toBe(24 * M);
+    expect(averageCaseSizeRealised(year)).not.toBe(((100 * M) / 1 + (20 * M) / 4) / 2);
   });
 
   it('P18.1-T1 AC-4 Avg. Monthly AA: MAA_COUNT_IN_UNIT of each month held, averaged; a month not held leaves it', () => {

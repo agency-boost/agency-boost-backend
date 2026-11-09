@@ -250,11 +250,49 @@ describe('the configuration controllers', () => {
     });
 
     /*
-     * P18.5-T1 AC-8 (the leak): this asserted the opposite until 2026-10-10 — *"readable by every member"* — and
+     * P18.2-T1 AC-8 (the leak): this asserted the opposite until 2026-10-10 — *"readable by every member"* — and
      * the read answers drafts and archived rows. The settings read is the office's administration's
      * (`training_settings:read`); an agent reads what is offered, at `/training`.
      */
-    it('P18.5-T1 AC-8 refuses a field member the settings read, as the batch refuses them its writes', async () => {
+    it('P19.6-T4 AC-1 an Owner and an Admin write a skill’s and a module’s Deskripsi singkat; over 160 is 400, an agent 403', async () => {
+      await wired.provisioning.seedTrainingTaxonomy(KPM_A);
+      const flat = (await wired.training.list(OWNER, true)).flatMap((c) => c.skills);
+      const skill = flat.find((s) => s.code === 'PROSPECTING')!;
+      const module = flat.flatMap((s) => s.modules).find((m) => m.code === 'PROSPECT_LIST')!;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [
+          { op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version, body: { description: '8 cara mendapat calon nasabah' } },
+          { op: 'trainingSkill.create', body: { code: 'FACT_FINDING', categoryCode: 'SALES', label: 'Fact finding', description: 'Menghitung kebutuhan' } },
+        ] })
+        .expect(201);
+      current = ADMIN;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingModule.update', id: module.id, expectedVersion: module.version, body: { description: 'Daftar 100 nama' } }] })
+        .expect(201);
+      const list = await request(app.getHttpServer()).get('/kpm/settings/training').expect(200);
+      const skills = list.body.flatMap((c: { skills: { code: string; description: string | null; version: number; modules: { code: string; description: string | null }[] }[] }) => c.skills);
+      expect(skills.find((s: { code: string }) => s.code === 'PROSPECTING')).toMatchObject({
+        description: '8 cara mendapat calon nasabah', version: skill.version + 1,
+      });
+      expect(skills.find((s: { code: string }) => s.code === 'FACT_FINDING')).toMatchObject({ description: 'Menghitung kebutuhan' });
+      expect(skills.flatMap((s: { modules: { code: string }[] }) => s.modules).find((m: { code: string }) => m.code === 'PROSPECT_LIST'))
+        .toMatchObject({ description: 'Daftar 100 nama' });
+
+      const refused = await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version + 1, body: { description: 'x'.repeat(161) } }] })
+        .expect(400);
+      expect(refused.body.error.code).toBe('VALIDATION_FAILED');
+      current = AGENT;
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'trainingSkill.update', id: skill.id, expectedVersion: skill.version + 1, body: { description: 'Milik saya' } }] })
+        .expect(403);
+    });
+
+    it('P18.2-T1 AC-8 refuses a field member the settings read, as the batch refuses them its writes', async () => {
       current = AGENT;
       await request(app.getHttpServer()).get('/kpm/settings/training').expect(403);
       await request(app.getHttpServer())
@@ -319,7 +357,7 @@ describe('the configuration controllers', () => {
     });
 
     /*
-     * The Phase 18.5 exit review (permission review B2): this asserted *"readable by every member"* until 2026-10-10,
+     * The Phase 18.2 exit review (permission review B2): this asserted *"readable by every member"* until 2026-10-10,
      * and the read answers the draft and names each training link by its working title, a draft module's included. The
      * settings read is the office's administration's (`activation_settings:read`); a field member reads their own
      * activation, named from what the office offers.
@@ -330,7 +368,7 @@ describe('the configuration controllers', () => {
       ['an AAB', new RequestContext('u-aab', 'none', member({
         membershipId: 'mem-e', orgLevelCode: 'AAB', hierarchyRole: 'aab', isKpmOwner: false,
       }) as never)],
-    ])('P18.5 exit review B2 refuses %s the settings read, as it refuses them both writes', async (_name, who) => {
+    ])('P18.2 exit review B2 refuses %s the settings read, as it refuses them both writes', async (_name, who) => {
       current = who;
       const res = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(403);
       expect(res.body.error.code).toBe('PERM_DENIED');
@@ -342,7 +380,7 @@ describe('the configuration controllers', () => {
         .post('/kpm/settings/activation-checklist/publish').expect(403);
     });
 
-    it('P18.5 exit review B2 the Owner, the Admin and a read-only session as the Owner read it; a Super Admin in no office is refused', async () => {
+    it('P18.2 exit review B2 the Owner, the Admin and a read-only session as the Owner read it; a Super Admin in no office is refused', async () => {
       for (const who of [OWNER, ADMIN, new RequestContext(OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true)]) {
         current = who;
         await request(app.getHttpServer()).get('/kpm/settings/activation-checklist').expect(200);
@@ -352,7 +390,7 @@ describe('the configuration controllers', () => {
       expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
-    it('P18.5 exit review B2 names a training link by the module’s working title here, a draft’s included — the settings read alone', async () => {
+    it('P18.2 exit review B2 names a training link by the module’s working title here, a draft’s included — the settings read alone', async () => {
       const module = (await wired.training.list(OWNER, true))
         .flatMap((c) => c.skills.flatMap((s) => s.modules)).find((m) => m.code === 'CLOSING_TECHNIQUES')!;
       const read = await request(app.getHttpServer()).get('/kpm/settings/activation-checklist');
@@ -369,6 +407,102 @@ describe('the configuration controllers', () => {
       // What `/kpm/config` would publish to every member names no draft: the module is not offered, so its code.
       const snapshot = await wired.activation.publishedForSnapshot(OWNER);
       expect(snapshot!.aspects[2].items[0].link).toMatchObject({ label: 'CLOSING_TECHNIQUES', route: null });
+    });
+  });
+
+  /*
+   * **An activity type's *Nama singkat*** (P19.8-T4 AC-5, AC-13; ADR-0229 §5, MOB UI-180): written where the name is —
+   * the batch the settings screen saves through and the single routes — by the Owner and an Admin; refused past the bound
+   * and to every field rung and a read-only session; another office's type is 404.
+   */
+  describe('P19.8-T4 an activity type’s short name (MOB UI-180)', () => {
+    const KPM_B = '66f0000000000000000000b1';
+    const typeOf = async (ctx: RequestContext, code: string) =>
+      (await wired.activity.list(ctx, true)).flatMap((c) => c.types).find((t) => t.code === code)!;
+    const field = (over: Partial<Record<string, unknown>>) => new RequestContext(
+      `u-${String(over.membershipId)}`, 'none', member({ isKpmOwner: false, ...over }) as never,
+    );
+    const AB = field({ membershipId: 'mem-ab', hierarchyRole: 'ab', orgLevelCode: 'AB' });
+    const AAB = field({ membershipId: 'mem-aab', hierarchyRole: 'aab', orgLevelCode: 'AAB' });
+    const READ_ONLY = new RequestContext(OWNER.userId, 'none', OWNER.membership, 'u-support', null, false, true);
+
+    it('P19.8-T4 AC-13 MOB UI-180 the office is given the seed’s short names, and the settings read returns them', async () => {
+      const res = await request(app.getHttpServer()).get('/kpm/settings/activity-types?includeArchived=true').expect(200);
+      const types = res.body.flatMap((c: { types: { code: string; shortLabel: string | null }[] }) => c.types);
+      expect(types.find((t: { code: string }) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi' });
+      // And /kpm/config, which every screen reads.
+      const config = await request(app.getHttpServer()).get('/kpm/config').expect(200);
+      expect(config.body.activity.flatMap((c: { types: unknown[] }) => c.types)
+        .find((t: { code: string }) => t.code === 'SELL_SUBMISSION')).toMatchObject({ shortLabel: 'Submission polis' });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 the Owner and an Admin write it through the batch and the single route; blank clears it', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [
+          { op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: ' Presentasi jual ' } },
+          { op: 'type.create', body: { code: 'SELL_REFERRAL', categoryCode: 'SELLING', label: 'Meminta referensi', shortLabel: 'Referensi' } },
+        ] })
+        .expect(201);
+      expect(await typeOf(OWNER, 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi jual', version: presentation.version + 1 });
+      expect(await typeOf(OWNER, 'SELL_REFERRAL')).toMatchObject({ shortLabel: 'Referensi' });
+
+      current = ADMIN;
+      const submission = await typeOf(OWNER, 'SELL_SUBMISSION');
+      const patched = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${submission.id}`).send({ shortLabel: 'SPAJ' }).expect(200);
+      expect(patched.body).toMatchObject({ code: 'SELL_SUBMISSION', label: 'Submission polis', shortLabel: 'SPAJ' });
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${submission.id}`).send({ shortLabel: '' }).expect(200);
+      expect(await typeOf(OWNER, 'SELL_SUBMISSION')).toMatchObject({ shortLabel: null, label: 'Submission polis' });
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 refuses a short name past 20 characters on both paths, writing nothing', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      const batch = await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: 'x'.repeat(21) } }] })
+        .expect(400);
+      expect(batch.body.error.code).toBe('VALIDATION_FAILED');
+      const single = await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'x'.repeat(21) }).expect(400);
+      expect(single.body.error.code).toBe('VALIDATION_FAILED');
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'x'.repeat(20) }).expect(200);
+      current = OWNER;
+      expect((await typeOf(OWNER, 'SELL_PRESENTATION')).shortLabel).toBe('x'.repeat(20));
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 refuses an AB, an AAB, an Agent and a read-only session, through the batch and the route', async () => {
+      const presentation = await typeOf(OWNER, 'SELL_PRESENTATION');
+      for (const who of [AB, AAB, AGENT, READ_ONLY]) {
+        current = who;
+        await request(app.getHttpServer())
+          .post('/kpm/settings/changes')
+          .send({ ops: [{ op: 'type.update', id: presentation.id, expectedVersion: presentation.version, body: { shortLabel: 'Milik saya' } }] })
+          .expect(403);
+        await request(app.getHttpServer())
+          .patch(`/kpm/settings/activity-types/${presentation.id}`).send({ shortLabel: 'Milik saya' }).expect(403);
+      }
+      expect((await typeOf(OWNER, 'SELL_PRESENTATION')).shortLabel).toBe('Presentasi');
+    });
+
+    it('P19.8-T4 AC-13 MOB UI-180 an Owner of one office cannot write another’s short name — 404, never 403', async () => {
+      await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create({
+        _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta',
+      });
+      await wired.provisioning.seedActivityTaxonomy(KPM_B);
+      const OWNER_B = new RequestContext('u-owner-b', 'none', member({ membershipId: 'mem-ob', kpmId: KPM_B }) as never);
+      const theirs = await typeOf(OWNER_B, 'SELL_PRESENTATION');
+
+      await request(app.getHttpServer())
+        .patch(`/kpm/settings/activity-types/${theirs.id}`).send({ shortLabel: 'Bukan milikmu' }).expect(404);
+      await request(app.getHttpServer())
+        .post('/kpm/settings/changes')
+        .send({ ops: [{ op: 'type.update', id: theirs.id, expectedVersion: theirs.version, body: { shortLabel: 'Bukan milikmu' } }] })
+        .expect(404);
+      expect((await typeOf(OWNER_B, 'SELL_PRESENTATION')).shortLabel).toBe('Presentasi');
     });
   });
 
@@ -414,7 +548,7 @@ describe('the configuration controllers', () => {
         .expect(400);
     });
 
-    it('P18.98-T5 AC-7 names the op that failed, its field sentences and a missing row in Indonesian for an Indonesian reader', async () => {
+    it('P18.10-T5 AC-7 names the op that failed, its field sentences and a missing row in Indonesian for an Indonesian reader', async () => {
       const ops = [
         { op: 'category.create', body: { code: 'REFERRALS', label: 'Referrals' } },
         { op: 'category.create', body: { code: 'x', label: '' } },

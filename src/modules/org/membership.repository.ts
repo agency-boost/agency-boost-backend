@@ -13,6 +13,24 @@ import { Membership, MembershipDocument } from './membership.schema';
  * below — and no escape hatch to the raw model. Adding one would defeat the chokepoint,
  * and nothing in this module has needed it.
  */
+/** A membership as *All members* reads it (`listMembershipsAcrossTenants`, ADR-0207 §2): the listed fields alone. */
+export interface MembershipListRow {
+  _id: unknown;
+  kpmId: string;
+  userId: string;
+  agentCode: string;
+  orgLevelCode: string;
+  role: 'ab' | 'aab' | 'agent';
+  leaderId: string | null;
+  status: 'active' | 'pending' | 'removed';
+  joinedAt?: Date | null;
+  joinDate?: string | null;
+  removedAt?: Date | null;
+  invitedAt?: Date | null;
+  adminAccess?: { isKpmAdmin?: boolean } | null;
+  createdAt?: Date;
+}
+
 /** Accounts counted, and how many of them signed in within 7 and 30 days (`distinctAccountsAcrossTenants`). */
 export interface AccountCounts {
   members: number;
@@ -56,6 +74,32 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
+   * **A linked login's office, and whether it administers it** (UI-169 item 5; ADR-0199 §1, §3): the one membership of
+   * one login — active or pending, as `ContextResolver` resolves a login's own — in whichever office holds it.
+   *
+   * **Deliberately unscoped, and named so** (invariant §1). The two logins of a link are global (invariant 2) and may sit
+   * in different offices, or one in none (a Super Admin's), so there is no tenant to ask within. It is read for exactly
+   * two things, and only from `auth/account-links.service.ts` (`named-cross-tenant-reads.tenancy.spec.ts`): whether a
+   * login may be linked at all — an Owner's, an Admin's or a Super Admin's — when a link is started and confirmed; and
+   * the caller's **own** other login's views on `GET /auth/me`. It returns the office id, the status and the admin flag,
+   * never a row of anything the office holds.
+   */
+  async officeRoleOfLoginAcrossTenants(
+    userId: string,
+  ): Promise<{ kpmId: string; status: 'active' | 'pending'; isKpmAdmin: boolean } | null> {
+    const row = await this.model
+      .findOne({ userId, status: { $in: ['active', 'pending'] }, deletedAt: null }, { kpmId: 1, status: 1, adminAccess: 1 })
+      .lean()
+      .exec();
+    if (!row) return null;
+    return {
+      kpmId: String(row.kpmId),
+      status: row.status as 'active' | 'pending',
+      isKpmAdmin: row.adminAccess?.isKpmAdmin ?? false,
+    };
+  }
+
+  /**
    * Who these memberships belong to, in whichever office holds each one.
    *
    * **Deliberately unscoped, and named so.** The Super Admin's audit console shows platform
@@ -80,6 +124,27 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
       userId: String(r.userId),
       agentCode: (r as { agentCode?: string | null }).agentCode ?? null,
     }));
+  }
+
+  /**
+   * **The agent codes registered in the offices named** (P19.5-T1 AC-11; ADR-0214 §7): every active membership's code,
+   * distinct, for the test of a template's agent-code pattern over every KPM on the template.
+   *
+   * **Deliberately unscoped, and named so.** The pattern is the template's, and the template's KPMs are many offices;
+   * the Super Admin who edits it is in none of them. Invariant §1 asks that such a read be an explicitly named method
+   * rather than an absent filter, and this is one: the caller must be a Super Admin, it is narrowed to the offices
+   * named, and it answers codes alone — never a name, an office or a row. A code the insurer issued is the company's,
+   * so naming up to five that do not match is what the publish dialog does (AA UI-018).
+   */
+  async agentCodesInOfficesAcrossTenants(ctx: RequestContext, kpmIds: readonly string[]): Promise<string[]> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'agentCodesInOfficesAcrossTenants');
+    }
+    if (kpmIds.length === 0) return [];
+    const codes = await this.model
+      .distinct('agentCode', { kpmId: { $in: [...kpmIds] }, status: 'active', deletedAt: null })
+      .exec() as unknown[];
+    return codes.filter((c): c is string => typeof c === 'string' && c.trim() !== '').sort();
   }
 
   /**
@@ -113,7 +178,38 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
-   * **How many live memberships stand on one rung, in whichever offices hold them** (ADR-0156 §5, P18.8-T1): what
+   * **The memberships of the named offices, for the Super Admin's *All members*** (ADR-0207 §2, §4; P19.4-T3 AC-1):
+   * one row per membership, active, pending or removed, in the offices `kpmIds` names — `kpmId` is written last, so
+   * nothing in `filter` can widen it — soft-deleted rows left out.
+   *
+   * **Deliberately unscoped, and named so**, as invariant §1 asks: the Super Admin is in no office. Anybody else is
+   * refused as an unscoped read is. Only the fields the list needs are read (`projection`): who, where, which rung and
+   * class, the leader, the status and its dates, the Admin flag and the invitation's stamp — never a figure. Who may
+   * call it, and why, is `named-cross-tenant-reads.tenancy.spec.ts`'s register.
+   */
+  async listMembershipsAcrossTenants(
+    ctx: RequestContext,
+    kpmIds: readonly string[],
+    filter: FilterQuery<MembershipDocument> = {},
+  ): Promise<MembershipListRow[]> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'listMembershipsAcrossTenants');
+    }
+    if (kpmIds.length === 0) return [];
+    return this.model
+      .find(
+        { ...filter, kpmId: { $in: [...kpmIds] }, deletedAt: null } as FilterQuery<MembershipDocument>,
+        {
+          kpmId: 1, userId: 1, agentCode: 1, orgLevelCode: 1, role: 1, leaderId: 1, status: 1, joinedAt: 1, joinDate: 1,
+          removedAt: 1, invitedAt: 1, 'adminAccess.isKpmAdmin': 1, createdAt: 1,
+        },
+      )
+      .lean<MembershipListRow[]>()
+      .exec();
+  }
+
+  /**
+   * **How many live memberships stand on one rung, in whichever offices hold them** (ADR-0156 §5, P18.5-T1): what
    * refuses a change of the rung's leader tier while anybody would be re-classed by it.
    *
    * **Deliberately unscoped, and named so.** A rung is the company's, and its members are in every office of that
@@ -140,7 +236,7 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
    * and rung code the active memberships, and by office the memberships that began and that were removed inside
    * `[monthStart, monthEndExclusive)` — no membership id, no name, nothing a member did (ADR-0011's line).
    *
-   * **Began by `joinedAt`, the system's stamp — not the join date** (P18.96-T5 AC-1, kept deliberately): this is the
+   * **Began by `joinedAt`, the system's stamp — not the join date** (P18.8-T5 AC-1, kept deliberately): this is the
    * platform's *adoption*, when people started on AgencyBoost, beside *left* by `removedAt`, another stamp. An office's
    * own counts of people read the join date (ADR-0172 §1); here an existing agent added today with a join date years
    * back is a member the platform gained this month.

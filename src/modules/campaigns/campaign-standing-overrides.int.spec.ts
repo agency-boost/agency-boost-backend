@@ -21,12 +21,12 @@ const APE = { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1 };
 const REASON = 'Persistency corrected by the carrier after the month locked.';
 
 /**
- * **The override's two routes over HTTP** (P18.6-T2 AC-5): `PUT` and `DELETE
+ * **The override's two routes over HTTP** (P18.3-T2 AC-5): `PUT` and `DELETE
  * /kpm/settings/campaigns/:code/standings/:membershipId/override`, with the real `PermissionsGuard`, the production
  * pipe and the real services over `test/coaching-office.ts` — 10:00 on Monday 14 September 2026 in Jakarta, August
  * locked. `AUGUST_PUSH` is final: Rina qualified, Budi not met; `SEPT_PUSH` runs.
  */
-describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
+describe('the override of a final standing over HTTP (P18.3-T2 AC-5)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
@@ -85,14 +85,14 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
     }
   }, 60_000);
 
-  it('P18.6-T2 AC-5 both routes declare campaign_qualification:override', () => {
+  it('P18.3-T2 AC-5 both routes declare campaign_qualification:override', () => {
     const declared = declaredPermissions(CampaignController);
     expect({ override: declared.override, clearOverride: declared.clearOverride })
       .toEqual({ override: 'campaign_qualification:override', clearOverride: 'campaign_qualification:override' });
   });
 
-  describe('who may (P18.6-T2 AC-5, roles §3.11)', () => {
-    it.each(['OWNER', 'ADMIN'] as const)('P18.6-T2 AC-5 positive: %s sets and clears an override', async (who) => {
+  describe('who may (P18.3-T2 AC-5, roles §3.11)', () => {
+    it.each(['OWNER', 'ADMIN'] as const)('P18.3-T2 AC-5 positive: %s sets and clears an override', async (who) => {
       as(who);
       const set = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(200);
       expect(set.body).toEqual({
@@ -104,7 +104,7 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       expect([await audits('campaign_standing.overridden'), await audits('campaign_standing.override_cleared')]).toEqual([1, 1]);
     });
 
-    it.each(['AGUS', 'SARI', 'RINA', 'BUDI'] as const)('P18.6-T2 AC-5 negative: %s is refused 403 PERM_DENIED, nothing written', async (who) => {
+    it.each(['AGUS', 'SARI', 'RINA', 'BUDI'] as const)('P18.3-T2 AC-5 negative: %s is refused 403 PERM_DENIED, nothing written', async (who) => {
       as(who);
       const res = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'campaign_qualification:override' } });
@@ -112,13 +112,13 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       expect(await db().collection('campaignStandings').countDocuments({ 'override.status': { $exists: true } })).toBe(0);
     });
 
-    it('P18.6-T2 AC-5 negative: a Super Admin outside a support session has no office — 403 TENANT_NO_MEMBERSHIP', async () => {
+    it('P18.3-T2 AC-5 negative: a Super Admin outside a support session has no office — 403 TENANT_NO_MEMBERSHIP', async () => {
       session.current = RequestContext.platform('root');
       const res = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(403);
       expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
-    it('P18.6-T2 AC-5 negative: a read-only support session is refused both, freezing nothing', async () => {
+    it('P18.3-T2 AC-5 negative: a read-only support session is refused both, freezing nothing', async () => {
       supporting('OWNER', true);
       const res = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(403);
       expect(res.body.error.code).toBe('PERM_DENIED');
@@ -127,14 +127,14 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       expect(await db().collection('campaignStandings').countDocuments({})).toBe(0);
     });
 
-    it('P18.6-T2 AC-5 positive: an elevated support session writes as the Owner, both actors on the entry', async () => {
+    it('P18.3-T2 AC-5 positive: an elevated support session writes as the Owner, both actors on the entry', async () => {
       supporting('OWNER', false);
       await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(200);
       const entry = await db().collection('auditLog').findOne({ action: 'campaign_standing.overridden' });
       expect(entry).toMatchObject({ actorUserId: 'u-operator', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER });
     });
 
-    it('P18.6-T2 AC-5 negative: an elevated session as a field member holds nothing', async () => {
+    it('P18.3-T2 AC-5 negative: an elevated session as a field member holds nothing', async () => {
       supporting('AGUS', false);
       await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(403);
     });
@@ -165,7 +165,7 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
     });
   });
 
-  describe('what it refuses (P18.6-T2 AC-5)', () => {
+  describe('what it refuses (P18.3-T2 AC-5)', () => {
     beforeEach(() => as('OWNER'));
 
     it.each([
@@ -173,18 +173,18 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       [{ status: 'qualified', reason: 'x'.repeat(501) }, 'reason must be 1–500 characters.'],
       [{ status: 'qualified' }, 'reason is required.'],
       [{ status: 'achieved', reason: 'x' }, 'status must be one of qualified, not_met.'],
-    ])('P18.6-T2 AC-5 400 VALIDATION_FAILED for %j', async (body, said) => {
+    ])('P18.3-T2 AC-5 400 VALIDATION_FAILED for %j', async (body, said) => {
       const res = await put('AUGUST_PUSH', 'BUDI', body).expect(400);
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { violations: expect.arrayContaining([said]) } });
     });
 
-    it('P18.6-T2 AC-5 400 for a field the body does not take — the pipe’s own refusal', async () => {
+    it('P18.3-T2 AC-5 400 for a field the body does not take — the pipe’s own refusal', async () => {
       const res = await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: 'x', by: 'me' }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
       expect(JSON.stringify(res.body.error)).toContain('by');
     });
 
-    it('P18.6-T2 AC-5 400 for a clear with no reason, with a blank one, or with no body at all', async () => {
+    it('P18.3-T2 AC-5 400 for a clear with no reason, with a blank one, or with no body at all', async () => {
       await put('AUGUST_PUSH', 'BUDI', { status: 'qualified', reason: REASON }).expect(200);
       for (const body of [{}, { reason: ' ' }, undefined]) {
         const res = await del('AUGUST_PUSH', 'BUDI', body).expect(400);
@@ -193,18 +193,18 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       expect(await audits('campaign_standing.override_cleared')).toBe(0);
     });
 
-    it('P18.6-T2 AC-5 400 for the status it already reads, naming it in details', async () => {
+    it('P18.3-T2 AC-5 400 for the status it already reads, naming it in details', async () => {
       const res = await put('AUGUST_PUSH', 'BUDI', { status: 'not_met', reason: 'x' }).expect(400);
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { status: 'not_met' } });
     });
 
-    it('P18.6-T2 AC-5 409 CAMPAIGN_STANDING_NOT_FINAL before final', async () => {
+    it('P18.3-T2 AC-5 409 CAMPAIGN_STANDING_NOT_FINAL before final', async () => {
       const res = await put('SEPT_PUSH', 'RINA', { status: 'not_met', reason: 'x' }).expect(409);
       expect(res.body.error).toMatchObject({ code: 'CAMPAIGN_STANDING_NOT_FINAL', details: { code: 'SEPT_PUSH' } });
       await del('SEPT_PUSH', 'RINA', { reason: 'x' }).expect(409);
     });
 
-    it('P18.6-T2 AC-5 404 NOT_FOUND: an unknown campaign, another office’s member, a non-chaser, a clear with no override', async () => {
+    it('P18.3-T2 AC-5 404 NOT_FOUND: an unknown campaign, another office’s member, a non-chaser, a clear with no override', async () => {
       await put('NO_SUCH_PUSH', 'BUDI', { status: 'qualified', reason: 'x' }).expect(404);
       await put('AUGUST_PUSH', 'B_AGENT', { status: 'qualified', reason: 'x' }).expect(404);
       await put('AUGUST_PUSH', 'not-an-id', { status: 'qualified', reason: 'x' }).expect(404);
@@ -213,14 +213,14 @@ describe('the override of a final standing over HTTP (P18.6-T2 AC-5)', () => {
       await del('AUGUST_PUSH', 'BUDI', { reason: 'x' }).expect(404);
     });
 
-    it('P18.6-T2 AC-5 takes the campaign’s code in any case', async () => {
+    it('P18.3-T2 AC-5 takes the campaign’s code in any case', async () => {
       await put('august_push', 'BUDI', { status: 'qualified', reason: REASON }).expect(200);
     });
   });
 
-  /** **The override's refusals in Bahasa Indonesia** (P18.98-T5 AC-7): the codes and details as in English. */
-  describe('P18.98-T5 AC-7 the override’s refusals in Indonesian', () => {
-    it('P18.98-T5 AC-7 one’s own result, a result not final, the status it already reads and a missing reason', async () => {
+  /** **The override's refusals in Bahasa Indonesia** (P18.10-T5 AC-7): the codes and details as in English. */
+  describe('P18.10-T5 AC-7 the override’s refusals in Indonesian', () => {
+    it('P18.10-T5 AC-7 one’s own result, a result not final, the status it already reads and a missing reason', async () => {
       as('OWNER');
       const own = await put('AUGUST_PUSH', 'OWNER', { status: 'qualified', reason: REASON }).set(...IN_INDONESIAN).expect(400);
       expect(own.body.error).toMatchObject({

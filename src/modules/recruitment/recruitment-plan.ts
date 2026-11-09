@@ -12,7 +12,7 @@ import { briefChipLabel, RECRUITMENT_REFUSALS } from './recruitment.messages';
 
 const SAY = RECRUITMENT_REFUSALS.VALIDATION_FAILED;
 
-/** A chip: its code, and its label — the registry's, written for the reader (P18.98-T7). */
+/** A chip: its code, and its label — the registry's, written for the reader (P18.10-T7). */
 export interface Choice {
   code: string;
   label: string;
@@ -44,7 +44,7 @@ export interface RecruitmentPlan {
 type ChipCode = RecruitmentTypeCode | RecruitmentMotivationCode | RecruitmentHesitationCode;
 
 /**
- * A chip as served: its code, and its label **in the reader's language** (P18.98-T7; ADR-0179 §7) — the platform's
+ * A chip as served: its code, and its label **in the reader's language** (P18.10-T7; ADR-0179 §7) — the platform's
  * words, the English the registry's byte for byte. The playbook's own words are the company's, and stay as typed.
  */
 const choiceFor = (reader: Reader) => ({ code }: { code: ChipCode }): Choice =>

@@ -3,7 +3,7 @@ import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import { GOAL_MODES, type GoalMode } from './goal.schema';
 import { GOAL_REFUSALS } from './goals.messages';
 
-/** A goal's field sentences, in both languages (P18.98-T5 AC-3): its own, and the shared *… is required.* */
+/** A goal's field sentences, in both languages (P18.10-T5 AC-3): its own, and the shared *… is required.* */
 const SAY = GOAL_REFUSALS.VALIDATION_FAILED;
 const REQUIRED = VALIDATION_REFUSALS.VALIDATION_FAILED.required;
 
@@ -95,6 +95,15 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
    */
   for (const field of MONEY) {
     /*
+     * **`null` clears the typed APE produced** (P19.8-T5, ADR-0230 §5): Goal Settings' *Pakai otomatis*, saved — the
+     * figure the member typed over the office's goes, and the office's is read again. Nothing typed is 0, as the
+     * Summary's *Hapus* stores it through `checkEstimate`.
+     */
+    if (field === 'apeAchievedMinor' && raw(body, field) === null) {
+      out.apeAchievedMinor = 0;
+      continue;
+    }
+    /*
      * **The APE produced is the one money field a save may leave out** (S1 of the T17–T20 permission review): a screen
      * sends it only when the reader changed it in this edit, and absent means *keep the stored figure* (`typedApeOf`) —
      * so a coach saving the target never writes back, over the member's newer figure, the one they read.
@@ -147,6 +156,22 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
 }
 
 /**
+ * **What `PUT /goals/:period/ape-estimate` takes** (P19.1-T4, UI-157 item 4; ADR-0195 §2): `{ apeAchievedMinor }`, whole
+ * IDR sen in the goal's money bounds, nothing else — the member's own estimate of the APE produced so far this year.
+ * `null` is *Hapus*, and clears it to 0, nothing typed — as 0 does.
+ */
+export function checkEstimate(body: unknown): number {
+  if (raw(body, 'apeAchievedMinor') === null) {
+    new Fields(body, ['apeAchievedMinor']).done({});
+    return 0;
+  }
+  const f = new Fields(body, ['apeAchievedMinor']);
+  const value = f.number('apeAchievedMinor', GOAL_BOUNDS.money, true);
+  if (value !== undefined && !Number.isInteger(value)) f.violations.push(SAY.wholeSen({ field: 'apeAchievedMinor' }));
+  return f.done({ apeAchievedMinor: value as number }).apeAchievedMinor;
+}
+
+/**
  * **Which typed *APE yang sudah dicapai tahun ini* a save or a preview keeps** (ADR-0075, partly reversed by
  * ADR-0183).
  *
@@ -154,14 +179,14 @@ export function checkGoal(body: unknown, opts: { partial?: boolean } = {}): Chec
  *   screens send it only when the reader changed it in this edit, so a coach saving the target does not write back the
  *   figure they read over the member's newer one. A body that carries it is an edit, and the last write wins.
  *
- * - **The member's own plan**: what they typed, always — measured against only while the office holds no figure, and
- *   stored as theirs either way (P9-T6).
+ * - **The member's own plan**: what they typed, always — also over the office's figure since ADR-0230 (D-36, MOB
+ *   UI-190) — measured against while it is the newer of the two (`typedInForce`), and stored as theirs either way.
  * - **Somebody else's plan** — a leader who coaches them, or the office's Owner or Admin, the reach `goal:update`
  *   already gives a save (§3.6) — **what they typed, when the office holds no year-to-date figure for the year**
  *   (ADR-0183: the member's figure is often nobody's until a leader types it in a 1:1).
- * - **An office figure — uploaded or corrected — locks it for everybody but the member**: somebody else's typing is
- *   *ignored*, not refused, and the member's stored figure is kept. Ignored because the plan around it is still theirs
- *   to save, and the screen never offers the field in that state (`PillReadOnly`).
+ * - **An office figure — uploaded or corrected — locks it for everybody but the member** (ADR-0183, kept by ADR-0230
+ *   §7): somebody else's typing is *ignored*, not refused, and the member's stored figure is kept. Ignored because the
+ *   plan around it is still theirs to save, and the screen never offers the field in that state (`PillReadOnly`).
  *
  * Pure, so the rule is pinned without a database.
  */
@@ -196,6 +221,47 @@ export function typedByAfter({ before, after, savedBy, typedBefore }: {
   typedBefore: string | null | undefined;
 }): string | null {
   return after !== before ? savedBy : (typedBefore ?? null);
+}
+
+/**
+ * **When the office last wrote a member's year to date** (P19.8-T5; ADR-0230 §6): the later of the newest correction
+ * among the year's months (`HeldFigure.correctedAt`) and the year's latest import standing — a committed upload, the
+ * office's file for any of its months. `null` when neither moment is known. Pure.
+ */
+export function officialWrittenAt(correctedAt: Date | null, latestImport: Date | null): Date | null {
+  if (correctedAt === null) return latestImport;
+  if (latestImport === null) return correctedAt;
+  return correctedAt.getTime() >= latestImport.getTime() ? correctedAt : latestImport;
+}
+
+/**
+ * **Whether the typed *APE yang sudah dicapai tahun ini* is the figure the member's own screens measure against**
+ * (P19.8-T5; ADR-0230 §6, OD-279's default, amending ADR-0195 §3) — **the newer wins**:
+ *
+ * - **nothing typed** (0) is never the figure: the office's, or nothing;
+ * - **with no office figure** for the year, the typed one, as it always was (P9-T6);
+ * - **with one**, the typed figure only when it was typed **after** the office last wrote the year (`officialWrittenAt`);
+ *   an import or a correction written after it replaces it. A moment either side does not know — a plan from before
+ *   `apeAchievedTypedAt` was recorded, an office figure no upload or correction dates — leaves the office's figure in
+ *   force, as ADR-0195 had it.
+ *
+ * For the member's own screens and their coach's view of the member's plan only: every leader's and the office's read
+ * takes the office's figure whatever this says (ADR-0230 §7, `officialGoalFigures`). Pure.
+ */
+export function typedInForce({ typedMinor, typedAt, held, officialAt }: {
+  /** The figure the plan stores (0 is nothing typed). */
+  typedMinor: number;
+  /** When it was typed: `apeAchievedTypedAt`, or this moment for a figure a save or a preview is taking now. */
+  typedAt: Date | null;
+  /** Whether the office holds a year-to-date figure for the year. */
+  held: boolean;
+  /** When the office last wrote it (`officialWrittenAt`). */
+  officialAt: Date | null;
+}): boolean {
+  if (typedMinor <= 0) return false;
+  if (!held) return true;
+  if (typedAt === null || officialAt === null) return false;
+  return typedAt.getTime() > officialAt.getTime();
 }
 
 /** `Fields` collects its own; this reaches the raw value for the cases it does not cover. */

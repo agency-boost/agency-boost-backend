@@ -1,6 +1,7 @@
-import { formatDateTime } from '@/common/format/format';
+import { formatDateTime, formatMonth } from '@/common/format/format';
 import { readerOf, type Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
+import { quoteNotice } from './billing-quote.messages';
 import { NOTICE_MESSAGES } from './notification.messages';
 import { NotificationTemplate, NotificationTemplateId, TEMPLATE_CHANNELS } from './notification.types';
 
@@ -24,7 +25,7 @@ function nameOf(payload: Record<string, unknown>, keys: readonly string[], fallb
 }
 
 /**
- * **Who asked to join** (P18.96-T1 AC-3). `requestLeader` writes the asker's name as `askerName`; the demo seed and
+ * **Who asked to join** (P18.8-T1 AC-3). `requestLeader` writes the asker's name as `askerName`; the demo seed and
  * every notice stored before this read wrote `fullName`. The template read only `fullName`, so every real request
  * said *"Somebody asked to join your unit"*. Either is the asker's name; `askerName` first, as the sender writes it.
  */
@@ -34,6 +35,31 @@ const ASKER_KEYS = ['askerName', 'fullName'] as const;
 const JOINER_KEYS = ['joinerName', 'fullName'] as const;
 
 const SAY = NOTICE_MESSAGES;
+
+/**
+ * **A template kind, by the name of the settings screen it changes** (ADR-0208 §7): kept English in both languages, as
+ * the screens' own names are (§A.3).
+ */
+const SETTING_NAME: Readonly<Record<string, string>> = {
+  activity_taxonomy: 'Activity types',
+  ratio_set: 'Ratio benchmarks',
+  lead_pipeline: 'Lead statuses',
+  training_taxonomy: 'Training',
+  activation_checklist: 'Activation checklist',
+  capability_ladder: 'Capability mapping',
+  event_types: 'Events',
+};
+
+/** **Each kind's settings screen**, for the notice's link (ADR-0208 §7). */
+const SETTING_ROUTE: Readonly<Record<string, string>> = {
+  activity_taxonomy: '/kpm/settings/activity-types',
+  ratio_set: '/kpm/settings/ratio-benchmarks',
+  lead_pipeline: '/kpm/settings/lead-statuses',
+  training_taxonomy: '/kpm/settings/training',
+  activation_checklist: '/kpm/settings/activation-checklist',
+  capability_ladder: '/kpm/settings/capability-mapping',
+  event_types: '/kpm/settings/events',
+};
 
 /** What a notification says: its title and its detail, each written for the reader. */
 export interface NoticeWords {
@@ -50,7 +76,7 @@ export interface NoticeWords {
  * anything the product depends on"* — so what a row says is product copy, not a
  * rendering detail a client may improvise. One source, quoted by the manual books.
  *
- * **In the reader's language, when it is read** (P18.98-T5 AC-4; ADR-0179 §7): the inbox composes each row for the
+ * **In the reader's language, when it is read** (P18.10-T5 AC-4; ADR-0179 §7): the inbox composes each row for the
  * request's reader, so a notice stored before the phase reads in the new language too, and the email renders the same
  * words for its recipient (`email-renderer.ts`). A name and a reason in the payload are shown as typed; a figure — an
  * event's time — is written in the reader's figures' language. The words are `NOTICE_MESSAGES`'.
@@ -79,7 +105,7 @@ export function describeNotification(
       return { title: say(SAY.joinRequestDeclined), detail: reasonOr(SAY.joinRequestDeclinedDetail) };
     case NotificationTemplate.MEMBER_TAGGED_BY_LEADER:
       /*
-       * **One template, two readers** (P18.96-T1 AC-3). A tag (`ApprovalsService.tag`, or AgencyBoost approving one
+       * **One template, two readers** (P18.8-T1 AC-3). A tag (`ApprovalsService.tag`, or AgencyBoost approving one
        * past the leader limit) tells the member, `via: 'tagged'`; a leader code redeemed (`LeaderCodeService.redeem`)
        * tells the **leader** whose code it was, `via: 'leader-code'`. The member's sentence reached the leader, who
        * read *"A leader added you to their unit"* about somebody joining theirs.
@@ -92,7 +118,7 @@ export function describeNotification(
       }
       return { title: say(SAY.taggedByLeader), detail: say(SAY.taggedByLeaderDetail) };
     /*
-     * P18.96-T3 (ADR-0170 §2, §4): an invite accepted, a transfer asked for, and its decision — which reads by who it
+     * P18.8-T3 (ADR-0170 §2, §4): an invite accepted, a transfer asked for, and its decision — which reads by who it
      * is addressed to (`audience`): whoever asked, the member who moved, or the leader they left.
      */
     case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
@@ -180,6 +206,39 @@ export function describeNotification(
         : { title: say(SAY.supportInYourOffice), detail: reasonOr(SAY.supportHelpingDefault) };
     case NotificationTemplate.IMPERSONATION_ELEVATED:
       return { title: say(SAY.supportElevated), detail: reasonOr(SAY.supportElevatedDefault) };
+    case NotificationTemplate.TEMPLATE_APPLIED: {
+      // The settings changed, by their own names (§A.3), in the order the push applied them.
+      const kinds = Array.isArray(payload.kinds) ? (payload.kinds as unknown[]).map(String) : [];
+      const named = kinds.map((kind) => SETTING_NAME[kind]).filter((n): n is string => Boolean(n));
+      const sections = named.length ? [...new Set(named)].join(', ') : say(SAY.someSettings);
+      return {
+        title: say(SAY.templateApplied({ name: name(payload, 'templateName', say(SAY.aTemplate)) })),
+        detail: say(payload.awaitingPublish === true
+          ? SAY.templateAppliedWaiting({ sections })
+          : SAY.templateAppliedDetail({ sections })),
+      };
+    }
+    // P19.4-T3 (ADR-0211 §5): a quote for the Owner's KPM — its plan, leaders and total; the email holds the rest.
+    case NotificationTemplate.BILLING_QUOTE_RECEIVED:
+      return quoteNotice(payload, say);
+    case NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED: {
+      // P19.5-T1 AC-17 (AA UI-019): the new columns by their names in the reader's language, from their first month.
+      const version = typeof payload.version === 'number' ? payload.version : 0;
+      const added = Array.isArray(payload.newColumns)
+        ? (payload.newColumns as { label?: { id?: string; en?: string }; effectiveFrom?: string }[])
+        : [];
+      const names = added.map((c) => (reader.language === 'en' ? c.label?.en || c.label?.id : c.label?.id) ?? '')
+        .filter(Boolean);
+      const months = added.map((c) => c.effectiveFrom).filter((m): m is string => typeof m === 'string').sort();
+      return {
+        title: names.length && months.length
+          ? say(SAY.analyticsColumnsAdded({
+            n: names.length, names: names.join(', '), month: formatMonth(months[0], reader.language),
+          }))
+          : say(SAY.analyticsVersion({ version })),
+        detail: say(SAY.analyticsFollows({ name: name(payload, 'templateName', say(SAY.aTemplate)), version })),
+      };
+    }
     case NotificationTemplate.EVENT_REMINDER:
       return {
         title: say(SAY.eventComingUp({ title: name(payload, 'title', say(SAY.anEvent)) })),
@@ -208,9 +267,9 @@ function transferDecided(payload: Record<string, unknown>, say: (sentence: Sente
 }
 
 /**
- * **An event's time and place**, the reminder's detail (P18.95-T7 AC-4; the client's UI review of 2026-10-26, UI-030):
+ * **An event's time and place**, the reminder's detail (P18.7-T7 AC-4; the client's UI review of 2026-10-26, UI-030):
  * *9 Nov 2026, 09.00 · Kantor KPM* — its start on the office's clock, through the shared formatter (ADR-0167 §1), in the
- * reader's figures' language (*9 Nov 2026, 09:00* in English, P18.98-T5), and where it is as the office wrote it. It
+ * reader's figures' language (*9 Nov 2026, 09:00* in English, P18.10-T5), and where it is as the office wrote it. It
  * said *"Check the time and where it is."*, which sent the reader looking for both. Either half alone when the payload
  * holds one; `null` when it holds neither — a reminder written before the payload carried them — and the old sentence
  * is still true of it.
@@ -227,7 +286,7 @@ function whenAndWhere(payload: Record<string, unknown>, reader: Reader): string 
 }
 
 /**
- * The leader's request inbox: **`/new-hires`'s *Review requests***, opened by `?review=requests` (P18.96-T3 AC-5,
+ * The leader's request inbox: **`/new-hires`'s *Review requests***, opened by `?review=requests` (P18.8-T3 AC-5,
  * ADR-0170 §5). It was the *Pending Requests* tab of User management, which lists the same requests and stays.
  */
 export const JOIN_REQUEST_INBOX = '/new-hires?review=requests';
@@ -251,11 +310,11 @@ const wellFormed = (value: unknown, shape: RegExp): value is string => typeof va
  *   week, `/calendar?entry={entryId}&date={date}`; a cancellation opens the week it was in,
  *   `/calendar?date={date}`, since the entry no longer reads. A payload without a well-formed id or date
  *   opens `/calendar`.
- * - **A join request** (P18.96-T1 AC-3) opens the leader's request inbox, `/new-hires?review=requests` since P18.96-T3
+ * - **A join request** (P18.8-T1 AC-3) opens the leader's request inbox, `/new-hires?review=requests` since P18.8-T3
  *   (*Review requests* on *New hires*; `/user-management/pending` until then), where it is
  *   approved or declined. It goes only to an AB or an AAB, who reach that route. The payload names nobody's row,
  *   so the address names none either.
- * - **A transfer request** (P18.96-T3, ADR-0170 §4) opens the office's *All Members* on its *Pending* tab,
+ * - **A transfer request** (P18.8-T3, ADR-0170 §4) opens the office's *All Members* on its *Pending* tab,
  *   `/people/members?tab=pending`, where the Owner and the Admins decide it; **an accepted invite** opens `/new-hires`.
  * - **Every other item is `null`**.
  */
@@ -273,11 +332,20 @@ export function inboxAddress(templateId: string, payload: Record<string, unknown
       return calendarEntryAddress(payload);
     case NotificationTemplate.JOIN_REQUEST_RECEIVED:
       return JOIN_REQUEST_INBOX;
-    // P18.96-T3: a transfer waits on the office's Pending tab; an accepted invite is in the leader's unit.
+    // P18.8-T3: a transfer waits on the office's Pending tab; an accepted invite is in the leader's unit.
     case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
       return '/people/members?tab=pending';
     case NotificationTemplate.MEMBER_INVITE_ACCEPTED:
       return '/new-hires';
+    // ADR-0208 §7: the settings screen of the first section applied — training's, where the material and its count show.
+    // P19.5-T1 AC-17: the Data upload, whose banner names the template and its version.
+    case NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED:
+      return '/kpm/data-upload';
+    case NotificationTemplate.TEMPLATE_APPLIED: {
+      const kinds = Array.isArray(payload.kinds) ? (payload.kinds as unknown[]).map(String) : [];
+      const first = kinds.includes('training_taxonomy') ? 'training_taxonomy' : kinds.find((k) => SETTING_ROUTE[k]);
+      return first ? SETTING_ROUTE[first] : null;
+    }
     default:
       return null;
   }

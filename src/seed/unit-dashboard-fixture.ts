@@ -34,7 +34,7 @@ import { seedObjectId } from './coaching-fixture';
  * | Signed in as | Sees |
  * |---|---|
  * | `agus@kpm0417.test` (AB) | The whole roster: *Your Unit* — Agus (*You*), Dimas, Indah, Siti; units — Arief (Novi, Wahyu), Dewi alone, Sari (Budi, Rina, Yanti). Every status, every *Last 1:1* (`coaching-fixture.ts`'s table) |
- * | | **Production.** Budi and Yanti are left out of this month's file (`demo.ts`), so their month reads *Not uploaded yet* and their unit's month total names two missing. **New:** Sari's correction of **Budi's year to date** through *Update production* — under *This year* Budi's goal cell carries the correction's mark with Sari's name, and the production cell's year shows it; his month stays *Not uploaded yet*, as his Summary has always read |
+ * | | **Production.** Budi and Yanti are left out of this month's file (`demo.ts`), so their month reads *Not uploaded yet* and their unit's month total names two missing. **New:** Sari's correction of **Budi's month** through *Update production* — his this month's APE, Rp 14 juta, the company report's figure — so the production cell and *This year* (the sum of his months, P19.5-T2) carry the correction's mark with Sari's name. *Since P19.5-T2* a leader corrects a month, never a year to date, which is the months' sum (R4) |
  * | | **Leads.** Budi's recruitment lead promised this month (*Pak Andi Kurniawan*), so *Your AABs* reads *1 candidate*. **New:** a recruitment lead of Indah's promised this month (*Sdri. Laras Wulandari*), so *Your unit* reads *1 candidate* |
  * | | **Follow-up** (OD-140, typed or from a lead — nothing new is seeded for it): **Sari** *Overdue 9d*, a typed item of her last 1:1 with Agus twelve days ago (*Go through Budi's lapsed prospects with him*); **Indah** *Overdue 2d*, a lead action her 1:1 four days ago froze (*Collect the signed SPAJ.*); **Rina** *Overdue 6d*, a lead action today's 1:1 froze as Pak Hendro's lead stood (*Chase the illustration.*) |
  * | `admin@kpm0417.test` opening Agus's unit (`/unit/dashboard/{agus}`) | The same rows, **without a lead's text** (roles §3.7): the Admin coaches none of them, so no lead action is a follow-up — Sari's typed item stands (*Overdue 9d*), Indah's falls back to a typed item (*Overdue 1d*), Rina's to one dated two days ahead. No row opens coaching (`coached: false`). The Owner, the root AB above them all, reads what Agus reads |
@@ -50,7 +50,7 @@ import { seedObjectId } from './coaching-fixture';
  *
  * **Written once, until `--reset`.** The lead's `_id` is derived (`seedObjectId`), and the correction's marker
  * is its audit row for the month: a re-run writes nothing, a run in a new month corrects that month's, and a
- * year to date somebody already corrected by hand this month — in a walk — is left as they left it. A month
+ * month somebody already corrected by hand — in a walk — is left as they left it. A month
  * locked by hand is left alone too.
  */
 
@@ -65,8 +65,11 @@ export const UNIT_DASHBOARD_INDAH_LEAD = {
   nextActionNote: 'Undang ke BOP hari Kamis.',
 } as const;
 
-/** Sari's correction of Budi's year to date: the company report's figure, Rp 14 M above last month's. */
-export const UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH = 14 * MINOR_UNITS_PER_RP_MILLION;
+/**
+ * Sari's correction of Budi's month: the company report's figure, Rp 14 M. *Since P19.5-T2* (R4) a correction of his
+ * year to date — what this was — is refused: the year to date is the months' sum, and the month is what Sari corrects.
+ */
+export const UNIT_DASHBOARD_BUDI_THIS_MONTH = 14 * MINOR_UNITS_PER_RP_MILLION;
 
 /** The derived id of the lead this fixture writes. */
 export const unitDashboardLeadId = (kpmId: string) => seedObjectId('unit-dashboard-fixture', 'lead', kpmId, 'indah-recruitment');
@@ -120,19 +123,13 @@ export async function seedUnitDashboardFixture(deps: UnitDashboardFixtureDeps): 
     written += 1;
   }
 
-  // ---- Sari's correction of Budi's year to date, through *Update production*'s own function.
+  // ---- Sari's correction of Budi's month, through *Update production*'s own function.
   const marked = await Audit.exists({
     kpmId, action: 'upload.cell_corrected', targetMembershipId: deps.budi, 'after.surface': 'unit_dashboard', 'after.month': month,
   }).exec();
   const budiThisMonth = await MonthRows.findOne({ kpmId, membershipId: deps.budi, month, deletedAt: null }).lean().exec();
-  const alreadyCorrected = (budiThisMonth as { apeYtd?: { provenance?: string } } | null)?.apeYtd?.provenance === 'corrected';
+  const alreadyCorrected = (budiThisMonth as { values?: { APE?: { provenance?: string } } } | null)?.values?.APE?.provenance === 'corrected';
   if (!marked && !alreadyCorrected) {
-    const [lastHeld] = await MonthRows.find({
-      kpmId, membershipId: deps.budi, deletedAt: null, month: { $gte: `${month.slice(0, 4)}-01`, $lt: month }, 'apeYtd.value': { $ne: null },
-    }).sort({ month: -1 }).limit(1).lean().exec();
-    const ytd = ((lastHeld as { apeYtd?: { value?: number } } | undefined)?.apeYtd?.value ?? 0)
-      + UNIT_DASHBOARD_BUDI_YTD_ABOVE_LAST_MONTH;
-
     const memberships = new MembershipRepository(mongoose.model(Membership.name, MembershipSchema, undefined, RECOMPILE) as never);
     const audit = new AuditService(Audit as never);
     const months = new ProductionMonths(
@@ -152,7 +149,7 @@ export async function seedUnitDashboardFixture(deps: UnitDashboardFixtureDeps): 
     try {
       const { revision } = await months.state(asSari, month);
       const result = await corrections.correctApe(asSari, {
-        month, revision, rows: [{ membershipId: deps.budi, apeYtdMinor: ytd }],
+        month, revision, rows: [{ membershipId: deps.budi, apeMonthlyMinor: UNIT_DASHBOARD_BUDI_THIS_MONTH }],
         reason: UNIT_DASHBOARD_CORRECTION_REASON, surface: 'unit_dashboard',
       });
       written += result.updated;

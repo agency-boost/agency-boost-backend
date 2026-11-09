@@ -68,7 +68,7 @@ describe('reading an event body', () => {
       ...valid, audience: { issuer: 'kpm', scope: 'select_agents', inviteeMembershipIds: 'a' },
     })).toThrow(/must be a list/);
 
-    // Membership ids, since the Phase 18.5 exit review: anything else is a malformed body, never a lookup.
+    // Membership ids, since the Phase 18.2 exit review: anything else is a malformed body, never a lookup.
     const a = '66f0000000000000000000aa';
     const b = '66f0000000000000000000bb';
     const read = checkEvent({
@@ -78,7 +78,7 @@ describe('reading an event body', () => {
     expect(read.audience.inviteeMembershipIds).toEqual([a, b]);
   });
 
-  it('P18.5-T5 AC-9 refuses an invitee that is not a membership id, and a location link that is not a web address', () => {
+  it('P18.2-T5 AC-9 refuses an invitee that is not a membership id, and a location link that is not a web address', () => {
     expect(() => checkEvent({
       ...valid, audience: { issuer: 'kpm', scope: 'select_agents', inviteeMembershipIds: ['a', 'b'] },
     })).toThrow(/2 value\(s\) that are not membership ids/);
@@ -131,32 +131,32 @@ describe('reading an event type body', () => {
 });
 
 /**
- * **The bodies nobody sends on purpose** (the Phase 18.5 exit review, module coverage): no body at all, an audience
+ * **The bodies nobody sends on purpose** (the Phase 18.2 exit review, module coverage): no body at all, an audience
  * with nothing in it, a type change that names only its description, a link too long. Each is refused, or read,
  * the way a deliberate body is.
  */
-describe('reading the bodies nobody sends on purpose (P18.5 exit review)', () => {
-  it('P18.5-T5 AC-9 no body at all is every required field missing, never a server fault', () => {
+describe('reading the bodies nobody sends on purpose (P18.2 exit review)', () => {
+  it('P18.2-T5 AC-9 no body at all is every required field missing, never a server fault', () => {
     expect(() => checkEvent(null)).toThrow(/code is required/);
     expect(() => checkEventType(undefined)).toThrow(/code is required/);
   });
 
-  it('P18.5-T5 AC-9 an audience with no issuer or scope names both', () => {
+  it('P18.2-T5 AC-9 an audience with no issuer or scope names both', () => {
     expect(() => checkEvent({ audience: {} }, { partial: true })).toThrow(/audience.issuer is one of.*audience.scope is one of/);
   });
 
-  it('P18.5-T5 AC-9 a type change naming only its description changes only that', () => {
+  it('P18.2-T5 AC-9 a type change naming only its description changes only that', () => {
     expect(checkEventType({ description: 'For the whole office' }, { partial: true })).toEqual({ description: 'For the whole office' });
   });
 
-  it('P18.5-T5 AC-9 a location link over 500 characters is refused', () => {
+  it('P18.2-T5 AC-9 a location link over 500 characters is refused', () => {
     expect(() => checkEvent({ locationUrl: `https://x.test/${'a'.repeat(500)}` }, { partial: true }))
       .toThrow(/locationUrl is at most 500 characters/);
   });
 });
 
-/** **The same refusals, in Bahasa Indonesia** (P18.98-T5 AC-3): each violation a sentence, the message them all. */
-describe('P18.98-T5 AC-3 an event body’s violations, in both languages', () => {
+/** **The same refusals, in Bahasa Indonesia** (P18.10-T5 AC-3): each violation a sentence, the message them all. */
+describe('P18.10-T5 AC-3 an event body’s violations, in both languages', () => {
   const refused = (read: () => unknown): DomainException => {
     try {
       read();
@@ -166,7 +166,7 @@ describe('P18.98-T5 AC-3 an event body’s violations, in both languages', () =>
     throw new Error('expected a refusal');
   };
 
-  it('P18.98-T5 AC-3 every field sentence reads in Indonesian; the English, the message and the code are unchanged', () => {
+  it('P18.10-T5 AC-3 every field sentence reads in Indonesian; the English, the message and the code are unchanged', () => {
     const err = refused(() => checkEvent({
       code: 'KICKOFF', typeCode: 'TRAINING', title: 'Kickoff', startsAt: 'next tuesday', endsAt: '2026-10-01T06:00:00Z',
       locationUrl: 42, audience: { issuer: 'kpm', scope: 'leaders', inviteeMembershipIds: ['a', 'b'] },
@@ -188,7 +188,7 @@ describe('P18.98-T5 AC-3 an event body’s violations, in both languages', () =>
     expect(err.messageFor(readerIn('id'))).toBe(id.violations.join('; '));
   });
 
-  it('P18.98-T5 AC-3 a type’s colour, a missing audience, a text too long and an audience that is not an object', () => {
+  it('P18.10-T5 AC-3 a type’s colour, a missing audience, a text too long and an audience that is not an object', () => {
     const say = (read: () => unknown) => refused(read).detailsFor(readerIn('id'));
     expect(say(() => checkEventType({ code: 'CLINIC', label: 'Clinic', color: 'blue' })))
       .toEqual({ violations: ['color harus berupa nilai hex, misalnya #2D9CDB.'] });

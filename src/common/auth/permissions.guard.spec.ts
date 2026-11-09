@@ -2,8 +2,7 @@ import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RequestContext } from '@/common/context/request-context';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { ALLOWED_WHILE_READ_ONLY, REFUSED_IN_SUPPORT_SESSION, REQUIRED_PERMISSION } from './auth.decorators';
-import { SETUP_SESSION_WRITE_SCOPE } from '@/modules/rbac/permissions';
+import { REFUSED_IN_SUPPORT_SESSION, REQUIRED_PERMISSION } from './auth.decorators';
 import { PermissionsGuard } from './permissions.guard';
 
 /**
@@ -11,6 +10,10 @@ import { PermissionsGuard } from './permissions.guard';
  * hole survived: the e2e suite proved the control through `POST /join/kpm`, a route that
  * declares a permission, and the four unannotated writes on `AuthController` were never
  * asked about.
+ *
+ * **A session's writes are `ViewOnlySessionGuard`'s since P19.4-T2** (ADR-0206 §4), and its spec asks them. This guard
+ * no longer looks at the method: what it still refuses a session is a write *permission*, by `can()`'s verb — on any
+ * method — and a person's own account.
  */
 describe('PermissionsGuard', () => {
   /** A reflector answering from a plain map, so no Nest metadata plumbing is involved. */
@@ -44,36 +47,11 @@ describe('PermissionsGuard', () => {
       expect(guardWith({}).canActivate(execution(member(false, false), 'POST'))).toBe(true);
     });
 
-    it('is still refused a write inside a read-only support session', () => {
-      /*
-       * The exit review's finding. `PATCH /auth/me` declares no permission, so `can()`
-       * never ran, and a session whose own response said `readOnly: true` renamed the
-       * office Owner.
-       */
-      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-        expect(() => guardWith({}).canActivate(execution(member(true), method)))
-          .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED }));
+    it('P19.4-T2 AC-2 leaves a session\'s method to ViewOnlySessionGuard, which runs first: no fallback here', () => {
+      // The method fallback that stood here — and a setup session's scope inside it (ADR-0162) — is gone.
+      for (const method of ['GET', 'POST', 'PATCH', undefined]) {
+        expect(guardWith({}).canActivate(execution(member(true), method as string))).toBe(true);
       }
-    });
-
-    it('lets the same session read', () => {
-      for (const method of ['GET', 'HEAD', 'OPTIONS']) {
-        expect(guardWith({}).canActivate(execution(member(true), method))).toBe(true);
-      }
-    });
-
-    it('treats a request with no method as a write', () => {
-      // Fail closed. A request reaching the guard without a method is a wiring anomaly,
-      // and the open answer is the wrong default for a control the Owner was promised.
-      expect(() => guardWith({}).canActivate(execution(member(true), undefined as never)))
-        .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED }));
-    });
-
-    it('lets a route opt out, so the operator can leave the session', () => {
-      // `POST /admin/impersonate/end` and `POST /auth/logout`. Blocking either strands
-      // them inside the session they are trying to end.
-      const guard = guardWith({ [ALLOWED_WHILE_READ_ONLY]: true });
-      expect(guard.canActivate(execution(member(true), 'POST'))).toBe(true);
     });
 
     it('leaves a public route alone, where there is no context to read', () => {
@@ -81,67 +59,32 @@ describe('PermissionsGuard', () => {
     });
   });
 
-  /*
-   * ADR-0162 (P18.9-T1 AC-2, AC-3): the method fallback lets a setup session's write through only when the
-   * route's own permission is in its scope, and a person's own account is refused in every session.
-   */
-  describe('a setup session (ADR-0162)', () => {
-    const owner = (readOnly: boolean, writeScope: readonly string[] = SETUP_SESSION_WRITE_SCOPE) =>
-      new RequestContext(
-        'u-owner', 'none',
-        {
-          membershipId: 'mem-o', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab',
-          status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 0,
-        },
-        'sa-1', null, false, readOnly, writeScope,
-      );
-
-    it('AC-2 lets a write through when the route declares a permission in the scope', () => {
-      for (const permission of ['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']) {
-        const guard = guardWith({ [REQUIRED_PERMISSION]: permission });
-        expect(guard.canActivate(execution(owner(true), 'POST'))).toBe(true);
-      }
-    });
-
-    it('AC-2 refuses a write outside the scope, saying what a setup session may change', () => {
-      const guard = guardWith({ [REQUIRED_PERMISSION]: 'member:change_role' });
-      expect(() => guard.canActivate(execution(owner(true), 'PATCH'))).toThrow(expect.objectContaining({
-        code: ErrorCode.PERM_DENIED,
-        message: expect.stringContaining('change the office\'s settings, import people and upload production files'),
-      }));
-    });
-
-    it('AC-2 refuses a write through a route that declares no permission: the scope names permissions', () => {
-      expect(() => guardWith({}).canActivate(execution(owner(true), 'POST')))
-        .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED }));
-    });
-
-    it('AC-2 a read-only session with no scope is refused the same route', () => {
-      const guard = guardWith({ [REQUIRED_PERMISSION]: 'tenant_config:write' });
-      expect(() => guard.canActivate(execution(owner(true, []), 'POST')))
-        .toThrow(expect.objectContaining({ message: expect.stringContaining('read-only support session') }));
-    });
-
-    it('AC-3 refuses a person\'s own account in every session — read-only, setup and elevated', () => {
+  describe('a person\'s own account (ADR-0162 §4)', () => {
+    it('refuses it in every session, on a read as on a write', () => {
       const guard = guardWith({ [REFUSED_IN_SUPPORT_SESSION]: true });
-      for (const ctx of [member(true), owner(true), owner(false), member(false)]) {
-        expect(() => guard.canActivate(execution(ctx, 'PATCH'))).toThrow(expect.objectContaining({
+      for (const method of ['GET', 'PATCH']) {
+        expect(() => guard.canActivate(execution(member(true), method))).toThrow(expect.objectContaining({
           code: ErrorCode.PERM_DENIED, message: expect.stringContaining('own account'),
         }));
       }
     });
 
-    it('AC-3 leaves the same route alone for the person themselves', () => {
+    it('leaves the same route alone for the person themselves', () => {
       const guard = guardWith({ [REFUSED_IN_SUPPORT_SESSION]: true });
       expect(guard.canActivate(execution(member(false, false), 'PATCH'))).toBe(true);
     });
   });
 
   describe('a route that declares one', () => {
-    it('refuses a read-only session before asking about the permission', () => {
-      const guard = guardWith({ [REQUIRED_PERMISSION]: 'tenant_config:write' });
-      expect(() => guard.canActivate(execution(member(true), 'POST')))
-        .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED }));
+    it('P19.4-T2 AC-2 refuses a session a write permission by its verb, whatever the method: no scope lets it through', () => {
+      // A setup session's scope let `tenant_config:write`, `kpm:import_roster` and `data_upload:*` through (ADR-0162).
+      for (const permission of ['tenant_config:write', 'kpm:import_roster', 'data_upload:commit_import']) {
+        const guard = guardWith({ [REQUIRED_PERMISSION]: permission });
+        for (const method of ['GET', 'POST']) {
+          expect(() => guard.canActivate(execution(member(true), method)))
+            .toThrow(expect.objectContaining({ code: ErrorCode.PERM_DENIED, details: { permission } }));
+        }
+      }
     });
 
     it('names the Owner when the power is one the Owner reserved', () => {

@@ -11,7 +11,7 @@ const SAY = USERS_REFUSALS.VALIDATION_FAILED;
  * same words, and a test can put today anywhere without a clock.
  *
  * Each answers `null` for a value that is fine, or the sentence the caller shows, naming what is wrong — in both
- * languages (P18.98-T5 AC-3), written for its reader by whoever answers with it.
+ * languages (P18.10-T5 AC-3), written for its reader by whoever answers with it.
  * The caller supplies `today`, from the injected clock and the office's timezone (invariant §9): nothing
  * here reads one.
  */

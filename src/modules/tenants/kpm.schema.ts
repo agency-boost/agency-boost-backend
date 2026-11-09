@@ -4,6 +4,7 @@ import type { SeedRecord, TemplateKind } from '@/modules/config/company-template
 import { baseSchemaOptions } from '@/common/schema/base.schema';
 import {
   ACTIVATION, DEFAULT_CURRENCY, DEFAULT_TENANT_TIMEZONE, PERFORMANCE, PRODUCTION, ACTIVITY, TIME,
+  type SubscriptionPlan,
 } from '@/domain/constants';
 
 export type KpmDocument = HydratedDocument<Kpm>;
@@ -178,6 +179,16 @@ export class Kpm {
   @Prop({ type: Object, default: null })
   leaderLimitLock!: { token: string; until: Date } | null;
 
+  /**
+   * **The Owner named with no email, waiting** (ADR-0212 §3; P19.4-T3 AC-6): *KPM baru*'s *Pemilik KPM* filled with a
+   * name and a WhatsApp number but no email. No account is made — an account is an email — so the KPM reads *Belum
+   * diundang* and *"KPM {code} belum punya Owner"* until *Ganti pemilik* gives an email (or picks an account) and the
+   * Owner is set, which clears this. Personal data: shown to the Super Admin alone, never served to a tenant role, and
+   * soft-deleted with the KPM.
+   */
+  @Prop({ type: Object, default: null })
+  pendingOwner!: KpmPendingOwner | null;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }
@@ -199,6 +210,19 @@ export interface KpmSubscription {
   maxLeaders: number | null;
   /** On, and the office stays open after its end date: *Ended — kept active*. Off by default. */
   keepActiveAfterEnd: boolean;
+  /**
+   * **The plan** (ADR-0211 §1; P19.4-T3): *6 bulan* or *Tahunan*, a label — nothing renews or is charged from it. `null`
+   * or absent (a subscription written before 19.4) is no plan. Its renewal date is `endDate`.
+   */
+  plan?: SubscriptionPlan | null;
+}
+
+/** An Owner named without an email (ADR-0212 §3): who they are, and the number the Super Admin may call. */
+export interface KpmPendingOwner {
+  fullName: string;
+  /** Their WhatsApp number, as typed — a number to call, never a channel the product sends by (ADR-0212 §4). */
+  phone: string;
+  agentCode: string | null;
 }
 
 /** The source an office was started from (ADR-0115 §4). */
@@ -216,6 +240,15 @@ export interface KpmStartedFrom {
 }
 
 export const KpmSchema = SchemaFactory.createForClass(Kpm);
-/** A code is unique per company, not globally — two insurers may both have an 0417. */
-KpmSchema.index({ companyId: 1, code: 1 }, { unique: true });
+/**
+ * A code is unique per company, not globally — two insurers may both have an 0417 (OD-246's default).
+ *
+ * **Among live offices only** since P19-T3 (ADR-0191 §3, §5; migration `0050`): a deleted office — an empty one the
+ * Super Admin removed, or one an approval made and undid when its Owner could not be set — gives its code back. Held
+ * by a deleted row, the code read as free to every check (`deletedAt: null`) and then failed the index as a 500.
+ */
+KpmSchema.index(
+  { companyId: 1, code: 1 },
+  { unique: true, name: 'one_live_code_per_company', partialFilterExpression: { deletedAt: null } },
+);
 KpmSchema.index({ status: 1, createdAt: -1 });

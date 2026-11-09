@@ -28,7 +28,7 @@ export interface RolledUpGoal {
   /** The sum of the actuals the rows hold; `null` when none holds one. */
   actualMinor: number | null;
   /**
-   * `APE_ATTAINMENT_PCT` of the two sums, capped as the row's is, half up in integers (`wholePercent`; P18.97-T3,
+   * `APE_ATTAINMENT_PCT` of the two sums, capped as the row's is, half up in integers (`wholePercent`; P18.9-T3,
    * parity F-254); `null` without both, or on a zero target.
    */
   attainmentPct: number | null;
@@ -65,7 +65,7 @@ export interface PairedGoal extends RolledUpGoal {
 }
 
 /**
- * **The Unit Dashboard's totals, paired** (ADR-0165 §1, P18.8-T15 AC-6; the client's UI review, UI-004) — a unit's
+ * **The Unit Dashboard's totals, paired** (ADR-0165 §1, P18.5-T15 AC-6; the client's UI review, UI-004) — a unit's
  * total and *Direct Group production*. `rollUpGoal` summed every target that exists against the production held, so a
  * member whose file was late counted as producing nothing: *5% · Rp 264.666.667 short* for a unit two of whose
  * members were *Not uploaded yet*, beside a tooltip saying they were *not counted*. Their targets were.
@@ -172,7 +172,7 @@ export interface ProductionRollup {
 }
 
 /**
- * **A unit's production total and *On pace to be active*** (ADR-0172 §2, P18.96-T5 AC-2; UI-013). A new hire before
+ * **A unit's production total and *On pace to be active*** (ADR-0172 §2, P18.8-T5 AC-2; UI-013). A new hire before
  * their first sale is in the team (§1) and **not in the production total**: not their target, not their production, not
  * in `missing`. **In *on pace*, they are in `of` and not in `count`** since UI V1 (UI-013): its denominator is manpower,
  * the same number as *Tim Anda*, and its numerator rule is unchanged. Everybody else is the paired rollup

@@ -65,13 +65,24 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
       .toEqual(SEED_RATIO_DEFINITIONS.map((r) => [r.code, r.label, r.benchmark, 'platform', 'active', 1]));
   });
 
+  it('P19.8-T4 AC-13 MOB UI-180 every demo type carries its short name, by code, in the working copy and what agents read', async () => {
+    const kpmId = await office('0417');
+    const types = await col('activityTypes').find({ kpmId }).sort({ displayOrder: 1 }).toArray();
+    expect(types.map((t) => [t.code, t.shortLabel])).toEqual(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.shortLabel]));
+    expect(types.find((t) => t.code === 'SELL_PRESENTATION')).toMatchObject({ shortLabel: 'Presentasi' });
+
+    const published = await wired.config.readPublished(await as('rina@kpm0417.test'));
+    expect(published.activity.flatMap((c) => c.types).find((t) => t.code === 'DEV_COACHING_RECEIVED'))
+      .toMatchObject({ shortLabel: '1-on-1 dgn leader' });
+  });
+
   it('AC-2 0417’s publish bar reads clean, and item 7 reaches its agents under the client’s label', async () => {
     const owner = await as('owner@kpm0417.test', true);
     expect(await wired.config.state(owner)).toMatchObject({ publishedVersion: 1, hasUnpublishedChanges: false });
 
     const published = await wired.config.readPublished(await as('rina@kpm0417.test'));
     const item7 = published.activity.flatMap((c) => c.types).find((t) => t.code === 'RECRUIT_PRESENTATION');
-    // The client's words since ADR-0160 (P18.8-T8 AC-2), with no note.
+    // The client's words since ADR-0160 (P18.5-T8 AC-2), with no note.
     expect(item7).toMatchObject({ label: 'Melakukan presentasi recruitment', description: null });
   });
 
@@ -140,11 +151,14 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
     expect(months.size).toBeGreaterThanOrEqual(2);
   });
 
-  it('P18.8-T7 AC-1 Rina’s /leads opens in the order she dragged, and every seeded lead has a place', async () => {
+  it('P18.5-T7 AC-1 Rina’s /leads opens in the order she dragged, and every seeded lead has a place', async () => {
     const page = await wired.leadRecords.list(await as('rina@kpm0417.test'), { outcome: 'open' });
-    expect(page.rows.map((lead) => lead.name)).toEqual([
+    expect(page.rows.map((lead) => lead.name).slice(0, 6)).toEqual([
       'Ibu Wulan Sari', 'Pak Hendro Gunawan', 'Ibu Rosa Damayanti', 'Ibu Kartika Dewanti', 'Pak Surya Dharma', 'Pak Bambang',
     ]);
+    // P19.1-T3 AC-12: this week's Tugas (`tugas-fixture.ts`), which the dragged order does not name, after it.
+    expect(page.rows.map((lead) => lead.name).slice(6).sort())
+      .toEqual(['Ibu Shinta Wardhani', 'Ibu Wening Sari', 'Pak Gunawan Saleh']);
     // Not the order registration would give: that is the point of seeding it.
     const byRegistration = await wired.leadRecords.list(await as('rina@kpm0417.test'), { outcome: 'open', sort: 'dateRegistered' });
     expect(byRegistration.rows.map((lead) => lead.name)).not.toEqual(page.rows.map((lead) => lead.name));

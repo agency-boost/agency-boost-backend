@@ -9,7 +9,7 @@ const CODE = 'NOT_APPROACHED';
 /**
  * Which pipeline, the seeded words it may still hold, and the words it takes — all read from the constants. **The
  * words it takes are the ones it was written for**, *Not yet approached*: the seed has said *Belum didekati* since
- * P18.98-T7 (OD-238), and an office's own configuration keeps its language — a template is a copy, never a link.
+ * P18.10-T7 (OD-238), and an office's own configuration keeps its language — a template is a copy, never a link.
  */
 function rewrite(): { pipeline: string; labels: string[]; label: string } {
   const before = SEEDED_LEAD_STATUS_LABELS_BEFORE_ADR_0167[CODE];
@@ -19,7 +19,7 @@ function rewrite(): { pipeline: string; labels: string[]; label: string } {
 
 /**
  * **The recruitment pipeline's first status in the sales pipeline's words** (ADR-0167 §10, OD-205; the client's UI
- * review of 2026-10-26, UI-027; P18.95-T9 AC-6).
+ * review of 2026-10-26, UI-027; P18.7-T9 AC-6).
  *
  * The sales pipeline starts at *Not yet approached* and the recruitment pipeline at *Not approached* — the
  * prototype's two words for one stage. The client asked for one. A new office is given *Not yet approached* by the

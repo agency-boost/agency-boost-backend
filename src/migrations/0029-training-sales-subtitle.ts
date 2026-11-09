@@ -4,7 +4,7 @@ import {
 } from '@/domain/constants/training-taxonomy';
 
 /**
- * **Sales's subtitle without the Skill Tracker promise** (OD-150, answered 2026-10-10 as recommended; P18.5-T1).
+ * **Sales's subtitle without the Skill Tracker promise** (OD-150, answered 2026-10-10 as recommended; P18.2-T1).
  *
  * The seeded Sales category read *"Structured modules — tracked here, and later in your Skill Tracker."* — the
  * prototype's promise of a link no feature makes (the only Skill tracker is a leader's private grid, ADR-0073, and
@@ -22,7 +22,7 @@ import {
  */
 export async function up(db: mongoose.mongo.Db): Promise<{ categories: number; snapshots: number; templates: number }> {
   const before = SEEDED_SALES_SUBTITLE_BEFORE_OD_150;
-  // The words OD-150 gave, pinned: the seed's own moved on in P18.97-T4, and migration 0045 takes them from here.
+  // The words OD-150 gave, pinned: the seed's own moved on in P18.9-T4, and migration 0045 takes them from here.
   const after = SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97.SALES;
 
   const categories = await db.collection('trainingCategories').updateMany(

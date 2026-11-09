@@ -39,7 +39,7 @@ import type { ReportingKey } from './reporting-fixture';
 import { SALES } from './training-fixture';
 
 /**
- * **The Owner's compliance tree, seeded** (Phase 18.6, P18.6-T3 AC-1; the phase file's *Seed*). Almost everything the
+ * **The Owner's compliance tree, seeded** (Phase 18.3, P18.3-T3 AC-1; the phase file's *Seed*). Almost everything the
  * tree reads is seeded already — `local-development.md`'s *Activation*, *Owner reporting*, *Training*, *Events* and
  * *Campaigns* — so this adds two things, and **no member, activity day, goal, production month, event, RSVP,
  * confirmation, answer or chase**:
@@ -89,7 +89,7 @@ export const COMPLIANCE_OVERRIDE_SEED = {
   campaignCode: 'PERSISTENCY_PUSH',
   status: 'qualified',
   reason: 'Persistency diralat oleh perusahaan setelah bulannya dikunci.',
-  /** The reason the seed typed before P18.98-T7: an override an earlier run wrote with it is still the seed's. */
+  /** The reason the seed typed before P18.10-T7: an override an earlier run wrote with it is still the seed's. */
   formerReason: 'Persistency corrected by the carrier after the month locked.',
 } as const;
 

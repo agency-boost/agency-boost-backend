@@ -18,7 +18,7 @@ const file = (over: Record<string, unknown> = {}) => ({
 const link = (over: Record<string, unknown> = {}) => ({ label: 'Talk', url: 'https://learn.example.com/talk', ...over });
 
 /**
- * **A module's content, checked whole** (P5-T2 AC-6; the Phase 18.5 exit review raised the training module's floor and
+ * **A module's content, checked whole** (P5-T2 AC-6; the Phase 18.2 exit review raised the training module's floor and
  * this file was its gap): every rule the checker enforces, one violation per bad row, all of them at once.
  */
 describe('checkTrainingContent', () => {
@@ -79,10 +79,10 @@ describe('checkTrainingContent', () => {
 });
 
 /**
- * **A module's content refused in Bahasa Indonesia** (P18.98-T5 AC-3): each item named by its place in the reader's
+ * **A module's content refused in Bahasa Indonesia** (P18.10-T5 AC-3): each item named by its place in the reader's
  * words — *File 1*, *Video 1*, *Tautan 1* — its own field's sentence after it, the English unchanged.
  */
-describe('P18.98-T5 AC-3 checkTrainingContent, in both languages', () => {
+describe('P18.10-T5 AC-3 checkTrainingContent, in both languages', () => {
   const refused = (body: unknown): DomainException => {
     try {
       checkTrainingContent(body);
@@ -93,7 +93,7 @@ describe('P18.98-T5 AC-3 checkTrainingContent, in both languages', () => {
   };
   const indonesian = (body: unknown) => (refused(body).detailsFor(readerIn('id')) as { violations: string[] }).violations;
 
-  it('P18.98-T5 AC-3 every rule, its item named in Indonesian', () => {
+  it('P18.10-T5 AC-3 every rule, its item named in Indonesian', () => {
     expect(indonesian({ files: 'deck.pdf', videos: [[]], links: [link({ url: '' }), link({ url: 'not a url' }), link({ url: 'http://x.test' })] }))
       .toEqual([
         'files harus berupa daftar.',
@@ -114,7 +114,7 @@ describe('P18.98-T5 AC-3 checkTrainingContent, in both languages', () => {
     expect(indonesian({ links: [{ label: 'Talk' }] })).toEqual(['Tautan 1: url wajib diisi.']);
   });
 
-  it('P18.98-T5 AC-3 the English and the message are as they were: the sentences joined by "; "', () => {
+  it('P18.10-T5 AC-3 the English and the message are as they were: the sentences joined by "; "', () => {
     const err = refused({ links: [link({ url: 'http://x.test' })], files: [null] });
     expect(err.message).toBe('File 1 must be an object of fields.; Link 1: a link must start with https://. "http://x.test" would be '
       + 'blocked or warned about on an agent’s phone.');

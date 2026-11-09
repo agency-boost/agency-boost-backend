@@ -75,7 +75,7 @@ export class Membership {
    * The code this person shares to bring somebody into their unit.
    *
    * **One per membership, generated with it, never reissued and never withdrawn**
-   * (P3.6-T1). The prototype shows exactly this — a link, a code and a QR, all three
+   * (P3.2-T1). The prototype shows exactly this — a link, a code and a QR, all three
    * *copyable*, over a value that already exists (`Overall.html:3578-3596`,
    * `User_Management_Section.html:446-454`). It has no create button and no revoke, and
    * neither do we any more: a code that cannot be reissued must not be revocable, or
@@ -123,7 +123,7 @@ export class Membership {
    * the Owner's agency and unit partitions read it; and the services that sort, group and
    * label — the org tree, the directory, the unit dashboard — read it as they always did.
    *
-   * It was derived from the rung's code lower-cased from P3.5-T8 until P18.8-T1, which made
+   * It was derived from the rung's code lower-cased from P3.1-T8 until P18.5-T1, which made
    * it one-to-one with v1's one ladder and meaningless for any other (OD-50, narrowed).
    *
    * Every write goes through `HierarchyService`, which sets it from the resolved level's
@@ -173,7 +173,7 @@ export class Membership {
   joinedAt!: Date | null;
 
   /**
-   * ***Join date*: the day this person joined the office, as their leader gives it** (ADR-0169 §1, P18.96-T2). An
+   * ***Join date*: the day this person joined the office, as their leader gives it** (ADR-0169 §1, P18.8-T2). An
    * **office date** `YYYY-MM-DD` in `kpms.timezone`, never an instant (invariant §9), set when the membership is
    * made active — an approval, a tag, a leader's code, a roster import, an Owner assigned — and the office's today
    * unless a leader named another. A new hire's activation starts on it, and a leader's correction moves both
@@ -193,7 +193,7 @@ export class Membership {
 
   /**
    * **The instant a leader marked this new hire as having left** (ADR-0169 §4 as amended 2026-10-27, ADR-0173): written
-   * by *Mark left* (P18.96-T6), which then removes the membership through the removal's own path — `status: removed`,
+   * by *Mark left* (P18.8-T6), which then removes the membership through the removal's own path — `status: removed`,
    * `removedAt` the same instant — so a leaver leaves every count of people. The record and its history stay, and a
    * removed membership with `leftAt` is a new hire who left, which `/new-hires` lists for their year. `null` until then.
    */
@@ -201,7 +201,7 @@ export class Membership {
   leftAt!: Date | null;
 
   /**
-   * **`FIRST_SALE_DATE`: the day of this person's first sale since joining** (ADR-0171 §1, P18.96-T4 AC-1) — an office
+   * **`FIRST_SALE_DATE`: the day of this person's first sale since joining** (ADR-0171 §1, P18.8-T4 AC-1) — an office
    * date, the earliest of a sales lead reaching *Paid and issued*, a closing logged by a checklist tick, and — failing
    * both — the production file's first month with a policy. Computed by `firstSaleOf` and written by
    * `FirstSaleService` from the leads, the production file and migration 0042; **it only ever moves earlier**: a
@@ -222,7 +222,7 @@ export class Membership {
   firstSaleRecordId!: string | null;
 
   /**
-   * **`ACTIVATION_3M`, kept once decided** (ADR-0171 §2, P18.96-T6 AC-1; `metrics-and-definitions.md`, *3M
+   * **`ACTIVATION_3M`, kept once decided** (ADR-0171 §2, P18.8-T6 AC-1; `metrics-and-definitions.md`, *3M
    * activation*): `activated` or `not_activated` — decided after day 90 of the join date, or on the day a new hire
    * left within it — and **never written over**, so a closing logged later with an earlier day, a production file
    * uploaded late or a corrected join date moves nothing. `null` while in progress, for an existing agent, and for a
@@ -253,7 +253,7 @@ export class Membership {
   adminAccess!: AdminAccess;
 
   /**
-   * ***Full-time* or *part-time*: how this person works in this office** (ADR-0158 §1, P18.8-T4).
+   * ***Full-time* or *part-time*: how this person works in this office** (ADR-0158 §1, P18.5-T4).
    *
    * On the membership, not the account, because somebody may work one way here and another way in an
    * office they join later. **Optional**: a member who arrived before it has none, which a screen reads
@@ -284,6 +284,17 @@ export class Membership {
    */
   @Prop({ type: Boolean, default: false })
   calendarHideDetails!: boolean;
+
+  /**
+   * **When this person's latest invitation was sent** (ADR-0212 §2; P19.4-T3 AC-6): the one-time link to choose a
+   * password, emailed to an Owner a KPM was made with (or given by *Ganti pemilik*, or sent again by *Kirim ulang
+   * undangan*) and to each new person a member import invites (ADR-0205 §10). `null`: no invitation was sent.
+   *
+   * What *Diundang* reads — sent, and the account not yet signed in (`users.lastLoginAt`) — on the Owner's card, on
+   * `/admin/tenants` and in *All members* (ADR-0207). On the membership because an invitation is to this office.
+   */
+  @Prop({ type: Date, default: null })
+  invitedAt!: Date | null;
 
   /*
    * No `activationGraduatedAt`. It sat here unwritten from Phase 3, waiting for Phase 13 — which records

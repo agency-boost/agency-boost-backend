@@ -6,7 +6,7 @@ import { StoragePort } from './storage.port';
 import { UnconfiguredStorage } from './unconfigured-storage';
 
 /**
- * **Which storage this instance has** (P18.7-T2, ADR-0153, D12): the bucket when `GCS_BUCKET` names one, and
+ * **Which storage this instance has** (P18.4-T2, ADR-0153, D12): the bucket when `GCS_BUCKET` names one, and
  * otherwise — in development and test only — storage that refuses every call with `STORAGE_NOT_CONFIGURED`.
  *
  * `env.validation.ts` already refuses to boot staging or production without a bucket; the throw below is the same

@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# Shared by every script in /opt/agencyboost/bin (P18.7-T3, ADR-0152, ADR-0155). Sourced, never run.
+# Shared by every script in /opt/agencyboost/bin (P18.4-T3, ADR-0152, ADR-0155). Sourced, never run.
 #
 # One VM serves both environments (ADR-0155). The layout, which deploy/ in the repository mirrors:
 #
@@ -104,7 +104,7 @@ dc() {
 
 # The id of a service's own container, running or not, or nothing. By compose's labels rather than
 # `compose ps`: a one-off container (`compose run`, the migrations, the seed) carries the same service
-# name, and is not the service (P18.7 review, L4).
+# name, and is not the service (P18.4 review, L4).
 container_of() {
   docker ps --all --quiet \
     --filter "label=com.docker.compose.project=agencyboost" \
@@ -134,7 +134,7 @@ take_lock() {
 
 # An image this VM may run for <env>: by digest, never by tag, and from that environment's own
 # repository, <IMAGE_REGISTRY>/agencyboost-<env> (provision.sh). The whole reference is matched,
-# anchored at both ends (P18.7 review, L3), so a staging image cannot be deployed as production's.
+# anchored at both ends (P18.4 review, L3), so a staging image cannot be deployed as production's.
 require_own_image() {
   local _ref=$1 _env=$2 _name=$3 _repository _pattern
   _repository=$(setting IMAGE_REGISTRY)/agencyboost-$_env/$_name
@@ -149,7 +149,7 @@ unfilled_keys() {
 }
 
 # The keys mongo/init/01-app-users.js and the image's entrypoint need, missing or unfilled in $1, one per
-# line (P18.7 review, L9). An empty data directory is initialised with whatever this file says, once.
+# line (P18.4 review, L9). An empty data directory is initialised with whatever this file says, once.
 missing_mongo_keys() {
   local key value
   for key in MONGO_INITDB_ROOT_USERNAME MONGO_INITDB_ROOT_PASSWORD \
@@ -187,7 +187,7 @@ assert_db_scope() {
 # --- images ----------------------------------------------------------------------------------------
 
 # Old api and tools images, except the current and previous of each environment, which a rollback or
-# the next seed would need (P18.7 review, L2). Named by state/, not guessed by age; an image a container
+# the next seed would need (P18.4 review, L2). Named by state/, not guessed by age; an image a container
 # still uses is refused by docker and kept.
 prune_images() {
   local registry _e name file ref id keep=""
@@ -213,7 +213,7 @@ prune_images() {
 # --- running detached ------------------------------------------------------------------------------
 
 # Run "$@" as a transient systemd unit and follow its journal here; return the unit's exit status
-# (P18.7 review, M2). Run as a child of an SSH session, a deploy dies with the session: sshd hangs up
+# (P18.4 review, M2). Run as a child of an SSH session, a deploy dies with the session: sshd hangs up
 # the shell when the connection drops, and a deploy killed between the migrations and the switch, or a
 # seed killed halfway, leaves the VM in a state nobody chose. As a unit it belongs to systemd. A
 # dropped client stops only the following, and the work runs to the end, lock and all.

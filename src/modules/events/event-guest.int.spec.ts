@@ -11,11 +11,11 @@ import { IN_INDONESIAN } from '../../../test/i18n';
 import { EventGuestController } from './event-guest.controller';
 
 /**
- * **Events, for the people they are for, over HTTP** (P18.5-T5, P18.5-T6): the agent's list, the modal, RSVP and
+ * **Events, for the people they are for, over HTTP** (P18.2-T5, P18.2-T6): the agent's list, the modal, RSVP and
  * the claim; the Owner's roll call, the picker's people and the *Feedback Summary*; and the answer between them.
  * The real services over the real collections, the real `PermissionsGuard` and the production pipe.
  */
-describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
+describe('events, for their audience (P18.2-T5, P18.2-T6)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: EventsOffice;
@@ -53,7 +53,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
   const rowOf = (call: { people: { membershipId: string }[] }, who: EventsWho) =>
     call.people.find((p) => p.membershipId === office.id[who]) as Record<string, unknown> | undefined;
 
-  it('P18.5-T5 AC-1 declares a permission on every route, and the right one', () => {
+  it('P18.2-T5 AC-1 declares a permission on every route, and the right one', () => {
     expect(declaredPermissions(EventGuestController)).toEqual({
       list: 'event:read_list',
       read: 'event:read_list',
@@ -65,14 +65,14 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-1 who reads and writes — a positive and a negative per role and route', () => {
-    it.each(['OWNER', 'ADMIN', 'AGUS', 'SARI', 'RINA'] as const)('P18.5-T5 AC-1 %s reads the list and one event', async (who) => {
+  describe('P18.2-T5 AC-1 who reads and writes — a positive and a negative per role and route', () => {
+    it.each(['OWNER', 'ADMIN', 'AGUS', 'SARI', 'RINA'] as const)('P18.2-T5 AC-1 %s reads the list and one event', async (who) => {
       as(who);
       await http().get('/events').expect(200);
       await http().get(`/events/${idOf('UPCOMING')}`).expect(200);
     });
 
-    it('P18.5-T5 AC-1 a Super Admin outside a support session reads no office', async () => {
+    it('P18.2-T5 AC-1 a Super Admin outside a support session reads no office', async () => {
       session.current = SA;
       expect((await http().get('/events').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
       // The writes are no Super Admin's at all: the guard refuses them before anything is looked up.
@@ -80,7 +80,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
 
     it.each(['OWNER', 'ADMIN', 'AGUS', 'SARI', 'RINA'] as const)(
-      'P18.5-T5 AC-1 %s RSVPs, cancels, claims and answers — the Owner and the Admin as the AB they are', async (who) => {
+      'P18.2-T5 AC-1 %s RSVPs, cancels, claims and answers — the Owner and the Admin as the AB they are', async (who) => {
         as(who);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp`).expect(201);
         await http().post(`/events/${idOf('UPCOMING')}/rsvp/cancel`).expect(201);
@@ -90,7 +90,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       },
     );
 
-    it('P18.5-T5 AC-1 a read-only support session reads, is told it may write nothing, and is refused every write', async () => {
+    it('P18.2-T5 AC-1 a read-only support session reads, is told it may write nothing, and is refused every write', async () => {
       session.current = office.supported('RINA');
       const list = (await http().get('/events').expect(200)).body;
       expect(list.can).toEqual({ rsvp: false, cancelRsvp: false, claim: false, feedback: false });
@@ -104,7 +104,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventRsvps').countDocuments()).toBe(0);
     });
 
-    it('P18.5-T5 AC-1 an elevated session reads, and never RSVPs, cancels, claims or answers in the member’s name (D-support)', async () => {
+    it('P18.2-T5 AC-1 an elevated session reads, and never RSVPs, cancels, claims or answers in the member’s name (D-support)', async () => {
       session.current = office.supported('RINA', false);
       const list = (await http().get('/events').expect(200)).body;
       expect(list.can).toEqual({ rsvp: false, cancelRsvp: false, claim: false, feedback: false });
@@ -119,7 +119,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventRsvps').countDocuments()).toBe(0);
     });
 
-    it.each(['AGUS', 'SARI', 'RINA'] as const)('P18.5-T5 AC-1 %s is refused the roll call, its save, the picker and the summary', async (who) => {
+    it.each(['AGUS', 'SARI', 'RINA'] as const)('P18.2-T5 AC-1 %s is refused the roll call, its save, the picker and the summary', async (who) => {
       as(who);
       const id = idOf('PAST_ALL');
       for (const call of [
@@ -130,7 +130,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       ]) expect((await call().expect(403)).body.error.code).toBe('PERM_DENIED');
     });
 
-    it.each(['OWNER', 'ADMIN'] as const)('P18.5-T5 AC-1 %s reads the roll call, the picker and the summary, and saves the roll call', async (who) => {
+    it.each(['OWNER', 'ADMIN'] as const)('P18.2-T5 AC-1 %s reads the roll call, the picker and the summary, and saves the roll call', async (who) => {
       as(who);
       const id = idOf('PAST_ALL');
       await http().get('/kpm/settings/events/invitees').expect(200);
@@ -140,7 +140,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
         .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(200);
     });
 
-    it('P18.5-T5 AC-1 a read-only session as the Owner reads the list, the picker and the summary; the roll call, read and save, is the confirm’s and refused', async () => {
+    it('P18.2-T5 AC-1 a read-only session as the Owner reads the list, the picker and the summary; the roll call, read and save, is the confirm’s and refused', async () => {
       session.current = office.supported('OWNER');
       await http().get('/kpm/settings/events').expect(200);
       await http().get('/kpm/settings/events/invitees').expect(200);
@@ -151,7 +151,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
         .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(403);
     });
 
-    it('P18.5-T5 AC-1 an elevated session as the Owner reads the roll call and may confirm, both actors audited', async () => {
+    it('P18.2-T5 AC-1 an elevated session as the Owner reads the roll call and may confirm, both actors audited', async () => {
       session.current = office.supported('OWNER', false);
       const call = (await http().get(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).expect(200)).body;
       expect(call.can).toEqual({ confirm: true });
@@ -162,8 +162,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-3 the audience, as at the start', () => {
-    it('P18.5-T5 AC-3 Dewi (an AAB leading nobody) and Rina do not see the running leaders’ event; Agus and Sari do', async () => {
+  describe('P18.2-T5 AC-3 the audience, as at the start', () => {
+    it('P18.2-T5 AC-3 Dewi (an AAB leading nobody) and Rina do not see the running leaders’ event; Agus and Sari do', async () => {
       expect(await codesOf('AGUS')).toContain('RUNNING_LEADERS');
       expect(await codesOf('SARI')).toContain('RUNNING_LEADERS');
       expect(await codesOf('DEWI')).not.toContain('RUNNING_LEADERS');
@@ -172,13 +172,13 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect((await http().get(`/events/${idOf('RUNNING_LEADERS')}`).expect(404)).body.error.code).toBe('NOT_FOUND');
     });
 
-    it('P18.5-T5 AC-3 leaders by the edges valid then: Dewi led Tari on 10 August, Lukas leads her now', async () => {
+    it('P18.2-T5 AC-3 leaders by the edges valid then: Dewi led Tari on 10 August, Lukas leads her now', async () => {
       expect(await codesOf('DEWI')).toContain('PAST_LEADERS');
       expect(await codesOf('LUKAS')).not.toContain('PAST_LEADERS');
       expect(await codesOf('LUKAS')).toContain('RUNNING_LEADERS');
     });
 
-    it('P18.5-T5 AC-3 somebody who joined later never sees an earlier event, nor claims in it', async () => {
+    it('P18.2-T5 AC-3 somebody who joined later never sees an earlier event, nor claims in it', async () => {
       // ENDS_NOW began two hours ago, after she joined: hers. The August events are not.
       expect(await codesOf('LATE')).toEqual(['ENDS_NOW', 'UPCOMING']);
       as('LATE');
@@ -186,14 +186,14 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(rowOf(await rollCall('PAST_ALL'), 'LATE')).toBeUndefined();
     });
 
-    it('P18.5-T5 AC-3 a chosen list holds only its people', async () => {
+    it('P18.2-T5 AC-3 a chosen list holds only its people', async () => {
       expect(await codesOf('RINA')).toContain('PAST_CHOSEN');
       expect(await codesOf('DIMAS')).not.toContain('PAST_CHOSEN');
       const call = await rollCall('PAST_CHOSEN');
       expect(call.people.map((p: { name: string }) => p.name).sort()).toEqual(['Budi Santoso', 'Rina Wijaya']);
     });
 
-    it('P18.5-T5 AC-3 no field reader’s payload carries an invitee list, nor a confirmation', async () => {
+    it('P18.2-T5 AC-3 no field reader’s payload carries an invitee list, nor a confirmation', async () => {
       as('OWNER');
       await http().put(`/kpm/settings/events/${idOf('PAST_CHOSEN')}/attendance`)
         .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(200);
@@ -207,7 +207,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       }
     });
 
-    it('P18.5-T5 AC-9 an archived event is not listed and answers 404, its RSVP too', async () => {
+    it('P18.2-T5 AC-9 an archived event is not listed and answers 404, its RSVP too', async () => {
       expect(await codesOf('RINA')).not.toContain('ARCHIVED');
       as('RINA');
       await http().get(`/events/${idOf('ARCHIVED')}`).expect(404);
@@ -216,8 +216,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-4, AC-5 the list and the modal', () => {
-    it('P18.5-T5 AC-4 each event carries what the card draws, the day and time in the office’s zone, and the reader’s own part', async () => {
+  describe('P18.2-T5 AC-4, AC-5 the list and the modal', () => {
+    it('P18.2-T5 AC-4 each event carries what the card draws, the day and time in the office’s zone, and the reader’s own part', async () => {
       const body = (await listed('RINA')) as unknown as {
         events: Record<string, unknown>[]; companyName: string; timezone: string; limits: unknown; can: unknown;
       };
@@ -238,7 +238,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(body.events.find((e) => e.code === 'UPCOMING')).toMatchObject({ phase: 'upcoming', locationUrl: 'https://meet.example.test/x' });
     });
 
-    it('P18.5-T5 AC-5 Join event, then Cancel RSVP — idempotent, and audited once each', async () => {
+    it('P18.2-T5 AC-5 Join event, then Cancel RSVP — idempotent, and audited once each', async () => {
       as('RINA');
       const id = idOf('UPCOMING');
       expect((await http().post(`/events/${id}/rsvp`).expect(201)).body.me).toEqual({ rsvp: 'going', claimed: false, feedback: null });
@@ -288,7 +288,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('auditLog').countDocuments({ action: 'event.rsvp_withdrawn' })).toBe(0);
     });
 
-    it('P18.5-T5 AC-5 a running event still takes an RSVP; from endsAt both are refused 409, at the exact boundary', async () => {
+    it('P18.2-T5 AC-5 a running event still takes an RSVP; from endsAt both are refused 409, at the exact boundary', async () => {
       as('AGUS');
       await http().post(`/events/${idOf('RUNNING_LEADERS')}/rsvp`).expect(201);
       as('RINA');
@@ -300,15 +300,15 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect((await http().get(`/events/${idOf('ENDS_NOW')}`).expect(200)).body).toMatchObject({ phase: 'past', ended: true });
     });
 
-    it('P18.5-T5 AC-5 an RSVP or a claim takes no body', async () => {
+    it('P18.2-T5 AC-5 an RSVP or a claim takes no body', async () => {
       as('RINA');
       await http().post(`/events/${idOf('UPCOMING')}/rsvp`).send({ going: true }).expect(400);
       await http().get('/events?phase=past').expect(400);
     });
   });
 
-  describe('P18.5-T5 AC-6 a claim is not attendance — exit test 2', () => {
-    it('P18.5-T5 AC-6 attendance cannot be self-claimed without a confirming role', async () => {
+  describe('P18.2-T5 AC-6 a claim is not attendance — exit test 2', () => {
+    it('P18.2-T5 AC-6 attendance cannot be self-claimed without a confirming role', async () => {
       as('RINA');
       const claimed = (await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201)).body;
       expect(claimed.me).toEqual({ rsvp: null, claimed: true, feedback: null });
@@ -338,7 +338,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventRsvps').countDocuments({ confirmedAttended: true })).toBe(1);
     });
 
-    it('P18.5-T5 AC-6 a claim before the end is refused 409 EVENT_NOT_ENDED, and is idempotent after', async () => {
+    it('P18.2-T5 AC-6 a claim before the end is refused 409 EVENT_NOT_ENDED, and is idempotent after', async () => {
       as('RINA');
       expect((await http().post(`/events/${idOf('UPCOMING')}/attendance/claim`).expect(409)).body.error.code).toBe('EVENT_NOT_ENDED');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
@@ -347,8 +347,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-7 the roll call', () => {
-    it('P18.5-T5 AC-7 lists the audience as at the start with name, rung and what they said; the caller’s own row is marked', async () => {
+  describe('P18.2-T5 AC-7 the roll call', () => {
+    it('P18.2-T5 AC-7 lists the audience as at the start with name, rung and what they said; the caller’s own row is marked', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       const call = await rollCall('PAST_ALL');
@@ -360,7 +360,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(rowOf(call, 'SARI')!.rung).toBeTruthy();
     });
 
-    it('P18.5-T5 AC-7 nobody confirms their own: 400 EVENT_ATTENDANCE_SELF, nothing written; the Admin confirms the Owner', async () => {
+    it('P18.2-T5 AC-7 nobody confirms their own: 400 EVENT_ATTENDANCE_SELF, nothing written; the Admin confirms the Owner', async () => {
       as('OWNER');
       const res = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`)
         .send({ entries: [{ membershipId: office.id.RINA, attended: true }, { membershipId: office.id.OWNER, attended: true }] })
@@ -375,7 +375,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(rowOf(call, 'ADMIN')).toMatchObject({ self: true });
     });
 
-    it('P18.5-T5 AC-7 marks absent, clears back to unconfirmed, and audits each change with before, after and the confirmer', async () => {
+    it('P18.2-T5 AC-7 marks absent, clears back to unconfirmed, and audits each change with before, after and the confirmer', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       as('OWNER');
@@ -392,7 +392,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(audits[0].targetMembershipId).toBe(office.id.RINA);
     });
 
-    it('P18.5-T5 AC-7 before the end 409 EVENT_NOT_ENDED; somebody outside the audience 404; a malformed body 400', async () => {
+    it('P18.2-T5 AC-7 before the end 409 EVENT_NOT_ENDED; somebody outside the audience 404; a malformed body 400', async () => {
       as('OWNER');
       const put = (key: EventKey, body: unknown) => http().put(`/kpm/settings/events/${idOf(key)}/attendance`).send(body as object);
       expect((await put('UPCOMING', { entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(409)).body.error.code)
@@ -409,7 +409,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       ]) expect([body, (await put('PAST_ALL', body).expect(400)).body.error.code]).toEqual([body, 'VALIDATION_FAILED']);
     });
 
-    it('P18.5-T5 AC-8 the rate over the audience as at the start: 2 of 2 chosen is 100, one absent of two is 50', async () => {
+    it('P18.2-T5 AC-8 the rate over the audience as at the start: 2 of 2 chosen is 100, one absent of two is 50', async () => {
       as('OWNER');
       const put = (entries: unknown[]) => http().put(`/kpm/settings/events/${idOf('PAST_CHOSEN')}/attendance`).send({ entries }).expect(200);
       expect((await put([{ membershipId: office.id.RINA, attended: true }, { membershipId: office.id.BUDI, attended: true }])).body.attendanceRate).toBe(100);
@@ -418,8 +418,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-10 the picker', () => {
-    it('P18.5-T5 AC-10 lists every active member with the rung and whether they lead somebody — by the graph', async () => {
+  describe('P18.2-T5 AC-10 the picker', () => {
+    it('P18.2-T5 AC-10 lists every active member with the rung and whether they lead somebody — by the graph', async () => {
       as('OWNER');
       const { people } = (await http().get('/kpm/settings/events/invitees').expect(200)).body as {
         people: { membershipId: string; name: string; leads: boolean; orgLevelCode: string; rung: string }[];
@@ -434,7 +434,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       await http().get('/kpm/settings/events/invitees?q=rina').expect(400);
     });
 
-    it('P18.5-T5 AC-10 a chosen-leaders event takes somebody who leads, by the same graph, and refuses one who leads nobody', async () => {
+    it('P18.2-T5 AC-10 a chosen-leaders event takes somebody who leads, by the same graph, and refuses one who leads nobody', async () => {
       as('OWNER');
       const make = (code: string, who: EventsWho) => http().post('/kpm/settings/events').send({
         code, typeCode: 'TRAINING', title: 'Leaders', startsAt: '2026-10-01T02:00:00Z', endsAt: '2026-10-01T04:00:00Z',
@@ -445,8 +445,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T6 the answer', () => {
-    it('P18.5-T6 AC-2 only after the end, only for somebody who RSVP’d, claimed or was confirmed', async () => {
+  describe('P18.2-T6 the answer', () => {
+    it('P18.2-T6 AC-2 only after the end, only for somebody who RSVP’d, claimed or was confirmed', async () => {
       as('RINA');
       expect((await http().post(`/events/${idOf('UPCOMING')}/feedback`).send({ score: 9 }).expect(409)).body.error.code)
         .toBe('EVENT_NOT_ENDED');
@@ -460,7 +460,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }).expect(201);
     });
 
-    it('P18.5-T6 AC-3 one answer, kept whole: improve stored, both texts trimmed; a second submit 409', async () => {
+    it('P18.2-T6 AC-3 one answer, kept whole: improve stored, both texts trimmed; a second submit 409', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       const answered = (await http().post(`/events/${idOf('PAST_ALL')}/feedback`)
@@ -473,7 +473,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(await db().collection('eventFeedback').countDocuments()).toBe(1);
     });
 
-    it('P18.5-T6 AC-3 refuses a score that is not a whole number from 0 to 10, an over-long text and an unknown field — 400', async () => {
+    it('P18.2-T6 AC-3 refuses a score that is not a whole number from 0 to 10, an over-long text and an unknown field — 400', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       for (const body of [
@@ -486,7 +486,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 0, why: 'x'.repeat(1000) }).expect(201);
     });
 
-    it('P18.5-T6 AC-7 the audit row carries ids and the score, never the words', async () => {
+    it('P18.2-T6 AC-7 the audit row carries ids and the score, never the words', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 6, why: 'Secret words', improve: 'More secret' }).expect(201);
@@ -495,7 +495,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(JSON.stringify(row)).not.toMatch(/secret/i);
     });
 
-    it('P18.5-T6 AC-5, AC-6 the Feedback Summary: names shown, NPS over confirmed attendees, k awaiting, absent counted in neither', async () => {
+    it('P18.2-T6 AC-5, AC-6 the Feedback Summary: names shown, NPS over confirmed attendees, k awaiting, absent counted in neither', async () => {
       const answer = async (who: EventsWho, score: number, why = '', improve = '') => {
         as(who);
         await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
@@ -531,7 +531,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(summary.rows[3]).toMatchObject({ why: 'Long', improve: '' });
     });
 
-    it('P18.5-T6 AC-4 the reader reads their own answer back in the list, and nobody else’s', async () => {
+    it('P18.2-T6 AC-4 the reader reads their own answer back in the list, and nobody else’s', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9, why: 'Clear' }).expect(201);
@@ -542,8 +542,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-4 what an office missing a part of its record still reads', () => {
-    it('P18.5-T5 AC-4 no company row: the issuer word is empty and every rung reads its code; a vanished type reads its code', async () => {
+  describe('P18.2-T5 AC-4 what an office missing a part of its record still reads', () => {
+    it('P18.2-T5 AC-4 no company row: the issuer word is empty and every rung reads its code; a vanished type reads its code', async () => {
       await db().collection('companies').deleteMany({});
       await db().collection('kpms').updateOne(
         { _id: new mongoose.Types.ObjectId(office.as('OWNER').kpmId!) }, { $set: { companyId: '66f0000000000000000000ff' } },
@@ -559,7 +559,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(people.every((p) => p.rung === p.orgLevelCode)).toBe(true);
     });
 
-    it('P18.5-T5 AC-4 an office whose own row is gone, and a member whose account is gone: no company word, no rungs, names empty', async () => {
+    it('P18.2-T5 AC-4 an office whose own row is gone, and a member whose account is gone: no company word, no rungs, names empty', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       await http().post(`/events/${idOf('PAST_ALL')}/feedback`).send({ score: 9 }).expect(201);
@@ -577,7 +577,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(summary.rows.map((r: { name: string }) => r.name)).toEqual(['']);
     });
 
-    it('P18.5-T5 AC-7 the roll call of a running or upcoming event names an RSVP as RSVP’d, registered, and offers no confirm', async () => {
+    it('P18.2-T5 AC-7 the roll call of a running or upcoming event names an RSVP as RSVP’d, registered, and offers no confirm', async () => {
       as('RINA');
       await http().post(`/events/${idOf('UPCOMING')}/rsvp`).expect(201);
       const call = await rollCall('UPCOMING');
@@ -586,7 +586,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(call.counts.registered).toBe(1);
     });
 
-    it('P18.5-T5 AC-7 a confirmer whose membership has gone is named by nobody, never by a placeholder', async () => {
+    it('P18.2-T5 AC-7 a confirmer whose membership has gone is named by nobody, never by a placeholder', async () => {
       as('OWNER');
       await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`)
         .send({ entries: [{ membershipId: office.id.RINA, attended: true }] }).expect(200);
@@ -598,8 +598,8 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('P18.5-T5 AC-9 the office’s zone and the refusal to reopen an answered event', () => {
-    it('P18.5-T5 AC-9 the day and the time come from kpms.timezone, not a constant', async () => {
+  describe('P18.2-T5 AC-9 the office’s zone and the refusal to reopen an answered event', () => {
+    it('P18.2-T5 AC-9 the day and the time come from kpms.timezone, not a constant', async () => {
       // A column set to another zone moves the day: 16:30Z is 00:30 on the next day in Makassar.
       await db().collection('kpms').updateOne(
         { _id: new mongoose.Types.ObjectId(office.as('OWNER').kpmId!) }, { $set: { timezone: 'Asia/Makassar' } },
@@ -617,7 +617,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(settings.find((e) => e.code === 'LATE_NIGHT')!.startsOn).toBe('2026-10-02');
     });
 
-    it('P18.5-T5 AC-9 an answered event that has ended is not moved back into the future: 409 EVENT_HAS_RESPONSES', async () => {
+    it('P18.2-T5 AC-9 an answered event that has ended is not moved back into the future: 409 EVENT_HAS_RESPONSES', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       as('OWNER');
@@ -635,7 +635,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
     });
   });
 
-  describe('the Phase 18.5 exit review — an edit never shifts what an ended, answered event was', () => {
+  describe('the Phase 18.2 exit review — an edit never shifts what an ended, answered event was', () => {
     const patch = (key: EventKey, body: Record<string, unknown>) => http().patch(`/kpm/settings/events/${idOf(key)}`).send(body);
     const answered = async (key: EventKey, who: EventsWho = 'RINA') => {
       as(who);
@@ -644,7 +644,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       as('OWNER');
     };
 
-    it('P18.5-T5 AC-9 a patch carrying startsAt alone is checked against the stored end: 400, never a bypass of the guard', async () => {
+    it('P18.2-T5 AC-9 a patch carrying startsAt alone is checked against the stored end: 400, never a bypass of the guard', async () => {
       await answered('PAST_ALL');
       const res = await patch('PAST_ALL', { startsAt: '2026-10-01T02:00:00Z' }).expect(400);
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { violations: ['endsAt must be after startsAt.'] } });
@@ -652,13 +652,13 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       await patch('UPCOMING', { startsAt: '2026-12-01T02:00:00Z' }).expect(400);
     });
 
-    it('P18.5-T5 AC-9 its start does not move, even within the past: 409, details.field "dates"', async () => {
+    it('P18.2-T5 AC-9 its start does not move, even within the past: 409, details.field "dates"', async () => {
       await answered('PAST_ALL');
       const res = await patch('PAST_ALL', { startsAt: '2026-08-24T01:00:00Z' }).expect(409);
       expect(res.body.error).toMatchObject({ code: 'EVENT_HAS_RESPONSES', details: { field: 'dates', changed: ['startsAt'] } });
     });
 
-    it('P18.5-T5 AC-9 who it was for does not change — scope or invitees: 409, details.field "audience"; nothing drops from the summary', async () => {
+    it('P18.2-T5 AC-9 who it was for does not change — scope or invitees: 409, details.field "audience"; nothing drops from the summary', async () => {
       await answered('PAST_CHOSEN', 'RINA');
       await answered('PAST_CHOSEN', 'BUDI');
       for (const audience of [
@@ -677,7 +677,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect((await rollCall('PAST_CHOSEN')).counts.audience).toBe(2);
     });
 
-    it('P18.5-T5 AC-10 a past chosen event keeps an invitee who has since left; only the people a patch adds are checked', async () => {
+    it('P18.2-T5 AC-10 a past chosen event keeps an invitee who has since left; only the people a patch adds are checked', async () => {
       await db().collection('memberships').updateOne(
         { _id: new mongoose.Types.ObjectId(office.id.BUDI) }, { $set: { status: 'removed', removedAt: new Date('2026-09-01T02:00:00Z') } },
       );
@@ -697,7 +697,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       }).expect(400);
     });
 
-    it('P18.5-T5 AC-9 an invitee id that is not an id is 400, not a server fault; a location link must be a web address', async () => {
+    it('P18.2-T5 AC-9 an invitee id that is not an id is 400, not a server fault; a location link must be a web address', async () => {
       const make = (over: Record<string, unknown>) => http().post('/kpm/settings/events').send({
         code: 'CHECKED', typeCode: 'TRAINING', title: 'Checked', startsAt: '2026-10-01T02:00:00Z', endsAt: '2026-10-01T04:00:00Z',
         audience: { issuer: 'kpm', scope: 'all_agents' }, ...over,
@@ -713,7 +713,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       await patch('UPCOMING', { locationUrl: 'javascript:alert(1)' }).expect(400);
     });
 
-    it('P18.5-T5 AC-5 three taps at once write one RSVP, one claim, one cancellation — and one audit row each', async () => {
+    it('P18.2-T5 AC-5 three taps at once write one RSVP, one claim, one cancellation — and one audit row each', async () => {
       as('RINA');
       await Promise.all([1, 2, 3].map(() => http().post(`/events/${idOf('UPCOMING')}/rsvp`).expect(201)));
       await Promise.all([1, 2, 3].map(() => http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201)));
@@ -724,7 +724,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(audits.every((a) => typeof a.targetId === 'string' && a.targetId.length === 24)).toBe(true);
     });
 
-    it('P18.5-T6 AC-5 the summary orders by score, then by name — whatever order the answers came in', async () => {
+    it('P18.2-T6 AC-5 the summary orders by score, then by name — whatever order the answers came in', async () => {
       for (const who of ['SARI', 'INDAH', 'BUDI'] as const) {
         as(who);
         await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
@@ -735,7 +735,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(summary.rows.map((r: { name: string }) => r.name)).toEqual(['Budi Santoso', 'Indah Permatasari', 'Sari Puspita']);
     });
 
-    it('P18.5-T5 AC-7 the refusal of one’s own row names the membership and none of OD-39’s words', async () => {
+    it('P18.2-T5 AC-7 the refusal of one’s own row names the membership and none of OD-39’s words', async () => {
       as('OWNER');
       const res = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`)
         .send({ entries: [{ membershipId: office.id.OWNER, attended: true }] }).expect(400);
@@ -743,7 +743,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(res.body.error.message).not.toMatch(/office|KPM|reports to|tagged to|untagged|unassigned/i);
     });
 
-    it('P18.5-T5 AC-2 a Super Admin outside a support session is refused every settings read: no office', async () => {
+    it('P18.2-T5 AC-2 a Super Admin outside a support session is refused every settings read: no office', async () => {
       session.current = SA;
       for (const path of [
         '/kpm/settings/events', '/kpm/settings/events/types', '/kpm/settings/events/invitees',
@@ -754,7 +754,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       }
     });
 
-    it('P18.5-T5 AC-3 a re-parent after the start: the single read and the list agree on who led then', async () => {
+    it('P18.2-T5 AC-3 a re-parent after the start: the single read and the list agree on who led then', async () => {
       // Dodi has no edge of his own (older than the history); on 1 September he moved from Lukas to Nina.
       await db().collection('membershipHistory').insertOne({
         kpmId: office.as('OWNER').kpmId, membershipId: office.id.DODI, eventType: 're_parented',
@@ -771,11 +771,11 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
   });
 
   /**
-   * **The member's and the roll call's refusals, in Bahasa Indonesia** (P18.98-T5 AC-7): the same code and details as
+   * **The member's and the roll call's refusals, in Bahasa Indonesia** (P18.10-T5 AC-7): the same code and details as
    * in English, the words the reader's — a refusal's message and every field sentence in `details.violations`.
    */
-  describe('P18.98-T5 AC-7 the events’ refusals in Indonesian', () => {
-    it('P18.98-T5 AC-7 one’s own row, before the end and a malformed roll call: the codes as in English, the words Indonesian', async () => {
+  describe('P18.10-T5 AC-7 the events’ refusals in Indonesian', () => {
+    it('P18.10-T5 AC-7 one’s own row, before the end and a malformed roll call: the codes as in English, the words Indonesian', async () => {
       as('OWNER');
       const own = await http().put(`/kpm/settings/events/${idOf('PAST_ALL')}/attendance`).set(...IN_INDONESIAN)
         .send({ entries: [{ membershipId: office.id.OWNER, attended: true }] }).expect(400);
@@ -799,7 +799,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
       expect(extra.body.error.details.violations).toEqual(['properti extra tidak dikenal']);
     });
 
-    it('P18.98-T5 AC-7 the answer: not ended, not attended, a score out of range and a second submit, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 the answer: not ended, not attended, a score out of range and a second submit, in Indonesian', async () => {
       as('RINA');
       const say = async (key: EventKey, body: Record<string, unknown>, status: number) =>
         (await http().post(`/events/${idOf(key)}/feedback`).set(...IN_INDONESIAN).send(body).expect(status)).body.error;
@@ -826,7 +826,7 @@ describe('events, for their audience (P18.5-T5, P18.5-T6)', () => {
         .toBe('This event has ended, so its RSVP is closed.');
     });
 
-    it('P18.98-T5 AC-7 an answered event moved into the future is refused in Indonesian, its details as in English', async () => {
+    it('P18.10-T5 AC-7 an answered event moved into the future is refused in Indonesian, its details as in English', async () => {
       as('RINA');
       await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201);
       as('OWNER');

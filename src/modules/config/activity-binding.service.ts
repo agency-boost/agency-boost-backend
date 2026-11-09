@@ -2,10 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
-import { DomainException, InvalidRequestException, NotFoundException } from '@/common/errors/domain.exception';
+import {
+  DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
+} from '@/common/errors/domain.exception';
 import { joinSentences } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
+import { can } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { ActivityBindingRepository, ActivityTypeRepository } from './activity.repository';
 import type { ActivityBindingDocument } from './activity-binding.schema';
@@ -57,10 +60,10 @@ function viewOf(row: ActivityBindingDocument | null): ActivityBindingView {
  *   chips and the campaigns' cascade touches. A role bound to `[A, B]` counts both. It reads the office's
  *   **live** binding — the Super Admin keeps it, the Owner does not publish it, so a rebind counts from the
  *   moment it is saved, as the Summary's sections already read the live taxonomy (`sectionsShown`).
- * - **The Super Admin edits it per office** through the named cross-tenant read (`findInOfficeAcrossTenants`,
- *   registered in `named-cross-tenant-reads.tenancy.spec.ts`) and a write scoped to that office alone
- *   (`RequestContext.superAdminInTenant`, as the roster import writes). Nothing outside configuration is read.
- * - **The Owner and the Admin read it** for their own office.
+ * - **The Super Admin reads it per office** through the named cross-tenant read (`findInOfficeAcrossTenants`,
+ *   registered in `named-cross-tenant-reads.tenancy.spec.ts`). Nothing outside configuration is read. *Until P19.4-T3*
+ *   they also wrote it, scoped to that office (ADR-0163 §3); the Super Admin changes no KPM data (ADR-0206 §1).
+ * - **The Owner and the Admin read and set it** for their own office, through the tenant-scoped repositories.
  */
 @Injectable()
 export class ActivityBindingService {
@@ -116,6 +119,11 @@ export class ActivityBindingService {
   /**
    * `PUT /admin/tenants/:kpmId/activity-binding` (ADR-0163 §3): the whole binding, every time.
    *
+   * **The Owner's and the Admin's, in their own office** (P19.4-T3; ADR-0206 §1): the binding is a setting the KPM
+   * holds, and the Super Admin changes no KPM data — `activity_binding:write` is theirs at `own-kpm`, refused to anybody
+   * else (`403`), and another office's id is `404`. Read and written through the tenant-scoped repositories with the
+   * caller's own office; the Super Admin, who held the write until then, reads it.
+   *
    * Every code must be one of **that office's** activity types — archived allowed, since its history still counts,
    * unknown refused `400`. A role holds at least one code, and a code sits in one role. `expectedVersion`, when sent,
    * must be the version read, or `409 VERSION_CONFLICT`. Written in that office alone, version bumped, and audited
@@ -124,8 +132,10 @@ export class ActivityBindingService {
   async updateForOffice(
     ctx: RequestContext, kpmId: string, body: Record<string, unknown>,
   ): Promise<OfficeActivityBindingView> {
+    // The guard has asked for the grant; this is the second wall, so the write cannot be reached another way.
+    if (!can(ctx, 'activity_binding:write')) throw new PermissionDeniedException('activity_binding:write');
     await this.office(ctx, kpmId);
-    const types = await this.types.findInOfficeAcrossTenants(ctx, kpmId, {});
+    const types = await this.types.find(ctx, {});
     const known = new Set(types.map((t) => t.code));
     const input: Record<string, unknown> = Object.fromEntries(BINDING_ROLES.map((role) => [role, body[role]]));
     // Codes are stored upper-case; a lower-case one typed by hand is the same code.
@@ -137,7 +147,7 @@ export class ActivityBindingService {
     if (problems.length) throw new InvalidRequestException(joinSentences(problems, ' '));
     const next = normalisedBinding(input);
 
-    const [current] = await this.bindings.findInOfficeAcrossTenants(ctx, kpmId, { status: 'active' }, { limit: 1 });
+    const current = await this.live(ctx);
     const before = viewOf(current ?? null);
     const expected = body.expectedVersion;
     if (typeof expected === 'number' && expected !== before.version) {
@@ -149,14 +159,13 @@ export class ActivityBindingService {
       );
     }
 
-    // Scoped to the one office named, and nothing else: the Super Admin is in no office of their own.
-    const office = RequestContext.superAdminInTenant(ctx.userId, kpmId);
-    await this.bindings.upsertOne(office, { status: 'active' }, {
+    // The caller's own office, through the tenant-scoped repository: `office` above has refused any other.
+    await this.bindings.upsertOne(ctx, { status: 'active' }, {
       $set: { ...next },
       $setOnInsert: { status: 'active', archivedAt: null },
       $inc: { version: 1 },
     });
-    await this.audit.record(office, {
+    await this.audit.record(ctx, {
       action: 'activity_binding.updated',
       targetCollection: 'activityBindings',
       targetId: kpmId,

@@ -13,7 +13,7 @@ const COMPANY = '66f0000000000000000000c1';
 const ctxFor = (kpmId: string, over: Record<string, unknown> = {}) => new RequestContext('u1', 'none', {
   membershipId: `mem-${kpmId}`, kpmId, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
-} as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.98-T4)
+} as never).withReader(SOURCE_READER); // the API's English, as asserted below: nobody's choice reads Indonesian (P18.10-T4)
 const agent = (kpmId = KPM_A) => ctxFor(kpmId);
 const leader = () => ctxFor(KPM_A, { membershipId: 'mem-leader', orgLevelCode: 'AB', hierarchyRole: 'ab', directCount: 1 });
 const owner = (kpmId = KPM_A) => ctxFor(kpmId, { isKpmOwner: true });
@@ -120,7 +120,7 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
       expect((await byCode(leader())).SELLING_SUCCESS_RATE.sides).toBeNull();
     });
 
-    it('P18.98-T5 AC-4 tags the balance in the reader’s language; its sides are the office’s own labels, as typed', async () => {
+    it('P18.10-T5 AC-4 tags the balance in the reader’s language; its sides are the office’s own labels, as typed', async () => {
       await day(TODAY, { SELL_PRESENTATION: 9, RECRUIT_PRESENTATION: 1 }, { membershipId: 'mem-leader' });
       expect((await byCode(leader().withReader(readerIn('id')))).SELLING_VS_RECRUITMENT).toMatchObject({
         tag: { code: null, label: 'Keseimbangan' }, sides: { numerator: 'Penjualan', denominator: 'Recruitment' },

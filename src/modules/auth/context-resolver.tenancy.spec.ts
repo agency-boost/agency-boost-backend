@@ -35,11 +35,14 @@ describe('ContextResolver', () => {
    * synthetic owner membership Phase 2 fabricated is gone: a context built from a row
    * that does not exist cannot carry a direct count, and leadership is that count.
    */
+  // Counted, not drawn: `leaderCode` is unique across every office, and two random draws from 900 met on GitHub's
+  // runner (`E11000 … leaderCode: "LC0779"`, production's first release, 2026-11-02).
+  let joined = 99;
   async function join(userId: string, kpmId: string, over: Record<string, unknown> = {}) {
-    const seq = Math.floor(Math.random() * 900) + 100;
+    const seq = ++joined;
     return mongoose.model(Membership.name).create({
       kpmId, userId, agentCode: `PRU-${seq}`, agentSeq: seq,
-      // Every membership carries one, generated with it (P3.6-T1).
+      // Every membership carries one, generated with it (P3.2-T1).
       leaderCode: `LC${String(seq).padStart(4, '0')}`,
       // A placeholder rung, deliberately: this helper writes straight to the model to
       // build a context, and what it exercises is the resolver, not the ladder.
@@ -94,7 +97,7 @@ describe('ContextResolver', () => {
     expect((await resolver.resolve(String(u._id))).membership).toBeNull();
   });
 
-  describe('P18.8-T5 AC-1: the effective Core Leader, read on every request (ADR-0159 §4)', () => {
+  describe('P18.5-T5 AC-1: the effective Core Leader, read on every request (ADR-0159 §4)', () => {
     async function tagged(role: 'ab' | 'aab' | 'agent', isCoreLeader: boolean) {
       const u = await makeUser();
       const kpm = await mongoose.model(Kpm.name).create({ companyId: 'c1', code: '0417', branchName: 'BSD' });
@@ -292,18 +295,11 @@ describe('ContextResolver', () => {
     expect(ctx.auditActors).toEqual({ actorUserId: 'sa-1', effectiveUserId: String(u._id) });
   });
 
-  it('ADR-0162: carries a setup session\'s write scope, frozen, and never outside a session', async () => {
+  it('P19.4-T2 AC-2 marks every session read-only, and nobody acting as themselves (ADR-0206 §4)', async () => {
     const u = await makeUser();
-    const setup = await resolver.resolve(String(u._id), 'sa-1', true, false, ['tenant_config:write']);
-    expect(setup.impersonationWriteScope).toEqual(['tenant_config:write']);
-    expect(Object.isFrozen(setup.impersonationWriteScope)).toBe(true);
-    expect(setup.impersonationPurpose).toBe('setup');
-
-    const support = await resolver.resolve(String(u._id), 'sa-1', true);
-    expect([support.impersonationWriteScope, support.impersonationPurpose]).toEqual([[], 'support']);
-
-    // Somebody acting as themselves is never given a scope, whatever the caller passes.
-    const themselves = await resolver.resolve(String(u._id), null, false, false, ['tenant_config:write']);
-    expect([themselves.impersonationWriteScope, themselves.impersonationPurpose]).toEqual([[], null]);
+    // No caller says so any more: a session is read-only because it is a session. The setup scope is gone (ADR-0162).
+    expect((await resolver.resolve(String(u._id), 'sa-1')).impersonationReadOnly).toBe(true);
+    expect((await resolver.resolve(String(u._id), 'sa-1', true)).impersonationReadOnly).toBe(true);
+    expect((await resolver.resolve(String(u._id))).impersonationReadOnly).toBe(false);
   });
 });

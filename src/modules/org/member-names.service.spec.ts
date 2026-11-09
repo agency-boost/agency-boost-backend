@@ -212,5 +212,40 @@ describe('a person’s name, from their membership', () => {
       expect(found).toEqual(new Map([[SARI, { name: 'Ibu Sari', pronoun: 'she', photoUrl: null }]]));
       expect((await names.pictured(ctx(), [])).size).toBe(0);
     });
+
+    /*
+     * **P19.9-T4 AC-1 — the Unit roster's WhatsApp** (ADR-0235): `phones` reads each drawn person's number in the same
+     * user read. Without it no person carries the key at all, so no other reader can hand on a number it does not draw.
+     */
+    describe('phones (P19.9-T4 AC-1)', () => {
+      const setPhone = (suffix: string, phone: string) => mongoose.connection.db!.collection('users')
+        .updateOne({ _id: new mongoose.Types.ObjectId(`66f0000000000000000002${suffix}`) }, { $set: { phone } });
+
+      it('P19.9-T4 AC-1 a drawn person’s number, null without one; the users read once, as without it', async () => {
+        await setPhone('01', '+6281200000001');
+        const find = jest.spyOn(mongoose.model(User.name), 'find');
+        const found = await names.pictured(ctx(), [SARI, RINA], [SARI, RINA], { phones: true });
+        expect(found.get(SARI)).toEqual({ name: 'Ibu Sari', pronoun: 'she', photoUrl: null, phone: '+6281200000001' });
+        expect(found.get(RINA)).toEqual({ name: 'Rina Wijaya', pronoun: 'they', photoUrl: null, phone: null });
+        expect(find).toHaveBeenCalledTimes(1);
+        find.mockRestore();
+      });
+
+      it('P19.9-T4 AC-1 somebody only named, and an inactive membership, carry null', async () => {
+        await setPhone('01', '+6281200000001');
+        await setPhone('02', '+6281200000002');
+        await mongoose.connection.db!.collection('memberships')
+          .updateOne({ _id: new mongoose.Types.ObjectId(RINA) }, { $set: { status: 'removed' } });
+        const found = await names.pictured(ctx(), [SARI, RINA], [RINA], { phones: true });
+        expect(found.get(SARI)).toMatchObject({ name: 'Ibu Sari', phone: null });
+        expect(found.get(RINA)).toMatchObject({ name: 'Rina Wijaya', phone: null });
+      });
+
+      it('P19.9-T4 AC-1 not asked, no person carries a phone key — whatever is on file', async () => {
+        await setPhone('01', '+6281200000001');
+        const found = await names.pictured(ctx(), [SARI]);
+        expect(found.get(SARI)).not.toHaveProperty('phone');
+      });
+    });
   });
 });

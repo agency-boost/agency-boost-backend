@@ -34,7 +34,7 @@ export const LeaderNoteRevisionSchema = SchemaFactory.createForClass(LeaderNoteR
  * **Joined into no other answer.** No session, snapshot, print, notification or roster row carries a
  * field of this record (`functional/coaching.md`, *No leader note reaches its subject*).
  *
- * Personal data under UU 27/2022, about the coachee and holding the author's judgement of them. P19-T1's
+ * Personal data under UU 27/2022, about the coachee and holding the author's judgement of them. P20-T1's
  * erasure cascade reaches it.
  */
 @Schema({ ...configSchemaOptions, collection: 'leaderNotes' })

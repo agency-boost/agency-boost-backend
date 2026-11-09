@@ -267,8 +267,10 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect(await col('coachingSessions').countDocuments({ coacheeMembershipId: id(coachee), status: 'draft', coachMembershipId: id(coach) })).toBe(0);
     });
 
-    it('P11-T5 an Agent, a Super Admin and a read-only support session hold no grant to start one', async () => {
-      expect((await start('INDAH', 'DIMAS').expect(403)).body.error.code).toBe('PERM_DENIED');
+    it('P11-T5 a Super Admin and a read-only support session hold no grant to start one; an Agent who leads nobody reaches nobody', async () => {
+      // P19.9-T6 (ADR-0234): the Agent rung holds the grant now, and `COACH` reaches nobody for Indah, who leads nobody.
+      expect((await start('INDAH', 'DIMAS').expect(404)).body.error.code).toBe('NOT_FOUND');
+      expect(await col('coachingSessions').countDocuments({ coachMembershipId: id('INDAH') })).toBe(0);
       session.current = SUPER_ADMIN;
       await http().post(`/coaching/coachees/${id('INDAH')}/sessions`).expect(403);
       const agus = office.as('AGUS');
@@ -388,16 +390,15 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect((await read(started.sessionId).expect(200)).body.version).toBe(1);
     });
 
-    it('P11-T5 writes are its coach’s, while they coach the coachee: anybody else is 404, and an Agent 403', async () => {
+    it('P11-T5 writes are its coach’s, while they coach the coachee: anybody else is 404', async () => {
       const started = (await start('AGUS', 'INDAH').expect(201)).body;
       const body = { version: 1, lastWeekItems: [], actionItems: [dated()], tips: [] };
-      // Another current coach — the Owner as the root AB — a peer, another office: none of them writes it.
-      for (const who of ['OWNER', 'SARI', 'PEER_AB', 'B_AB'] as Who[]) {
+      // Another current coach — the Owner as the root AB — a peer, another office, the coachee herself and an Agent
+      // who leads (P19.9-T6: an Agent holds the grant now, and was a 403): none of them writes it.
+      for (const who of ['OWNER', 'SARI', 'PEER_AB', 'B_AB', 'INDAH', 'LUKAS'] as Who[]) {
         as(who);
         expect([who, (await save(started.sessionId, body)).status]).toEqual([who, 404]);
       }
-      as('INDAH');
-      await save(started.sessionId, body).expect(403);
       const agus = office.as('AGUS');
       session.current = new RequestContext(agus.userId, 'none', agus.membership, 'u-support', null, false, true);
       await save(started.sessionId, body).expect(403);
@@ -745,8 +746,9 @@ describe('the coaching session over HTTP (P11-T5)', () => {
         as(who);
         expect([who, (await reopen(done.sessionId, done.version)).status]).toEqual([who, 404]);
       }
+      // The coachee too: an Agent holds the grant since P19.9-T6 (it was a 403), and reaches nobody's session but a coachee's.
       as('INDAH');
-      await reopen(done.sessionId, done.version).expect(403);
+      await reopen(done.sessionId, done.version).expect(404);
       // A draft: its coach is told it is not finalized; the Owner, who cannot read a draft, is not told it exists.
       as('AGUS');
       expect((await reopen(draft.sessionId, draft.version).expect(409)).body.error)
@@ -798,12 +800,12 @@ describe('the coaching session over HTTP (P11-T5)', () => {
   // ------------------------------------------------------------------ who reads a session
 
   /*
-   * **The session in Indonesian** (P18.98-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
+   * **The session in Indonesian** (P18.10-T5 AC-4, AC-6, AC-7): a refusal's words follow the request's
    * `Accept-Language`, its code and details the same in both; *From leads (automatic)*'s *Follow up with {name}* is
    * written for the reader while the session is open, and stored at finalize in the language of the leader finalizing.
    */
-  describe('P18.98-T5 AC-7 in Indonesian', () => {
-    it('P18.98-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
+  describe('P18.10-T5 AC-7 in Indonesian', () => {
+    it('P18.10-T5 AC-7 refuses finalize in Indonesian, with the same rule', async () => {
       const started = (await start('AGUS', 'LUKAS').expect(201)).body;
       const res = await finalize(started.sessionId, started.version).set('Accept-Language', 'id').expect(422);
       expect(res.body.error).toMatchObject({
@@ -813,7 +815,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       });
     });
 
-    it('P18.98-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
+    it('P18.10-T5 AC-4, AC-6 writes *Follow up with* for the reader while open, and stores it as the leader finalized it', async () => {
       const promised = await lead('LUKAS', { name: 'Pak Fauzan Akbar', nextActionDate: '2026-09-16' });
       const started = (await start('AGUS', 'LUKAS').expect(201)).body;
       const line = (text: string) => [{ leadId: promised, leadName: 'Pak Fauzan Akbar', dueDate: '2026-09-16', text }];
@@ -831,7 +833,7 @@ describe('the coaching session over HTTP (P11-T5)', () => {
       expect((await read(started.sessionId).expect(200)).body.leadActions).toEqual(line('Follow up dengan Pak Fauzan Akbar'));
     });
 
-    it('P18.98-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
+    it('P18.10-T5 AC-7 refuses a reopen past its window in Indonesian, the day in it; and a blank reason by the DTO’s sentence', async () => {
       const closed = await finalized('AGUS', 'DIMAS');
       as('AGUS');
       clock.set(new Date('2026-09-21T17:00:00Z')); // 00:00 on the 22nd in Jakarta.

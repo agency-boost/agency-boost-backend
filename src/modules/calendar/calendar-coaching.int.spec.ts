@@ -60,12 +60,15 @@ describe('1:1 coaching entries (P12-T6)', () => {
       expect(chips(entry)).toEqual({ [h.id('INDAH')]: false });
     });
 
-    it('P12-T6 AC-4 any field role makes a 1:1 entry with anybody the picker reaches; an Agent’s links nowhere', async () => {
+    it('P12-T6 AC-4 any field role makes a 1:1 entry with anybody the picker reaches; an Agent who leads nobody links nowhere', async () => {
       const byAgent = await create('INDAH', oneToOne(2, { inviteeIds: [h.id('AGUS'), h.id('PEER_AGENT')] }));
       expect(chips(byAgent)).toEqual({ [h.id('AGUS')]: false, [h.id('PEER_AGENT')]: false });
-      // An Agent who leads somebody coaches nobody on the calendar, as in coaching.
-      const byLukas = await create('LUKAS', oneToOne(2, { inviteeIds: [h.id('TARI')] }));
-      expect(chips(byLukas)).toEqual({ [h.id('TARI')]: false });
+    });
+
+    it('P19.9-T6 AC-2 an Agent who leads links their coachee’s chip, as an AB does — and nobody else’s (ADR-0234)', async () => {
+      // Was: Lukas's chips linked nowhere, an Agent coaching nobody. Every upline coaches since P19.9-T6.
+      const byLukas = await create('LUKAS', oneToOne(2, { inviteeIds: [h.id('TARI'), h.id('INDAH')] }));
+      expect(chips(byLukas)).toEqual({ [h.id('TARI')]: true, [h.id('INDAH')]: false });
     });
 
     it('P12-T6 AC-6 another office reads none of it', async () => {

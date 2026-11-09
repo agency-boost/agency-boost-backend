@@ -1,5 +1,5 @@
 import {
-  SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
+  ACTIVITY_TEXT, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES, SEED_LEAD_STATUSES,
   SEED_RATIO_DEFINITIONS, type SeedActivityCategory, type SeedActivityType,
 } from '@/domain/constants';
 import { defaultTrainingTaxonomy } from '@/modules/training/training-payload';
@@ -7,6 +7,8 @@ import { defaultActivationChecklist } from '@/modules/activation/activation-payl
 import { defaultCapabilityLadder } from '@/modules/capability/capability-payload';
 import { defaultEventTypes } from '@/modules/events/event-types-payload';
 import { defaultCampaignKinds } from '@/modules/campaigns/campaign-kinds-payload';
+import { defaultPlaybookBody } from '@/modules/recruitment/recruitment-playbook-defaults';
+import { platformAnalyticsConfig } from './analytics-config';
 import type { TemplateKind } from './company-template.schema';
 import { boundCodes, defaultBinding, type CascadeBinding } from './activity-binding';
 
@@ -28,9 +30,29 @@ export const OFFICE_TEMPLATE_KINDS = [
 ] as const satisfies readonly TemplateKind[];
 export type OfficeTemplateKind = (typeof OFFICE_TEMPLATE_KINDS)[number];
 
-/** Is this kind held by a named template, rather than by the company itself? */
+/** Is this kind copied into an office — one of the seven, rather than the company's or the playbook? */
 export function isOfficeTemplateKind(kind: TemplateKind): kind is OfficeTemplateKind {
   return (OFFICE_TEMPLATE_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * **Every kind a named template holds: its sections' kinds** (ADR-0210 §1). The seven office kinds and the recruitment
+ * playbook, which a template holds, drafts, publishes and copies like them, but which **no office copies**: each KPM reads
+ * its template's published playbook live (ADR-0210 §4). So a template's checklist, its copies and *Terbitkan semua* read
+ * this list; provisioning, the push and the offices' standing read {@link OFFICE_TEMPLATE_KINDS}.
+ */
+export const NAMED_TEMPLATE_KINDS = [
+  ...OFFICE_TEMPLATE_KINDS, 'recruitment_playbook',
+  // P19.5-T1 (ADR-0214 §1): the eighth section, read live by every KPM on the template — never copied, never pushed.
+  'advanced_analytics',
+  // P19.6-T1 (ADR-0218 §3): the ninth, *Tampilan* — read live, never copied, never pushed, and no lock.
+  'branding',
+] as const satisfies readonly TemplateKind[];
+export type NamedTemplateKind = (typeof NAMED_TEMPLATE_KINDS)[number];
+
+/** Is this kind held by a named template, rather than by the company itself (`campaign_kinds`)? */
+export function isNamedTemplateKind(kind: TemplateKind): kind is NamedTemplateKind {
+  return (NAMED_TEMPLATE_KINDS as readonly string[]).includes(kind);
 }
 
 /**
@@ -68,7 +90,51 @@ export function platformDefaultPayload(kind: TemplateKind): Record<string, unkno
       return { ...defaultEventTypes() };
     case 'campaign_kinds':
       return { ...defaultCampaignKinds() };
+    case 'recruitment_playbook':
+      // The AgencyBoost words (ADR-0125 §2), what *Mulai dari kata-kata AgencyBoost* starts a template's section from.
+      return defaultPlaybookBody() as unknown as Record<string, unknown>;
+    case 'advanced_analytics':
+      // Version 1's seven columns with the first pattern (ADR-0214 §3, §9): what a KPM reads where nothing is published.
+      return platformAnalyticsConfig() as unknown as Record<string, unknown>;
+    case 'branding':
+      // AgencyBoost's own (ADR-0218 §3): nothing set, so a KPM on the template shows AgencyBoost's logo, colours and Boost.
+      return { logo: null, logoSquare: null, primary: null, secondary: null, mascot: null };
   }
+}
+
+/**
+ * **A template type's *Nama singkat*, as an office is given it** (P19.8-T4, ADR-0229 §5).
+ *
+ * - **A payload that carries the key gives what it says** — a text, or `null` for none (the template's author cleared it).
+ * - **A payload type with no such key** — every template published before the field, and an office's published settings
+ *   saved as a template before it — **gives the platform's short name for its code** (`SEED_ACTIVITY_TYPES`), or `null`
+ *   for a code of the office's own. So provisioning from an old template gives the approved words, and a push of one
+ *   never wipes what migration `0060` wrote into an office.
+ *
+ * Provisioning and the push call this one rule, so the two cannot give an office different words.
+ */
+export function shortLabelOf(type: { code: string; shortLabel?: string | null }): string | null {
+  if (Object.prototype.hasOwnProperty.call(type, 'shortLabel') && type.shortLabel !== undefined) {
+    const own = typeof type.shortLabel === 'string' ? type.shortLabel.trim() : null;
+    return own || null;
+  }
+  return SEED_ACTIVITY_TYPES.find((t) => t.code === type.code)?.shortLabel ?? null;
+}
+
+/**
+ * **The codes of a template's types whose *Nama singkat* an office's own write would refuse** (P19.8-T4, ADR-0229 §5):
+ * not text and not `null`, or longer than `ACTIVITY_TEXT.SHORT_LABEL_MAX` once trimmed. Absent is fine (`shortLabelOf`).
+ */
+export function typeShortLabelProblems(types: unknown): string[] {
+  if (!Array.isArray(types)) return [];
+  return types
+    .filter((t): t is { code?: unknown; shortLabel?: unknown } => t !== null && typeof t === 'object')
+    .filter((t) => {
+      const value = t.shortLabel;
+      if (value === undefined || value === null) return false;
+      return typeof value !== 'string' || value.trim().length > ACTIVITY_TEXT.SHORT_LABEL_MAX;
+    })
+    .map((t) => String(t.code ?? '?'));
 }
 
 /**

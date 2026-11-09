@@ -5,13 +5,14 @@ import {
   KPM_A, KPM_B, startActivationHarness, stopActivationHarness, TODAY, type ActivationHarness,
 } from '../../../test/activation-office';
 import { ActivationReadings } from './activation-readings';
+import type { NewHireDetailView } from './activation-progress.view';
 
 /**
- * **`ActivationReadings.ofMembers` — its shape pinned** (P18.6-T1 AC-7): every activation of the members asked, in
+ * **`ActivationReadings.ofMembers` — its shape pinned** (P18.3-T1 AC-7): every activation of the members asked, in
  * every state, the newest per membership, in one read; the open ones through `resolve`, which writes a newly met
  * link unless the session is read-only. Over `test/activation-office.ts` (Monday 14 September 2026, Jakarta).
  */
-describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
+describe('ActivationReadings.ofMembers (P18.3-T1 AC-7)', () => {
   let h: ActivationHarness;
   let readings: ActivationReadings;
   const office = (ctx: RequestContext) => new TenantDay(h.wired.kpms as never, h.wired.clock).office(ctx);
@@ -26,7 +27,7 @@ describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
 
   beforeEach(() => h.reset());
 
-  it('P18.6-T1 AC-7 answers every state, its day 1, its end, overdue and the graduation day — and nobody without one', async () => {
+  it('P18.3-T1 AC-7 answers every state, its day 1, its end, overdue and the graduation day — and nobody without one', async () => {
     await h.start('RINA', '2026-08-01');
     await h.start('BUDI', '2026-05-01');
     await h.start('DODI', '2026-03-01', { graduatedAt: new Date('2026-05-20T17:30:00Z'), graduatedByMembershipId: h.id('DODI') });
@@ -50,18 +51,19 @@ describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
     });
   });
 
-  it('P18.6-T1 AC-7 each standing equals the leader’s detail for that hire', async () => {
+  it('P18.3-T1 AC-7 each standing equals the leader’s detail for that hire', async () => {
     await h.start('RINA', '2026-08-01');
     await h.start('BUDI', '2026-05-01');
     await h.start('DODI', '2026-03-01', { graduatedAt: new Date('2026-05-20T03:00:00Z'), graduatedByMembershipId: h.id('DODI') });
     const out = await read(h.office.as('OWNER'), [h.id('RINA'), h.id('BUDI'), h.id('DODI')]);
     for (const who of ['RINA', 'BUDI', 'DODI'] as const) {
-      const detail = await h.wired.newHires.detail(h.office.as('AGUS'), h.id(who));
+      // Inside the first year, so the full view (P19.9-T3 AC-5).
+      const detail = await h.wired.newHires.detail(h.office.as('AGUS'), h.id(who)) as NewHireDetailView;
       expect(out.get(h.id(who))).toMatchObject({ state: detail.state, overdue: detail.overdue, endsOn: detail.endsOn, startDate: detail.startDate });
     }
   });
 
-  it('P18.6-T1 AC-7 one per membership, the newest; a removed row is no activation', async () => {
+  it('P18.3-T1 AC-7 one per membership, the newest; a removed row is no activation', async () => {
     await h.start('RINA', '2026-01-02', {
       graduatedAt: new Date('2026-03-01T03:00:00Z'), graduatedByMembershipId: h.id('RINA'), createdAt: new Date('2026-01-02T03:00:00Z'),
     });
@@ -72,7 +74,7 @@ describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
     expect([...out.values()].map((s) => [s.membershipId, s.state, s.startDate])).toEqual([[h.id('RINA'), 'open', '2026-08-01']]);
   });
 
-  it('P18.6-T1 AC-7 reads within the office: another office’s activation, asked by id, is not there', async () => {
+  it('P18.3-T1 AC-7 reads within the office: another office’s activation, asked by id, is not there', async () => {
     await h.start('B_AGENT', '2026-08-01');
     expect((await read(h.office.as('OWNER'), [h.id('B_AGENT')])).size).toBe(0);
     expect((await read(h.office.as('B_AB'), [h.id('B_AGENT')])).size).toBe(1);
@@ -80,7 +82,7 @@ describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
     expect(h.office.as('OWNER').kpmId).toBe(KPM_A);
   });
 
-  it('P18.6-T1 AC-7 one query for any number of closed activations, none for nobody', async () => {
+  it('P18.3-T1 AC-7 one query for any number of closed activations, none for nobody', async () => {
     for (const who of ['RINA', 'BUDI', 'DODI', 'TARI'] as const) {
       await h.start(who, '2026-01-02', { graduatedAt: new Date('2026-03-01T03:00:00Z'), graduatedByMembershipId: h.id(who) });
     }
@@ -98,7 +100,7 @@ describe('ActivationReadings.ofMembers (P18.6-T1 AC-7)', () => {
     expect(queries).toEqual(['activationProgress.find']);
   });
 
-  it('P18.6-T1 AC-7 the open ones through resolve: a newly met link is written — but never by a read-only support session', async () => {
+  it('P18.3-T1 AC-7 the open ones through resolve: a newly met link is written — but never by a read-only support session', async () => {
     // Rina's goal (the coaching office's) meets `feature:goals`.
     const doc = await h.start('RINA', '2026-08-01');
     const stored = () => h.col('activationProgress').findOne({ _id: doc._id });

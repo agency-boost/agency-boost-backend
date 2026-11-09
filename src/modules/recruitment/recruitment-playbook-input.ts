@@ -13,7 +13,7 @@ const SAY = RECRUITMENT_REFUSALS.VALIDATION_FAILED;
 
 /**
  * One field a save got wrong, by its path in the request (`body.profiles.retiree.tagline`), and what is wrong with it
- * — a sentence in both languages (P18.98-T5 AC-3), written for the reader in `details.violations`.
+ * — a sentence in both languages (P18.10-T5 AC-3), written for the reader in `details.violations`.
  */
 export interface PlaybookViolation {
   field: string;
@@ -129,7 +129,7 @@ export function checkPlaybookBody(raw: unknown): RecruitmentPlaybookBody {
   const nextAction = text(body.nextAction, 'body.nextAction');
 
   if (violations.length > 0) {
-    throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.cannotSave({ violations }), HttpStatus.BAD_REQUEST, { violations });
+    throw new DomainException(ErrorCode.VALIDATION_FAILED, SAY.cannotPublish({ violations }), HttpStatus.BAD_REQUEST, { violations });
   }
   return { profiles, objections, profileObjections, nextAction };
 }

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LEAD_AGE, LEAD_GENDERS } from '@/domain/constants';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 import type { LeadDetailView, LeadFlag, LeadMoveView, LeadPage, LeadView } from './lead.service';
 
@@ -8,6 +9,40 @@ export class LeadContactDto {
 
   @ApiProperty({ type: String, nullable: true })
   email!: string | null;
+}
+
+/** Whose lead it is, by name (P19.9-T1 AC-4; ADR-0232): *Milik Rina Wijaya* on a leader's card under *Tim*. */
+export class LeadOwnerDto {
+  @ApiProperty({ type: String, description: 'The membership whose lead it is — `ownerMembershipId` again.' })
+  membershipId!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Rina Wijaya',
+    description: 'The account’s name behind that membership; `null` for one that can no longer be named, never a placeholder.',
+  })
+  name!: string | null;
+}
+
+/** The latest proposal's products, as its card names them (P19.7-T2 AC-12). */
+export class LeadLatestProposalDto {
+  @ApiProperty({
+    type: [String],
+    example: ['PRUWell Medical', 'PRUCinta'],
+    description: 'The item names of the live proposal updated last that has a product, as the proposal shows them, in order. '
+      + 'Empty when every live proposal of the lead is still empty.',
+  })
+  products!: string[];
+}
+
+/** A lead's proposals, for its owner alone (P19.7-T2 AC-12; ADR-0221 §6). */
+export class LeadProposalsDto {
+  @ApiProperty({ type: Number, minimum: 1, description: 'The lead’s live proposals, drafts included.' })
+  count!: number;
+
+  @ApiProperty({ type: LeadLatestProposalDto })
+  latest!: LeadLatestProposalDto;
 }
 
 export class LeadResponseDto implements LeadView {
@@ -50,6 +85,15 @@ export class LeadResponseDto implements LeadView {
   })
   committedMonths!: string[];
 
+  @ApiProperty({
+    type: Boolean,
+    description:
+      '**Derived** (UI-153 item 5): marked *Berhasil* inside the office’s current month. With `thisMonth` it '
+      + 'is the avatar’s badge — yellow ✓ switched on and not closed, green ✓ switched on and closed this month — and it '
+      + 'clears on the 1st with the switch.',
+  })
+  closedThisMonth!: boolean;
+
   @ApiProperty({ type: String, nullable: true })
   remarks!: string | null;
 
@@ -67,6 +111,32 @@ export class LeadResponseDto implements LeadView {
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   dateRegistered!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: LEAD_AGE.MIN,
+    example: 36,
+    description: '**The client\'s age at the next birthday, today** (*Umur ulang tahun berikutnya*; ADR-0224 §2): the '
+      + 'age written plus the whole years since `ageRecordedOn`, on the office\'s calendar — one more on each '
+      + 'anniversary, at 00:00 WIB. `null` when none was given. Read by whoever reads the lead.',
+  })
+  age!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2026-11-05',
+    description: 'The office\'s day the age was last written, `YYYY-MM-DD`; `null` with it. Set by the server only.',
+  })
+  ageRecordedOn!: string | null;
+
+  @ApiProperty({
+    enum: LEAD_GENDERS,
+    nullable: true,
+    description: '*Laki-laki* or *Perempuan* (ADR-0224 §1), or `null`. Printed nowhere, and decides no figure.',
+  })
+  gender!: 'male' | 'female' | null;
 
   @ApiProperty({ type: Number, description: 'What a later write pins, so two people cannot overwrite each other.' })
   version!: number;
@@ -94,6 +164,14 @@ export class LeadResponseDto implements LeadView {
   lastEditedBy!: { membershipId: string; name: string | null } | null;
 
   @ApiProperty({
+    type: LeadOwnerDto,
+    description:
+      '**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s '
+      + 'leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.',
+  })
+  owner!: LeadOwnerDto;
+
+  @ApiProperty({
     type: Number,
     nullable: true,
     example: 14,
@@ -103,27 +181,54 @@ export class LeadResponseDto implements LeadView {
       + 'key carrying a number is one nobody can match against.',
   })
   overdueDays!: number | null;
+
+  @ApiProperty({
+    type: LeadProposalsDto,
+    nullable: true,
+    description:
+      'How many live proposals the lead has, and the latest’s products — the card’s *"PRUWell '
+      + 'Medical +1"*. **`null` on a lead with none, and on every lead that is not yours**: a leader reads a downline’s '
+      + 'lead, never what was proposed on it.',
+  })
+  proposals!: LeadProposalsDto | null;
 }
 
-/** One move along a lead's ladder (UI V1, UI-105): the lead sheet's *Riwayat*. */
-export class LeadMoveDto implements LeadMoveView {
-  @ApiProperty({ type: String, format: 'date-time' })
+/**
+ * One entry of a lead's *Riwayat* (UI V1, UI-105; P19.7-T2 AC-11): a move along its ladder (`kind: 'stage'`), or — on the
+ * owner's own read — a proposal first saved as a PDF (`kind: 'proposal'`). One shape, the other kind's fields absent.
+ */
+export class LeadMoveDto implements Omit<LeadMoveView, 'kind'> {
+  @ApiProperty({ enum: ['stage', 'proposal'], description: '`stage`: a move. `proposal`: *"Proposal dibuat · …"*, derived.' })
+  kind!: 'stage' | 'proposal';
+
+  @ApiProperty({ type: String, format: 'date-time', description: 'A move’s time, or the proposal’s first *Simpan PDF*.' })
   at!: string;
 
-  @ApiProperty({ type: String, nullable: true, description: '`null` on the lead’s first move: it had no stage before.' })
+  @ApiPropertyOptional({ type: String, nullable: true, description: '`stage` only. `null` on the lead’s first move.' })
   fromStatusCode!: string | null;
 
-  @ApiProperty({ type: String, example: 'FOLLOW_UP', description: 'A code; the office names it.' })
+  @ApiPropertyOptional({ type: String, example: 'FOLLOW_UP', description: '`stage` only. A code; the office names it.' })
   toStatusCode!: string;
+
+  @ApiPropertyOptional({
+    type: String, nullable: true,
+    description: '`proposal` only: the proposal to open, or `null` once it is deleted — the note stays, its link goes.',
+  })
+  proposalId?: string | null;
+
+  @ApiPropertyOptional({ type: [String], description: '`proposal` only: its item names when first saved, in order.' })
+  products?: string[];
 }
 
 /** `GET /leads/:id`: the list's lead, and its moves (UI V1, UI-105). The list never carries them. */
 export class LeadDetailResponseDto extends LeadResponseDto implements LeadDetailView {
   @ApiProperty({
     type: [LeadMoveDto],
-    description: 'Every move along its ladder, oldest first. Append-only: a reopen or a type change adds none.',
+    description: 'Every move along its ladder, oldest first. Append-only: a reopen or a type change adds none. On your own '
+      + 'lead, the proposals ever saved as a PDF are interleaved by date (`kind: \'proposal\'`).',
   })
-  history!: LeadMoveDto[];
+  // The DTO is one shape for both kinds (the document's); the service's type is the union it answers.
+  history!: LeadDetailView['history'];
 }
 
 export class LeadPageDto implements LeadPage {
@@ -148,7 +253,7 @@ export class DeletedLeadDto {
   deletedAt!: string;
 }
 
-/** `PATCH /leads/order`: the order as it was saved, top first (P18.8-T7). */
+/** `PATCH /leads/order`: the order as it was saved, top first (P18.5-T7). */
 export class LeadOrderDto {
   @ApiProperty({ type: [String], description: 'Your open leads’ ids, in the order now saved.' })
   ids!: string[];

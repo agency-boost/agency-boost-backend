@@ -12,7 +12,7 @@ import { OrgLevelService } from './org-level.service';
 const NOW = new Date('2026-09-07T02:00:00.000Z');
 
 /**
- * P3.5-T7. The ladder is the company's, referenced by code, and archived rather than
+ * P3.1-T7. The ladder is the company's, referenced by code, and archived rather than
  * deleted — three rules that only bite when somebody tries to break them.
  */
 describe('OrgLevelService', () => {
@@ -219,8 +219,8 @@ describe('OrgLevelService', () => {
     });
   });
 
-  /** P18.8-T1, ADR-0156: the tier on each rung, and the class it gives. Over HTTP: `org-level.int.spec.ts`. */
-  describe('P18.8-T1 the leader tier', () => {
+  /** P18.5-T1, ADR-0156: the tier on each rung, and the class it gives. Over HTTP: `org-level.int.spec.ts`. */
+  describe('P18.5-T1 the leader tier', () => {
     it('AC-1 seeds the default ladder with its tiers: AB senior, AAB associate, Agent none', async () => {
       await service.seedDefaultLadder(companyId);
       const ladder = await service.list(sa(), companyId);
@@ -246,6 +246,105 @@ describe('OrgLevelService', () => {
       expect((await service.list(sa(), companyId))[0].leaderTier).toBeNull();
       // A change that is no change asks nobody.
       await expect(service.update(sa(), level.orgLevelId, { leaderTier: null, label: 'SM' })).resolves.toHaveLength(1);
+    });
+  });
+
+  /** ADR-0164 §4, ADR-0012 §3: the ladder a new company starts with — the default's, or the Template library's copied. */
+  describe('P18.6 (ADR-0164 §4) a new company’s ladder, seeded or copied', () => {
+    const codes = async (id: string) => (await service.list(sa(), id)).map((l) => [l.code, l.label]);
+
+    it('P3.1-T7 seeds the default ladder once: run again, as the demo seed is, it neither duplicates nor throws', async () => {
+      await service.seedDefaultLadder(companyId);
+      await service.seedDefaultLadder(companyId);
+      expect(await codes(companyId)).toEqual([['AGENT', 'Agent'], ['AAB', 'AAB'], ['AB', 'AB']]);
+    });
+
+    it('ADR-0164 §4 copies the source’s active rungs — code, label, order and tier — and copying again keeps what is there', async () => {
+      const library = String((await mongoose.model(Company.name).create({ name: 'Template library', slug: 'library' }))._id);
+      await service.create(sa(), { companyId: library, code: 'AGENT', label: 'Agen', displayOrder: 1 });
+      await service.create(sa(), { companyId: library, code: 'UM', label: 'Unit Manager', displayOrder: 2, leaderTier: 'associate' });
+      const [, , old] = await service.create(sa(), { companyId: library, code: 'OLD', label: 'Lama', displayOrder: 3, leaderTier: 'senior' });
+      await service.update(sa(), old.orgLevelId, { status: 'archived' });
+
+      expect(await service.copyLadderFrom(library, companyId)).toBe(2);
+      expect((await service.list(sa(), companyId)).map((l) => [l.code, l.label, l.leaderTier]))
+        .toEqual([['AGENT', 'Agen', null], ['UM', 'Unit Manager', 'associate']]);
+      // A copy, never a link: the second run finds both rungs there and writes neither again.
+      expect(await service.copyLadderFrom(library, companyId)).toBe(0);
+      expect(await codes(companyId)).toHaveLength(2);
+    });
+
+    it('ADR-0164 §4 a source with no active rung gives the default ladder: a company without one is a company nobody can join', async () => {
+      const empty = String((await mongoose.model(Company.name).create({ name: 'Template library', slug: 'library' }))._id);
+      expect(await service.copyLadderFrom(empty, companyId)).toBe(0);
+      expect(await codes(companyId)).toEqual([['AGENT', 'Agent'], ['AAB', 'AAB'], ['AB', 'AB']]);
+    });
+  });
+
+  /**
+   * P19.4-T5 AC-2, P19-T6 AC-2: a delete and a tier change each ask something before they write — what names the rung,
+   * who stands on it — and the rung can change in between. The write is conditional on what was read, so a rung
+   * restored, saved or deleted meanwhile is answered as it now is, never written over.
+   */
+  describe('P19.4-T5 a rung that changes while a write is asking first', () => {
+    /** What happens to the rung while the reference search or the holder count is being asked. */
+    let meanwhile: () => Promise<unknown> = async () => undefined;
+    const levels = () => mongoose.model(CompanyOrgLevel.name);
+    const asking = () => new OrgLevelService(
+      levels() as never, mongoose.model(Company.name) as never, mongoose.model(Kpm.name) as never,
+      new AuditService(mongoose.model(AuditLog.name) as never), new FixedClock(NOW),
+      { countHoldingRungAcrossTenants: async () => { await meanwhile(); return 0; } } as never,
+      { of: async () => { await meanwhile(); return []; } } as never,
+    );
+    const archived = async () => {
+      const [level] = await service.create(sa(), rung('OLD', 'Old', 1));
+      await service.update(sa(), level.orgLevelId, { status: 'archived' });
+      return level.orgLevelId;
+    };
+    const live = async (id: string) => levels().findOne({ _id: id, deletedAt: null }).lean().exec() as Promise<{ status: string } | null>;
+    afterEach(() => { meanwhile = async () => undefined; });
+
+    it('P19.4-T5 AC-2 refuses a delete as a server fault when it cannot search what names the rung — nothing deleted', async () => {
+      // This spec's `service` has no reference search: a rung is never deleted without asking what names it.
+      const id = await archived();
+      await expect(service.remove(sa(), id)).rejects.toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+      expect(await live(id)).toMatchObject({ status: 'archived' });
+    });
+
+    it('P19.4-T5 AC-2 a rung restored while its references were searched is not deleted: 409 at the version it now is', async () => {
+      const id = await archived();
+      meanwhile = () => levels().updateOne({ _id: id }, { $set: { status: 'active', archivedAt: null }, $inc: { version: 1 } }).exec();
+      await expect(asking().remove(sa(), id)).rejects.toMatchObject({
+        code: 'VERSION_CONFLICT', status: 409, details: { expectedVersion: 1, actualVersion: 2 },
+      });
+      // The version the Super Admin's table was read at, when they sent one.
+      await levels().updateOne({ _id: id }, { $set: { status: 'archived' } }).exec();
+      await expect(asking().remove(sa(), id, 2)).rejects.toMatchObject({
+        code: 'VERSION_CONFLICT', details: { expectedVersion: 2, actualVersion: 3 },
+      });
+      // Restored, and there: the delete wrote nothing over the restore.
+      expect(await live(id)).toMatchObject({ status: 'active' });
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'org_level.deleted' })).toBe(0);
+    });
+
+    it('P19.4-T5 AC-2 a rung deleted by somebody else while its references were searched is 404, not a second delete', async () => {
+      const id = await archived();
+      meanwhile = () => levels().updateOne({ _id: id }, { $set: { deletedAt: NOW } }).exec();
+      await expect(asking().remove(sa(), id)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'org_level.deleted' })).toBe(0);
+    });
+
+    it('P19-T6 AC-2 a tier change on a rung saved meanwhile is 409; on one deleted meanwhile, 404 — nothing written either way', async () => {
+      const [level] = await service.create(sa(), rung('SM', 'Senior Manager', 1));
+      meanwhile = () => levels().updateOne({ _id: level.orgLevelId }, { $set: { label: 'Saved by another' }, $inc: { version: 1 } }).exec();
+      await expect(asking().update(sa(), level.orgLevelId, { leaderTier: 'senior' })).rejects.toMatchObject({
+        code: 'VERSION_CONFLICT', details: { expectedVersion: 0, actualVersion: 1 },
+      });
+      expect((await service.list(sa(), companyId))[0]).toMatchObject({ label: 'Saved by another', leaderTier: null });
+
+      meanwhile = () => levels().updateOne({ _id: level.orgLevelId }, { $set: { deletedAt: NOW } }).exec();
+      await expect(asking().update(sa(), level.orgLevelId, { leaderTier: 'senior' }))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
     });
   });
 });

@@ -12,7 +12,7 @@ import { finalizeSentence, type FinalizeRefusal } from './coaching-session.rules
  * `CONFIG_ARCHIVED`'s, which the Leader Notes tab's banner shows as written, and `VALIDATION_FAILED`'s for
  * a code the catalog does not hold.
  *
- * **In both languages since P18.98-T5** (ADR-0179 §7): every sentence the module writes is in its catalogue,
+ * **In both languages since P18.10-T5** (ADR-0179 §7): every sentence the module writes is in its catalogue,
  * `coaching.messages.ts`, English and Indonesian side by side, and the Indonesian names none of the six either —
  * nor their Indonesian, *KPM* (the glossary's word for the office, §B.9), *kantor*, *melapor ke*, *di-tag ke* and
  * *tanpa tim*.
@@ -221,7 +221,7 @@ describe('ADR-0084 rule 2: coaching’s own error messages use none of the six w
     }
   });
 
-  it('P18.98-T5 the scan’s Indonesian pattern catches the six as the glossary words them, and a lead’s month tag passes', () => {
+  it('P18.10-T5 the scan’s Indonesian pattern catches the six as the glossary words them, and a lead’s month tag passes', () => {
     for (const text of ['KPM ini', 'kantor Anda', 'yang melapor ke Sari', 'di-tag ke seorang leader', 'anggota tanpa tim']) {
       expect({ text, caught: writesASixWord({ where: '', language: 'id', text }) }).toEqual({ text, caught: true });
     }

@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { ActivityRatioView, RatioTermView } from '@/modules/activity/activity-ratio-readings';
 import type {
-  ActivitiesPerson, ActivitiesSection, CodeCount, ScopeTotals, UnitActivitiesView,
+  ActivitiesPerson, ActivitiesSection, ActivitiesType, CodeCount, PersonRatios, ScopeTotals, UnitActivitiesView,
 } from './unit-activities.service';
 import { ACTIVITY_SPANS, type ActivityPeriod, type ActivitySpan } from './unit-figures';
 
@@ -76,9 +76,14 @@ class ActivitiesHeadDto {
   @ApiProperty({ description: 'The unit is the reader’s own.' }) isReader!: boolean;
 }
 
-class ActivitiesTypeDto {
+class ActivitiesTypeDto implements ActivitiesType {
   @ApiProperty({ example: 'SELL_SUBMISSION' }) code!: string;
   @ApiProperty({ example: 'Submission polis', description: 'As the agency named it — content, never translated.' }) label!: string;
+  @ApiProperty({
+    type: String, nullable: true, example: 'Submission polis',
+    description: 'ADR-0229 §5: the agency’s *Nama singkat*, the table’s one line; `null` for none — the row then '
+      + 'shows `label` on up to two lines.',
+  }) shortLabel!: string | null;
   @ApiProperty({ enum: ['active', 'archived'] }) status!: 'active' | 'archived';
 }
 
@@ -115,6 +120,14 @@ class ActivitiesTotalsDto {
   @ApiProperty({ type: ScopeTotalsDto }) group!: ScopeTotals;
 }
 
+class PersonRatiosDto implements PersonRatios {
+  @ApiProperty({ description: 'The member `ratioFor` named.' }) membershipId!: string;
+  @ApiProperty({
+    type: [UnitRatioDto],
+    description: 'The Ratio page’s ratios over their own counts, the same 30 days, on their own rung.',
+  }) ratios!: UnitRatioDto[];
+}
+
 class ActivitiesRatiosDto {
   @ApiProperty({ example: '2026-10-01' }) from!: string;
   @ApiProperty({ example: '2026-10-30' }) to!: string;
@@ -124,6 +137,10 @@ class ActivitiesRatiosDto {
     description: 'The Ratio page’s ratios over the *Unit*’s counts summed, on the head’s rung.',
   }) unit!: UnitRatioDto[];
   @ApiProperty({ type: [UnitRatioDto], description: 'The same over the *Group*’s.' }) group!: UnitRatioDto[];
+  @ApiProperty({
+    type: PersonRatiosDto, nullable: true,
+    description: 'ADR-0229 §7: one member’s own, when `ratioFor` names them; `null` otherwise.',
+  }) person!: PersonRatiosDto | null;
 }
 
 export class UnitActivitiesDto implements UnitActivitiesView {

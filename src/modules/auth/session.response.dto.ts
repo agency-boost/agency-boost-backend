@@ -1,6 +1,7 @@
 import type { SessionView } from './auth.service';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LANGUAGES, type Language } from '@/domain/constants';
+import { SessionBrandingDto } from '@/modules/branding/branding.response.dto';
 
 /**
  * The shapes `AuthController` builds itself rather than handing back from a service, and
@@ -35,23 +36,14 @@ export class ImpersonationSessionDto {
   @ApiProperty({ type: String, format: 'date-time', description: 'Time-boxed. The session cannot outlive this.' })
   expiresAt!: Date;
 
-  @ApiProperty({ type: String, description: 'What a second Super Admin approves writing for.' })
+  @ApiProperty({ type: String, description: 'The session\'s id, named on its `impersonation.started` audit entry.' })
   sessionId!: string;
 
   @ApiProperty({
-    type: Boolean,
-    description: 'Always `true` at the start. A setup session writes only what `writeScope` lists.',
+    type: Boolean, enum: [true],
+    description: 'Always `true`: a session only looks (ADR-0206 §3). Every write in it is `403 IMPERSONATION_READ_ONLY`.',
   })
-  readOnly!: boolean;
-
-  @ApiProperty({ type: String, enum: ['support', 'setup'] })
-  purpose!: 'support' | 'setup';
-
-  @ApiProperty({
-    type: String, isArray: true,
-    description: 'The permissions this session may write besides reading. Empty for a support session.',
-  })
-  writeScope!: string[];
+  readOnly!: true;
 }
 
 /**
@@ -63,7 +55,7 @@ export class ImpersonationSessionDto {
 export class StatusAckDto {
   @ApiProperty({
     type: String,
-    enum: ['verification_sent', 'verified', 'accepted', 'reset', 'changed', 'ended'],
+    enum: ['verification_sent', 'verified', 'accepted', 'reset', 'changed', 'ended', 'linked'],
   })
   status!: string;
 }
@@ -116,8 +108,16 @@ export class MeUserDto {
   @ApiProperty({ type: String, enum: ['super_admin', 'none'] })
   platformRole!: string;
 
+  /* P19-T1 AC-4 (UI-163, ADR-0190 §4): an account signs in before its address is verified. */
+  @ApiProperty({
+    type: Boolean,
+    description: 'Whether this account\'s address is verified. An account signs in before it is (ADR-0190); while '
+      + 'this is `false` every shell offers *Kirim ulang*, which posts `/auth/resend-verification`.',
+  })
+  emailVerified!: boolean;
+
   /*
-   * What a person records (ADR-0158, P18.8-T4): `null` for anybody who has not, which the screens read as
+   * What a person records (ADR-0158, P18.5-T4): `null` for anybody who has not, which the screens read as
    * *Not recorded*. Theirs to set on `PATCH /auth/me`.
    */
   @ApiProperty({ type: String, nullable: true, example: '1990-03-15', description: '`YYYY-MM-DD`.' })
@@ -136,7 +136,7 @@ export class MeUserDto {
   workStatus!: string | null;
 
   /*
-   * The language they read AgencyBoost in (ADR-0179 §2, P18.98-T2): set with `PATCH /auth/me`. Never `null` here —
+   * The language they read AgencyBoost in (ADR-0179 §2, P18.10-T2): set with `PATCH /auth/me`. Never `null` here —
    * `users.locale` is, for somebody who has chosen nothing, and that reads Bahasa Indonesia.
    */
   @ApiProperty({
@@ -238,6 +238,39 @@ export class MeActivationDto {
  * therefore disappears on the next call rather than at the next refresh, which is why the
  * client reads this rather than decoding the JWT.
  */
+/** One view of a linked login (ADR-0198 §1, ADR-0199 §3), in the switcher's order. */
+export class LinkedViewDto {
+  @ApiProperty({
+    type: String, enum: ['self', 'kpm_owner', 'kpm_admin', 'super_admin'],
+    description: '*Akun saya*, the office entry as Owner or Admin, or *Superadmin*.',
+  })
+  kind!: string;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'The office as it typed its name — its branch, else its code — on the office entry; `null` otherwise.',
+  })
+  officeName!: string | null;
+}
+
+/** The caller's other login (ADR-0199 §3): its address, its name and its views. Nothing else of it is read. */
+export class LinkedLoginDto {
+  @ApiProperty({ type: String, description: 'The link, for `DELETE /auth/links/:linkId`.' })
+  linkId!: string;
+
+  @ApiProperty({ type: String, description: 'The other login, for `POST /auth/links/switch`.' })
+  userId!: string;
+
+  @ApiProperty({ type: String })
+  email!: string;
+
+  @ApiProperty({ type: String })
+  fullName!: string;
+
+  @ApiProperty({ type: () => LinkedViewDto, isArray: true })
+  views!: LinkedViewDto[];
+}
+
 export class MeDto {
   @ApiProperty({ type: () => MeUserDto })
   user!: MeUserDto;
@@ -251,27 +284,10 @@ export class MeDto {
   @ApiProperty({
     type: Boolean,
     description:
-      'A support session that may look and not touch (§3.13). False outside a session, '
-      + 'and false inside one a second Super Admin has approved to write. True in a setup '
-      + 'session, which writes only what `impersonationWriteScope` lists.',
+      'A support session, which only looks (§3.13; ADR-0206 §4): `true` in every session, `false` outside one. '
+      + 'Every write a session sends is `403 IMPERSONATION_READ_ONLY`.',
   })
   impersonationReadOnly!: boolean;
-
-  @ApiProperty({
-    type: String, enum: ['support', 'setup'], nullable: true,
-    description:
-      'Why the session was started: `support` to look, `setup` to configure the office as its Owner or '
-      + 'Admin would. `null` outside a session.',
-  })
-  impersonationPurpose!: 'support' | 'setup' | null;
-
-  @ApiProperty({
-    type: String, isArray: true,
-    description:
-      'The permissions a setup session may write besides reading: the office\'s settings, its people import '
-      + 'and its production file. Empty outside a session and in a support session.',
-  })
-  impersonationWriteScope!: string[];
 
   @ApiProperty({ type: String, nullable: true, description: 'The real Super Admin, when this is a support session.' })
   impersonatedBy!: string | null;
@@ -297,6 +313,20 @@ export class MeDto {
     description: 'You coach a new hire who joined in the last twelve months: the *New hires* menu item.',
   })
   newHires!: boolean;
+
+  @ApiProperty({
+    type: () => LinkedLoginDto, nullable: true,
+    description: 'Your other login, linked with *Tambah akun*, and its views for the account menu — `null` with no link, '
+      + 'and always `null` in a support session.',
+  })
+  linkedLogin!: LinkedLoginDto | null;
+
+  @ApiProperty({
+    type: () => SessionBrandingDto, nullable: true,
+    description: 'What the session’s KPM shows (ADR-0218 §8): its palette, logo size, images, mascot poses and a '
+      + 'lesson’s colours — `null` with no KPM.',
+  })
+  branding!: SessionBrandingDto | null;
 }
 
 /** `GET /api/health/ready`. Read by a load balancer, not by a person. */

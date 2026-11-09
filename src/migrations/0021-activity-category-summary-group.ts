@@ -53,7 +53,7 @@ interface SeedTile {
 
 /**
  * The seed's tiles, by code — read from the seed, the one place the mapping is written. **The label is the one it was
- * written for**, *Development*: the seed has said *Pengembangan* since P18.98-T7 (OD-238), and an office's own
+ * written for**, *Development*: the seed has said *Pengembangan* since P18.10-T7 (OD-238), and an office's own
  * configuration keeps its language.
  */
 function seedTiles(): Map<string, SeedTile> {

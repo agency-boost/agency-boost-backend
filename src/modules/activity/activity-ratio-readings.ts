@@ -52,7 +52,7 @@ export interface ActivityRatioView {
 }
 
 /**
- * **The office's ratios over sets of members' summed counts** (P10-T2's computation; UI V1, Phase 18.99 T4): the one
+ * **The office's ratios over sets of members' summed counts** (P10-T2's computation; UI V1, Phase 18.11 T4): the one
  * place the ratio views are built. `ActivityService.ratiosOf` — `GET /activity/ratios`, the Ratio page — is its
  * one-member set; the Unit Dashboard's *Activities* tab asks it for the *Unit* and the *Group* (UI-001: *Ratio values
  * match the Ratio page logic for the same people and window*).

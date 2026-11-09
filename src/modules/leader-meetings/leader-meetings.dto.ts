@@ -9,7 +9,7 @@ import { LEADER_MEETING_LIMITS, LEADER_MEETING_TARGET_RATE_DECIMALS } from '@/do
 import { ACTION_STATUSES, AGENDA_SECTIONS, type ActionStatus, type AgendaSection } from './leader-meeting.schema';
 import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 
-/** The DTOs' own sentences, in both languages (P18.98-T5 AC-3): `field` carries them through class-validator. */
+/** The DTOs' own sentences, in both languages (P18.10-T5 AC-3): `field` carries them through class-validator. */
 const SAY = LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED;
 
 const { titleMax, textMax, picMax } = LEADER_MEETING_LIMITS;

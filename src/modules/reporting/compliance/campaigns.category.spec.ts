@@ -17,7 +17,7 @@ const APE = { metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 1 };
 const REASON = 'Persistency corrected by the carrier after the month locked.';
 
 /**
- * **Campaigns in the Owner's compliance tree** (P18.6-T1 AC-3, P18.6-T2 AC-4, AC-6, AC-7): the picker over D-window,
+ * **Campaigns in the Owner's compliance tree** (P18.3-T1 AC-3, P18.3-T2 AC-4, AC-6, AC-7): the picker over D-window,
  * the chip over D-chips, and each member's *Chasing* and *Achieved* — **equal to the evaluation the member's own
  * dialog reads** (exit test 4), the override applied. Over `test/coaching-office.ts`: 10:00 on Monday 14 September 2026
  * in Jakarta, August locked.
@@ -32,7 +32,7 @@ const REASON = 'Persistency corrected by the carrier after the month locked.';
  * | `AGENTS_AUG` | seasonal, August | `AGENT` | — | ended, final |
  * | `LAST_YEAR`, `ARCHIVED_PUSH`, 0555's `B_PUSH` | — | — | — | never listed in 0417 |
  */
-describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
+describe('the compliance tree’s Campaigns category (P18.3-T2)', () => {
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
   let category: CampaignsComplianceCategory;
@@ -92,8 +92,8 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
   }, 120_000);
   afterAll(stopMongo);
 
-  describe('the picker (P18.6-T2 AC-4, D-window)', () => {
-    it('P18.6-T2 AC-4 lists Structural, then Seasonal ongoing and upcoming, then Seasonal past — archived, last year’s and B’s never', async () => {
+  describe('the picker (P18.3-T2 AC-4, D-window)', () => {
+    it('P18.3-T2 AC-4 lists Structural, then Seasonal ongoing and upcoming, then Seasonal past — archived, last year’s and B’s never', async () => {
       const { catalog } = await read(ownerScope(), null, false);
       expect(catalog.map((c) => c.code)).toEqual(['MDRT', 'PROMO', 'SEPT_PUSH', 'NEXT_PUSH', 'AGENTS_AUG', 'AUGUST_PUSH']);
       expect(catalog[0]).toEqual({
@@ -104,18 +104,18 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(catalog.find((c) => c.code === 'AUGUST_PUSH')).toMatchObject({ phase: 'ended', final: true, subtype: null });
     });
 
-    it('P18.6-T2 AC-4 opens on the picker’s first campaign without an item, as the prototype does (Owner:3497)', async () => {
+    it('P18.3-T2 AC-4 opens on the picker’s first campaign without an item, as the prototype does (Owner:3497)', async () => {
       expect((await read(ownerScope())).item).toBe('MDRT');
     });
 
-    it('P18.6-T2 AC-4 404 for a campaign it does not list: archived, last year’s, another office’s, unknown — any case is one code', async () => {
+    it('P18.3-T2 AC-4 404 for a campaign it does not list: archived, last year’s, another office’s, unknown — any case is one code', async () => {
       for (const item of ['ARCHIVED_PUSH', 'LAST_YEAR', 'B_PUSH', 'NOPE']) {
         await expect(read(ownerScope(), item)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
       }
       expect((await read(ownerScope(), 'august_push')).item).toBe('AUGUST_PUSH');
     });
 
-    it('P18.6-T2 AC-4 an office with no campaign this year: no item, an empty tree, the chip over nobody', async () => {
+    it('P18.3-T2 AC-4 an office with no campaign this year: no item, an empty tree, the chip over nobody', async () => {
       const ofOffice = jest.fn(async () => ({ campaigns: [], standings: [] }));
       const empty = new CampaignsComplianceCategory({ ofOffice } as never, {} as never);
       expect(await empty.read(ownerScope(), { selected: true, item: null }))
@@ -126,7 +126,7 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(ofOffice).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ requireListed: 'MDRT' }));
     });
 
-    it('P18.6-T2 AC-4 KPM A never reads KPM B: 0555 lists its own campaign alone, and A’s code is 404 there', async () => {
+    it('P18.3-T2 AC-4 KPM A never reads KPM B: 0555 lists its own campaign alone, and A’s code is 404 there', async () => {
       const b = scopeOf(ownerB(), [office.id.B_AB, office.id.B_AGENT]);
       const result = await read(b);
       expect(result.catalog.map((c) => c.code)).toEqual(['B_PUSH']);
@@ -134,10 +134,10 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
     });
   });
 
-  describe('the rows (P18.6-T2 AC-6)', () => {
+  describe('the rows (P18.3-T2 AC-6)', () => {
     const cellsOf = async (code: string) => (await read(ownerScope(), code)).cells!;
 
-    it('P18.6-T2 AC-6 an ended seasonal campaign: Chasing and the result; Not chasing and not joined; a chaser’s cell overridable', async () => {
+    it('P18.3-T2 AC-6 an ended seasonal campaign: Chasing and the result; Not chasing and not joined; a chaser’s cell overridable', async () => {
       const cells = await cellsOf('AUGUST_PUSH');
       const of = (who: Who) => cells.get(office.id[who]);
       expect(of('RINA')).toEqual({ status: 'chasing', done: true, on: null, second: 'qualified', override: null, overridable: true });
@@ -145,13 +145,13 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(of('INDAH')).toEqual({ status: 'not_chasing', done: false, on: null, second: 'not_joined', override: null, overridable: false });
     });
 
-    it('P18.6-T2 AC-6 a campaign not open to the member’s rung: — in both, out of every count', async () => {
+    it('P18.3-T2 AC-6 a campaign not open to the member’s rung: — in both, out of every count', async () => {
       const cells = await cellsOf('AGENTS_AUG');
       expect(cells.get(office.id.SARI)).toEqual({ status: null, done: null, on: null, second: null, override: null, overridable: false });
       expect(cells.get(office.id.RINA)).toMatchObject({ status: 'not_chasing', second: 'not_joined' });
     });
 
-    it('P18.6-T2 AC-6 no result drawn while running, before it starts, or for a structural campaign', async () => {
+    it('P18.3-T2 AC-6 no result drawn while running, before it starts, or for a structural campaign', async () => {
       expect((await cellsOf('SEPT_PUSH')).get(office.id.RINA)).toEqual({ status: 'chasing', done: true, on: null, second: null, override: null, overridable: false });
       expect((await cellsOf('NEXT_PUSH')).get(office.id.RINA)).toMatchObject({ status: 'not_chasing', second: null, overridable: false });
       expect((await cellsOf('MDRT')).get(office.id.AGUS)).toMatchObject({ status: 'chasing', second: null, overridable: false });
@@ -159,7 +159,7 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
     });
 
     it.each(['AUGUST_PUSH', 'SEPT_PUSH', 'MDRT', 'AGENTS_AUG'])(
-      'P18.6-T2 AC-6 exit test 4: for %s, Chasing and the result equal the evaluation each member’s own dialog reads',
+      'P18.3-T2 AC-6 exit test 4: for %s, Chasing and the result equal the evaluation each member’s own dialog reads',
       async (code) => {
         const cells = await cellsOf(code);
         const row = (await wired.campaignRows.findOne(office.as('OWNER'), { code }))!;
@@ -177,7 +177,7 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       },
     );
 
-    it('P18.6-T2 AC-7 an override shows in the result, with who, when and why — and still equals the evaluation', async () => {
+    it('P18.3-T2 AC-7 an override shows in the result, with who, when and why — and still equals the evaluation', async () => {
       await wired.campaignStandingOverrides.override(office.as('ADMIN'), 'AUGUST_PUSH', office.id.BUDI, { status: 'qualified', reason: REASON });
       try {
         const cell = (await cellsOf('AUGUST_PUSH')).get(office.id.BUDI);
@@ -193,7 +193,7 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       }
     });
 
-    it('P18.6-T2 AC-8 an override by somebody the office cannot name reads an empty name', async () => {
+    it('P18.3-T2 AC-8 an override by somebody the office cannot name reads an empty name', async () => {
       await wired.campaignStandingOverrides.override(RequestContext.forJob(KPM_A, 'correction'), 'AUGUST_PUSH', office.id.BUDI, {
         status: 'qualified', reason: REASON,
       });
@@ -214,22 +214,22 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(owners.get(office.id.RINA)).toMatchObject({ overridable: true });
     });
 
-    it('P18.6-T2 AC-6 serves a cell for the tree’s members only, and none when not selected', async () => {
+    it('P18.3-T2 AC-6 serves a cell for the tree’s members only, and none when not selected', async () => {
       const result = await read(ownerScope(['RINA', 'BUDI']), 'AUGUST_PUSH');
       expect([...result.cells!.keys()].sort()).toEqual([office.id.RINA, office.id.BUDI].sort());
       expect((await read(ownerScope(), null, false)).cells).toBeNull();
     });
   });
 
-  describe('the chip (P18.6-T1 AC-3, D-chips)', () => {
-    it('P18.6-T1 AC-3 chasing one listed campaign, over those eligible for one', async () => {
+  describe('the chip (P18.3-T1 AC-3, D-chips)', () => {
+    it('P18.3-T1 AC-3 chasing one listed campaign, over those eligible for one', async () => {
       // Everybody is eligible for an all-rungs campaign; Agus (MDRT), Rina and Budi chase.
       expect((await read(ownerScope(), null, false)).chip).toEqual({ count: 3, of: ACTIVE.length });
       expect((await read(ownerScope(['RINA', 'INDAH']), null, false)).chip).toEqual({ count: 1, of: 2 });
     });
   });
 
-  describe('the freeze through the tree (P18.6-T2 AC-5; ADR-0144)', () => {
+  describe('the freeze through the tree (P18.3-T2 AC-5; ADR-0144)', () => {
     beforeAll(build, 120_000);
     const finalised = () => db().collection('auditLog').countDocuments({ action: 'campaign_standing.finalised' });
 
@@ -242,7 +242,7 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(await finalised()).toBe(0);
     });
 
-    it('P18.6-T2 AC-5 a read-only session reads the frozen view and writes nothing; the first other read freezes it once', async () => {
+    it('P18.3-T2 AC-5 a read-only session reads the frozen view and writes nothing; the first other read freezes it once', async () => {
       const o = office.as('OWNER');
       const readOnly = new RequestContext(o.userId, 'none', o.membership, 'u-operator', null, false, true);
       const viewed = (await read(ownerScope(ACTIVE, readOnly), 'AUGUST_PUSH')).cells!;
@@ -276,6 +276,9 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       await chase('DEC_PUSH', 'RINA');
       await chase('NOV_PUSH', 'BUDI');
       (wired.clock as FixedClock).set(JANUARY);
+      // December's file never arrived. A month never written stays open whatever its date (P19.5-T2; ADR-0214 §11), so the
+      // Owner has locked it by hand: the window is final with nothing to decide it.
+      await wired.productionMonths.lock(o, '2026-12');
     }, 120_000);
     afterAll(() => (wired.clock as FixedClock).set(ROSTER_NOW));
 
@@ -351,14 +354,14 @@ describe('the compliance tree’s Campaigns category (P18.6-T2)', () => {
       expect(campaignCell(standing({}), campaign({}), () => '', true)).toMatchObject({ second: 'unknown', overridable: false });
     });
 
-    it('P18.6-T2 AC-8 a final unknown is overridable; an ended but not final one is not', () => {
+    it('P18.3-T2 AC-8 a final unknown is overridable; an ended but not final one is not', () => {
       expect(campaignCell(standing({}), campaign({}), () => '')).toMatchObject({ second: 'unknown', overridable: true });
       expect(campaignCell(standing({ final: false, status: 'in_progress' }), campaign({ final: false }), () => ''))
         .toMatchObject({ second: 'in_progress', overridable: false });
       expect(campaignCell(undefined, campaign({}), () => '')).toMatchObject({ status: null, overridable: false });
     });
 
-    it('P18.6-T2 AC-4 the picker’s order: structural before seasonal whatever the dates', () => {
+    it('P18.3-T2 AC-4 the picker’s order: structural before seasonal whatever the dates', () => {
       const a = campaign({ code: 'A', kind: 'seasonal', phase: 'running' });
       const b = campaign({ code: 'B', title: 'B', kind: 'structural', phase: 'running', endsAt: null });
       expect([a, b].sort(campaignPickerOrder).map((c) => c.code)).toEqual(['B', 'A']);

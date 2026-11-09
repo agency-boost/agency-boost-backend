@@ -65,6 +65,18 @@ export class CompanyOrgLevel {
   @Prop({ type: Date, default: null })
   archivedAt!: Date | null;
 
+  /**
+   * **Moves on every write of the rung** (P19-T6 AC-2; the 11-03 handover's B1-10): `PATCH /admin/org-levels/:id`
+   * with an `expectedVersion` it has moved past is refused `409 VERSION_CONFLICT`, so a Super Admin acting on a
+   * ladder somebody else changed since it was read is told so rather than overwriting it.
+   *
+   * **No `@Prop`: it is the schema's version key** (`baseSchemaOptions`, `versionKey: 'version'`), which Mongoose
+   * writes as `0` when a rung is made and — this schema holding no array — never moves on its own. `OrgLevelService`
+   * moves it, in the write's own filter. A rung written raw, as migration 0037 writes the Template's, has none and
+   * reads as `0`; the filter matches it by the field's absence.
+   */
+  version?: number;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }

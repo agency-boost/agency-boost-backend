@@ -3,15 +3,16 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { AllowWhileReadOnly, Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
-import { GoalReadQueryDto, SaveGoalDto, SaveGoalQueryDto } from './goal.dto';
+import { GoalReadQueryDto, SaveEstimateDto, SaveGoalDto, SaveGoalQueryDto } from './goal.dto';
 import { GoalPreviewDto, GoalResponseDto } from './goal.response.dto';
 import { GoalService } from './goal.service';
 
 /**
  * An agent's agreed plan for a period (P8-T3).
  *
- * **Three routes, one screen.** All are called by `/goals` and a coachee's *Goal Setting* tab: the read, the save,
- * and since UI V1 (P18.99-T5) the preview its result card moves with. `GET /goals/:period/history` was retired
+ * **Three routes, one screen** — and a fourth, the Summary's. The read, the save and since UI V1 (P18.11-T5) the
+ * preview its result card moves with are called by `/goals` and a coachee's *Goal Setting* tab; since P19.1-T4 the
+ * Summary writes the member's own estimate of the APE produced through `PUT /goals/:period/ape-estimate`. `GET /goals/:period/history` was retired
  * by P10.1-T6 with the card that read it: the prototype draws no goal history, so no screen would
  * call it again. The stored revisions keep every version and who saved it (ADR-0042).
  *
@@ -47,7 +48,7 @@ export class GoalController {
   }
 
   /*
-   * **A read by its permission, sent as a `POST` for its body** (the Phase 18.99 exit review, L4): it writes nothing, so
+   * **A read by its permission, sent as a `POST` for its body** (the Phase 18.11 exit review, L4): it writes nothing, so
    * a read-only support session reaches it as it reaches `GET /goals/:period` — the screen it moves is one the session
    * may open.
    */
@@ -101,5 +102,39 @@ export class GoalController {
   ) {
     // The period is the path, never the body: two sources for one key is one source too many.
     return this.goals.save(ctx, { ...body, period }, query.for, query.session);
+  }
+
+  /*
+   * **The member's own estimate** (P19.1-T4, UI-157 item 4; ADR-0195): the Summary's *Isi produksi sementara*, *Ubah*
+   * and *Hapus*. One narrow write of one field, the caller's own plan, no `for`: it is not a plan saved again.
+   */
+  @Put(':period/ape-estimate')
+  @RequirePermission('goal:update')
+  @ApiOperation({
+    summary: 'Your own estimate of the APE produced so far this year',
+    description:
+      'Writes the plan’s `apeAchievedMinor` — the figure Goal Settings shows as *APE yang sudah dicapai tahun ini* — as '
+      + 'the caller’s own estimate (*perkiraan Anda*, provenance `self_reported`); `null` or `0` clears it (*Hapus*). The '
+      + 'plan as it stood is kept as a revision and its version moves on; nothing else of it changes — not its other '
+      + 'inputs, its agreed snapshot or `savedAt`. **Your own plan only**, and only a '
+      + 'saved one: `404 Goal` without it. Read by your own screens alone — never by a leader’s or the office’s, which '
+      + 'read the office’s figures (ADR-0195). There, **the newer of it and the office’s year-to-date figure is the one '
+      + 'in force** (ADR-0230): an import or a correction written after it replaces it, and sending it again — the same '
+      + 'figure too — is a typing now, newer than that upload, so it is in force again. The same figure sent while it is '
+      + 'already in force changes nothing.',
+  })
+  @ApiResponse({ status: 200, type: GoalResponseDto })
+  @ApiResponse({
+    status: 404,
+    description: '`NOT_FOUND` — you have no saved plan for the period. Indistinguishable from a plan in another office.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({ status: 409, description: '`GOAL_PERIOD_LOCKED` — the period has ended.', type: ApiErrorEnvelope })
+  async saveEstimate(
+    @Ctx() ctx: RequestContext,
+    @Param('period') period: string,
+    @Body() body: SaveEstimateDto,
+  ) {
+    return this.goals.saveEstimate(ctx, period, body);
   }
 }

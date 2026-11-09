@@ -6,7 +6,7 @@ export type SeedPlan =
   | { target: MongoTarget; banner: string };
 
 /**
- * **Whether the demo seed may run here, and the line it prints before it writes** (P18.7-T1, ADR-0152).
+ * **Whether the demo seed may run here, and the line it prints before it writes** (P18.4-T1, ADR-0152).
  *
  * - **Never in production** (plan decision D11: production starts dark, with no tenant and no seed). The seed
  *   writes accounts whose passwords are printed in its own output and in the manuals, and `--reset` empties

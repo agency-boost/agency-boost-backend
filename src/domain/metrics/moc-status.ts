@@ -1,7 +1,7 @@
 import { formatNumber, formatPercent, formatRupiahCompact } from '@/common/format/format';
 import type { Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
-import { metricByKey, type Language } from '@/domain/constants';
+import { currentMetricKey, metricByKey, type Language } from '@/domain/constants';
 import { combine, criterionMet } from './criteria';
 import { MOC_MESSAGES as SAY } from './moc-status.messages';
 
@@ -11,9 +11,14 @@ import { MOC_MESSAGES as SAY } from './moc-status.messages';
  *
  * **The rule is the company's**, of kind `moc`, read live (ADR-0026, ADR-0035): its groups, their criteria and
  * thresholds, and whether the groups are ORed — never a threshold in code. **None of the prototype's
- * derivations are ported** (`:3254-3275`, which its own comment disowns): the inputs are OD-22's stated reading
- * of the office's file, computed by the caller — `NET_APE`, the `MONTHLY2_AA` counts, `DIRECT_AB_COUNT` and
- * `MOC_PERSISTENCY` — each with the period it was read over.
+ * derivations are ported** (`:3254-3275`, which its own comment disowns): the inputs are the office's file as the
+ * client corrected the reading on 3 November (ADR-0201), computed by the caller — `MOC_APE` (*APE*, D5), the
+ * `MONTHLY2_AA` averages (Q6), `DIRECT_AB_COUNT` (*berdasarkan upline saat ini*, Q7) and `MOC_PERSISTENCY`, the
+ * leader's uploaded `UNIT_PERSISTENCY` (D6) — each with the period it was read over.
+ *
+ * **A stored key is read as the metric it now names** (`currentMetricKey`, P19.3-T1 AC-5): a rule that still names
+ * `NET_APE` — one migration `0051-moc-ape-key` did not reach — reads `MOC_APE`'s input under *APE*, never an empty
+ * criterion called *NET_APE*.
  *
  * **Three answers, and the third is the point** (D-moc): a criterion whose input is not uploaded is `met: null`,
  * never ✕, and a rule that could still go either way because of one is `unknown` — the screen's *—*, with the
@@ -22,7 +27,7 @@ import { MOC_MESSAGES as SAY } from './moc-status.messages';
  * (Kleene): in a group that needs every criterion, one ✕ fails it whatever else is unknown; in an OR, one path
  * met is enough.
  *
- * Pure: a rule and the inputs in, the verdict out — **its words written for the reader passed last** (P18.98-T5 AC-4):
+ * Pure: a rule and the inputs in, the verdict out — **its words written for the reader passed last** (P18.10-T5 AC-4):
  * the path, what is missing and the joining words in their language, a threshold in their figures. The criteria's names
  * are the registry's and the same in both (§A.4); a period comes from the caller, written for the same reader.
  */
@@ -73,15 +78,19 @@ export function mocRuleFor<R extends MocRule>(rules: readonly R[], orgLevelCode:
 }
 
 /*
- * The three-valued rule itself is `criteria.ts`'s since P18.5-T8 (AC-4): one rule for MOC and a campaign's
+ * The three-valued rule itself is `criteria.ts`'s since P18.2-T8 (AC-4): one rule for MOC and a campaign's
  * requirements alike. Re-exported here so this module's callers and its spec read it where they always did.
  */
 export { combine, criterionMet };
 
-/** The dialog's labels (`KPM_Owner.html:3302-3313`), verbatim; a criterion the prototype never drew, by its registry name. */
+/**
+ * The dialog's labels (`KPM_Owner.html:3302-3313`), verbatim but one; a criterion the prototype never drew, by its
+ * registry name. *Since P19.3-T1* (ADR-0201 §1, D5): the APE criterion is ***APE***, where the prototype wrote *Net APE*
+ * — under its stored key `MOC_APE`, or the `NET_APE` an older rule holds.
+ */
 export function criterionLabel(metricKey: string, rule: Pick<MocRule, 'appliesToOrgLevelCodes'>): string {
-  switch (metricKey) {
-    case 'NET_APE': return 'Net APE';
+  switch (currentMetricKey(metricKey)) {
+    case 'MOC_APE': return 'APE';
     case 'MONTHLY2_AA': return 'Monthly2 AA';
     case 'MONTHLY2_AA_DU': return 'Monthly2 AA — DU';
     case 'MONTHLY2_AA_DG': return 'Monthly2 AA — DG';
@@ -114,10 +123,11 @@ export function mocStatus(rule: MocRule, inputs: Readonly<Record<string, MocInpu
   const criteria: MocCriterion[] = [];
   rule.criteriaGroups.forEach((group, index) => {
     const results = group.criteria.map((c) => {
-      const input = inputs[c.metricKey];
+      const key = currentMetricKey(c.metricKey);
+      const input = inputs[key];
       const met = criterionMet(input, c.comparator, c.value);
       criteria.push({
-        code: c.metricKey,
+        code: key,
         label: `${alternative && index > 0 ? render(SAY.orBefore, reader) : ''}${criterionLabel(c.metricKey, rule)}`,
         current: input?.current ?? null,
         required: c.value,
@@ -146,7 +156,7 @@ const SYMBOLS: Readonly<Record<string, string>> = { gte: '≥', gt: '>', lte: '�
  * compact form would round is written in full, and a percentage keeps every decimal it was set with and no *,0*.
  */
 function thresholdText(metricKey: string, value: number, figures: Language): string {
-  switch (metricByKey(metricKey)?.unit) {
+  switch (metricByKey(currentMetricKey(metricKey))?.unit) {
     case 'idr_minor': return formatRupiahCompact(value, { lossless: true }, figures);
     case 'percentage': return formatPercent(value, { lossless: true }, figures);
     default: return formatNumber(value, undefined, figures);
@@ -176,7 +186,7 @@ function groupText(rule: MocRule, criteria: readonly MocRuleCriterion[], reader:
 
 /**
  * **The MOC column's tooltip** (`KPM_Owner.html:1248`), composed from the company's `moc` rules rather than
- * typed (item 8 of the Phase 18 exit review): a line per rule, in the order given — *"AAB: Net APE ≥ Rp 200 jt AND
+ * typed (item 8 of the Phase 18 exit review): a line per rule, in the order given — *"AAB: APE ≥ Rp 200 jt AND
  * Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%."* — an OR of groups with each group of several criteria in
  * brackets, as the prototype writes the AB's. A carrier that changes a threshold changes the sentence with it.
  * No rule, no sentence: `''`. In the reader's language: *DAN* and *ATAU* join an Indonesian reader's, each threshold

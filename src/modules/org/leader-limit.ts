@@ -87,7 +87,7 @@ export interface ApprovedPastLimit {
  * changed. Nothing is written for the member; the request is closed as declined with `why`.
  *
  * `why` is a sentence (`STALE_REASONS`), said inside the refusal and kept in `details.why` — English on the exception,
- * as `details` always is, and written for the reader in the response (P18.98-T5 AC-3).
+ * as `details` always is, and written for the reader in the response (P18.10-T5 AC-3).
  */
 export function leaderLimitRequestStale(requestId: string, why: StaleReason): DomainException {
   return new DomainException(

@@ -69,3 +69,94 @@ export class BillingPricesDto {
   })
   annualDiscountPct!: number;
 }
+
+/** A tier as a row of the list names it: its code and its bounds. */
+export class BillingKpmTierDto {
+  @ApiProperty({ example: 'TIER_1_10' })
+  code!: string;
+
+  @ApiProperty({ example: 1 })
+  minLeaders!: number;
+
+  @ApiProperty({ type: Number, nullable: true, example: 10, description: '`null` for the open last tier.' })
+  maxLeaders!: number | null;
+}
+
+/** A KPM's company, by id and name. */
+export class BillingKpmCompanyDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty({ example: 'Prudential' })
+  name!: string;
+}
+
+/** One KPM on `/admin/billing` (ADR-0211 §3): counts and codes, no member named. */
+export class BillingKpmRowDto {
+  @ApiProperty()
+  kpmId!: string;
+
+  @ApiProperty({ example: '0417' })
+  code!: string;
+
+  @ApiProperty({ example: 'Jakarta Selatan' })
+  branch!: string;
+
+  @ApiProperty({ type: BillingKpmCompanyDto })
+  company!: BillingKpmCompanyDto;
+
+  @ApiProperty({ example: 8, description: '*Leader*: the active members on a leader rung, the Owner included (ADR-0113).' })
+  leadersUsed!: number;
+
+  @ApiProperty({ type: BillingKpmTierDto, description: '*Tingkat*: the tier those leaders fall in; under one, the first.' })
+  tier!: BillingKpmTierDto;
+
+  @ApiProperty({ type: String, nullable: true, enum: ['six_months', 'annual'], description: '*Paket*; `null`, none.' })
+  plan!: 'six_months' | 'annual' | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '2027-04-30',
+    description: '*Perpanjangan*: the subscription’s end date, the last day the office is served; `null`, none.',
+  })
+  renewalDate!: string | null;
+
+  @ApiProperty({
+    enum: ['active', 'ended', 'ended_kept_active', 'none'],
+    description: '*Aktif*, *Berakhir*, *Berakhir — tetap aktif*, or *Belum ada langganan* (no end date).',
+  })
+  status!: 'active' | 'ended' | 'ended_kept_active' | 'none';
+}
+
+/** The server's figures for a sent quote, in IDR minor units. */
+export class QuotePricingDto {
+  @ApiProperty({ example: 8 }) leaders!: number;
+  @ApiProperty({ example: 'TIER_1_10' }) tierCode!: string;
+  @ApiProperty({ enum: ['six_months', 'annual'] }) plan!: 'six_months' | 'annual';
+  @ApiProperty({ enum: [6, 12] }) months!: 6 | 12;
+  @ApiProperty() standardMinor!: number;
+  @ApiProperty({ description: 'The six-month rate, on either plan.' }) offerMinor!: number;
+  @ApiProperty({ description: 'The plan’s rate before the manual discount.' }) baseMinor!: number;
+  @ApiProperty() annualDiscountMinor!: number;
+  @ApiProperty() manualDiscountMinor!: number;
+  @ApiProperty({ description: 'The rate per leader per month, after every discount.' }) finalMinor!: number;
+  @ApiProperty() monthlyTotalMinor!: number;
+  @ApiProperty() periodTotalMinor!: number;
+}
+
+/** Who received the quote. */
+export class QuoteRecipientDto {
+  @ApiProperty({ example: 'Wulan Kartika' })
+  fullName!: string;
+}
+
+/** `POST /admin/tenants/:kpmId/quote`: sent, to whom, and the figures the server sent. */
+export class QuoteSentDto {
+  @ApiProperty()
+  kpmId!: string;
+
+  @ApiProperty({ type: QuoteRecipientDto })
+  recipient!: QuoteRecipientDto;
+
+  @ApiProperty({ type: QuotePricingDto })
+  pricing!: QuotePricingDto;
+}

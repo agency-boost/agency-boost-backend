@@ -219,7 +219,7 @@ export class CalendarAutoItems {
    * `membershipId → phone`, for **active** memberships of this office whose person has one on file.
    *
    * A coach who has left keeps their name on the items they agreed — *Dari: NAME* is the item's history — but their
-   * number is not served (the Phase 18.99 exit review, L1): a membership that is not `active` is somebody this office no
+   * number is not served (the Phase 18.11 exit review, L1): a membership that is not `active` is somebody this office no
    * longer puts its members in touch with, and their `users.phone` is their own account's, not the office's to hand out.
    */
   async phonesOf(ctx: RequestContext, membershipIds: readonly string[]): Promise<Map<string, string>> {

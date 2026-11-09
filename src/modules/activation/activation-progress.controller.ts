@@ -26,7 +26,7 @@ const NO_ACTIVATION =
 export class ActivationProgressController {
   constructor(
     private readonly activation: ActivationProgressService,
-    // P18.96-T4 AC-3: a tick of a data-backed item, with its record.
+    // P18.8-T4 AC-3: a tick of a data-backed item, with its record.
     private readonly records: ActivationItemRecords,
   ) {}
 
@@ -38,7 +38,9 @@ export class ActivationProgressController {
       'Your checklist as it was published when you started, with what is done, when and by whom, your own '
       + 'note and date on each item, your start date, the office’s today, your day and window, each '
       + 'aspect’s status and the percentage — computed by the server, never in the browser — and your '
-      + 'leader’s coaching note. Answered in any state: open, complete, or past its six months.',
+      + 'leader’s coaching note. Answered in any state: open, complete, or past its six months. **Empty** '
+      + '(`ActivationEmptyDto`, told apart by its `empty`) once your join date plus twelve calendar months has come: the '
+      + 'activation covers your first year only, and nothing of the checklist is served.',
   })
   @ApiResponse(refusal(404, NO_ACTIVATION))
   @ApiResponse({ status: 200, type: ActivationViewDto })

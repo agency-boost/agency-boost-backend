@@ -9,7 +9,10 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { readerOf, type Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
 import type { LocalDate } from '@/common/time/local-day';
-import { DEFAULT_TENANT_TIMEZONE, INVITES } from '@/domain/constants';
+import { AGENT_CODE_PATTERN, DEFAULT_TENANT_TIMEZONE, INVITES } from '@/domain/constants';
+import { refuseWith } from '@/common/validation/fields';
+import { agentCodePattern } from '@/modules/config/analytics-config';
+import { AnalyticsConfigReader } from '@/modules/config/analytics-config.reader';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -22,6 +25,7 @@ import { User, UserDocument } from '@/modules/users/user.schema';
 import { ActivationStarter, startActivation } from './activation-starter.port';
 import { ApprovalsService } from './approvals.service';
 import { HierarchyService } from './hierarchy.service';
+import { RecruitLeadLinks } from '@/modules/leads/recruit-lead-links';
 import { MemberInviteDocument } from './member-invite.schema';
 import { MemberNames } from './member-names.service';
 import { MembershipRepository } from './membership.repository';
@@ -29,6 +33,8 @@ import { MembershipDocument } from './membership.schema';
 import { ONBOARDING_MESSAGES, ONBOARDING_REFUSALS } from './onboarding.messages';
 import { JoinRequestRepository, MemberInviteRepository } from './org.repositories';
 import { TransfersService, type RequestedTransferView } from './transfers.service';
+import { BrandingReader } from '@/modules/branding/branding-reader';
+import type { BrandingPalette } from '@/domain/branding/palette';
 
 const DAY_MS = 86_400_000;
 const SAY = ONBOARDING_REFUSALS;
@@ -47,6 +53,8 @@ export interface AddAgentInput {
   joinDate?: string;
   /** The Owner's or an Admin's choice of unit. A leader's own unit is theirs whether or not it is named. */
   leaderMembershipId?: string;
+  /** The recruitment lead the form was opened from (P19.1-T6 AC-7), linked to the membership the form makes. */
+  recruitLeadId?: string;
 }
 
 /** One invite as `/new-hires` draws it, *Invited, waiting to join* or *Invite expired*. Never its link. */
@@ -87,10 +95,15 @@ export interface InviteBanner {
   fullName: string;
   existingAccount: boolean;
   expiresAt: string;
+  /**
+   * **The KPM's marks for the invitation's pages** (P19.6-T1 AC-13; ADR-0218 §9): as `GET /kpm-branding/:kpmId`
+   * answers them, with the KPM's id for the files' addresses; `null` without the reader.
+   */
+  branding: { kpmId: string; name: string; version: string; palette: BrandingPalette | null; logo: { width: number; height: number } | null } | null;
 }
 
 /**
- * **+ Add agent, and the invites it makes** (ADR-0170 §1–§4, P18.96-T3 AC-1 to AC-4; `functional/org-hierarchy.md`,
+ * **+ Add agent, and the invites it makes** (ADR-0170 §1–§4, P18.8-T3 AC-1 to AC-4; `functional/org-hierarchy.md`,
  * *Adding an agent*).
  *
  * **One entry point decides by the agent code**, within the office's company (the insurer issued it, ADR-0017):
@@ -130,15 +143,62 @@ export class InvitesService {
     private readonly clock: Clock,
     /** OD-119: an invite accepted places its person under a leader, at the Agent rung — a hire. */
     @Optional() @Inject(ActivationStarter) private readonly activations: ActivationStarter | null = null,
+    /**
+     * P19.1-T6 AC-7: a recruitment lead linked to the membership the form makes, through the leads module's own seam.
+     * The application always provides it; optional, so the specs built before it keep their constructor.
+     */
+    @Optional() @Inject(RecruitLeadLinks) private readonly recruitLeads: RecruitLeadLinks | null = null,
+    /**
+     * P19.5-T2 (ADR-0214 §7): the KPM's template's agent-code format, read live. Optional, so the specs built before it
+     * keep their constructor; without it the global `AGENT_CODE_PATTERN` stands.
+     */
+    @Optional() private readonly analytics: AnalyticsConfigReader | null = null,
+    /** P19.6-T1 AC-13 (ADR-0218 §9): the KPM's logo and colours on the invitation's pages. Optional, as above. */
+    @Optional() private readonly branding: BrandingReader | null = null,
   ) {}
+
+  /**
+   * **A new code in this KPM follows its template's format** (P19.5-T2; ADR-0214 §7, amending ADR-0158 §4): the
+   * published `agentCodePattern` in place of the global `AGENT_CODE_PATTERN` — *Tambah anggota* and an invitation
+   * accepted into the KPM. `400 VALIDATION_FAILED` naming `agentCode`, with the template's example. A code already held
+   * keeps its form: this is asked only of a code being given to somebody here.
+   */
+  private async checkCode(kpmId: string, code: string): Promise<void> {
+    if (this.analytics) {
+      const { config } = await this.analytics.forOffice(kpmId);
+      const compiled = agentCodePattern(config.uploadRules.agentCodePattern);
+      if ('pattern' in compiled) {
+        if (!compiled.pattern.test(code)) {
+          refuseWith([SAY.VALIDATION_FAILED.agentCodeNotTemplate({ example: config.uploadRules.agentCodeExample })]);
+        }
+        return;
+      }
+    }
+    if (!AGENT_CODE_PATTERN.test(code)) refuseWith([SAY.VALIDATION_FAILED.agentCodeShape]);
+  }
 
   // ---------------------------------------------------------------- + Add agent
 
   /** **`POST /new-hires/agents`**: the one form's one entry point. See the class for what it decides. */
   async addAgent(ctx: RequestContext, input: AddAgentInput, appOrigin: string): Promise<AddAgentResult> {
+    if (ctx.kpmId) await this.checkCode(ctx.kpmId, input.agentCode.trim());
     const leader = await this.leaderFor(ctx, input.leaderMembershipId);
     // The join date first, so a refused date leaves nothing behind (ADR-0169): the office's today when omitted.
     const { joinDate } = await this.hierarchy.joining(ctx, { joinDate: input.joinDate });
+    // P19.1-T6 AC-12: the lead it came from, checked before anything is written — another office's is 404.
+    const recruitLeadId = input.recruitLeadId && this.recruitLeads ? input.recruitLeadId : null;
+    if (recruitLeadId) await this.recruitLeads!.check(ctx, recruitLeadId);
+    const result = await this.added(ctx, input, leader, joinDate, appOrigin, recruitLeadId);
+    // Somebody already in the office, placed now: the lead names them at once (P19.1-T6 AC-7).
+    if (recruitLeadId && result.outcome === 'linked') await this.recruitLeads!.link(ctx, recruitLeadId, result.member.membershipId);
+    return result;
+  }
+
+  /** What the code decides (the class's table), once the leader and the join date are settled. */
+  private async added(
+    ctx: RequestContext, input: AddAgentInput, leader: MembershipDocument, joinDate: LocalDate, appOrigin: string,
+    recruitLeadId: string | null,
+  ): Promise<AddAgentResult> {
     const kpm = await this.office(ctx);
     const agentCode = input.agentCode.trim();
 
@@ -157,12 +217,12 @@ export class InvitesService {
       });
       if (membership) return this.forMember(ctx, membership, leader, joinDate, holder, input.fullName);
     }
-    return this.invite(ctx, kpm, leader, { ...input, agentCode, joinDate }, Boolean(holder), appOrigin);
+    return this.invite(ctx, kpm, leader, { ...input, agentCode, joinDate }, Boolean(holder), appOrigin, recruitLeadId);
   }
 
   /**
    * The three outcomes for somebody already in the office: linked, refused, or a transfer asked for. A transfer is
-   * answered with the name the form was given, never the account's (the P18.96 exit review, M3): the code found
+   * answered with the name the form was given, never the account's (the P18.8 exit review, M3): the code found
    * somebody in another leader's unit, and nothing of that unit is the asker's to learn from it.
    */
   private async forMember(
@@ -201,6 +261,7 @@ export class InvitesService {
     input: AddAgentInput & { joinDate: LocalDate },
     existingAccount: boolean,
     appOrigin: string,
+    recruitLeadId: string | null = null,
   ): Promise<AddAgentResult> {
     const now = this.clock.now();
     await this.expireStale(ctx, { agentCode: input.agentCode });
@@ -223,6 +284,7 @@ export class InvitesService {
         status: 'pending',
         expiresAt: new Date(now.getTime() + INVITES.EXPIRY_DAYS * DAY_MS),
         existingAccount,
+        recruitLeadId,
       });
     } catch (err) {
       // Two forms at once for one code: the partial unique index lets one through.
@@ -335,6 +397,17 @@ export class InvitesService {
       fullName: row.fullName,
       existingAccount: row.existingAccount,
       expiresAt: row.expiresAt.toISOString(),
+      branding: await this.brandingOf(String(kpm._id)),
+    };
+  }
+
+  /** The invitation's KPM's marks (P19.6-T1 AC-13), or `null` without the reader or for a KPM that is not live. */
+  private async brandingOf(kpmId: string): Promise<InviteBanner['branding']> {
+    const shown = this.branding ? await this.branding.shownFor(kpmId, true) : null;
+    if (!shown) return null;
+    return {
+      kpmId, name: shown.name, version: shown.version, palette: shown.palette,
+      logo: shown.logo ? { width: shown.logo.width, height: shown.logo.height } : null,
     };
   }
 
@@ -397,6 +470,8 @@ export class InvitesService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
+    // The KPM's template's format, as it stands now (P19.5-T2; ADR-0214 §7): a template published since the invite.
+    await this.checkCode(row.kpmId, row.agentCode);
     // The code is checked again at acceptance (ADR-0170 §2): it belongs to this account and nobody else's.
     const clash = await this.users.findOne({
       companyId: row.companyId, agentCode: row.agentCode, deletedAt: null, _id: { $ne: userId },
@@ -411,7 +486,7 @@ export class InvitesService {
     }
 
     /*
-     * **The invite is claimed before anybody is placed** (the P18.96 exit review, L3): one write, conditional on it still
+     * **The invite is claimed before anybody is placed** (the P18.8 exit review, L3): one write, conditional on it still
      * waiting, so of two accepts at once — a double tap, two tabs — one goes on and the other is refused `409
      * ORG_REQUEST_ALREADY_DECIDED`, never a second membership's duplicate key as a `500`. A placement refused after the
      * claim puts the invite back, waiting.
@@ -454,6 +529,8 @@ export class InvitesService {
     }
     const membershipId = String(membership._id);
     await this.invites.updateById(scoped, inviteId, { $set: { acceptedMembershipId: membershipId } });
+    // The recruitment lead the form came from now names who they became (P19.1-T6 AC-7).
+    if (row.recruitLeadId && this.recruitLeads) await this.recruitLeads.link(scoped, row.recruitLeadId, membershipId);
     // Their number, from the invite, where the account has none yet.
     await this.users.updateOne({ _id: userId, phone: null }, { $set: { phone: row.phone } }).exec();
     await this.requests.updateMany(

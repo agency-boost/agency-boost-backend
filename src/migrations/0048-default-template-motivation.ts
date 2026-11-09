@@ -20,7 +20,7 @@ function placeIn(categories: readonly Held[]): number {
 }
 
 /**
- * **The owner's seventh training category in the platform's Default template** (Phase 18.99 T10; the UI V1 report's
+ * **The owner's seventh training category in the platform's Default template** (Phase 18.11 T10; the UI V1 report's
  * UI-063, *Motivation, new, owner 30 Oct 2026*). The seed has carried `MOTIVATION_CATEGORY` since this phase, so a fresh
  * install's `0037` writes the Template company's *Default template* with it; this gives it to a Default template made
  * before:

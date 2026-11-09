@@ -2,7 +2,7 @@ import { formatDate } from '@/common/format/format';
 import { messages, refusals } from '@/common/i18n/sentence';
 
 /**
- * **The coaching module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): a session written, finalized,
+ * **The coaching module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): a session written, finalized,
  * reopened and printed, a 1:1 logged after it was held, and a coachee's capability ticks. *Coaching*, *1:1*, *AB*,
  * *AAB* and *Leader* stay English (glossary §A), and so do the session's own *action item* and *coaching tip*; a
  * session is a *sesi coaching*, finalized *difinalkan*, reopened *dibuka kembali* (the API's vocabulary).
@@ -66,9 +66,10 @@ export const COACHING_REFUSALS = refusals('modules/coaching', {
     },
   },
   PERM_DENIED: {
+    /** No longer *an AB or an AAB*: an Agent who leads runs sessions too since P19.9-T6 (ADR-0234). */
     logOneOnOne: {
-      en: 'A 1:1 is logged by a leader who runs coaching sessions: an AB or an AAB.',
-      id: '1:1 dicatat oleh leader yang menjalankan sesi coaching: AB atau AAB.',
+      en: 'A 1:1 is logged by a leader who runs coaching sessions for this person.',
+      id: '1:1 dicatat oleh leader yang menjalankan sesi coaching untuk orang ini.',
     },
   },
   CONFIG_ARCHIVED: {
@@ -117,7 +118,7 @@ export const COACHING_REFUSALS = refusals('modules/coaching', {
 });
 
 /**
- * **The words a session writes into its answers** (P18.98-T5 AC-4, AC-6): *From leads (automatic)*'s line for a dated
+ * **The words a session writes into its answers** (P18.10-T5 AC-4, AC-6): *From leads (automatic)*'s line for a dated
  * lead with no note — the prototype's *Follow up with {name}* (`Overall.html:11057`). Live in an open session, in the
  * reader's language; **stored at finalize**, in the language of the leader finalizing, and shown as stored. The name
  * is the lead's own, shown as typed; *Follow up* stays English (glossary §A.6).

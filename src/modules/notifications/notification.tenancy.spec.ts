@@ -27,7 +27,7 @@ const KPM_B = new mongoose.Types.ObjectId().toString();
  * an id that selects whose inbox to read.** These tests assert the absence of that door,
  * not that a door is locked.
  */
-/** A person reading in English — the copy asserted below — since nobody's choice is Bahasa Indonesia (P18.98-T4's exit). */
+/** A person reading in English — the copy asserted below — since nobody's choice is Bahasa Indonesia (P18.10-T4's exit). */
 function person(userId: string, kpmId: string | null) {
   return new RequestContext(
     userId,
@@ -48,7 +48,7 @@ class StubRenderer extends TemplateRenderer {
   }
 }
 
-describe('notifications — one inbox per person (P3.5-T10)', () => {
+describe('notifications — one inbox per person (P3.1-T10)', () => {
   let service: NotificationService;
   let clock: FixedClock;
 

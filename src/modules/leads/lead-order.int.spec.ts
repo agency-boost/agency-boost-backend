@@ -15,14 +15,14 @@ import { LeadController } from './lead.controller';
 import { LeadService } from './lead.service';
 
 /**
- * **`PATCH /leads/order`, over HTTP, per role** (P18.8-T7 AC-1 to AC-3, ADR-0161 §1).
+ * **`PATCH /leads/order`, over HTTP, per role** (P18.5-T7 AC-1 to AC-3, ADR-0161 §1).
  *
  * Through the real `PermissionsGuard`, the production pipe and the real service, over
  * `test/coaching-office.ts`'s office, where the people stand in a real hierarchy: so *whose* list a
  * reorder writes can be asked — the caller's, never a downline's, never another office's — which the
  * one-person fixtures of `lead.controller.int.spec.ts` cannot.
  */
-describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
+describe('P18.5-T7 — the owner’s own order, over HTTP', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: CoachingOffice;
@@ -76,7 +76,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       ['an AB', 'AGUS'],
       ['the Owner, on their own rung', 'OWNER'],
       ['the Admin, on their own rung', 'ADMIN'],
-    ] as [string, Who][])('P18.8-T7 AC-2 AC-3 lets %s save their order, and GET /leads without a sort reads it', async (_name, who) => {
+    ] as [string, Who][])('P18.5-T7 AC-2 AC-3 lets %s save their order, and GET /leads without a sort reads it', async (_name, who) => {
       const [first, second, third] = await threeOf(who);
       as(who);
 
@@ -88,7 +88,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       expect(await places([first, third, second])).toEqual([0, 1, 2]);
     });
 
-    it('P18.8-T7 AC-3 a column sort still sorts, and is not saved', async () => {
+    it('P18.5-T7 AC-3 a column sort still sorts, and is not saved', async () => {
       const [first, second, third] = await threeOf('RINA');
       as('RINA');
       await order(second, first, third).expect(200);
@@ -98,7 +98,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       expect(await listed()).toEqual(['RINA second', 'RINA first', 'RINA third']);
     });
 
-    it('P18.8-T7 AC-1 a lead a leader adds in a session goes to the top of the coachee’s list', async () => {
+    it('P18.5-T7 AC-1 a lead a leader adds in a session goes to the top of the coachee’s list', async () => {
       const [first, second] = [await leadOf('RINA', 'RINA first'), await leadOf('RINA', 'RINA second')];
       as('RINA');
       await order(first, second).expect(200);
@@ -112,12 +112,13 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
   });
 
   describe('a list is its owner’s', () => {
-    it('P18.8-T7 AC-2 refuses a leader a downline’s lead, though their own list shows it, and writes nothing', async () => {
+    it('P18.5-T7 AC-2 refuses a leader a downline’s lead, though their own list shows it, and writes nothing', async () => {
       const [mine] = [await leadOf('SARI', 'SARI own')];
       const rinas = await threeOf('RINA');
       as('SARI');
-      // Sari's `/leads` holds her unit's leads beside her own (P7-T7)…
-      expect(await listed()).toHaveLength(4);
+      // Sari's `/leads` reaches her unit's leads (P7-T7) — on *Leads milik: Tim* since P19.9-T1 (ADR-0232 §3)…
+      expect(await listed()).toEqual(['SARI own']);
+      expect((await http().get('/leads').query({ scope: 'team' }).expect(200)).body.rows).toHaveLength(3);
 
       // …and her order is hers alone: Rina's leads in it, or in place of hers, are refused.
       for (const ids of [[mine, ...rinas], [...rinas], [mine, rinas[0]]]) {
@@ -132,7 +133,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       expect(await places(rinas)).toEqual([0, -1, -2]);
     });
 
-    it('P18.8-T7 AC-2 refuses an agent a colleague’s lead', async () => {
+    it('P18.5-T7 AC-2 refuses an agent a colleague’s lead', async () => {
       const [mine] = [await leadOf('RINA', 'RINA own')];
       const budis = await leadOf('BUDI', 'BUDI own');
       as('RINA');
@@ -141,7 +142,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       expect((await order(budis).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('P18.8-T7 AC-2 refuses another office’s leads, both ways, and moves neither list', async () => {
+    it('P18.5-T7 AC-2 refuses another office’s leads, both ways, and moves neither list', async () => {
       const ours = await threeOf('RINA');
       const theirs = await threeOf('B_AGENT');
 
@@ -156,7 +157,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       expect(await places(theirs)).toEqual([0, -1, -2]);
     });
 
-    it('P18.8-T7 AC-2 refuses a list with one of the caller’s open leads left out', async () => {
+    it('P18.5-T7 AC-2 refuses a list with one of the caller’s open leads left out', async () => {
       const [first, second] = await threeOf('RINA');
       as('RINA');
 
@@ -168,7 +169,7 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       });
     });
 
-    it('P18.98-T5 AC-7 says what is wrong with the list in Indonesian: one form for one and many, *leads* kept English', async () => {
+    it('P18.10-T5 AC-7 says what is wrong with the list in Indonesian: one form for one and many, *leads* kept English', async () => {
       const [first] = await threeOf('RINA');
       const budis = await leadOf('BUDI', 'BUDI own');
       as('RINA');
@@ -217,13 +218,13 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
       ['an id that is not an ObjectId', { ids: ['lead-1'] }],
       ['an operator in place of an id', { ids: [{ $ne: null }] }],
       ['a field nobody defined', { ids: ['66f00000000000000000ffff'], pipeline: 'sales' }],
-    ])('P18.8-T7 AC-2 refuses %s with 400', async (_name, body) => {
+    ])('P18.5-T7 AC-2 refuses %s with 400', async (_name, body) => {
       as('RINA');
       const res = await http().patch('/leads/order').send(body).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('P18.8-T7 is declared above PATCH /leads/:id, so *order* is never read as a lead', async () => {
+    it('P18.5-T7 is declared above PATCH /leads/:id, so *order* is never read as a lead', async () => {
       const [only] = [await leadOf('RINA', 'RINA only')];
       as('RINA');
       // `PATCH /leads/:id` would take a `name` and answer 404 for the id *order*; this route refuses it.
@@ -234,20 +235,20 @@ describe('P18.8-T7 — the owner’s own order, over HTTP', () => {
   });
 
   describe('who is refused, and how', () => {
-    it('P18.8-T7 refuses a Super Admin by name, not by a 500', async () => {
+    it('P18.5-T7 refuses a Super Admin by name, not by a 500', async () => {
       session.current = SUPER_ADMIN;
       const res = await order('66f00000000000000000ffff').expect(403);
       expect(res.body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
-    it('P18.8-T7 refuses a membership still pending, which holds no grant yet', async () => {
+    it('P18.5-T7 refuses a membership still pending, which holds no grant yet', async () => {
       const rina = office.as('RINA');
       session.current = new RequestContext('u-x', 'none', { ...rina.membership!, status: 'pending' });
       const res = await order('66f00000000000000000ffff').expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'lead:update' } });
     });
 
-    it('P18.8-T7 refuses a read-only support session, and moves nothing', async () => {
+    it('P18.5-T7 refuses a read-only support session, and moves nothing', async () => {
       const [first, second] = [await leadOf('RINA', 'RINA first'), await leadOf('RINA', 'RINA second')];
       const rina = office.as('RINA');
       session.current = new RequestContext(rina.userId, 'none', rina.membership, 'u-support', null, false, true);

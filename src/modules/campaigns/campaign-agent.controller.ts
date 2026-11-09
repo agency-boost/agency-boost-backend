@@ -25,7 +25,7 @@ export class CampaignChasingQueryDto {
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
- * **The agent's campaigns** (P18.5-T7, T8, T9; `functional/campaigns.md`, the Data contract): the list, one
+ * **The agent's campaigns** (P18.2-T7, T8, T9; `functional/campaigns.md`, the Data contract): the list, one
  * campaign with the reader's progress, the chase, and whose chases a reader may see.
  *
  * **The literal path before the parameter**: `chasing` is declared ahead of `:code`, so the chases read is never

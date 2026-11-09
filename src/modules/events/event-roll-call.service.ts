@@ -90,7 +90,7 @@ export interface FeedbackSummary {
 export const ROLL_CALL_MAX_ENTRIES = 500;
 
 /**
- * **The office's side of an event** (P18.5-T5 AC-7, AC-10; P18.5-T6 AC-5; OD-31, OD-151, D-rollcall, D-picker): the
+ * **The office's side of an event** (P18.2-T5 AC-7, AC-10; P18.2-T6 AC-5; OD-31, OD-151, D-rollcall, D-picker): the
  * roll call in the *View feedback* dialog (`KPM_Owner.html:1655`), the *Feedback Summary* below it
  * (`KPM_Owner.html:3751-3795`), and the audience picker's people.
  *
@@ -171,7 +171,7 @@ export class EventRollCallService {
         registered: reading.counts.registered,
         notRegistered: reading.counts.not_registered,
       },
-      // The share as a reader is shown it, whole and rounded once from the counts (ADR-0174 §1, P18.97-T3 AC-2), never
+      // The share as a reader is shown it, whole and rounded once from the counts (ADR-0174 §1, P18.9-T3 AC-2), never
       // `EVENT_ATTENDANCE_RATE`'s tenth for a screen to round again.
       attendanceRate: eventAttendanceRateShown(reading.rows.map((r) => r.status), reading.event.ended),
       can: { confirm: can(ctx, 'event_attendance:confirm') && reading.event.ended },

@@ -5,7 +5,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { CampaignStanding, CampaignStandingDocument, type StandingOverride } from './campaign-standing.schema';
 
-/** The final standings (P18.5-T8 AC-5). Through the chokepoint; written in one insert when a window becomes final. */
+/** The final standings (P18.2-T8 AC-5). Through the chokepoint; written in one insert when a window becomes final. */
 @Injectable()
 export class CampaignStandingRepository extends TenantScopedRepository<CampaignStandingDocument> {
   constructor(@InjectModel(CampaignStanding.name) model: Model<CampaignStandingDocument>) {
@@ -35,7 +35,7 @@ export class CampaignStandingRepository extends TenantScopedRepository<CampaignS
   }
 
   /**
-   * **Set or clear a final standing's override, only where the row is still as it was read** (P18.6-T2 AC-5): one
+   * **Set or clear a final standing's override, only where the row is still as it was read** (P18.3-T2 AC-5): one
    * conditional update on the row's own `version`, which it moves — so of two writes from one reading only the first
    * lands, and the caller audits exactly the write that happened (`false`: somebody changed it first). Scoped like
    * every write here; the frozen `status` is not touched. Stamped with the clock port's instant.

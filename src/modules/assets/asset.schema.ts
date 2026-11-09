@@ -33,6 +33,15 @@ export class Asset {
   companyId!: string | null;
 
   /**
+   * **The template a company file was uploaded into** (ADR-0208 §1): set on the material of a template's *Training*
+   * section, `null` on every other asset. A record of where the file came from, not a second owner — the company owns
+   * it (`companyId`), every office of the company reads it by reference, and a copy of the template within the company
+   * references the same row (*Salin dari…*, ADR-0032). The upload's confirm is refused for another template's file.
+   */
+  @Prop({ type: String, default: null })
+  templateId!: string | null;
+
+  /**
    * The object's name in the environment's Cloud Storage bucket (ADR-0153):
    * `<STORAGE_KEY_PREFIX>/<kpmId | company/<companyId>>/<folder>/<id>`. Keys written while storage was
    * Cloudinary (ADR-0032) have the same shape, as its public ids did.

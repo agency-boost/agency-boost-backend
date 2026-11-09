@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
-import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import {
   readBrief, recruitmentPlanFor, recruitmentVocabulary, type RecruitmentPlan, type RecruitmentVocabulary,
 } from './recruitment-plan';
@@ -10,7 +9,10 @@ import { playbookFor } from './recruitment-words';
 
 /** `GET /recruitment/attack-plan` (`RecruitmentAttackPlanView`). */
 export interface RecruitmentAttackPlanView {
-  /** False when the office's company has no playbook — a blank company's (ADR-0115) — and then `plan: null`. */
+  /**
+   * False when the template the office reads its playbook from has published none — or the office's company has no
+   * template at all (ADR-0210 §4) — and then `plan: null`: ADR-0125's empty state.
+   */
   hasPlaybook: boolean;
   vocabulary: RecruitmentVocabulary;
   /** `null` with no brief in the address, or with no playbook to build one from. */
@@ -18,22 +20,19 @@ export interface RecruitmentAttackPlanView {
 }
 
 /**
- * **The Recruitment Attack Plan's read** — the chips' labels written for the request's reader (P18.98-T7), the
- * company's playbook as typed (D-plan, D-store; T2 AC-4 to AC-7) — save where it still holds the platform's seed words,
+ * **The Recruitment Attack Plan's read** — the chips' labels written for the request's reader (P18.10-T7), the
+ * playbook's words as typed (D-plan, D-store; T2 AC-4 to AC-7) — save where it still holds the platform's seed words,
  * which a reader in Indonesian reads in Indonesian (UI V1, UI-107; `playbookFor`).
  *
- * The reader's office's company, from the office's own row (`TenantDay.office`) — never a company the
- * caller names — and that company's playbook through its named company-filtered read: **those two reads and
- * nothing else**. No office's text, no member's data, no lead. **Nothing is written**: no record of the
- * brief, no audit row, no §3.5 entry, nothing sent (D-store, ADR-0117's rule) — so a read-only support
- * session builds one as its member would.
+ * **The playbook of the template the reader's office was made from, published, read live** (ADR-0210 §4; P19.4-T5
+ * AC-8): through `RecruitmentPlaybookService.forOffice`, which takes the office from the request's own context — never
+ * a company or a template the caller names — and filters every read by that office's company. **That read and nothing
+ * else**: no office's text, no member's data, no lead. **Nothing is written**: no record of the brief, no audit row, no
+ * §3.5 entry, nothing sent (D-store, ADR-0117's rule) — so a read-only support session builds one as its member would.
  */
 @Injectable()
 export class RecruitmentPlanService {
-  constructor(
-    private readonly playbooks: RecruitmentPlaybookService,
-    private readonly offices: TenantDay,
-  ) {}
+  constructor(private readonly playbooks: RecruitmentPlaybookService) {}
 
   async attackPlan(
     ctx: RequestContext, query: { type?: string; motivation?: string; hesitation?: string },
@@ -42,8 +41,7 @@ export class RecruitmentPlanService {
     if (!ctx.kpmId) throw new MissingTenantContextError('recruitmentPlaybooks', 'attackPlan');
     const brief = readBrief(query);
 
-    const { companyId } = await this.offices.office(ctx);
-    const playbook = companyId ? await this.playbooks.ofCompany(companyId) : null;
+    const playbook = await this.playbooks.forOffice(ctx.kpmId);
     return {
       hasPlaybook: playbook !== null,
       vocabulary: recruitmentVocabulary(ctx.reader),

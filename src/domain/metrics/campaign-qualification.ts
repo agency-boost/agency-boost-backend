@@ -4,7 +4,7 @@ import { combine, compare } from './criteria';
 
 /**
  * `CAMPAIGN_QUALIFICATION_STATUS` — one member's standing against one campaign's requirements
- * (`metrics-and-definitions.md` §A.6; P18.5-T8 AC-3, AC-4, AC-6; OD-153, OD-154, OD-157). Pure: the requirements
+ * (`metrics-and-definitions.md` §A.6; P18.2-T8 AC-3, AC-4, AC-6; OD-153, OD-154, OD-157). Pure: the requirements
  * and each one's reading in, a row per requirement and a status out.
  *
  * **A row per requirement, as the dialog prints it** (OD-157): *"{current} of {target}"* with ✓ when met; *Not
@@ -15,7 +15,7 @@ import { combine, compare } from './criteria';
  * **The status** (the registry's, as amended; ADR-0143): for a chaser, `qualified` — every requirement met;
  * `in_progress` — the window still open, or its last month not yet locked; `not_met` — final, and a requirement
  * missed; `unknown` — final with a requirement nothing could decide. **For a member who did not chase, `not_joined`**:
- * only a chaser qualifies (OD-153), chasing is enrolment, and the Phase 18.6 tree reads `not_joined` as *Not
+ * only a chaser qualifies (OD-153), chasing is enrolment, and the Phase 18.3 tree reads `not_joined` as *Not
  * achieved* — they did not take part. Their progress is still shown in the dialog all the same.
  *
  * The three-valued logic is `criteria.ts`'s, the one MOC is decided by (invariant §8).
@@ -115,7 +115,7 @@ export function qualify(
 }
 
 /**
- * **The first reader of a metric's period** (D-period, P18.5-T8 AC-7): a campaign reading must agree with the period
+ * **The first reader of a metric's period** (D-period, P18.2-T8 AC-7): a campaign reading must agree with the period
  * the registry gives the metric — a sum over months or days for a monthly or yearly figure, the latest month held
  * for a rolling or point-in-time one (or a month's count, which summing would double), a ratio over a rolling
  * window. The evaluator refuses a reading that disagrees, so a metric cannot be added to the set read the wrong way.

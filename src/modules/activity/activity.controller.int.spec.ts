@@ -175,7 +175,7 @@ describe('logging a day over HTTP (P6)', () => {
       expect(res.body.error.message).toMatch(/still open/);
     });
 
-    it('refuses a day nobody logged as not found, the sentence alone (P18.98-T5)', async () => {
+    it('refuses a day nobody logged as not found, the sentence alone (P18.10-T5)', async () => {
       // It was raised as `NotFoundException(sentence)`, which answered *… Log the day instead. not found.*
       const res = await request(app.getHttpServer()).post(`${url}/log/correction`)
         .send({ date: '2025-12-05', counts: {}, reason: 'Because.' }).expect(404);
@@ -188,13 +188,13 @@ describe('logging a day over HTTP (P6)', () => {
   });
 
   /*
-   * **The same refusals in Indonesian** (P18.98-T5 AC-7; ADR-0179 §7): the request's `Accept-Language` decides the
+   * **The same refusals in Indonesian** (P18.10-T5 AC-7; ADR-0179 §7): the request's `Accept-Language` decides the
    * words, and a day in them is in Indonesian figures. The code and every other detail are the same in both.
    */
-  describe('P18.98-T5 AC-7 in Indonesian', () => {
+  describe('P18.10-T5 AC-7 in Indonesian', () => {
     const indonesian = () => request(app.getHttpServer());
 
-    it('P18.98-T5 AC-7 refuses a day that has not happened in Indonesian, the day in Indonesian figures', async () => {
+    it('P18.10-T5 AC-7 refuses a day that has not happened in Indonesian, the day in Indonesian figures', async () => {
       const res = await indonesian().put(`${url}/log`).set('Accept-Language', 'id')
         .send({ date: '2026-05-12', counts: {} }).expect(422);
 
@@ -205,7 +205,7 @@ describe('logging a day over HTTP (P6)', () => {
       });
     });
 
-    it('P18.98-T5 AC-7 refuses a day of the wrong shape with the DTO’s own sentence, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses a day of the wrong shape with the DTO’s own sentence, in Indonesian', async () => {
       const res = await indonesian().get(`${url}/log`).set('Accept-Language', 'id')
         .query({ date: '11-03-2026' }).expect(400);
 
@@ -216,7 +216,7 @@ describe('logging a day over HTTP (P6)', () => {
       });
     });
 
-    it('P18.98-T5 AC-7 refuses an unknown code, and a correction of an open day, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 refuses an unknown code, and a correction of an open day, in Indonesian', async () => {
       const unknown = await indonesian().put(`${url}/log`).set('Accept-Language', 'id')
         .send({ counts: { NOT_A_CODE: 1 } }).expect(400);
       expect(unknown.body.error).toEqual({

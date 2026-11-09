@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
-import { VALUE_COLUMNS } from '@/modules/production/production-preview';
 import { TEMPLATE_HEADER_V1 } from '@/modules/production/production-template';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -10,6 +9,9 @@ import { frozenBeforeTheSlide } from '../../../test/frozen-scorecard';
 import { columnPeriods } from './scorecard/scorecard.service';
 
 const M = 1_000_000 * 100;
+/** The twelve value columns of a version 1 file, keyed `metric.cadence` as these specs name them (P19.5-T2). */
+const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
+  (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 
 /**
  * **Live, then frozen** (P18.1-T2 AC-4; ADR-0129 §6, §7; exit test 2): while a meeting is upcoming every read computes
@@ -35,6 +37,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     chips: view.scorecard.chips,
     rows: view.scorecard.rows.map(({ key, unit, cells }) => ({ key, unit, cells })),
     asOf: view.scorecard.asOf.kind === 'date' ? view.scorecard.asOf.date : null,
+    definitions: view.scorecard.definitions,
   });
 
   beforeAll(async () => {
@@ -56,7 +59,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     expect(first.editors.frozen).toBe(false);
     // A member's figures move: the next read shows it.
     await db().collection('monthlyAgentData').updateOne(
-      { kpmId: KPM_A, membershipId: office.id.INDAH, month: '2026-08' }, { $set: { 'apeMonthly.value': 25 * M } },
+      { kpmId: KPM_A, membershipId: office.id.INDAH, month: '2026-08' }, { $set: { 'values.APE.value': 25 * M } },
     );
     const again = await office.forum.read(owner(), meeting.id);
     expect(bare(again)).toEqual(await computed('2026-09-17'));
@@ -83,6 +86,8 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     const row = (await stored(meeting.id))!;
     expect(row.frozenAt).toEqual(ROSTER_NOW);
     expect(row.frozenScorecard).toEqual(await computed('2026-09-07'));
+    // P19.3-T1 AC-7 (ADR-0202 §4): the freeze stores the definitions its rows were computed with, and serves them.
+    expect([row.frozenScorecard.definitions, view.scorecard.definitions]).toEqual(['data_sources', 'data_sources']);
     expect(row.frozenCoeditors).toEqual([
       { membershipId: office.id.OWNER, as: 'owner', rungCode: 'AB', tagged: false },
       { membershipId: office.id.ADMIN, as: 'admin', rungCode: 'AB', tagged: false },
@@ -160,7 +165,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     }
   });
 
-  it('P18.1-T2 AC-4, P18.97-T1 AC-10 the Monthly Target is never frozen: typed after the freeze, its rate × the frozen units', async () => {
+  it('P18.1-T2 AC-4, P18.9-T1 AC-10 the Monthly Target is never frozen: typed after the freeze, its rate × the frozen units', async () => {
     const meeting = await make('Targets after', '2026-09-12');
     const frozen = await office.forum.read(owner(), meeting.id);
     const units = frozen.scorecard.chips.units;
@@ -172,7 +177,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     expect(after.scorecard.frozenAt).toBe(frozen.scorecard.frozenAt);
   });
 
-  it('P18.97-T1 AC-19 a scorecard frozen before the reference slide is read tolerantly: — where it lacks, its own units, nothing recomputed or written', async () => {
+  it('P18.9-T1 AC-19 a scorecard frozen before the reference slide is read tolerantly: — where it lacks, its own units, nothing recomputed or written', async () => {
     const meeting = await make('Kept before the slide', '2026-09-12');
     const editors = await office.people.liveEditors(owner(), await office.people.office(owner()));
     const frozenAt = new Date('2026-09-13T02:00:00Z');
@@ -193,6 +198,9 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
     expect(Object.values(row('cases_per_producing_agent').cells).map((c) => c.kind))
       .toEqual(['unrecorded', 'unrecorded', 'unrecorded', 'blocked', 'blocked', 'blocked']);
     expect(view.scorecard.asOf).toEqual({ kind: 'unrecorded' });
+    // P19.3-T1 AC-7 (ADR-0202 §4): it stores no definitions — frozen before the data sources — so it is served as the
+    // reference slide's, and the screen draws those footnotes: its 3M figure is ADR-0171's, never recomputed as D7.
+    expect(view.scorecard.definitions).toBe('reference_slide');
     // What it has that the table no longer draws is kept, and not served.
     expect(view.scorecard.rows.map((r) => r.key)).not.toContain('new_aa');
     expect(row('ape').cells.ytd).toEqual({ kind: 'figure', value: 5_800 * M, leavesOut: [] });
@@ -236,7 +244,7 @@ describe('the forum’s scorecard, live then frozen (P18.1-T2 AC-4, exit test 2)
       await wired.productionMonths.reopen(owner(), '2026-08');
       const revision = (await wired.productionMonths.state(owner(), '2026-08')).revision;
       await wired.productionCorrections.correct(owner(), {
-        month: '2026-08', membershipId: office.id.INDAH, metric: 'ape', cadence: 'monthly', value: 90 * M, revision,
+        month: '2026-08', membershipId: office.id.INDAH, kode: 'APE', ytd: false, value: 90 * M, revision,
         reason: 'The carrier restated it by email',
       });
       // An import into this month, and a revert of it.

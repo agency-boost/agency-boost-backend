@@ -47,7 +47,7 @@ export type ProductNeed = (typeof PRODUCT_NEEDS)[number];
  * Named slots rather than a list: an agent looking for the illustration is looking for **the**
  * illustration, and a list would make "which one is the brochure" a question about ordering.
  *
- * The labels are the English source of words the API serves in the reader's language (P18.98-T7; ADR-0179 §7):
+ * The labels are the English source of words the API serves in the reader's language (P18.10-T7; ADR-0179 §7):
  * `modules/products/products.messages.ts` (`PRODUCTS_MESSAGES`) holds each beside its Indonesian — as it does
  * *Lump-sum*, the one budget band below that is a word. The keys never change.
  */
@@ -76,11 +76,45 @@ export const PRODUCT_DOCUMENT_LABEL_MAX_LENGTH = 200;
 export const SCRIPT_REVIEW_STATES = ['none', 'pending', 'approved', 'rejected'] as const;
 export type ScriptReviewState = (typeof SCRIPT_REVIEW_STATES)[number];
 
-/** The seven that make up the script, so approving one approves a coherent whole. */
+/**
+ * The fields that make up the script, so approving one approves a coherent whole.
+ *
+ * **`objections` is one field, a list of cards** (P19.4-T4 AC-1, B1-1; ADR-0209 §9): it replaced the one pair,
+ * `objectionTheySay` and `objectionYouSay`, so an office overrides the whole list or none of it. Six fields where the
+ * prototype's modal had seven (`KPM_Owner.html:1786-1793`); the cards are the *4 · If they push back* block's.
+ */
 export const SCRIPT_OVERRIDE_FIELDS = [
-  'goodFit', 'opening', 'benefits', 'fullScript',
-  'objectionTheySay', 'objectionYouSay', 'nextAction',
+  'goodFit', 'opening', 'benefits', 'fullScript', 'objections', 'nextAction',
 ] as const;
+
+/**
+ * **A product is a base or a rider** (P19.4-T4 AC-3; the riders spec's rule 1 and data model; ADR-0209 §1). A kind,
+ * not a category: a rider keeps an ordinary `category` (health, CI), and `PRODUCT_CATEGORIES` has no `rider`. Every
+ * product is `base` until the Super Admin says otherwise (migration `0053-product-kind-and-currency`).
+ */
+export const PRODUCT_KINDS = ['base', 'rider'] as const;
+export type ProductKind = (typeof PRODUCT_KINDS)[number];
+
+/**
+ * **The currencies a product's policies are sold in** (P19.4-T4 AC-12, B1-4; ADR-0209 §8). A product lists one or
+ * both, in this order, and `['IDR']` by default. **A label, not money**: a product carries no amount, and the office's
+ * money — production, goals, the upload, every figure — stays IDR (ADR-0016, amended for products only).
+ */
+export const PRODUCT_CURRENCIES = ['IDR', 'USD'] as const;
+export type ProductCurrency = (typeof PRODUCT_CURRENCIES)[number];
+
+/** What a product names when nobody has said otherwise (ADR-0209 §8). */
+export const PRODUCT_DEFAULT_CURRENCIES: readonly ProductCurrency[] = ['IDR'];
+
+/**
+ * **The most objection cards a product carries** (P19.4-T4 AC-1, B1-1; ADR-0209 §9). The owner's session wrote three
+ * to five per product; ten leaves room without letting the *push back* block outgrow the plan it sits in. The same
+ * bound holds an office's own list in its override. `metrics-and-definitions.md`, Part B.
+ */
+export const PRODUCT_OBJECTIONS_MAX = 10;
+
+/** The longest text either side of an objection card holds — the bound the one pair had (ADR-0209 §9). */
+export const PRODUCT_OBJECTION_TEXT_MAX_LENGTH = 1000;
 
 /**
  * What an office may replace on a product it sells (P5-T5 AC-6; ADR-0120).
@@ -93,6 +127,8 @@ export const SCRIPT_OVERRIDE_FIELDS = [
  */
 export const OVERRIDABLE_PRODUCT_FIELDS = [
   'displayName', 'description', ...SCRIPT_OVERRIDE_FIELDS,
+  // P19.7-T1 AC-3 (ADR-0225 §5; the proposal spec's decision 6): the FAQ as a whole list, and each plan's highlights.
+  'faq', 'planHighlights',
 ] as const;
 export type OverridableProductField = (typeof OVERRIDABLE_PRODUCT_FIELDS)[number];
 
@@ -103,7 +139,18 @@ export type OverridableProductField = (typeof OVERRIDABLE_PRODUCT_FIELDS)[number
  * may repeat to a customer, which is what the approval is for. The display name is not here — it
  * is a label, and it reaches agents as soon as it is saved.
  */
-export const APPROVED_PRODUCT_FIELDS = ['description', ...SCRIPT_OVERRIDE_FIELDS] as const;
+export const APPROVED_PRODUCT_FIELDS = [
+  'description', ...SCRIPT_OVERRIDE_FIELDS,
+  /*
+   * **The proposal's FAQ and plan highlights** (P19.7-T1 AC-3; ADR-0225 §5, amending ADR-0037): an answer in *Tanya-jawab*
+   * is a sentence an agent repeats to a client, as a description is, so it waits for the office's approval with the
+   * script. Until approved, agents read the company's.
+   */
+  'faq', 'planHighlights',
+] as const;
+
+/** **The script's own fields and the description** — what an agent's script reads, the proposal's two aside. */
+export const SCRIPT_WORD_FIELDS = ['description', ...SCRIPT_OVERRIDE_FIELDS] as const;
 
 /**
  * The longest tagline a product carries, and so the longest description an office may put in its
@@ -136,7 +183,7 @@ export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
 
 /**
  * **The one budget band that is not a monthly premium**: *Lump-sum*, a single payment (ADR-0167; the client's
- * UI review of 2026-10-26, UI-030; P18.95-T6 AC-3, parity I-422).
+ * UI review of 2026-10-26, UI-030; P18.7-T6 AC-3, parity I-422).
  *
  * The prototype drew it as the seventh chip under *Monthly premium budget* (`Overall.html:3826-3834`), which
  * reads a single premium as a monthly one. The brief now asks it as an option of its own, beside that
@@ -146,7 +193,11 @@ export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
  */
 export const PRODUCT_LUMP_SUM_BUDGET_BAND = 7;
 
-/** The seven fields the Owner's override modal names, in its order. */
+/**
+ * The seven fields the Owner's override modal names, in its order — **as the seed is authored**: one pair, as the
+ * prototype wrote each product's. A company's product stores the pair as its first objection card (`objections`,
+ * ADR-0209 §9); `seedObjectionsOf` is that one conversion.
+ */
 export interface SeedAttackPlan {
   readonly goodFit: string;
   readonly opening: string;
@@ -158,7 +209,7 @@ export interface SeedAttackPlan {
 }
 
 /**
- * **A seed product's words in another language, field for field** (UI V1, UI-107; Phase 18.99 T13): what
+ * **A seed product's words in another language, field for field** (UI V1, UI-107; Phase 18.11 T13): what
  * `product-words-id.ts` holds for every product below, so a reader in that language reads the platform's default words
  * in it. Every list is the seed's length and order; a field the seed leaves blank (a run-off product's `opening` and
  * `nextAction`) stays blank. `objectionYouSay` is not here: it is the need's reply (`SEED_REPLY_BY_NEED`), translated
@@ -189,6 +240,21 @@ export interface SeedProduct {
   readonly activeByDefault: boolean;
   readonly sortOrder: number;
   readonly defaultAttackPlan: SeedAttackPlan;
+}
+
+/** One objection card: what the customer says, and the reply (ADR-0209 §9). Plain text, line breaks kept. */
+export interface ObjectionCard {
+  readonly objection: string;
+  readonly answer: string;
+}
+
+/**
+ * **A seed plan's pair as the cards a product stores** (ADR-0209 §9): the one pair is one card, and a pair with
+ * neither side written is none.
+ */
+export function seedObjectionsOf(plan: Pick<SeedAttackPlan, 'objectionTheySay' | 'objectionYouSay'>): ObjectionCard[] {
+  if (plan.objectionTheySay === '' && plan.objectionYouSay === '') return [];
+  return [{ objection: plan.objectionTheySay, answer: plan.objectionYouSay }];
 }
 
 /**

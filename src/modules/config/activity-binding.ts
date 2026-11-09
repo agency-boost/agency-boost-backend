@@ -58,7 +58,7 @@ export function roleOfCode(binding: CascadeBinding): Map<string, BindingRole> {
 }
 
 /**
- * **What is wrong with a binding, one sentence each**, in both languages (P18.98-T5 AC-3) — the one checker the
+ * **What is wrong with a binding, one sentence each**, in both languages (P18.10-T5 AC-3) — the one checker the
  * office's write, a template's publish and provisioning share, so the three cannot disagree about what is valid.
  *
  * - each role a list of codes, at least one and at most `BINDING_CODES_MAX`;

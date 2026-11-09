@@ -21,7 +21,7 @@ describe('training field rules', () => {
     expect(checkTrainingCategoryCreate({ code: ' onboarding ', label: ' Onboarding ', description: '  ' }))
       .toEqual({ code: 'ONBOARDING', label: 'Onboarding', description: null });
     expect(checkTrainingSkillCreate({ code: 'first_week', categoryCode: 'onboarding', label: 'First week' }))
-      .toEqual({ code: 'FIRST_WEEK', categoryCode: 'ONBOARDING', label: 'First week' });
+      .toEqual({ code: 'FIRST_WEEK', categoryCode: 'ONBOARDING', label: 'First week', description: null });
     expect(checkTrainingSkillUpdate({ categoryCode: 'sales' })).toEqual({ categoryCode: 'SALES' });
     expect(checkTrainingModuleUpdate({ title: ' New ', publishState: 'published', skillCode: 'closing' }))
       .toEqual({ title: 'New', publishState: 'published', skillCode: 'CLOSING' });
@@ -65,5 +65,34 @@ describe('training field rules', () => {
     // A code is the identity, so no update carries one.
     expect(violations(() => checkTrainingModuleUpdate({ code: 'NEW_CODE' })))
       .toEqual(['property code should not exist']);
+  });
+});
+
+/** P19.6-T4 (ADR-0220 §1; UI-161): a skill's and a module's *Deskripsi singkat*. */
+describe('short descriptions (P19.6-T4)', () => {
+  it('P19.6-T4 AC-1 takes a description on a skill and a module, trimmed, plain text, blank or null clearing it', () => {
+    expect(checkTrainingSkillCreate({
+      code: 'LEADS_GEN', categoryCode: 'SALES', label: 'Leads generation', description: '  8 cara <b>mendapat</b> calon nasabah ',
+    })).toEqual({
+      code: 'LEADS_GEN', categoryCode: 'SALES', label: 'Leads generation', description: '8 cara mendapat calon nasabah',
+    });
+    expect(checkTrainingModuleCreate({ code: 'LEADS_101', skillCode: 'LEADS_GEN', title: 'Leads', description: 'Satu baris' }))
+      .toMatchObject({ description: 'Satu baris' });
+    expect(checkTrainingModuleCreate({ code: 'LEADS_101', skillCode: 'LEADS_GEN', title: 'Leads' }))
+      .toMatchObject({ description: null });
+    expect(checkTrainingSkillUpdate({ description: '   ' })).toEqual({ description: null });
+    expect(checkTrainingModuleUpdate({ description: null })).toEqual({ description: null });
+    expect(checkTrainingModuleUpdate({ description: '<script>alert(1)</script>' })).toEqual({ description: null });
+    // Absent leaves it alone: an update naming no description changes none.
+    expect(checkTrainingSkillUpdate({ label: 'Closing' })).toEqual({ label: 'Closing' });
+  });
+
+  it.each([
+    ['a skill\'s', (d: unknown) => checkTrainingSkillUpdate({ description: d })],
+    ['a module\'s', (d: unknown) => checkTrainingModuleUpdate({ description: d })],
+  ])('P19.6-T4 AC-1 holds %s description at 160 characters, and refuses one that is not text', (_name, check) => {
+    expect(violations(() => check(long(160)))).toBeNull();
+    expect(violations(() => check(long(161)))).toEqual(['description must be at most 160 characters.']);
+    expect(violations(() => check(7))).toEqual(['description must be text.']);
   });
 });

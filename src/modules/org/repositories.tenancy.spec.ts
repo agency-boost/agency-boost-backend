@@ -22,7 +22,7 @@ const TENANT_SCOPED_MODELS = [
   'JoinRequest',
   // ADR-0157: a leader past the office's limit, from the day the collection exists.
   'LeaderLimitRequest',
-  // P18.96-T3 (ADR-0170): a leader's invites, and the requests to move a member, from the day they exist.
+  // P18.8-T3 (ADR-0170): a leader's invites, and the requests to move a member, from the day they exist.
   'MemberInvite',
   'TransferRequest',
   'MembershipHistory',
@@ -39,11 +39,11 @@ const TENANT_SCOPED_MODELS = [
   'KpmProductConfig',
   'EventType',
   'Event',
-  // P18.5-T5, T6: members' RSVPs, claims and confirmations, and their answers, from the day the collections exist.
+  // P18.2-T5, T6: members' RSVPs, claims and confirmations, and their answers, from the day the collections exist.
   'EventRsvp',
   'EventFeedback',
   'Campaign',
-  // P18.5-T7, T8: a member's chase of a campaign, and a final standing, from the day the collections exist.
+  // P18.2-T7, T8: a member's chase of a campaign, and a final standing, from the day the collections exist.
   'CampaignChase',
   'CampaignStanding',
   'CapabilityCatalog',
@@ -58,8 +58,15 @@ const TENANT_SCOPED_MODELS = [
   // Phase 18.1 (D-forum-model, D-share): an office's leader meetings and their shared links, from the day they exist.
   'LeaderMeeting',
   'LeaderMeetingShareLink',
-  // P18.5-T1 AC-2: a member's progress on a training module, from the day the collection exists.
+  // P18.2-T1 AC-2: a member's progress on a training module, from the day the collection exists.
   'TrainingProgress',
+  // P19.5-T4 (ADR-0216): a KPM's survey runs, who was invited, and the sent forms, from the day they exist.
+  'SurveyRun',
+  'SurveyParticipation',
+  'SurveyResponse',
+  // P19.5-T3 (ADR-0215 §6, §7): a KPM's MAPA and sub-group targets, and its Quant runs, from the day they exist.
+  'AnalyticsTarget',
+  'QuantRun',
 ];
 
 /**
@@ -109,6 +116,8 @@ const ALLOWED = new Map<string, string>([
   ['leader-meetings/leader-meeting.repository.ts', 'the repository for that model'],
   ['leader-meetings/leader-meeting-share-link.repository.ts', 'the repository for that model'],
   ['training/training-progress.repository.ts', 'the repository for that model'],
+  ['surveys/survey.repositories.ts', 'the repositories for those models'],
+  ['reporting/advanced-analytics/advanced-analytics.repositories.ts', 'the repositories for those models'],
   [
     'config/provisioning.service.ts',
     'writes into an office being created, before any context is scoped to it',

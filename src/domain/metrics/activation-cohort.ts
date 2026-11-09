@@ -2,7 +2,7 @@ import type { LocalDate } from '@/common/time/local-day';
 
 /**
  * `ACTIVATION_COHORT` (Phase 18.1, P18.1-T1; D-cohort, ADR-0102, ADR-0103) — the hires whose activation started in a
- * period. The forum's *3M new agent %* read it until P18.96-T6 (below); `ACTIVATION_COMPLETION_RATE` still does.
+ * period. The forum's *3M new agent %* read it until P18.8-T6 (below); `ACTIVATION_COMPLETION_RATE` still does.
  *
  * **The cohort is read by the activation's start day**, an office date (`activationProgress.startDate`): the day
  * the hire joined, in the office's calendar, unless a leader corrected it (ADR-0102). So the day boundary is the
@@ -33,7 +33,7 @@ export function activationCohort(
 
 /*
  * `CohortMonth`, `cohortOutcome` and `newAgent3mActive` — `NEW_AGENT_3M_ACTIVE_PCT`, a hire's start month and the three
- * after it read from the production file — were here until P18.96-T6, when ADR-0171 §2 retired the metric for
+ * after it read from the production file — were here until P18.8-T6, when ADR-0171 §2 retired the metric for
  * `ACTIVATION_3M_PCT` (`activation-3m.ts`): a first sale by day 90 of the join date, the one 3M metric (invariant §8).
  * The cohort stays, for `ACTIVATION_COMPLETION_RATE`'s calendar year (`activation-completion-rate.ts`).
  */

@@ -102,7 +102,7 @@ class FollowUpDto implements FollowUp {
   @ApiProperty({ type: Number, nullable: true, description: 'Whole days past `dueDate`, when it is before today.' }) overdueDays!: number | null;
 }
 
-/** A campaign a row's person is chasing: the chip's words, and its address (P18.5-T7 AC-8). */
+/** A campaign a row's person is chasing: the chip's words, and its address (P18.2-T7 AC-8). */
 class UnitChasedCampaignDto {
   @ApiProperty() code!: string;
   @ApiProperty() title!: string;
@@ -116,6 +116,13 @@ export class UnitRowDto implements UnitRow {
     description: 'UI V1 (UI-111): their profile photo, when they have one, as a signed link (`users.avatarUrl`); the row draws initials otherwise.',
   })
   photoUrl!: string | null;
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281234567890',
+    description: 'The WhatsApp number on their account, for the row’s WhatsApp button. `null` without one, '
+      + 'and always on the reader’s own row, for an inactive membership, and in the agency’s read-only view of another '
+      + 'leader’s unit.',
+  })
+  phone!: string | null;
   @ApiProperty({ description: 'The reader’s own row.' }) isReader!: boolean;
   @ApiProperty({
     description:
@@ -134,6 +141,10 @@ export class UnitRowDto implements UnitRow {
     description: '*Closing* (UI-028; O-4): their sales leads that reached *Paid and issued* within `window`, on the agency’s '
       + 'calendar — each lead counted on its first move there.',
   }) closings!: number;
+  @ApiProperty({
+    description: '*Proposal* (`PROPOSALS_MADE`): their live proposals first saved as a PDF within `window`, on the '
+      + 'agency’s calendar. A count, and nothing about any client, product or premium.',
+  }) proposalsMade!: number;
   @ApiProperty({ type: UnitActivityDto }) activity!: UnitRow['activity'];
 
   @ApiProperty({
@@ -219,6 +230,7 @@ export class UnitTotalDto implements UnitTotal {
   goal!: PairedGoal;
   @ApiProperty({ type: LeadCountsDto }) leadsCounts!: LeadCountsRow;
   @ApiProperty({ description: 'The rows’ *Closing* summed (UI-028).' }) closings!: number;
+  @ApiProperty({ description: 'The rows’ *Proposal* summed.' }) proposalsMade!: number;
   @ApiProperty({ type: CountAgainstDto }) touches!: CountAgainst;
   @ApiProperty({ type: PotentialActiveDto }) potentialActive!: { count: number; of: number };
   @ApiProperty({
@@ -278,7 +290,7 @@ class UnitProductionStateDto {
   @ApiProperty({ description: 'The reader may save corrections here, in this session, over a unit with rows.' }) canUpdate!: boolean;
 }
 
-/** *Chasing MDRT*'s header (P18.5-T7 AC-7). */
+/** *Chasing MDRT*'s header (P18.2-T7 AC-7). */
 class UnitMdrtDto {
   @ApiProperty({ description: 'The agency’s `MDRT_QUALIFICATION` campaign is running now.' }) running!: boolean;
   @ApiProperty({
@@ -302,6 +314,11 @@ export class UnitDashboardDto implements UnitDashboardView {
   @ApiProperty({ description: 'The agency’s `coachingOverdueDays`.' }) overdueAfterDays!: number;
   @ApiProperty({ type: UnitHeadDto }) head!: UnitPerson & { isReader: boolean };
   @ApiProperty({ description: 'The head leads nobody: no rows.' }) empty!: boolean;
+  @ApiProperty({
+    description: 'The Owner or an Admin reading another leader’s unit (`for`): drawn as that leader sees it, with no write '
+      + 'control, and a save naming it is refused (UI-152).',
+  })
+  readOnly!: boolean;
   @ApiProperty({ type: UnitTilesDto }) tiles!: UnitDashboardView['tiles'];
   @ApiProperty({ type: YourUnitDto }) yourUnit!: { rows: UnitRow[]; total: UnitTotal };
   @ApiProperty({ type: [UnitGroupDto] }) units!: UnitGroup[];

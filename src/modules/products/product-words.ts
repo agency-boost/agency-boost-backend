@@ -45,7 +45,7 @@ function indonesianByCode(): ReadonlyMap<string, ReadonlyMap<string, string>> {
 }
 
 /**
- * **A product's words for its reader** (UI V1, UI-107; Phase 18.99 T13): for a reader in Indonesian, a field still
+ * **A product's words for its reader** (UI V1, UI-107; Phase 18.11 T13): for a reader in Indonesian, a field still
  * holding the platform's seed English **byte for byte** is served in the seed's Indonesian (`SEED_PRODUCTS_ID`); any
  * other text — a company's own wording, an office's approved override, a product the platform never seeded — is shown
  * as typed (ADR-0179 §5). An English reader reads every field as stored. Keyed by the product's code, so a sentence two

@@ -1,7 +1,7 @@
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 /**
- * **How mail leaves, decided by the environment alone** (P18.99-T18, ADR-0182).
+ * **How mail leaves, decided by the environment alone** (P18.11-T18, ADR-0182).
  *
  * `MAIL_PROVIDER` names a provider and a preset fills its host, port and TLS, so switching from Gmail to SendGrid,
  * say, is a new version of the env file and a redeploy, never a code change. Pure: it reads a configuration and
@@ -15,7 +15,7 @@ import type SMTPTransport from 'nodemailer/lib/smtp-transport';
  * **How long a mail relay may take to answer a dial, or to greet once dialled** (P12.1-T1), unless
  * `SMTP_TIMEOUT_MS` says otherwise. nodemailer's own default is two minutes. Email is no longer awaited
  * inside a request, so this bounds how long a delivery stays `pending` and how long a start-up check
- * waits, not how long anybody waits for a save. *Moved here from `env.validation.ts` 2026-11-01 (P18.99-T18).*
+ * waits, not how long anybody waits for a save. *Moved here from `env.validation.ts` 2026-11-01 (P18.11-T18).*
  */
 export const SMTP_TIMEOUT_MS_DEFAULT = 5_000;
 /** The range `SMTP_TIMEOUT_MS` may take: long enough for a slow relay, never nodemailer's two minutes. */

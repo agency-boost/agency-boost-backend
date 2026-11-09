@@ -104,13 +104,13 @@ describe('leadOrder', () => {
   });
 });
 
-/** P18.8-T7 AC-3: the order `GET /leads` answers when no `sort` is asked for. */
+/** P18.5-T7 AC-3: the order `GET /leads` answers when no `sort` is asked for. */
 describe('SAVED_ORDER', () => {
-  it('P18.8-T7 AC-3 is the owner’s place, smallest first, then the newest registration, then the id', () => {
+  it('P18.5-T7 AC-3 is the owner’s place, smallest first, then the newest registration, then the id', () => {
     expect(Object.entries(SAVED_ORDER)).toEqual([['position', 1], ['dateRegistered', -1], ['_id', -1]]);
   });
 
-  it('P18.8-T7 AC-3 is no key a reader can ask for: it is what asking for none gives', () => {
+  it('P18.5-T7 AC-3 is no key a reader can ask for: it is what asking for none gives', () => {
     expect(LEAD_SORT_KEYS as readonly string[]).not.toContain('position');
     expect(isInMemorySort(undefined)).toBe(false);
   });

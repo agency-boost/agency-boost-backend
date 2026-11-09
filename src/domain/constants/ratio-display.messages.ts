@@ -1,7 +1,7 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **Why a ratio cannot have the unit asked for, in both languages** (P18.98-T5 AC-2; P4-T25) — worded once, by
+ * **Why a ratio cannot have the unit asked for, in both languages** (P18.10-T5 AC-2; P4-T25) — worded once, by
  * `resolveDisplayUnit`, and refused under `CONFIG_RATIO_UNIT_MISMATCH` (or, where a caller refuses a whole template,
  * re-filed under its own code). *Ratio*, *benchmark* and *points* stay as the glossary keeps them (§A.6, §B.7 *poin*).
  */

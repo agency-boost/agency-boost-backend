@@ -8,7 +8,7 @@ import type { ResourceName } from './resources';
 /**
  * Base class for every expected failure. Never throw a string.
  *
- * **Its words are a sentence out of the module's catalogue, in both languages** (P18.98-T5 AC-2), filed under the code
+ * **Its words are a sentence out of the module's catalogue, in both languages** (P18.10-T5 AC-2), filed under the code
  * it is raised with — `tsc` refuses another code's sentence. The response is written for the request's reader by
  * `DomainExceptionFilter`; `code` and `details` are the same in both languages, and clients still switch on the code.
  *
@@ -112,7 +112,7 @@ export class VersionConflictException extends DomainException<'VERSION_CONFLICT'
 
 /**
  * **A request the API refuses as malformed**, `400 VALIDATION_FAILED`: what a service raises where Nest's
- * `BadRequestException` was raised with a bare English string (P18.98-T5 AC-3). The same answer on the wire — the code,
+ * `BadRequestException` was raised with a bare English string (P18.10-T5 AC-3). The same answer on the wire — the code,
  * the status, no `details` unless given — with its words in both languages.
  */
 export class InvalidRequestException extends DomainException<'VALIDATION_FAILED'> {

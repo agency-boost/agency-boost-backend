@@ -49,8 +49,6 @@ import {
 import { CampaignRepository } from '@/modules/campaigns/campaign.repository';
 import { CampaignService } from '@/modules/campaigns/campaign.service';
 import { ProductService } from '@/modules/products/product.service';
-import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
-import { RecruitmentPlaybook, RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
@@ -65,7 +63,7 @@ function platform() {
   return RequestContext.platform('u-root');
 }
 
-describe('KpmRequestService (P3.5-T2)', () => {
+describe('KpmRequestService (P3.1-T2)', () => {
   let service: KpmRequestService;
   let tenants: TenantService;
   let namedTemplates: NamedTemplateService;
@@ -127,6 +125,8 @@ describe('KpmRequestService (P3.5-T2)', () => {
         companies as never,
         audit,
         clock,
+        // P19.4-T4: the offices' rows a delete counts (ADR-0209 §10); not exercised here.
+        {} as never,
       ),
       new CampaignService(
         new CampaignRepository(mongoose.model(Campaign.name, CampaignSchema) as never),
@@ -136,13 +136,6 @@ describe('KpmRequestService (P3.5-T2)', () => {
         clock,
       ),
       namedTemplates,
-      // Phase 17: a company started from the defaults is given the recruitment playbook's words.
-      new RecruitmentPlaybookService(
-        mongoose.model(RecruitmentPlaybook.name, RecruitmentPlaybookSchema) as never,
-        companies as never,
-        users as never,
-        audit,
-      ),
     );
     service = new KpmRequestService(
       requests as never, companies as never, users as never, tenants, audit, clock,
@@ -164,6 +157,8 @@ describe('KpmRequestService (P3.5-T2)', () => {
       // Approving a request creates the office and puts the asker in it, so they need
       // the insurer that issued their code (ADR-0017).
       companyId, agentCode: 'PRU-60001',
+      // ADR-0190 §4: only a verified address may be made an office's Owner.
+      emailVerifiedAt: NOW, phone: '+62 812 3456 7890',
     });
     requesterId = String(user._id);
   });
@@ -203,15 +198,19 @@ describe('KpmRequestService (P3.5-T2)', () => {
     });
 
     it('refuses a company that does not exist, without saying which kind of absent', async () => {
+      // An account with no company names one (P19-T2 AC-2); a malformed or unknown one is "not here".
+      await mongoose.model(User.name).updateOne({ _id: requesterId }, { $set: { companyId: null } });
       await expect(
         service.create(asker(requesterId), { ...ask(), companyId: 'not-an-id' }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
-    it('lets the asker read back where their own request stands', async () => {
-      expect(await service.mine(asker(requesterId))).toBeNull();
+    it('lets the asker read back where their own request stands, and the company a request is for', async () => {
+      expect(await service.mine(asker(requesterId))).toEqual({
+        request: null, company: { companyId, name: 'Prudential' },
+      });
       await service.create(asker(requesterId), ask());
-      expect(await service.mine(asker(requesterId))).toMatchObject({ status: 'pending' });
+      expect((await service.mine(asker(requesterId))).request).toMatchObject({ status: 'pending' });
     });
   });
 
@@ -238,7 +237,7 @@ describe('KpmRequestService (P3.5-T2)', () => {
         requestedByName: 'Unknown',
         requestedByEmail: '',
       });
-      // P18.98-T7: in the reader's language — the Super Admin reading Bahasa Indonesia reads *Tidak diketahui*.
+      // P18.10-T7: in the reader's language — the Super Admin reading Bahasa Indonesia reads *Tidak diketahui*.
       const [inIndonesian] = await service.queue(platform().withReader(readerIn('id')));
       expect(inIndonesian).toMatchObject({ companyName: 'Tidak diketahui', requestedByName: 'Tidak diketahui' });
     });
@@ -269,6 +268,17 @@ describe('KpmRequestService (P3.5-T2)', () => {
       const stored = await mongoose.model(Kpm.name).findById(after.createdKpmId).lean().exec() as
         { startedFrom: unknown } | null;
       expect(stored?.startedFrom).toEqual({ source: 'template', templateId: other.id, templateName: 'Surabaya settings' });
+    });
+
+    it('P19.4-T5 AC-5 approving for a company with no template takes the Mulai dari the card offered', async () => {
+      // A company made since ADR-0213 §3 has no template until the Super Admin makes one.
+      await mongoose.model(NamedTemplate.name).deleteMany({ companyId }).exec();
+      const row = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), row.requestId, { code: '0629', startFrom: { kind: 'empty' } });
+
+      const stored = await mongoose.model(Kpm.name).findById(after.createdKpmId).lean().exec() as
+        { startedFrom: unknown } | null;
+      expect(stored?.startedFrom).toEqual({ source: 'empty', templateId: null, templateName: null });
     });
 
     it('AC-2: declining creates nothing, and keeps the reason', async () => {
@@ -334,6 +344,281 @@ describe('KpmRequestService (P3.5-T2)', () => {
 
       const queue = await service.queue(platform());
       expect(queue.map((r) => r.status)).toEqual(['pending', 'declined']);
+    });
+  });
+
+  // ------------------------------------------------------------------ Phase 19 (ADR-0191)
+
+  /** A second insurer, with its ladder and its default template: Victor Gunawan's. */
+  async function manulife(): Promise<string> {
+    const company = await mongoose.model(Company.name).create({
+      name: 'Manulife', slug: 'manulife', defaultTimezone: 'Asia/Jakarta',
+    });
+    await seedLadder(String(company._id));
+    await namedTemplates.createFirst(RequestContext.platform('root'), company as never);
+    return String(company._id);
+  }
+
+  /** Somebody who signed up with a company — verified unless told otherwise. */
+  async function applicant(email: string, fullName: string, over: Record<string, unknown> = {}): Promise<string> {
+    const user = await mongoose.model(User.name).create({
+      email, fullName, passwordHash: 'x', companyId, agentCode: `${Math.floor(Math.random() * 1e8)}`,
+      emailVerifiedAt: NOW, ...over,
+    });
+    return String(user._id);
+  }
+
+  const offices = () => mongoose.model(Kpm.name).find({}).lean().exec() as Promise<Array<Record<string, unknown>>>;
+  const audits = (action: string) => mongoose.model(AuditLog.name).find({ action }).lean().exec();
+
+  describe('P19-T2 the request carries the applicant’s company (ADR-0191 §1)', () => {
+    it('P19-T2 AC-3 saves the request with the company the applicant signed up with, naming none', async () => {
+      const row = await service.create(asker(requesterId), { branchName: 'stellar' });
+      expect(row).toMatchObject({ companyId, companyName: 'Prudential', branchName: 'stellar' });
+    });
+
+    it('P19-T2 AC-3 refuses a request for another company, writing nothing', async () => {
+      const other = await manulife();
+      await expect(service.create(asker(requesterId), { companyId: other, branchName: 'stellar' }))
+        .rejects.toMatchObject({ code: 'TENANT_COMPANY_MISMATCH', status: 409 });
+      expect(await mongoose.model(KpmRequest.name).countDocuments()).toBe(0);
+    });
+
+    it('P19-T2 AC-2 asks an account with no company to name one, and saves it for the one named', async () => {
+      const nobody = await applicant('nobody@example.test', 'No Company', { companyId: null, agentCode: null });
+      await expect(service.create(asker(nobody), { branchName: 'stellar' }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'companyId' } });
+      expect(await service.mine(asker(nobody))).toEqual({ request: null, company: null });
+      await expect(service.create(asker(nobody), { companyId, branchName: 'stellar' }))
+        .resolves.toMatchObject({ companyId, companyName: 'Prudential' });
+    });
+  });
+
+  describe('P19-T3 the Super Admin’s requests (ADR-0191 §2–§5)', () => {
+    it('P19-T3 AC-1 each row names the applicant: name, email, phone, the company they signed up with, note and date', async () => {
+      await service.create(asker(requesterId), ask());
+      const [row] = await service.queue(platform());
+      expect(row).toMatchObject({
+        requestedByName: 'Rangga Wibisono',
+        requestedByEmail: 'rangga@example.test',
+        requestedByPhone: '+62 812 3456 7890',
+        requesterCompanyId: companyId,
+        requesterCompanyName: 'Prudential',
+        requesterEmailVerified: true,
+        companyName: 'Prudential',
+        branchName: 'Surabaya Branch',
+        note: 'Twelve agents already here.',
+        createdKpm: null,
+      });
+      // The date the card shows: when it was asked, as the database stamped it.
+      expect(Number.isNaN(Date.parse(row.requestedAt))).toBe(false);
+    });
+
+    it('P19-T3 AC-2 approving with the company corrected on the card makes the office there, and records both', async () => {
+      // Production's shape (UI-165): a Manulife applicant whose request arrived as Prudential.
+      const other = await manulife();
+      const victor = await applicant('victor@example.test', 'Victor Gunawan', { companyId: other });
+      const { requestId } = await service.create(asker(victor), { branchName: 'stellar' });
+      await mongoose.model(KpmRequest.name).updateOne({ _id: requestId }, { $set: { companyId } });
+
+      const [after] = await service.approve(platform(), requestId, { code: '1001', companyId: other });
+      expect(after).toMatchObject({ status: 'approved', companyId: other, companyName: 'Manulife' });
+      const kpm = await tenants.readProfile(platform(), after.createdKpmId!);
+      expect(kpm).toMatchObject({ companyId: other, code: '1001', ownerUserId: victor });
+      const [audit] = await audits('kpm_request.approved');
+      expect(audit).toMatchObject({ before: { companyId }, after: { companyId: other, ownerUserId: victor } });
+    });
+
+    it('P19-T3 AC-3 one press makes the office and its Owner; pressing again answers the same office, not a second', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const [first] = await service.approve(platform(), requestId, { code: '0629' });
+      const [again] = await service.approve(platform(), requestId, { code: '0629' });
+
+      expect(again).toMatchObject({ status: 'approved', createdKpmId: first.createdKpmId });
+      expect(again.createdKpm).toEqual({
+        kpmId: first.createdKpmId, code: '0629', branchName: 'Surabaya Branch', deleted: false,
+      });
+      expect(await offices()).toHaveLength(1);
+      expect((await offices())[0]).toMatchObject({ ownerUserId: requesterId });
+    });
+
+    it('P19-T3 AC-3 an applicant of another company is refused before anything is written', async () => {
+      const other = await manulife();
+      const victor = await applicant('victor@example.test', 'Victor Gunawan', { companyId: other });
+      const { requestId } = await service.create(asker(victor), { branchName: 'stellar' });
+
+      // Approving it as Prudential — the half-made office of UI-165 — is refused, and leaves nothing.
+      const refusal = service.approve(platform(), requestId, { code: '1001', companyId });
+      await expect(refusal).rejects.toMatchObject({
+        code: 'TENANT_COMPANY_MISMATCH', status: 409, details: { userCompanyId: other, kpmCompanyId: companyId },
+      });
+      await expect(refusal).rejects.toThrow(/Victor Gunawan signed up with Manulife, and this office is Prudential's/);
+      expect(await offices()).toEqual([]);
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec())
+        .toMatchObject({ status: 'pending', approvingSince: null, createdKpmId: null });
+    });
+
+    it('P19-T3 AC-3 an applicant whose address is not verified is refused before anything is written (ADR-0190 §4)', async () => {
+      await mongoose.model(User.name).updateOne({ _id: requesterId }, { $set: { emailVerifiedAt: null } });
+      const { requestId } = await service.create(asker(requesterId), ask());
+      await expect(service.approve(platform(), requestId, { code: '0629' }))
+        .rejects.toMatchObject({ code: 'AUTH_EMAIL_NOT_VERIFIED', status: 409 });
+      expect(await offices()).toEqual([]);
+    });
+
+    it('P19-T3 AC-3 if the Owner cannot be set, the office is undone, the code is free, and a second press succeeds', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const spy = jest.spyOn(tenants, 'assignOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
+
+      await expect(service.approve(platform(), requestId, { code: '0629' })).rejects.toThrow('the Owner could not be set');
+      const [undone] = await offices();
+      expect(undone).toMatchObject({ code: '0629' });
+      expect(undone.deletedAt).toEqual(NOW);
+      expect(await tenants.listAll(platform())).toEqual([]);
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec())
+        .toMatchObject({ status: 'pending', approvingSince: null, createdKpmId: null });
+      expect(await audits('kpm.discarded')).toHaveLength(1);
+      // Its configuration went with it.
+      expect(await mongoose.model(ActivityType.name).countDocuments({ kpmId: String(undone._id), deletedAt: null })).toBe(0);
+
+      spy.mockRestore();
+      const [after] = await service.approve(platform(), requestId, { code: '0629' });
+      expect(after).toMatchObject({ status: 'approved' });
+      expect((await tenants.listAll(platform())).map((k) => k.code)).toEqual(['0629']);
+    });
+
+    it('P19-T3 AC-3 a second press while the first holds the request is refused; a lease past two minutes is taken over', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      await mongoose.model(KpmRequest.name).updateOne({ _id: requestId }, { $set: { approvingSince: NOW } });
+      await expect(service.approve(platform(), requestId, { code: '0629' }))
+        .rejects.toMatchObject({ code: 'TENANT_REQUEST_IN_PROGRESS', status: 409 });
+      await expect(service.decline(platform(), requestId, {}))
+        .rejects.toMatchObject({ code: 'TENANT_REQUEST_IN_PROGRESS' });
+      expect(await offices()).toEqual([]);
+
+      await mongoose.model(KpmRequest.name).updateOne(
+        { _id: requestId }, { $set: { approvingSince: new Date(NOW.getTime() - 3 * 60 * 1000) } },
+      );
+      await expect(service.approve(platform(), requestId, { code: '0629' }))
+        .resolves.toMatchObject([{ status: 'approved' }]);
+    });
+
+    it('P19-T3 AC-3 an approval that stopped after making the office is finished on that office', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const made = await tenants.createKpm(platform(), { companyId, code: '0629', branchName: 'Surabaya Branch' });
+      await mongoose.model(KpmRequest.name).updateOne({ _id: requestId }, { $set: { createdKpmId: made._id } });
+
+      const [after] = await service.approve(platform(), requestId, { code: '0629' });
+      expect(after).toMatchObject({ status: 'approved', createdKpmId: made._id });
+      expect(await offices()).toHaveLength(1);
+      expect((await tenants.readProfile(platform(), made._id)).ownerUserId).toBe(requesterId);
+    });
+
+    it('P19-T3 AC-3 a declined request stays declined: approving it is 409 saying so, and makes nothing', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      await service.decline(platform(), requestId, { reason: 'duplikat' });
+      await expect(service.approve(platform(), requestId, { code: '0629' })).rejects.toMatchObject({
+        code: 'TENANT_REQUEST_DECIDED', status: 409, details: { requestId, status: 'declined', decidedAt: NOW.toISOString() },
+      });
+      expect(await offices()).toEqual([]);
+    });
+
+    it('P19-T3 AC-2 a company corrected on the card must be a live insurer: the Template library, a deleted one, a bad id are 404', async () => {
+      const library = await mongoose.model(Company.name).create({ name: 'Template library', slug: 'template-library', kind: 'template' });
+      const gone = await mongoose.model(Company.name).create({ name: 'Gone Life', slug: 'gone-life', deletedAt: NOW });
+      const { requestId } = await service.create(asker(requesterId), ask());
+      for (const companyId of [String(library._id), String(gone._id), 'not-an-id']) {
+        await expect(service.approve(platform(), requestId, { code: '0629', companyId }))
+          .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      }
+      expect(await offices()).toEqual([]);
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec())
+        .toMatchObject({ status: 'pending', approvingSince: null, createdKpmId: null });
+    });
+
+    it('P19-T3 AC-3 an applicant whose account has gone since asking is 404: there is nobody to make the Owner', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      await mongoose.model(User.name).updateOne({ _id: requesterId }, { $set: { deletedAt: NOW } });
+      await expect(service.approve(platform(), requestId, { code: '0629' }))
+        .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect(await offices()).toEqual([]);
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec()).toMatchObject({ status: 'pending' });
+    });
+
+    it('P19-T3 AC-3 a resumed approval that fails again keeps the office it was finishing; the next press finishes it', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const made = await tenants.createKpm(platform(), { companyId, code: '0629', branchName: 'Surabaya Branch' });
+      await mongoose.model(KpmRequest.name).updateOne({ _id: requestId }, { $set: { createdKpmId: made._id } });
+      const spy = jest.spyOn(tenants, 'assignOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
+
+      await expect(service.approve(platform(), requestId, { code: '0629' })).rejects.toThrow('the Owner could not be set');
+      spy.mockRestore();
+      // This press made no office, so it discards none: the one an earlier press made is still there to finish.
+      expect((await offices()).map((k) => [String(k._id), k.deletedAt])).toEqual([[made._id, null]]);
+      expect(await audits('kpm.discarded')).toEqual([]);
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec())
+        .toMatchObject({ status: 'pending', approvingSince: null, createdKpmId: made._id });
+
+      const [after] = await service.approve(platform(), requestId, { code: '0629' });
+      expect(after).toMatchObject({ status: 'approved', createdKpmId: made._id });
+      expect(await offices()).toHaveLength(1);
+    });
+
+    it('P19-T2 AC-3 an applicant whose company has since gone reads no company on their own screen', async () => {
+      await mongoose.model(Company.name).updateOne({ _id: companyId }, { $set: { deletedAt: NOW } });
+      expect(await service.mine(asker(requesterId))).toEqual({ request: null, company: null });
+    });
+
+    it('P19-T3 AC-4 a code in use is refused naming the office that holds it, before anything is written', async () => {
+      await tenants.createKpm(platform(), { companyId, code: '1001', branchName: 'stellar' });
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const refusal = service.approve(platform(), requestId, { code: '1001' });
+      await expect(refusal).rejects.toMatchObject({
+        code: 'TENANT_CODE_TAKEN', status: 409, details: { code: '1001', branchName: 'stellar', companyName: 'Prudential' },
+      });
+      await expect(refusal).rejects.toThrow('Code 1001 is already used by another KPM at Prudential: KPM 1001 · stellar.');
+      expect(await offices()).toHaveLength(1);
+    });
+
+    it('P19-T3 AC-3 the decided list says what an approval made, and that it was deleted once it is', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), requestId, { code: '0629' });
+      await mongoose.model(Kpm.name).updateOne({ _id: after.createdKpmId }, { $set: { deletedAt: NOW } });
+      const [row] = await service.queue(platform());
+      expect(row.createdKpm).toMatchObject({ code: '0629', deleted: true });
+    });
+
+    it('P19-T3 AC-3 declining sends the reason back to the applicant’s own screen', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      await service.decline(platform(), requestId, { reason: 'KPM ini sudah ada: 0417.' });
+      expect((await service.mine(asker(requesterId))).request).toMatchObject({
+        status: 'declined', reason: 'KPM ini sudah ada: 0417.',
+      });
+    });
+
+    it('P19-T3 AC-7 Hapus removes a wrong or duplicate request, pending or decided, and audits it', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      expect(await service.remove(platform(), requestId)).toEqual([]);
+      const [audit] = await audits('kpm_request.deleted');
+      expect(audit).toMatchObject({ targetId: requestId, before: { status: 'pending', branchName: 'Surabaya Branch' } });
+      expect(await mongoose.model(KpmRequest.name).findById(requestId).lean().exec())
+        .toMatchObject({ deletedAt: NOW });
+      // Gone from the applicant's own screen too, so they may ask again.
+      expect((await service.mine(asker(requesterId))).request).toBeNull();
+      await expect(service.remove(platform(), requestId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      const decided = await service.create(asker(requesterId), ask());
+      await service.decline(platform(), decided.requestId, { reason: 'duplikat' });
+      await expect(service.remove(platform(), decided.requestId)).resolves.toEqual([]);
+    });
+
+    it('P19-T3 permissions: an office’s Owner may neither approve with a company, nor remove a request', async () => {
+      const owner = new RequestContext(requesterId, 'none', {
+        membershipId: 'mem-1', kpmId: 'kpm-1', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+        isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+      });
+      await expect(service.remove(owner, 'x')).rejects.toMatchObject({ code: 'PERM_DENIED' });
+      await expect(service.approve(owner, 'x', { code: '0629', companyId })).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
   });
 });

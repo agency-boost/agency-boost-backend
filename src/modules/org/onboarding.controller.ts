@@ -97,10 +97,12 @@ export class OnboardingController {
     description:
       'The only cross-tenant read a non-Super-Admin has, and the reason it exists is ' +
       'that otherwise nobody could join. Projection-limited to code, branch name, ' +
-      'company and city: no member counts, no production, no owner name.',
+      'company and city: no member counts, no production, no owner name. **Only the offices of the company the ' +
+      'reader signed up with** (ADR-0191 §1): an office admits only its own insurer\'s agents, so ' +
+      'another company\'s offices were offers that could only fail. An account with no company is answered none.',
   })
   async kpms(@Ctx() ctx: RequestContext, @Query() query: KpmSearchDto) {
-    return this.onboarding.searchKpms(query.q, ctx.reader);
+    return this.onboarding.searchKpmsFor(ctx, query.q);
   }
 
   @Post('kpm')
@@ -118,15 +120,17 @@ export class OnboardingController {
 
   @Get('kpm-request')
   @ApiOperation({
-    summary: 'The office you asked for, if you asked for one',
+    summary: 'The office you asked for, if you asked for one, and the company a request is for',
     description:
       '`{ request: null }` when you have not. Wrapped rather than returned bare, because a bare ' +
       '`null` leaves the wire as an empty body and a client cannot tell it from a response that ' +
       'failed to serialise. The screen reads this before offering the form, so somebody who has ' +
-      'already asked is told where it stands instead of being invited to ask again.',
+      'already asked is told where it stands instead of being invited to ask again. `company` is the one the ' +
+      'reader signed up with, which a request is for (ADR-0191 §1); `null` for an account with none, whose form ' +
+      'asks for one.',
   })
   async myKpmRequest(@Ctx() ctx: RequestContext) {
-    return { request: await this.kpmRequests.mine(ctx) };
+    return this.kpmRequests.mine(ctx);
   }
 
   @Post('kpm-request')
@@ -136,7 +140,9 @@ export class OnboardingController {
     description:
       'For somebody whose branch has never been provisioned: they search the directory, find ' +
       'nothing, and until now the product had no answer for them (ADR-0011). Refused to anybody ' +
-      'already in an office.',
+      'already in an office. For the company the applicant signed up with (ADR-0191 §1): `companyId` only for an ' +
+      'account with none (`400 VALIDATION_FAILED` if it names none), and another company is `409 ' +
+      'TENANT_COMPANY_MISMATCH`.',
   })
   async askForKpm(@Ctx() ctx: RequestContext, @Body() dto: CreateKpmRequestDto) {
     return this.kpmRequests.create(ctx, dto);

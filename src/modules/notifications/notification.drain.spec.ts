@@ -50,14 +50,14 @@ class GatedEmail extends NotificationChannelAdapter {
 type Doc = { _id: unknown; delivery: Record<string, { status: string }> };
 
 /**
- * **A deploy waits for the email a save just started** (P18.7-T1, ADR-0152). A save answers before its
+ * **A deploy waits for the email a save just started** (P18.4-T1, ADR-0152). A save answers before its
  * email is sent (P12.1-T1), so a SIGTERM a second after a registration found the send in flight; Node
  * exited, and the row stayed `pending` for good. The shutdown now waits for it, bounded: `drain`, which
  * `GracefulShutdown` calls once the HTTP server has stopped (`src/graceful-shutdown.int.spec.ts` drives that
  * order). On the real collection, because the wait is only worth anything if the outcome is recorded before
  * the database closes.
  */
-describe('notifications: the drain at shutdown (P18.7-T1)', () => {
+describe('notifications: the drain at shutdown (P18.4-T1)', () => {
   let service: NotificationService;
   let email: GatedEmail;
   const rows = () => mongoose.model(Notification.name).find({}).sort({ _id: 1 }).lean().exec() as unknown as Promise<Doc[]>;
@@ -94,17 +94,17 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     jest.restoreAllMocks();
   });
 
-  it('P18.7-T1 waits ten seconds at most, by default', () => {
+  it('P18.4-T1 waits ten seconds at most, by default', () => {
     expect(NOTIFICATION_DRAIN_TIMEOUT_MS).toBe(10_000);
   });
 
-  it('P18.7-T1 answers at once when nothing is in flight', async () => {
+  it('P18.4-T1 answers at once when nothing is in flight', async () => {
     const started = Date.now();
     await expect(service.drain(5_000)).resolves.toEqual([]);
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
-  it('P18.7-T1 waits for an email in flight, and its outcome is recorded before the wait ends', async () => {
+  it('P18.4-T1 waits for an email in flight, and its outcome is recorded before the wait ends', async () => {
     email.hang();
     await register('u-rina');
     expect((await rows())[0].delivery.email.status).toBe('pending');
@@ -121,7 +121,7 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     expect((await rows())[0].delivery.email.status).toBe('sent');
   });
 
-  it('P18.7-T1 waits for a held email released just before the signal', async () => {
+  it('P18.4-T1 waits for a held email released just before the signal', async () => {
     await service.sendCoalesced({
       userId: 'u-rina', kpmId: KPM, membershipId: 'm-rina', coalesceKey: 'session-1:1',
       templateId: NotificationTemplate.GOAL_SET_BY_LEADER, payload: { sessionId: 'session-1' },
@@ -136,7 +136,7 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     expect((await rows())[0].delivery.email.status).toBe('sent');
   });
 
-  it('P18.7-T1 waits for a delivery that starts while it is waiting', async () => {
+  it('P18.4-T1 waits for a delivery that starts while it is waiting', async () => {
     email.hang();
     await register('u-rina');
     const drained = service.drain(5_000);
@@ -146,7 +146,7 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     expect((await rows()).map((r) => r.delivery.email.status)).toEqual(['sent', 'sent']);
   });
 
-  it('P18.7-T1 gives up after the timeout rather than hanging, and names what is still pending', async () => {
+  it('P18.4-T1 gives up after the timeout rather than hanging, and names what is still pending', async () => {
     const warned = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     email.hang(); // and never opened while the drain waits
     await register('u-rina');
@@ -165,7 +165,7 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     expect((await rows())[0].delivery.email.status).toBe('pending');
   });
 
-  it('P18.7-T1 a delivery that fails still counts as settled, and the drain ends', async () => {
+  it('P18.4-T1 a delivery that fails still counts as settled, and the drain ends', async () => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     jest.spyOn(email, 'send').mockRejectedValue(new Error('Greeting never received'));
     await register('u-rina');
@@ -173,7 +173,7 @@ describe('notifications: the drain at shutdown (P18.7-T1)', () => {
     expect((await rows())[0].delivery.email.status).toBe('failed');
   });
 
-  it('P18.7-T1 a release that fails is still the caller\'s rejection, and the drain is not stuck on it', async () => {
+  it('P18.4-T1 a release that fails is still the caller\'s rejection, and the drain is not stuck on it', async () => {
     const failing = new NotificationService(
       mongoose.model(Notification.name) as never,
       { claimHeld: async () => { throw new Error('database gone'); } } as never,

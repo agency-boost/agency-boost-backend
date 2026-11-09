@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PRODUCT_DOCUMENT_SLOTS, SCRIPT_REVIEW_STATES } from '@/domain/constants';
+import { PRODUCT_DOCUMENT_SLOTS, PRODUCT_KINDS, SCRIPT_REVIEW_STATES } from '@/domain/constants';
 
 export class EffectiveFieldDto {
   @ApiProperty({ description: 'The value this office reads.' })
@@ -23,10 +23,34 @@ export class ProductDocumentSlotDto {
   filename!: string | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'application/pdf',
+    description: 'What storage holds: `application/pdf`, or `text/html`, drawn only inside a sandboxed frame (ADR-0217 '
+      + '§4). Null for an empty slot.',
+  })
+  mimeType!: string | null;
+
+  @ApiProperty({
     enum: ['kpm', 'company', 'none'],
     description: 'The prototype’s own *"Uploaded by KPM"* against *"From the catalog"*.',
   })
   source!: string;
+}
+
+/** One of the company's plans as an office reads it on its settings (ADR-0225 §5). */
+export class KpmProductPlanDto {
+  @ApiProperty({ type: String, description: 'The company\'s plan, by its name — an option of the `plan` field.' })
+  name!: string;
+
+  @ApiProperty({ type: Boolean, description: '*Paling banyak dipilih*, the company\'s mark.' })
+  popular!: boolean;
+
+  @ApiProperty({
+    type: EffectiveFieldDto,
+    description: 'Its highlights, `{ label, value }[]`: this office\'s draft, else the company\'s. Held for approval.',
+  })
+  highlights!: EffectiveFieldDto;
 }
 
 export class KpmProductDto {
@@ -44,6 +68,18 @@ export class KpmProductDto {
 
   @ApiProperty({ type: String })
   category!: string;
+
+  @ApiProperty({
+    type: String,
+    enum: PRODUCT_KINDS,
+    description: '*Produk dasar* or *Rider* (ADR-0209 §6). A rider sits under each of its bases with no switch of its '
+      + 'own: `active` is derived — on exactly when one of its bases is on — and every write about it is `409 '
+      + 'PRODUCT_IS_RIDER`.',
+  })
+  kind!: string;
+
+  @ApiProperty({ type: [String], description: 'A rider\'s base products, by id; `[]` for a base.' })
+  attachesTo!: string[];
 
   @ApiProperty({ type: String })
   lifecycle!: string;
@@ -69,8 +105,26 @@ export class KpmProductDto {
   })
   description!: EffectiveFieldDto;
 
-  @ApiProperty({ type: Object, description: 'The seven script fields, each with its own overridden flag.' })
+  @ApiProperty({
+    type: Object,
+    description: 'The script fields, each with its own overridden flag: `objections` a list of `{ objection, answer }` '
+      + 'cards (ADR-0209 §9).',
+  })
   script!: Record<string, EffectiveFieldDto>;
+
+  @ApiProperty({
+    type: EffectiveFieldDto,
+    description: '*Tanya-jawab*, `{ question, answer }[]` (ADR-0225 §5): this office\'s draft — the '
+      + 'whole list — else the company\'s FAQ. **Held for approval with the script**: agents read the approved one.',
+  })
+  faq!: EffectiveFieldDto;
+
+  @ApiProperty({
+    type: [KpmProductPlanDto],
+    description: 'The company\'s plans in its order, each with its highlights as this office drafted them, else the '
+      + 'company\'s. A plan the company no longer has is not here. `[]` for a product with no plans.',
+  })
+  plans!: KpmProductPlanDto[];
 
   @ApiProperty({ enum: SCRIPT_REVIEW_STATES })
   reviewState!: string;
@@ -98,7 +152,7 @@ export class EffectiveScriptDto {
 
   @ApiProperty({
     type: Object,
-    description: 'The seven script fields, each the effective value. No markup, ever.',
+    description: 'The script fields, each the effective value — `objections` a list of cards. No markup, ever.',
   })
   script!: Record<string, unknown>;
 

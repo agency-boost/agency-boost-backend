@@ -3,14 +3,14 @@ import { DEFAULT_LANGUAGE, type Language, MINOR_UNITS_PER_MAJOR } from '@/domain
 
 /**
  * **How the API writes a date, a sum or a percentage in a sentence** (ADR-0167 §1, OD-196): *26 Okt 2026*,
- * *Rp 500 jt*, *96%*. **Percentages and money since ADR-0174** (OD-226, OD-227; P18.97-T3): a percentage whole,
+ * *Rp 500 jt*, *96%*. **Percentages and money since ADR-0174** (OD-226, OD-227; P18.9-T3): a percentage whole,
  * rounded half up, with no *,0*, and a threshold with the places it was set with; a sum compact in *miliar*, *juta*
  * and *ribu*.
  *
- * **In the reader's language since P18.98-T3** (ADR-0174 §6, ADR-0179 §6; the approved glossary's §E): every function
+ * **In the reader's language since P18.10-T3** (ADR-0174 §6, ADR-0179 §6; the approved glossary's §E): every function
  * takes the `language` as its **last parameter**, and a caller that passes none gets **Indonesian**
  * (`DEFAULT_LANGUAGE`), the forms every sentence had before — so nothing changes until a caller passes the request's
- * language (P18.98-T5). English: *26 Oct 2026*, *Monday, 26 Oct 2026*, *13:05*, *1,250*, *17.6*, *IDR 5.8B*,
+ * language (P18.10-T5). English: *26 Oct 2026*, *Monday, 26 Oct 2026*, *13:05*, *1,250*, *17.6*, *IDR 5.8B*,
  * *IDR 150M*, *IDR 750K*, *IDR 45,000,000*. **One rounding** (ADR-0174 §1): the figure is computed once, in digits,
  * and the language changes only its characters — the marks, a month's or a weekday's name, the currency's and a
  * unit's — never the figure. The words around a figure are the sentence's, and follow the language with it (T5).

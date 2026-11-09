@@ -7,7 +7,7 @@ import {
 } from '@/domain/constants';
 import { EVENTS_REFUSALS } from './events.messages';
 
-/** What an event's fields are refused with (P18.98-T5 AC-3): this module's sentences, and the shared envelope's. */
+/** What an event's fields are refused with (P18.10-T5 AC-3): this module's sentences, and the shared envelope's. */
 const SAY = EVENTS_REFUSALS.VALIDATION_FAILED;
 const FIELD = VALIDATION_REFUSALS.VALIDATION_FAILED;
 

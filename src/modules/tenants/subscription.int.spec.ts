@@ -19,6 +19,7 @@ import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { AdminController } from './admin.controller';
+import { PlatformReads } from '@/modules/reporting/platform/platform-reads.service';
 import { Company, CompanySchema } from './company.schema';
 import { KpmRequest, KpmRequestSchema } from './kpm-request.schema';
 import { Kpm, KpmSchema } from './kpm.schema';
@@ -65,12 +66,17 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
     const tenants = new Service(
       kpms, mongoose.model(Company.name, CompanySchema), mongoose.model(User.name, UserSchema),
       mongoose.model(KpmRequest.name, KpmRequestSchema), new AuditService(audit as never), clock,
-      {}, repo, {}, {}, {}, {}, {},
+      // The ladder is read for the Super Admin's *Ringkasan* counts (P19.4-T3 AC-9): none here, so codes stand for labels.
+      {}, repo, { laddersByCompany: async () => new Map() }, {}, {}, {}, {},
     );
 
     const moduleRef = await Test.createTestingModule({
       controllers: [AdminController],
-      providers: [{ provide: TenantService, useValue: tenants }],
+      providers: [
+        { provide: TenantService, useValue: tenants },
+        // *Data terakhir* (P19.4-T3 AC-8) is the platform reads'; these offices hold no file.
+        { provide: PlatformReads, useValue: { dataStatusAcrossTenants: async () => new Map() } },
+      ],
     })
       .useMocker(() => ({}))
       .compile();
@@ -128,12 +134,30 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
     const res = await patch(String(kpm._id)).expect(200);
     expect(res.body).toMatchObject({
       _id: String(kpm._id),
-      subscription: { ...BODY, currency: 'IDR' },
+      subscription: { ...BODY, currency: 'IDR', plan: null },
       leadersUsed: 2,
       subscriptionState: 'active',
     });
     const stored = await kpms.findById(kpm._id).lean().exec();
-    expect(stored?.subscription).toEqual({ ...BODY, currency: 'IDR' });
+    expect(stored?.subscription).toEqual({ ...BODY, currency: 'IDR', plan: null });
+  });
+
+  it('P19.4-T3 AC-10 sets the plan, audits it with the rest, and keeps it when a body leaves it out', async () => {
+    const kpm = await office();
+    const set = await patch(String(kpm._id), { ...BODY, plan: 'annual' }).expect(200);
+    expect(set.body.subscription.plan).toBe('annual');
+    // An older client sends the five fields alone: the plan the office has stays.
+    await patch(String(kpm._id), { ...BODY, keepActiveAfterEnd: true }).expect(200);
+    expect((await kpms.findById(kpm._id).lean().exec())?.subscription?.plan).toBe('annual');
+    // `null` clears it.
+    await patch(String(kpm._id), { ...BODY, plan: null }).expect(200);
+    expect((await kpms.findById(kpm._id).lean().exec())?.subscription?.plan).toBeNull();
+    await patch(String(kpm._id), { ...BODY, plan: 'monthly' }).expect(400);
+
+    const rows = await audit.find({ action: 'kpm.subscription_updated', targetId: String(kpm._id) })
+      .sort({ createdAt: 1, _id: 1 }).lean().exec();
+    expect(rows.map((r) => (r.after as { subscription: { plan: unknown } }).subscription.plan)).toEqual(['annual', 'annual', null]);
+    expect((rows[2].before as { subscription: { plan: unknown } }).subscription.plan).toBe('annual');
   });
 
   it('AC-2: writes one audit row with the five fields before and after', async () => {
@@ -144,7 +168,7 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
     const rows = await audit.find({ action: 'kpm.subscription_updated', targetId: String(kpm._id) })
       .sort({ createdAt: 1, _id: 1 }).lean().exec();
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ before: { subscription: null }, after: { subscription: { ...BODY, currency: 'IDR' } } });
+    expect(rows[0]).toMatchObject({ before: { subscription: null }, after: { subscription: { ...BODY, currency: 'IDR', plan: null } } });
     expect(rows[1]).toMatchObject({
       before: { subscription: { keepActiveAfterEnd: false } },
       after: { subscription: { keepActiveAfterEnd: true } },
@@ -183,11 +207,11 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
   it('exit review: a price over the bound is refused in rupiah, the words the dialog shows', async () => {
     const kpm = await office();
     const res = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 }).expect(400);
-    // In the English reader's figures (`test/setup.ts`; P18.98-T5 AC-1, live): the Indonesian dialog's are pinned below.
+    // In the English reader's figures (`test/setup.ts`; P18.10-T5 AC-1, live): the Indonesian dialog's are pinned below.
     expect(res.body.error.message).toBe('The price per leader must be from IDR 0 to IDR 100,000,000 a month.');
   });
 
-  it('P18.98-T5 AC-7 refuses a price, and a date the DTO cannot read, in Indonesian for an Indonesian reader', async () => {
+  it('P18.10-T5 AC-7 refuses a price, and a date the DTO cannot read, in Indonesian for an Indonesian reader', async () => {
     const kpm = await office();
     const price = await patch(String(kpm._id), { ...BODY, pricePerLeaderMinor: 100_000_001_00 })
       .set(...IN_INDONESIAN).expect(400);
@@ -204,7 +228,7 @@ describe('PATCH /admin/tenants/:kpmId/subscription, and the reads (P13.2-T3)', (
     expect(date.body.error.message).toBe('startDate harus berupa tanggal dengan format YYYY-MM-DD');
   });
 
-  it('P18.98-T5 AC-1 writes a bound’s figures in English for a reader who chose English', async () => {
+  it('P18.10-T5 AC-1 writes a bound’s figures in English for a reader who chose English', async () => {
     const kpm = await office();
     savedLanguage.current = 'en';
     try {

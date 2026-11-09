@@ -25,6 +25,10 @@ import { CompanyOrgLevel, CompanyOrgLevelSchema } from '@/modules/tenants/compan
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
+import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
+import { LeadRepository } from '@/modules/leads/lead.repository';
+import { RecruitLeadLinks } from '@/modules/leads/recruit-lead-links';
+import { CoachResolver } from './coach-resolver';
 import { declaredPermissions, NO_CLASS, productionPipe, session, StubAuth } from '../../../test/http-permissions';
 import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
@@ -63,7 +67,7 @@ const hash = (token: string) => createHash('sha256').update(token).digest('hex')
 const tokenOf = (link: string) => decodeURIComponent(new URL(link).searchParams.get('invite')!);
 
 /**
- * **+ Add agent, invites, transfers and Find Your Leader, over HTTP** (P18.96-T3; ADR-0170). The real services behind
+ * **+ Add agent, invites, transfers and Find Your Leader, over HTTP** (P18.8-T3; ADR-0170). The real services behind
  * the real `PermissionsGuard` and the production pipe, on an office built through `HierarchyService`:
  *
  * ```
@@ -76,7 +80,7 @@ const tokenOf = (link: string) => decodeURIComponent(new URL(link).searchParams.
  * Office B (0555), the same company:  B_OWNER (AB, its Owner) ── B_AGENT
  * ```
  */
-describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HTTP', () => {
+describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTTP', () => {
   let app: INestApplication;
   let clock: FixedClock;
   let limiterClock: FixedClock;
@@ -118,9 +122,13 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
     const approvals = new ApprovalsService(members, hierarchy, requests, history, users as never, audit, notifications, clock, activations);
     const names = new MemberNames(members, users as never);
     const transfers = new TransfersService(transferRows, members, hierarchy, names, kpms as never, audit, notifications, clock);
+    // P19.1-T6 AC-7: a recruitment lead linked to the membership the form makes.
+    const recruitLinks = new RecruitLeadLinks(
+      new LeadRepository(mongoose.model(Lead.name, LeadSchema) as never), new CoachResolver(members), audit,
+    );
     const invites = new InvitesService(
       invitesRows, members, hierarchy, approvals, transfers, requests, names,
-      kpms as never, companies as never, users as never, audit, notifications, clock, activations,
+      kpms as never, companies as never, users as never, audit, notifications, clock, activations, recruitLinks,
     );
     const onboarding = new OnboardingService(
       members, hierarchy, kpms as never, companies as never, users as never, requests, audit, notifications, clock,
@@ -249,7 +257,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
   // ------------------------------------------------------------------ the entry point
 
   describe('POST /new-hires/agents — one entry point, decided by the agent code', () => {
-    it('P18.96-T3 AC-2 a code nobody holds is invited: a link to registration, 14 days, audited, and nothing counts it', async () => {
+    it('P18.8-T3 AC-2 a code nobody holds is invited: a link to registration, 14 days, audited, and nothing counts it', async () => {
       const res = await add({ agentCode: '80777', joinDate: TODAY }).expect(200);
       expect(res.body).toMatchObject({
         outcome: 'invited',
@@ -273,7 +281,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await audits('member_invite.created')).toHaveLength(1);
     });
 
-    it('P18.96-T3 AC-2 the code is unique across the company’s accounts and invites: a second invite is 409 ORG_INVITE_PENDING, from this office or another', async () => {
+    it('P18.8-T3 AC-2 the code is unique across the company’s accounts and invites: a second invite is 409 ORG_INVITE_PENDING, from this office or another', async () => {
       await add({ agentCode: '80777' }).expect(200);
       expect((await add({ agentCode: '80777' }).expect(409)).body.error.code).toBe('ORG_INVITE_PENDING');
       await signIn('PEER');
@@ -283,7 +291,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(other.body.error).toMatchObject({ code: 'ORG_INVITE_PENDING', message: expect.stringContaining('80777') });
     });
 
-    it('P18.96-T3 AC-3 a pending member is linked at once under the leader, with the join date given, classified, and their request cancelled', async () => {
+    it('P18.8-T3 AC-3 a pending member is linked at once under the leader, with the join date given, classified, and their request cancelled', async () => {
       const res = await add({ agentCode: '10008', joinDate: '2026-10-20' }).expect(200);
       expect(res.body).toEqual({ outcome: 'linked', member: { membershipId: id.PUTRI, fullName: 'Putri Anggraini' } });
       const putri = (await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id.PUTRI) }))!;
@@ -296,9 +304,9 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(notices('member.tagged_by_leader').map((n) => n.userId)).toEqual([user.PUTRI]);
     });
 
-    it('P18.96-T3 AC-3 an account reporting to another leader becomes a transfer request for the Owner and the Admin; a second is 409 ORG_TRANSFER_PENDING', async () => {
+    it('P18.8-T3 AC-3 an account reporting to another leader becomes a transfer request for the Owner and the Admin; a second is 409 ORG_TRANSFER_PENDING', async () => {
       const res = await add({ agentCode: '10007', fullName: 'Lina Marlina' }).expect(200);
-      // P18.96-T8 M3: answered with what Agus typed, and nothing of Hendra's unit.
+      // P18.8-T8 M3: answered with what Agus typed, and nothing of Hendra's unit.
       expect(res.body).toEqual({
         outcome: 'transfer_requested',
         transfer: {
@@ -315,7 +323,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().get('/new-hires/transfers').expect(200)).body.map((t: { requestedName: string }) => t.requestedName)).toEqual(['Lina Marlina']);
     });
 
-    it('P18.96-T8 M3 a peer unit’s code is answered with what was typed — no real name, no from, no member id — to the POST and GET /new-hires/transfers', async () => {
+    it('P18.8-T8 M3 a peer unit’s code is answered with what was typed — no real name, no from, no member id — to the POST and GET /new-hires/transfers', async () => {
       const res = await add({ agentCode: '10007', fullName: 'Hendra W.' }).expect(200);
       const mine = (await http().get('/new-hires/transfers').expect(200)).body;
       expect(mine).toEqual([res.body.transfer]);
@@ -338,7 +346,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       })]);
     });
 
-    it('P18.96-T8 M3 whoever asked is told the decision in the name they typed, declined or approved', async () => {
+    it('P18.8-T8 M3 whoever asked is told the decision in the name they typed, declined or approved', async () => {
       const first = (await add({ agentCode: '10007', fullName: 'Hendra W.' }).expect(200)).body.transfer.transferId;
       await signIn('OWNER');
       await http().post(`/transfer-requests/${first}/decline`).send({}).expect(200);
@@ -352,7 +360,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(notices('transfer_request.decided').find((n) => n.payload!.audience === 'from_leader')!.payload!.memberName).toBe('Lina Marlina');
     });
 
-    it('P18.96-T8 M3 the office’s owner who has a leader is refused 403 ORG_NOT_PERMITTED_TO_TAG, when asked and when approved — nothing moves', async () => {
+    it('P18.8-T8 M3 the office’s owner who has a leader is refused 403 ORG_NOT_PERMITTED_TO_TAG, when asked and when approved — nothing moves', async () => {
       const kpm = { _id: new mongoose.Types.ObjectId(KPM_A) };
       // Ownership moved to Sari, who keeps her leader, Agus.
       await col('kpms').updateOne(kpm, { $set: { ownerUserId: user.SARI } });
@@ -370,13 +378,13 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id.RINA) }))!.leaderId).toBe(id.SARI);
     });
 
-    it('P18.96-T3 AC-4 an account with no membership in the office is invited to sign in and accept: the link opens /join', async () => {
+    it('P18.8-T3 AC-4 an account with no membership in the office is invited to sign in and accept: the link opens /join', async () => {
       const res = await add({ agentCode: '20001' }).expect(200);
       expect(res.body).toMatchObject({ outcome: 'invited', invite: { existingAccount: true } });
       expect(res.body.link).toMatch(/^https:\/\/app\.agencyboost\.test\/join\?invite=/);
     });
 
-    it('P18.96-T3 AC-1 refuses its own code, somebody already in the unit, a loop, the office’s root, a bad date and a bad code', async () => {
+    it('P18.8-T3 AC-1 refuses its own code, somebody already in the unit, a loop, the office’s root, a bad date and a bad code', async () => {
       expect((await add({ agentCode: '10003' }).expect(409)).body.error.code).toBe('ORG_CYCLE_DETECTED');
       await signIn('SARI');
       expect((await add({ agentCode: '10005' }).expect(409)).body.error.code).toBe('ORG_AGENT_ALREADY_TAGGED');
@@ -392,7 +400,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('memberInvites').countDocuments({})).toBe(0);
     });
 
-    it('P18.96-T3 AC-7 the Owner adds to any unit by naming its leader; an AB naming another unit is 404, an Agent and the Super Admin 403', async () => {
+    it('P18.8-T3 AC-7 the Owner adds to any unit by naming its leader; an AB naming another unit is 404, an Agent and the Super Admin 403', async () => {
       await signIn('OWNER');
       const res = await add({ agentCode: '80777', leaderMembershipId: id.SARI }).expect(200);
       expect(res.body.invite.leader).toEqual({ membershipId: id.SARI, name: 'Sari Puspita' });
@@ -413,7 +421,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
   // ------------------------------------------------------------------ the leader's invites
 
   describe('the invites: list, resend, cancel, expiry', () => {
-    it('P18.96-T3 AC-2 Agus lists the invites into his unit and not the Peer’s; the Owner lists the office’s, with its today', async () => {
+    it('P18.8-T3 AC-2 Agus lists the invites into his unit and not the Peer’s; the Owner lists the office’s, with its today', async () => {
       await add({ agentCode: '80777' }).expect(200);
       await signIn('PEER');
       await add({ agentCode: '80778', fullName: 'Rudi Hartono' }).expect(200);
@@ -428,7 +436,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().get('/new-hires/invites').expect(200)).body.invites).toEqual([]);
     });
 
-    it('P18.96-T3 AC-2 Resend makes a new token — the old link opens nothing — and 14 days from now; audited', async () => {
+    it('P18.8-T3 AC-2 Resend makes a new token — the old link opens nothing — and 14 days from now; audited', async () => {
       const first = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       clock.advance(5 * DAY_MS);
       const inviteId = String((await col('memberInvites').findOne({}))!._id);
@@ -441,7 +449,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await audits('member_invite.resent')).toHaveLength(1);
     });
 
-    it('P18.96-T3 AC-2 Cancel invite leaves nothing: the link opens nothing, it is listed no more, and twice is 409', async () => {
+    it('P18.8-T3 AC-2 Cancel invite leaves nothing: the link opens nothing, it is listed no more, and twice is 409', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       const inviteId = String((await col('memberInvites').findOne({}))!._id);
       const res = await http().delete(`/new-hires/invites/${inviteId}`).expect(200);
@@ -454,7 +462,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       await add({ agentCode: '80777' }).expect(200);
     });
 
-    it('P18.96-T3 AC-2 past 14 days the link has expired, the row says so, the code is free, and Resend revives it', async () => {
+    it('P18.8-T3 AC-2 past 14 days the link has expired, the row says so, the code is free, and Resend revives it', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       clock.advance(14 * DAY_MS);
       const expired = await http().get(`/invites/${encodeURIComponent(token)}`).expect(404);
@@ -466,7 +474,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(revived.body.invite.status).toBe('pending');
     });
 
-    it('P18.96-T3 AC-7 an AB reaches only the invites into their own unit; another office’s are 404', async () => {
+    it('P18.8-T3 AC-7 an AB reaches only the invites into their own unit; another office’s are 404', async () => {
       await add({ agentCode: '80777' }).expect(200);
       const inviteId = String((await col('memberInvites').findOne({}))!._id);
       await signIn('PEER');
@@ -490,7 +498,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       inviteToken: token, ...over,
     });
 
-    it('P18.96-T3 AC-4 the banner names the leader, the office, the code, the join date and the name; 404 for a link that opens nothing', async () => {
+    it('P18.8-T3 AC-4 the banner names the leader, the office, the code, the join date and the name; 404 for a link that opens nothing', async () => {
       const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-10-25' }).expect(200)).body.link);
       session.current = RequestContext.platform('nobody');
       const res = await http().get(`/invites/${encodeURIComponent(token)}`).expect(200);
@@ -498,18 +506,20 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
         leaderName: 'Agus Prasetyo', kpm: { code: '0417', branchName: 'BSD City' }, companyId, companyName: 'Prudential',
         agentCode: '80777', joinDate: '2026-10-25', fullName: 'Hendra Wijaya', existingAccount: false,
         expiresAt: new Date(NOW.getTime() + 14 * DAY_MS).toISOString(),
+        // P19.6-T1 AC-13 (ADR-0218 §9): no branding reader in this harness, so AgencyBoost's.
+        branding: null,
       });
       for (const bad of ['nonsense', `${KPM_A}.wrong`, `${KPM_B}.${token.split('.')[1]}`, `not-an-id.${token.split('.')[1]}`]) {
         expect([bad, (await http().get(`/invites/${encodeURIComponent(bad)}`)).status]).toEqual([bad, 404]);
       }
     });
 
-    it('P18.96-T3 AC-4 the banner is rate limited per address: the sixty-first opening in an hour is 429', async () => {
+    it('P18.8-T3 AC-4 the banner is rate limited per address: the sixty-first opening in an hour is 429', async () => {
       for (let n = 0; n < 60; n += 1) await http().get('/invites/nonsense').expect(404);
       expect((await http().get('/invites/nonsense').expect(429)).body.error.code).toBe('AUTH_RATE_LIMITED');
     });
 
-    it('P18.96-T3 AC-4 registering on the link joins the office under the leader at once, with the invite’s code and join date', async () => {
+    it('P18.8-T3 AC-4 registering on the link joins the office under the leader at once, with the invite’s code and join date', async () => {
       const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-10-20' }).expect(200)).body.link);
       await register(token).expect(201, { status: 'verification_sent' });
       const account = (await col('users').findOne({ email: 'hendra@new.test' }))!;
@@ -529,7 +539,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('users').countDocuments({ email: 'again@new.test' })).toBe(0);
     });
 
-    it('P18.96-T8 L2 sign-ups are rate limited per address: the twenty-first in an hour is 429, before anything is read or made', async () => {
+    it('P18.8-T8 L2 sign-ups are rate limited per address: the twenty-first in an hour is 429, before anything is read or made', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       session.current = RequestContext.platform('nobody');
       // Twenty attempts, refused or not, spend the address's hour.
@@ -543,14 +553,14 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       await register(token).expect(201);
     });
 
-    it('P18.96-T3 AC-4 an existing agent joins as an existing agent: a join date over 90 days back classifies them so', async () => {
+    it('P18.8-T3 AC-4 an existing agent joins as an existing agent: a join date over 90 days back classifies them so', async () => {
       const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-01-05' }).expect(200)).body.link);
       await register(token).expect(201);
       const account = (await col('users').findOne({ email: 'hendra@new.test' }))!;
       expect(await membershipOf(String(account._id))).toMatchObject({ joinDate: '2026-01-05', joinedAs: 'existing_agent' });
     });
 
-    it('P18.96-T3 AC-4 registering on a link with an address that already exists joins nobody to anything', async () => {
+    it('P18.8-T3 AC-4 registering on a link with an address that already exists joins nobody to anything', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       const existing = (await col('users').findOne({ _id: new mongoose.Types.ObjectId(user.RINA) }))!;
       await register(token, { email: existing.email }).expect(201, { status: 'verification_sent' });
@@ -558,14 +568,14 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('memberships').countDocuments({ kpmId: KPM_A })).toBe(11);
     });
 
-    it('P18.96-T3 AC-2 the code is checked again at acceptance: an account that took it since refuses the registration, 409 AGENT_CODE_TAKEN', async () => {
+    it('P18.8-T3 AC-2 the code is checked again at acceptance: an account that took it since refuses the registration, 409 AGENT_CODE_TAKEN', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       await account('Somebody Else', '80777');
       expect((await register(token).expect(409)).body.error.code).toBe('AGENT_CODE_TAKEN');
       expect(await col('users').countDocuments({ email: 'hendra@new.test' })).toBe(0);
     });
 
-    it('P18.96-T3 AC-4 a signed-in account the code belongs to accepts with one button; another account is 404, somebody in an office 409', async () => {
+    it('P18.8-T3 AC-4 a signed-in account the code belongs to accepts with one button; another account is 404, somebody in an office 409', async () => {
       const token = tokenOf((await add({ agentCode: '20001' }).expect(200)).body.link);
       await signIn('B_AGENT');
       expect((await http().post(`/invites/${encodeURIComponent(token)}/accept`).expect(404)).body.error.code).toBe('NOT_FOUND');
@@ -591,7 +601,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       return res.body.transfer.transferId as string;
     };
 
-    it('P18.96-T3 AC-3 the Owner approves: the member moves with history — the old edge closed, a re_parented one open — and three people are told', async () => {
+    it('P18.8-T3 AC-3 the Owner approves: the member moves with history — the old edge closed, a re_parented one open — and three people are told', async () => {
       const transferId = await transfer();
       sent.length = 0;
       await signIn('OWNER');
@@ -615,7 +625,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().get('/new-hires/transfers').expect(200)).body).toEqual([]);
     });
 
-    it('P18.96-T3 AC-3 declining moves nothing and tells whoever asked, with the reason; deciding twice is 409', async () => {
+    it('P18.8-T3 AC-3 declining moves nothing and tells whoever asked, with the reason; deciding twice is 409', async () => {
       const transferId = await transfer();
       sent.length = 0;
       await signIn('ADMIN');
@@ -628,7 +638,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().post(`/transfer-requests/${transferId}/approve`).expect(409)).body.error.code).toBe('ORG_REQUEST_ALREADY_DECIDED');
     });
 
-    it('P18.96-T3 AC-3 a loop is refused at the decision too: the destination moved under the member since', async () => {
+    it('P18.8-T3 AC-3 a loop is refused at the decision too: the destination moved under the member since', async () => {
       const transferId = await transfer();
       // Agus is moved under Lina by the office, so moving Lina under Agus would make her her own ancestor.
       await hierarchy.reparent(job(KPM_A), id.AGUS, id.PEER_AGENT);
@@ -637,7 +647,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('transferRequests').findOne({})).toMatchObject({ status: 'pending' });
     });
 
-    it('P18.96-T3 AC-7 only the Owner and the Admins decide: an AB, an AAB and an Agent are 403; another office’s request is 404', async () => {
+    it('P18.8-T3 AC-7 only the Owner and the Admins decide: an AB, an AAB and an Agent are 403; another office’s request is 404', async () => {
       const transferId = await transfer();
       for (const who of ['AGUS', 'SARI', 'RINA'] as const) {
         await signIn(who);
@@ -659,21 +669,21 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
     const setStatus = (who: Who, status: string) =>
       col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id[who]) }, { $set: { status } });
 
-    it('P18.96-T3 AC-2 two forms at once for one code make one invite; the other is 409 ORG_INVITE_PENDING', async () => {
+    it('P18.8-T3 AC-2 two forms at once for one code make one invite; the other is 409 ORG_INVITE_PENDING', async () => {
       const [a, b] = await Promise.all([add({ agentCode: '80777' }), add({ agentCode: '80777' })]);
       expect([a.status, b.status].sort()).toEqual([200, 409]);
       expect([a.body, b.body].find((x) => x.error)?.error.code).toBe('ORG_INVITE_PENDING');
       expect(await col('memberInvites').countDocuments({ status: 'pending' })).toBe(1);
     });
 
-    it('P18.96-T3 AC-3 two forms at once for one member make one transfer; the other is 409 ORG_TRANSFER_PENDING', async () => {
+    it('P18.8-T3 AC-3 two forms at once for one member make one transfer; the other is 409 ORG_TRANSFER_PENDING', async () => {
       const [a, b] = await Promise.all([add({ agentCode: '10007' }), add({ agentCode: '10007' })]);
       expect([a.status, b.status].sort()).toEqual([200, 409]);
       expect([a.body, b.body].find((x) => x.error)?.error.code).toBe('ORG_TRANSFER_PENDING');
       expect(await col('transferRequests').countDocuments({ status: 'pending' })).toBe(1);
     });
 
-    it('P18.96-T3 AC-2 an expired invite’s code invited again since cannot be resent: 409 ORG_INVITE_PENDING', async () => {
+    it('P18.8-T3 AC-2 an expired invite’s code invited again since cannot be resent: 409 ORG_INVITE_PENDING', async () => {
       await add({ agentCode: '80777' }).expect(200);
       const first = String((await col('memberInvites').findOne({}))!._id);
       clock.advance(15 * DAY_MS);
@@ -686,7 +696,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().post(`/new-hires/invites/${first}/resend`).expect(409)).body.error.code).toBe('ORG_REQUEST_ALREADY_DECIDED');
     });
 
-    it('P18.96-T3 AC-3 approving a transfer for somebody who has left closes it, 409 ORG_ALREADY_REMOVED; to a leader who left, 422', async () => {
+    it('P18.8-T3 AC-3 approving a transfer for somebody who has left closes it, 409 ORG_ALREADY_REMOVED; to a leader who left, 422', async () => {
       const first = (await add({ agentCode: '10007' }).expect(200)).body.transfer.transferId;
       await setStatus('PEER_AGENT', 'removed');
       await signIn('OWNER');
@@ -701,7 +711,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       await http().post('/transfer-requests/not-an-id/approve').expect(404);
     });
 
-    it('P18.96-T8 L4 approving a transfer whose member moved since is 409 ORG_TRANSFER_STALE: the request is closed, nobody moves', async () => {
+    it('P18.8-T8 L4 approving a transfer whose member moved since is 409 ORG_TRANSFER_STALE: the request is closed, nobody moves', async () => {
       const transferId = (await add({ agentCode: '10007' }).expect(200)).body.transfer.transferId;
       // The office moved Lina under the Admin meanwhile.
       await hierarchy.reparent(job(KPM_A), id.PEER_AGENT, id.ADMIN);
@@ -713,7 +723,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await audits('transfer_request.approved')).toHaveLength(0);
     });
 
-    it('P18.96-T8 L4 a move that fails leaves the request waiting, never approved with nobody moved; approving again moves them', async () => {
+    it('P18.8-T8 L4 a move that fails leaves the request waiting, never approved with nobody moved; approving again moves them', async () => {
       const transferId = (await add({ agentCode: '10007' }).expect(200)).body.transfer.transferId;
       await signIn('OWNER');
       const reparent = jest.spyOn(hierarchy, 'reparent').mockRejectedValueOnce(new Error('the database went away'));
@@ -728,7 +738,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id.PEER_AGENT) }))!.leaderId).toBe(id.AGUS);
     });
 
-    it('P18.96-T8 L3 two accepts at once place the person once: the other is a 4xx, never a duplicate key’s 500', async () => {
+    it('P18.8-T8 L3 two accepts at once place the person once: the other is a 4xx, never a duplicate key’s 500', async () => {
       const token = tokenOf((await add({ agentCode: '20001' }).expect(200)).body.link);
       session.current = new RequestContext(user.LOOSE, 'none', null);
       const [a, b] = await Promise.all([
@@ -741,7 +751,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('memberInvites').findOne({})).toMatchObject({ status: 'accepted', acceptedMembershipId: expect.any(String) });
     });
 
-    it('P18.96-T8 L3 the accept is a compare-and-set: an invite accepted between the read and the write is 409 ORG_REQUEST_ALREADY_DECIDED', async () => {
+    it('P18.8-T8 L3 the accept is a compare-and-set: an invite accepted between the read and the write is 409 ORG_REQUEST_ALREADY_DECIDED', async () => {
       const token = tokenOf((await add({ agentCode: '20001' }).expect(200)).body.link);
       session.current = new RequestContext(user.LOOSE, 'none', null);
       const findById = members.findById.bind(members);
@@ -759,7 +769,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await membershipOf(user.LOOSE)).toBeNull();
     });
 
-    it('P18.96-T8 L3 a placement refused after the claim puts the invite back, waiting — a duplicate key is 409 ORG_AGENT_ALREADY_TAGGED', async () => {
+    it('P18.8-T8 L3 a placement refused after the claim puts the invite back, waiting — a duplicate key is 409 ORG_AGENT_ALREADY_TAGGED', async () => {
       const token = tokenOf((await add({ agentCode: '20001' }).expect(200)).body.link);
       session.current = new RequestContext(user.LOOSE, 'none', null);
       const create = jest.spyOn(hierarchy, 'create').mockRejectedValueOnce(Object.assign(new Error('E11000 duplicate key'), { code: 11000 }));
@@ -773,7 +783,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await col('memberInvites').findOne({})).toMatchObject({ status: 'accepted' });
     });
 
-    it('P18.96-T3 AC-4 accepting after the leader has left is 422 ORG_LEADER_NOT_IN_KPM, and nobody is placed', async () => {
+    it('P18.8-T3 AC-4 accepting after the leader has left is 422 ORG_LEADER_NOT_IN_KPM, and nobody is placed', async () => {
       const token = tokenOf((await add({ agentCode: '20001' }).expect(200)).body.link);
       await setStatus('AGUS', 'removed');
       session.current = new RequestContext(user.LOOSE, 'none', null);
@@ -781,7 +791,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(await membershipOf(user.LOOSE)).toBeNull();
     });
 
-    it('P18.96-T3 AC-7 the Owner naming a leader who has left is 422 ORG_LEADER_NOT_IN_KPM; a suspended office’s link opens nothing', async () => {
+    it('P18.8-T3 AC-7 the Owner naming a leader who has left is 422 ORG_LEADER_NOT_IN_KPM; a suspended office’s link opens nothing', async () => {
       await setStatus('PEER', 'removed');
       await signIn('OWNER');
       expect((await add({ agentCode: '80777', leaderMembershipId: id.PEER }).expect(422)).body.error.code).toBe('ORG_LEADER_NOT_IN_KPM');
@@ -795,7 +805,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
   // ------------------------------------------------------------------ Find Your Leader
 
   describe('Find Your Leader (AC-6)', () => {
-    it('P18.96-T3 AC-6 never lists the reader or anybody below them', async () => {
+    it('P18.8-T3 AC-6 never lists the reader or anybody below them', async () => {
       await signIn('ORPHAN');
       const names = (await http().get('/join/leaders').expect(200)).body.map((l: { fullName: string }) => l.fullName);
       expect(names).not.toContain('Bayu Saputra');
@@ -807,7 +817,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(agus).not.toContain('Sari Puspita');
     });
 
-    it('P18.96-T3 AC-6 a request to somebody in the reader’s own unit is refused when sent, 409 ORG_CYCLE_DETECTED; nobody is notified', async () => {
+    it('P18.8-T3 AC-6 a request to somebody in the reader’s own unit is refused when sent, 409 ORG_CYCLE_DETECTED; nobody is notified', async () => {
       await signIn('ORPHAN');
       const res = await http().post('/join/leader-request').send({ leaderMembershipId: id.ORPHAN_AAB }).expect(409);
       expect(res.body.error.code).toBe('ORG_CYCLE_DETECTED');
@@ -817,7 +827,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       await http().post('/join/leader-request').send({ leaderMembershipId: id.PEER }).expect(200);
     });
 
-    it('P18.96-T3 AC-6 a reader who already has a leader is refused as before, 409 ORG_AGENT_ALREADY_TAGGED', async () => {
+    it('P18.8-T3 AC-6 a reader who already has a leader is refused as before, 409 ORG_AGENT_ALREADY_TAGGED', async () => {
       await signIn('RINA');
       expect((await http().post('/join/leader-request').send({ leaderMembershipId: id.PEER }).expect(409)).body.error.code)
         .toBe('ORG_AGENT_ALREADY_TAGGED');
@@ -827,21 +837,27 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
   // ------------------------------------------------------------------ the reader's language
 
   /*
-   * **P18.98-T5 — joining an office, in the reader's language** (ADR-0179 §7; AC-3, AC-4, AC-6, AC-7). One refusal of
+   * **P18.10-T5 — joining an office, in the reader's language** (ADR-0179 §7; AC-3, AC-4, AC-6, AC-7). One refusal of
    * each family asked as an Indonesian screen asks (`Accept-Language: id`): the same `code` and `details`, the sentence
    * in Indonesian, a field's sentence in `details.violations` with it. Every other test here reads English.
    */
-  describe('P18.98-T5 in Indonesian', () => {
-    it('P18.98-T5 AC-7 + Add agent refuses the form’s own fields, a join date after today and a code already invited, in Indonesian', async () => {
+  describe('P18.10-T5 in Indonesian', () => {
+    it('P18.10-T5 AC-7 + Add agent refuses the form’s own fields, a join date after today and a code already invited, in Indonesian', async () => {
+      // The form's own fields first; the code's format is the office's template's (P19.5-T2, ADR-0214 §7), asked
+      // after them — so a form wrong in both is told about the phone, then about the code.
       const fields = await add({ agentCode: 'PRU-1', phone: 'call me' }).set(...IN_INDONESIAN).expect(400);
       expect(fields.body.error).toMatchObject({
         code: 'VALIDATION_FAILED',
         details: {
           violations: [
-            'agentCode hanya boleh berisi angka, 3 sampai 32 digit',
             'phone harus berupa nomor telepon: angka, spasi, atau tanda hubung, dengan paling banyak satu + di depan',
           ],
         },
+      });
+      const code = await add({ agentCode: 'PRU-1' }).set(...IN_INDONESIAN).expect(400);
+      expect(code.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { violations: ['agentCode hanya boleh berisi angka, 3 sampai 32 digit'] },
       });
       const english = await add({ agentCode: 'PRU-1' }).expect(400);
       expect(english.body.error.message).toBe('agentCode must be digits only, 3 to 32 of them');
@@ -862,7 +878,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       });
     });
 
-    it('P18.98-T5 AC-7 an invite: a link that opens nothing, and one cancelled twice, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 an invite: a link that opens nothing, and one cancelled twice, in Indonesian', async () => {
       const nothing = await http().get('/invites/nonsense').set(...IN_INDONESIAN).expect(404);
       expect(nothing.body.error).toMatchObject({
         code: 'NOT_FOUND',
@@ -880,7 +896,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
         .toBe('That invite was already cancelled.');
     });
 
-    it('P18.98-T5 AC-4 the banner names a leader whose account is gone in the reader’s language', async () => {
+    it('P18.10-T5 AC-4 the banner names a leader whose account is gone in the reader’s language', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       await col('users').deleteOne({ _id: new mongoose.Types.ObjectId(user.AGUS) });
       session.current = RequestContext.platform('nobody');
@@ -889,7 +905,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect((await http().get(path).expect(200)).body.leaderName).toBe('your leader');
     });
 
-    it('P18.98-T5 AC-6, AC-7 a transfer: asked twice, decided twice, in Indonesian — and its edge’s reason stored in the decider’s', async () => {
+    it('P18.10-T5 AC-6, AC-7 a transfer: asked twice, decided twice, in Indonesian — and its edge’s reason stored in the decider’s', async () => {
       const first = (await add({ agentCode: '10007' }).expect(200)).body.transfer.transferId;
       const again = await add({ agentCode: '10007' }).set(...IN_INDONESIAN).expect(409);
       expect(again.body.error).toMatchObject({
@@ -905,7 +921,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       });
     });
 
-    it('P18.98-T5 AC-7 a join request decided twice, and a tag for somebody already in a unit, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 a join request decided twice, and a tag for somebody already in a unit, in Indonesian', async () => {
       const requestId = String((await col('joinRequests').findOne({ membershipId: id.PUTRI }))!._id);
       await signIn('SARI');
       const badDate = await http().post(`/join/requests/${requestId}/approve`).set(...IN_INDONESIAN)
@@ -926,7 +942,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       });
     });
 
-    it('P18.98-T5 AC-7 Find Your Leader refuses a loop and somebody who has a leader, in Indonesian', async () => {
+    it('P18.10-T5 AC-7 Find Your Leader refuses a loop and somebody who has a leader, in Indonesian', async () => {
       await signIn('ORPHAN');
       const loop = await http().post('/join/leader-request').set(...IN_INDONESIAN)
         .send({ leaderMembershipId: id.ORPHAN_AAB }).expect(409);
@@ -947,7 +963,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
   // ------------------------------------------------------------------ who may
 
   describe('permissions, per role (AC-7)', () => {
-    it('P18.96-T3 AC-7 declares one permission per route, and the link’s banner none', () => {
+    it('P18.8-T3 AC-7 declares one permission per route, and the link’s banner none', () => {
       expect(declaredPermissions(NewHireAgentsController)).toEqual({
         add: 'member:invite', list: 'member:invite', resend: 'member:invite', cancel: 'member:invite', myTransfers: 'member:invite',
       });
@@ -957,7 +973,7 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       expect(declaredPermissions(InviteLinkController)).toEqual({ banner: undefined, accept: 'join_via_code_link_qr' });
     });
 
-    it('P18.96-T3 AC-7 the invites’ routes answer the Owner, the Admin — on a rung or none — an AB and an AAB, and refuse an Agent and the Super Admin', async () => {
+    it('P18.8-T3 AC-7 the invites’ routes answer the Owner, the Admin — on a rung or none — an AB and an AAB, and refuse an Agent and the Super Admin', async () => {
       const base = await as('ADMIN');
       // An Admin standing on no rung the matrix names: the office's grant alone.
       const officeOnly = new RequestContext(base.userId, 'none', { ...base.membership!, orgLevelCode: 'NO_RUNG', hierarchyRole: NO_CLASS });
@@ -975,12 +991,77 @@ describe('P18.96-T3 + Add agent, invites, transfers and Find Your Leader over HT
       }
     });
 
-    it('P18.96-T3 AC-7 a read-only support session reads nothing it would need the write to use, and writes nothing', async () => {
+    it('P18.8-T3 AC-7 a read-only support session reads nothing it would need the write to use, and writes nothing', async () => {
       const base = await as('AGUS');
       session.current = new RequestContext(base.userId, 'none', base.membership, 'u-support', null, false, true);
       await add({ agentCode: '80777' }).expect(403);
       await http().get('/new-hires/invites').expect(403);
       expect(await col('memberInvites').countDocuments({})).toBe(0);
+    });
+  });
+
+  // ------------------------------------------------------------------ P19.1-T6: Tambahkan ke unit ›
+
+  describe('P19.1-T6 AC-7 Tambahkan ke unit › — the recruitment lead the form came from names who they became', () => {
+    /** A recruitment lead of `owner`'s, marked *Berhasil* at the final Recruit stage this month. */
+    const rekrut = async (owner: string, kpmId = KPM_A, over: Record<string, unknown> = {}) => {
+      const { insertedId } = await col('leads').insertOne({
+        kpmId, ownerMembershipId: owner, type: 'recruitment', name: 'Sdri. Maya Lestari', statusCode: 'NEW_ACTIVE_AGENT',
+        statusId: null, outcome: 'won', outcomeAt: new Date('2026-10-20T03:00:00Z'), contact: { phone: null, email: null },
+        commitments: [{ month: '2026-10', at: new Date('2026-10-02T03:00:00Z'), byMembershipId: owner }],
+        transitions: [], version: 3, joinedMembershipId: null, deletedAt: null, dateRegistered: new Date('2026-09-01T03:00:00Z'),
+        ...over,
+      });
+      return String(insertedId);
+    };
+    const linkOf = async (leadId: string) =>
+      (await col('leads').findOne({ _id: new mongoose.Types.ObjectId(leadId) }))!.joinedMembershipId;
+
+    it('P19.1-T6 AC-7 a code linking somebody in the office now writes the link at once, audited without a name', async () => {
+      const lead = await rekrut(id.RINA);
+      const res = await add({ agentCode: '10009', recruitLeadId: lead }).expect(200);
+      expect(res.body).toMatchObject({ outcome: 'linked', member: { membershipId: id.FAJAR } });
+      expect(await linkOf(lead)).toBe(id.FAJAR);
+      const [entry] = await audits('lead.recruit_linked');
+      expect(entry).toMatchObject({ targetId: lead, targetMembershipId: id.FAJAR, after: { joinedMembershipId: id.FAJAR } });
+      expect(JSON.stringify(entry)).not.toContain('Maya');
+    });
+
+    it('P19.1-T6 AC-7 an invite carries the lead, and accepting it writes the link to the membership it made', async () => {
+      const lead = await rekrut(id.RINA);
+      const token = tokenOf((await add({ agentCode: '20001', recruitLeadId: lead }).expect(200)).body.link);
+      expect(await col('memberInvites').findOne({ agentCode: '20001' })).toMatchObject({ recruitLeadId: lead });
+      expect(await linkOf(lead)).toBeNull();
+      session.current = new RequestContext(user.LOOSE, 'none', null);
+      await http().post(`/invites/${encodeURIComponent(token)}/accept`).expect(200);
+      const joined = await membershipOf(user.LOOSE);
+      expect(await linkOf(lead)).toBe(String(joined!._id));
+    });
+
+    it('P19.1-T6 AC-12 another office’s lead is refused 404 and nothing is written — no invite, no link', async () => {
+      const theirs = await rekrut(id.B_AGENT, KPM_B);
+      const res = await add({ agentCode: '80777', recruitLeadId: theirs }).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+      expect(await col('memberInvites').countDocuments({})).toBe(0);
+      expect(await linkOf(theirs)).toBeNull();
+    });
+
+    it('P19.1-T6 AC-12 a lead outside the adder’s reach, an open one, a sales one, or one linked already is 404 alike', async () => {
+      const peers = await rekrut(id.PEER_AGENT);
+      const open = await rekrut(id.RINA, KPM_A, { outcome: null, outcomeAt: null, statusCode: 'AGENT_CODE_CREATED' });
+      const sales = await rekrut(id.RINA, KPM_A, { type: 'sales', statusCode: 'PAID_AND_ISSUED' });
+      const linked = await rekrut(id.RINA, KPM_A, { joinedMembershipId: id.SARI });
+      for (const lead of [peers, open, sales, linked]) {
+        expect((await add({ agentCode: '80777', recruitLeadId: lead }).expect(404)).body.error.code).toBe('NOT_FOUND');
+      }
+      expect(await col('memberInvites').countDocuments({})).toBe(0);
+      expect(await linkOf(linked)).toBe(id.SARI);
+    });
+
+    it('P19.1-T6 AC-7 recruitLeadId is a lead id, or the form is refused 400 by name', async () => {
+      const res = await add({ agentCode: '80777', recruitLeadId: 'not-an-id' }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(res.body.error.details)).toContain('recruitLeadId');
     });
   });
 });

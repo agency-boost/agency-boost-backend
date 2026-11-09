@@ -193,6 +193,27 @@ describe('TenantScopedRepository — cross-tenant isolation', () => {
     });
   });
 
+  describe('named offices counted by a Super Admin (P19.4-T5 AC-2, ADR-0213 §2)', () => {
+    const root = RequestContext.platform('root');
+
+    it('P19.4-T5 AC-2 is refused to anybody but a Super Admin', async () => {
+      await expect(repo.countInOfficesAcrossTenants(ctxFor(KPM_A), [KPM_A])).rejects.toThrow(MissingTenantContextError);
+    });
+
+    it('P19.4-T5 AC-2 counts the named offices’ live rows only, whatever the filter says, and nothing for no office', async () => {
+      await repo.create(ctxFor(KPM_A), { name: 'a' } as Partial<WidgetDoc>);
+      const gone = await repo.create(ctxFor(KPM_A), { name: 'a' } as Partial<WidgetDoc>);
+      await repo.softDeleteById(ctxFor(KPM_A), String(gone._id), new Date());
+      await repo.create(ctxFor(KPM_B), { name: 'a' } as Partial<WidgetDoc>);
+
+      expect(await repo.countInOfficesAcrossTenants(root, [KPM_A], { name: 'a' } as never)).toBe(1);
+      expect(await repo.countInOfficesAcrossTenants(root, [KPM_A, KPM_B], { name: 'a' } as never)).toBe(2);
+      // A filter naming another office cannot widen the count: the named offices win.
+      expect(await repo.countInOfficesAcrossTenants(root, [KPM_A], { kpmId: KPM_B } as never)).toBe(1);
+      expect(await repo.countInOfficesAcrossTenants(root, [])).toBe(0);
+    });
+  });
+
   describe('a malformed id is nothing found, wherever it sits in the filter', () => {
     it('answers null for a bad id at the top level and inside $and', async () => {
       const ctx = ctxFor(KPM_A);

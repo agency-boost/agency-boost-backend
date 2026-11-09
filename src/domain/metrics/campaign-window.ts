@@ -9,7 +9,7 @@ import {
 import { CAMPAIGN_WINDOW_MESSAGES } from './campaign-window.messages';
 
 /**
- * **What a campaign is read over** (P18.5-T8 AC-2; D-windows), in the office's calendar — pure: a campaign's
+ * **What a campaign is read over** (P18.2-T8 AC-2; D-windows), in the office's calendar — pure: a campaign's
  * window, its dates and the office's day in; the months its file metrics read, the days its activity reads, the
  * key its standing is stored under and the words the dialog writes, out.
  *
@@ -21,7 +21,7 @@ import { CAMPAIGN_WINDOW_MESSAGES } from './campaign-window.messages';
  * Every edge is a local day: a campaign that ends on 30 September is running at 23:59 that night in Jakarta and
  * ended at 00:01 on 1 October, whatever the server's clock says (invariant §9).
  *
- * **Its words are the reader's** (P18.98-T5 AC-4): a function that writes them takes the reader last — the figures'
+ * **Its words are the reader's** (P18.10-T5 AC-4): a function that writes them takes the reader last — the figures'
  * language alone where it writes only figures (a month range, a day range, the window's label) — and a caller that
  * passes none reads what the API wrote before the phase: English words, Indonesian figures.
  */
@@ -134,7 +134,7 @@ export function durationWords(campaign: CampaignDates, timezone: string, reader:
 }
 
 /**
- * **The Personal Summary row's one line: the months the campaign runs** (P18.95-T7 AC-1, ADR-0167 §7; the client's
+ * **The Personal Summary row's one line: the months the campaign runs** (P18.7-T7 AC-1, ADR-0167 §7; the client's
  * *Grey text* table, row 23). It read *"Ongoing incentive · Standing — evaluated per calendar year (1 Jan – 31 Des)"*;
  * the client's line is *Runs Jan–Des*, and each window's is composed the same way, in the office's calendar:
  *

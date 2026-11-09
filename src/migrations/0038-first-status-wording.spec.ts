@@ -16,7 +16,7 @@ const NEW = 'Not yet approached';
 const OWNERS = 'Belum didekati';
 
 /**
- * **ADR-0167 §10 for offices that already exist** (P18.95-T9 AC-6, UI-027): the recruitment pipeline's first status,
+ * **ADR-0167 §10 for offices that already exist** (P18.7-T9 AC-6, UI-027): the recruitment pipeline's first status,
  * `NOT_APPROACHED`, says *Not yet approached* as the sales pipeline's does — in the working copy, the newest snapshot
  * agents read, and every Company template, the Template company's *Default template* among them — only where the
  * seeded *Not approached* is still there, found by code within its pipeline, no version moving, and a second run
@@ -42,7 +42,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     kpmId, version, sourceVersion: 3, publishedAt: new Date(), publishedBy: null, deletedAt: null,
     payload: { activity: [], ratios: [], leadPipelines: pipelines(rows) },
   });
-  /** The seed's statuses in the English it gave before P18.98-T7 (OD-238), which is what 0038 was written over. */
+  /** The seed's statuses in the English it gave before P18.10-T7 (OD-238), which is what 0038 was written over. */
   const english = SEED_LEAD_STATUSES.map((s) => ({
     ...s, label: SEEDED_LEAD_STATUS_LABELS_BEFORE_OD_238[s.pipeline][s.code] ?? s.label,
   }));
@@ -101,7 +101,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     ]);
   });
 
-  it('P18.95-T9 AC-6 rewrites the seeded words in the working copy, archived rows included, versions kept', async () => {
+  it('P18.7-T9 AC-6 rewrites the seeded words in the working copy, archived rows included, versions kept', async () => {
     // A's and B's first recruitment status.
     expect(await up(db())).toEqual({ statuses: 2, snapshots: 1, templates: 3 });
 
@@ -117,7 +117,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     expect((await db().collection('leadStatuses').findOne({ kpmId: KPM_B, code: 'NOT_APPROACHED' }))!.status).toBe('archived');
   });
 
-  it('P18.95-T9 AC-6 rewrites the newest snapshot agents read, and leaves the older one as history', async () => {
+  it('P18.7-T9 AC-6 rewrites the newest snapshot agents read, and leaves the older one as history', async () => {
     await up(db());
     const before = [['sales', [['NOT_YET_APPROACHED', NEW], ['FOLLOW_UP', 'Follow-up']]],
       ['recruitment', [['NOT_APPROACHED', OLD], ['MEETING_SCHEDULED', 'Meeting scheduled']]]];
@@ -129,7 +129,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     expect(newest!.payload.leadPipelines[1].statuses[0]).toMatchObject({ id: 'recruitment-0', version: 3, label: NEW });
   });
 
-  it('P18.95-T9 AC-6 rewrites the Company templates, published and draft, and the Template company’s Default template', async () => {
+  it('P18.7-T9 AC-6 rewrites the Company templates, published and draft, and the Template company’s Default template', async () => {
     await up(db());
     const templates = await db().collection('companyTemplates').find({ kind: 'lead_pipeline' }).toArray();
     const firstOf = (t: (typeof templates)[number]) =>
@@ -142,7 +142,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
       [TEMPLATE_LIBRARY.companyId, 'published', 1, [NEW]],
     ]);
     // Every other status of a rewritten template is the seed's English, as it was: 0038 writes the words it was
-    // written for, and the Indonesian since P18.98-T7 is 0046's to give (OD-238).
+    // written for, and the Indonesian since P18.10-T7 is 0046's to give (OD-238).
     const defaults = templates.find((t) => t.templateId === TEMPLATE_LIBRARY.defaultTemplateId)!;
     expect(defaults.payload.statuses).toEqual(english);
 
@@ -150,7 +150,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     expect(other!.payload.statuses).toEqual(templateStatuses());
   });
 
-  it('P18.95-T9 AC-6 leaves an Owner’s own label, the sales pipeline’s first status and another code holding the old words alone', async () => {
+  it('P18.7-T9 AC-6 leaves an Owner’s own label, the sales pipeline’s first status and another code holding the old words alone', async () => {
     await up(db());
     const c = await db().collection('leadStatuses').find({ kpmId: KPM_C }).sort({ pipeline: -1, rank: 1 }).toArray();
     expect(c.map((r) => [r.pipeline, r.code, r.label])).toEqual([
@@ -172,12 +172,12 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     expect((await db().collection('leadStatuses').findOne({ kpmId: KPM_E }))!.label).toBe(OLD);
   });
 
-  it('P18.95-T9 AC-6 is idempotent: a second run writes nothing', async () => {
+  it('P18.7-T9 AC-6 is idempotent: a second run writes nothing', async () => {
     await up(db());
     expect(await up(db())).toEqual({ statuses: 0, snapshots: 0, templates: 0 });
   });
 
-  it('P18.95-T9 AC-6 passes over a snapshot published without lead pipelines', async () => {
+  it('P18.7-T9 AC-6 passes over a snapshot published without lead pipelines', async () => {
     await db().collection('configSnapshots').insertOne({
       kpmId: KPM_B, version: 1, sourceVersion: 1, publishedAt: new Date(), publishedBy: null, deletedAt: null, payload: { ratios: [] },
     });
@@ -185,7 +185,7 @@ describe('0038 — the recruitment pipeline’s first status in the sales pipeli
     expect((await db().collection('configSnapshots').findOne({ kpmId: KPM_B }))!.payload).toEqual({ ratios: [] });
   });
 
-  it('P18.95-T9 AC-6 on an empty database reads nothing and creates nothing', async () => {
+  it('P18.7-T9 AC-6 on an empty database reads nothing and creates nothing', async () => {
     for (const name of ['leadStatuses', 'configSnapshots', 'companyTemplates']) await db().collection(name).drop();
     expect(await up(db())).toEqual({ statuses: 0, snapshots: 0, templates: 0 });
     const names = (await db().listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name);

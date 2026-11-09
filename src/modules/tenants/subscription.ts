@@ -4,7 +4,9 @@ import type { Clock } from '@/common/clock/clock.port';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import type { Sentence } from '@/common/i18n/sentence';
-import { DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION } from '@/domain/constants';
+import {
+  DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION, SUBSCRIPTION_PLANS, type SubscriptionPlan,
+} from '@/domain/constants';
 import type { KpmSubscription } from './kpm.schema';
 import { TENANTS_REFUSALS } from './tenants.messages';
 
@@ -68,6 +70,11 @@ export interface SubscriptionInput {
   pricePerLeaderMinor: number | null;
   maxLeaders: number | null;
   keepActiveAfterEnd: boolean;
+  /**
+   * *Paket* (ADR-0211 §1; P19.4-T3): `six_months`, `annual` or `null`. **Absent keeps the plan the office has** — an
+   * older client that sends the five fields alone changes no plan; `null` clears it.
+   */
+  plan?: SubscriptionPlan | null;
 }
 
 /** A real calendar date in `YYYY-MM-DD`: `2026-02-30` has the shape and is no day. */
@@ -77,7 +84,7 @@ function isOfficeDate(value: string): boolean {
 }
 
 /**
- * **The refusals, in both languages** (P18.98-T5 AC-3), each said under the field it names (`details.field`). A bound
+ * **The refusals, in both languages** (P18.10-T5 AC-3), each said under the field it names (`details.field`). A bound
  * is rupiah as the dialog shows it, **in full** — `Rp 100.000.000` — through the shared formatter (ADR-0167 §1): the
  * Super Admin reads it under the field they typed rupiah into, so it is written in the digits they type, and in rupiah —
  * never sen, the unit the API carries. Every bound is whole rupiah, so nothing rounds. A count is grouped as the
@@ -148,7 +155,14 @@ export function validateSubscription(input: SubscriptionInput): KpmSubscription 
     throw refuse('keepActiveAfterEnd', SAY.keepActiveOnOrOff);
   }
 
+  const { plan } = input;
+  if (plan !== undefined && plan !== null && !(SUBSCRIPTION_PLANS as readonly string[]).includes(plan)) {
+    throw refuse('plan', SAY.planOneOf);
+  }
+
   return {
     startDate, endDate, pricePerLeaderMinor, currency: 'IDR', maxLeaders, keepActiveAfterEnd,
+    // Absent is left for the caller to keep the stored plan (`TenantService.updateSubscription`); here it is none.
+    plan: plan ?? null,
   };
 }

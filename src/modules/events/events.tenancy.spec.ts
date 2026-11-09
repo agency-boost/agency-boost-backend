@@ -10,7 +10,7 @@ import { ROSTER_NOW } from '../../../test/coaching-office';
 import { buildEventsOffice, eventsApp, KPM_A, KPM_B, type EventsOffice } from '../../../test/events-office';
 
 /**
- * **Isolation** (invariant §1; P18.5-T5 AC-1, AC-9; P18.5-T6 AC-1; `ROUTE_MODULE['/events']`): 0417 against 0555,
+ * **Isolation** (invariant §1; P18.2-T5 AC-1, AC-9; P18.2-T6 AC-1; `ROUTE_MODULE['/events']`): 0417 against 0555,
  * **on every events route**, both ways. A member of one office addressing the other's event — the field routes, the
  * roll call, its save, the *Feedback Summary*, and the settings writes — is answered `404 NOT_FOUND`, the answer an
  * event that is not there gives, and nothing of the other office is read or written. The lists hold the reader's
@@ -67,7 +67,7 @@ describe('events, isolated (invariant §1)', () => {
   });
 
   it.each([['0555', '0417'], ['0417', '0555']] as const)(
-    'P18.5-T5 AC-9 %s’s Owner is answered 404 on every events route of %s’s event, and nothing is written',
+    'P18.2-T5 AC-9 %s’s Owner is answered 404 on every events route of %s’s event, and nothing is written',
     async (reader, other) => {
       const before = await everything();
       session.current = reader === '0417' ? office.as('OWNER') : office.as('B_OWNER');
@@ -81,7 +81,7 @@ describe('events, isolated (invariant §1)', () => {
     },
   );
 
-  it('P18.5-T5 AC-9 an agent of 0555 meets 404 on every field route of 0417’s event; 0417’s agent likewise on 0555’s', async () => {
+  it('P18.2-T5 AC-9 an agent of 0555 meets 404 on every field route of 0417’s event; 0417’s agent likewise on 0555’s', async () => {
     const before = await everything();
     for (const [who, target] of [['B_AGENT', office.event.PAST_ALL], ['RINA', office.event.B_PAST]] as const) {
       session.current = office.as(who);
@@ -93,7 +93,7 @@ describe('events, isolated (invariant §1)', () => {
     expect(await everything()).toEqual(before);
   });
 
-  it('P18.5-T5 AC-9 a roll-call save naming another office’s member is 404, and writes nothing', async () => {
+  it('P18.2-T5 AC-9 a roll-call save naming another office’s member is 404, and writes nothing', async () => {
     const before = await everything();
     session.current = office.as('OWNER');
     await http().put(`/kpm/settings/events/${office.event.PAST_ALL.id}/attendance`)
@@ -101,7 +101,7 @@ describe('events, isolated (invariant §1)', () => {
     expect(await everything()).toEqual(before);
   });
 
-  it.each([['0417', KPM_A], ['0555', KPM_B]] as const)('P18.5-T5 AC-9 %s’s lists are its own office’s alone', async (side, kpmId) => {
+  it.each([['0417', KPM_A], ['0555', KPM_B]] as const)('P18.2-T5 AC-9 %s’s lists are its own office’s alone', async (side, kpmId) => {
     session.current = side === '0417' ? office.as('OWNER') : office.as('B_OWNER');
     const own = (await db().collection('events').find({ kpmId, status: 'active', deletedAt: null }).toArray()).map((e) => String(e._id));
     const field = (await http().get('/events').expect(200)).body.events.map((e: { id: string }) => e.id);
@@ -117,7 +117,7 @@ describe('events, isolated (invariant §1)', () => {
     expect(summary.rows.map((r: { name: string }) => r.name)).toEqual([side === '0417' ? 'Rina Wijaya' : 'Bayu Saputra']);
   });
 
-  it('P18.5-T5 AC-9 the two new repositories refuse a read or a write with no office in the context', async () => {
+  it('P18.2-T5 AC-9 the two new repositories refuse a read or a write with no office in the context', async () => {
     const nobody = RequestContext.platform('root');
     await expect(wired.eventRsvps.find(nobody, {})).rejects.toBeInstanceOf(MissingTenantContextError);
     await expect(wired.eventFeedback.find(nobody, {})).rejects.toBeInstanceOf(MissingTenantContextError);
@@ -127,7 +127,7 @@ describe('events, isolated (invariant §1)', () => {
       .rejects.toBeInstanceOf(MissingTenantContextError);
   });
 
-  it('P18.5-T5 AC-8 the readings port answers nothing for another office’s event', async () => {
+  it('P18.2-T5 AC-8 the readings port answers nothing for another office’s event', async () => {
     expect(await wired.eventReadings.attendance(office.as('OWNER'), office.event.B_PAST.id)).toBeNull();
     expect(await wired.eventReadings.feedbackSummary(office.as('B_OWNER'), office.event.PAST_ALL.id)).toBeNull();
     const between = await wired.eventReadings.eventsBetween(office.as('B_OWNER'), new Date('2026-01-01'), new Date('2027-01-01'));

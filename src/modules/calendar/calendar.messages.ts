@@ -1,7 +1,7 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The calendar's refusals, in both languages** (P18.98-T5 AC-2, AC-3): an entry's timing, field by field, the
+ * **The calendar's refusals, in both languages** (P18.10-T5 AC-2, AC-3): an entry's timing, field by field, the
  * invitation list's own rules, a block its member cannot answer, and the people picker's cursor. A calendar is a
  * *kalender*, an entry an *entri*, time placed on somebody's calendar a *blok waktu* (the API's vocabulary); a field is
  * named as the API names it (`startsOn`, `inviteeIds`), and so is a format (`YYYY-MM-DD`, `HH:mm`).

@@ -5,7 +5,7 @@ import type { Sentence } from '@/common/i18n/sentence';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { SUMMARY_REFUSALS } from './summary.messages';
 
-/** What a reader asked for: a month, a year, or neither — the office's current month (P18.8-T11). */
+/** What a reader asked for: a month, a year, or neither — the office's current month (P18.5-T11). */
 export interface SummaryPeriodQuery {
   /** `YYYY-MM`. */
   month?: string;
@@ -23,7 +23,7 @@ export interface OfficeCalendar {
 }
 
 /**
- * **The period a Summary is for** (P18.8-T11, ADR-0161 §4, amending ADR-0056's *this month and this year only*).
+ * **The period a Summary is for** (P18.5-T11, ADR-0161 §4, amending ADR-0056's *this month and this year only*).
  *
  * One month and its year, always — the payload carries both views, *Monthly* and *Yearly*:
  *
@@ -68,7 +68,7 @@ export function summaryPeriod(office: OfficeCalendar, asked: SummaryPeriodQuery 
   const firstYear = firstMonth.slice(0, 4);
 
   // The words name no office (ADR-0084): a coachee's *Personal Summary* tab shows a refusal as its banner. In both
-  // languages, a month in the reader's figures (P18.98-T5 AC-2).
+  // languages, a month in the reader's figures (P18.10-T5 AC-2).
   const SAY = SUMMARY_REFUSALS.VALIDATION_FAILED;
   const refuse = (field: 'month' | 'year', message: Sentence<'VALIDATION_FAILED'>): never => {
     throw new DomainException(ErrorCode.VALIDATION_FAILED, message, HttpStatus.BAD_REQUEST, {

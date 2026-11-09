@@ -94,7 +94,7 @@ describe('the goal cascade', () => {
       expect(weeklyOf(67)).toBe(16);
     });
 
-    it('P18.8-T10 AC-2 writes policies per week to one decimal: six a month is 1.4, not ≈ 2', () => {
+    it('P18.5-T10 AC-2 writes policies per week to one decimal: six a month is 1.4, not ≈ 2', () => {
       // ADR-0160 §5: the monthly policies ÷ 4.33, to a tenth — the same 4.33 as every weekly figure.
       expect(policiesPerWeekOf(6)).toBe(1.4);
       expect(policiesPerWeekOf(7)).toBe(1.6);
@@ -105,7 +105,7 @@ describe('the goal cascade', () => {
       expect(policiesPerWeekOf(6)).toBe(Math.round((6 / TIME.WEEKS_PER_MONTH) * 10) / 10);
     });
 
-    it('P18.8-T10 AC-2 gives step 3 and step 5 the one policies-per-week figure, the other two whole', () => {
+    it('P18.5-T10 AC-2 gives step 3 and step 5 the one policies-per-week figure, the other two whole', () => {
       const out = computeCascade(defaults);
 
       expect(out.policiesPerWeek).toBe(1.4);
@@ -300,7 +300,7 @@ describe('the goal cascade', () => {
       }
     });
 
-    it('P18.98-T5 AC-2 says each in both languages, one after another, Goal Settings’ labels kept English', () => {
+    it('P18.10-T5 AC-2 says each in both languages, one after another, Goal Settings’ labels kept English', () => {
       try {
         computeCascade({ ...defaults, caseSizeMinor: 0, closingRatePct: 0 });
         throw new Error('should have refused');
@@ -342,7 +342,7 @@ describe('the goal cascade', () => {
     });
   });
 
-  describe('P18.8-T10 AC-1 — the two percentages open on the office’s benchmarks (ADR-0160 §3)', () => {
+  describe('P18.5-T10 AC-1 — the two percentages open on the office’s benchmarks (ADR-0160 §3)', () => {
     /** The office's two ratios as the seed gives them. */
     const seeded = SEED_RATIO_DEFINITIONS.filter((r) => ['SELLING_SUCCESS_RATE', 'MEETING_PER_APPROACH'].includes(r.code));
 

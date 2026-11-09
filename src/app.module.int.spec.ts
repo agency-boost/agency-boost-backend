@@ -79,27 +79,27 @@ describe('AppModule boots', () => {
     expect(port(ApprovalsService, 'activations')).toBe(activation);
     expect(port(LeaderCodeService, 'activations')).toBe(activation);
     expect(port(AuthController, 'activationNav')).toBe(activation);
-    // P18.8-T6 AC-1: the profile line's groups and office, read with the session.
+    // P18.5-T6 AC-1: the profile line's groups and office, read with the session.
     expect(port(AuthController, 'profileLine')).toBe(app.get(ProfileLineReader, { strict: false }));
-    // P18.5-T7 AC-5: leaving answers the calendar and the campaigns' chases, both behind the one port.
+    // P18.2-T7 AC-5: leaving answers the calendar and the campaigns' chases, both behind the one port.
     const departures = port(RemovalService, 'departures') as { each: unknown[] };
     expect(departures).toBe(app.get(MemberDeparture as never, { strict: false }));
     expect(departures.each[0] === app.get(CalendarLeave, { strict: false })).toBe(true);
     expect(departures.each[1] === app.get(CampaignChaseDeparture, { strict: false })).toBe(true);
-    // P18.5-T3 AC-2: a module marked done reaches the hire's activation through the same port.
+    // P18.2-T3 AC-2: a module marked done reaches the hire's activation through the same port.
     expect(port(TrainingProgressService, 'activation')).toBe(activation);
-    // P18.96-T3 AC-4: registration on an invite's link reaches the invites, by token.
+    // P18.8-T3 AC-4: registration on an invite's link reaches the invites, by token.
     expect(port(AuthController, 'invites') === app.get(InvitesService, { strict: false })).toBe(true);
     expect(port(InvitesService, 'activations')).toBe(activation);
   });
 
   /*
-   * **P18.96-T3: `/new-hires/invites` and `/new-hires/transfers` are their own routes, not a hire's id.** Express takes
+   * **P18.8-T3: `/new-hires/invites` and `/new-hires/transfers` are their own routes, not a hire's id.** Express takes
    * the first route that matches in the order they were registered, and `NewHiresController` declares
    * `GET /new-hires/:membershipId`: registered before *+ Add agent*'s controller, it would read `invites` as a
    * membership and answer 404. Both are guarded, so a request cannot tell them apart; the router's own order can.
    */
-  it('P18.96-T3 registers GET /new-hires/invites and /new-hires/transfers before GET /new-hires/:membershipId', () => {
+  it('P18.8-T3 registers GET /new-hires/invites and /new-hires/transfers before GET /new-hires/:membershipId', () => {
     const stack = (app.getHttpAdapter().getInstance() as { _router: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] } })
       ._router.stack;
     const at = (path: string) => stack.findIndex((layer) => layer.route?.path === path && layer.route.methods.get);
@@ -123,11 +123,11 @@ describe('AppModule boots', () => {
   });
 
   /*
-   * P18.8-T10 AC-1: a plan nobody saved opens on the office's benchmarks, read through an optional dependency
+   * P18.5-T10 AC-1: a plan nobody saved opens on the office's benchmarks, read through an optional dependency
    * so a hand-built instance need not provide it. Optional means a graph that failed to would quietly open
    * every plan on `GOAL_DEFAULTS` again, so the real graph is asserted.
    */
-  it('P18.8-T10 AC-1 hands GoalService the office’s ratio definitions, in the real graph', () => {
+  it('P18.5-T10 AC-1 hands GoalService the office’s ratio definitions, in the real graph', () => {
     const service = app.get(GoalService, { strict: false }) as unknown as Record<string, unknown>;
     expect(service.ratios === app.get(RatioDefinitionRepository, { strict: false })).toBe(true);
   });
@@ -182,5 +182,13 @@ describe('AppModule boots', () => {
   it('enforces permissions on the admin surface', async () => {
     const res = await request(app.getHttpServer()).get('/api/v1/admin/tenants').expect(401);
     expect(res.body.error.code).toBeDefined();
+  });
+
+  it('P19.6-T5 AC-4 answers the Super Admin’s guide 401 to a request with no session, and nothing of it', async () => {
+    for (const path of ['/api/v1/admin/panduan', '/api/v1/admin/panduan/pdf']) {
+      const res = await request(app.getHttpServer()).get(path).expect(401);
+      expect([path, res.body.error.code]).toEqual([path, 'AUTH_TOKEN_INVALID']);
+      expect(res.text).not.toMatch(/Panduan Super Admin|%PDF-/);
+    }
   });
 });

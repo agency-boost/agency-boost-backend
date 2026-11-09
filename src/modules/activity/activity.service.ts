@@ -37,7 +37,7 @@ import { ActivityBindingService } from '@/modules/config/activity-binding.servic
 import { boundCodes, countOf, defaultBinding, type CascadeBinding } from '@/modules/config/activity-binding';
 import { GoalService } from '@/modules/goals/goal.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
-import { ProductionReadings } from '@/modules/production/production-readings';
+import { OfficialApe } from '@/modules/production/official-ape';
 import {
   sectionChips, summaryPlan, type ActivityTargetKey, type SectionChip,
 } from '@/modules/summary/summary-figures';
@@ -156,7 +156,7 @@ export interface ActivityDashboardView {
   correctedDays: number;
 }
 
-/** A ratio's term and a computed ratio: the shapes `ActivityRatioReadings` builds (one place since UI V1, Phase 18.99 T4). */
+/** A ratio's term and a computed ratio: the shapes `ActivityRatioReadings` builds (one place since UI V1, Phase 18.11 T4). */
 export type { ActivityRatioView, RatioTermView } from './activity-ratio-readings';
 
 export interface ActivityRatiosView {
@@ -228,7 +228,7 @@ export class ActivityService {
      * production, read as `GET /summary` reads them, and the sections a rung is shown.
      */
     private readonly goals: GoalService,
-    private readonly production: ProductionReadings,
+    private readonly production: OfficialApe,
     private readonly readings: ActivityReadings,
     /*
      * P13-T3 AC-5: a day saved or corrected may complete a hire's four weeks of activity. A port the
@@ -470,7 +470,7 @@ export class ActivityService {
     if (stray.length > 0) {
       const counts = stray.map((code) => byCode.get(code)!);
       sections.push({
-        // The section's name is the API's own, written for the reader; each row's is its code (P18.98-T5 AC-4).
+        // The section's name is the API's own, written for the reader; each row's is its code (P18.10-T5 AC-4).
         code: '', label: render(ACTIVITY_MESSAGES.otherSection, ctx.reader), standing: 'archived',
         total: total(sum(counts)), counts: sum(counts),
         types: stray.map((code, i) => ({
@@ -537,7 +537,7 @@ export class ActivityService {
   }
 
   /**
-   * **The same ratios over several sets of members' summed counts at once** (UI V1, Phase 18.99 T4; UI-001: the Unit
+   * **The same ratios over several sets of members' summed counts at once** (UI V1, Phase 18.11 T4; UI-001: the Unit
    * Dashboard's *Ratio · 30 hari terakhir*, its *Unit* and its *Group*). `ratiosOf` is the one-member set of this, so a
    * set's figures are the Ratio page's by construction: the same window, the same definitions and the same formula over
    * the members' counts added up — each member counted once in a set, however many sets hold them. **No subject is

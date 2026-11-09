@@ -41,7 +41,7 @@ export function periodFigures(
   return {
     targetMinor,
     actualMinor,
-    // Half up in integers (P18.97-T3, parity F-254): Rp 23 jt of Rp 40 jt is 58%, which the float read 57.
+    // Half up in integers (P18.9-T3, parity F-254): Rp 23 jt of Rp 40 jt is 58%, which the float read 57.
     attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(actualMinor, targetMinor)),
     gapMinor: gap,
     overMinor: Math.max(0, actualMinor - targetMinor),
@@ -149,6 +149,11 @@ export function summaryPlan(input: {
   throughLastMonthMinor: number | null;
   /** This month's own APE; `null` until the month's file arrives. */
   thisMonthMinor: number | null;
+  /**
+   * **The office's figures only** (ADR-0195, UI-157 item 5): a member's own estimate fixes no month's target on a
+   * leader's or the office's screen. Absent, the member's own read, which takes it while nothing is uploaded (P9-T6).
+   */
+  officialOnly?: boolean;
 }): SummaryPlan {
   const { goal, month } = input;
   const monthNumber = Number(month.slice(5, 7));
@@ -162,7 +167,7 @@ export function summaryPlan(input: {
     // This month's own year to date is what the goal already reads when it is the latest the office holds.
     thisMonth: input.thisMonthMinor !== null && goal.achieved.month === month
       ? { ytdMinor: goal.achieved.minor, monthlyMinor: input.thisMonthMinor } : null,
-    ownFigureMinor: goal.achieved.provenance === 'self_reported' ? goal.achieved.minor : null,
+    ownFigureMinor: goal.achieved.provenance === 'self_reported' && !input.officialOnly ? goal.achieved.minor : null,
   });
   const monthly = annual !== null ? monthlyApeTarget(annual, before, monthNumber) : null;
   const rates = goal.caseSizeMinor > 0 ? goal : null;
@@ -262,7 +267,12 @@ export interface GoalFigures {
  * - **Where each figure came from** travels with it: this month's APE, until the month's file arrives
  *   `null`; the year's, the office's year to date or the agent's own figure (P9-T6).
  */
-export function goalFigures(input: {
+export function goalFigures(input: GoalFiguresInput): GoalFigures {
+  return figuresOf(input, false) as GoalFigures;
+}
+
+/** What `goalFigures` and `officialGoalFigures` read. */
+export interface GoalFiguresInput {
   goal: PlannedGoal;
   /** The office's calendar month, `YYYY-MM`. */
   month: string;
@@ -274,15 +284,42 @@ export function goalFigures(input: {
   yearToDate: HeldApe | null;
   /** The names of whoever corrected either figure, by membership. */
   names: ReadonlyMap<string, string>;
-}): GoalFigures {
+}
+
+/** `GoalFigures` as a leader's or the office's screen reads them: the year's figure may be nobody's yet. */
+export interface OfficialGoalFigures extends Omit<GoalFigures, 'yearly'> {
+  /** The annual target against the office's year to date — `null` actual and source while the office holds none. */
+  yearly: PeriodFigures & { source: FigureSource | null };
+}
+
+/**
+ * **A member's goal figures as a leader's or the office's screen reads them** (ADR-0195; P19.1-T4 AC-12, the 6 November
+ * handover's UI-157 item 5: *estimates never show in leader/KPM dashboards, clubs or rankings*). The Summary's
+ * computation over **the office's figures alone**: a member's own estimate — `self_reported`, typed on Goal Settings or
+ * the Summary by them, or on their Goal Setting tab by their coach (ADR-0183) — is no APE produced here (`null`, which
+ * the screens say as *Belum diunggah*), has no source, and fixes no month's target (`summaryPlan`'s `officialOnly`).
+ *
+ * The Unit Dashboard, the KPM Overview and KPM Analytics read through here; the coaching roster's status reads the same
+ * rule (`monthPaceOf`). The member's own screens — the Summary, Goal Settings, and their coach's reading of the
+ * member's own plan — read `goalFigures`, which shows the estimate labelled as theirs.
+ */
+export function officialGoalFigures(input: GoalFiguresInput): OfficialGoalFigures {
+  return figuresOf(input, true);
+}
+
+function figuresOf(input: GoalFiguresInput, officialOnly: boolean): OfficialGoalFigures {
   const { goal, month, thisMonth, names } = input;
+  const estimate = goal.achieved.provenance === 'self_reported';
   const plan = summaryPlan({
     goal, month, throughLastMonthMinor: input.throughLastMonth?.minor ?? null, thisMonthMinor: thisMonth?.minor ?? null,
+    officialOnly,
   });
   const monthly = plan.monthlyTargetMinor === 0
     ? madeFigures(thisMonth?.minor ?? null)
     : periodFigures(plan.monthlyTargetMinor, thisMonth?.minor ?? null, goal.caseSizeMinor);
-  const yearly = periodFigures(plan.annualTargetMinor, goal.achieved.minor, goal.caseSizeMinor);
+  // On a leader's or the office's screen an estimate is nothing held: the year's figure waits for the office's file.
+  const ignored = officialOnly && estimate;
+  const yearly = periodFigures(plan.annualTargetMinor, ignored ? null : goal.achieved.minor, goal.caseSizeMinor);
   return {
     set: goal.savedAt !== null,
     caseSizeMinor: goal.caseSizeMinor,
@@ -295,7 +332,7 @@ export function goalFigures(input: {
     },
     yearly: {
       ...yearly,
-      source: {
+      source: ignored ? null : {
         provenance: goal.achieved.provenance as FigureSource['provenance'],
         month: goal.achieved.month,
         // The agent's own figure is nobody's correction, whatever the office holds beside it.
@@ -305,6 +342,40 @@ export function goalFigures(input: {
       },
     },
   };
+}
+
+/**
+ * **Whose figure a period's APE produced is** (P19.1-T4, the 6 November handover's UI-157; ADR-0195): the office's file
+ * (`official`, imported or corrected), the member's own estimate — *perkiraan Anda*, typed on Goal Settings or the
+ * Summary (`self_reported` above zero; a coach's typing is one too, ADR-0183) — or `none` yet. A month's own APE is
+ * the office's or nothing: the estimate is the year to date (OD-250).
+ */
+export type ProductionBasis = 'official' | 'estimate' | 'none';
+
+/** A Summary period's `production` and its helpers without it (UI-157 items 2 and 4). */
+export interface ProductionHeld {
+  production: ProductionBasis;
+  /**
+   * **The helpers with nothing held count what was achieved as 0** (UI-157 item 2, rule R2: never "—" for a value the
+   * screen can work out): *Sisa* is the whole target and *Polis yang dibutuhkan* the target over the case size, rounded
+   * up — the `APE_GAP_TO_TARGET` and `POLICIES_NEEDED` of an APE of 0. The screen marks them *(belum ada data
+   * produksi)*. `null` with something held, without a target above 0, and for a period whose target is already met.
+   */
+  withoutProduction: { gapMinor: number; policiesNeeded: number | null } | null;
+}
+
+export function productionHeld(
+  figures: PeriodFigures & { source: FigureSource | null }, caseSizeMinor: number,
+): ProductionHeld {
+  const { source } = figures;
+  const production: ProductionBasis = source === null ? 'none'
+    : source.provenance !== 'self_reported' ? 'official'
+      : (figures.actualMinor ?? 0) > 0 ? 'estimate' : 'none';
+  if (production !== 'none' || figures.targetMinor === null || figures.targetMinor <= 0 || figures.targetMet) {
+    return { production, withoutProduction: null };
+  }
+  const nothing = periodFigures(figures.targetMinor, 0, caseSizeMinor);
+  return { production, withoutProduction: { gapMinor: nothing.gapMinor as number, policiesNeeded: nothing.policiesNeeded } };
 }
 
 /**
@@ -473,7 +544,7 @@ export interface SectionChip {
  * A type the office archived stays as a row while the period holds a count against it, so the chip's rows
  * add up to its total; one with nothing in the period is gone, as it is from the log screen.
  *
- * **So does a section the office archived** (ADR-0163 §6, P18.9-T2 AC-5): it keeps, on its tile, the types the
+ * **So does a section the office archived** (ADR-0163 §6, P18.6-T2 AC-5): it keeps, on its tile, the types the
  * period holds counts for, and is gone where it holds none. Its bound types are left to the target chips that
  * count them, so an archived section never takes a live tile out with it.
  */

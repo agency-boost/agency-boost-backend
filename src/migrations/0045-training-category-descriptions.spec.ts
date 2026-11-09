@@ -8,24 +8,24 @@ import { up } from './0045-training-category-descriptions';
 const KPM_A = '66f0000000000000000000a1';
 const KPM_B = '66f0000000000000000000b1';
 const OLD_SALES = SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97.SALES;
-/** The English lines it was written for — the seed's Indonesian since P18.98-T7 is `0046`'s to give a template. */
+/** The English lines it was written for — the seed's Indonesian since P18.10-T7 is `0046`'s to give a template. */
 const NEW = Object.fromEntries(
   Object.entries(SEEDED_TRAINING_WORDINGS_BEFORE_OD_238.categories).map(([code, c]) => [code, c.description]),
 );
 /**
- * The six this migration was written for. *Motivation*, the owner's seventh (UI V1, P18.99-T10), came after it, was never
+ * The six this migration was written for. *Motivation*, the owner's seventh (UI V1, P18.11-T10), came after it, was never
  * seeded without a line, and is `0048`'s to give a template.
  */
 const SIX = SEED_TRAINING_CATEGORIES.filter((c) => c.code in SEEDED_TRAINING_DESCRIPTIONS_BEFORE_P18_97);
 const CODES = SIX.map((c) => c.code);
 
 /**
- * **A real line for each default training category, for offices that already exist** (P18.97-T4 AC-9, ADR-0176 §9;
+ * **A real line for each default training category, for offices that already exist** (P18.9-T4 AC-9, ADR-0176 §9;
  * UI-031): in the working copy, each office's newest snapshot and every `training_taxonomy` template — only where the
  * seeded words are still held, an office's own words and an edited category untouched, no version moved, and a second
  * run writing nothing.
  */
-describe('0045 — the default training categories’ descriptions (P18.97-T4 AC-9)', () => {
+describe('0045 — the default training categories’ descriptions (P18.9-T4 AC-9)', () => {
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   /** The six as seeded, Sales with OD-150's sentence and the rest with none, at version 1 unless edited. */
   const seeded = (kpmId: string, over: Record<string, { description?: string | null; version?: number }> = {}) =>
@@ -71,18 +71,18 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     ]);
   });
 
-  it('P18.97-T4 AC-9 gives every seeded category of the working copy its line, versions kept', async () => {
+  it('P18.9-T4 AC-9 gives every seeded category of the working copy its line, versions kept', async () => {
     // Office A's six, and office B's four it never touched; both offices' newest snapshots; the Default template.
     expect(await up(db())).toEqual({ categories: 10, snapshots: 2, templates: 1 });
 
     expect(await descriptions(KPM_A)).toEqual(NEW);
-    // P18.98-T7 (OD-238): the English it was written for, never the seed's Indonesian — an office keeps its language.
+    // P18.10-T7 (OD-238): the English it was written for, never the seed's Indonesian — an office keeps its language.
     expect(Object.values(await descriptions(KPM_A))).not.toContain(SEED_TRAINING_CATEGORIES[0].description);
     const versions = (await db().collection('trainingCategories').find({ kpmId: KPM_A }).toArray()).map((c) => c.version);
     expect(versions).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
-  it('P18.97-T4 AC-9 leaves an office’s own words, and a description it cleared, as they are', async () => {
+  it('P18.9-T4 AC-9 leaves an office’s own words, and a description it cleared, as they are', async () => {
     await up(db());
     expect(await descriptions(KPM_B)).toEqual({
       ...NEW, SALES: 'Kalimat kami sendiri.', PRODUCT: null,
@@ -94,7 +94,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     expect(sold.find((c) => c.code === 'RECRUITING')!.description).toBe(NEW.RECRUITING);
   });
 
-  it('P18.97-T4 AC-9 rewrites the newest snapshot agents read, and leaves the older ones as the history they are', async () => {
+  it('P18.9-T4 AC-9 rewrites the newest snapshot agents read, and leaves the older ones as the history they are', async () => {
     await up(db());
     const snaps = await db().collection('configSnapshots').find({ kpmId: KPM_A }).sort({ version: 1 }).toArray();
     const words = (s: (typeof snaps)[number]) => (s.payload.training as { description: string | null }[]).map((c) => c.description);
@@ -108,7 +108,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
       .find((c) => c.code === 'TEAM_MANAGEMENT')!.description).toBe(NEW.TEAM_MANAGEMENT);
   });
 
-  it('P18.97-T4 AC-9 gives the Default template its six lines, and a template somebody edited none', async () => {
+  it('P18.9-T4 AC-9 gives the Default template its six lines, and a template somebody edited none', async () => {
     await up(db());
     const templates = await db().collection('companyTemplates').find({}).sort({ companyId: 1, kind: 1 }).toArray();
     const byWho = Object.fromEntries(templates.map((t) => [`${t.companyId}:${t.kind}`, t]));
@@ -123,7 +123,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     expect(byWho['c1:activity_taxonomy'].payload.categories[0].description).toBe(OLD_SALES);
   });
 
-  it('P18.97-T4 AC-9 is idempotent: a second run writes nothing, and a line an Owner clears afterwards stays cleared', async () => {
+  it('P18.9-T4 AC-9 is idempotent: a second run writes nothing, and a line an Owner clears afterwards stays cleared', async () => {
     const first = await up(db());
     // The migration's printout (`run.ts` logs it).
     // eslint-disable-next-line no-console
@@ -138,7 +138,7 @@ describe('0045 — the default training categories’ descriptions (P18.97-T4 AC
     expect((await descriptions(KPM_A)).PRODUCT).toBeNull();
   });
 
-  it('P18.97-T4 AC-9 passes over what holds none of the defaults: another code, a snapshot without training, a template without Sales', async () => {
+  it('P18.9-T4 AC-9 passes over what holds none of the defaults: another code, a snapshot without training, a template without Sales', async () => {
     for (const name of ['trainingCategories', 'configSnapshots', 'companyTemplates']) await db().collection(name).deleteMany({});
     await db().collection('trainingCategories').insertOne({
       kpmId: KPM_A, code: 'OUR_OWN', label: 'Our own', description: null, version: 1, status: 'active', deletedAt: null,

@@ -2,7 +2,7 @@ import { messages, refusals } from '@/common/i18n/sentence';
 import { decidedAs, type DecidedStatus } from './org.messages';
 
 /**
- * **Joining an office, in both languages** (P18.98-T5 AC-2; ADR-0179 §7): registering to one and asking a leader
+ * **Joining an office, in both languages** (P18.10-T5 AC-2; ADR-0179 §7): registering to one and asking a leader
  * (`OnboardingService`), a leader's code (`LeaderCodeService`), deciding who gets in and tagging somebody untagged
  * (`ApprovalsService`), and *+ Add agent* with the invites it makes (`InvitesService`) — the routes under `/join`,
  * `/new-hires` and `/invites`.
@@ -130,6 +130,16 @@ export const ONBOARDING_REFUSALS = refusals('modules/org: joining', {
     agentCodeShape: {
       en: 'agentCode must be digits only, 3 to 32 of them',
       id: 'agentCode hanya boleh berisi angka, 3 sampai 32 digit',
+    },
+    /** P19.5-T2 (ADR-0214 §7): inside a KPM on a template, a new code follows the template's format. */
+    agentCodeNotTemplate: ({ example }: { example: string }) => ({
+      en: `agentCode is not in the agent code format of this KPM's template — for example ${example}`,
+      id: `agentCode tidak sesuai format kode agen di template KPM ini — contohnya ${example}`,
+    }),
+    /** A code at most this long, whatever the format: the shape the form checks before the template's format. */
+    agentCodeTooLong: {
+      en: 'agentCode must be 1 to 64 characters',
+      id: 'agentCode harus 1 sampai 64 karakter',
     },
     fullNameEmpty: {
       en: 'fullName must not be empty',

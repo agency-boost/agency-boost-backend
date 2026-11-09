@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy/compose.yml resolves, and keeps the properties the shared VM's safety rests on (P18.7-T3,
+# deploy/compose.yml resolves, and keeps the properties the shared VM's safety rests on (P18.4-T3,
 # ADR-0155):
 #
 #   - no API publishes a port; only Caddy faces the internet

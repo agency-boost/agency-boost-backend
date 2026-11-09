@@ -121,7 +121,7 @@ export class LeaderCodeService {
    * office and a real person is a directory anybody could walk; requiring a session means
    * a prober needs an account first, and an account is auditable. Settled 2026-09-09.
    *
-   * `reader`: the request's, for the words written where a name is missing (P18.98-T5 AC-4).
+   * `reader`: the request's, for the words written where a name is missing (P18.10-T5 AC-4).
    */
   async preview(code: string, reader: Reader = readerOf()): Promise<InvitePreview> {
     const { leader, kpm } = await this.resolve(code);
@@ -178,7 +178,7 @@ export class LeaderCodeService {
       kpmId: String(kpm._id),
       templateId: NotificationTemplate.MEMBER_TAGGED_BY_LEADER,
       payload: {
-        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.98-T5 AC-4).
+        // No name, no word: the inbox writes its own for a notice with none, in its reader's language (P18.10-T5 AC-4).
         joinerName: joiner?.fullName ?? null,
         via: 'leader-code',
         code: leader.leaderCode,

@@ -8,7 +8,7 @@ import {
 const idCount = (n: number) => formatNumber(n, undefined, 'id');
 
 /**
- * **The products module's refusals, in both languages** (P18.98-T5 AC-2, AC-3): the company's catalogue (Super Admin)
+ * **The products module's refusals, in both languages** (P18.10-T5 AC-2, AC-3): the company's catalogue (Super Admin)
  * and the office's own settings over it — what it sells, its words, its scripts' approval. A field is named as the
  * API names it (`displayName`, `fullScript`), a product by the name the company gave it; *script* stays English
  * (§A.6) and the shelf an office sells from is its *etalase*.
@@ -78,14 +78,92 @@ export const PRODUCTS_REFUSALS = refusals('modules/products', {
       en: 'A product code starts with a letter and holds letters, digits and underscores.',
       id: 'Kode produk diawali huruf dan berisi huruf, angka, dan garis bawah.',
     },
+
+    /* Riders (P19.4-T4 AC-4, ADR-0209 §2): the riders spec's own sentence first. */
+    attachAtLeastOne: {
+      en: 'Choose at least one base product.',
+      id: 'Pilih minimal satu produk dasar',
+    },
+    attachNotOnShelf: {
+      en: 'A rider attaches only to a product of this company’s catalogue.',
+      id: 'Rider hanya dapat dipasang ke produk di katalog perusahaan ini.',
+    },
+    attachToRider: ({ name }: { name: string }) => ({
+      en: `${name} is a rider. A rider attaches to base products only, never to another rider.`,
+      id: `${name} adalah rider. Rider hanya dapat dipasang ke produk dasar, tidak ke rider lain.`,
+    }),
+    attachNotActive: ({ name }: { name: string }) => ({
+      en: `${name} is not on sale. A rider attaches to active base products only.`,
+      id: `${name} tidak sedang dijual. Rider hanya dapat dipasang ke produk dasar yang aktif.`,
+    }),
+    baseAttaches: {
+      en: 'A base product attaches to nothing. Send an empty list, or make it a rider.',
+      id: 'Produk dasar tidak dipasang ke produk lain. Kirim daftar kosong, atau jadikan rider.',
+    },
+    deleteOnSale: ({ name }: { name: string }) => ({
+      en: `${name} is still on the shelf. Withdraw it first; only a withdrawn product can be deleted.`,
+      id: `${name} masih ada di etalase. Tarik dulu; hanya produk yang ditarik yang dapat dihapus.`,
+    }),
+  },
+
+  PRODUCT_KIND_IN_USE: {
+    baseHasRiders: ({ name, riders }: { name: string; riders: number }) => ({
+      en: `${name} cannot become a rider while ${riders} rider${riders === 1 ? '' : 's'} attach to it. `
+        + 'Take it out of each rider’s base products first.',
+      id: `${name} tidak dapat dijadikan rider selama ${idCount(riders)} rider terpasang padanya. `
+        + 'Keluarkan dulu dari produk dasar setiap rider.',
+    }),
+    riderHasBases: ({ name, bases }: { name: string; bases: number }) => ({
+      en: `${name} cannot become a base product while it is attached to ${bases} base product${bases === 1 ? '' : 's'}. `
+        + 'Clear its base products in the same change.',
+      id: `${name} tidak dapat dijadikan produk dasar selama masih terpasang ke ${idCount(bases)} produk dasar. `
+        + 'Kosongkan produk dasarnya dalam perubahan yang sama.',
+    }),
+  },
+
+  PRODUCT_IS_RIDER: {
+    followsItsBase: ({ name }: { name: string }) => ({
+      en: `${name} is a rider. It is on exactly when one of its base products is on, and its words and documents `
+        + 'are your company’s.',
+      id: `${name} adalah rider. Rider aktif tepat ketika salah satu produk dasarnya aktif, dan kata-kata serta `
+        + 'dokumennya milik perusahaan Anda.',
+    }),
+  },
+
+  PRODUCT_IN_USE: {
+    referenced: ({ name, reasons }: { name: string; reasons: { en: string; id: string } }) => ({
+      en: `${name} cannot be deleted: ${reasons.en}. It stays withdrawn.`,
+      id: `${name} tidak dapat dihapus: ${reasons.id}. Produk tetap berstatus ditarik.`,
+    }),
   },
 });
+
+/** What a withdrawn product is still named by, in both languages (`PRODUCT_IN_USE`, ADR-0209 §10). */
+export function referenceWords(references: { activations: number; scriptApprovals: number; riders: number }): {
+  en: string; id: string;
+} {
+  const en: string[] = [];
+  const id: string[] = [];
+  if (references.activations > 0) {
+    en.push(`${references.activations} KPM${references.activations === 1 ? '' : 's'} sell${references.activations === 1 ? 's' : ''} it`);
+    id.push(`${idCount(references.activations)} KPM menjualnya`);
+  }
+  if (references.scriptApprovals > 0) {
+    en.push(`${references.scriptApprovals} KPM${references.scriptApprovals === 1 ? ' has' : 's have'} a script for it`);
+    id.push(`${idCount(references.scriptApprovals)} KPM memiliki script untuknya`);
+  }
+  if (references.riders > 0) {
+    en.push(`${references.riders} rider${references.riders === 1 ? ' is' : 's are'} attached to it`);
+    id.push(`${idCount(references.riders)} rider terpasang padanya`);
+  }
+  return { en: en.join('; '), id: id.join('; ') };
+}
 
 /** A document slot's English, read from the registry so the two cannot drift. */
 const SLOT = (key: ProductDocumentSlot) => PRODUCT_DOCUMENT_SLOTS.find((s) => s.key === key)!.label;
 
 /**
- * **The products module's own words, in both languages** (P18.98-T7; ADR-0179 §7): what the API serves of the
+ * **The products module's own words, in both languages** (P18.10-T7; ADR-0179 §7): what the API serves of the
  * registry (`domain/constants/product-catalog.ts`) as words — the three document slots' names, on the office's
  * *Products* settings and the catalog's drawer, and the one budget band that is a word, *Lump-sum* — written for the
  * request's reader. Each English is the registry's, byte for byte; the slot keys and band numbers do not change. A

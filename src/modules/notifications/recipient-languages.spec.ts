@@ -4,10 +4,10 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { UserLanguages } from './recipient-languages';
 
 /**
- * **P18.98-T5 AC-5 — whose language an email is written in**: the recipient's saved `users.locale`, read by id, or
+ * **P18.10-T5 AC-5 — whose language an email is written in**: the recipient's saved `users.locale`, read by id, or
  * `null` for somebody who has chosen none, an account that has gone, or an id nobody holds.
  */
-describe('P18.98-T5 AC-5 a recipient’s saved language', () => {
+describe('P18.10-T5 AC-5 a recipient’s saved language', () => {
   let languages: UserLanguages;
   const users = () => mongoose.model(User.name);
 
