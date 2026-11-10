@@ -74,6 +74,7 @@ import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
 import { seedPotensiFixture } from './potensi-fixture';
 import { seedProposalFixture } from './proposal-fixture';
+import { seedAvatarFixture } from './avatar-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
 import { seedHomeFixture } from './home-fixture';
@@ -3827,6 +3828,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     recount,
   });
 
+  // ------------------- profile photos for Agus, Arief and Tari (UI-111, UX-14; `avatar-fixture.ts`): after Tari is placed,
+  // so New Hires shows a photo in her not-yet circle and on Arief's group row, and initials for everybody else.
+  const avatars = await seedAvatarFixture({ storage: options.storage ?? null });
+
   /*
    * P18.8-T6: the first sales the seed holds so far — every lead and production month above — computed before the forum
    * freezes #12's and #13's scorecards, whose *3M new agent %* reads them (`ACTIVATION_3M_PCT`). Migration 0042's own
@@ -4260,6 +4265,8 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   });
   log(advancedAnalytics.guide);
   log(activation3M.guide);
+  log(`Profile photos (${avatars.images}, ${avatars.written} written): Agus, Arief and Tari — Tari's not-yet circle on `
+    + 'New Hires, Arief\'s group row and Agus\'s own; everybody else initials. Sign in as agus@kpm0417.test.');
 
   const after = await countRows();
   const written = Object.fromEntries(COUNTED_COLLECTIONS

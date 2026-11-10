@@ -134,14 +134,14 @@ export class NewHiresService {
       return below.map((id) => members.get(id)).find((m) => m !== undefined && m.role !== 'agent') ?? null;
     };
     const leaders = new Map(listed.map((c) => [c.membershipId, leaderOf(c.membership)] as const));
-    // P19.11-T2 AC-4 (UX-14): each hire's photo, signed, for the circle of one not activated yet; a unit's leader is named.
-    const people = await this.names.pictured(ctx, [
-      ...ids, ...[...leaders.values()].filter((m) => m !== null).map((m) => String(m!._id)),
-    ], ids);
+    // P19.11-T2 AC-4 (UX-14): each hire's photo, signed, for the circle of one not activated yet — and a unit's leader's, for
+    // the group's row (UI-111; 2026-11-10: it drew initials for a leader with a photo). Everybody here is drawn.
+    const drawnIds = [...ids, ...[...leaders.values()].filter((m) => m !== null).map((m) => String(m!._id))];
+    const people = await this.names.pictured(ctx, drawnIds, drawnIds);
     const person = (membershipId: string) => ({ membershipId, name: people.get(membershipId)?.name ?? '' });
     const pictured = (membershipId: string) => ({ ...person(membershipId), photoUrl: people.get(membershipId)?.photoUrl ?? null });
     const unitOf = (leader: MembershipDocument | null): NewHireUnitRefView => (leader
-      ? { kind: leader.role === 'ab' ? 'ab' : 'aab', leader: person(String(leader._id)) }
+      ? { kind: leader.role === 'ab' ? 'ab' : 'aab', leader: pictured(String(leader._id)) }
       : { kind: 'direct', leader: null });
 
     const rows: NewHireRowView[] = listed.map(({ membershipId, membership: m }) => {

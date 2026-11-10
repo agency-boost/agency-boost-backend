@@ -198,8 +198,9 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       }
       // Every slot record names a file storage holds: none written without one. (Phase 18.2's training PDFs are the
       // company's, in its own folder, and `training-seed.spec.ts`'s to count; P19.6-T1's branding images — 0555's logo,
-      // its sizes and its mascot, under `<kpmId>/branding/` (ADR-0218 §2) — are `branding-seed.spec.ts`'s.)
-      expect(storage.puts.filter((key) => !key.includes('/training/') && !key.includes('/branding/')))
+      // its sizes and its mascot, under `<kpmId>/branding/` (ADR-0218 §2) — are `branding-seed.spec.ts`'s; the three
+      // profile photos under `user/<userId>/avatar/` (UI-111, UX-14) are `avatar-seed.spec.ts`'s.)
+      expect(storage.puts.filter((key) => !key.includes('/training/') && !key.includes('/branding/') && !key.includes('/avatar/')))
         .toHaveLength(rows.length + 1);
     });
 

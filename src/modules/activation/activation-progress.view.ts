@@ -109,8 +109,11 @@ export interface ActivationView {
  */
 export interface NewHireUnitRefView {
   kind: 'direct' | 'aab' | 'ab';
-  /** `null` for `direct`. */
-  leader: ActivationPersonView | null;
+  /**
+   * `null` for `direct`. With their photo (2026-11-10, UI-111): the group's row draws their avatar, which showed initials
+   * for a leader who has a photo.
+   */
+  leader: NewHirePersonView | null;
 }
 
 /** A new hire's checklist, where they have one (an Agent placed by a leader, ADR-0103): how far it is, and overdue. */
@@ -131,7 +134,8 @@ export type FirstSaleSourceView = 'sales' | 'manual';
 
 /**
  * A new hire as their row names them (P19.11-T2 AC-4, UX-14): the person, and their profile photo as a signed link —
- * `null` without one, which the row draws as initials — for the circle of a hire not activated yet.
+ * `null` without one, which the row draws as initials — for the circle of a hire not activated yet. A unit's leader
+ * the same way, for the group's row (UI-111).
  */
 export interface NewHirePersonView extends ActivationPersonView {
   photoUrl: string | null;

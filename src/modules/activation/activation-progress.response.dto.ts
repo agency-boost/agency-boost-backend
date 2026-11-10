@@ -256,6 +256,20 @@ export class Activation3MFiguresDto implements Activation3MFiguresView {
   byMonth!: Activation3MMonthDto[];
 }
 
+/**
+ * A new hire as their row names them (P19.11-T2 AC-4), or a unit's leader as its group's row does (UI-111): the person
+ * and their photo.
+ */
+export class NewHirePersonDto extends ActivationPersonDto implements NewHirePersonView {
+  @ApiProperty({
+    type: String, nullable: true,
+    description:
+      'Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws '
+      + 'as initials. The circle of a hire not activated yet shows it (UX-14), and a unit leader\'s group row (UI-111).',
+  })
+  photoUrl!: string | null;
+}
+
 export class NewHireUnitRefDto implements NewHireUnitRefView {
   @ApiProperty({
     type: String, enum: ['direct', 'aab', 'ab'],
@@ -263,8 +277,8 @@ export class NewHireUnitRefDto implements NewHireUnitRefView {
   })
   kind!: 'direct' | 'aab' | 'ab';
 
-  @ApiProperty({ type: ActivationPersonDto, nullable: true, description: '`null` for *Direct Unit*.' })
-  leader!: ActivationPersonDto | null;
+  @ApiProperty({ type: NewHirePersonDto, nullable: true, description: '`null` for *Direct Unit*. With their photo.' })
+  leader!: NewHirePersonDto | null;
 }
 
 export class NewHireUnitDto extends NewHireUnitRefDto implements NewHireUnitView {
@@ -287,17 +301,6 @@ export class NewHireChecklistDto implements NewHireChecklistView {
 
   @ApiProperty({ type: Boolean, description: 'Open, past the window, below 100%.' })
   overdue!: boolean;
-}
-
-/** A new hire as their row names them (P19.11-T2 AC-4): the person and their photo. */
-export class NewHirePersonDto extends ActivationPersonDto implements NewHirePersonView {
-  @ApiProperty({
-    type: String, nullable: true,
-    description:
-      'Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws '
-      + 'as initials. The circle of a hire not activated yet shows it (UX-14).',
-  })
-  photoUrl!: string | null;
 }
 
 export class NewHireRowDto implements NewHireRowView {

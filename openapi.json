@@ -50123,6 +50123,29 @@
           "byMonth"
         ]
       },
+      "NewHirePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "The full name."
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws as initials. The circle of a hire not activated yet shows it (UX-14), and a unit leader's group row (UI-111)."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "photoUrl"
+        ]
+      },
       "NewHireUnitDto": {
         "type": "object",
         "properties": {
@@ -50137,10 +50160,10 @@
           },
           "leader": {
             "nullable": true,
-            "description": "`null` for *Direct Unit*.",
+            "description": "`null` for *Direct Unit*. With their photo.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ActivationPersonDto"
+                "$ref": "#/components/schemas/NewHirePersonDto"
               }
             ]
           },
@@ -50159,29 +50182,6 @@
           "activation3M"
         ]
       },
-      "NewHirePersonDto": {
-        "type": "object",
-        "properties": {
-          "membershipId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "example": "Sari Puspita",
-            "description": "The full name."
-          },
-          "photoUrl": {
-            "type": "string",
-            "nullable": true,
-            "description": "Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws as initials. The circle of a hire not activated yet shows it (UX-14)."
-          }
-        },
-        "required": [
-          "membershipId",
-          "name",
-          "photoUrl"
-        ]
-      },
       "NewHireUnitRefDto": {
         "type": "object",
         "properties": {
@@ -50196,10 +50196,10 @@
           },
           "leader": {
             "nullable": true,
-            "description": "`null` for *Direct Unit*.",
+            "description": "`null` for *Direct Unit*. With their photo.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ActivationPersonDto"
+                "$ref": "#/components/schemas/NewHirePersonDto"
               }
             ]
           }

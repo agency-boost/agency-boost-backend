@@ -19,14 +19,14 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
   const writes = () => h.col('auditLog').find({ action: { $regex: '^activation\\.' } }).sort({ createdAt: 1 }).toArray();
   type Row = {
     hire: { membershipId: string; name: string; photoUrl: string | null };
-    unit: { kind: string; leader: { membershipId: string; name: string } | null };
+    unit: { kind: string; leader: { membershipId: string; name: string; photoUrl: string | null } | null };
     joinDate: string; day: number; firstSaleDate: string | null; activation3M: string; leftOn: string | null;
     checklist: { state: string; done: number; total: number; pct: number; overdue: boolean } | null;
   };
   const roster = async () => (await h.http().get('/new-hires').expect(200)).body as {
     today: string;
     sections: Record<'inProgress' | 'activated' | 'notActivated', Row[]>;
-    units: { kind: string; leader: { membershipId: string; name: string } | null }[];
+    units: { kind: string; leader: { membershipId: string; name: string; photoUrl: string | null } | null }[];
   };
   /**
    * P18.8-T6 (ADR-0173): the roster is sections by 3M result now, each row naming its unit. `shape` keeps the D-group
@@ -77,7 +77,7 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         joinDate: '2026-06-10', day: 97, firstSaleDate: null, firstSaleDay: null, firstSaleSource: null, status: 'not_yet',
         activation3M: 'not_activated', leftOn: null, checklist: { state: 'open', done: 1, total: 16, pct: 6, overdue: true },
       });
-      expect(r.units[2].leader).toEqual({ membershipId: id('SARI'), name: 'Sari Puspita' });
+      expect(r.units[2].leader).toEqual({ membershipId: id('SARI'), name: 'Sari Puspita', photoUrl: null });
     });
 
     it('Phase 13 exit review the leader cards are A to Z by the leader’s full name, Direct Unit first — not in COACH’s order, nearest first', async () => {
@@ -549,10 +549,26 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         const r = await roster();
         expect([rowOf(r, 'Budi Santoso').hire.photoUrl, rowOf(r, 'Rina Wijaya').hire.photoUrl]).toEqual([SIGNED, null]);
         expect(JSON.stringify(r)).not.toContain(`"${KEY}"`);
-        // A unit's leader is named, never pictured: the row draws no avatar for them.
-        expect(r.units.every((u) => u.leader === null || !('photoUrl' in u.leader))).toBe(true);
       } finally {
         await h.col('users').updateOne(budi(), { $set: { avatarUrl: null } });
+      }
+    });
+
+    it('UI-111 a unit’s leader carries their photo for the group’s row, as a signed link — never the storage key', async () => {
+      const SARI_KEY = 'user/66f0000000000000000009a2/avatar/01JBBBBBBBBBBBBBBBBBBBBBBB.jpg';
+      await h.start('BUDI', '2026-07-15');
+      await h.col('users').updateOne({ email: 'sari@coaching.test' }, { $set: { avatarUrl: SARI_KEY } });
+      try {
+        h.as('AGUS');
+        const r = await roster();
+        // 2026-11-10: the group's row drew Sari's initials although she has a photo; Direct Unit has no leader to send.
+        expect(r.units.map((u) => [u.kind, u.leader?.name ?? null, u.leader?.photoUrl ?? null])).toEqual([
+          ['aab', 'Sari Puspita', `https://cdn.test/${SARI_KEY}?sig=abc`],
+        ]);
+        expect(rowOf(r, 'Budi Santoso').unit.leader).toMatchObject({ name: 'Sari Puspita', photoUrl: `https://cdn.test/${SARI_KEY}?sig=abc` });
+        expect(JSON.stringify(r)).not.toContain(`"${SARI_KEY}"`);
+      } finally {
+        await h.col('users').updateOne({ email: 'sari@coaching.test' }, { $set: { avatarUrl: null } });
       }
     });
 
