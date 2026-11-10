@@ -140,20 +140,36 @@ describe.each([
     expect(Object.values(roster.sections).flat().map((r) => r.hire.name)).not.toEqual(expect.arrayContaining(['Sari Puspita']));
   });
 
-  it('UI-023 Seed: Agus’s Aktivasi 3M is 7 of 7 — Lukman outside it — and each leader’s group is 100%: Arief 2 of 2', async () => {
+  /*
+   * *Changed 2026-11-10 (P19.11-T2 AC-2, UX-4; ADR-0239):* this read *7 of 7 — Lukman outside it*, every group 100%. A late
+   * first sale is due now, in the denominator and not the numerator: the brief's example is Agus's own unit at 75%.
+   */
+  it('P19.11-T2 AC-2 Seed: Agus’s own unit is 75% — Dimas, Indah and Siti on time, Lukman late — the tile 7 of 8, Arief 2 of 2 with Tari not due', async () => {
     const roster = await wired.newHires.roster(await as('agus@kpm0417.test'));
-    expect(roster.activation3M.all).toEqual({ activated: 7, notActivated: 0, late: 1, inProgress: 2, pct: 100 });
+    expect(roster.activation3M.all).toEqual({ activated: 7, notActivated: 0, late: 1, inProgress: 2, pct: 88 });
     // Direct Unit first, then the leaders A to Z.
     expect(roster.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all]))
       .toEqual([
-        ['Direct Unit', { activated: 3, notActivated: 0, late: 1, inProgress: 0, pct: 100 }],
+        ['Direct Unit', { activated: 3, notActivated: 0, late: 1, inProgress: 0, pct: 75 }],
         ['Arief Hidayat', { activated: 2, notActivated: 0, late: 0, inProgress: 1, pct: 100 }],
         ['Sari Puspita', { activated: 2, notActivated: 0, late: 0, inProgress: 1, pct: 100 }],
       ]);
+    const direct = Object.values(roster.sections).flat().filter((r) => r.unit.kind === 'direct').map((r) => r.hire.name).sort();
+    expect(direct).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Lukman Hakim', 'Siti Rahmawati']);
     // Each month's figure is its join month's new hires.
     for (const month of roster.activation3M.byMonth) {
       const theirs = Object.values(roster.sections).flat().filter((r) => r.joinDate.startsWith(month.month));
       expect(month.activated + month.notActivated + month.late + month.inProgress).toBe(theirs.length);
+    }
+  });
+
+  it('P19.11-T2 AC-1 Seed: every row of Agus’s and Arief’s New Hires opens — Tari, who left, read-only', async () => {
+    for (const email of ['agus@kpm0417.test', 'arief@kpm0417.test']) {
+      const ctx = await as(email);
+      for (const row of Object.values((await wired.newHires.roster(ctx)).sections).flat()) {
+        const view = await wired.newHires.detail(ctx, row.hire.membershipId) as NewHireDetailView;
+        expect([email, row.hire.name, view.readOnly]).toEqual([email, row.hire.name, row.hire.name === 'Tari Wulandari']);
+      }
     }
   });
 

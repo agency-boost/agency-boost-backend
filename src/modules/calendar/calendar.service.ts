@@ -79,18 +79,15 @@ export interface CalendarSettings {
   hideDetails: boolean;
 }
 
-/** One timed thing on the reader's today, for Home's *Aksi hari ini* to fill up with (UI-100, UI-104 point 7). */
-export interface CalendarTodayItem {
-  kind: 'entry' | 'event';
-  /** The calendar entry's id, or the event's. */
-  id: string;
-  title: string;
-  /** A calendar entry's type code, or the event's type label as the office typed it. */
-  type: string;
-  start: string;
-  end: string;
-  startsAt: string;
-}
+/**
+ * **One timed thing on the reader's today, as the Calendar answers it** (UI-100; P19.11-T1 AC-3, UX-2): an entry in the
+ * Calendar's own `CalendarEntryView`, or a joined event in its own — so Home draws it with the Agenda's row (its time
+ * range, title and type, its tone's accent bar) and opens it as the Calendar does. *Changed 2026-11-10: it was a
+ * flattened row with a start and no end.*
+ */
+export type CalendarTodayItem =
+  | { kind: 'entry'; entry: CalendarEntryView }
+  | { kind: 'event'; event: JoinedEvent };
 
 /**
  * **The reader's today on their calendar, counted** (UI V1, UI-104 point 7; Home's *Jadwal hari ini* and *Aksi hari
@@ -100,11 +97,11 @@ export interface CalendarTodayView {
   today: LocalDate;
   /** **Timed things today** (*n meeting*): the reader's entries not declined — a trip of any kind left out — and the events they joined. */
   meetings: number;
-  /** **Open Tugas today** (*Tugas n*): lead next actions and coaching action items due today, a ticked one excluded. */
+  /** **Open Tugas today** (*Tugas n*; P19.11-T1 AC-2): lead next actions and coaching action items due today, a ticked one not counted. */
   tasks: number;
-  /** Today's Tugas, in the Agenda checklist's order. */
+  /** Today's Tugas, **the ticked ones included** (`done`; P19.11-T1 AC-1), in the Agenda checklist's order. */
   taskItems: CalendarTaskView[];
-  /** Today's timed things not yet ended, soonest first. */
+  /** Today's timed things not yet ended — one that began on an earlier day and runs into today included — soonest first. */
   upcoming: CalendarTodayItem[];
 }
 
@@ -233,7 +230,8 @@ export class CalendarService {
        */
       ...(compared && hidden.has(subject.membershipId)
         ? {
-          tasks: tasks.map((task) => ({ busy: true as const, date: task.date })),
+          // Open tasks alone, as before the ticked stayed on the calendar (P19.11-T1 AC-2): a count is of open ones.
+          tasks: tasks.filter((task) => !task.done).map((task) => ({ busy: true as const, date: task.date })),
           events: joined.map((event) => ({
             busy: true as const,
             allDay: event.allDay, date: event.date, start: event.start, end: event.end,
@@ -269,8 +267,14 @@ export class CalendarService {
    *
    * - `meetings`: the reader's own entries on today that are not trips and not declined, and the events they joined that
    *   touch today. A trip is a line at the top of the day, not a meeting.
-   * - `tasks`: today's open *Tugas* — the moment one is ticked it is gone from here, as from the Agenda.
-   * - `upcoming`: today's timed things not yet ended, soonest first, for *Aksi hari ini* after its tasks.
+   * - `tasks`: today's **open** *Tugas* — the moment one is ticked it is not counted, as the Agenda's *Tugas · n*
+   *   (P19.11-T1 AC-2, UXQ8).
+   * - `taskItems`: today's *Tugas*, the ticked ones still among them, `done` (P19.11-T1 AC-1).
+   * - `upcoming`: today's timed things not yet ended, soonest first, each in the Calendar's own shape — an entry as the
+   *   Agenda reads it, with what the reader owes it, and a joined event — for *Aksi hari ini* after its tasks.
+   *
+   * *Changed 2026-11-10 (P19.11-T1 AC-3, UX-2): `nextAfterToday`, which filled *Aksi hari ini* with the days after, is
+   * gone — the list is today's alone.*
    */
   async today(ctx: RequestContext): Promise<CalendarTodayView> {
     const me = requireMembership(ctx);
@@ -285,40 +289,24 @@ export class CalendarService {
     ]);
     const timed = rows.filter((entry) => entry.type !== CALENDAR_ALL_DAY_TYPE);
     const now = this.clock.now();
-    const upcoming: CalendarTodayItem[] = [
-      ...timed.filter((entry) => entry.endsAt > now).map((entry) => entryItem(entry, timezone)),
-      ...joined.filter((event) => new Date(event.endsAt) > now).map(eventItem),
-    ].sort(soonestFirst);
-    return { today: office.today, meetings: timed.length + joined.length, tasks: taskItems.length, taskItems, upcoming };
-  }
-
-  /**
-   * **The reader's next timed things after today** (UI V1, UI-100 *Aksi hari ini*: *fill the rest with my next agenda
-   * items — timed events, soonest first, from now on; today first, then the next days*). `today().upcoming` is today's.
-   * This is the days after: the reader's calendar entries and **the events they joined** (UI-104 #1), soonest first, at
-   * most `limit`. A trip is left out, as `today()` leaves it out: it is a line, never a meeting. There is no horizon:
-   * the next one is the next one, however far off. Home reads it (T16); no route of its own.
-   */
-  async nextAfterToday(ctx: RequestContext, limit: number): Promise<(CalendarTodayItem & { date: LocalDate })[]> {
-    if (limit <= 0) return [];
-    const me = requireMembership(ctx);
-    const office = await this.days.office(ctx);
-    const timezone = office.timezone;
-    const tomorrow = startOfOfficeDay(timezone, addDays(office.today, 1));
-    const [rows, joined] = await Promise.all([
-      this.entries.find(
-        ctx,
-        { $and: [onCalendarOf(me), { startsAt: { $gte: tomorrow } }, { type: { $ne: CALENDAR_ALL_DAY_TYPE } }] } as FilterQuery<CalendarEventDocument>,
-        { sort: { startsAt: 1, _id: 1 }, limit },
-      ),
-      // Every joined event still to start: the reader's RSVPs are few, so no horizon is needed to keep the read small.
-      this.auto.joinedEventsOf(ctx, me, tomorrow, NO_HORIZON, timezone),
+    const ahead = timed.filter((entry) => entry.endsAt > now);
+    // The Agenda's own reading of an entry: its people's names, and whom the reader coaches for a 1:1's chips.
+    const [coaches, names] = await Promise.all([
+      ahead.some((entry) => entry.type === 'coaching') ? this.coachedBy(ctx, me) : Promise.resolve(new Set<string>()),
+      ahead.length > 0 ? this.names.byMembershipId(ctx, namedIn(ahead)) : Promise.resolve(new Map<string, string>()),
     ]);
-    const items = [
-      ...rows.map((entry) => ({ ...entryItem(entry, timezone), date: officeClockOf(timezone, entry.startsAt).date })),
-      ...joined.filter((event) => new Date(event.startsAt) >= tomorrow).map((event) => ({ ...eventItem(event), date: event.date })),
+    const reader: Reader = { membershipId: me, coaches, names, timezone };
+    const upcoming: CalendarTodayItem[] = [
+      ...ahead.map((entry): CalendarTodayItem => ({ kind: 'entry', entry: entryView(entry, reader, standingOf(entry, me)!) })),
+      ...joined.filter((event) => new Date(event.endsAt) > now).map((event): CalendarTodayItem => ({ kind: 'event', event })),
     ].sort(soonestFirst);
-    return items.slice(0, limit);
+    return {
+      today: office.today,
+      meetings: timed.length + joined.length,
+      tasks: taskItems.filter((task) => !task.done).length,
+      taskItems,
+      upcoming,
+    };
   }
 
   /**
@@ -656,35 +644,16 @@ function requireMembership(ctx: RequestContext): string {
   return me;
 }
 
-/**
- * **A timed entry as *Aksi hari ini* lists it** (UI-100, UI-104 point 7): its times on the office's wall clock, an end at
- * the next midnight `00:00` as `officeTimingOf` answers it. Never a trip: `today` and `nextAfterToday` leave trips out.
- */
-function entryItem(entry: CalendarEventDocument, timezone: string): CalendarTodayItem {
-  return {
-    kind: 'entry', id: String(entry._id), title: entry.title, type: entry.type,
-    start: officeClockOf(timezone, entry.startsAt).time, end: officeClockOf(timezone, entry.endsAt).time,
-    startsAt: entry.startsAt.toISOString(),
-  };
-}
+/** A timed thing of today's: when it starts, and its id — an entry's or an event's. */
+const startOf = (item: CalendarTodayItem) => (item.kind === 'entry' ? item.entry.startsAt : item.event.startsAt);
+const idOf = (item: CalendarTodayItem) => (item.kind === 'entry' ? item.entry.entryId : item.event.eventId);
 
-/** **A joined event as *Aksi hari ini* lists it** (UI-104 point 1): its times, and its type's label as the office typed it. */
-function eventItem(event: JoinedEvent): CalendarTodayItem {
-  return {
-    kind: 'event', id: event.eventId, title: event.title, type: event.type.label,
-    start: event.start, end: event.end, startsAt: event.startsAt,
-  };
-}
-
-/** Soonest first, and by id on a tie, so two reads never shuffle: `today`'s and `nextAfterToday`'s order. */
+/** Soonest first, and by id on a tie, so two reads never shuffle: `today`'s order. */
 function soonestFirst(a: CalendarTodayItem, b: CalendarTodayItem): number {
-  return a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id);
+  return startOf(a).localeCompare(startOf(b)) || idOf(a).localeCompare(idOf(b));
 }
 
 /** A member's calendar: every entry they organise, and every one they attend but have not declined. */
-/** The far end of a read with no horizon: the latest instant a `Date` holds. */
-const NO_HORIZON = new Date(8_640_000_000_000_000);
-
 function onCalendarOf(membershipId: string): FilterQuery<CalendarEventDocument> {
   return {
     $or: [

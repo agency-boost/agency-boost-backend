@@ -135,6 +135,50 @@ describe('a Personal Summary with a subject, over HTTP (P11-T4)', () => {
       expect(theirs.goal).toEqual(hers.goal);
     });
 
+    it('P19.11-T5 AC-4 a coach reads the coachee’s open leads only, as `GET /leads?owner=` answers them — hers, named, no proposals', async () => {
+      as('AGUS');
+      const rows = (await get({ for: office.id.INDAH }).expect(200)).body.leads.rows as {
+        id: string; name: string; ownerMembershipId: string; owner: { name: string | null }; proposals: unknown;
+      }[];
+      const listed = (await wired.leadRecords.list(office.as('AGUS'), { owner: office.id.INDAH, outcome: 'open' })).rows;
+
+      // Hers, what needs attention first: the dated one, then the undated.
+      expect(rows.map((r) => r.name)).toEqual(['Pak Hadi', 'Ibu Wati']);
+      for (const row of rows) {
+        // The card's not-mine form reads `ownerMembershipId` and `owner` (*Milik Indah Permatasari*); no proposal is a coach's.
+        expect(row).toMatchObject({ ownerMembershipId: office.id.INDAH, owner: { name: 'Indah Permatasari' }, proposals: null });
+        expect(row).toEqual(JSON.parse(JSON.stringify(listed.find((l) => l.id === row.id))));
+      }
+    });
+
+    it('P19.11-T5 AC-4 the coachee’s own read carries her proposals; her coach’s copy of the same rows carries none', async () => {
+      as('INDAH');
+      const [first] = (await get().expect(200)).body.leads.rows as { id: string }[];
+      const proposals = mongoose.connection.db!.collection('proposals');
+      const { insertedId } = await proposals.insertOne({
+        kpmId: KPM_A, ownerMembershipId: office.id.INDAH, leadId: first.id, channel: 'agency', items: [], status: 'draft',
+        version: 1, deletedAt: null, createdAt: ROSTER_NOW, updatedAt: ROSTER_NOW,
+      } as never);
+      try {
+        const hers = (await get().expect(200)).body.leads.rows as { id: string; proposals: { count: number } | null }[];
+        as('AGUS');
+        const theirs = (await get({ for: office.id.INDAH }).expect(200)).body.leads.rows as { id: string; proposals: unknown }[];
+
+        expect(hers.find((r) => r.id === first.id)!.proposals).toMatchObject({ count: 1 });
+        expect(theirs.find((r) => r.id === first.id)!.proposals).toBeNull();
+      } finally {
+        await proposals.deleteOne({ _id: insertedId });
+      }
+    });
+
+    it('P19.11-T5 AC-4 another office’s AB naming the coachee is 404, and no lead of hers is in the answer', async () => {
+      as('B_AB');
+      const res = await get({ for: office.id.INDAH }).expect(404);
+
+      expect(JSON.stringify(res.body)).not.toContain('Pak Hadi');
+      expect(await audit().countDocuments()).toBe(0);
+    });
+
     it('P11-T4 AC-1 without for, or naming the caller, it is the caller’s own Summary, unchanged', async () => {
       as('AGUS');
       const absent = (await get().expect(200)).body;

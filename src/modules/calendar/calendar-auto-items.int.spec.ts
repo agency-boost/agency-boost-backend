@@ -4,11 +4,13 @@ import { ROSTER_TODAY, type Who } from '../../../test/coaching-office';
 import { startCalendar, stopCalendar, timed, WEEK, type CalendarHarness } from '../../../test/calendar-office';
 import { CoachingActionDoneController } from '@/modules/coaching/coaching-action-done.controller';
 import { LeadController } from '@/modules/leads/lead.controller';
+import type { CalendarTodayItem } from './calendar.service';
 
 type Doc = Record<string, unknown>;
 type Task = {
   taskId: string; source: 'lead' | 'coaching'; date: string; name: string; note: string; phone: string | null;
   lead: { leadId: string; version: number } | null; coaching: { sessionId: string; itemId: string; coachMembershipId: string } | null;
+  done: boolean;
 };
 
 /**
@@ -85,7 +87,7 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       expect(tasksOf(week)).toEqual([{
         taskId: `lead:${wiwik.id}`, source: 'lead', date: '2026-09-15', ownerMembershipId: h.id('INDAH'),
         name: 'Ibu Wiwik', note: 'Invite BOP', phone: '+6281234567890',
-        lead: { leadId: wiwik.id, version: wiwik.version }, coaching: null,
+        lead: { leadId: wiwik.id, version: wiwik.version }, coaching: null, done: false,
       }]);
       // Nobody else's calendar holds it: not a peer's, not the leader's own.
       expect(tasksOf(await read('DIMAS'))).toEqual([]);
@@ -208,21 +210,46 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
   // ------------------------------------------------------------------ ticking
 
   describe('ticking a task completes it at its source, and Urungkan restores it (UI-104 point 4)', () => {
-    it('UI-104 the owner ticks a lead’s next action: it leaves the calendar, the lead asks for a new one; Urungkan puts it back', async () => {
+    /*
+     * *Rewritten 2026-11-10 (P19.11-T1 AC-1, UX-1):* a ticked task left the calendar, so it vanished on a refresh. It now
+     * stays on its due date, `done: true`, read back from `nextActionDone`; the lead still asks for a new next action.
+     */
+    it('P19.11-T1 AC-1 the owner ticks a lead’s next action: it stays on its date done, with its note and the lead’s new version; Urungkan makes it open again', async () => {
       const wiwik = await lead('INDAH', { name: 'Ibu Wiwik', nextActionDate: '2026-09-15', nextActionNote: 'Invite BOP' });
       h.as('INDAH');
       const ticked = (await h.http().put(`/leads/${wiwik.id}/next-action/done`).send({ done: true, version: wiwik.version }).expect(200)).body;
       expect(ticked).toMatchObject({ nextActionDate: null, nextActionNote: null, version: wiwik.version + 1 });
-      expect(tasksOf(await read('INDAH'))).toEqual([]);
+      // A refresh — a new read — still holds it, on the day it was due, done, pinned to the version the untick needs.
+      expect(tasksOf(await read('INDAH'))).toEqual([expect.objectContaining({
+        taskId: `lead:${wiwik.id}`, source: 'lead', date: '2026-09-15', name: 'Ibu Wiwik', note: 'Invite BOP',
+        lead: { leadId: wiwik.id, version: ticked.version }, done: true,
+      })]);
       const stored = await h.col('leads').findOne({ _id: new mongoose.Types.ObjectId(wiwik.id) });
       expect(stored!.nextActionDone).toMatchObject({ date: '2026-09-15', note: 'Invite BOP', byMembershipId: h.id('INDAH') });
+      // The Agenda's other periods hold it the same way: 3 Hari from its day, the Month around it.
+      expect(tasksOf(await read('INDAH', { view: 'three_days', date: '2026-09-15' })).map((t) => [t.taskId, t.done])).toEqual([[`lead:${wiwik.id}`, true]]);
+      expect(tasksOf(await read('INDAH', { view: 'month' })).filter((t) => t.source === 'lead').map((t) => [t.taskId, t.date, t.done]))
+        .toEqual([[`lead:${wiwik.id}`, '2026-09-15', true]]);
 
       h.as('INDAH');
       const undone = (await h.http().put(`/leads/${wiwik.id}/next-action/done`).send({ done: false, version: ticked.version }).expect(200)).body;
       expect(undone).toMatchObject({ nextActionDate: '2026-09-15', nextActionNote: 'Invite BOP' });
-      expect(tasksOf(await read('INDAH')).map((t) => t.taskId)).toEqual([`lead:${wiwik.id}`]);
+      expect(tasksOf(await read('INDAH')).map((t) => [t.taskId, t.date, t.done])).toEqual([[`lead:${wiwik.id}`, '2026-09-15', false]]);
       const audit = await h.col('auditLog').find({ targetCollection: 'leads', targetId: wiwik.id }).toArray();
       expect(audit.map((r) => r.action)).toEqual(expect.arrayContaining(['lead.next_action_done', 'lead.next_action_undone']));
+    });
+
+    it('P19.11-T1 AC-1 known limit: a new next action written over a ticked one takes the ticked one off its day; a closed lead’s ticked task leaves too', async () => {
+      const wiwik = await lead('INDAH', { name: 'Ibu Wiwik', nextActionDate: '2026-09-15', nextActionNote: 'Invite BOP' });
+      h.as('INDAH');
+      const ticked = (await h.http().put(`/leads/${wiwik.id}/next-action/done`).send({ done: true, version: wiwik.version }).expect(200)).body;
+      await h.http().patch(`/leads/${wiwik.id}`).send({ nextActionDate: '2026-09-18', nextActionNote: 'Call back', version: ticked.version }).expect(200);
+      expect(tasksOf(await read('INDAH')).map((t) => [t.date, t.note, t.done])).toEqual([['2026-09-18', 'Call back', false]]);
+
+      const melati = await lead('INDAH', { name: 'Ibu Melati', nextActionDate: '2026-09-16' });
+      await h.http().put(`/leads/${melati.id}/next-action/done`).send({ done: true, version: melati.version }).expect(200);
+      await h.col('leads').updateOne({ _id: new mongoose.Types.ObjectId(melati.id) }, { $set: { outcome: 'won' } });
+      expect(tasksOf(await read('INDAH')).map((t) => t.name)).toEqual(['Ibu Wiwik']);
     });
 
     /*
@@ -264,8 +291,10 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       expect((await h.col('leads').findOne({ _id: new mongoose.Types.ObjectId(wiwik.id) }))!.nextActionDate).toBe('2026-09-15');
     });
 
-    it('UI-104 the coachee ticks a coaching item: it leaves the calendar, Urungkan brings it back, and nothing agreed moves', async () => {
+    // *Rewritten 2026-11-10 (P19.11-T1 AC-1, UX-1):* a ticked item stays on its due date, done, where it left the calendar.
+    it('P19.11-T1 AC-1 the coachee ticks a coaching item: it stays on its due date done, Urungkan makes it open again, and nothing agreed moves', async () => {
       const [task] = tasksOf(await read('RINA'));
+      expect(task.done).toBe(false);
       const path = `/coaching/sessions/${task.coaching!.sessionId}/action-items/${task.coaching!.itemId}/done`;
       const before = await h.col('coachingSessions').findOne({ _id: new mongoose.Types.ObjectId(task.coaching!.sessionId) });
 
@@ -273,7 +302,7 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       expect((await h.http().put(path).send({ done: true }).expect(200)).body).toEqual({
         sessionId: task.coaching!.sessionId, itemId: 'RINA-1', done: true,
       });
-      expect(tasksOf(await read('RINA'))).toEqual([]);
+      expect(tasksOf(await read('RINA'))).toEqual([{ ...task, done: true }]);
       const after = await h.col('coachingSessions').findOne({ _id: before!._id });
       expect(after!.version).toBe(before!.version);
       expect(after!.actionItems).toEqual(before!.actionItems);
@@ -281,7 +310,7 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
 
       h.as('RINA');
       await h.http().put(path).send({ done: false }).expect(200);
-      expect(tasksOf(await read('RINA')).map((t) => t.taskId)).toEqual([task.taskId]);
+      expect(tasksOf(await read('RINA'))).toEqual([{ ...task, done: false }]);
     });
 
     it('UI-104 nobody but the coachee ticks their item: the coach, a leader above, another office and a read-only support session are refused', async () => {
@@ -296,7 +325,7 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       // An item the session does not hold is the same 404.
       h.as('RINA');
       await h.http().put(`/coaching/sessions/${task.coaching!.sessionId}/action-items/nope/done`).send({ done: true }).expect(404);
-      expect(tasksOf(await read('RINA'))).toHaveLength(1);
+      expect(tasksOf(await read('RINA')).map((t) => t.done)).toEqual([false]);
     });
 
     it('T1 a lead’s next action per role: an AB and an AAB tick their own; the Owner and the Admin are 403; a Super Admin outside a session and a read-only support session are refused', async () => {
@@ -395,6 +424,19 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       expect(tasksOf(await read('INDAH'))[0].name).toBe('Ibu Melati');
     });
 
+    it('P19.11-T1 AC-1 AC-2 a leader comparing reads a ticked task done; one who hides their details is counted by open tasks alone', async () => {
+      await lead('INDAH', { name: 'Ibu Melati', nextActionDate: '2026-09-15', nextActionNote: 'Collect the signed SPAJ.' });
+      const done = await lead('INDAH', { name: 'Pak Done', nextActionDate: '2026-09-16', nextActionNote: 'Sent the brochure.' });
+      h.as('INDAH');
+      await h.http().put(`/leads/${done.id}/next-action/done`).send({ done: true, version: done.version }).expect(200);
+
+      expect(tasksOf(await read('AGUS', { for: h.id('INDAH') })).map((t) => [t.name, t.date, t.done])).toEqual([
+        ['Ibu Melati', '2026-09-15', false], ['Pak Done', '2026-09-16', true],
+      ]);
+      await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(h.id('INDAH')) }, { $set: { calendarHideDetails: true } });
+      expect((await read('AGUS', { for: h.id('INDAH') })).tasks).toEqual([{ busy: true, date: '2026-09-15' }]);
+    });
+
     it('L2 a compared person’s WhatsApp number is served beside their tasks, and is null when they hide their details', async () => {
       await h.col('users').updateOne({ fullName: 'Indah Permatasari' }, { $set: { phone: '+6281211112222' } });
       try {
@@ -421,9 +463,16 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
         kpmId: kpmB(), ownerMembershipId: h.id('INDAH'), name: 'Office B lead', nextActionDate: '2026-09-15', outcome: null,
         version: 1, deletedAt: null, commitments: [], transitions: [], contact: { phone: null, email: null },
       });
+      // P19.11-T1 AC-1: a ticked one filed in office B under her id never reaches her calendar, nor Home's today.
+      await h.col('leads').insertOne({
+        kpmId: kpmB(), ownerMembershipId: h.id('INDAH'), name: 'Office B ticked lead', nextActionDate: null, outcome: null,
+        nextActionDone: { date: ROSTER_TODAY, note: 'Done in B', at: new Date(), byMembershipId: h.id('INDAH') },
+        version: 2, deletedAt: null, commitments: [], transitions: [], contact: { phone: null, email: null },
+      });
       const week = await read('INDAH');
       expect(week.tasks).toEqual([]);
       expect(week.events).toEqual([]);
+      expect(await h.wired.calendar.today(h.office.as('INDAH'))).toMatchObject({ tasks: 0, taskItems: [], upcoming: [] });
     });
   });
 
@@ -506,21 +555,50 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
   // ------------------------------------------------------------------ Home's counts
 
   describe('today’s counts for Home’s Jadwal hari ini (UI-104 point 7)', () => {
-    it('UI-104 counts timed things and open Tugas today, a trip and a ticked task left out, and lists what is still to come', async () => {
+    /** A timed thing of today's, as `today().upcoming` holds it: its kind, title, type and times. */
+    const row = (u: CalendarTodayItem) => (u.kind === 'entry'
+      ? ['entry', u.entry.title, u.entry.type, u.entry.date, u.entry.start, u.entry.end]
+      : ['event', u.event.title, u.event.type.label, u.event.date, u.event.start, u.event.end]);
+
+    // *Rewritten 2026-11-10 (P19.11-T1 AC-1 to AC-3):* the ticked task is listed, done, and not counted; each timed thing
+    // comes in the Calendar's own shape, with its end.
+    it('P19.11-T1 AC-2 AC-3 counts timed things and open Tugas today — a trip left out, a ticked task listed done and not counted — and lists what is still to come in the Calendar’s shapes', async () => {
       await lead('INDAH', { name: 'Ibu Wiwik', nextActionDate: ROSTER_TODAY });
       const done = await lead('INDAH', { name: 'Pak Done', nextActionDate: ROSTER_TODAY });
       h.as('INDAH');
       await h.http().put(`/leads/${done.id}/next-action/done`).send({ done: true, version: done.version }).expect(200);
       await h.http().post('/calendar/entries').send(timed(0, '09:00', '09:30', { title: 'Already over' })).expect(201);
-      await h.http().post('/calendar/entries').send(timed(0, '13:00', '14:00', { title: 'Client review', type: 'client' })).expect(201);
+      const review = (await h.http().post('/calendar/entries').send(timed(0, '13:00', '14:00', { title: 'Client review', type: 'client' })).expect(201)).body;
       await h.http().post('/calendar/entries').send({ type: 'travel', startsOn: ROSTER_TODAY, endsOn: '2026-09-15' }).expect(201);
       const bop = await event({ startsAt: new Date('2026-09-14T08:00:00Z'), endsAt: new Date('2026-09-14T09:00:00Z') });
       await rsvp(bop, 'INDAH', 'going');
 
       const today = await h.wired.calendar.today(h.office.as('INDAH'));
       expect(today).toMatchObject({ today: ROSTER_TODAY, meetings: 3, tasks: 1 });
-      expect(today.taskItems.map((t) => t.name)).toEqual(['Ibu Wiwik']);
-      expect(today.upcoming.map((u) => [u.kind, u.title, u.start])).toEqual([['entry', 'Client review', '13:00'], ['event', 'BOP Surabaya', '15:00']]);
+      expect(today.taskItems.map((t) => [t.name, t.done])).toEqual([['Ibu Wiwik', false], ['Pak Done', true]]);
+      expect(today.upcoming.map(row)).toEqual([
+        ['entry', 'Client review', 'client', ROSTER_TODAY, '13:00', '14:00'],
+        ['event', 'BOP Surabaya', 'Business Opportunity Presentation', ROSTER_TODAY, '15:00', '16:00'],
+      ]);
+      // The entry is the Calendar's own reading of it — what `GET /calendar/entries/:id` answers its organiser.
+      const [entry] = today.upcoming;
+      expect(entry.kind === 'entry' && entry.entry).toMatchObject({ entryId: review.entryId, readerIs: 'organiser', version: 1, myAnswer: null });
+    });
+
+    it('P19.11-T1 AC-3 today alone: nothing of the days after, and a joined event that began yesterday and runs into today is today’s, with its two dates', async () => {
+      h.as('INDAH');
+      await h.http().post('/calendar/entries').send(timed(1, '09:00', '10:00', { title: 'Tomorrow' })).expect(201);
+      const tomorrow = await event({ title: 'Tomorrow’s BOP', startsAt: new Date('2026-09-15T02:00:00Z'), endsAt: new Date('2026-09-15T04:00:00Z') });
+      await rsvp(tomorrow, 'INDAH', 'going');
+      // 13 September 20:00 to 15 September 12:00 in Jakarta.
+      const retreat = await event({ title: 'Leaders retreat', startsAt: new Date('2026-09-13T13:00:00Z'), endsAt: new Date('2026-09-15T05:00:00Z') });
+      await rsvp(retreat, 'INDAH', 'going');
+      await lead('INDAH', { name: 'Pak Besok', nextActionDate: '2026-09-15' });
+
+      const today = await h.wired.calendar.today(h.office.as('INDAH'));
+      expect(today.taskItems).toEqual([]);
+      expect(today.upcoming.map(row)).toEqual([['event', 'Leaders retreat', 'Business Opportunity Presentation', '2026-09-13', '20:00', '12:00']]);
+      expect(today.upcoming[0].kind === 'event' && today.upcoming[0].event).toMatchObject({ startsOn: '2026-09-13', endsOn: '2026-09-15' });
     });
 
     it('UI-104 counts nothing of anybody else’s, nor another office’s', async () => {
@@ -535,84 +613,55 @@ describe('Calendar auto items, Tugas and the new views (UI-104)', () => {
       const bop = await event({ startsAt: new Date('2026-09-14T08:00:00Z'), endsAt: new Date('2026-09-14T09:00:00Z') });
       await rsvp(bop, 'INDAH', 'going');
       const { upcoming } = await h.wired.calendar.today(h.office.as('INDAH'));
-      expect(upcoming.map((u) => u.id)).toEqual([entry.entryId, bop].sort());
-      expect(upcoming.map((u) => [u.start, u.end])).toEqual([['15:00', '16:00'], ['15:00', '16:00']]);
+      expect(upcoming.map((u) => (u.kind === 'entry' ? u.entry.entryId : u.event.eventId))).toEqual([entry.entryId, bop].sort());
+      expect(upcoming.map((u) => row(u).slice(4))).toEqual([['15:00', '16:00'], ['15:00', '16:00']]);
     });
   });
 
-  // ------------------------------------------------------------------ Home's next days
+  // ------------------------------------------------------------------ Home's today, and nothing after it
 
-  describe('the next timed things after today, for Home’s Aksi hari ini (UI-100)', () => {
-    const next = (who: Who, limit = 10) => h.wired.calendar.nextAfterToday(h.office.as(who), limit);
+  /*
+   * *Rewritten 2026-11-10 (P19.11-T1 AC-3, UX-2):* `nextAfterToday` filled Home's *Aksi hari ini* up with the days after
+   * today — 10 and 11 November on the 9th. It is gone, and these hold the list Home reads to today.
+   */
+  describe('P19.11-T1 AC-3 today’s timed things for Home’s Aksi hari ini, and nothing after today', () => {
+    const row = (u: CalendarTodayItem) => (u.kind === 'entry'
+      ? ['entry', u.entry.title, u.entry.date, u.entry.start, u.entry.end]
+      : ['event', u.event.title, u.event.date, u.event.start, u.event.end]);
+    const upcomingOf = async (who: Who) => (await h.wired.calendar.today(h.office.as(who))).upcoming;
 
-    it('UI-100 a limit of 0 or less answers nothing, and reads nothing', async () => {
-      h.as('INDAH');
-      await h.http().post('/calendar/entries').send(timed(1, '09:00', '10:00')).expect(201);
-      const entries = jest.spyOn(h.wired.calendarEntries, 'find');
-      const rsvps = jest.spyOn(h.wired.eventRsvps, 'find');
-      try {
-        expect(await next('INDAH', 0)).toEqual([]);
-        expect(await next('INDAH', -1)).toEqual([]);
-        expect([entries.mock.calls.length, rsvps.mock.calls.length]).toEqual([0, 0]);
-      } finally {
-        entries.mockRestore();
-        rsvps.mockRestore();
-      }
-      expect(await next('INDAH', 1)).toHaveLength(1);
-    });
-
-    it('UI-100 the reader’s entries and joined events after today, soonest first and by id on a tie, each on its office date', async () => {
+    it('P19.11-T1 AC-3 the reader’s entries and joined events today, not yet ended — a pending invitation included; a declined one, a trip and the days after never', async () => {
       h.as('INDAH');
       const post = async (body: Doc) => (await h.http().post('/calendar/entries').send(body).expect(201)).body;
-      // Today's is today's, never the days after's.
       await post(timed(0, '13:00', '14:00', { title: 'Later today' }));
-      // 06:30 on Tuesday in Jakarta, 23:30 on Monday in UTC: Tuesday's.
-      const early = await post(timed(1, '06:30', '07:00', { title: 'Early Tuesday' }));
-      // An entry and a joined event at 09:00 on Wednesday: by id.
-      const standup = await post(timed(2, '09:00', '10:00', { title: 'Wednesday standup' }));
-      const bop = await event();
-      await rsvp(bop, 'INDAH', 'going');
-      // A joined event that began today and runs into Wednesday is today's, not one of the next.
-      const running = await event({ title: 'Started today', startsAt: new Date('2026-09-14T08:00:00Z'), endsAt: new Date('2026-09-16T08:00:00Z') });
-      await rsvp(running, 'INDAH', 'going');
-      // An event joined for Sunday, and one not joined.
+      await post(timed(1, '06:30', '07:00', { title: 'Early Tuesday' }));
+      await post({ type: 'travel', title: 'Trip with times', allDay: false, startsOn: ROSTER_TODAY, start: '11:00', endsOn: '2026-09-15', end: '18:00' });
+      await post({ type: 'travel', title: 'Trip all day', startsOn: ROSTER_TODAY, endsOn: '2026-09-15' });
       const sunday = await event({ title: 'Sunday gathering', startsAt: new Date('2026-09-20T03:00:00Z'), endsAt: new Date('2026-09-20T05:00:00Z') });
       await rsvp(sunday, 'INDAH', 'going');
-      await rsvp(await event({ title: 'Not going' }), 'INDAH', 'cancelled');
-      // A trip is a line, never a meeting: all-day or with times.
-      await post({ type: 'travel', title: 'Trip all day', startsOn: '2026-09-15', endsOn: '2026-09-16' });
-      await post({ type: 'travel', title: 'Trip with times', allDay: false, startsOn: '2026-09-15', start: '07:00', endsOn: '2026-09-16', end: '18:00' });
-      // Agus's invitations: one she declined, one still pending.
+      // Agus's invitations today: one she declined, one still pending.
       h.as('AGUS');
-      const declined = await post(timed(3, '11:00', '12:00', { title: 'Declined one', inviteeIds: [h.id('INDAH')] }));
-      await post(timed(3, '14:00', '15:00', { title: 'Pending invite', inviteeIds: [h.id('INDAH')] }));
+      const declined = await post(timed(0, '16:00', '17:00', { title: 'Declined one', inviteeIds: [h.id('INDAH')] }));
+      await post(timed(0, '11:00', '12:00', { title: 'Pending invite', inviteeIds: [h.id('INDAH')] }));
       h.as('INDAH');
       await h.http().post(`/calendar/entries/${declined.entryId}/answer`).send({ answer: 'declined' }).expect(200);
 
-      const tie = [
-        { id: standup.entryId, row: ['entry', 'Wednesday standup', 'meeting', '2026-09-16', '09:00', '10:00'] },
-        { id: bop, row: ['event', 'BOP Surabaya', 'Business Opportunity Presentation', '2026-09-16', '09:00', '11:00'] },
-      ].sort((a, b) => a.id.localeCompare(b.id));
-      const all = await next('INDAH');
-      expect(all.map((i) => [i.kind, i.title, i.type, i.date, i.start, i.end])).toEqual([
-        ['entry', 'Early Tuesday', 'meeting', '2026-09-15', '06:30', '07:00'],
-        ...tie.map((t) => t.row),
-        ['entry', 'Pending invite', 'meeting', '2026-09-17', '14:00', '15:00'],
-        ['event', 'Sunday gathering', 'Business Opportunity Presentation', '2026-09-20', '10:00', '12:00'],
+      const upcoming = await upcomingOf('INDAH');
+      expect(upcoming.map(row)).toEqual([
+        ['entry', 'Pending invite', ROSTER_TODAY, '11:00', '12:00'],
+        ['entry', 'Later today', ROSTER_TODAY, '13:00', '14:00'],
       ]);
-      expect(all[0]).toMatchObject({ id: early.entryId, startsAt: '2026-09-14T23:30:00.000Z' });
-      expect(all.slice(1, 3).map((i) => i.id)).toEqual(tie.map((t) => t.id));
-      // At most `limit`, the soonest kept.
-      expect((await next('INDAH', 2)).map((i) => i.title)).toEqual(['Early Tuesday', tie[0].row[1]]);
+      // What she owes it rides along, as the Agenda names it.
+      expect(upcoming[0].kind === 'entry' && upcoming[0].entry).toMatchObject({ readerIs: 'invitee', myAnswer: 'pending' });
     });
 
-    it('UI-100 holds nothing of anybody else’s: a peer’s entries and events stay theirs', async () => {
+    it('P19.11-T1 AC-3 holds nothing of anybody else’s: a peer’s entries and events today stay theirs', async () => {
       h.as('DIMAS');
-      await h.http().post('/calendar/entries').send(timed(1, '09:00', '10:00', { title: 'Dimas only' })).expect(201);
-      const bop = await event();
+      await h.http().post('/calendar/entries').send(timed(0, '13:00', '14:00', { title: 'Dimas only' })).expect(201);
+      const bop = await event({ startsAt: new Date('2026-09-14T08:00:00Z'), endsAt: new Date('2026-09-14T09:00:00Z') });
       await rsvp(bop, 'DIMAS', 'going');
-      expect(await next('INDAH')).toEqual([]);
-      expect((await next('DIMAS')).map((i) => i.title)).toEqual(['Dimas only', 'BOP Surabaya']);
+      expect(await upcomingOf('INDAH')).toEqual([]);
+      expect((await upcomingOf('DIMAS')).map((u) => row(u)[1])).toEqual(['Dimas only', 'BOP Surabaya']);
     });
   });
 

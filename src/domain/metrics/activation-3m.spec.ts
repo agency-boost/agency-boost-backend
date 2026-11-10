@@ -141,33 +141,53 @@ const late = o('not_activated', '2026-10-15');
 const missed = o('not_activated');
 const running = o('in_progress');
 
-describe('ACTIVATION_3M_PCT (ADR-0171 §2, rule A of UI V1)', () => {
-  it('UI-023 is activated by day 90 ÷ (that + past day 90 with no sale), whole; in progress and late in neither part', () => {
+describe('ACTIVATION_3M_PCT (ADR-0171 §2; ADR-0239, P19.11-T2)', () => {
+  /*
+   * *Changed 2026-11-10 (P19.11-T2 AC-2, UX-4; ADR-0239):* the denominator is every new hire who is due — past day 90,
+   * activated or not, or with a first sale at any time — so a late first sale counts against the share. Rule A of UI V1
+   * left it out of both parts, and these tests pinned *Lukman in neither*; they are rewritten, not dropped.
+   */
+  it('P19.11-T2 AC-2 is on time ÷ due, whole: due is past day 90 or a first sale at any time; in progress in neither part', () => {
     expect(activation3MShare([sold, missed, missed, running, late])).toEqual({
-      activated: 1, notActivated: 2, late: 1, inProgress: 1, pct: 33,
+      activated: 1, notActivated: 2, late: 1, inProgress: 1, pct: 25,
     });
     expect(activation3MShare([sold, missed])).toMatchObject({ pct: 50 });
     // Half up, in integers: 2 of 3 is 67.
     expect(activation3MShare([sold, sold, missed]).pct).toBe(67);
+    expect(activation3MShare([sold, sold, late]).pct).toBe(67);
   });
 
-  it('UI-023 Arief’s group: Wahyu and Novi activated, Tari in her 90 days — 2 of 2, 100%, not 2 of 3', () => {
+  it('P19.11-T2 AC-2 Arief’s group: Novi and Wahyu on time, Tari on day 53 with none — not due, 2 of 2, 100%, not 2 of 3', () => {
     expect(activation3MShare([sold, sold, running])).toEqual({ activated: 2, notActivated: 0, late: 0, inProgress: 1, pct: 100 });
   });
 
-  it('UI-023 Lukman, sold on day 96, is in neither the numerator nor the denominator', () => {
+  it('P19.11-T2 AC-2 Agus’s own unit: Dimas, Indah and Siti on time, Lukman on day 96 — 3 of 4, 75%, where rule A read 100%', () => {
+    expect(activation3MShare([sold, sold, late, sold])).toEqual({ activated: 3, notActivated: 0, late: 1, inProgress: 0, pct: 75 });
+    // A late first sale is in the denominator and not the numerator: adding one lowers the share.
     const withoutHim = activation3MShare([sold, sold, sold, missed]);
     const withHim = activation3MShare([sold, sold, sold, missed, late]);
-    expect(withHim.pct).toBe(withoutHim.pct);
-    expect(withHim).toMatchObject({ activated: 3, notActivated: 1, late: 1, pct: 75 });
-    // Agus's tree on the report's data: seven activated by day 90, Lukman late, two inside their 90 days — 100%.
-    expect(activation3MShare([...Array(7).fill(sold), late, running, running])).toMatchObject({ pct: 100, late: 1, inProgress: 2 });
+    expect([withoutHim.pct, withHim.pct]).toEqual([75, 60]);
+    // Agus's tree on the seed: seven on time, Lukman late, two inside their 90 days — 7 of 8, 88%.
+    expect(activation3MShare([...Array(7).fill(sold), late, running, running])).toMatchObject({ pct: 88, late: 1, inProgress: 2 });
   });
 
-  it('P18.8-T6 AC-2 is no figure while nobody is decided — never 0%', () => {
+  it('P19.11-T2 AC-2 day 90 is on time: a sale on day 90 is the numerator, and day 90 with none is not due until day 91', () => {
+    const onDay90 = activation3MOf(hire({ firstSaleDate: DAY_90 }), DAY_90);
+    const noneOnDay90 = activation3MOf(hire(), DAY_90);
+    const noneOnDay91 = activation3MOf(hire(), DAY_91);
+    expect([onDay90, noneOnDay90, noneOnDay91]).toEqual(['activated', 'in_progress', 'not_activated']);
+    expect(activation3MShare([o(onDay90, DAY_90)])).toMatchObject({ activated: 1, pct: 100 });
+    expect(activation3MShare([o(noneOnDay90)])).toMatchObject({ inProgress: 1, pct: null });
+    expect(activation3MShare([o(noneOnDay91)])).toMatchObject({ notActivated: 1, pct: 0 });
+    // A first sale on day 91 is late: due, and not on time.
+    const onDay91 = activation3MOf(hire({ firstSaleDate: DAY_91 }), DAY_91);
+    expect(activation3MShare([o(onDay91, DAY_91)])).toMatchObject({ late: 1, pct: 0 });
+  });
+
+  it('P18.8-T6 AC-2, P19.11-T2 AC-2 is no figure while nobody is due — never 0%; one late sale alone is 0%', () => {
     expect(activation3MShare([])).toEqual({ activated: 0, notActivated: 0, late: 0, inProgress: 0, pct: null });
     expect(activation3MShare([running, running]).pct).toBeNull();
-    expect(activation3MShare([late]).pct).toBeNull();
+    expect(activation3MShare([late]).pct).toBe(0);
     expect(activation3MShare([missed]).pct).toBe(0);
   });
 

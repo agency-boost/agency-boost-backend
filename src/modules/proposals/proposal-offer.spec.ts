@@ -51,7 +51,7 @@ describe('P19.7-T2 what a proposal offers (proposal-offer.ts)', () => {
 
   describe('the catalogue (GET /proposals/catalog)', () => {
     const shelf = [
-      entry({ code: 'HEALTH', name: 'PRUWell', category: 'health', planOptions: [{ name: 'Gold', popular: true, highlights: [{ label: 'Kamar', value: '1 jt' }] }], faq: [{ question: 'Q?', answer: 'A.' }], proposalFields: [{ key: 'plan', label: 'Plan', draft: true, type: 'chips', options: [], currency: false }] }),
+      entry({ code: 'HEALTH', name: 'PRUWell', category: 'health', planOptions: [{ name: 'Gold', popular: true, highlights: [{ label: 'Kamar', value: '1 Jt' }] }], faq: [{ question: 'Q?', answer: 'A.' }], proposalFields: [{ key: 'plan', label: 'Plan', draft: true, type: 'chips', options: [], currency: false }] }),
       entry({ code: 'RIDER', name: 'PA', kind: 'rider', attachesTo: ['HEALTH'] }),
       entry({ code: 'OLD_RIDER', name: 'PA lama', kind: 'rider', attachesTo: ['HEALTH'], lifecycle: 'withdrawn' }),
       entry({ code: 'USD', name: 'Prosper', currencies: ['USD'], category: 'investment' }),
@@ -71,10 +71,10 @@ describe('P19.7-T2 what a proposal offers (proposal-offer.ts)', () => {
     });
 
     it('P19.7-T2 AC-8, AC-9 answers each product’s plans and FAQ as the office approved them, else the company’s', () => {
-      const own = [{ ...shelf[0], approved: { faq: [{ question: 'Kantor?', answer: 'Ya.' }], planHighlights: { Gold: [{ label: 'Kamar', value: '2 jt' }] } } }];
+      const own = [{ ...shelf[0], approved: { faq: [{ question: 'Kantor?', answer: 'Ya.' }], planHighlights: { Gold: [{ label: 'Kamar', value: '2 Jt' }] } } }];
       const [product] = catalogOf(own, 'conventional', 36);
       expect(product.faq).toEqual([{ question: 'Kantor?', answer: 'Ya.' }]);
-      expect(product.plans).toEqual([{ name: 'Gold', popular: true, highlights: [{ label: 'Kamar', value: '2 jt' }] }]);
+      expect(product.plans).toEqual([{ name: 'Gold', popular: true, highlights: [{ label: 'Kamar', value: '2 Jt' }] }]);
       expect(catalogOf(shelf, 'conventional', 36)[0].faq).toEqual([{ question: 'Q?', answer: 'A.' }]);
     });
 

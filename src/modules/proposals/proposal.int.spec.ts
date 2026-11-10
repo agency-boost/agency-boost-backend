@@ -207,6 +207,22 @@ describe('P19.7-T2 the proposal’s routes (HTTP)', () => {
       expect(incomplete.body.error).toMatchObject({ code: 'PROPOSAL_INCOMPLETE', details: { items: [] } });
     });
 
+    it('P19.11-T3 AC-8 POST /proposals twice on one lead answers the same empty draft, 201 both times', async () => {
+      const first = await http().post('/proposals').send({ leadId: leads.budi }).expect(201);
+      const again = await http().post('/proposals').send({ leadId: leads.budi }).expect(201);
+      expect(again.body).toMatchObject({ id: first.body.id, status: 'draft', items: [] });
+      expect((await http().get(`/proposals?leadId=${leads.budi}`).expect(200)).body.total).toBe(1);
+    });
+
+    it('P19.11-T3 AC-7 GET /proposals?leadId=&status=done&pageSize=1 answers the lead’s last finished proposal, never a draft', async () => {
+      let p = await completeProposal(wired, agent(), leads.budi);
+      p = await wired.proposals.done(agent(), p.id, p.version);
+      await completeProposal(wired, agent(), leads.budi, [P.EDU]);
+      const res = await http().get(`/proposals?leadId=${leads.budi}&status=done&pageSize=1`).expect(200);
+      expect(res.body).toMatchObject({ total: 1, pageSize: 1 });
+      expect(res.body.rows.map((r: { id: string; status: string }) => [r.id, r.status])).toEqual([[p.id, 'done']]);
+    });
+
     it('P19.7-T2 AC-11 POST …/done answers 200 with the proposal Selesai', async () => {
       const p = await completeProposal(wired, agent(), leads.budi);
       const res = await http().post(`/proposals/${p.id}/done`).send({ expectedVersion: p.version }).expect(200);

@@ -57,14 +57,50 @@ describe('P19.7-T2 AC-12 proposals on the Leads page (HTTP)', () => {
     await completeProposal(wired, agent(), leads.budi, [P.HEALTH, P.EDU]);
     await wired.proposals.create(agent(), leads.budi); // an empty draft, updated last: counted, never the "latest"
     const res = await http().get('/leads').expect(200);
-    expect(rowOf(res.body, leads.budi)?.proposals).toEqual({ count: 2, latest: { products: ['PRUWell Medical', 'PRUCerah'] } });
+    // Neither is finished (P19.11-T3 AC-1): `done` 0, no `latestDone`.
+    expect(rowOf(res.body, leads.budi)?.proposals).toEqual({
+      count: 2, latest: { products: ['PRUWell Medical', 'PRUCerah'] }, done: 0, latestDone: null,
+    });
     expect(rowOf(res.body, leads.sari)?.proposals).toBeNull();
   });
 
   it('P19.7-T2 AC-12 answers only empty drafts as a count with no products', async () => {
     await wired.proposals.create(agent(), leads.budi);
     const res = await http().get('/leads').expect(200);
-    expect(rowOf(res.body, leads.budi)?.proposals).toEqual({ count: 1, latest: { products: [] } });
+    expect(rowOf(res.body, leads.budi)?.proposals).toEqual({ count: 1, latest: { products: [] }, done: 0, latestDone: null });
+  });
+
+  it('P19.11-T3 AC-1 counts the finished proposals server-side and names the one saved last, by doneAt, never a draft', async () => {
+    let older = await completeProposal(wired, agent(), leads.budi);
+    older = await wired.proposals.done(agent(), older.id, older.version);
+    (wired.clock as FixedClock).set(new Date('2026-11-06T03:00:00Z'));
+    let newer = await completeProposal(wired, agent(), leads.budi, [P.EDU]);
+    newer = await wired.proposals.done(agent(), newer.id, newer.version);
+    // A draft changed after both: counted, never the one the icon opens.
+    (wired.clock as FixedClock).set(new Date('2026-11-07T03:00:00Z'));
+    await completeProposal(wired, agent(), leads.budi, [P.LIFE]);
+    const res = await http().get('/leads').expect(200);
+    expect(rowOf(res.body, leads.budi)?.proposals).toMatchObject({ count: 3, done: 2, latestDone: { id: newer.id } });
+    // The one written again turns back to a draft (any write does): the other finished one is the latest now.
+    await wired.proposals.update(agent(), newer.id, { expectedVersion: newer.version, showTotal: true });
+    const after = await http().get('/leads').expect(200);
+    expect(rowOf(after.body, leads.budi)?.proposals).toMatchObject({ count: 3, done: 1, latestDone: { id: older.id } });
+  });
+
+  it('P19.11-T3 AC-1 a lead with drafts only answers done 0 and latestDone null; one with none, null', async () => {
+    await completeProposal(wired, agent(), leads.budi);
+    const res = await http().get('/leads').expect(200);
+    expect(rowOf(res.body, leads.budi)?.proposals).toMatchObject({ count: 1, done: 0, latestDone: null });
+    expect(rowOf(res.body, leads.sari)?.proposals).toBeNull();
+  });
+
+  it('P19.11-T3 AC-1 a leader reads no finished count on a downline’s lead, and another office none of ours (cross-tenant)', async () => {
+    const p = await completeProposal(wired, agent(), leads.budi);
+    await wired.proposals.done(agent(), p.id, p.version);
+    session.current = ab();
+    expect(rowOf((await http().get('/leads?scope=team').expect(200)).body, leads.budi)?.proposals).toBeNull();
+    session.current = agentB();
+    expect(rowOf((await http().get('/leads').expect(200)).body, leads.budi)).toBeUndefined();
   });
 
   it('P19.7-T2 AC-13 answers null on every lead the caller does not own: a leader reads the lead, never its proposals', async () => {

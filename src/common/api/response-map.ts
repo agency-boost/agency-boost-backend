@@ -21,7 +21,7 @@ import { DeletedLeadDto, LeadOrderDto, LeadPageDto, LeadResponseDto } from '@/mo
 import {
   ProposalCatalogDto, ProposalDuplicatedDto, ProposalPageDto, ProposalPatchedDto, ProposalResponseDto,
 } from '@/modules/proposals/proposal.response.dto';
-import { GoalPreviewDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
+import { GoalMonthApeResponseDto, GoalPreviewDto, GoalResponseDto } from '@/modules/goals/goal.response.dto';
 import {
   CorrectionResultDto, HistoryDto, ImportResultDto, MonthStateDto, MonthViewDto, TemplateFileDto,
   UploadPreviewDto,
@@ -343,6 +343,7 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   GoalController_read: { type: GoalResponseDto },
   GoalController_save: { type: GoalResponseDto },
   GoalController_saveEstimate: { type: GoalResponseDto },
+  GoalController_saveMonthApe: { type: GoalMonthApeResponseDto },
   GoalController_preview: { type: GoalPreviewDto },
   ProductionController_readMonth: { type: MonthViewDto },
   // ADR-0184: `format=xlsx` answers the workbook itself.

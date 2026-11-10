@@ -144,8 +144,8 @@ describe('domain constants', () => {
     it('P13.1-T5 AC-4 has no first day for the pace any more: ADR-0057’s seven days went with its run-rate', () => {
       expect(SUMMARY).not.toHaveProperty('PACE_MIN_DAYS');
     });
-    it('pins how many open leads the Summary lists before it counts the rest (P10-T6)', () => {
-      expect(SUMMARY.LEADS_SHOWN).toBe(10);
+    it('P19.11-T5 AC-2 pins how many open leads the Summary shows before *Lihat semua (N)*: the top 5 (UX-13)', () => {
+      expect(SUMMARY.LEADS_SHOWN).toBe(5);
     });
     it('pins the insight rules’ thresholds (P10-T7, ADR-0060)', () => {
       expect(INSIGHTS.MAX_CARDS).toBe(4);

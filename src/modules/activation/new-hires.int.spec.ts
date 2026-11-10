@@ -18,7 +18,8 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
   const reads = () => h.col('auditLog').find({ action: 'activity_log.read_raw', 'after.surface': 'activation' }).toArray();
   const writes = () => h.col('auditLog').find({ action: { $regex: '^activation\\.' } }).sort({ createdAt: 1 }).toArray();
   type Row = {
-    hire: { membershipId: string; name: string }; unit: { kind: string; leader: { membershipId: string; name: string } | null };
+    hire: { membershipId: string; name: string; photoUrl: string | null };
+    unit: { kind: string; leader: { membershipId: string; name: string } | null };
     joinDate: string; day: number; firstSaleDate: string | null; activation3M: string; leftOn: string | null;
     checklist: { state: string; done: number; total: number; pct: number; overdue: boolean } | null;
   };
@@ -70,8 +71,9 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
         ['aab', 'Sari Puspita', ['Budi Santoso 62', 'Rina Wijaya 59']],
       ]);
       // P18.8-T6: past day 90 with no first sale, Indah is not activated; her checklist is overdue as before.
+      // P19.11-T2 AC-4: the hire carries their photo — none on file here.
       expect(rowOf(r, 'Indah Permatasari')).toEqual({
-        hire: { membershipId: id('INDAH'), name: 'Indah Permatasari' }, unit: { kind: 'direct', leader: null },
+        hire: { membershipId: id('INDAH'), name: 'Indah Permatasari', photoUrl: null }, unit: { kind: 'direct', leader: null },
         joinDate: '2026-06-10', day: 97, firstSaleDate: null, firstSaleDay: null, firstSaleSource: null, status: 'not_yet',
         activation3M: 'not_activated', leftOn: null, checklist: { state: 'open', done: 1, total: 16, pct: 6, overdue: true },
       });
@@ -404,6 +406,168 @@ describe('a leader’s new hires over HTTP (Phase 13)', () => {
           empty: 'first_year_over', hire: { name: 'Bayu Saputra' },
         });
       });
+    });
+  });
+
+  /*
+   * **P19.11-T2 AC-1 — every row New Hires lists opens** (UX-3; ADR-0239). The detail reaches through the list's own
+   * predicate (`newHireReached`): somebody the reader coaches, or a new hire who left below them with a join date in either
+   * year. A leaver's detail is read-only — no number, no write — and every write route stays 404 for them.
+   */
+  describe('P19.11-T2 AC-1 every new hire listed opens; a leaver read-only', () => {
+    /** Mark `who` left as *Mark left* did (ADR-0169 §4 as amended): removed, `leftAt` set; `reset` puts them back. */
+    const leave = (who: Who, at = new Date('2026-09-01T03:00:00Z')) => h.col('memberships').updateOne(
+      { _id: new mongoose.Types.ObjectId(id(who)) }, { $set: { status: 'removed', removedAt: at, leftAt: at } },
+    );
+    const user = (who: Who) => ({ email: `${who.toLowerCase()}@coaching.test` });
+
+    it('P19.11-T2 AC-1 Rina, who left, is listed for Sari and Agus and opens for both: readOnly, no number, one read recorded', async () => {
+      await h.start('RINA', '2026-07-18');
+      await h.col('users').updateOne(user('RINA'), { $set: { phone: '+6281211002200' } });
+      try {
+        await leave('RINA');
+        for (const who of ['SARI', 'AGUS'] as const) {
+          h.as(who);
+          expect(rowOf(await roster(), 'Rina Wijaya')).toMatchObject({ leftOn: '2026-09-01' });
+          const view = (await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body;
+          expect([who, view.readOnly, view.hire.name, view.newHire.phone]).toEqual([who, true, 'Rina Wijaya', null]);
+          expect(view.newHire).toMatchObject({ joinDate: '2026-07-18', status: 'not_yet', leader: { name: 'Sari Puspita' } });
+          expect(view.aspects.length).toBeGreaterThan(0);
+        }
+        // One detail read each, beside the rosters' own.
+        expect((await reads()).filter((r) => r.targetMembershipId === id('RINA'))).toHaveLength(4);
+      } finally {
+        await h.col('users').updateOne(user('RINA'), { $set: { phone: null } });
+      }
+    });
+
+    it('P19.11-T2 AC-1 a hire the reader coaches is served readOnly false, with their number', async () => {
+      await h.start('RINA', '2026-07-18');
+      h.as('SARI');
+      expect((await h.http().get(`/new-hires/${id('RINA')}`).expect(200)).body).toMatchObject({ readOnly: false });
+    });
+
+    const WRITES: [string, (target: string) => Test][] = [
+      ['PUT tick', (target) => h.http().put(`/new-hires/${target}/items/CRM_SETUP`).send({ done: true })],
+      ['PUT start-date', (target) => h.http().put(`/new-hires/${target}/start-date`).send({ startDate: '2026-07-01' })],
+      ['PUT note', (target) => h.http().put(`/new-hires/${target}/note`).send({ text: 'Not yours to write.' })],
+    ];
+    it.each(WRITES)(
+      'P19.11-T2 AC-1 a leaver is never written: %s is 404 to the leader she left, and nothing changes',
+      async (_route, call) => {
+        await h.start('RINA', '2026-07-18');
+        await leave('RINA');
+        const before = await h.col('activationProgress').findOne({ membershipId: id('RINA') });
+        h.as('SARI');
+        const res = await call(id('RINA'));
+        expect([res.status, res.body.error.code]).toEqual([404, 'NOT_FOUND']);
+        expect(await h.col('activationProgress').findOne({ membershipId: id('RINA') })).toEqual(before);
+        expect(await h.col('auditLog').countDocuments({ action: { $regex: '^activation\\.' } })).toBe(0);
+      },
+    );
+
+    it('P19.11-T2 AC-1 a leaver’s closings are not read either: GET /new-hires/:id/closings is 404', async () => {
+      await h.start('RINA', '2026-07-18');
+      await leave('RINA');
+      h.as('SARI');
+      expect((await h.http().get(`/new-hires/${id('RINA')}/closings`).expect(404)).body.error.code).toBe('NOT_FOUND');
+    });
+
+    it('P19.11-T2 AC-1 a leaver stays 404 to a peer, a sibling, the leaver’s own peers and another office', async () => {
+      await h.start('RINA', '2026-07-18');
+      await leave('RINA');
+      for (const who of ['PEER_AB', 'PEER_AAB', 'DEWI', 'NINA', 'BUDI', 'B_AB'] as const) {
+        h.as(who);
+        expect([who, (await h.http().get(`/new-hires/${id('RINA')}`).expect(404)).body.error.code]).toEqual([who, 'NOT_FOUND']);
+      }
+    });
+
+    it('P19.11-T2 AC-1 cross-tenant: office B’s leaver opens for office B’s leader, never for office A’s', async () => {
+      await h.start('B_AGENT', '2026-08-01');
+      await leave('B_AGENT');
+      h.as('B_AB');
+      expect((await h.http().get(`/new-hires/${id('B_AGENT')}`).expect(200)).body).toMatchObject({ readOnly: true, hire: { name: 'Bayu Saputra' } });
+      h.as('OWNER');
+      expect((await h.http().get(`/new-hires/${id('B_AGENT')}`).expect(404)).body.error.code).toBe('NOT_FOUND');
+    });
+
+    it('P19.11-T2 AC-1 a member who left and is on no list stays 404: not a new hire, joined before last year, or no leaving recorded', async () => {
+      await h.start('RINA', '2024-12-31'); // before last year: on neither year's list
+      await h.start('BUDI', '2026-07-15');
+      await h.col('memberships').updateOne({ _id: new mongoose.Types.ObjectId(id('BUDI')) }, { $set: { joinedAs: 'existing_agent' } });
+      await h.start('LEFT', '2026-08-01'); // removed, with no `leftAt`
+      for (const who of ['RINA', 'BUDI'] as const) await leave(who);
+      h.as('AGUS');
+      for (const who of ['RINA', 'BUDI', 'LEFT'] as const) {
+        expect([who, (await h.http().get(`/new-hires/${id(who)}`).expect(404)).body.error.code]).toEqual([who, 'NOT_FOUND']);
+      }
+    });
+
+    it('P19.11-T2 AC-1 the one predicate: for every reader and both years, every row the roster lists opens — none a dead end', async () => {
+      await h.start('INDAH', '2026-06-10');
+      await h.start('DIMAS', '2026-08-20');
+      await h.start('TARI', '2026-08-01'); // Lukas's, an Agent who leads
+      await h.start('RINA', '2025-07-18'); // last year's
+      await h.start('BUDI', '2026-07-15');
+      await h.start('DODI', '2026-09-01');
+      await leave('DIMAS'); // the first child under Agus, as in the brief's screenshot
+      await leave('TARI');
+      await leave('RINA', new Date('2025-10-01T03:00:00Z'));
+      let opened = 0;
+      for (const who of ['OWNER', 'AGUS', 'SARI', 'NINA', 'LUKAS'] as const) {
+        h.as(who);
+        for (const year of ['current', 'previous']) {
+          const res = await h.http().get(`/new-hires?year=${year}`);
+          if (res.status === 404) continue;
+          for (const row of Object.values((res.body as Awaited<ReturnType<typeof roster>>).sections).flat()) {
+            const detail = await h.http().get(`/new-hires/${row.hire.membershipId}`);
+            expect([who, year, row.hire.name, detail.status]).toEqual([who, year, row.hire.name, 200]);
+            // Read-only for a leaver; Rina, last year's, is past her first year and served empty — nothing to write there.
+            const served = detail.body.empty ?? (detail.body.readOnly ? 'read-only' : 'writable');
+            const expected = row.hire.name === 'Rina Wijaya' ? 'first_year_over' : row.leftOn ? 'read-only' : 'writable';
+            expect([row.hire.name, served]).toEqual([row.hire.name, expected]);
+            opened += 1;
+          }
+        }
+      }
+      // Owner six, Agus six, Sari three, Nina one, Lukas one.
+      expect(opened).toBe(17);
+    });
+  });
+
+  describe('P19.11-T2 AC-4 the roster’s photos (UX-14)', () => {
+    const KEY = 'user/66f0000000000000000009a1/avatar/01JAAAAAAAAAAAAAAAAAAAAAAA.jpg';
+    const SIGNED = `https://cdn.test/${KEY}?sig=abc`;
+    const budi = () => ({ email: 'budi@coaching.test' });
+
+    it('P19.11-T2 AC-4 each row’s hire carries their photo as a signed link, or null — never the storage key', async () => {
+      await h.start('BUDI', '2026-07-15');
+      await h.start('RINA', '2026-07-18');
+      await h.col('users').updateOne(budi(), { $set: { avatarUrl: KEY } });
+      try {
+        h.as('SARI');
+        const r = await roster();
+        expect([rowOf(r, 'Budi Santoso').hire.photoUrl, rowOf(r, 'Rina Wijaya').hire.photoUrl]).toEqual([SIGNED, null]);
+        expect(JSON.stringify(r)).not.toContain(`"${KEY}"`);
+        // A unit's leader is named, never pictured: the row draws no avatar for them.
+        expect(r.units.every((u) => u.leader === null || !('photoUrl' in u.leader))).toBe(true);
+      } finally {
+        await h.col('users').updateOne(budi(), { $set: { avatarUrl: null } });
+      }
+    });
+
+    it('P19.11-T2 AC-4 an activated hire’s circle is a check, so the row sends no photo for them', async () => {
+      await h.start('BUDI', '2026-07-15');
+      await h.col('users').updateOne(budi(), { $set: { avatarUrl: KEY } });
+      try {
+        h.as('SARI');
+        await h.http().put(`/new-hires/${id('BUDI')}/items/FIRST_CASE_CLOSED`)
+          .send({ done: true, record: { kind: 'closing', name: 'Ibu Ratna', date: '2026-09-01' } }).expect(200);
+        const row = rowOf(await roster(), 'Budi Santoso');
+        expect(row).toMatchObject({ status: 'activated', hire: { photoUrl: null } });
+      } finally {
+        await h.col('users').updateOne(budi(), { $set: { avatarUrl: null } });
+      }
     });
   });
 

@@ -54,7 +54,7 @@ describe('P19.3-T1 AC-7 NEW_AGENT_ACTIVATION_3M_PCT — a first policy in the jo
     expect(newAgentActivationShare(['not_activated'])).toMatchObject({ pct: 0 });
   });
 
-  it('P19.3-T1 AC-7 one person, two results: activated on the forum by a policy in month four, Teraktivasi late on New Hires', () => {
+  it('P19.3-T1 AC-7, P19.11-T2 AC-2 one person, two results: activated on the forum by a policy in month four, Teraktivasi late on New Hires', () => {
     // Joined 1 February: day 90 is 1 May. Her first paid-and-issued case is on 20 May (day 109), and the office's file
     // shows her policy in May — the fourth month of D7's window.
     const joinDate = '2026-02-01';
@@ -63,10 +63,11 @@ describe('P19.3-T1 AC-7 NEW_AGENT_ACTIVATION_3M_PCT — a first policy in the jo
     const newHires = activation3MOf({ joinDate, firstSaleDate, locked: null }, '2026-10-10');
     expect(d7).toBe('activated');
     // ADR-0171, unchanged: past day 90 with no sale by then — not activated, and the late sale is *Teraktivasi* in amber
-    // (*lewat 3M*), in neither part of New Hires' share.
+    // (*lewat 3M*). P19.11-T2 AC-2 (ADR-0239): due, so in New Hires' denominator and not its numerator — 0%, where rule A
+    // left her out of both.
     expect(newHires).toBe('not_activated');
     expect(newHireStatusOf(newHires, firstSaleDate)).toBe('activated_late');
-    expect(activation3MShare([{ result: newHires, firstSaleDate }]).pct).toBeNull();
+    expect(activation3MShare([{ result: newHires, firstSaleDate }])).toMatchObject({ late: 1, pct: 0 });
     expect(newAgentActivationShare([d7]).pct).toBe(100);
   });
 

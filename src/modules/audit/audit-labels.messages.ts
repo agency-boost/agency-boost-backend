@@ -96,6 +96,8 @@ const ACTIONS = {
   'goal.created': { en: 'Goal set', id: 'Target ditetapkan' },
   'goal.estimate_cleared': { en: 'Production estimate cleared', id: 'Perkiraan produksi dihapus' },
   'goal.estimate_set': { en: 'Production estimate set', id: 'Perkiraan produksi diisi' },
+  'goal.month_ape_cleared': { en: 'Month’s APE back to the upload', id: 'APE bulan dikembalikan ke data unggahan' },
+  'goal.month_ape_set': { en: 'Month’s APE changed manually', id: 'APE bulan diubah manual' },
   'goal.updated': { en: 'Goal changed', id: 'Target diubah' },
   'group.archived': { en: 'Group archived', id: 'Grup diarsipkan' },
   'group.created': { en: 'Group created', id: 'Grup dibuat' },

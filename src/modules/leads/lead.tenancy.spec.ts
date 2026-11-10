@@ -154,13 +154,14 @@ describe('the lead record (P7-T1)', () => {
     });
 
     it.each([
-      ['a phone number', { phone: '0812-3456-7890', email: null }],
-      ['an email', { phone: null, email: 'budi@example.com' }],
-      ['both', { phone: '0812-3456-7890', email: 'budi@example.com' }],
-    ])('P13.1-T4 AC-1 creates a lead holding %s with no recorded ground', async (_what, contact) => {
+      // The phone as `+62…` since P19.11-T3 AC-6.
+      ['a phone number', { phone: '0812-3456-7890', email: null }, { phone: '+6281234567890', email: null }],
+      ['an email', { phone: null, email: 'budi@example.com' }, { phone: null, email: 'budi@example.com' }],
+      ['both', { phone: '0812-3456-7890', email: 'budi@example.com' }, { phone: '+6281234567890', email: 'budi@example.com' }],
+    ])('P13.1-T4 AC-1 creates a lead holding %s with no recorded ground', async (_what, contact, kept) => {
       const lead = await create(A(), { contact });
 
-      expect(lead.contact).toEqual(contact);
+      expect(lead.contact).toEqual(kept);
       expect(lead).not.toHaveProperty('lawfulBasis');
       // The schema's defaults, never a ground nobody chose.
       expect(await stored()).toMatchObject({ lawfulBasis: null, consentAt: null });
@@ -169,9 +170,9 @@ describe('the lead record (P7-T1)', () => {
     it('P13.1-T4 AC-1 adds contact details later to a lead that has no ground', async () => {
       const lead = await create(A());
 
-      const updated = await wired.leadRecords.update(A(), lead.id, { contact: { phone: '0812' } });
+      const updated = await wired.leadRecords.update(A(), lead.id, { contact: { phone: '0812 1100 2200' } });
 
-      expect(updated.contact).toEqual({ phone: '0812', email: null });
+      expect(updated.contact).toEqual({ phone: '+6281211002200', email: null });
       expect(updated).not.toHaveProperty('lawfulBasis');
     });
 
@@ -185,7 +186,7 @@ describe('the lead record (P7-T1)', () => {
 
     it('P13.1-T4 AC-1 keeps a ground stored before the rule went, through a write to the details', async () => {
       // A deploy is not an erasure: the column stays, unread, and nothing clears it.
-      const lead = await create(A(), { contact: { phone: '0812' } });
+      const lead = await create(A(), { contact: { phone: '0812-1100-2200' } });
       const before = new Date('2026-09-20T02:00:00Z');
       await mongoose.connection.db!.collection('leads')
         .updateOne({}, { $set: { lawfulBasis: 'consent', consentAt: before } });
@@ -260,6 +261,60 @@ describe('the lead record (P7-T1)', () => {
       expect(after).not.toHaveProperty('lawfulBasis');
       expect(JSON.stringify(entry)).not.toContain('Pak Budi');
       expect(JSON.stringify(entry)).not.toContain('0812');
+      // Nor the number as stored (P19.11-T3 AC-6).
+      expect(JSON.stringify(entry)).not.toContain('81234567890');
+    });
+  });
+
+  /*
+   * P19.11-T3 AC-6 (UX-10): the lead sheet's *WhatsApp* field and the number at its top are one field, `contact.phone`,
+   * stored one way. A number typed before the rule is kept until somebody changes it.
+   */
+  describe('P19.11-T3 AC-6 — a lead’s phone, stored as +62… and refused only when it changes to a non-number', () => {
+    const storedPhone = async (id: string) => ((await mongoose.connection.db!.collection('leads')
+      .findOne({ _id: new mongoose.Types.ObjectId(id) }))!.contact as { phone: string | null }).phone;
+
+    it.each([['0812-1100-2200'], ['6281211002200'], ['+62 812 1100 2200']])(
+      'P19.11-T3 AC-6 create and update store %j as +6281211002200', async (typed) => {
+        const made = await create(A(), { contact: { phone: typed } });
+        expect(await storedPhone(made.id)).toBe('+6281211002200');
+        const other = await create(A(), { name: 'Ibu Sari' });
+        await wired.leadRecords.update(A(), other.id, { contact: { phone: typed, email: null } });
+        expect(await storedPhone(other.id)).toBe('+6281211002200');
+      },
+    );
+
+    it('P19.11-T3 AC-6 refuses a new lead whose phone is not an Indonesian number, and writes nothing', async () => {
+      await expect(create(A(), { contact: { phone: '0812' } })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await mongoose.connection.db!.collection('leads').countDocuments()).toBe(0);
+    });
+
+    it('P19.11-T3 AC-6 refuses a phone changed to a non-number, leaving the lead as it was', async () => {
+      const lead = await create(A(), { contact: { phone: '0812-1100-2200' } });
+      await expect(wired.leadRecords.update(A(), lead.id, { contact: { phone: 'call me', email: null } }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await storedPhone(lead.id)).toBe('+6281211002200');
+      expect((await wired.leadRecords.read(A(), lead.id)).version).toBe(1);
+    });
+
+    it('P19.11-T3 AC-6 passes a number stored before the rule untouched while the email beside it changes', async () => {
+      const lead = await create(A());
+      await mongoose.connection.db!.collection('leads').updateOne({}, { $set: { 'contact.phone': '0812' } });
+      const updated = await wired.leadRecords.update(A(), lead.id, { contact: { phone: '0812', email: 'budi@example.com' } });
+      expect(updated.contact).toEqual({ phone: '0812', email: 'budi@example.com' });
+      expect(await storedPhone(lead.id)).toBe('0812');
+      // Changing it, though, is held to the rule.
+      await expect(wired.leadRecords.update(A(), lead.id, { contact: { phone: '08123', email: 'budi@example.com' } }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('P19.11-T3 AC-6 another office’s lead is 404 before anything about its number, and keeps it (cross-tenant)', async () => {
+      const theirs = await create(B(), { contact: { phone: '0812-1100-2200' } });
+      for (const phone of ['0813-2200-3300', 'call me']) {
+        await expect(wired.leadRecords.update(A(), theirs.id, { contact: { phone, email: null } }))
+          .rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      expect(await storedPhone(theirs.id)).toBe('+6281211002200');
     });
   });
 

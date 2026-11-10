@@ -266,10 +266,18 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
          * Summary's year is an estimate (Raka, seeded), the leader's target is the office's figures' and is not compared.
          */
         const estimate = summary.yearly.production === 'estimate';
+        /*
+         * P19.11-T4 AC-6 (UX-12): a month the member typed over the upload is their own Summary's alone (Dewi and Raka,
+         * seeded) — the leader's row reads the office's upload for the month, the month table's figure, or nothing.
+         */
+        const manual = summary.monthly.realised.source === 'manual';
+        const office = table.rows.find((x) => x.membershipId === r.membershipId)!.values.APE;
         expect({ email, who: r.name, target: estimate ? 'their estimate' : r.goal.targetMinor, actual: r.goal.actualMinor, source: r.goal.source })
           .toEqual({
             email, who: r.name, target: estimate ? 'their estimate' : summary.monthly.targetMinor,
-            actual: summary.monthly.actualMinor, source: summary.monthly.source,
+            actual: manual ? office.value : summary.monthly.actualMinor,
+            source: !manual ? summary.monthly.source
+              : office.value === null ? null : expect.objectContaining({ provenance: office.provenance, month: MONTH }),
           });
         if (!r.isReader) {
           const c = coached.find((x) => x.membershipId === r.membershipId)!;

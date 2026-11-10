@@ -143,11 +143,12 @@ export const SUMMARY = {
    */
   PACE_WINDOW_DAYS: PERIOD.ROLLING_30D_DAYS,
   /**
-   * How many of a member's open leads *Leads that need you* lists, nearest next action first (P10-T6).
-   * The prototype lists every one; a summary of two hundred rows is the Leads screen without its search,
-   * so the card shows the nearest and counts the rest, with the way to all of them.
+   * How many of a member's open leads *Leads yang perlu perhatian Anda* shows before ***Lihat semua (N)*** (P19.11-T5
+   * AC-2; UX-13, the client's brief of 2026-11-09): the **top 5**, what needs attention first; the rest open in place.
+   * Every open lead is answered (AC-3) — this is the collapsed count, sent as `leads.shown` so the screen re-declares
+   * nothing (invariant §7). *Changed 2026-11-10:* was 10, the rows the API cut the list to (P10-T6).
    */
-  LEADS_SHOWN: 10,
+  LEADS_SHOWN: 5,
 } as const;
 
 /**

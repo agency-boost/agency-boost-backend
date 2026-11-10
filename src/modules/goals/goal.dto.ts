@@ -17,6 +17,30 @@ export class SaveEstimateDto {
 }
 
 /**
+ * **`PUT /goals/:period/ape-month`** (P19.11-T4; UX-12, UXQ2's default): one month's APE as the member realised it,
+ * typed over the office's upload on the Summary. `@Allow()`, read by `checkMonthApe`, as the estimate's body is read by
+ * `checkEstimate`.
+ */
+export class SaveMonthApeDto {
+  @ApiProperty({
+    type: String, example: '2026-11',
+    description: '`YYYY-MM`: a month of the path’s year, no later than the office’s current month and no earlier than the '
+      + 'month the office opened — the months the Summary’s month selector offers.',
+  })
+  @Allow()
+  month!: string;
+
+  @ApiProperty({
+    type: Number, nullable: true, example: 216_500_000_00,
+    description: 'IDR **sen**, whole and at least 0: the month’s APE as the member realised it — typed in millions on the '
+      + 'screen (*216,5* is Rp 216.500.000). In force over the office’s upload for the month on the member’s own Summary '
+      + '(*Diubah manual*). `null` clears it: the upload again (*Kembalikan ke data unggahan*), or *Belum diunggah*.',
+  })
+  @Allow()
+  apeAchievedMinor!: number | null;
+}
+
+/**
  * **`@Allow()`, and the whole body is read by `checkGoal` instead.**
  *
  * The global pipe runs with `whitelist` and `forbidNonWhitelisted`, so a property with no

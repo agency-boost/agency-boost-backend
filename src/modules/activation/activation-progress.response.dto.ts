@@ -8,7 +8,8 @@ import type {
   ActivationItemProgressView,
   ActivationItemRecordView, ActivationNoteSavedView, ActivationNoteView, ActivationPersonView, ActivationView,
   Activation3MFiguresView, Activation3MMonthView, Activation3MResultView, Activation3MShareView, FirstSaleSourceView,
-  NewHireChecklistView, NewHireDetailView, NewHireLeaderView, NewHireRowView, NewHiresRosterView, NewHireStandingView,
+  NewHireChecklistView, NewHireDetailView, NewHireLeaderView, NewHirePersonView, NewHireRowView, NewHiresRosterView,
+  NewHireStandingView,
   NewHireStatusView, NewHireUnitRefView, NewHireUnitView,
 } from './activation-progress.view';
 import type { ActivationState, AspectStatus } from './activation-rules';
@@ -211,23 +212,33 @@ const RESULTS: Activation3MResultView[] = ['in_progress', 'activated', 'not_acti
 const STATUSES: NewHireStatusView[] = ['activated', 'activated_late', 'not_yet'];
 
 export class Activation3MShareDto implements Activation3MShareView {
-  @ApiProperty({ type: Number, description: 'Their first sale was on or before day 90 of the join date: the numerator.' })
+  @ApiProperty({
+    type: Number,
+    description: 'Their first sale was on or before day 90 of the join date — day 90 is on time: the numerator, and part of the denominator.',
+  })
   activated!: number;
 
-  @ApiProperty({ type: Number, description: 'Past day 90 with no first sale: with `activated`, the denominator.' })
+  @ApiProperty({ type: Number, description: 'Past day 90 with no first sale: part of the denominator.' })
   notActivated!: number;
 
-  @ApiProperty({ type: Number, description: 'A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share.' })
+  @ApiProperty({
+    type: Number,
+    description: 'A first sale after day 90 (*lewat 3M*): Teraktivasi in amber — part of the denominator, not the numerator.',
+  })
   late!: number;
 
-  @ApiProperty({ type: Number, description: 'Still within their 90 days with no first sale: in neither part of the share (rule A).' })
+  @ApiProperty({
+    type: Number,
+    description: 'Day 90 not over yet and no first sale: not due yet, so in neither part of the share.',
+  })
   inProgress!: number;
 
   @ApiProperty({
-    type: Number, nullable: true, example: 100,
+    type: Number, nullable: true, example: 75,
     description:
-      '*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none '
-      + 'of them is decided — never 0. The screen shows this alone.',
+      '*Aktivasi 3M*: of the new hires who are due — past day 90, or with a first sale at any time — the share whose first '
+      + 'sale was by day 90: `activated ÷ (activated + late + notActivated)`, a whole percent; `null` while nobody is due — '
+      + 'never 0. Counted over the set’s own hires, never averaged from smaller sets. The screen shows this alone.',
   })
   pct!: number | null;
 }
@@ -278,9 +289,20 @@ export class NewHireChecklistDto implements NewHireChecklistView {
   overdue!: boolean;
 }
 
+/** A new hire as their row names them (P19.11-T2 AC-4): the person and their photo. */
+export class NewHirePersonDto extends ActivationPersonDto implements NewHirePersonView {
+  @ApiProperty({
+    type: String, nullable: true,
+    description:
+      'Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws '
+      + 'as initials. The circle of a hire not activated yet shows it (UX-14).',
+  })
+  photoUrl!: string | null;
+}
+
 export class NewHireRowDto implements NewHireRowView {
-  @ApiProperty({ type: ActivationPersonDto })
-  hire!: ActivationPersonDto;
+  @ApiProperty({ type: NewHirePersonDto })
+  hire!: NewHirePersonDto;
 
   @ApiProperty({ type: NewHireUnitRefDto, description: 'The unit they are counted in.' })
   unit!: NewHireUnitRefDto;
@@ -312,8 +334,8 @@ export class NewHireRowDto implements NewHireRowView {
   @ApiProperty({
     type: String, enum: STATUSES,
     description:
-      'Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, outside the '
-      + 'share); `not_yet` without one. Leaving is not a status.',
+      'Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, in the '
+      + 'share’s denominator and not its numerator); `not_yet` without one. Leaving is not a status.',
   })
   status!: NewHireStatusView;
 
@@ -327,7 +349,9 @@ export class NewHireRowDto implements NewHireRowView {
 
   @ApiProperty({
     type: String, nullable: true,
-    description: 'The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it.',
+    description:
+      'The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it — their '
+      + 'row opens as anybody’s, and their detail is served read-only.',
   })
   leftOn!: string | null;
 
@@ -424,7 +448,7 @@ export class NewHireStandingDto implements NewHireStandingView {
     type: String, nullable: true, example: '+6281211002200',
     description:
       'Their WhatsApp number as stored (`users.phone`), or `null` with none (UI-027, UI-081): the detail’s *WhatsApp* opens '
-      + 'it, or asks for it first.',
+      + 'it, or asks for it first. `null` for a new hire who left, whom nobody coaches now.',
   })
   phone!: string | null;
 }
@@ -436,6 +460,15 @@ export class NewHireDetailDto extends ActivationViewDto implements NewHireDetail
     description: 'The strip at the top of the detail (UI-023, D-25): the row’s status, from the same function. `null` for somebody who is not a new hire.',
   })
   newHire!: NewHireStandingDto | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      '`true` for a new hire who left, whom New Hires lists and this detail opens for reading only: nobody '
+      + 'coaches them now, so every write route answers 404 for them, and the page draws no write control. `false` for '
+      + 'everybody you coach.',
+  })
+  readOnly!: boolean;
 }
 
 const EMPTY_REASONS: readonly ActivationEmptyReason[] = ['first_year_over', 'no_activation'];

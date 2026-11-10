@@ -36,6 +36,12 @@ export class LeadLatestProposalDto {
   products!: string[];
 }
 
+/** The lead's finished proposal saved last (P19.11-T3 AC-1): what the card's proposal icon opens. */
+export class LeadLatestDoneProposalDto {
+  @ApiProperty({ type: String, description: 'The proposal’s id: `/proposal/{id}?step=3` on the screen.' })
+  id!: string;
+}
+
 /** A lead's proposals, for its owner alone (P19.7-T2 AC-12; ADR-0221 §6). */
 export class LeadProposalsDto {
   @ApiProperty({ type: Number, minimum: 1, description: 'The lead’s live proposals, drafts included.' })
@@ -43,6 +49,21 @@ export class LeadProposalsDto {
 
   @ApiProperty({ type: LeadLatestProposalDto })
   latest!: LeadLatestProposalDto;
+
+  @ApiProperty({
+    type: Number,
+    minimum: 0,
+    description: 'Among them, the finished ones: `status: "done"`, the PDF saved and not changed since.'
+      + ' Drafts never count. The card draws its proposal icon only when this is 1 or more.',
+  })
+  done!: number;
+
+  @ApiProperty({
+    type: LeadLatestDoneProposalDto,
+    nullable: true,
+    description: 'The finished proposal saved last, by `doneAt`; `null` when none is finished.',
+  })
+  latestDone!: LeadLatestDoneProposalDto | null;
 }
 
 export class LeadResponseDto implements LeadView {

@@ -13,6 +13,13 @@ export interface LeadProposals {
   count: number;
   /** Among them, the one updated last that has a product: its item names, as the proposal shows them, in order. */
   latest: { products: string[] };
+  /**
+   * **Among them, the finished ones** (P19.11-T3 AC-1; UX-9; UXQ3): `status: 'done'` — its PDF saved and not changed
+   * since. The card draws its proposal icon only when this is 1 or more. Drafts never count.
+   */
+  done: number;
+  /** The finished one saved last, by `doneAt` — what the card's icon opens. `null` when none is finished. */
+  latestDone: { id: string } | null;
 }
 
 /** One *"Proposal dibuat · …"* note in a lead's *Riwayat*: derived, never written to the lead (ADR-0221 §6). */
@@ -45,18 +52,32 @@ export class ProposalReadings {
     const rows = await this.proposals.find(
       ctx,
       { ownerMembershipId, leadId: { $in: [...leadIds] } },
-      { sort: { updatedAt: -1, _id: -1 }, projection: { leadId: 1, channel: 1, items: 1, updatedAt: 1 } },
+      {
+        sort: { updatedAt: -1, _id: -1 },
+        projection: { leadId: 1, channel: 1, items: 1, updatedAt: 1, status: 1, doneAt: 1 },
+      },
     );
+    /** The `doneAt` of each lead's `latestDone`, to compare the next finished one against. */
+    const doneAtOf = new Map<string, number>();
     for (const row of rows) {
       const names = (row.items ?? []).map((item: StoredItem) => itemName(item.snapshot, row.channel));
-      const held = out.get(row.leadId);
+      let held = out.get(row.leadId);
       if (!held) {
-        out.set(row.leadId, { count: 1, latest: { products: names } });
-        continue;
+        held = { count: 0, latest: { products: names }, done: 0, latestDone: null };
+        out.set(row.leadId, held);
       }
       held.count += 1;
       // Newest first: the first with a product is the latest that has one.
       if (held.latest.products.length === 0 && names.length > 0) held.latest = { products: names };
+      if (row.status === 'done') {
+        held.done += 1;
+        // By `doneAt`, not by the list's order: the last *Simpan PDF* is what "latest" means (UXQ3).
+        const at = row.doneAt ? row.doneAt.getTime() : 0;
+        if (held.latestDone === null || at > (doneAtOf.get(row.leadId) ?? 0)) {
+          held.latestDone = { id: String(row._id) };
+          doneAtOf.set(row.leadId, at);
+        }
+      }
     }
     return out;
   }

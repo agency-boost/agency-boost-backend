@@ -2,13 +2,11 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { HomeService, type HomeView } from '@/modules/home/home.service';
-import { LeadRepository } from '@/modules/leads/lead.repository';
-import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { seedDemo } from '../demo';
-import { HOME_TODAY_LEAD } from '../home-fixture';
+import { HOME_TICKED_LEAD, HOME_TODAY_LEAD } from '../home-fixture';
 
 const RUN_MS = 240_000;
 const quiet = () => undefined;
@@ -49,7 +47,6 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
       wired.coachingReadings,
       wired.activityReadings,
       wired.memberships,
-      new LeadRepository(mongoose.model(Lead.name, LeadSchema) as never),
       wired.leadReadings,
       wired.calendar,
       wired.subjectReads,
@@ -64,16 +61,48 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
 
   const read = async (email: string): Promise<HomeView> => home.read(await as(email));
 
-  it('P19.8-T2 AC-11 Agus: a lead’s next action today first, and an entry of his ahead, with an end time, that the Calendar’s detail opens', async () => {
-    const view = await read('agus@kpm0417.test');
+  // *Rewritten 2026-11-10 (P19.11-T1 AC-1, AC-3):* today's alone, in the Calendar's shapes, a ticked task among them.
+  it('P19.8-T2 AC-11 P19.11-T1 AC-1 AC-3 Agus: today’s alone — Ratna’s next action, Yusuf’s already ticked, then today’s first timed thing still to come', async () => {
+    const agus = await as('agus@kpm0417.test');
+    const view = await home.read(agus);
     expect(view.today).toBe('2026-11-07');
-    expect(view.actions[0]).toMatchObject({ kind: 'lead', name: HOME_TODAY_LEAD.name, note: HOME_TODAY_LEAD.note });
-    const ahead = view.actions.find((a) => a.kind === 'agenda' && a.source === 'entry');
-    expect(ahead).toBeDefined();
-    const entry = await wired.calendar.readOne(await as('agus@kpm0417.test'), (ahead as { id: string }).id);
+    expect(view.actions[0]).toMatchObject({
+      kind: 'task', task: { source: 'lead', name: HOME_TODAY_LEAD.name, note: HOME_TODAY_LEAD.note, done: false },
+    });
+    expect(view.actions).toContainEqual({
+      kind: 'task',
+      task: expect.objectContaining({ source: 'lead', name: HOME_TICKED_LEAD.name, note: HOME_TICKED_LEAD.note, date: '2026-11-07', done: true }),
+    });
+    // The ticked one is listed and not counted.
+    const calendar = await wired.calendar.today(agus);
+    expect(view.schedule.tasks).toBe(calendar.taskItems.filter((t) => !t.done).length);
+    // Nothing of another day: every row is today's, or a timed thing running into today.
+    for (const action of view.actions) {
+      if (action.kind === 'task') expect(action.task.date).toBe('2026-11-07');
+      else {
+        const item = action.kind === 'entry' ? action.entry : action.event;
+        const [first, last] = [item.startsOn ?? item.date ?? '', item.endsOn ?? item.date ?? ''];
+        expect([first <= '2026-11-07', last >= '2026-11-07']).toEqual([true, true]);
+      }
+    }
+    // Two tasks, then the first of today's timed things still to come — a joined event (`events-fixture.ts`) or an entry.
+    expect(view.actions.map((a) => a.kind)).toEqual(['task', 'task', expect.stringMatching(/^(entry|event)$/)]);
+    expect(view.actions[2]).toEqual(calendar.upcoming[0]);
+    // His 1:1 with Indah today is on Calendar's today, and its entry opens the Calendar's detail.
+    const oneToOne = calendar.upcoming.find((u) => u.kind === 'entry');
+    expect(oneToOne).toBeDefined();
+    const entry = await wired.calendar.readOne(agus, oneToOne!.kind === 'entry' ? oneToOne!.entry.entryId : '');
     expect(entry.readerIs).toBe('organiser');
     expect(entry.end).toEqual(expect.stringMatching(/^\d\d:\d\d$/));
     expect(view.leads).toBeGreaterThan(0);
+  });
+
+  it('P19.11-T1 AC-1 this week’s Calendar holds Yusuf’s ticked task on its day, done, beside the open ones', async () => {
+    const agus = await as('agus@kpm0417.test');
+    const week = await wired.calendar.read(agus, { view: 'week' });
+    const tasks = week.tasks.filter((t): t is Extract<typeof t, { taskId: string }> => 'taskId' in t);
+    expect(tasks).toContainEqual(expect.objectContaining({ name: HOME_TICKED_LEAD.name, date: '2026-11-07', done: true }));
+    expect(tasks.some((t) => !t.done)).toBe(true);
   });
 
   it('P19.8-T2 AC-11 Agus’s team report: orange counts and grey ✕ rows on the run’s day, more than five people', async () => {

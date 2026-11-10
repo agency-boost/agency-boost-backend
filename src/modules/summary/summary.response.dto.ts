@@ -1,13 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { LeadFlag } from '@/modules/leads/lead-attention';
-import type { OpenLead } from '@/modules/leads/lead-readings';
-import type { LeadType } from '@/modules/leads/lead.schema';
+import { LeadResponseDto } from '@/modules/leads/lead.response.dto';
 import { INSIGHT_RULES, type Insight, type InsightKind, type InsightRule } from './insights';
 import { FigureSourceDto } from './figure-source.dto';
 import type { FigureSource, SummaryActivity, SummaryView } from './summary.service';
 
 export { FigureSourceDto };
-import type { ActivityTarget, ActivityTargetKey, Pace, PeriodFigures, SectionChip } from './summary-figures';
+import type {
+  ActivityTarget, ActivityTargetKey, MonthApeSource, MonthRealised, Pace, PeriodFigures, SectionChip,
+} from './summary-figures';
 
 /** Declared for OpenAPI. The wire shapes live on `SummaryService`'s view types. */
 
@@ -32,7 +32,8 @@ class ProductionHeldDto extends PeriodFiguresDto {
   @ApiProperty({
     enum: ['official', 'estimate', 'none'],
     description: '`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal '
-      + 'Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183); the year only. `none`: nothing yet.',
+      + 'Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183) — the year to date, or on `monthly` the '
+      + 'month’s own figure typed over the upload (`realised.source: manual`). `none`: nothing yet.',
   })
   production!: 'official' | 'estimate' | 'none';
   @ApiProperty({
@@ -53,12 +54,49 @@ class EstimateReplacedDto {
   uploadedOn!: string;
 }
 
+/** The member's own figure for a month, typed over the upload (P19.11-T4). */
+class MonthManualDto {
+  @ApiProperty({ example: 216_500_000_00, description: 'IDR sen: the month’s APE as the member typed it, in millions on the screen.' })
+  minor!: number;
+  @ApiProperty({ type: String, format: 'date-time', description: 'When the member typed it.' }) typedAt!: string;
+}
+
+/** *Bulanan*'s realised APE: which figure `actualMinor` is (P19.11-T4; UX-12, UXQ2's default). */
+class MonthRealisedDto implements MonthRealised {
+  @ApiProperty({
+    enum: ['manual', 'uploaded', 'none'],
+    description: 'Which figure `actualMinor` is — **the member’s own figure typed over the upload, then the office’s upload, '
+      + 'then nothing** (*Belum diunggah*). `manual` is the screen’s *Diubah manual*.',
+  })
+  source!: MonthApeSource;
+  @ApiProperty({
+    description: 'The office holds an upload for the month, in force or not — with `manual`, the screen offers *Kembalikan ke '
+      + 'data unggahan*; without, clearing goes back to *Belum diunggah*.',
+  })
+  uploaded!: boolean;
+  @ApiProperty({
+    type: MonthManualDto, nullable: true,
+    description: 'The member’s own figure for the month (`PUT /goals/:period/ape-month`), always the one in force; `null` without one.',
+  })
+  manual!: { minor: number; typedAt: string } | null;
+}
+
 export class MonthlyFiguresDto extends ProductionHeldDto {
   @ApiProperty({
     type: FigureSourceDto, nullable: true,
-    description: 'Where this month’s APE came from; `null` until the file for the month arrives.',
+    description: 'Where this month’s APE came from: the office’s file, or — with `realised.source: manual` — `self_reported` '
+      + 'for the month, the member’s own figure typed over it; `null` while neither is held.',
   })
   source!: FigureSource | null;
+
+  @ApiProperty({
+    type: MonthRealisedDto,
+    description: 'The realised APE’s source — `manual`, `uploaded` or `none` — and whether an upload '
+      + 'exists for the month. `actualMinor` is `manual ?? uploaded`, and the attainment, `gapMinor` (never below 0), '
+      + '`policiesNeeded` and `targetMet` are worked out from it. The member’s own Summary and their coach’s view of it only: '
+      + 'no leader’s, Unit Dashboard’s or office’s figure reads the member’s own.',
+  })
+  realised!: MonthRealised;
 }
 
 export class YearlyFiguresDto extends ProductionHeldDto {
@@ -133,22 +171,19 @@ class SummaryActivityPeriodsDto {
   @ApiProperty({ type: SummaryActivityDto, description: 'The year to date, against the cascade on the annual target.' }) yearly!: SummaryActivityDto;
 }
 
-export class OpenLeadDto implements OpenLead {
-  @ApiProperty() id!: string;
-  @ApiProperty() name!: string;
-  @ApiProperty({ enum: ['sales', 'recruitment'], nullable: true }) type!: LeadType | null;
-  @ApiProperty({ type: String, nullable: true }) statusCode!: string | null;
-  @ApiProperty({ type: String, nullable: true, description: 'The office’s name for the stage, archived stages included.' }) statusLabel!: string | null;
-  @ApiProperty({ description: 'Promised for the office’s current month.' }) thisMonth!: boolean;
-  @ApiProperty({ enum: ['overdue', 'no-next-action', 'no-remarks'], isArray: true, description: 'As the Leads screen derives them (`leadFlags`).' }) flags!: LeadFlag[];
-  @ApiProperty({ type: Number, nullable: true, description: 'Whole days in the office’s zone; `null` unless overdue.' }) overdueDays!: number | null;
-  @ApiProperty({ type: String, nullable: true, example: '2026-09-18' }) nextActionDate!: string | null;
-  @ApiProperty({ type: String, nullable: true }) nextActionNote!: string | null;
-}
-
 class SummaryLeadsDto {
-  @ApiProperty({ type: [OpenLeadDto], description: 'The nearest `SUMMARY.LEADS_SHOWN` (10), nearest next action first, undated last.' }) rows!: OpenLeadDto[];
-  @ApiProperty({ description: 'Every open lead of the reader’s own.' }) total!: number;
+  @ApiProperty({
+    type: [LeadResponseDto],
+    description: '**Every** open lead of the member’s own, in `GET /leads`’ row shape — `proposals` on the '
+      + 'reader’s own rows only — what needs attention first: a dated next action first, the nearest (an overdue one) on '
+      + 'top, then the leads with none, the one registered first first, then the id. Empty to a reader whose `lead:read` '
+      + 'does not reach the member (roles §3.7): `total` still counts them.',
+  }) rows!: LeadResponseDto[];
+  @ApiProperty({ description: 'Every open lead of the member’s own.' }) total!: number;
+  @ApiProperty({
+    example: 5,
+    description: '`SUMMARY.LEADS_SHOWN`: how many rows the section shows before *Lihat semua (N)* opens the rest in place (AC-2).',
+  }) shown!: number;
   @ApiProperty({
     description: 'The open leads of everybody else the reader’s `lead:read` reaches — what Leads Management lists them '
       + 'besides their own. Counted on the reader’s own summary while `total` is 0; 0 otherwise.',
@@ -250,8 +285,8 @@ export class SummaryDto implements SummaryView {
   @ApiProperty({ type: SummaryActivityPeriodsDto, description: '*Your sales activity targets* and the other sections.' })
   activity!: { monthly: SummaryActivityDto; yearly: SummaryActivityDto };
 
-  @ApiProperty({ type: SummaryLeadsDto, description: '*Leads that need you*: the reader’s own open leads.' })
-  leads!: { rows: OpenLeadDto[]; total: number; unitOpen: number };
+  @ApiProperty({ type: SummaryLeadsDto, description: '*Leads yang perlu perhatian Anda*: the member’s own open leads.' })
+  leads!: { rows: LeadResponseDto[]; total: number; shown: number; unitOpen: number };
 
   @ApiProperty({ type: [InsightDto], description: 'The insight cards: the rules that fired, in their fixed priority, at most four.' })
   insights!: Insight[];

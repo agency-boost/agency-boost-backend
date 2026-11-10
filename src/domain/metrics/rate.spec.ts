@@ -25,7 +25,7 @@ describe('wholePercent', () => {
   it('P18.9-T3 F-253 rounds an exact half up where the float does not: 23 of 40 is 58, which Math.round makes 57', () => {
     expect(Math.round((23 / 40) * 100)).toBe(57);
     expect(wholePercent(23, 40)).toBe(58);
-    // The same half as sen: Rp 23 jt of Rp 40 jt.
+    // The same half as sen: Rp 23 Jt of Rp 40 Jt.
     expect(wholePercent(23_000_000_00, 40_000_000_00)).toBe(58);
   });
 

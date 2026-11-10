@@ -464,11 +464,12 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
         });
         /*
          * The Summary's figures, less what the Summary adds for its own reader (UI-157: `production`, the helpers
-         * without it) — and **the office's figure or nothing** (P19.1-T4 AC-12, ADR-0195): where the Summary's year is the
-         * member's own (`self_reported`), the dashboard holds no APE produced for the year and no source.
+         * without it; P19.11-T4: `realised`, which figure the month's is) — and **the office's figure or nothing** (P19.1-T4
+         * AC-12, ADR-0195): where the Summary's year is the member's own (`self_reported`), the dashboard holds no APE
+         * produced for the year and no source.
          */
         const official = (period: Record<string, unknown> & { source: { provenance: string } | null }) => {
-          const { production: _production, withoutProduction: _without, ...rest } = period;
+          const { production: _production, withoutProduction: _without, realised: _realised, ...rest } = period;
           return period.source?.provenance === 'self_reported'
             ? { ...rest, actualMinor: null, attainmentPct: null, gapMinor: null, overMinor: null, policiesNeeded: null, targetMet: false, source: null }
             : rest;

@@ -163,7 +163,7 @@ describe('P19.7-T2 a proposal’s items (proposal-items.ts)', () => {
       expect(String(r.details?.field)).toMatch(/^fieldValues\./);
     });
 
-    it('P19.7-T2 AC-7 holds a money field to its least sum on an IDR item (PRUWell Health’s min 100 jt)', () => {
+    it('P19.7-T2 AC-7 holds a money field to its least sum on an IDR item (PRUWell Health’s min 100 Jt)', () => {
       expect(refusal(() => applyItemPatch(health(), { fieldValues: { up: 9_999_999_999 } }))).toMatchObject({ status: 400, details: { field: 'fieldValues.up' } });
       expect(applyItemPatch(health(), { fieldValues: { up: 10_000_000_000 } }).fieldValues.up).toBe(10_000_000_000);
     });

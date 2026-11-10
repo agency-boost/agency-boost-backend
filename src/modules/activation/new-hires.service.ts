@@ -24,7 +24,7 @@ import { User, type UserDocument } from '@/modules/users/user.schema';
 import type { ActivationProgressDocument } from './activation-progress.schema';
 import { ActivationProgressRepository } from './activation-progress.repository';
 import { ActivationProgressService, activationClosed } from './activation-progress.service';
-import { newHiresIn } from './new-hire-years';
+import { newHireReached, newHiresIn } from './new-hire-years';
 import type {
   ActivationClosingsView, ActivationEmptyReason, ActivationEmptyView, ActivationNoteSavedView, ActivationView,
   FirstSaleSourceView, NewHireDetailView, NewHireLeaderView,
@@ -43,9 +43,11 @@ const SAY = ACTIVATION_REFUSALS.VALIDATION_FAILED;
  * coaching note.
  *
  * **Reach is `COACH`, resolved on the server at each request** (ADR-0074): a hire the reader coaches now,
- * at any depth, never themselves. Anybody else — a peer's hire, another office's, a member who left, the
- * reader — is **404**, never 403 (P11-T3 AC-3). A hire who moves leader leaves the old leader's roster at
- * once, and nothing is written to the activation when they do (D-moves).
+ * at any depth, never themselves. Anybody else — a peer's hire, another office's, the reader — is **404**, never 403
+ * (P11-T3 AC-3). **A new hire who left is read, never written** (P19.11-T2 AC-1; ADR-0239): the roster lists them and
+ * their detail opens `readOnly` (`newHireReached`, the list's own predicate), and every write is 404 for them. A hire
+ * who moves leader leaves the old leader's roster at once, and nothing is written to the activation when they do
+ * (D-moves).
  *
  * **Every read of a hire's activation is recorded** (D-audit, roles §3.5): the detail one entry, the
  * roster one per hire it shows, surface `activation`, failing open. A refused read records nothing.
@@ -132,25 +134,29 @@ export class NewHiresService {
       return below.map((id) => members.get(id)).find((m) => m !== undefined && m.role !== 'agent') ?? null;
     };
     const leaders = new Map(listed.map((c) => [c.membershipId, leaderOf(c.membership)] as const));
-    const names = await this.names.byMembershipId(ctx, [
+    // P19.11-T2 AC-4 (UX-14): each hire's photo, signed, for the circle of one not activated yet; a unit's leader is named.
+    const people = await this.names.pictured(ctx, [
       ...ids, ...[...leaders.values()].filter((m) => m !== null).map((m) => String(m!._id)),
-    ]);
-    const person = (membershipId: string) => ({ membershipId, name: names.get(membershipId) ?? '' });
+    ], ids);
+    const person = (membershipId: string) => ({ membershipId, name: people.get(membershipId)?.name ?? '' });
+    const pictured = (membershipId: string) => ({ ...person(membershipId), photoUrl: people.get(membershipId)?.photoUrl ?? null });
     const unitOf = (leader: MembershipDocument | null): NewHireUnitRefView => (leader
       ? { kind: leader.role === 'ab' ? 'ab' : 'aab', leader: person(String(leader._id)) }
       : { kind: 'direct', leader: null });
 
     const rows: NewHireRowView[] = listed.map(({ membershipId, membership: m }) => {
       const checklist = checklists.get(membershipId);
+      const status = newHireStatusOf(results.get(membershipId) ?? 'in_progress', m.firstSaleDate ?? null);
       return {
-        hire: person(membershipId),
+        // The photo only where the circle draws it: a hire not activated yet; a ticked one is a check, and sends none.
+        hire: status === 'not_yet' ? pictured(membershipId) : { ...person(membershipId), photoUrl: null },
         unit: unitOf(leaders.get(membershipId) ?? null),
         joinDate: m.joinDate!,
         day: activation3MDay(m.joinDate!, office.today),
         firstSaleDate: m.firstSaleDate ?? null,
         firstSaleDay: activation3MFirstSaleDay(m.joinDate!, m.firstSaleDate ?? null),
         firstSaleSource: saleSourceOf(m.firstSaleDate ? (m.firstSaleSource ?? null) : null),
-        status: newHireStatusOf(results.get(membershipId) ?? 'in_progress', m.firstSaleDate ?? null),
+        status,
         activation3M: results.get(membershipId) ?? 'in_progress',
         leftOn: m.leftAt ? this.clock.localDateFor(office.timezone, m.leftAt) : null,
         checklist: checklist
@@ -218,19 +224,24 @@ export class NewHiresService {
    * checklist (`ActivationEmptyView`) — once their first year is over (`activationFirstYearEndsOn`), whatever is stored;
    * and for a new hire with no activation at all, whom New Hires lists all the same (an AB or an AAB placed as one, an
    * office with nothing published), where the page said *not found*. An empty answer reads no activation and records
-   * none. Reach is unchanged: somebody the reader does not coach, or who is neither a new hire nor has an activation, is
-   * 404.
+   * none.
+   *
+   * **Every new hire the roster lists opens** (P19.11-T2 AC-1, UX-3; ADR-0239): reach is `newHireReached` — `COACH`, or a
+   * new hire who left below the reader with a join date in either year the roster offers (`newHiresReach`), the list's
+   * own filter. A leaver's detail is `readOnly`, without their number, and every write route stays 404 for them
+   * (`reach`). Somebody else, or somebody coached who is neither a new hire nor has an activation, is 404.
    */
   async detail(ctx: RequestContext, membershipId: string): Promise<NewHireDetailView | ActivationEmptyView> {
-    const hire = await this.coach.coachee(ctx, ctx.membershipId!, membershipId);
+    const office = await this.days.office(ctx);
+    const reached = await newHireReached(this.readers, ctx, ctx.membershipId!, membershipId, newHiresReach(office.today));
+    const hire = reached?.membership ?? null;
     const doc = hire ? await this.activations.latestOf(ctx, membershipId) : null;
     if (!hire || (!doc && hire.joinedAs !== 'new_hire')) throw new NotFoundException('Activation');
-    const office = await this.days.office(ctx);
     // The one count `GET /activation/me` makes too (the Phase 19.9 exit review, L3).
     const year = firstYearOf(office.timezone, office.today, hire.joinDate, doc?.startDate);
     if (year.over) return this.emptyOf(ctx, hire, 'first_year_over', year.joinDate, year.endsOn, office);
     if (!doc) return this.emptyOf(ctx, hire, 'no_activation', year.joinDate, year.endsOn, office);
-    const view = await this.withStanding(ctx, await this.activations.viewOne(ctx, doc, office, 'leader'), office);
+    const view = await this.withStanding(ctx, await this.activations.viewOne(ctx, doc, office, 'leader'), office, reached!.left);
     await this.subjectReads.record(ctx, { membershipId }, 'activation', { from: doc.startDate, to: office.today });
     return view;
   }
@@ -255,12 +266,15 @@ export class NewHiresService {
    * **And the header's two facts** (UI-027, D-25): who they report to — their leader's name and rung — and their
    * WhatsApp number (`users.phone`), which the detail's *WhatsApp* opens. Both are read only here, for a reader who
    * reaches this hire (`reach`, `COACH`); the number never reaches the roster.
+   *
+   * **`left`** (P19.11-T2 AC-1): a new hire who left, read through the roster's reach — `readOnly`, and no number, since
+   * nobody coaches them now. Every write answers somebody coached, so `false` there.
    */
   private async withStanding(
-    ctx: RequestContext, view: ActivationView, office: OfficeDay,
+    ctx: RequestContext, view: ActivationView, office: OfficeDay, left = false,
   ): Promise<NewHireDetailView> {
     const member = await this.memberships.findById(ctx, view.hire.membershipId);
-    if (!member || member.joinedAs !== 'new_hire' || !member.joinDate) return { ...view, newHire: null };
+    if (!member || member.joinedAs !== 'new_hire' || !member.joinDate) return { ...view, newHire: null, readOnly: left };
     const result = (await this.results.settle(ctx, [member], office)).get(view.hire.membershipId) ?? 'in_progress';
     const firstSaleDate = member.firstSaleDate ?? null;
     const newHire: NewHireStandingView = {
@@ -272,9 +286,9 @@ export class NewHiresService {
       firstSaleDay: activation3MFirstSaleDay(member.joinDate, firstSaleDate),
       firstSaleSource: saleSourceOf(firstSaleDate ? (member.firstSaleSource ?? null) : null),
       leader: await this.leaderOf(ctx, member),
-      phone: await this.phoneOf(member),
+      phone: left ? null : await this.phoneOf(member),
     };
-    return { ...view, newHire };
+    return { ...view, newHire, readOnly: left };
   }
 
   /** The hire's leader as their header names them (UI-027): membership, name and rung; `null` with nobody. */
@@ -388,7 +402,10 @@ export class NewHiresService {
     };
   }
 
-  /** The activation of a hire the reader coaches, or a 404 that says nothing about whether they exist. */
+  /**
+   * The activation of a hire the reader coaches, or a 404 that says nothing about whether they exist. **`COACH` alone**,
+   * for every write and for *Which case?*: a new hire who left is read on the detail, never written (P19.11-T2 AC-1).
+   */
   private async reach(ctx: RequestContext, membershipId: string): Promise<ActivationProgressDocument> {
     const hire = await this.coach.coachee(ctx, ctx.membershipId!, membershipId);
     const doc = hire ? await this.activations.latestOf(ctx, membershipId) : null;
@@ -398,8 +415,9 @@ export class NewHiresService {
 }
 
 /**
- * `ACTIVATION_3M_PCT` of a set of rows (rule A, UI V1): all of them, and each join month, newest first — one function
- * for the tree and for each leader's group, so the list, the tile and every leader's % agree.
+ * `ACTIVATION_3M_PCT` of a set of rows (`activation3MShare`; P19.11-T2 AC-2, ADR-0239): all of them, and each join month,
+ * newest first — one function for the tree and for each leader's group, each counted over its own rows and never averaged,
+ * so the list, the tile and every leader's % agree.
  */
 function figuresOf(rows: readonly NewHireRowView[]): Activation3MFiguresView {
   const outcomes = rows.map((r) => ({ joinDate: r.joinDate, result: r.activation3M, firstSaleDate: r.firstSaleDate }));

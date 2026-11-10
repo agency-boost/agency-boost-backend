@@ -156,14 +156,14 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
   describe('P19.7-T1 AC-3 plans, FAQ, detail blocks and the product’s own words', () => {
     const plan = chips('plan', ['Silver', 'Gold', 'Platinum'], { plan: true });
     const card = (name: string, over: Record<string, unknown> = {}) => ({
-      name, highlights: [{ label: 'Kamar', value: 'Rp 1 jt/hari' }], ...over,
+      name, highlights: [{ label: 'Kamar', value: 'Rp 1 Jt/hari' }], ...over,
     });
 
     it('P19.7-T1 AC-2 keeps plan cards in order, cheapest first, with one popular', () => {
       const out = check({ proposalFields: [plan], planOptions: [card('Silver'), card('Gold', { popular: true })] });
       expect(out.planOptions).toEqual([
-        { name: 'Silver', highlights: [{ label: 'Kamar', value: 'Rp 1 jt/hari' }], popular: false },
-        { name: 'Gold', highlights: [{ label: 'Kamar', value: 'Rp 1 jt/hari' }], popular: true },
+        { name: 'Silver', highlights: [{ label: 'Kamar', value: 'Rp 1 Jt/hari' }], popular: false },
+        { name: 'Gold', highlights: [{ label: 'Kamar', value: 'Rp 1 Jt/hari' }], popular: true },
       ]);
     });
 
@@ -284,8 +284,8 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
       const product = {
         faq: [{ question: 'Q?', answer: 'Company.' }],
         planOptions: [
-          { name: 'Silver', highlights: [{ label: 'Kamar', value: '1 jt' }], popular: false },
-          { name: 'Gold', highlights: [{ label: 'Kamar', value: '2 jt' }], popular: true },
+          { name: 'Silver', highlights: [{ label: 'Kamar', value: '1 Jt' }], popular: false },
+          { name: 'Gold', highlights: [{ label: 'Kamar', value: '2 Jt' }], popular: true },
         ],
       };
       expect(effectiveProposalWordsOf(product, undefined)).toEqual({
@@ -297,7 +297,7 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
       });
       expect(words.source).toBe('kpm');
       expect(words.faq).toEqual([{ question: 'Q?', answer: 'Office.' }]);
-      expect(words.plans.map((p) => [p.name, p.highlights[0].value])).toEqual([['Silver', '1 jt'], ['Gold', 'VIP']]);
+      expect(words.plans.map((p) => [p.name, p.highlights[0].value])).toEqual([['Silver', '1 Jt'], ['Gold', 'VIP']]);
     });
   });
 

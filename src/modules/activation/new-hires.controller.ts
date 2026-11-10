@@ -16,8 +16,15 @@ const refusal = (status: number, description: string) => ({ status, description,
 
 const NOT_REACHED =
   '`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who '
-  + 'has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another '
-  + 'office: a `403` would confirm that somebody exists.';
+  + 'has left — a new hire who left included, whose detail you read but never write — yourself, or an id that is '
+  + 'nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.';
+
+/** P19.11-T2 AC-1 (UX-3): the detail reaches everybody New Hires lists, a new hire who left included. */
+const DETAIL_NOT_REACHED =
+  '`NOT_FOUND` — nobody you coach with an activation, and no new hire New Hires lists for you: a peer’s hire, '
+  + 'somebody in another team, a member who left who was not a new hire of the two years New Hires shows, yourself, or '
+  + 'an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that '
+  + 'somebody exists.';
 
 const CLOSED = '`ACTIVATION_CLOSED` — the activation is complete, or its six months are over: nothing on it changes — '
   + 'nor after its first year, when it is served empty.';
@@ -45,8 +52,11 @@ export class NewHiresController {
       + '90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each '
       + 'row: the join date, the day, the first sale with its day and source, the status and their checklist where they '
       + 'have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each '
-      + 'AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. A year '
-      + 'with nobody in it while the other has somebody answers empty sections. Each new hire shown is a recorded read.',
+      + 'AAB’s or AB’s below you — overall and by join month: of the new hires who are due — past day 90, or with a first '
+      + 'sale at any time — the share whose first sale was by day 90, so a late one counts against it. A result decided is '
+      + 'kept, and never changes after. Each row carries the person’s photo as a signed link, or `null`. A new hire who '
+      + 'left is listed, and opens read-only. A year with nobody in it while the other has somebody answers empty '
+      + 'sections. Each new hire shown is a recorded read.',
   })
   @ApiResponse(refusal(
     404,
@@ -68,9 +78,11 @@ export class NewHiresController {
       + 'detail page, and a coaching page’s Activation tab. A recorded read. **Empty** (`ActivationEmptyDto`, told apart '
       + 'by its `empty`) once the join date plus twelve calendar months has come — the activation covers the first year '
       + 'only — and for a new hire New Hires lists who has no activation at all: the person, their join date and leader, '
-      + 'and nothing of a checklist, recording no read.',
+      + 'and nothing of a checklist, recording no read. **Everybody New Hires lists opens**: a new hire '
+      + 'who left — listed on the edges they left with — is served `readOnly: true`, without their WhatsApp number, and '
+      + 'every write on them answers 404.',
   })
-  @ApiResponse(refusal(404, NOT_REACHED))
+  @ApiResponse(refusal(404, DETAIL_NOT_REACHED))
   @ApiResponse({ status: 200, type: NewHireDetailDto })
   async detail(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
     return this.hires.detail(ctx, membershipId);

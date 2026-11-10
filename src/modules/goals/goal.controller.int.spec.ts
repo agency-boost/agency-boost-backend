@@ -25,6 +25,7 @@ const ROUTES: Record<string, string> = {
   preview: 'goal:read',
   save: 'goal:update',
   saveEstimate: 'goal:update',
+  saveMonthApe: 'goal:update',
 };
 
 /**
@@ -441,6 +442,70 @@ describe('goals over HTTP (P8-T3)', () => {
         leadsToApptPct: 30, closingRatePct: 30, version: 1, savedAt: NOW, deletedAt: null,
       });
       const res = await http().put('/goals/2025/ape-estimate').send({ apeAchievedMinor: 1 }).expect(409);
+      expect(res.body.error.code).toBe('GOAL_PERIOD_LOCKED');
+    });
+  });
+
+  describe('P19.11-T4 a month’s APE over the upload: PUT /goals/:period/ape-month (UX-12)', () => {
+    const monthUrl = '/goals/2026/ape-month';
+    /** The office's current month at `NOW`, 25 September 2026 in Jakarta. */
+    const MONTH = '2026-09';
+    beforeEach(async () => {
+      // The office opened in January, whatever the run's own date: the months the Summary offers reach back to it.
+      await mongoose.connection.db!.collection('kpms').updateOne({}, { $set: { createdAt: new Date('2026-01-05T02:00:00Z') } });
+    });
+
+    it.each(EVERY_MEMBER)('P19.11-T4 AC-3 positive: %s types a month on their own plan, and clears it', async (_name, who) => {
+      session.current = who;
+      await http().put(url).send(plan()).expect(200);
+      const res = await http().put(monthUrl).send({ month: MONTH, apeAchievedMinor: 216_500_000_00 }).expect(200);
+      expect(res.body).toEqual({ period: '2026', month: MONTH, manual: { minor: 216_500_000_00, typedAt: NOW.toISOString() } });
+      // *Kembalikan ke data unggahan*: null clears it.
+      expect((await http().put(monthUrl).send({ month: MONTH, apeAchievedMinor: null }).expect(200)).body)
+        .toEqual({ period: '2026', month: MONTH, manual: null });
+    });
+
+    it('P19.11-T4 AC-3 negative: a support session, read-only or elevated, types no month for the member', async () => {
+      session.current = AGENT;
+      await http().put(url).send(plan()).expect(200);
+      for (const readOnly of [true, false]) {
+        session.current = new RequestContext(AGENT.userId, 'none', AGENT.membership, 'u-support', null, false, readOnly);
+        const res = await http().put(monthUrl).send({ month: MONTH, apeAchievedMinor: 1 }).expect(403);
+        expect(res.body.error.code).toMatch(/^(PERM_DENIED|IMPERSONATION_READ_ONLY)$/);
+      }
+      const goal = await mongoose.connection.db!.collection('goals').findOne({});
+      expect(goal!.apeByMonth ?? {}).toEqual({});
+    });
+
+    it('P19.11-T4 AC-3 negative: a Super Admin holds no goal:update, and is refused by the guard', async () => {
+      session.current = SUPER_ADMIN;
+      const res = await http().put(monthUrl).send({ month: MONTH, apeAchievedMinor: 1 }).expect(403);
+      expect(res.body.error.details).toEqual({ permission: 'goal:update' });
+    });
+
+    it('P19.11-T4 AC-3 a plan nobody saved is not found', async () => {
+      await http().put(monthUrl).send({ month: MONTH, apeAchievedMinor: 1 }).expect(404);
+    });
+
+    it('P19.11-T4 AC-3 refuses a bad month, a month of another year or not begun, a bad figure and a field nobody defined', async () => {
+      await http().put(url).send(plan()).expect(200);
+      for (const body of [
+        { month: '2026-13', apeAchievedMinor: 1 }, { month: '2025-09', apeAchievedMinor: 1 }, { month: '2026-10', apeAchievedMinor: 1 },
+        { month: MONTH, apeAchievedMinor: 1.5 }, { month: MONTH, apeAchievedMinor: -1 }, { month: MONTH },
+        { apeAchievedMinor: 1 }, { month: MONTH, apeAchievedMinor: 1, for: 'x' },
+      ]) {
+        const res = await http().put(monthUrl).send(body).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      }
+    });
+
+    it('P19.11-T4 AC-3 a year that has ended is GOAL_PERIOD_LOCKED', async () => {
+      await mongoose.connection.db!.collection('goals').insertOne({
+        kpmId: FIXTURE_KPM, membershipId: AGENT.membershipId, period: '2025', mode: 'direct', annualApeTargetMinor: 1,
+        savingsTargetMinor: 0, commissionRatePct: 0, monthsLeftOverride: null, apeAchievedMinor: 0, caseSizeMinor: 1,
+        leadsToApptPct: 30, closingRatePct: 30, version: 1, savedAt: NOW, deletedAt: null,
+      });
+      const res = await http().put('/goals/2025/ape-month').send({ month: '2025-11', apeAchievedMinor: 1 }).expect(409);
       expect(res.body.error.code).toBe('GOAL_PERIOD_LOCKED');
     });
   });

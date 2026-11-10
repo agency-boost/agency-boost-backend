@@ -38,8 +38,11 @@ export class CreateLeadDto {
     additionalProperties: false,
     properties: { phone: { type: 'string' }, email: { type: 'string' } },
     description:
-      'Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** '
-      + '(ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with '
+      'Both optional, both clearable, sent as a pair. **`phone` is stored as `+62` and its national digits**'
+      + ': `0812-1100-2200`, `62812…` and `+62 812…` all store `+6281211002200`. A phone that is not '
+      + 'an Indonesian number (9 to 13 digits after `+62`) is `400 VALIDATION_FAILED` — unless it is the number the '
+      + 'lead already holds, sent back unchanged, which passes untouched. **No lawful basis is asked for since '
+      + '2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with '
       + '`400 VALIDATION_FAILED` like any other unknown field.',
   })
   @Allow()

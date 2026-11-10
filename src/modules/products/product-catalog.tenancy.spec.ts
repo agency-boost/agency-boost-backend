@@ -309,7 +309,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       const mapan = await service.product(agent(KPM_A), 'prumapan');
       expect(mapan).toMatchObject({
         code: 'PRUMAPAN', name: 'PRUMapan', lifecycle: 'active', needs: ['retirement'],
-        ageBands: ['< 25', '25–34', '35–49'], budgetBands: ['< Rp 500 rb', 'Rp 500 rb–Rp 2 jt', 'Rp 2 jt–Rp 5 jt'],
+        ageBands: ['< 25', '25–34', '35–49'], budgetBands: ['< Rp 500 rb', 'Rp 500 rb–Rp 2 Jt', 'Rp 2 Jt–Rp 5 Jt'],
         runOffNote: null, successorCode: null,
       });
       expect(mapan.benefits.length).toBeGreaterThan(0);

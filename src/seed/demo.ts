@@ -77,6 +77,7 @@ import { seedProposalFixture } from './proposal-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
 import { seedHomeFixture } from './home-fixture';
+import { seedSummaryLeadsFixture } from './summary-leads-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
 import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
 import {
@@ -2682,7 +2683,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // ------------------- the proposal's fields: the Prudential draft, two products' plans and FAQ, two leads' ages (P19.7-T1; `proposal-fixture.ts`)
 
   const proposal = await seedProposalFixture({
-    clock, companyId: String(prudential._id), kpm0417: id0417, rina: rina.id, superAdminUserId: String(superAdmin._id),
+    clock, companyId: String(prudential._id), kpm0417: id0417, rina: rina.id, agus: ab.id,
+    superAdminUserId: String(superAdmin._id),
   });
 
   // ------------------- 0555 in its own colours, logo and mascot, beside 0417's AgencyBoost look (P19.6-T1; `branding-fixture.ts`)
@@ -2697,6 +2699,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // ------------------- Home: a lead's next action on the run's today, for Agus (P19.8-T2 AC-11; `home-fixture.ts`)
 
   const home = await seedHomeFixture({ clock, kpm0417: id0417, agus: ab.id });
+
+  // ------------------- the Summary's leads: more than five, one late and one undated, for Agus (P19.11-T5; `summary-leads-fixture.ts`)
+
+  const summaryLeads = await seedSummaryLeadsFixture({ clock, kpm0417: id0417, agus: ab.id });
 
   // ------------------- recruitment tools: the playbooks, the pitch, 0417's brochure (Phase 17; `recruitment-fixture.ts`)
 
@@ -2745,9 +2751,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   /*
    * **Raka holds an estimate and no upload**: no file this year names him (`reporting-fixture.ts`, `apeMillions: null`),
-   * so his own Summary and Goal Settings read *Rp 120 jt · perkiraan Anda*, while Satria's Unit Dashboard and the
+   * so his own Summary and Goal Settings read *Rp 120 Jt · perkiraan Anda*, while Satria's Unit Dashboard and the
    * Owner's screens say *Belum diunggah* (`officialGoalFigures`). **Rina's estimate was replaced**: she typed her
-   * Rp 120 jt before the office's files, which now hold her year to date, so her Summary reads the office's figure and
+   * Rp 120 Jt before the office's files, which now hold her year to date, so her Summary reads the office's figure and
    * *Diganti data produksi resmi (diunggah …)*. Each written only while it is not there yet, so a re-run changes nothing.
    */
   await Goals.updateOne(
@@ -2760,7 +2766,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   ).exec();
   /*
    * **Pandu typed over his uploaded figure, after the office's latest file** (P19.8-T5 AC-8; MOB UI-190, ADR-0230 §6):
-   * this month's corrected file landed a day ago, and six hours ago he typed Rp 60 jt over the year to date it gives
+   * this month's corrected file landed a day ago, and six hours ago he typed Rp 60 Jt over the year to date it gives
    * him. The newer wins on his own screens — Goal Settings reads *Diubah oleh Anda* with *Pakai otomatis*, the Summary
    * *perkiraan Anda* — while Satria's Unit Dashboard and the Owner's screens read the office's figure. Rina's above is
    * the other order: typed before the files, replaced by them. Written only while nothing is typed yet.
@@ -3450,6 +3456,22 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const snapshotsTaken = await backfillCoachingSnapshots(id0417);
 
   /*
+   * **P19.11-T4 — a month's APE typed over the upload, and one with none** (UX-12; UXQ2's default): this month, on the
+   * Summary's *Bulanan*, **Dewi** typed Rp 72,5 Jt over the office's upload (Rp 55 Jt) — *Diubah manual*, and
+   * *Kembalikan ke data unggahan* — and **Raka**, with nothing uploaded for him, typed Rp 18,5 Jt — *Diubah manual*, and
+   * the way back to *Belum diunggah*. Neither leader's screen reads either (`officialGoalFigures`). Agus, the demo AB,
+   * holds no plan this year (his Unit Dashboard row is the client's *No goal set · Rp 29 Jt*, I-406), so Dewi's login is
+   * the one to review it from. Written after the sessions' snapshots, which froze what the 1:1s saw; each only while the
+   * month holds none, so a re-run changes nothing, and a figure changed in a walk is kept.
+   */
+  for (const [membershipId, minor, hoursAgo] of [[dewi.id, 72_500_000_00, 6], [reportingCast.raka.id, 18_500_000_00, 30]] as const) {
+    await Goals.updateOne(
+      { kpmId: id0417, membershipId, period: thisYear, deletedAt: null, [`apeByMonth.${thisMonth}`]: { $exists: false } },
+      { $set: { [`apeByMonth.${thisMonth}`]: { minor, typedAt: daysAgo(hoursAgo / 24) } } },
+    ).exec();
+  }
+
+  /*
    * **The notice each coachee's latest finalize sent** (P11-T10 AC-8): `COACHING_SESSION_FINALIZED`, in-app,
    * payload `{ sessionId }` and nothing a leader typed, sent when the session was finalized and unread —
    * what `announceFinalized` writes. Without it a fresh seed holds finalized sessions and no inbox link
@@ -3985,7 +4007,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${summaryLeads.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM; every Agent
                                                        item opens its Contoh with Cari / Daftar KPM and
@@ -4060,6 +4082,11 @@ ${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTempla
                                  asks for her. Two insights: a ratio below benchmark, and
                                  Leads per activity well above it; no action card. (admin@ has neither a goal nor a lead, and her
                                  Summary shows both empty states.)
+    dewi@kpm0417.test            Monthly: Rp 72,5 Jt typed over this month's upload (Rp 55 Jt)
+                                 — "Diubah manual", tap the figure to change it in millions,
+                                 and "Kembalikan ke data unggahan" (P19.11-T4). Raka Aditama
+                                 typed Rp 18,5 Jt with nothing uploaded, so clearing his goes
+                                 back to "Belum diunggah"; neither reaches a leader's screen
 
   MONTHLY UPLOAD at /kpm/data-upload  (owner@kpm0417.test or admin@kpm0417.test)
     This month   one import reverted by the Admin (figures typed in thousands), then

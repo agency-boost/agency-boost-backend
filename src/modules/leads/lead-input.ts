@@ -2,7 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
-import { LEAD_AGE, LEAD_GENDERS, type LeadGender } from '@/domain/constants';
+import { LEAD_AGE, LEAD_GENDERS, normalisePhone, type LeadGender } from '@/domain/constants';
 import { isLeadAge } from './lead-age';
 import { LEAD_TYPES, type LeadType } from './lead.schema';
 import { LEAD_REFUSALS } from './leads.messages';
@@ -145,7 +145,14 @@ export function checkLead(body: unknown, opts: { partial?: boolean } = {}): Chec
   return out;
 }
 
-/** Both optional, both clearable, and shape only. No ground is asked for either (ADR-0108 §1). */
+/**
+ * Both optional, both clearable, and no ground is asked for either (ADR-0108 §1).
+ *
+ * **The phone is normalised where it reads as an Indonesian number** (P19.11-T3 AC-6; UX-10; `normalisePhone`, the same
+ * reading as *Isi nomor WhatsApp*'s): `0812-1100-2200`, `62812…` and `+62 812…` all come back `+6281211002200`. One that
+ * does not read as one comes back trimmed, as typed — whether it may be stored depends on what the lead holds, which this
+ * pure reader cannot see: `checkContactPhone` decides, with the stored row beside it.
+ */
 function readContact(value: unknown, f: Fields): { phone: string | null; email: string | null } {
   if (value === null) return { phone: null, email: null };
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -172,10 +179,25 @@ function readContact(value: unknown, f: Fields): { phone: string | null; email: 
     if (key === 'email' && !trimmed.includes('@')) {
       f.violations.push(SAY.contactEmail);
     }
-    return trimmed;
+    return key === 'phone' ? normalisePhone(trimmed) ?? trimmed : trimmed;
   };
 
   return { phone: read('phone'), email: read('email') };
+}
+
+/**
+ * **A lead's phone, refused only when it changes to something that is not an Indonesian number** (P19.11-T3 AC-6; UX-10):
+ * `400 VALIDATION_FAILED` with `contact.phone`'s sentence — the field's own words for the rule `PATCH /auth/me` and
+ * `PUT /members/:membershipId/phone` already hold a person's number to.
+ *
+ * `next` is what `checkLead` read (normalised where it could be); `stored` the lead's number now, `null` for a new lead.
+ * A number stored before the rule — *"0812"* typed in 2026 — **passes untouched while it is sent back unchanged**, as
+ * the sheet does when only the email moves (the pair travels together): saving a lead never fails over a field the
+ * reader did not touch. Clearing it (`null`) is always allowed.
+ */
+export function checkContactPhone(next: string | null, stored: string | null): void {
+  if (next === null || normalisePhone(next) === next || next === stored) return;
+  refuseWith([SAY.contactPhone]);
 }
 
 /** An enum that may also be explicitly cleared. */

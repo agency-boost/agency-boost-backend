@@ -135,7 +135,7 @@ export function moneyInFull(minor: number, currency: ProductCurrency): string {
   return unbroken(currency === 'USD' ? usdInFull(minor) : formatRupiah(minor, 'id'));
 }
 
-/** **A field's amount and a block's amount: compact** (§B.25) — *Rp 1 M*, *Rp 250 jt*; a USD amount still in full. */
+/** **A field's amount and a block's amount: compact** (§B.25) — *Rp 1 M*, *Rp 250 Jt*; a USD amount still in full. */
 export function moneyCompact(minor: number, currency: ProductCurrency): string {
   return unbroken(currency === 'USD' ? usdInFull(minor) : formatRupiahCompact(minor, {}, 'id'));
 }

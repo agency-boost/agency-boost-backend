@@ -92,12 +92,15 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     await db.collection('goals').insertMany(goals as never);
     await db.collection('monthlyAgentData').insertMany(production as never);
     await db.collection('activityLogs').insertMany(logs as never);
-    // P11-T4 AC-7: office A's twenty agents under one AB, so a leader's `for=` read has somebody to reach.
+    /*
+     * P11-T4 AC-7: office A's twenty agents under one AB, so a leader's `for=` read has somebody to reach. Their accounts'
+     * ids are ids (P19.11-T5): the leads' rows name their owner (`owner`), as `/leads`' do, through the accounts.
+     */
     await db.collection('memberships').insertMany([
-      { _id: new mongoose.Types.ObjectId(LEADER), kpmId: KPM_A, userId: 'u-leader', leaderCode: 'LC-LEAD',
+      { _id: new mongoose.Types.ObjectId(LEADER), kpmId: KPM_A, userId: '66f0000000000000000002ff', leaderCode: 'LC-LEAD',
         orgLevelCode: 'AB', leaderId: null, ancestorIds: [], status: 'active', deletedAt: null },
       ...agents.map((id, i) => ({
-        _id: new mongoose.Types.ObjectId(id), kpmId: KPM_A, userId: `u-${i}`, leaderCode: `LC-${i}`,
+        _id: new mongoose.Types.ObjectId(id), kpmId: KPM_A, userId: `66f000000000000000002${String(i).padStart(3, '0')}`, leaderCode: `LC-${i}`,
         orgLevelCode: 'AGENT', leaderId: LEADER, ancestorIds: [LEADER], status: 'active', deletedAt: null,
       })),
     ] as never);
@@ -136,7 +139,8 @@ describe('the Personal Summary, measured (P10-T4)', () => {
     // UI-052: the total is the breakdown's sum — the closings and the recruitment shown, nothing else.
     expect(view.activity.yearly.total).toBe(514);
     expect(view.leads).toMatchObject({ total: 30 });
-    expect(view.leads.rows).toHaveLength(10);
+    // P19.11-T5 AC-3: every open lead, uncut, in `/leads`' row shape — the screen shows five and opens the rest.
+    expect(view.leads.rows).toHaveLength(30);
   });
 
   it('AC-6: answers well inside the read budget, at p95', async () => {

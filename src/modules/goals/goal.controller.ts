@@ -1,18 +1,19 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { AllowWhileReadOnly, Ctx, RequirePermission } from '@/common/auth/auth.decorators';
+import { AllowWhileReadOnly, Ctx, RefuseInSupportSession, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
-import { GoalReadQueryDto, SaveEstimateDto, SaveGoalDto, SaveGoalQueryDto } from './goal.dto';
-import { GoalPreviewDto, GoalResponseDto } from './goal.response.dto';
+import { GoalReadQueryDto, SaveEstimateDto, SaveGoalDto, SaveGoalQueryDto, SaveMonthApeDto } from './goal.dto';
+import { GoalMonthApeResponseDto, GoalPreviewDto, GoalResponseDto } from './goal.response.dto';
 import { GoalService } from './goal.service';
 
 /**
  * An agent's agreed plan for a period (P8-T3).
  *
- * **Three routes, one screen** — and a fourth, the Summary's. The read, the save and since UI V1 (P18.11-T5) the
+ * **Three routes, one screen** — and two more, the Summary's. The read, the save and since UI V1 (P18.11-T5) the
  * preview its result card moves with are called by `/goals` and a coachee's *Goal Setting* tab; since P19.1-T4 the
- * Summary writes the member's own estimate of the APE produced through `PUT /goals/:period/ape-estimate`. `GET /goals/:period/history` was retired
+ * Summary writes the member's own estimate of the APE produced through `PUT /goals/:period/ape-estimate` (on *Tahunan*
+ * since P19.11-T4), and since P19.11-T4 a month's APE over the upload through `PUT /goals/:period/ape-month`. `GET /goals/:period/history` was retired
  * by P10.1-T6 with the card that read it: the prototype draws no goal history, so no screen would
  * call it again. The stored revisions keep every version and who saved it (ADR-0042).
  *
@@ -136,5 +137,47 @@ export class GoalController {
     @Body() body: SaveEstimateDto,
   ) {
     return this.goals.saveEstimate(ctx, period, body);
+  }
+
+  /*
+   * **A month's APE, typed over the upload** (P19.11-T4; UX-12, UXQ2's default): the Summary's headline on *Bulanan*,
+   * edited in place in millions, and *Kembalikan ke data unggahan*. One month of one plan, the caller's own, no `for`.
+   */
+  @Put(':period/ape-month')
+  @RequirePermission('goal:update')
+  // The member's own declaration, which the Summary shows as theirs (*Diubah manual*): never typed by a support session,
+  // read-only or elevated, as the coaching tick and the profile's own fields are not.
+  @RefuseInSupportSession()
+  @ApiOperation({
+    summary: 'Your own APE for one month, over the office’s upload',
+    description:
+      'Stores the month’s APE as the caller realised it on their own plan for the year (`apeByMonth`), or clears it with '
+      + '`null`. **On the caller’s own Summary it is in force over the office’s upload for that month** — an upload '
+      + 'arriving later does not replace it — and the screen marks it *Diubah manual*; cleared, the upload is read again '
+      + '(*Kembalikan ke data unggahan*), or *Belum diunggah*. The upload (`monthlyAgentData`) is never written. **Read by '
+      + 'the member’s own Summary and their coach’s view of it alone** — no leader’s, Unit Dashboard’s or office’s figure '
+      + 'reads it. Not a plan input: no revision, the version and `savedAt` unchanged. The same figure again, or clearing a '
+      + 'month that holds none, changes nothing. Audited `goal.month_ape_set` / `goal.month_ape_cleared`, never the amount.',
+  })
+  @ApiResponse({ status: 200, type: GoalMonthApeResponseDto })
+  @ApiResponse({
+    status: 400,
+    description: '`VALIDATION_FAILED` — `month` is no `YYYY-MM`, not a month of the path’s year, after the office’s current '
+      + 'month or before the month it opened (`details.field: month`, with `earliest` and `latest`); `apeAchievedMinor` is '
+      + 'missing, negative, a fraction of a sen or above the money bound; or the body holds any other field.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({
+    status: 404,
+    description: '`NOT_FOUND` — you have no saved plan for the period. Indistinguishable from a plan in another office.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({ status: 409, description: '`GOAL_PERIOD_LOCKED` — the period has ended.', type: ApiErrorEnvelope })
+  async saveMonthApe(
+    @Ctx() ctx: RequestContext,
+    @Param('period') period: string,
+    @Body() body: SaveMonthApeDto,
+  ) {
+    return this.goals.saveMonthApe(ctx, period, body);
   }
 }

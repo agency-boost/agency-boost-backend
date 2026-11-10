@@ -165,8 +165,8 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     expect(yosef.aabUnits[0].moc!.criteria.find((c) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 2, met: true });
     expect(analytics.mocRulesText).toBe(
       // P19.3-T1 AC-5: *APE*, never *Net APE*.
-      'AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+      'AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (APE ≥ Rp 600 Jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     );
     const satria = agency('Satria Nugraha');
     expect(satria.moc!.status).toBe('not_met');

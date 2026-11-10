@@ -96,7 +96,7 @@ describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
       for (const line of [
         'KESEHATAN', 'PRUWell Medical · Gold', 'Tertanggung: Klien', 'Premi per bulan', 'Rp 1.250.000',
         'Plan Gold Masa bayar 10 tahun', 'Uang pertanggungan Rp 1 M',
-        'DANA PENDIDIKAN', 'PRUCerah', 'Tertanggung: Anak Adik Raka, 8 th', 'Target dana Rp 500 jt',
+        'DANA PENDIDIKAN', 'PRUCerah', 'Tertanggung: Anak Adik Raka, 8 th', 'Target dana Rp 500 Jt',
       ]) expect(page.split('\n')).toContain(line);
       // Total dibayar: the premium × 12 × the term's years, in full (§B.34).
       expect(page.replace(/\n/g, ' ')).toContain('Total dibayar selama 10 tahun: Rp 150.000.000');
@@ -155,7 +155,7 @@ describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
       expect(page).toEqual(expect.arrayContaining([
         'Manfaat utama', 'Batas tahunan Rp 2 M', 'Kamar per hari Rp 1,5 jt', 'Jadwal', 'Pembayaran premi 10 tahun',
         'Yang tidak ditanggung', 'Kondisi yang sudah ada 12 bulan', 'Nilai tunai (contoh) — tidak dijamin',
-        'Tahun ke-10 contoh Rp 100 jt', 'Tahapan dana Rp 25 jt',
+        'Tahun ke-10 contoh Rp 100 Jt', 'Tahapan dana Rp 25 Jt',
       ]));
       const empty = await built({ items: [{ ...HEALTH, values: { plan: 'Gold', masa_bayar: '10 tahun' } }] });
       expect(empty.pages[1].text.split('\n')).toEqual(expect.arrayContaining(['Batas tahunan –', 'Uang pertanggungan – Wilayah Indonesia']));
@@ -257,8 +257,8 @@ describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
       const pdf = await built({ items: [HEALTH, EDUCATION] });
       expect(pdf.pages[0].text).not.toContain('Rincian');
       const two = pdf.pages[1].text;
-      expect(two.indexOf('PRUWell Medical · Gold')).toBeLessThan(two.indexOf('Tahun ke-10 contoh Rp 100 jt'));
-      expect(two.indexOf('Tahun ke-10 contoh Rp 100 jt')).toBeLessThan(two.indexOf('PRUCerah'));
+      expect(two.indexOf('PRUWell Medical · Gold')).toBeLessThan(two.indexOf('Tahun ke-10 contoh Rp 100 Jt'));
+      expect(two.indexOf('Tahun ke-10 contoh Rp 100 Jt')).toBeLessThan(two.indexOf('PRUCerah'));
     });
   });
 
@@ -321,7 +321,7 @@ describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
     it('P19.7-T3 AC-4 writes a premium and its totals in full, a field’s amount compact, and USD in full with its code (ADR-0223 §8)', () => {
       expect(moneyInFull(1_250_000_00, 'IDR')).toBe('Rp 1.250.000');
       expect(moneyCompact(100_000_000_000, 'IDR')).toBe('Rp 1 M');
-      expect(moneyCompact(25_000_000_000, 'IDR')).toBe('Rp 250 jt');
+      expect(moneyCompact(25_000_000_000, 'IDR')).toBe('Rp 250 Jt');
       expect(usdInFull(125_000)).toBe('USD 1.250,00');
       expect(usdInFull(123_456_789)).toBe('USD 1.234.567,89');
       expect(moneyCompact(125_000, 'USD')).toBe('USD 1.250,00');

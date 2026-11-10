@@ -61,7 +61,7 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadNextActionDoneSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
-  GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
+  GoalCascadeMappingSchema, GoalMonthApeSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
 import { PolicySchema } from '@/modules/production/policy.schema';
 import { ProductionMonthSchema } from '@/modules/production/production-month.schema';
@@ -315,6 +315,12 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'coached against does not stop having existed because it was revised',
   ],
   [
+    'goalMonthApe (subdocument)',
+    GoalMonthApeSchema,
+    'a month of the plan\'s `apeByMonth` (P19.11-T4, ADR-0240 §3): clearing it unsets the key, which the audit row '
+      + 'records, and the plan holding it is soft-deleted whole',
+  ],
+  [
     'goalCascadeMapping (subdocument)',
     GoalCascadeMappingSchema,
     'the three activity codes a goal is measured against. Set once and rewritten only if the '
@@ -506,6 +512,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [GoalSchema, 'GoalSchema'],
   [GoalSnapshotSchema, 'GoalSnapshotSchema'],
   [GoalCascadeMappingSchema, 'GoalCascadeMappingSchema'],
+  [GoalMonthApeSchema, 'GoalMonthApeSchema'],
   [PolicySchema, 'PolicySchema'],
   [MonthlyAgentDataSchema, 'MonthlyAgentDataSchema'],
   [ProductionMonthSchema, 'ProductionMonthSchema'],

@@ -713,12 +713,18 @@ export function configModule(
     // P19.7-T2: the owner's proposals on their own leads — the pill, the filter, the *Riwayat* notes.
     proposalReadings,
   );
+  /*
+   * P19.11-T5 (UX-13): the Summary's leads in `/leads`' row shape, from the leads' own row builder — handed over here, as
+   * `activityLogs`' published copy is above, since the Summary is built before the leads.
+   */
+  Object.assign(summary, { leadRows: leadRecords });
   // P18.8-T4: a data-backed item's hand tick, with its record — through the leads and the coaching sessions.
   const activationRecords = new ActivationItemRecords(
     activationProgress, leadRecords, coachingSession, new TenantDay(kpms as never, clock),
   );
   const newHires = new NewHiresService(
-    activationProgress, activationRows, coach, new MemberNames(memberships, users as never),
+    // P19.11-T2 AC-4: the roster's photos, signed as the application signs them.
+    activationProgress, activationRows, coach, new MemberNames(memberships, users as never, avatarLinks),
     new TenantDay(kpms as never, clock), subjectReads, audit, clock, memberships, activationRecords, activation3M,
     users as never,
   );

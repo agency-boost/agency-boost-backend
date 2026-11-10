@@ -7,7 +7,8 @@ import { ActivityService } from '@/modules/activity/activity.service';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { GoalService } from '@/modules/goals/goal.service';
 import { officialWrittenAt } from '@/modules/goals/goal-input';
-import { LeadReadings, type OpenLead } from '@/modules/leads/lead-readings';
+import { LeadReadings } from '@/modules/leads/lead-readings';
+import { LeadService, type LeadView } from '@/modules/leads/lead.service';
 import { CoachResolver, type Subject } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
@@ -18,8 +19,9 @@ import { ActivityBindingService } from '@/modules/config/activity-binding.servic
 import { insightsFor, type Insight } from './insights';
 import { summaryPeriod, type SummaryPeriodQuery } from './summary-period';
 import {
-  activityTargets, goalFigures, paceFor, productionHeld, sectionChips, totalLogged,
-  type ActivityTarget, type FigureSource, type Pace, type PeriodFigures, type ProductionHeld, type SectionChip,
+  activityTargets, goalFigures, monthWithManual, paceFor, productionHeld, sectionChips, totalLogged,
+  type ActivityTarget, type FigureSource, type MonthRealised, type Pace, type PeriodFigures, type ProductionHeld,
+  type SectionChip,
 } from './summary-figures';
 
 export type { FigureSource };
@@ -61,10 +63,12 @@ export interface SummaryView {
   goal: { set: boolean; savedAt: string | null };
   caseSizeMinor: number;
   /**
-   * *Monthly* (ADR-0056): this month's fixed target against this month's uploaded APE — `production` `official` or
+   * *Monthly* (ADR-0056): this month's fixed target against this month's realised APE — **the member's own figure typed
+   * over the upload, then the upload, then nothing** (P19.11-T4; UX-12, UXQ2's default; `monthWithManual`): `realised`
+   * says which, and whether an upload exists beneath it. `production` `estimate` for the member's own, `official` or
    * `none`, and with none the helpers counting 0 achieved (UI-157 item 2).
    */
-  monthly: PeriodFigures & { source: FigureSource | null } & ProductionHeld;
+  monthly: PeriodFigures & { source: FigureSource | null } & ProductionHeld & { realised: MonthRealised };
   /**
    * *Yearly*: the annual target against the year to date, from whichever writer holds it (P9-T6) — `production` says
    * whose: the office's, the member's own estimate (*perkiraan Anda*, UI-157 item 4), or none yet.
@@ -83,7 +87,8 @@ export interface SummaryView {
    * **Where this page's counts of policies come from** (UI V1, UI-052), so the screen can say so: every one — the
    * *Submission polis* chips and the pace sentence's *closing N* — is the member's **activity log**
    * (`activity_log`), the codes the office binds to *Submission polis* (`codes`). APE, the gap and *Polis yang
-   * dibutuhkan* are the office's **production upload** (`monthly.source`, `yearly.source`).
+   * dibutuhkan* are the office's **production upload** (`monthly.source`, `yearly.source`) — or, on the member's own
+   * page, the figure they typed over it (P19.11-T4: `monthly.realised`; the year's estimate).
    */
   policies: { source: 'activity_log'; codes: string[] };
   /**
@@ -96,13 +101,16 @@ export interface SummaryView {
   /** What was logged against the plan, and the rest of the member's sections (P10-T5). */
   activity: { monthly: SummaryActivity; yearly: SummaryActivity };
   /**
-   * *Leads that need you* (P10-T6): the member's own open leads — the reader's, or on a leader's copy
-   * the subject's (*Leads that need her*) — nearest next action first and undated last, the first
-   * `SUMMARY.LEADS_SHOWN` of them, and how many there are.
+   * *Leads yang perlu perhatian Anda* (P10-T6; P19.11-T5, UX-13): the member's own open leads — the reader's, or on a
+   * leader's copy the subject's (*Leads that need her*) — **every one, in `/leads`' row shape** (`LeadService.openRowsOf`),
+   * what needs attention first: a dated next action first, nearest on top, then the undated, oldest registered first.
+   * How many there are, and how many the section shows before *Lihat semua (N)* (`shown`).
    */
   leads: {
-    rows: OpenLead[];
+    rows: LeadView[];
     total: number;
+    /** `SUMMARY.LEADS_SHOWN`: the rows shown before *Lihat semua (N)* opens the rest in place (AC-2). */
+    shown: number;
     /**
      * **The open leads Leads Management lists the reader besides their own** (P18.5-T15 AC-4; the client's UI
      * review, UI-002): those of everybody else their `lead:read` reaches. Counted only on the reader's own
@@ -166,6 +174,12 @@ export class SummaryService {
      * it; optional so a hand-built instance need not (a coaching snapshot reads no date), and without it no date.
      */
     @Optional() @Inject(DataUploadBatchRepository) private readonly batches: DataUploadBatchRepository | null = null,
+    /*
+     * P19.11-T5 (UX-13): the section's rows in `/leads`' own shape, from the leads module's one row builder. The
+     * application always provides it; optional so a hand-built instance need not (a coaching snapshot reads no lead
+     * row), and without it no rows — the count stands.
+     */
+    @Optional() @Inject(LeadService) private readonly leadRows: LeadService | null = null,
   ) {}
 
   /**
@@ -187,8 +201,14 @@ export class SummaryService {
    * subject-taking internal of `read`, as `ActivityService.ratiosOf` is of `ratios`. A coaching session's
    * snapshot takes its goal figures from here at finalize — the figures the coachee's Summary tab shows
    * that day — and finalize writes its own entry for what it disclosed, rather than one per figure.
+   *
+   * **`official`** (P19.11-T4, ADR-0240 §3): the snapshot's read. A frozen record a leader keeps holds the office's
+   * figure, never the month's APE the member typed over it — which carries no provenance in the snapshot and which no
+   * leader's figure reads — and no lead rows, which the snapshot does not keep.
    */
-  async of(ctx: RequestContext, subject: Subject, asked: SummaryPeriodQuery = {}): Promise<SummaryView> {
+  async of(
+    ctx: RequestContext, subject: Subject, asked: SummaryPeriodQuery = {}, { official = false }: { official?: boolean } = {},
+  ): Promise<SummaryView> {
     const member = subject.membershipId;
     // The office's day and the month it opened, in one read; the period checked against them (P18.5-T11).
     const day = await this.days.calendar(ctx);
@@ -218,6 +238,7 @@ export class SummaryService {
     const paceWindow = rollingWindow(day.today, SUMMARY.PACE_WINDOW_DAYS);
     const [
       ledgers, counts, yearCounts, recentCounts, sections, openLeads, compliance, ratios, binding, monthUpload, yearUpload,
+      manualMonth,
     ] = await Promise.all([
       /*
        * The year to date through last month, this month's own APE and the year's latest year to date, with
@@ -238,6 +259,8 @@ export class SummaryService {
       // UI-054: the day the month's APE, and the year's, is valid for — the latest file standing for each.
       this.latestUpload(ctx, { from: period.month, to: period.month }),
       this.latestUpload(ctx, { from: `${year}-01`, to: period.month }),
+      // P19.11-T4 (UX-12): the month's APE the member typed over the upload, if any — the member's own page's alone.
+      official ? Promise.resolve(null) : this.goals.monthApeOf(ctx, member, period.month),
     ]);
 
     /*
@@ -253,8 +276,14 @@ export class SummaryService {
     const correctors = [thisMonth?.correctedBy, yearToDate?.correctedBy].filter((id): id is string => Boolean(id));
     const names = correctors.length ? await this.names.byMembershipId(ctx, correctors) : new Map<string, string>();
     const figures = goalFigures({ goal, month: period.month, throughLastMonth, thisMonth, yearToDate, names });
-    const { plan, monthly, yearly } = figures;
+    const { plan, yearly } = figures;
     const monthlyTarget = plan.monthlyTargetMinor;
+    /*
+     * **The member's own figure over the upload** (P19.11-T4; UX-12, UXQ2's default): the manual figure, then the
+     * upload, then *Belum diunggah*, the gap and the policies worked out from whichever is in force. Here alone — the
+     * Unit Dashboard and the office read `officialGoalFigures`, which never sees it.
+     */
+    const monthly = monthWithManual(figures.monthly, manualMonth, { month: period.month, caseSizeMinor: figures.caseSizeMinor });
 
     /*
      * **The chips' targets are the cascade run on the Summary's own APE targets** (ADR-0056, P10-T5).
@@ -297,7 +326,8 @@ export class SummaryService {
       dayOfMonth: Number(day.today.slice(8, 10)),
       daysInMonth: Number(endOfMonth(day.today).slice(8, 10)),
       apeTargetMinor: monthlyTarget,
-      apeProducedMinor: thisMonth?.minor ?? null,
+      // The month's APE in force (P19.11-T4): the card's *Polis yang dibutuhkan* and the sentence's are one number.
+      apeProducedMinor: monthly.actualMinor,
       caseSizeMinor: goal.caseSizeMinor,
       apeTargetMet: monthly.targetMet || yearly.targetMet,
     });
@@ -311,7 +341,7 @@ export class SummaryService {
       },
       goal: { set: figures.set, savedAt: goal.savedAt },
       caseSizeMinor: figures.caseSizeMinor,
-      monthly: { ...monthly, ...productionHeld(monthly, figures.caseSizeMinor) },
+      monthly,
       yearly: { ...yearly, ...productionHeld(yearly, figures.caseSizeMinor) },
       estimateReplaced: replacedEstimate({
         typedMinor: goal.apeAchievedMinor,
@@ -331,8 +361,11 @@ export class SummaryService {
         yearly: activityFor(yearWindow, yearCounts, yearlyCounts),
       },
       leads: {
-        rows: showsLeads ? openLeads.slice(0, SUMMARY.LEADS_SHOWN) : [],
+        // P19.11-T5 AC-3: every open lead, uncut, in the list's shape; the screen shows `shown` and opens the rest.
+        rows: !official && showsLeads && openLeads.length > 0 && this.leadRows
+          ? await this.leadRows.openRowsOf(ctx, member, day) : [],
         total: openLeads.length,
+        shown: SUMMARY.LEADS_SHOWN,
         unitOpen: subject.self && openLeads.length === 0 ? await this.unitOpenLeads(ctx, member) : 0,
       },
       insights: insightsFor({

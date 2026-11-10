@@ -9,9 +9,15 @@ const NOW = new Date('2026-11-05T03:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
 const KPM = '66f0000000000000000000a1';
 const RINA = '66f000000000000000000103';
+const AGUS = '66f000000000000000000101';
 
 const rina = new RequestContext('u-rina', 'none', {
   membershipId: RINA, kpmId: KPM, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+  status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
+} as never);
+/** The AB demo login (`agus@kpm0417.test`), for P19.11-T3's two leads. */
+const agus = new RequestContext('u-agus', 'none', {
+  membershipId: AGUS, kpmId: KPM, orgLevelCode: 'AB', hierarchyRole: 'ab',
   status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
 } as never);
 
@@ -23,7 +29,7 @@ const rina = new RequestContext('u-rina', 'none', {
 describe('P19.7-T1 the proposal seed', () => {
   let wired: ReturnType<typeof configModule>;
   const clock = new FixedClock(NOW);
-  const deps = { clock, companyId: COMPANY, kpm0417: KPM, rina: RINA, superAdminUserId: 'u-super' };
+  const deps = { clock, companyId: COMPANY, kpm0417: KPM, rina: RINA, agus: AGUS, superAdminUserId: 'u-super' };
 
   beforeAll(async () => {
     await startMongo();
@@ -50,6 +56,7 @@ describe('P19.7-T1 the proposal seed', () => {
     expect(first.worded).toBe(2);
     expect(first.aged).toBe(2);
     expect(first.proposals).toBe(2);
+    expect([first.abLeads, first.abProposals]).toEqual([2, 4]);
     const medical = (await wired.products.list(COMPANY, { withCommission: false })).find((p) => p.code === 'PRUWELL_MEDICAL')!;
     expect(medical.proposalFields.map((f) => f.key)).toEqual(['plan', 'wilayah', 'kamar', 'saver']);
     expect(medical.planOptions).toEqual(PROPOSAL_DEMO_WORDS.PRUWELL_MEDICAL.planOptions);
@@ -91,13 +98,37 @@ describe('P19.7-T1 the proposal seed', () => {
 
   it('P19.7-T2 AC-12 shows both proposals on Rina’s leads, and the Selesai one in Ibu Rosa’s Riwayat', async () => {
     const rows = (await wired.leadRecords.list(rina, { pageSize: 200 })).rows;
+    const rosaDone = (await wired.proposals.list(rina, { status: 'done' })).rows.find((r) => r.client.name === 'Ibu Rosa Damayanti')!;
     expect(rows.find((r) => r.name === 'Ibu Rosa Damayanti')!.proposals).toEqual({
-      count: 1, latest: { products: ['PRUWell Medical Syariah', 'PRUCerah'] },
+      count: 1, latest: { products: ['PRUWell Medical Syariah', 'PRUCerah'] }, done: 1, latestDone: { id: rosaDone.id },
     });
-    expect(rows.find((r) => r.name === 'Pak Hendro Gunawan')!.proposals).toEqual({ count: 1, latest: { products: ['PRUWell Medical'] } });
+    expect(rows.find((r) => r.name === 'Pak Hendro Gunawan')!.proposals).toEqual({
+      count: 1, latest: { products: ['PRUWell Medical'] }, done: 0, latestDone: null,
+    });
     expect(rows.find((r) => r.name === 'Ibu Wulan Sari')!.proposals).toBeNull();
     const rosa = await wired.leadRecords.read(rina, rows.find((r) => r.name === 'Ibu Rosa Damayanti')!.id);
     expect(rosa.history.filter((h) => h.kind === 'proposal')).toHaveLength(1);
+  });
+
+  it('P19.11-T3 AC-1 gives the AB demo login a lead with a finished proposal and one with drafts only, as the card reads them', async () => {
+    const rows = (await wired.leadRecords.list(agus, { pageSize: 200 })).rows;
+    const natalia = rows.find((r) => r.name === 'Ibu Natalia Prameswari')!;
+    const benny = rows.find((r) => r.name === 'Pak Benny Tanoto')!;
+    const done = (await wired.proposals.list(agus, { leadId: natalia.id, status: 'done', pageSize: 1 })).rows;
+    expect(done).toHaveLength(1);
+    // The icon: shown on hers and opening the finished one; none on his, whose proposals are drafts.
+    expect(natalia.proposals).toMatchObject({ count: 2, done: 1, latestDone: { id: done[0].id } });
+    expect(benny.proposals).toMatchObject({ count: 2, done: 0, latestDone: null });
+    expect(natalia).toMatchObject({ type: 'sales', age: 38, gender: 'female', contact: { phone: '+6281355502468' } });
+    // The finished one is complete and still offered: Simpan PDF takes it again.
+    const read = await wired.proposals.read(agus, done[0].id);
+    expect((await wired.proposals.done(agus, done[0].id, read.version)).status).toBe('done');
+  });
+
+  it('P19.11-T3 AC-7 the AB’s drafts-only lead lists nothing finished; both drafts are in Riwayat', async () => {
+    const benny = (await wired.leadRecords.list(agus, { pageSize: 200 })).rows.find((r) => r.name === 'Pak Benny Tanoto')!;
+    expect((await wired.proposals.list(agus, { leadId: benny.id, status: 'done' })).rows).toEqual([]);
+    expect((await wired.proposals.list(agus, { leadId: benny.id })).rows.map((r) => r.status)).toEqual(['draft', 'draft']);
   });
 
   it('P19.7-T1 AC-4 writes nothing on a second run', async () => {
@@ -105,7 +136,7 @@ describe('P19.7-T1 the proposal seed', () => {
     const again = await seedProposalFixture(deps);
     expect(again.imported.written).toEqual([]);
     expect(again.imported.unchanged).toHaveLength(17);
-    expect([again.worded, again.aged, again.proposals]).toEqual([0, 0, 0]);
+    expect([again.worded, again.aged, again.proposals, again.abLeads, again.abProposals]).toEqual([0, 0, 0, 0, 0]);
     expect(await mongoose.connection.db!.collection('products').find({}).toArray()).toEqual(products);
   });
 });

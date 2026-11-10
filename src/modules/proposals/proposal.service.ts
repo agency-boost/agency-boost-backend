@@ -137,7 +137,12 @@ export class ProposalService {
 
   // ------------------------------------------------------------------------------------------------ reads
 
-  /** `GET /proposals`: *Riwayat* — the caller's own live proposals, newest change first (ADR-0221 §5). */
+  /**
+   * `GET /proposals`: *Riwayat* — the caller's own live proposals, newest change first (ADR-0221 §5). **`status=done`
+   * orders by the last *Simpan PDF*** (`doneAt`, P19.11-T3 AC-7; UXQ3), so the lead sheet's one finished proposal is the
+   * first row of `?leadId=…&status=done&pageSize=1`. A finished proposal's last change is that save, so *Riwayat*'s
+   * *Selesai* filter reads in the same order as before.
+   */
   async list(ctx: RequestContext, query: ProposalQuery = {}): Promise<{ rows: ProposalRowView[]; total: number; page: number; pageSize: number }> {
     const me = this.me(ctx);
     const filter: Record<string, unknown> = { ownerMembershipId: me };
@@ -152,7 +157,11 @@ export class ProposalService {
     const pageSize = Math.min(Math.max(1, query.pageSize ?? PROPOSAL.LIST_PAGE_SIZE), PROPOSAL.LIST_PAGE_SIZE_MAX);
     const [total, rows, day] = await Promise.all([
       this.proposals.count(ctx, filter),
-      this.proposals.find(ctx, filter, { sort: { updatedAt: -1, _id: -1 }, skip: (page - 1) * pageSize, limit: pageSize }),
+      this.proposals.find(ctx, filter, {
+        sort: query.status === 'done' ? { doneAt: -1, _id: -1 } : { updatedAt: -1, _id: -1 },
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
+      }),
       this.days.for(ctx),
     ]);
     const live = await this.liveLeads(ctx, rows.map((row) => row.leadId));
@@ -200,10 +209,28 @@ export class ProposalService {
    * `POST /proposals`: **the draft, created at step 1's *Lanjut*** (ADR-0221 §3) for one of the caller's own live Sales
    * leads, with the client's copy taken from it. Another member's lead, or another KPM's, is `404 NOT_FOUND` (*Lead*); a
    * Recruit lead or one with no type, and one without an age or a gender — which step 1 saves to the lead first — `400`.
+   *
+   * **Never a second empty draft for the same lead** (P19.11-T3 AC-8; UX-11): where the caller already has a live draft
+   * on this lead **with no product chosen**, that draft is the answer — its client's copy taken from the lead again, as
+   * a new one's would be — instead of another row. *Lanjut* tapped twice, or *Buat proposal* opened again and left at
+   * step 2, used to leave one empty *Draf* each time under the client's name. A draft with a product is the agent's work
+   * and is never reused; a finished one never either.
    */
   async create(ctx: RequestContext, leadId: string): Promise<ProposalView> {
     const me = this.me(ctx);
     const client = await this.clientOf(ctx, me, leadId);
+    const [empty] = await this.proposals.find(
+      ctx,
+      { ownerMembershipId: me, leadId, status: 'draft', 'items.0': { $exists: false } },
+      { sort: { updatedAt: -1, _id: -1 }, limit: 1 },
+    );
+    if (empty) {
+      const same = empty.client.name === client.name && empty.client.age === client.age && empty.client.gender === client.gender;
+      if (same) return this.answer(ctx, empty, false);
+      const refreshed = await this.write(ctx, empty, { client });
+      await this.record(ctx, 'proposal.updated', String(empty._id), { fields: ['client'], reused: true });
+      return this.answer(ctx, refreshed, false);
+    }
     const created = await this.proposals.create(ctx, {
       ownerMembershipId: me,
       leadId,

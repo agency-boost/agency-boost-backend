@@ -105,7 +105,8 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
 
       expect(res.body).toMatchObject({
         type: 'sales',
-        contact: { phone: '0812-3456-7890', email: null },
+        // Stored as `+62…` since P19.11-T3 AC-6.
+        contact: { phone: '+6281234567890', email: null },
         nextActionDate: '2026-10-02',
         thisMonth: true,
         version: 1,
@@ -121,8 +122,8 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
 
   describe('P13.1-T4 AC-1 — no lawful basis, over the wire (ADR-0108 §1)', () => {
     it('P13.1-T4 AC-1 creates a lead with a phone and an email and no ground', async () => {
-      const res = await add({ contact: { phone: '0812', email: 'budi@example.com' } }).expect(201);
-      expect(res.body.contact).toEqual({ phone: '0812', email: 'budi@example.com' });
+      const res = await add({ contact: { phone: '0812 1100 2200', email: 'budi@example.com' } }).expect(201);
+      expect(res.body.contact).toEqual({ phone: '+6281211002200', email: 'budi@example.com' });
     });
 
     it('P13.1-T4 AC-1 answers with neither lawfulBasis nor consentAt', async () => {
@@ -297,7 +298,22 @@ describe('leads over HTTP (P7-T2, P7-T3)', () => {
 
       const res = await http().patch(`${url}/${body.id}`)
         .send({ contact: { phone: '0812-1100-2200', email: null } }).expect(200);
-      expect(res.body).toMatchObject({ contact: { phone: '0812-1100-2200', email: null }, version: 2 });
+      expect(res.body).toMatchObject({ contact: { phone: '+6281211002200', email: null }, version: 2 });
+    });
+
+    it('P19.11-T3 AC-6 stores a leading 0, 62 or +62 alike, and refuses a changed phone that is not a number, in both languages', async () => {
+      for (const phone of ['081211002200', '6281211002200', '+62 812-1100-2200']) {
+        const res = await add({ contact: { phone } }).expect(201);
+        expect(res.body.contact.phone).toBe('+6281211002200');
+      }
+      const { body } = await add({ contact: { phone: '0812-1100-2200' } }).expect(201);
+      const en = await http().patch(`${url}/${body.id}`).send({ contact: { phone: '12345', email: null } }).expect(400);
+      expect(en.body.error).toMatchObject({
+        code: 'VALIDATION_FAILED', message: 'contact.phone must be an Indonesian number: 9 to 13 digits after +62.',
+      });
+      const id = await add({ contact: { phone: 'telepon saya' } }).set('Accept-Language', 'id').expect(400);
+      expect(id.body.error.message).toBe('contact.phone harus nomor Indonesia: 9 sampai 13 digit setelah +62.');
+      expect((await http().get(`${url}/${body.id}`).expect(200)).body).toMatchObject({ contact: { phone: '+6281211002200' }, version: 1 });
     });
 
     it('removes softly, and the lead leaves the list without leaving the database', async () => {

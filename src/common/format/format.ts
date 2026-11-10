@@ -3,7 +3,7 @@ import { DEFAULT_LANGUAGE, type Language, MINOR_UNITS_PER_MAJOR } from '@/domain
 
 /**
  * **How the API writes a date, a sum or a percentage in a sentence** (ADR-0167 §1, OD-196): *26 Okt 2026*,
- * *Rp 500 jt*, *96%*. **Percentages and money since ADR-0174** (OD-226, OD-227; P18.9-T3): a percentage whole,
+ * *Rp 500 Jt*, *96%*. **Percentages and money since ADR-0174** (OD-226, OD-227; P18.9-T3): a percentage whole,
  * rounded half up, with no *,0*, and a threshold with the places it was set with; a sum compact in *miliar*, *juta*
  * and *ribu*.
  *
@@ -71,7 +71,7 @@ const RANGE = ' – ';
  */
 const COMPACT_UNITS = [
   { value: 1_000_000_000, suffix: { id: 'M', en: 'B' } },
-  { value: 1_000_000, suffix: { id: 'jt', en: 'M' } },
+  { value: 1_000_000, suffix: { id: 'Jt', en: 'M' } },
   { value: 1_000, suffix: { id: 'rb', en: 'K' } },
 ] as const satisfies readonly { value: number; suffix: Record<Language, string> }[];
 
@@ -81,7 +81,7 @@ const UNIT_GAP = { id: ' ', en: '' } as const satisfies Record<Language, string>
 /** The tenths a compact figure carries at most: one decimal. */
 const COMPACT_TENTHS = 10;
 
-/** A compact figure that rounds to a thousand of its unit is written in the next one: *Rp 1 jt*, not *Rp 1.000 rb*. */
+/** A compact figure that rounds to a thousand of its unit is written in the next one: *Rp 1 Jt*, not *Rp 1.000 rb*. */
 const COMPACT_CARRY = 1_000 * COMPACT_TENTHS;
 
 // ── calendar days and months ────────────────────────────────────────────────────────────────────
@@ -283,12 +283,12 @@ export function formatRupiah(minor: number, language: Language = DEFAULT_LANGUAG
 }
 
 /**
- * Rupiah compact, from minor units: *Rp 750 rb*, *Rp 357,5 jt*, *Rp 1,2 M*, and below a thousand in full, *Rp 999*
+ * Rupiah compact, from minor units: *Rp 750 rb*, *Rp 357,5 Jt*, *Rp 1,2 M*, and below a thousand in full, *Rp 999*
  * (ADR-0174 §4: compact wherever a sum is written but a price and an input's bound; `metrics-and-definitions.md`
  * §B.25). In English, at the same thresholds and to the same figure: *IDR 750K*, *IDR 357.5M*, *IDR 1.2B*, *IDR 999*.
  *
  * The largest unit the sum reaches, to one decimal at most, half up on that decimal, a trailing *,0* dropped. A
- * figure that rounds to a thousand of its unit moves up one: 999.950 is *Rp 1 jt*. Above a thousand *miliar* it stays
+ * figure that rounds to a thousand of its unit moves up one: 999.950 is *Rp 1 Jt*. Above a thousand *miliar* it stays
  * in *M* — there is no *triliun* — *Rp 1.500 M* (*IDR 1,500B*).
  *
  * **`lossless`**: where the compact form would round — *Rp 1,2 rb* for 1.150 — the full one instead, *Rp 1.150*. For

@@ -48,8 +48,8 @@ describe('P19.1-T4 AC-15 the estimate seed — a run at 10:00 on 8 October 2026 
     const raka = await as('raka@kpm0417.test');
     const summary = await wired.summary.read(raka);
     expect(summary.yearly).toMatchObject({ actualMinor: 120 * M, production: 'estimate', source: { provenance: 'self_reported' } });
-    expect(summary.monthly).toMatchObject({ actualMinor: null, production: 'none' });
-    expect(summary.monthly.withoutProduction).not.toBeNull();
+    // Nothing uploaded for his month either: what it shows is the month's own figure he typed (P19.11-T4, below).
+    expect(summary.monthly.realised).toMatchObject({ source: 'manual', uploaded: false });
 
     const satria = await as('satria@kpm0417.test');
     const year = await wired.unitDashboard.read(satria, { period: 'year' });
@@ -89,10 +89,50 @@ describe('P19.1-T4 AC-15 the estimate seed — a run at 10:00 on 8 October 2026 
     expect(goal.official).toMatchObject({ minor: goal.achieved.minor });
   });
 
+  /*
+   * **P19.11-T4 — a month's APE typed over the upload, and one with none** (UX-12; UXQ2's default): Dewi's login shows
+   * *Diubah manual* over October's upload, with *Kembalikan ke data unggahan*; Raka's over nothing, *Belum diunggah*
+   * underneath. Agus, the demo AB, holds no plan this year (I-406), so his Summary has no card to type on.
+   */
+  it('P19.11-T4 AC-5 Dewi typed this month’s APE over the upload: her Summary reads it, with the upload beneath it', async () => {
+    const dewi = await as('dewi@kpm0417.test');
+    const summary = await wired.summary.read(dewi);
+    expect(summary.month).toBe('2026-10');
+    expect(summary.monthly).toMatchObject({
+      actualMinor: 72.5 * M, production: 'estimate', withoutProduction: null,
+      source: { provenance: 'self_reported', month: '2026-10' },
+      realised: { source: 'manual', uploaded: true, manual: { minor: 72.5 * M } },
+    });
+    // The gap and the policies are worked out from her figure, against the month's own target.
+    expect(summary.monthly.gapMinor).toBe(summary.monthly.targetMinor! - 72.5 * M);
+  });
+
+  it('P19.11-T4 AC-5 Raka typed this month’s APE with nothing uploaded: no upload beneath it, so clearing is Belum diunggah', async () => {
+    const raka = await as('raka@kpm0417.test');
+    const summary = await wired.summary.read(raka);
+    expect(summary.monthly).toMatchObject({
+      actualMinor: 18.5 * M, realised: { source: 'manual', uploaded: false, manual: { minor: 18.5 * M } },
+    });
+  });
+
+  it('P19.11-T4 AC-6 neither reaches Satria’s or Agus’s Unit Dashboard: their month is the office’s', async () => {
+    const dewi = await as('dewi@kpm0417.test');
+    const raka = await as('raka@kpm0417.test');
+    const agusMonth = await wired.unitDashboard.read(await as('agus@kpm0417.test'));
+    expect(everyRow(agusMonth).find((r) => r.membershipId === dewi.membershipId)!.goal.actualMinor).toBe(55 * M);
+    const satriaMonth = await wired.unitDashboard.read(await as('satria@kpm0417.test'));
+    expect(everyRow(satriaMonth).find((r) => r.membershipId === raka.membershipId)!.goal.actualMinor).toBeNull();
+    // Two plans hold a month typed over the upload, Dewi's and Raka's — on the plan, never in the office's rows.
+    expect(await col('goals').countDocuments({ 'apeByMonth.2026-10': { $exists: true } })).toBe(2);
+  });
+
   it('P19.1-T4 AC-15 a second run changes neither', async () => {
     const before = await col('goals').find({ apeAchievedTypedAt: { $ne: null } }).project({ _id: 1, apeAchievedMinor: 1, apeAchievedTypedAt: 1 }).toArray();
+    // P19.11-T4: nor the months typed over the upload.
+    const months = await col('goals').find({ 'apeByMonth.2026-10': { $exists: true } }).project({ _id: 1, apeByMonth: 1 }).toArray();
     await seedDemo({ clock, log: quiet });
     const after = await col('goals').find({ apeAchievedTypedAt: { $ne: null } }).project({ _id: 1, apeAchievedMinor: 1, apeAchievedTypedAt: 1 }).toArray();
     expect(after).toEqual(before);
+    expect(await col('goals').find({ 'apeByMonth.2026-10': { $exists: true } }).project({ _id: 1, apeByMonth: 1 }).toArray()).toEqual(months);
   }, RUN_MS);
 });

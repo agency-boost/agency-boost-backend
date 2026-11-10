@@ -149,7 +149,7 @@ describe('the shared formatters (ADR-0167 §1, P18.7-T1 AC-4)', () => {
       [1_000_000_000_000, 'Rp 1.000 M'],
       [2_345_600_000_000, 'Rp 2.345,6 M'],
       [5_672_500_000, 'Rp 5,7 M'],
-      [150_000_000, 'Rp 150 jt'],
+      [150_000_000, 'Rp 150 Jt'],
     ])('P18.9-T3 AC-3 Rp %d is %s — miliar past a thousand of them, no triliun', (rupiah, compact) => {
       expect(formatRupiahCompact(rp(rupiah))).toBe(compact);
     });
@@ -159,12 +159,12 @@ describe('the shared formatters (ADR-0167 §1, P18.7-T1 AC-4)', () => {
       [999, 'Rp 999'],
       [1_000, 'Rp 1 rb'],
       [750_000, 'Rp 750 rb'],
-      [999_999, 'Rp 1 jt'],
-      [999_950, 'Rp 1 jt'],
-      [1_000_000, 'Rp 1 jt'],
-      [500_000_000, 'Rp 500 jt'],
-      [357_500_000, 'Rp 357,5 jt'],
-      [712_666_667, 'Rp 712,7 jt'],
+      [999_999, 'Rp 1 Jt'],
+      [999_950, 'Rp 1 Jt'],
+      [1_000_000, 'Rp 1 Jt'],
+      [500_000_000, 'Rp 500 Jt'],
+      [357_500_000, 'Rp 357,5 Jt'],
+      [712_666_667, 'Rp 712,7 Jt'],
       [999_950_000, 'Rp 1 M'],
       [1_000_000_000, 'Rp 1 M'],
       [1_200_000_000, 'Rp 1,2 M'],
@@ -182,13 +182,13 @@ describe('the shared formatters (ADR-0167 §1, P18.7-T1 AC-4)', () => {
     });
 
     it('drops a trailing ,0', () => {
-      expect(formatRupiahCompact(rp(2_000_000))).toBe('Rp 2 jt');
-      expect(formatRupiahCompact(rp(2_040_000))).toBe('Rp 2 jt');
+      expect(formatRupiahCompact(rp(2_000_000))).toBe('Rp 2 Jt');
+      expect(formatRupiahCompact(rp(2_040_000))).toBe('Rp 2 Jt');
     });
 
     it('moves up a unit only where the rounding reaches a thousand of it', () => {
       expect(formatRupiahCompact(rp(999_949))).toBe('Rp 999,9 rb');
-      expect(formatRupiahCompact(rp(999_949_999))).toBe('Rp 999,9 jt');
+      expect(formatRupiahCompact(rp(999_949_999))).toBe('Rp 999,9 Jt');
     });
 
     it('writes a negative with the hyphen before Rp, in every unit', () => {
@@ -207,9 +207,9 @@ describe('the shared formatters (ADR-0167 §1, P18.7-T1 AC-4)', () => {
       expect(formatRupiahCompact(rp(1_250_000_000), { lossless: true })).toBe('Rp 1.250.000.000');
       expect(formatRupiahCompact(rp(999_950_000), { lossless: true })).toBe('Rp 999.950.000');
       expect(formatRupiahCompact(rp(-712_666_667), { lossless: true })).toBe('-Rp 712.666.667');
-      expect(formatRupiahCompact(rp(200_000_000), { lossless: true })).toBe('Rp 200 jt');
+      expect(formatRupiahCompact(rp(200_000_000), { lossless: true })).toBe('Rp 200 Jt');
       expect(formatRupiahCompact(rp(2_400_000_000), { lossless: true })).toBe('Rp 2,4 M');
-      expect(formatRupiahCompact(rp(357_500_000), { lossless: true })).toBe('Rp 357,5 jt');
+      expect(formatRupiahCompact(rp(357_500_000), { lossless: true })).toBe('Rp 357,5 Jt');
       expect(formatRupiahCompact(rp(999), { lossless: true })).toBe('Rp 999');
     });
 
@@ -443,13 +443,13 @@ describe('P18.10-T3 the shared formatters in each language', () => {
       [1_000, 'Rp 1 rb', 'IDR 1K'],
       [750_000, 'Rp 750 rb', 'IDR 750K'],
       [999_949, 'Rp 999,9 rb', 'IDR 999.9K'],
-      [999_950, 'Rp 1 jt', 'IDR 1M'],
-      [999_999, 'Rp 1 jt', 'IDR 1M'],
-      [1_000_000, 'Rp 1 jt', 'IDR 1M'],
-      [150_000_000, 'Rp 150 jt', 'IDR 150M'],
-      [357_500_000, 'Rp 357,5 jt', 'IDR 357.5M'],
-      [712_666_667, 'Rp 712,7 jt', 'IDR 712.7M'],
-      [999_949_999, 'Rp 999,9 jt', 'IDR 999.9M'],
+      [999_950, 'Rp 1 Jt', 'IDR 1M'],
+      [999_999, 'Rp 1 Jt', 'IDR 1M'],
+      [1_000_000, 'Rp 1 Jt', 'IDR 1M'],
+      [150_000_000, 'Rp 150 Jt', 'IDR 150M'],
+      [357_500_000, 'Rp 357,5 Jt', 'IDR 357.5M'],
+      [712_666_667, 'Rp 712,7 Jt', 'IDR 712.7M'],
+      [999_949_999, 'Rp 999,9 Jt', 'IDR 999.9M'],
       [999_950_000, 'Rp 1 M', 'IDR 1B'],
       [1_000_000_000, 'Rp 1 M', 'IDR 1B'],
       [1_200_000_000, 'Rp 1,2 M', 'IDR 1.2B'],
@@ -498,7 +498,7 @@ describe('P18.10-T3 the shared formatters in each language', () => {
     const asIndonesian = (en: string) => en
       .replace(/[.,]/g, (mark) => (mark === '.' ? ',' : '.'))
       .replace(/^(-?)IDR /, '$1Rp ')
-      .replace(/(\d)(B|M|K)$/, (_, digit: string, unit: string) => `${digit} ${{ B: 'M', M: 'jt', K: 'rb' }[unit]}`);
+      .replace(/(\d)(B|M|K)$/, (_, digit: string, unit: string) => `${digit} ${{ B: 'M', M: 'Jt', K: 'rb' }[unit]}`);
     const sweep = [
       0, 1, 49, 50, 149, 150, 999, 1_000, 1_049, 1_050, 1_149, 1_150, 99_950, 999_949, 999_950, 1_000_000, 1_049_999,
       1_050_000, 2_345_678, 357_500_000, 712_666_667, 999_949_999, 999_950_000, 2_450_000_000, 5_672_500_000,
