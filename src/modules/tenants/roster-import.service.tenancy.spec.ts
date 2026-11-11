@@ -21,7 +21,10 @@ import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { MembershipHistory, MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
-import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { InvitesService } from '@/modules/org/invites.service';
+import { MemberInvite, MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { MemberInviteRepository, MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { AB, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
 import { IN_INDONESIAN } from '../../../test/i18n';
@@ -88,6 +91,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
     mongoose.model(CompanyOrgLevel.name, CompanyOrgLevelSchema);
     mongoose.model(AuditLog.name, AuditLogSchema);
     if (!mongoose.models[AuthToken.name]) mongoose.model(AuthToken.name, AuthTokenSchema);
+    if (!mongoose.models[MemberInvite.name]) mongoose.model(MemberInvite.name, MemberInviteSchema);
 
     members = new MembershipRepository(mongoose.model(Membership.name) as never);
     historyRepo = new MembershipHistoryRepository(mongoose.model(MembershipHistory.name) as never);
@@ -127,7 +131,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
   describe('P19.3-T4 AC-13 who may run it', () => {
     it('P19.3-T4 AC-13 lets an Owner and an Admin fill their own office', async () => {
       const owner = memberOf(kpmId, { isKpmOwner: true });
-      expect((await service.preview(owner, kpmId, a3(person('101', 'Rina', 'AB')))).counts).toEqual({ imported: 1, updated: 0, skipped: 0 });
+      expect((await service.preview(owner, kpmId, a3(person('101', 'Rina', 'AB')))).counts).toEqual({ imported: 1, updated: 0, invited: 0, skipped: 0 });
       const admin = memberOf(kpmId, { isKpmAdmin: true });
       await expect(service.commit(admin, kpmId, a3(person('102', 'Budi', 'AB')))).resolves.toMatchObject({ counts: { imported: 1 } });
     });
@@ -230,7 +234,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       const preview = await service.preview(theOwner(), kpmId, a3(
         person('103', 'Bayu', 'Agent', '102'), person('102', 'Sari', 'AAB', '101'), person('101', 'Rahmat', 'AB', '100'),
       ));
-      expect(preview.counts).toEqual({ imported: 3, updated: 0, skipped: 0 });
+      expect(preview.counts).toEqual({ imported: 3, updated: 0, invited: 0, skipped: 0 });
     });
 
     it('P19.3-T4 AC-8 a loop (A → B → A) is skipped, and so is a row whose upline’s row is skipped, naming it', async () => {
@@ -248,12 +252,15 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
 
     it('P19.3-T4 AC-8 a row without a WhatsApp number is imported, saying so', async () => {
       const preview = await service.preview(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB'), person('109', 'Nadia', 'Agent', '101', 'nadia@k.test', '')));
-      expect(results(preview)['109']).toEqual(['imported', 'No WhatsApp number: imported, but cannot be reminded on WhatsApp yet.']);
+      expect(results(preview)['109']).toEqual(['imported', null]);
+      // P19.12-T7 AC-3: among what the row leaves out (ADR-0250 §3).
+      expect(preview.rows[1].warnings[0]).toBe('No WhatsApp number: imported, but cannot be reminded on WhatsApp yet.');
       const committed = await service.commit(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB'), person('109', 'Nadia', 'Agent', '101', 'nadia@k.test', '')));
       expect(committed.counts.imported).toBe(2);
       expect(await mongoose.model(User.name).findOne({ email: 'nadia@k.test' }).lean()).toMatchObject({ phone: null });
     });
 
+    // Built with no invitation service, as before ADR-0250 §4: a row with no email is skipped whatever its rung.
     it('P19.3-T4 AC-8 a new person’s row needs an email (ADR-0205 §7); an address with an account is skipped too', async () => {
       await mongoose.model(User.name).create({ email: 'taken@k.test', passwordHash: 'x', fullName: 'Taken', companyId, agentCode: '999' });
       const preview = await service.preview(theOwner(), kpmId, a3(
@@ -304,15 +311,15 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       });
     });
 
-    it('P19.3-T4 AC-8 a bad value in one of the optional fields skips the row, naming the cell; blank ones import', async () => {
+    it('P19.12-T7 AC-2 a bad value in one of the optional fields is left empty, naming the cell; the row imports', async () => {
       const preview = await service.preview(theOwner(), kpmId, a3(
         line('101', 'Rahmat', 'AB', '', '', 'r@k.test', '', '', '10/10/2015'),
         line('102', 'Sari', 'AB', '', '', 's@k.test'),
       ));
-      expect(results(preview)).toEqual({
-        101: ['skipped', 'Tanggal lahir: A date of birth must be at least 18 years ago.'],
-        102: ['imported', 'No WhatsApp number: imported, but cannot be reminded on WhatsApp yet.'],
-      });
+      expect(results(preview)).toEqual({ 101: ['imported', null], 102: ['imported', null] });
+      expect(preview.rows[0].warnings[0])
+        .toBe('Tanggal lahir: A date of birth must be at least 18 years ago. Left empty; the rest of the row is imported.');
+      expect(preview.rows[1].warnings[0]).toBe('No WhatsApp number: imported, but cannot be reminded on WhatsApp yet.');
     });
   });
 
@@ -408,7 +415,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       expect(results(preview)['70013011']).toEqual(['skipped', 'This agent code is already registered at this insurer.']);
       const said = JSON.stringify(preview);
       for (const leak of ['rina@kpm0417.test', '0417', 'BSD City Branch']) expect(said).not.toContain(leak);
-      expect(preview.counts).toEqual({ imported: 1, updated: 0, skipped: 1 });
+      expect(preview.counts).toEqual({ imported: 1, updated: 0, invited: 0, skipped: 1 });
     });
 
     it('P19.3-T4 AC-9 in Indonesian, the sentence that stands until OD-257 is answered', async () => {
@@ -438,7 +445,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       const preview = await service.preview(theOwner(), kpmId, a3(
         person('101', 'Rahmat', 'AB', '100'), line('100', 'Wilson', 'AB'), person('102', 'Desi', 'Agen Senior', '101'),
       ));
-      expect(preview.counts).toEqual({ imported: 1, updated: 1, skipped: 1 });
+      expect(preview.counts).toEqual({ imported: 1, updated: 1, invited: 0, skipped: 1 });
       expect(preview.rows.map((r) => [r.line, r.agentCode, r.outcome])).toEqual([[2, '101', 'imported'], [3, '100', 'updated'], [4, '102', 'skipped']]);
       expect(await liveUsers()).toBe(1);
     });
@@ -469,7 +476,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
         person('103', 'Bayu', 'Agent', '102'), person('102', 'Sari', 'AAB', '101'), person('101', 'Rahmat', 'AB'),
         person('105', 'Fikri', 'Agent', '70049999'),
       ));
-      expect(result.counts).toEqual({ imported: 3, updated: 0, skipped: 1 });
+      expect(result.counts).toEqual({ imported: 3, updated: 0, invited: 0, skipped: 1 });
       const [rahmat, sari, bayu] = await Promise.all(['101', '102', '103'].map(byCode));
       expect(sari!.leaderId).toBe(String(rahmat!._id));
       expect(bayu!.ancestorIds).toEqual([String(rahmat!._id), String(sari!._id)]);
@@ -570,14 +577,14 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
 
       // The same file, imported again afterwards: the undone accounts' addresses and codes are free.
       const again = await service.commit(theOwner(), kpmId, file);
-      expect(again.counts).toEqual({ imported: 3, updated: 1, skipped: 0 });
+      expect(again.counts).toEqual({ imported: 3, updated: 1, invited: 0, skipped: 0 });
       expect(await byCode('300')).toMatchObject({ orgLevelCode: 'AAB', leaderId: String((await byCode('101'))!._id) });
     });
 
     it('P19.3-T4 AC-11 audits the counts and the codes, and never a personal datum', async () => {
       await service.commit(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB'), person('105', 'Fikri', 'Agent', '70049999')));
       const row = await mongoose.model(AuditLog.name).findOne({ action: 'roster.imported' }).lean<{ after: unknown }>();
-      expect(row?.after).toEqual({ count: 1, agentCodes: ['101'], updated: [], skipped: 1 });
+      expect(row?.after).toEqual({ count: 1, agentCodes: ['101'], updated: [], invitedOnWhatsApp: [], skipped: 1 });
       expect(JSON.stringify(row)).not.toContain('0812');
     });
   });
@@ -591,10 +598,260 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       const preview = await service.preview(owner, kpmId, a3(person('101', 'Rahmat', 'AB'), person('102', 'Sari', 'AAB', '101'), person('103', 'Bayu', 'Agent', '101')));
       expect(results(preview)['102'][0]).toBe('skipped');
       expect(results(preview)['102'][1]).toMatch(/Import them as an Agent, then promote them on their page/);
-      expect(preview.counts).toEqual({ imported: 2, updated: 0, skipped: 1 });
+      expect(preview.counts).toEqual({ imported: 2, updated: 0, invited: 0, skipped: 1 });
       await service.commit(owner, kpmId, a3(person('101', 'Rahmat', 'AB'), person('102', 'Sari', 'AAB', '101'), person('103', 'Bayu', 'Agent', '101')));
       expect(await byCode('102')).toBeNull();
       expect(await byCode('103')).not.toBeNull();
+    });
+  });
+
+  /*
+   * **The client's import test of 11 November** (P19.12-T7; ADR-0250; `revisions/2026-11-11/TES-IMPORT-PEOPLE-…`): a bad
+   * optional cell is left empty, `L` and `P` are read, a row says what it leaves out, and an Agent with no email is
+   * invited on WhatsApp through *+ Tambah agent*'s own invitation.
+   */
+  describe('P19.12-T7 the import forgives, says what is missing, and invites by WhatsApp', () => {
+    const ORIGIN = 'https://app.agencyboost.test';
+    const inviteRows = () => new MemberInviteRepository(mongoose.model(MemberInvite.name) as never);
+    /** The import as the application wires it: with the invitation *+ Tambah agent* makes. */
+    const withInvites = () => {
+      const users = mongoose.model(User.name);
+      const invites = new InvitesService(
+        inviteRows(), members, hierarchy, null as never, null as never, null as never, new MemberNames(members, users as never),
+        mongoose.model(Kpm.name) as never, mongoose.model(Company.name) as never, users as never,
+        new AuditService(mongoose.model(AuditLog.name) as never), notifications as never, clock,
+      );
+      return new RosterImportService(
+        members, hierarchy, mongoose.model(Kpm.name) as never, users as never, new PasswordService(),
+        new AuditService(mongoose.model(AuditLog.name) as never), clock, orgLevels, historyRepo, notifications as never,
+        mongoose.model(AuthToken.name) as never, undefined, invites, inviteRows(),
+        { get: (key: string) => (key === 'APP_ORIGIN' ? ORIGIN : undefined) } as never,
+      );
+    };
+    const inIndonesian = () => theOwner().withReader({ language: 'id', figures: 'id' } as never);
+    const pending = () => mongoose.model(MemberInvite.name).find({ kpmId, status: 'pending' }).lean<Record<string, unknown>[]>();
+    /** Rahmat, an AB already in the office: the upline the file's Agents name. */
+    const rahmat = () => service.commit(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB')));
+
+    it('P19.12-T7 AC-1 reads L and P as male and female, and stores them so', async () => {
+      const preview = await service.preview(theOwner(), kpmId, a3(
+        line('101', 'Lima', 'AB', '', '', 'l@k.test', '', '', '', 'L'), line('102', 'Dua', 'AB', '', '', 'p@k.test', '', '', '', 'p'),
+      ));
+      expect(preview.rows.map((r) => [r.outcome, r.warnings.some((w) => w.startsWith('Jenis kelamin'))]))
+        .toEqual([['imported', false], ['imported', false]]);
+      await service.commit(theOwner(), kpmId, a3(
+        line('101', 'Lima', 'AB', '', '', 'l@k.test', '', '', '', 'L'), line('102', 'Dua', 'AB', '', '', 'p@k.test', '', '', '', 'p'),
+      ));
+      expect(await mongoose.model(User.name).findOne({ agentCode: '101' }).lean()).toMatchObject({ gender: 'male' });
+      expect(await mongoose.model(User.name).findOne({ agentCode: '102' }).lean()).toMatchObject({ gender: 'female' });
+    });
+
+    it('P19.12-T7 AC-2 a bad WhatsApp number and birth date are left empty with a warning, and the person is imported', async () => {
+      // TES-IMPORT Tes 1's 99311205 and Tes 3's `nomor saya`: once skipped, now in with the bad cells empty.
+      const file = a3(
+        person('101', 'Rahmat', 'AB'),
+        line('102', 'Fmt', 'Agent', '101', 'nomor saya', 'fmt@k.test', '01/01/2030', '', '15/05/2015', 'L'),
+      );
+      const preview = await service.preview(inIndonesian(), kpmId, file);
+      expect(preview.counts).toEqual({ imported: 2, updated: 0, invited: 0, skipped: 0 });
+      expect(preview.rows[1]).toMatchObject({ outcome: 'imported', messages: [] });
+      expect(preview.rows[1].warnings).toEqual([
+        'No. WhatsApp: "nomor saya" bukan nomor WhatsApp. Dikosongkan; sisa barisnya tetap masuk.',
+        'Tanggal bergabung: Tanggal bergabung tidak boleh setelah hari ini. Dikosongkan; sisa barisnya tetap masuk.',
+        'Tanggal lahir: Tanggal lahir harus paling tidak 18 tahun yang lalu. Dikosongkan; sisa barisnya tetap masuk.',
+        'Tanpa nomor WhatsApp: masuk, tapi belum bisa diingatkan lewat WhatsApp.',
+        'Data belum lengkap: Tanggal bergabung, Waktu, Tanggal lahir, Bulan bergabung di perusahaan kosong. Impor ulang '
+          + 'barisnya untuk melengkapi.',
+      ]);
+      expect(preview.skippedCsv).toBeNull();
+
+      await service.commit(theOwner(), kpmId, file);
+      expect(await mongoose.model(User.name).findOne({ agentCode: '102' }).lean())
+        .toMatchObject({ phone: null, dateOfBirth: null, gender: 'male' });
+      // The join date left empty is the import's day, as a blank one is.
+      expect(await byCode('102')).toMatchObject({ joinDate: '2026-09-09' });
+    });
+
+    it('P19.12-T7 AC-2 a bad required cell still skips the row, its bad optional cells said among the reasons', async () => {
+      const preview = await service.preview(theOwner(), kpmId, a3(
+        person('101', 'Rahmat', 'AB'), line('102', 'Fmt', 'Senior Agent', '101', 'nomor saya', 'fmt@k.test'),
+      ));
+      expect(preview.rows[1]).toMatchObject({
+        outcome: 'skipped',
+        messages: ['Role "Senior Agent" does not exist. Use: Agent, AAB, AB.', 'No. WhatsApp: "nomor saya" is not a WhatsApp number.'],
+        warnings: [],
+      });
+      expect(preview.skippedCsv).toContain('"nomor saya"" is not a WhatsApp number.');
+    });
+
+    it('P19.12-T7 AC-2 a bad Email skips a new person, and only warns on an update, which never applies an email', async () => {
+      await rahmat();
+      const preview = await service.preview(theOwner(), kpmId, a3(
+        line('101', 'Rahmat', 'AB', '', 'nomor saya', 'fmt08@@agencyboost'),
+        line('102', 'Baru', 'Agent', '101', '0812 1100 2200', 'fmt08@@agencyboost'),
+      ));
+      expect(preview.rows[0]).toMatchObject({ outcome: 'updated', messages: ['Already here; details updated.'] });
+      // In the file's column order: No. WhatsApp, then Email.
+      expect(preview.rows[0].warnings.slice(0, 2)).toEqual([
+        'No. WhatsApp: "nomor saya" is not a WhatsApp number. Left empty; the rest of the row is imported.',
+        'Email: "fmt08@@agencyboost" is not an email address. Left empty; the rest of the row is imported.',
+      ]);
+      expect(preview.rows[1]).toMatchObject({ outcome: 'skipped', messages: ['Email: "fmt08@@agencyboost" is not an email address.'] });
+    });
+
+    it('P19.12-T7 AC-3 a new row names every detail it leaves empty; an update only those nothing stored fills', async () => {
+      await service.commit(theOwner(), kpmId, a3(
+        person('100', 'Wilson', 'AB'), line('300', 'Indah', 'Agent', '100', '', 'indah@k.test', '', 'Part-time'),
+      ));
+      const preview = await service.preview(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB', '100'), line('300', 'Indah', 'Agent')));
+      expect(preview.rows[0].warnings).toEqual([
+        'Incomplete: no Tanggal bergabung, Waktu, Tanggal lahir, Jenis kelamin, Bulan bergabung di perusahaan. Import the row '
+          + 'again with them to fill them in.',
+      ]);
+      // Indah's join date and work status are stored; her birth date, gender and join month are not.
+      expect(preview.rows[1].warnings).toEqual([
+        'Incomplete: no Tanggal lahir, Jenis kelamin, Bulan bergabung di perusahaan. Import the row again with them to fill them in.',
+      ]);
+
+      // Imported again with them, they fill in, and the row has nothing more to say.
+      const filled = a3(line('300', 'Indah', 'Agent', '', '', '', '', '', '21/07/1998', 'P', '03/2020'));
+      await service.commit(theOwner(), kpmId, filled);
+      expect(await mongoose.model(User.name).findOne({ agentCode: '300' }).lean())
+        .toMatchObject({ dateOfBirth: '1998-07-21', gender: 'female', companyJoinMonth: '2020-03' });
+      expect((await service.preview(theOwner(), kpmId, a3(line('300', 'Indah', 'Agent')))).rows[0].warnings).toEqual([]);
+    });
+
+    it('P19.12-T7 AC-4 an Agent with no email, a number and a leader upline is invited on WhatsApp, in the preview', async () => {
+      await rahmat();
+      const preview = await withInvites().preview(inIndonesian(), kpmId, a3(line('103', 'Tiga', 'Agent', '101', '0812 1100 3300')));
+      expect(preview.counts).toEqual({ imported: 0, updated: 0, invited: 1, skipped: 0 });
+      expect(preview.rows[0]).toMatchObject({
+        outcome: 'invited',
+        messages: ['Tanpa email: diundang lewat WhatsApp. Dia mendaftar lewat tautannya dengan email dan kata sandinya sendiri.'],
+        warnings: [],
+      });
+      expect(preview.rows[0]).not.toHaveProperty('invite');
+      expect(await pending()).toEqual([]);
+    });
+
+    it('P19.12-T7 AC-4 the commit makes + Tambah agent’s invitation under the upline, its link answered once to share', async () => {
+      await rahmat();
+      sent.length = 0;
+      const result = await withInvites().commit(theOwner(), kpmId, a3(
+        line('103', 'Tiga', 'Agent', '101', '0812 1100 3300', '', '', '', '21/07/1998'),
+      ));
+      expect(result.counts).toEqual({ imported: 0, updated: 0, invited: 1, skipped: 0 });
+      expect(result.invited).toBe(0);
+      expect(result.rows[0].messages).toEqual([
+        'No email: invited on WhatsApp instead. They register through the link with their own email and password.',
+        'Tanggal lahir not kept: they give their own when they register.',
+      ]);
+      expect(result.rows[0].invite).toEqual({ link: expect.stringMatching(`^${ORIGIN}/register\\?invite=`), phone: '+6281211003300' });
+
+      // Nobody is made, and nothing is mailed: the person registers through the link (ADR-0170).
+      expect(await liveUsers({ agentCode: '103' })).toBe(0);
+      expect(await byCode('103')).toBeNull();
+      expect(sent).toEqual([]);
+      const [invite] = await pending();
+      expect(invite).toMatchObject({
+        agentCode: '103', fullName: 'Tiga', phone: '+6281211003300', joinDate: '2026-09-09',
+        leaderMembershipId: String((await byCode('101'))!._id), existingAccount: false,
+      });
+      // The link carries the token the row keeps only as a hash.
+      const token = decodeURIComponent(new URL(result.rows[0].invite!.link).searchParams.get('invite')!);
+      expect(invite.tokenHash).not.toBe(token);
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'member_invite.created' })).toBe(1);
+      expect(await mongoose.model(AuditLog.name).findOne({ action: 'roster.imported' }).sort({ _id: -1 }).lean())
+        .toMatchObject({ after: { count: 0, invitedOnWhatsApp: ['103'] } });
+    });
+
+    it('P19.12-T7 AC-4 an upline new in the same file is made first, and the invitation goes under them', async () => {
+      const result = await withInvites().commit(theOwner(), kpmId, a3(
+        line('103', 'Tiga', 'Agent', '102', '0812 1100 3300', '', '15/01/2026'), person('102', 'Empat', 'AAB', '101'),
+        person('101', 'Rahmat', 'AB'),
+      ));
+      expect(result.counts).toEqual({ imported: 2, updated: 0, invited: 1, skipped: 0 });
+      expect(await pending()).toEqual([
+        expect.objectContaining({ agentCode: '103', leaderMembershipId: String((await byCode('102'))!._id), joinDate: '2026-01-15' }),
+      ]);
+    });
+
+    it('P19.12-T7 AC-4 an AAB with no email, an Agent with no number and one with no usable upline are still skipped', async () => {
+      await rahmat();
+      const preview = await withInvites().preview(theOwner(), kpmId, a3(
+        line('102', 'Empat', 'AAB', '101', '0812 1100 2200'),
+        line('103', 'Tiga', 'Agent', '101'),
+        line('104', 'Lima', 'Agent', '11111111', '0812 1100 4400'),
+        line('105', 'Enam', 'Agent', '', '0812 1100 5500'),
+        line('106', 'Tujuh', 'Agent', '101', 'nomor saya'),
+      ));
+      expect(results(preview)).toEqual({
+        102: ['skipped', 'No email: only an Agent can be invited on WhatsApp, so the row is skipped. Fill in their email.'],
+        103: ['skipped', 'No email and no WhatsApp number: they cannot be invited, so the row is skipped. Fill in their email, '
+          + 'or their WhatsApp number to invite them on WhatsApp.'],
+        104: ['skipped', 'Upline code 11111111 is in neither the file nor this KPM.'],
+        105: ['skipped', 'Agent and AAB need an upline code.'],
+        106: ['skipped', 'No email and no WhatsApp number: they cannot be invited, so the row is skipped. Fill in their email, '
+          + 'or their WhatsApp number to invite them on WhatsApp.'],
+      });
+      // The number left empty for its shape is said too: nothing of a skipped row goes in.
+      expect(preview.rows[4].messages[1]).toBe('No. WhatsApp: "nomor saya" is not a WhatsApp number.');
+      await expect(withInvites().commit(theOwner(), kpmId, a3(line('102', 'Empat', 'AAB', '101', '0812 1100 2200'))))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await pending()).toEqual([]);
+    });
+
+    it('P19.12-T7 AC-4 a code with an invitation already waiting is skipped in the preview, as + Tambah agent refuses it', async () => {
+      await rahmat();
+      const file = a3(line('103', 'Tiga', 'Agent', '101', '0812 1100 3300'));
+      await withInvites().commit(theOwner(), kpmId, file);
+      const again = await withInvites().preview(theOwner(), kpmId, file);
+      expect(results(again)['103']).toEqual([
+        'skipped', 'Agent code 103 already has an invite waiting to be accepted. Resend that one, or cancel it first.',
+      ]);
+      await expect(withInvites().commit(theOwner(), kpmId, file)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await pending()).toHaveLength(1);
+    });
+
+    it('P19.12-T7 AC-4 an invitation the commit cannot make skips its row with the refusal’s words; the rest stands', async () => {
+      await rahmat();
+      const service7 = withInvites();
+      // An invitation for the code comes to wait between the check and the write: + Tambah agent's own refusal.
+      const raced = Object.create(inviteRows()) as MemberInviteRepository;
+      let asked = 0;
+      raced.pendingCodeAcrossTenants = async () => { asked += 1; return false; };
+      (service7 as unknown as { inviteRows: MemberInviteRepository }).inviteRows = raced;
+      await mongoose.model(MemberInvite.name).create({
+        kpmId, companyId, leaderMembershipId: String((await byCode('101'))!._id), invitedByMembershipId: 'mem-1',
+        agentCode: '103', fullName: 'Tiga', phone: '+6281211003300', joinDate: '2026-09-09', tokenHash: 'h',
+        status: 'pending', expiresAt: new Date(NOW.getTime() + 86_400_000), existingAccount: false,
+      });
+      const result = await service7.commit(theOwner(), kpmId, a3(
+        line('103', 'Tiga', 'Agent', '101', '0812 1100 3300'), person('104', 'Empat', 'Agent', '101'),
+      ));
+      expect(asked).toBe(1);
+      expect(result.counts).toEqual({ imported: 1, updated: 0, invited: 0, skipped: 1 });
+      expect(results(result)['103']).toEqual([
+        'skipped', 'Agent code 103 already has an invite waiting to be accepted. Resend that one, or cancel it first.',
+      ]);
+      expect(result.skippedCsv).toContain('103,Tiga,Agent,101');
+      expect(await byCode('104')).not.toBeNull();
+    });
+
+    it('P19.12-T7 AC-4 an invitation that fails for no reason it can name skips its row, pointing at + Tambah agent', async () => {
+      await rahmat();
+      const service7 = withInvites();
+      (service7 as unknown as { invitations: Pick<InvitesService, 'addAgent'> }).invitations = {
+        addAgent: async () => { throw new Error('the database went away'); },
+      };
+      const result = await service7.commit(theOwner(), kpmId, a3(
+        line('103', 'Tiga', 'Agent', '101', '0812 1100 3300'), person('104', 'Empat', 'Agent', '101'),
+      ));
+      expect(results(result)['103']).toEqual([
+        'skipped', 'The WhatsApp invitation could not be made. Invite them with + Add agent on New Hires.',
+      ]);
+      expect(result.counts).toEqual({ imported: 1, updated: 0, invited: 0, skipped: 1 });
+      expect(await byCode('104')).not.toBeNull();
     });
   });
 
@@ -632,7 +889,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       const owner = memberOf(kpmId, { isKpmOwner: true }).withReader({ language: 'id', figures: 'id' } as never);
 
       const preview = await service.preview(owner, kpmId, SAMPLE);
-      expect(preview.counts).toEqual({ imported: 6, updated: 0, skipped: 4 });
+      expect(preview.counts).toEqual({ imported: 6, updated: 0, invited: 0, skipped: 4 });
       expect(results(preview)).toEqual({
         70045001: ['imported', null],
         70045002: ['imported', null],
@@ -642,12 +899,17 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
         70045006: ['skipped', 'Peran "Agen Senior" tidak ada. Pakai: Agent, AAB, AB.'],
         70013011: ['skipped', 'Kode agen ini sudah terdaftar di perusahaan asuransi ini.'],
         70045008: ['skipped', 'Upline harus leader (AAB atau AB), bukan Agent.'],
-        70045009: ['imported', 'Tanpa nomor WhatsApp: masuk, tapi belum bisa diingatkan lewat WhatsApp.'],
+        70045009: ['imported', null],
         7004510: ['imported', null],
       });
+      // P19.12-T7 AC-3: the sample has no *Jenis kelamin* or *Bulan bergabung* column, and every row says so.
+      expect(preview.rows.find((r) => r.agentCode === '70045009')!.warnings).toEqual([
+        'Tanpa nomor WhatsApp: masuk, tapi belum bisa diingatkan lewat WhatsApp.',
+        'Data belum lengkap: Jenis kelamin, Bulan bergabung di perusahaan kosong. Impor ulang barisnya untuk melengkapi.',
+      ]);
 
       const result = await service.commit(owner, kpmId, SAMPLE);
-      expect(result.counts).toEqual({ imported: 6, updated: 0, skipped: 4 });
+      expect(result.counts).toEqual({ imported: 6, updated: 0, invited: 0, skipped: 4 });
       expect(result.invited).toBe(6);
       expect(await members.count(scoped(), { status: 'active' })).toBe(6);
       expect(await byCode('70045009')).toMatchObject({ joinDate: '2026-08-20', workStatus: 'part_time' });

@@ -8,9 +8,22 @@ export const TRANSFER_REQUEST_STATUSES = ['pending', 'approved', 'declined', 'ca
 export type TransferRequestStatus = (typeof TRANSFER_REQUEST_STATUSES)[number];
 
 /**
+ * **What made a transfer request** (P19.12-T4; ADR-0247 §3): *+ Add agent* for an agent code held in another leader's
+ * unit (`add_agent`, ADR-0170 §4), or a leader moving one of their direct reports to a leader **outside their own tree**
+ * (`move`) — inside it they move them directly. A row written before the field existed reads `add_agent`.
+ */
+export const TRANSFER_REQUEST_KINDS = ['add_agent', 'move'] as const;
+export type TransferRequestKind = (typeof TRANSFER_REQUEST_KINDS)[number];
+
+/** The most a leader's note on a move request may hold. */
+export const TRANSFER_NOTE_MAX = 300;
+
+/**
  * **A request to move a member to another leader** (ADR-0170 §4, P18.8-T3 AC-3; `functional/org-hierarchy.md`,
  * *Adding an agent*): what *+ Add agent* makes for an agent code whose holder already reports to somebody else in the
- * office. **No leader moves a member directly.** The office's Owner and Admins decide it: approving moves the member
+ * office, and — since P19.12-T4 (ADR-0247 §3, amending ADR-0170 §4's *no leader moves a member directly*) — what a
+ * leader makes to move one of their direct reports to a leader outside their own tree (`kind: 'move'`); inside it they
+ * move them directly. The office's Owner and Admins decide it: approving moves the member
  * through `HierarchyService.reparent`, which closes their edge and opens one under the new leader (invariant §5);
  * declining changes nothing.
  *
@@ -45,6 +58,14 @@ export class TransferRequest {
    */
   @Prop({ type: String, default: null })
   requestedName!: string | null;
+
+  /** What made it (ADR-0247 §3). Defaulted, so a row written before the field reads `add_agent` with no migration. */
+  @Prop({ type: String, enum: TRANSFER_REQUEST_KINDS, default: 'add_agent' })
+  kind!: TransferRequestKind;
+
+  /** Why the leader asked for a move, as typed, at most 300 characters; `null` when they said nothing. */
+  @Prop({ type: String, default: null, maxlength: TRANSFER_NOTE_MAX })
+  note!: string | null;
 
   @Prop({ type: String, enum: TRANSFER_REQUEST_STATUSES, default: 'pending' })
   status!: TransferRequestStatus;

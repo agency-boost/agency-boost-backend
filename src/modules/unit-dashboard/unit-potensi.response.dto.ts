@@ -1,4 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { UNIT_DASHBOARD, type UnitView } from '@/domain/constants';
+import { UnitInformalDto, UnitScopesDto } from './unit-dashboard.response.dto';
+import type { UnitInformal } from './unit-dashboard.service';
 import type {
   PotensiAaCell, PotensiKandidat, PotensiPerson, PotensiRekrutCell, PotensiRung, PotensiTotals, PotensiUnit,
   UnitPotensiPersonView, UnitPotensiView,
@@ -78,12 +81,14 @@ class PotensiLeaderDto {
 
 class PotensiUnitDto implements PotensiUnit {
   @ApiProperty({
-    enum: ['unit', 'direct'],
+    enum: ['unit', 'direct', 'unled'],
     description: '`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 '
-      + '§4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order.',
+      + '§4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order; `unled`: *Belum punya leader*, '
+      + 'last — in the owner’s or an administrator’s own *Semua downline*, the people with no leader there who lead nobody.',
   })
-  kind!: 'unit' | 'direct';
-  @ApiProperty({ type: PotensiLeaderDto }) leader!: PotensiLeaderDto;
+  kind!: 'unit' | 'direct' | 'unled';
+  @ApiProperty({ type: PotensiLeaderDto, nullable: true, description: 'The card’s first row; `null` for `unled`.' })
+  leader!: PotensiLeaderDto | null;
   @ApiProperty({ type: [PotensiPersonDto], description: 'The leader first, then the card’s people in the roster’s order.' })
   people!: PotensiPersonDto[];
   @ApiProperty({ type: PotensiTotalsDto }) totals!: PotensiTotalsDto;
@@ -122,6 +127,11 @@ export class UnitPotensiDto implements UnitPotensiView {
   @ApiProperty({ type: PotensiTilesDto }) tiles!: PotensiTilesDto;
   @ApiProperty({ type: [PotensiUnitDto], description: 'The head’s own card first, then one card per unit below the head (ADR-0229 §4).' })
   units!: PotensiUnitDto[];
+  @ApiProperty({ enum: UNIT_DASHBOARD.VIEWS, description: 'The view this answer is over, as `GET /unit/dashboard`’s.' })
+  scope!: UnitView;
+  @ApiProperty({ type: UnitScopesDto }) scopes!: UnitScopesDto;
+  @ApiProperty({ type: UnitInformalDto, nullable: true, description: 'In `informal` only, as `GET /unit/dashboard`’s.' })
+  informal!: UnitInformal | null;
 }
 
 class PotensiSalesLeadDto {

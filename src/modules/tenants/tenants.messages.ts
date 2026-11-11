@@ -466,9 +466,10 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
       en: `"${value}" is not a work status. Use Full-time or Part-time.`,
       id: `"${value}" bukan status kerja. Gunakan Full-time atau Part-time.`,
     }),
+    /* P19.12-T7 AC-1 (ADR-0250 §1): every word the import reads, `L` and `P` among them. */
     notAGender: ({ value }: { value: string }) => ({
-      en: `"${value}" is not a gender. Use male or female.`,
-      id: `"${value}" bukan jenis kelamin. Gunakan male atau female.`,
+      en: `"${value}" is not a gender. Use L or P, Laki-laki or Perempuan, or male or female.`,
+      id: `"${value}" bukan jenis kelamin. Gunakan L atau P, Laki-laki atau Perempuan, atau male atau female.`,
     }),
     alreadyOnLine: ({ line }: { line: number }) => ({
       en: `Already on line ${line}.`,

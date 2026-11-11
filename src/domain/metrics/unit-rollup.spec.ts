@@ -204,13 +204,26 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
         ...Array.from({ length: 4 }, () => row({ pacingToMaa: false })),
       ];
       const split = activeAgentSplit(unit, aab);
-      expect(split).toEqual({ count: 4, of: 12, unit: { count: 1, of: 4 }, aab: { count: 3, of: 8 } });
+      expect(split).toEqual({ count: 4, of: 12, unit: { count: 1, of: 4 }, aab: { count: 3, of: 8 }, ab: { count: 0, of: 0 } });
       expect(split.unit.count + split.aab.count).toBe(split.count);
       expect(split.unit.of + split.aab.of).toBe(split.of);
       // The tile reads it whole: 4 of 12 is 33%.
       expect(Math.round((split.count / split.of) * 100)).toBe(33);
       // And the total is the rollup over everybody: the split is a partition of it.
       expect(rollUpProduction([...unit, ...aab]).potentialActive).toEqual({ count: 4, of: 12 });
+    });
+
+    it('P19.12-T6 AC-1 an AB below is never an AAB: the AB side is its own, and the three add up to the total', () => {
+      const unit = [row({}), row({ pacingToMaa: false })];
+      const aab = [row({}), row({ pacingToMaa: false })];
+      // Two people outside the direct group: an AB below and one of their agents, one pacing.
+      const ab = [row({}), row({ pacingToMaa: false })];
+      const split = activeAgentSplit(unit, aab, ab);
+      expect(split).toEqual({
+        count: 3, of: 6, unit: { count: 1, of: 2 }, aab: { count: 1, of: 2 }, ab: { count: 1, of: 2 },
+      });
+      expect(split.unit.of + split.aab.of + split.ab.of).toBe(split.of);
+      expect(rollUpProduction([...unit, ...aab, ...ab]).potentialActive).toEqual({ count: split.count, of: split.of });
     });
   });
 

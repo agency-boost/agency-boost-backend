@@ -1,6 +1,7 @@
 import { BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE } from '@/domain/constants/branding';
 import {
-  contrastRatio, derivePalette, hoverOf, inkOf, lessonColoursOf, mix, normaliseHex, textOn, tintOf,
+  contrastRatio, derivePalette, fillOf, hoverOf, inkOf, lessonColoursOf, mix, normaliseHex, textOn, tintOf,
+  type BrandingPalette,
 } from './palette';
 import { isSafeSvg } from './svg-check';
 
@@ -66,11 +67,9 @@ describe('P19.6-T1 AC-7 the contrast rule (acceptance 2)', () => {
     expect(textOn('#1b2b4b')).toEqual({ contrast: 'light', colour: '#ffffff', ratio: 14.06, readable: true });
   });
 
-  it('P19.6-T1 AC-7 refuses a colour no text reads on, naming the field', () => {
-    // A mid grey: white 3.95:1 and the dark ink 3.56:1, both short of 4.5.
-    const refused = derivePalette('#808080', '#1b2b4b');
-    expect(refused).toMatchObject({ ok: false, field: 'primary' });
-    expect(derivePalette('#e8954a', '#808080')).toMatchObject({ ok: false, field: 'secondary' });
+  it('P19.6-T1 AC-7 finds no words that read on a mid grey: white 3.95:1, the dark ink 3.56:1', () => {
+    // Refused until P19.12-T3; now painted as its nearest readable shade (below, ADR-0246).
+    expect(textOn('#808080')).toEqual({ contrast: 'light', colour: '#ffffff', ratio: 3.95, readable: false });
   });
 
   it('accepts only #rrggbb, lower-cased', () => {
@@ -82,9 +81,7 @@ describe('P19.6-T1 AC-7 the contrast rule (acceptance 2)', () => {
 });
 
 describe('P19.6-T1 AC-5 the palette of two colours (ADR-0218 §6)', () => {
-  const result = derivePalette('#0A6E5C', '#F2C14E');
-  if (!result.ok) throw new Error('expected a palette');
-  const { palette } = result;
+  const { palette } = derivePalette('#0A6E5C', '#F2C14E');
 
   it('P19.6-T1 AC-5 sets the words on each colour to the side that reads: white on teal, the dark ink on gold', () => {
     expect(palette.primaryContrast).toBe('#ffffff');
@@ -123,14 +120,12 @@ describe('P19.6-T1 AC-5 the palette of two colours (ADR-0218 §6)', () => {
 
   it('P19.6-T1 AC-5 keeps the focus ring the primary where it reads 3:1 on white, else its ink', () => {
     expect(palette.focusRing).toBe('#0a6e5c');
-    const pale = derivePalette('#f2c14e', '#1b2b4b');
-    expect(pale.ok && pale.palette.focusRing).toBe(inkOf('#f2c14e'));
+    expect(derivePalette('#f2c14e', '#1b2b4b').palette.focusRing).toBe(inkOf('#f2c14e'));
   });
 
   it('P19.6-T1 AC-5 writes the primary on the secondary only where it reads, else the secondary’s words', () => {
     expect(palette.primaryOnSecondary).toBe('#1b2b4b');
-    const today = derivePalette('#e8954a', '#1b2b4b');
-    expect(today.ok && today.palette.primaryOnSecondary).toBe('#e8954a');
+    expect(derivePalette('#e8954a', '#1b2b4b').palette.primaryOnSecondary).toBe('#e8954a');
   });
 
   it('every value is #rrggbb, lower-cased', () => {
@@ -138,15 +133,131 @@ describe('P19.6-T1 AC-5 the palette of two colours (ADR-0218 §6)', () => {
   });
 });
 
+/**
+ * **The palette as P19.6-T1 derived it**, frozen here (ADR-0218 §5, §6): what every stored colour was painted with
+ * before P19.12-T3. A colour that rule accepted must derive exactly this palette still (ADR-0246 §2).
+ */
+function paletteBefore(primary: string, secondary: string): BrandingPalette {
+  const words = (hex: string) => textOn(hex);
+  const ink = (hex: string) => {
+    let c = hex;
+    for (let i = 0; i < 400 && contrastRatio(c, '#ffffff') < 4.5; i += 1) c = mix(c, '#000000', 0.02);
+    return c;
+  };
+  const [p, q] = [primary.toLowerCase(), secondary.toLowerCase()];
+  const [onP, onQ] = [words(p), words(q)];
+  const primaryInk = ink(p);
+  const primary100 = tintOf(p, 0.16);
+  return {
+    primary: p,
+    primaryHover: hoverOf(p, onP.contrast),
+    primaryContrast: onP.colour,
+    primaryInk,
+    primaryDeep: primaryInk,
+    primaryOnSecondary: contrastRatio(p, q) >= 4.5 ? p : onQ.colour,
+    primary50: tintOf(p, 0.08),
+    primary100,
+    focusRing: contrastRatio(p, '#ffffff') >= 3 ? p : primaryInk,
+    secondary: q,
+    secondaryHover: hoverOf(q, onQ.contrast),
+    secondaryContrast: onQ.colour,
+    secondaryInk: ink(q),
+    secondaryMuted: onQ.colour,
+    secondary50: tintOf(q, 0.08),
+    secondary100: tintOf(q, 0.16),
+    today: primary100,
+    todayInk: primaryInk,
+    sidebarText: onQ.colour,
+  };
+}
+
+/** The sRGB cube every 15 levels: 5,832 colours, black, white and the six primaries among them. */
+const CUBE: string[] = [];
+for (let r = 0; r <= 255; r += 15) {
+  for (let g = 0; g <= 255; g += 15) {
+    for (let b = 0; b <= 255; b += 15) CUBE.push(`#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`);
+  }
+}
+
+describe('P19.12-T3 every KPM colour is accepted, and a filled surface takes its nearest readable shade (ADR-0246)', () => {
+  it.each([
+    // The client's colour: white reads 4.4996:1, a hair under; one step darker reads 4.64.
+    ['#a96800', { fill: '#a66600', contrast: 'light', colour: '#ffffff', ratio: 4.64, adjusted: true }],
+    // The client's colour that passed: unchanged.
+    ['#8a5500', { fill: '#8a5500', contrast: 'light', colour: '#ffffff', ratio: 6.21, adjusted: false }],
+    ['#ffffff', { fill: '#ffffff', contrast: 'dark', colour: '#1b2b4b', ratio: 14.06, adjusted: false }],
+    ['#000000', { fill: '#000000', contrast: 'light', colour: '#ffffff', ratio: 21, adjusted: false }],
+    ['#fff59d', { fill: '#fff59d', contrast: 'dark', colour: '#1b2b4b', ratio: 12.59, adjusted: false }],
+    // The mid grey: five steps darker for white, nine lighter for the dark ink — darker is nearer.
+    ['#808080', { fill: '#757575', contrast: 'light', colour: '#ffffff', ratio: 4.61, adjusted: true }],
+    // A green the dark ink almost reads on (4.46): one step lighter, against eleven darker — the lighter side.
+    ['#00a758', { fill: '#05a95b', contrast: 'dark', colour: '#1b2b4b', ratio: 4.57, adjusted: true }],
+    // Six steps either way: a tie takes the darker shade, with white words.
+    ['#009696', { fill: '#008484', contrast: 'light', colour: '#ffffff', ratio: 4.53, adjusted: true }],
+  ])('P19.12-T3 AC-1, AC-2 fills %s as pinned', (hex, expected) => {
+    expect(fillOf(hex)).toEqual(expected);
+    expect(fillOf(hex.toUpperCase())).toEqual(expected);
+  });
+
+  it('P19.12-T3 AC-1 derives a palette from any two colours, never a refusal, painting each as its fill', () => {
+    const result = derivePalette('#A96800', '#808080');
+    expect(result.primary).toMatchObject({ fill: '#a66600', adjusted: true });
+    expect(result.secondary).toMatchObject({ fill: '#757575', adjusted: true });
+    expect(result.palette).toEqual(paletteBefore('#a66600', '#757575'));
+    expect(contrastRatio(result.palette.primary, result.palette.primaryContrast)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(result.palette.secondary, result.palette.secondaryContrast)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('P19.12-T3 AC-2 a colour the old rule accepted derives exactly the palette it did — every stored colour unchanged', () => {
+    const accepted = CUBE.filter((hex) => textOn(hex).readable);
+    expect(accepted.length).toBeGreaterThan(4000);
+    const changed: string[] = [];
+    for (const hex of accepted) {
+      for (const [p, q] of [[hex, '#1b2b4b'], ['#e8954a', hex]] as const) {
+        const now = derivePalette(p, q);
+        if (JSON.stringify(now.palette) !== JSON.stringify(paletteBefore(p, q))) changed.push(`${p}/${q}`);
+        if (now.primary.adjusted || now.secondary.adjusted) changed.push(`${p}/${q} adjusted`);
+      }
+    }
+    expect(changed).toEqual([]);
+    // The demo office's colours, and AgencyBoost's own, by name.
+    expect(derivePalette('#0a6e5c', '#1f3a5f').palette).toEqual(paletteBefore('#0a6e5c', '#1f3a5f'));
+    expect(derivePalette('#e8954a', '#1b2b4b').palette).toEqual(paletteBefore('#e8954a', '#1b2b4b'));
+  });
+
+  it('P19.12-T3 AC-2 over the cube: every fill reads 4.5:1 with its words, within nine steps of the colour on its side', () => {
+    const unread: string[] = [];
+    const far: string[] = [];
+    let adjusted = 0;
+    for (const hex of CUBE) {
+      const f = fillOf(hex);
+      if (contrastRatio(f.fill, f.colour) < BRANDING.CONTRAST_MIN) unread.push(hex);
+      expect(f.adjusted).toBe(!textOn(hex).readable);
+      if (!f.adjusted) {
+        expect(f.fill).toBe(hex);
+        continue;
+      }
+      adjusted += 1;
+      // Walk from the colour toward black (white words) or white (dark words), INK_STEP at a time, at most nine times.
+      let c = hex;
+      for (let i = 0; i < 9 && c !== f.fill; i += 1) c = mix(c, f.contrast === 'light' ? '#000000' : '#ffffff', BRANDING.INK_STEP);
+      if (c !== f.fill) far.push(hex);
+    }
+    expect(unread).toEqual([]);
+    expect(far).toEqual([]);
+    // About a fifth of all colours were refused before, and are adjusted now.
+    expect(adjusted / CUBE.length).toBeGreaterThan(0.15);
+    expect(adjusted / CUBE.length).toBeLessThan(0.22);
+  });
+});
+
 describe('P19.6-T2 AC-5, P19.6-T3 AC-5 a lesson’s colours (ADR-0217 §5; OD-269)', () => {
   it('P19.6-T1 gives the lesson the primary’s ink and lightest tint, bare hex, and the secondary only where white reads', () => {
     const navy = derivePalette('#0a6e5c', '#1b2b4b');
-    if (!navy.ok) throw new Error('expected a palette');
     expect(lessonColoursOf(navy.palette)).toEqual({
       accent: navy.palette.primaryInk.slice(1), accentSoft: navy.palette.primary50.slice(1), ink: '1b2b4b',
     });
     const gold = derivePalette('#0a6e5c', '#f2c14e');
-    if (!gold.ok) throw new Error('expected a palette');
     expect(lessonColoursOf(gold.palette)).not.toHaveProperty('ink');
   });
 

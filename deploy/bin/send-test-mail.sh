@@ -7,7 +7,8 @@
 #
 # It runs `node dist/cli/send-test-mail.js` inside that environment's running API container, so it reads the
 # settings that API booted with, from the image deployed there. It prints the provider, the host and the port, then
-# the server's answer or its error, and never the password. Exit 0 when the server accepted the message, 1 when it
+# the server's answer or its error (with Resend, its id for the message: P19.12-T1, ADR-0244), and never the password
+# or RESEND_API_KEY. Exit 0 when the server accepted the message, 1 when it
 # did not, 2 on a usage error. Then look for the message in the inbox, and in the spam folder:
 # docs/03-engineering/email-delivery.md.
 set -euo pipefail

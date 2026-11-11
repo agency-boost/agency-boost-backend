@@ -8,6 +8,10 @@ import type SMTPTransport from 'nodemailer/lib/smtp-transport';
  * answers, so the API (`SmtpChannelAdapter`, `app.module.ts`), boot validation (`env.validation.ts`) and the test
  * command (`cli/send-test-mail.ts`) all decide the same way from the same keys.
  *
+ * *Since P19.12-T1 (ADR-0244)* one provider is not SMTP: `resend` sends through Resend's HTTP API with
+ * `RESEND_API_KEY` (`resend.adapter.ts`), and is what staging and production move to. It is still an env value, so
+ * moving back to Gmail is the same new env file and redeploy.
+ *
  * `env.validation.ts` imports this file, so it imports nothing of the app's.
  */
 
@@ -26,13 +30,32 @@ export const SMTP_TIMEOUT_MS_RANGE = { MIN: 1_000, MAX: 60_000 } as const;
  */
 export const SMTP_SOCKET_TIMEOUT_MS = 30_000;
 
-/** Every value `MAIL_PROVIDER` takes. `smtp` is any relay, named by `SMTP_HOST`; `log` sends nothing. */
-export const MAIL_PROVIDERS = ['gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp', 'log'] as const;
+/**
+ * Every value `MAIL_PROVIDER` takes. `resend` sends through Resend's HTTP API (P19.12-T1, ADR-0244); the five presets
+ * and `smtp`, any relay named by `SMTP_HOST`, send over SMTP; `log` sends nothing.
+ */
+export const MAIL_PROVIDERS = ['resend', 'gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp', 'log'] as const;
 export type MailProvider = (typeof MAIL_PROVIDERS)[number];
 /** The two values `MAIL_TRANSPORT`, the key `MAIL_PROVIDER` replaces, ever took. */
 export const LEGACY_MAIL_TRANSPORTS = ['smtp', 'log'] as const;
 
-type PresetProvider = Exclude<MailProvider, 'smtp' | 'log'>;
+type PresetProvider = Exclude<MailProvider, 'smtp' | 'log' | 'resend'>;
+/** The providers that send over SMTP, through nodemailer: every preset, and a plain relay. */
+export type SmtpProvider = Exclude<MailProvider, 'log' | 'resend'>;
+
+/**
+ * **Whether this provider sends over SMTP** (P19.12-T1): what decides whether `SmtpChannelAdapter` builds a transport
+ * and checks it at start-up. Neither `log` nor `resend` dials an SMTP server, and a check of the empty `SMTP_HOST`
+ * they leave would be fatal in production.
+ */
+export function isSmtpProvider(provider: MailProvider): provider is SmtpProvider {
+  return provider !== 'log' && provider !== 'resend';
+}
+
+/** Where Resend's API answers (P19.12-T1, ADR-0244), over HTTPS on 443. */
+export const RESEND_API_HOST = 'api.resend.com';
+/** Every Resend API key starts so; a value that does not is something else pasted, or a key with quotes around it. */
+const RESEND_KEY_PREFIX = 're_';
 
 interface Preset {
   readonly host: string;
@@ -83,15 +106,17 @@ export interface MailConfig {
 
 export interface MailSettings {
   readonly provider: MailProvider;
-  /** Empty for `log`, which dials nothing. */
+  /** Empty for `log`, which dials nothing; `api.resend.com` for `resend`. */
   readonly host: string;
-  /** `0` for `log`. */
+  /** `0` for `log`; 443 for `resend`. */
   readonly port: number;
-  /** Implicit TLS: port 465. */
+  /** Implicit TLS: port 465, and Resend's HTTPS. */
   readonly secure: boolean;
   readonly user: string;
   /** Never logged and never printed. */
   readonly pass: string;
+  /** `RESEND_API_KEY`, for `resend` alone; empty for every other provider. Never logged and never printed. */
+  readonly apiKey: string;
   readonly from: string;
   readonly replyTo: string | undefined;
   readonly timeoutMs: number;
@@ -171,7 +196,7 @@ export function addressIn(mailbox: string): string {
 }
 
 /** The domain an address is in, lower-cased and without a trailing dot; empty when it has no `@`. */
-function domainOf(address: string): string {
+export function domainOf(address: string): string {
   const bare = addressIn(address);
   const at = bare.lastIndexOf('@');
   return at < 0 ? '' : bare.slice(at + 1).replace(/\.$/, '');
@@ -197,6 +222,9 @@ export function isReservedAddress(address: string): boolean {
 /** The domains of Google's consumer mail: they publish DMARC, so nobody else may send as them. */
 const GOOGLE_MAIL_DOMAINS = ['gmail.com', 'googlemail.com'];
 
+/** The keys an SMTP provider reads and Resend does not. `SMTP_TIMEOUT_MS` has a default, so it is always present. */
+const SMTP_KEYS = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD'] as const;
+
 /** A configuration that works but will probably land in spam, in the words the start-up log uses. */
 function warningsFor(settings: MailSettings, choice: ProviderChoice, config: MailConfig): string[] {
   const warnings: string[] = [];
@@ -219,12 +247,26 @@ function warningsFor(settings: MailSettings, choice: ProviderChoice, config: Mai
   }
 
   // The likeliest slip in a switch: the old relay's SMTP_HOST left in the file, dialled with the new provider's login.
-  const preset = settings.provider === 'smtp' || settings.provider === 'log' ? undefined : MAIL_PRESETS[settings.provider];
+  const preset = isOneOf(Object.keys(MAIL_PRESETS) as PresetProvider[], settings.provider)
+    ? MAIL_PRESETS[settings.provider]
+    : undefined;
   if (preset && settings.host !== preset.host) {
     warnings.push(
       `SMTP_HOST=${settings.host} overrides the ${settings.provider} preset's ${preset.host}. If it is left from another `
         + 'provider, remove SMTP_HOST and SMTP_PORT: the preset fills both.',
     );
+  }
+
+  // The same slip moving to Resend (P19.12-T1): the old relay's login left in the file, read by nothing. Harmless, but a
+  // Gmail App Password kept in an env file nobody reads from is a secret with no reason to exist.
+  if (settings.provider === 'resend') {
+    const leftover = SMTP_KEYS.filter((key) => text(config, key) !== undefined);
+    if (leftover.length > 0) {
+      warnings.push(
+        `${leftover.join(', ')} ${leftover.length === 1 ? 'is' : 'are'} ignored: MAIL_PROVIDER=resend sends through `
+          + 'Resend\'s API with RESEND_API_KEY. Remove them, and revoke the old password where it was made.',
+      );
+    }
   }
 
   const legacy = text(config, 'MAIL_TRANSPORT');
@@ -243,6 +285,8 @@ function warningsFor(settings: MailSettings, choice: ProviderChoice, config: Mai
  * - `SMTP_USER` and `SMTP_PASSWORD` are required for every preset; a plain relay may need neither. SendGrid's user is
  *   the literal `apikey`.
  * - A Gmail App Password is shown in four groups of four with spaces, and is read without them.
+ * - `resend` (P19.12-T1, ADR-0244) reads `RESEND_API_KEY` instead, and refuses a `MAIL_FROM` it could never send from:
+ *   see `resendProblems`.
  */
 export function mailSettingsFrom(config: MailConfig): ResolvedMailSettings {
   const choice = resolveMailProvider(config);
@@ -257,7 +301,19 @@ export function mailSettingsFrom(config: MailConfig): ResolvedMailSettings {
 
   if (provider === 'log') {
     if (problems.length > 0) throw new MailConfigError(problems);
-    return { provider, host: '', port: 0, secure: false, user: '', pass: '', from, replyTo, timeoutMs, warnings: [] };
+    return {
+      provider, host: '', port: 0, secure: false, user: '', pass: '', apiKey: '', from, replyTo, timeoutMs, warnings: [],
+    };
+  }
+
+  if (provider === 'resend') {
+    const apiKey = text(config, 'RESEND_API_KEY') ?? '';
+    problems.push(...resendProblems(apiKey, from));
+    if (problems.length > 0) throw new MailConfigError(problems);
+    const settings: MailSettings = {
+      provider, host: RESEND_API_HOST, port: 443, secure: true, user: '', pass: '', apiKey, from, replyTo, timeoutMs,
+    };
+    return { ...settings, warnings: warningsFor(settings, choice, config) };
   }
 
   const preset = provider === 'smtp' ? undefined : MAIL_PRESETS[provider];
@@ -298,11 +354,59 @@ export function mailSettingsFrom(config: MailConfig): ResolvedMailSettings {
     secure: resolvedPort === 465,
     user,
     pass,
+    apiKey: '',
     from,
     replyTo,
     timeoutMs,
   };
   return { ...settings, warnings: warningsFor(settings, choice, config) };
+}
+
+/**
+ * **What makes a Resend configuration unable to send** (P19.12-T1, ADR-0244), each against its key and never quoting
+ * the key's value:
+ *
+ * - `RESEND_API_KEY` is required, and is a Resend key: it starts `re_`. Anything else is something else pasted, or the
+ *   key with quotes around it, which the env file's raw format keeps.
+ * - `MAIL_FROM` is on a domain Resend can send from: never `gmail.com` (Resend sends only from a domain verified in it,
+ *   and Google's DMARC policy refuses anybody else sending as Gmail) and never a reserved one, which nobody can verify.
+ *   Whether the domain *is* verified only Resend knows: the adapter asks it at start-up.
+ */
+function resendProblems(apiKey: string, from: string): MailProblem[] {
+  const problems: MailProblem[] = [];
+  if (!apiKey) {
+    problems.push({
+      key: 'RESEND_API_KEY',
+      message: 'is required when MAIL_PROVIDER is resend: an API key made in Resend (API Keys, Create API key, '
+        + 'Sending access, limited to the sending domain). It starts re_.',
+    });
+  } else if (!apiKey.startsWith(RESEND_KEY_PREFIX)) {
+    problems.push({
+      key: 'RESEND_API_KEY',
+      message: `is not a Resend API key: every one starts ${RESEND_KEY_PREFIX}. Paste the key itself, with no quotes `
+        + 'around it: the env file is read raw.',
+    });
+  }
+  if (from) {
+    const domain = domainOf(from);
+    if (!domain) {
+      problems.push({ key: 'MAIL_FROM', message: 'must hold an address on the domain verified in Resend, as "AgencyBoost <address>".' });
+    } else if (GOOGLE_MAIL_DOMAINS.includes(domain)) {
+      problems.push({
+        key: 'MAIL_FROM',
+        message: `may not be a ${domain} address when MAIL_PROVIDER is resend: Resend sends only from a domain verified `
+          + 'in it, and Google\'s DMARC policy refuses anybody else sending as Gmail. Send from the verified domain: '
+          + '"AgencyBoost <no-reply@notify.agencyboost.id>".',
+      });
+    } else if (isReservedAddress(from)) {
+      problems.push({
+        key: 'MAIL_FROM',
+        message: `may not be in ${domain}, a reserved domain no provider can verify (RFC 2606). Send from the domain `
+          + 'verified in Resend.',
+      });
+    }
+  }
+  return problems;
 }
 
 /** Every problem `mailSettingsFrom` would throw, for boot validation to report against its key. */
@@ -339,9 +443,13 @@ export function transportOptionsFrom(settings: MailSettings): SMTPTransport.Opti
   };
 }
 
-/** One line for a log or a terminal: the provider, where it dials, as whom and from what. Never the password. */
+/**
+ * One line for a log or a terminal: the provider, where it dials, as whom and from what. Never the password, and never
+ * Resend's key, not even a part of it.
+ */
 export function describeMail(settings: MailSettings): string {
   if (settings.provider === 'log') return 'provider log: email is written to the API log, and none is sent';
+  if (settings.provider === 'resend') return `provider resend via the HTTP API at ${settings.host}, from ${settings.from}`;
   const tls = settings.secure ? 'TLS' : settings.provider === 'smtp' ? 'STARTTLS if offered' : 'STARTTLS';
   return `provider ${settings.provider} via ${settings.host}:${settings.port} (${tls}), `
     + `as ${settings.user || '(no login)'}, from ${settings.from}`;

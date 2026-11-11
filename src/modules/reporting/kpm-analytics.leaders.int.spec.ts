@@ -232,13 +232,20 @@ describe('KPM Analytics — every leader, the read-only views, the group filter 
       }
     });
 
-    it('P19.3-T3 AC-6 Agus’s Group is the Unit Dashboard’s team for him; the Owner’s row counts the office', async () => {
+    /*
+     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §5, amending ADR-0204 §2):* a leader's Group is their *Grup langsung* — it
+     * never descends into an AB. Every report of the Owner here is an AB, so his row counts himself, where it counted the
+     * office.
+     */
+    it('P19.3-T3 AC-6 P19.12-T6 AC-1 Agus’s Group is the Unit Dashboard’s Grup langsung for him; the Owner’s, every report an AB, is himself', async () => {
       as('OWNER');
       const view = await analytics();
       const dashboard = (await http().get('/unit/dashboard').query({ for: office.id.AGUS }).expect(200)).body;
+      expect(dashboard.scope).toBe('direct');
       expect(leaderOf(view, 'AGUS').group).toBe(dashboard.tiles.team.total);
       expect(leaderOf(view, 'AGUS').unit).toBe(dashboard.tiles.team.direct);
-      expect(leaderOf(view, 'OWNER').group).toBe(view.total.manpower.total);
+      expect(leaderOf(view, 'OWNER').group).toBe(1);
+      expect(leaderOf(view, 'OWNER').group).toBeLessThan(view.total.manpower.total);
     });
 
     it('P19.3-T3 AC-10 every AAB counts in the split, Dewi who leads nobody included', async () => {

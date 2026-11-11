@@ -28,6 +28,26 @@ export class AccessTokenDto {
   expiresIn!: number;
 }
 
+/**
+ * **What `POST /auth/register` answers** (P19.12-T2 AC-3; ADR-0245 §3): `signed_in` with the access token for an account
+ * made here and now — the refresh cookie set beside it, as `/auth/login` sets it — or `verification_sent`, with no token
+ * and no cookie, for an address that already had an account.
+ */
+export class RegisterAnswerDto {
+  @ApiProperty({
+    type: String, enum: ['signed_in', 'verification_sent'],
+    description: '`signed_in`: the account was made and is signed in. `verification_sent`: the address already had an '
+      + 'account; nothing was made, nobody is signed in, and nobody joined anything.',
+  })
+  status!: 'signed_in' | 'verification_sent';
+
+  @ApiPropertyOptional({ type: String, description: 'With `signed_in` only.' })
+  accessToken?: string;
+
+  @ApiPropertyOptional({ type: Number, description: 'With `signed_in` only: seconds until the access token expires.' })
+  expiresIn?: number;
+}
+
 /** What a support impersonation hands back: a token that acts as somebody else, and its deadline. */
 export class ImpersonationSessionDto {
   @ApiProperty({ type: String })

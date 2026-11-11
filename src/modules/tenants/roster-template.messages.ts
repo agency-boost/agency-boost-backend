@@ -54,14 +54,17 @@ export const ROSTER_TEMPLATE_WORDS = messages('modules/tenants roster template',
       + 'Kosongkan hanya untuk jenjang teratas.',
   },
   phone: {
-    en: 'Their WhatsApp number, like 0812 1100 8801. Without one they are added, and cannot be reminded on WhatsApp yet.',
+    en: 'Their WhatsApp number, like 0812 1100 8801. Without one they are added, and cannot be reminded on WhatsApp yet. '
+      + 'A new Agent with no email is invited on it.',
     id: 'Nomor WhatsApp-nya, misalnya 0812 1100 8801. Tanpa nomor, mereka tetap masuk, tetapi belum bisa diingatkan lewat '
-      + 'WhatsApp.',
+      + 'WhatsApp. Agent baru tanpa email diundang lewat nomor ini.',
   },
+  /* ADR-0250 §4: an Agent with no email is invited on WhatsApp, as + Tambah agent invites. */
   email: {
     en: 'Their email address, which they sign in with. Needed for somebody new: the invitation to choose a password goes '
-      + 'there.',
-    id: 'Alamat email-nya, untuk masuk. Wajib untuk orang baru: undangan untuk membuat kata sandi dikirim ke sana.',
+      + 'there. A new Agent with no email but a WhatsApp number is invited on WhatsApp, and registers with their own email.',
+    id: 'Alamat email-nya, untuk masuk. Wajib untuk orang baru: undangan untuk membuat kata sandi dikirim ke sana. Agent '
+      + 'baru tanpa email tetapi dengan nomor WhatsApp diundang lewat WhatsApp, lalu mendaftar dengan email-nya sendiri.',
   },
   joinDate: {
     en: 'DD/MM/YYYY, like 15/01/2026: the day they joined this KPM. Empty is the day of the import.',
@@ -75,9 +78,10 @@ export const ROSTER_TEMPLATE_WORDS = messages('modules/tenants roster template',
     en: 'DD/MM/YYYY, like 15/03/1990. They must be at least 18.',
     id: 'DD/MM/YYYY, misalnya 15/03/1990. Minimal berusia 18 tahun.',
   },
+  /* ADR-0250 §1: the list offers two words; a paste or a CSV is read in the others too. */
   gender: {
-    en: 'male or female. Choose it from the list.',
-    id: 'male atau female. Pilih dari daftar.',
+    en: 'male or female. Choose it from the list. Pasted or in a CSV, L or P and Laki-laki or Perempuan are read too.',
+    id: 'male atau female. Pilih dari daftar. Bila ditempel atau di CSV, L atau P dan Laki-laki atau Perempuan juga dibaca.',
   },
   companyJoinMonth: {
     en: 'YYYY-MM, like 2021-07: the month they joined the insurer.',
@@ -105,10 +109,13 @@ export const ROSTER_TEMPLATE_WORDS = messages('modules/tenants roster template',
     en: 'Do not rename, move or delete the Data sheet’s columns, and do not rename the sheet.',
     id: 'Jangan mengganti nama, memindahkan, atau menghapus kolom di sheet Data, dan jangan mengganti nama sheet-nya.',
   },
+  /* ADR-0250 §2: a bad optional cell is left empty, and only a required one skips the row. */
   ruleSkipped: {
-    en: 'A row with a problem is skipped with its reason, and the rest are added together. Download the skipped rows, '
-      + 'fix them and upload them again.',
-    id: 'Baris yang bermasalah dilewati dengan alasannya, dan sisanya masuk sekaligus. Unduh baris yang dilewati, '
-      + 'perbaiki, lalu unggah lagi.',
+    en: 'An optional cell written wrongly is left empty, with a warning, and the person is still added. A row with a problem '
+      + 'in Kode agen, Nama, Peran, Kode upline or a new person’s Email is skipped with its reason, and the rest are added '
+      + 'together. Download the skipped rows, fix them and upload them again.',
+    id: 'Sel opsional yang salah isi dikosongkan, dengan peringatan, dan orangnya tetap masuk. Baris yang bermasalah di '
+      + 'Kode agen, Nama, Peran, Kode upline, atau Email orang baru dilewati dengan alasannya, dan sisanya masuk sekaligus. '
+      + 'Unduh baris yang dilewati, perbaiki, lalu unggah lagi.',
   },
 });

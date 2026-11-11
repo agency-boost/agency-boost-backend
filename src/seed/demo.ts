@@ -78,6 +78,7 @@ import { seedAvatarFixture } from './avatar-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
 import { seedHomeFixture } from './home-fixture';
+import { seedUnitViewsFixture } from './unit-views-fixture';
 import { seedSummaryLeadsFixture } from './summary-leads-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
 import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
@@ -86,7 +87,8 @@ import {
 } from './reporting-fixture';
 import { seedSetupMarks } from './setup-fixture';
 import { seedActivationCohort } from './cohort-fixture';
-import { seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
+import { ACTIVATION_3M_SEED, seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
+import { seedMemberPageFixture } from './member-page-fixture';
 import { markNewHires } from './join-dates';
 import { buildFirstSaleFixture, type FirstSaleFixture } from './first-sale-fixture';
 import { up as backfillFirstSales } from '../migrations/0042-membership-first-sale';
@@ -100,6 +102,8 @@ import { CONFIGURED_EVENTS, seedEventsFixture, type EventsFixture } from './even
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
 import { seedJoiningFixture, type JoiningFixture } from './joining-fixture';
+import { seedLeaderChangeFixture } from './leader-change-fixture';
+import { seedRegisteredAccountsFixture } from './registered-accounts-fixture';
 import { planSeed } from './seed-guard';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
@@ -2737,6 +2741,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     office0555: { kpmId: id0555, owner: owner0555.id, agent: agent0555.id },
   });
 
+  // ------------------- the Unit Dashboard's views: Wilson's ABs, tagged and not (P19.12-T6; `unit-views-fixture.ts`)
+
+  const unitViews = await seedUnitViewsFixture({ kpmId: id0417, owner: owner.id });
+
   /*
    * ------------------- every template's Advanced analytics section (P19.5-T1; `analytics-template-fixture.ts`) — after
    * every production file the seed writes (P19.5-T2), so version 1's columns start at the earliest month held, as the
@@ -3349,6 +3357,9 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // P19-T1 AC-4: signed in before verifying — every page says *Verifikasi email Anda · Kirim ulang* (ADR-0190 §4).
   // Its own code, so the counted codes of everybody after it stay as a fresh seed has always given them.
   await user('unverified@agencyboost.test', 'Yoga Pratama', { pronoun: 'he', unverified: true, agentCode: '81901' });
+  // P19.12-T2 (ADR-0245 §1): the client's two — a leader registered with no KPM, and one signed in unverified — for
+  // *All members* › *Akun terdaftar* › *Tanpa KPM* (`registered-accounts-fixture.ts`).
+  await seedRegisteredAccountsFixture({ clock, user });
 
   void superAdmin;
 
@@ -3932,6 +3943,21 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     ],
     notify,
   });
+  // ------------------- P19.12-T4 — changing a leader (`leader-change-fixture.ts`): Agus asks the office to move Dimas, one
+  // of his own agents, to Yosef's unit, outside his tree. One waiting row; nobody moves and no count changes.
+  const leaderChange = await seedLeaderChangeFixture({
+    clock,
+    kpmId: id0417,
+    agus: { membershipId: ab.id, fullName: 'Agus Prasetyo' },
+    dimas: { membershipId: cast.dimas.id, fullName: 'Dimas Pratama' },
+    yosef: { membershipId: reportingCast.yosef.id, fullName: 'Yosef Tambunan' },
+    deciders: [
+      { userId: String(ownerUser._id), membershipId: owner.id },
+      { userId: String(adminUser._id), membershipId: admin.id },
+    ],
+    notify,
+  });
+  log(leaderChange.guide);
   // P18.8-T2: migration 0040 after the fixtures, as a deploy runs it. On a fresh seed every membership has its join
   // date and classification already, so it leaves only the pending ones, waiting; on a re-seed over an older
   // database it classifies the rows `place()` adopted, as it would have on that database's deploy.
@@ -4012,7 +4038,7 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${summaryLeads.guide}${recruitment.guide}${reporting.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${summaryLeads.guide}${recruitment.guide}${reporting.guide}${unitViews.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM; every Agent
                                                        item opens its Contoh with Cari / Daftar KPM and
@@ -4264,6 +4290,15 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     peers: peerOffices.filter((p): p is { code: string; kpmId: string } => p !== null),
   });
   log(advancedAnalytics.guide);
+  // P19.12-T5 (ADR-0248 §3, §4): *Diundang* and *Lengkapi data* on 0417's member page, after every sign-in the seed
+  // writes (`member-page-fixture.ts`), sparing the people other walks read.
+  log((await seedMemberPageFixture({
+    clock, kpmId: id0417,
+    spare: new Set([
+      ...COACHING_CAST.map((p) => p.email), ...Object.values(ACTIVATION_3M_SEED).map((p) => p.email),
+      'owner@kpm0417.test', 'admin@kpm0417.test',
+    ]),
+  })).guide);
   log(activation3M.guide);
   log(`Profile photos (${avatars.images}, ${avatars.written} written): Agus, Arief and Tari — Tari's not-yet circle on `
     + 'New Hires, Arief\'s group row and Agus\'s own; everybody else initials. Sign in as agus@kpm0417.test.');

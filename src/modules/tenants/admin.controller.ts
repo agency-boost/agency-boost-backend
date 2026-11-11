@@ -682,7 +682,11 @@ export class AdminController {
       + 'or `skipped`, with A3\'s words — a code twice in the file, a role not on the company\'s ladder, an upline in '
       + 'neither the file nor the office, an upline who is no leader or ranks lower, an Agent or AAB with no upline, a '
       + 'loop, a row whose upline\'s row is skipped, a code held elsewhere at the insurer (naming no office), a new '
-      + 'person with no email, a cell in the wrong shape, a row past the leader limit. `counts` is *N orang baru siap '
+      + 'person with no email who cannot be invited on WhatsApp, a required cell (or a new person\'s *Email*) in the '
+      + 'wrong shape, a row past the leader limit — or `invited` (ADR-0250 §4): a new Agent with no email but a WhatsApp '
+      + 'number and a leader upline, invited as *+ Tambah agent* invites. **An optional cell in the wrong shape is left '
+      + 'empty** and the row goes on (ADR-0250 §2); each row\'s `warnings` say so, and name the details it leaves empty. '
+      + '`L` and `P` are read as a gender. `counts` is *N orang baru siap '
       + 'diimpor, M diperbarui, K baris dilewati*; `skippedCsv` the skipped rows with an `Alasan` column. `issues` is '
       + 'only what makes the file unreadable — no *Kode agen*, *Nama* or *Peran* column, an unknown column — and then '
       + '`rows` is empty. Writes nothing.',
@@ -705,7 +709,10 @@ export class AdminController {
       + 'accounts soft-deleted, its updates put back) before the failure is answered, so the office holds every valid '
       + 'row or none. New people are existing agents (ADR-0169 §6). **No password is returned or shown**: with `invite` '
       + '(the default) each new person is emailed a one-time link to choose theirs; without it they use *Lupa kata '
-      + 'sandi?*. Answers the preview\'s rows and counts, and `invited`. `400 VALIDATION_FAILED` for a file that cannot '
+      + 'sandi?*. **An `invited` row** is *+ Tambah agent*\'s invitation, made once the rest has landed, under the row\'s '
+      + 'upline — no account — its link answered on the row (`invite`) to share on WhatsApp; one that cannot be made '
+      + 'skips its row with the refusal\'s words. Answers the preview\'s rows and counts, and `invited` (the number '
+      + 'emailed). `400 VALIDATION_FAILED` for a file that cannot '
       + 'be read, or one with no row to import; `409 LEADER_LIMIT_REACHED` when the office fills while it is written.',
   })
   async importRoster(

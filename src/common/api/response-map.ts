@@ -12,7 +12,7 @@ import {
 } from '@/modules/branding/branding.response.dto';
 import {
   AccessTokenDto, EmailChangedDto, ImpersonationSessionDto, MeDto, ReadinessDto,
-  RedeemedInviteDto, SessionDto, StatusAckDto,
+  RedeemedInviteDto, RegisterAnswerDto, SessionDto, StatusAckDto,
 } from '@/modules/auth/session.response.dto';
 import {
   InboxDto, NotificationReadStateDto, UnreadCountDto,
@@ -32,12 +32,15 @@ import {
   MyLeaderCodeDto, OrgTreeDto, PendingRequestDto, RoleChangeEntryDto, RoutingChoiceDto, TeamMemberDto,
   UntaggedMemberDto, MemberPhoneDto, MemberSearchResultDto, WaitingRequestCountDto,
 } from '@/modules/org/org.response.dto';
+import { CancelledTransferDto, LeaderMoveChoiceDto, PendingMoveDto } from '@/modules/org/leader-change.response.dto';
+import { MemberPersonalCompletedDto } from '@/modules/org/member-personal.dto';
 import {
   AccountChoiceDto, CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
   MyKpmRequestStateDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto, RosterCommitDto, RosterPreviewDto,
   RosterTemplateDto,
 } from '@/modules/tenants/tenant.response.dto';
 import { CompanyResponseDto, PublicCompanyDto } from '@/modules/tenants/platform.response.dto';
+import { GroupMembersAddedDto } from '@/modules/org/group-members.dto';
 import { AuditPageDto } from '@/modules/audit/audit.response.dto';
 import {
   ActivityCategoryDto, ActivityTypeDto, LeadPipelineDto, LeadStatusDto, RatioDefinitionDto,
@@ -126,7 +129,7 @@ import {
 } from '@/modules/reporting/reporting.response.dto';
 import { ComplianceViewDto } from '@/modules/reporting/compliance/compliance.response.dto';
 import {
-  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformMembersPageDto,
+  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformAccountsPageDto, PlatformMembersPageDto,
 } from '@/modules/reporting/platform/platform-reads.response.dto';
 import {
   CoachingSessionDto, SessionDraftSavedDto, SessionHistoryDto,
@@ -183,6 +186,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   ComplianceController_read: { type: ComplianceViewDto },
   // P19.4-T3 (ADR-0207 §2): the Super Admin's reads across KPMs.
   PlatformReadsController_members: { type: PlatformMembersPageDto },
+  // P19.12-T2 (ADR-0245 §1): *Akun terdaftar*.
+  PlatformReadsController_accounts: { type: PlatformAccountsPageDto },
   PlatformReadsController_comparison: { type: KpmComparisonPageDto },
   PlatformReadsController_analytics: { type: KpmAnalyticsDto },
   PlatformReadsController_compliance: { type: ComplianceViewDto },
@@ -257,7 +262,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   HealthController_live: { type: StatusAckDto },
   HealthController_ready: { type: ReadinessDto },
 
-  AuthController_register: { type: StatusAckDto },
+  // P19.12-T2 (ADR-0245 §3): an account made is signed in.
+  AuthController_register: { type: RegisterAnswerDto },
   AuthController_login: { type: AccessTokenDto },
   AuthController_refresh: { type: AccessTokenDto },
   AuthController_logout: { type: StatusAckDto },
@@ -572,7 +578,14 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // UI V1 (2026-10-30): *Search agent* (UI-012, D-14), and a leader saving an agent's WhatsApp number (UI-081, D-22).
   OrgController_search: { type: MemberSearchResultDto },
   MemberPhoneController_set: { type: MemberPhoneDto },
+  // ADR-0248 §3: *Lengkapi data*, the office fills a member's blank personal data.
+  MemberPersonalController_complete: { type: MemberPersonalCompletedDto },
   OrgController_changeRole: { type: TeamMemberDto, isArray: true },
+  // ADR-0247: changing who somebody reports to.
+  LeaderChangeController_choices: { type: LeaderMoveChoiceDto, isArray: true },
+  LeaderChangeController_move: { type: DirectoryMemberDto },
+  LeaderChangeController_requestMove: { type: PendingMoveDto },
+  LeaderChangeController_cancel: { type: CancelledTransferDto },
   OrgController_remove: { type: TeamMemberDto, isArray: true },
   OrgController_roleLog: { type: RoleChangeEntryDto, isArray: true },
   // ADR-0157: a leader past the office's limit, asked about and decided.
@@ -590,6 +603,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_createGroup: { type: GroupSummaryDto, isArray: true },
   OrgController_updateGroup: { type: GroupSummaryDto, isArray: true },
   OrgController_archiveGroup: { type: GroupSummaryDto, isArray: true },
+  // P19.12-T6 (ADR-0249 §4): *+ Tambah ke grup*.
+  OrgController_addGroupMembers: { type: GroupMembersAddedDto },
   OrgController_readTags: { type: MemberTagsDto },
   OrgController_tagMember: { type: MemberTagsDto },
   OrgController_setCoreLeader: { type: MemberTagsDto },

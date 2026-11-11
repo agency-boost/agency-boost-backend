@@ -119,7 +119,8 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.ownerAgentCodeNeeded', V.ownerAgentCodeNeeded, []],
   ['VALIDATION_FAILED.ownerEmailNeeded', V.ownerEmailNeeded, ['owner.email']],
   ['VALIDATION_FAILED.notAWorkStatus', V.notAWorkStatus({ value: 'fulltime' }), ['"fulltime"', 'Full-time', 'Part-time']],
-  ['VALIDATION_FAILED.notAGender', V.notAGender({ value: 'f' }), ['"f"', 'male', 'female']],
+  // P19.12-T7 AC-1 (ADR-0250 §1): the letters the import reads too.
+  ['VALIDATION_FAILED.notAGender', V.notAGender({ value: 'f' }), ['"f"', 'male', 'female', 'L', 'P', 'Laki-laki', 'Perempuan']],
   ['VALIDATION_FAILED.alreadyOnLine', V.alreadyOnLine({ line: 2 }), ['2']],
   ['VALIDATION_FAILED.emailHasAccount', V.emailHasAccount, []],
   ['VALIDATION_FAILED.agentCodeHeld', V.agentCodeHeld({ email: 'rina@kpm.test' }), ['rina@kpm.test']],

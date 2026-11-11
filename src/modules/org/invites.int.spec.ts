@@ -526,7 +526,10 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
 
     it('P18.8-T3 AC-4 registering on the link joins the office under the leader at once, with the invite’s code and join date', async () => {
       const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-10-20' }).expect(200)).body.link);
-      await register(token).expect(201, { status: 'verification_sent' });
+      // P19.12-T2 AC-3 (ADR-0245 §3): the account made is signed in, the cookie set as at sign-in.
+      const made = await register(token).expect(201);
+      expect(made.body).toEqual({ status: 'signed_in', accessToken: expect.any(String), expiresIn: expect.any(Number) });
+      expect(String(made.headers['set-cookie'])).toMatch(/^agencyboost_refresh=/);
       const account = (await col('users').findOne({ email: 'hendra@new.test' }))!;
       // The invite's code and the office's insurer, whatever the form sent.
       expect(account).toMatchObject({ agentCode: '80777', companyId, phone: '0812-3456-7890', fullName: 'Hendra W.' });
@@ -568,7 +571,9 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
     it('P18.8-T3 AC-4 registering on a link with an address that already exists joins nobody to anything', async () => {
       const token = tokenOf((await add({ agentCode: '80777' }).expect(200)).body.link);
       const existing = (await col('users').findOne({ _id: new mongoose.Types.ObjectId(user.RINA) }))!;
-      await register(token, { email: existing.email }).expect(201, { status: 'verification_sent' });
+      const res = await register(token, { email: existing.email }).expect(201, { status: 'verification_sent' });
+      // P19.12-T2 AC-3 (ADR-0245 §3): and signs nobody in.
+      expect(res.headers['set-cookie']).toBeUndefined();
       expect(await col('memberInvites').findOne({})).toMatchObject({ status: 'pending' });
       expect(await col('memberships').countDocuments({ kpmId: KPM_A })).toBe(11);
     });
@@ -615,7 +620,10 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
       // The insurer the form sent is not the office's: the code's office decides, as an invite's does. Lower case and
       // spaces, as somebody types a code they were read.
       const elsewhere = new mongoose.Types.ObjectId().toString();
-      await registerWith(`  ${code.toLowerCase()} `, { companyId: elsewhere }).expect(201, { status: 'verification_sent' });
+      // P19.12-T2 AC-3 (ADR-0245 §3): and signs the account in, already in the unit.
+      const made = await registerWith(`  ${code.toLowerCase()} `, { companyId: elsewhere }).expect(201);
+      expect(made.body).toMatchObject({ status: 'signed_in', accessToken: expect.any(String) });
+      expect(String(made.headers['set-cookie'])).toMatch(/^agencyboost_refresh=/);
 
       const account = (await col('users').findOne({ email: 'yudi@new.test' }))!;
       expect(account).toMatchObject({ companyId, agentCode: '88123' });
@@ -659,10 +667,12 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
       expect(await col('users').countDocuments({ email: 'yudi@new.test' })).toBe(0);
     });
 
-    it('P19.10-T1 AC-1 an address that already exists answers as a new one does and joins nobody to anything', async () => {
+    it('P19.10-T1 AC-1 an address that already exists makes nothing, signs nobody in and joins nobody to anything', async () => {
       session.current = RequestContext.platform('nobody');
       const loose = (await col('users').findOne({ _id: new mongoose.Types.ObjectId(user.LOOSE) }))!;
-      await registerWith(await codeOf('AGUS'), { email: loose.email }).expect(201, { status: 'verification_sent' });
+      const res = await registerWith(await codeOf('AGUS'), { email: loose.email }).expect(201, { status: 'verification_sent' });
+      // P19.12-T2 AC-3 (ADR-0245 §3): no session for an address that already had an account.
+      expect(res.headers['set-cookie']).toBeUndefined();
       expect(await col('memberships').countDocuments({ userId: user.LOOSE })).toBe(0);
       expect(notices('member.tagged_by_leader')).toEqual([]);
     });
@@ -753,8 +763,9 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
       expect((await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id.PEER) }))!.directCounts.total).toBe(0);
       expect((await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(id.AGUS) }))!.directCounts.total).toBe(2);
       expect(await col('transferRequests').findOne({})).toMatchObject({ status: 'approved', decidedByMembershipId: id.OWNER });
+      // Whoever asked is told before the leader they left (P19.12-T4); Agus asked and is the new leader, told once.
       expect(notices('transfer_request.decided').map((n) => [n.userId, n.payload!.audience])).toEqual([
-        [user.PEER_AGENT, 'member'], [user.PEER, 'from_leader'], [user.AGUS, 'requester'],
+        [user.PEER_AGENT, 'member'], [user.AGUS, 'requester'], [user.PEER, 'from_leader'],
       ]);
       expect(await audits('transfer_request.approved')).toHaveLength(1);
       await signIn('AGUS');

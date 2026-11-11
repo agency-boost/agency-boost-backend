@@ -6,6 +6,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { calendarMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
+import type { UnitView } from '@/domain/constants';
+import type { ViewsOffered } from '@/domain/metrics/unit-view';
 import { aaThisMonth, rekrutThisMonth, type PersonPotensi, type PotensiMonth } from '@/domain/metrics/potensi';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { LeadReadings, type PotensiOpenLead } from '@/modules/leads/lead-readings';
@@ -17,7 +19,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
-import { UnitDashboardService } from './unit-dashboard.service';
+import { UnitDashboardService, type UnitInformal } from './unit-dashboard.service';
 
 /** A rung, as the company's ladder names it (BP and SBP at Manulife). */
 export interface PotensiRung {
@@ -70,10 +72,12 @@ export interface PotensiTotals {
 export interface PotensiUnit {
   /**
    * `direct`: ***Unit Anda*** — the head and the agents who answer to them, **first** (P19.8-T4 AC-4, MOB UI-179);
-   * `unit`: ***Unit <AAB name>***, each unit below, in the *Overview*'s order.
+   * `unit`: ***Unit <AAB name>***, each unit below, in the *Overview*'s order; `unled`: ***Belum punya leader***, last —
+   * office-wide *Semua downline* only (ADR-0249 §2), with no leader.
    */
-  kind: 'unit' | 'direct';
-  leader: { membershipId: string; name: string; rung: PotensiRung };
+  kind: 'unit' | 'direct' | 'unled';
+  /** The card's leader, its first row; `null` for `unled`. */
+  leader: { membershipId: string; name: string; rung: PotensiRung } | null;
   /** The leader first, then everybody in the card in the roster's order. The screen sorts by the tile chosen. */
   people: PotensiPerson[];
   totals: PotensiTotals;
@@ -94,6 +98,11 @@ export interface UnitPotensiView {
    */
   tiles: { aa: number; rekrut: number; potensi: { aa: number; rekrut: number } };
   units: PotensiUnit[];
+  /** The view this answer is over, as `GET /unit/dashboard`'s (ADR-0249 §1). */
+  scope: UnitView;
+  scopes: ViewsOffered;
+  /** *Grup informal*'s line, as `GET /unit/dashboard`'s; `null` in any other view. */
+  informal: UnitInformal | null;
 }
 
 /** One of the person's kandidat on the sheet (AC-7). */
@@ -169,11 +178,12 @@ export class UnitPotensiService {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
 
-  async read(ctx: RequestContext, query: { month?: string; for?: string } = {}): Promise<UnitPotensiView> {
+  async read(ctx: RequestContext, query: { month?: string; for?: string; scope?: UnitView } = {}): Promise<UnitPotensiView> {
     const me = requireMembership(ctx);
     const office = await this.days.office(ctx);
     const m = this.monthOf(office, query.month);
-    const people = await this.dashboard.people(ctx, query.for);
+    // The Overview's view, the same people (ADR-0249 §1): asked for, or the reader's default.
+    const people = await this.dashboard.people(ctx, query.for, { views: true, scope: query.scope });
     const ids = people.group;
 
     const [placed, figures, cells, ladder, pictured, leadReach] = await Promise.all([
@@ -215,11 +225,14 @@ export class UnitPotensiService {
       };
     };
 
-    // The tree below the head, each level in the roster's order (`people.group` is it).
+    // The tree below the head in the view (`placeView`, ADR-0249 §2), each level in the roster's order (`people.group` is it).
     const below = new Map<string, string[]>();
+    const unled: string[] = [];
     for (const id of ids) {
-      const leader = placed.get(id)?.leaderId;
-      if (id !== people.head.membershipId && leader) below.set(leader, [...(below.get(leader) ?? []), id]);
+      if (id === people.head.membershipId) continue;
+      const parent = people.parentOf.get(id) ?? null;
+      if (parent === null) unled.push(id);
+      else below.set(parent, [...(below.get(parent) ?? []), id]);
     }
     const leadsSomebody = (id: string) => below.has(id);
     const card = (kind: PotensiUnit['kind'], leader: string, members: readonly string[]): PotensiUnit => {
@@ -235,13 +248,19 @@ export class UnitPotensiService {
         ...children.filter(leadsSomebody).flatMap(unitsOf),
       ];
     };
-    // The head's level splits as the dashboard's does: its agents who lead nobody are *direct*, anybody else a unit.
+    // The head's level splits as the dashboard's does: its agents who lead nobody are *direct*, anybody else a unit —
+    // somebody hung from the head always a unit (ADR-0249 §2).
     const direct = below.get(people.head.membershipId) ?? [];
-    const isUnitHead = (id: string) => placed.get(id)?.role !== 'agent' || leadsSomebody(id);
-    // *Unit Anda* first, then each unit below, as the Overview's roster orders them (MOB UI-179).
+    const isUnitHead = (id: string) => people.attached.has(id) || placed.get(id)?.role !== 'agent' || leadsSomebody(id);
+    const unledCard = (): PotensiUnit => {
+      const rows = unled.map((id) => personOf(id, false));
+      return { kind: 'unled', leader: null, people: rows, totals: totalsOf(rows) };
+    };
+    // *Unit Anda* first, then each unit below, as the Overview's roster orders them (MOB UI-179); *Belum punya leader* last.
     const units = [
       card('direct', people.head.membershipId, direct.filter((id) => !isUnitHead(id))),
       ...direct.filter(isUnitHead).flatMap(unitsOf),
+      ...(unled.length > 0 ? [unledCard()] : []),
     ];
     const everybody = units.flatMap((u) => u.people);
 
@@ -260,6 +279,9 @@ export class UnitPotensiService {
         },
       },
       units,
+      scope: people.scope,
+      scopes: people.scopes,
+      informal: people.informal,
     };
 
     // Last, once the answer exists: the month's days up to today, one entry per member shown other than the reader.

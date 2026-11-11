@@ -1,16 +1,10 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The branding's refusals, in both languages** (P19.6-T1; ADR-0218 §2, §5). The colour's words are the handover's own
- * (§B7, *Contrast check on save*): *"Warna terlalu terang/gelap untuk teks"*.
+ * **The branding's refusals, in both languages** (P19.6-T1; ADR-0218 §2). No colour is refused since P19.12-T3
+ * (ADR-0246): `BRANDING_COLOUR_UNREADABLE` is retired, and its words went with it.
  */
 export const BRANDING_REFUSALS = refusals('modules/branding', {
-  BRANDING_COLOUR_UNREADABLE: {
-    unreadable: {
-      en: 'Colour too light/dark for text: neither white nor dark text reaches 4.5:1 on it.',
-      id: 'Warna terlalu terang/gelap untuk teks.',
-    },
-  },
   BRANDING_IMAGE_REFUSED: {
     refused: ({ reason }: { reason: string }) => ({
       en: {

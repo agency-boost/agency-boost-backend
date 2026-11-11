@@ -17,6 +17,13 @@ export interface BrandingSquare {
 }
 
 /** The mascot: the folder of each pose's three WebP widths, the default required. */
+/** One colour's words as measured on save. `fill` is absent on a row saved before 2026-11-11, where it is the colour. */
+export interface BrandingContrast {
+  side: 'light' | 'dark';
+  ratio: number;
+  fill?: string;
+}
+
 export interface BrandingMascot {
   default: string;
   poses: Partial<Record<'thinking' | 'celebrating' | 'pointing' | 'phone', string>>;
@@ -52,9 +59,13 @@ export class KpmBranding {
   @Prop({ type: String, default: null })
   secondary!: string | null;
 
-  /** The words on each colour as measured on save: `light` (white) or `dark`, and the ratio (acceptance 2). */
+  /**
+   * The words on each colour as measured on save: `light` (white) or `dark`, the ratio (acceptance 2), and the `fill`
+   * they read on — the colour itself, or its nearest readable shade (P19.12-T3; ADR-0246 §3). For the audit; the
+   * palette is derived again on read. A row saved before 2026-11-11 has no `fill`: it is the colour.
+   */
   @Prop({ type: Object, default: null })
-  contrast!: { primary: { side: 'light' | 'dark'; ratio: number }; secondary: { side: 'light' | 'dark'; ratio: number } } | null;
+  contrast!: { primary: BrandingContrast; secondary: BrandingContrast } | null;
 
   @Prop({ type: Object, default: null })
   mascot!: BrandingMascot | null;

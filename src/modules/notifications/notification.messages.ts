@@ -89,6 +89,56 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     id: `Permintaan Anda untuk memindahkan ${member} ditolak`,
   }),
   transferDeclinedDetail: { en: 'They stay where they are.', id: 'Dia tetap di unitnya sekarang.' },
+  /* P19.12-T4 (ADR-0247 §3): a leader's move to a leader outside their tree, asked of the office, and its answers. */
+  transferMoveRequested: ({ requester, member, to }: { requester: string; member: string; to: string }) => ({
+    en: `${requester} asked to move ${member} to ${to}’s unit`,
+    id: `${requester} meminta memindahkan ${member} ke unit ${to}`,
+  }),
+  transferMoveApprovedDetail: ({ to }: { to: string }) => ({
+    en: `They report to ${to} now, with everybody under them.`,
+    id: `Dia sekarang melapor ke ${to}, bersama semua orang di bawahnya.`,
+  }),
+  transferJoinedYourUnit: ({ member }: { member: string }) => ({
+    en: `${member} joined your unit`,
+    id: `${member} bergabung ke unit Anda`,
+  }),
+  transferJoinedYourUnitDetail: {
+    en: 'The office approved the move. Everybody under them came too, with their history.',
+    id: 'KPM menyetujui pemindahan ini. Semua orang di bawahnya ikut pindah, bersama riwayatnya.',
+  },
+  transferClosed: ({ member }: { member: string }) => ({
+    en: `Your request to move ${member} was closed`,
+    id: `Permintaan Anda untuk memindahkan ${member} ditutup`,
+  }),
+  transferClosedDetail: {
+    en: 'They were moved to another leader directly since you asked.',
+    id: 'Dia sudah dipindahkan langsung ke leader lain sejak Anda mengajukannya.',
+  },
+  /* P19.12-T4 (ADR-0247 §2): somebody moved to another leader at once — to them, and to both leaders. */
+  leaderChangedYou: ({ to }: { to: string }) => ({
+    en: `You now report to ${to}`,
+    id: `Sekarang Anda melapor ke ${to}`,
+  }),
+  leaderChangedYouDetail: {
+    en: 'Everybody under you moved with you, and your history stays with you.',
+    id: 'Semua orang di bawah Anda ikut pindah, dan riwayat Anda tetap bersama Anda.',
+  },
+  leaderChangedLeft: ({ member, to }: { member: string; to: string }) => ({
+    en: `${member} moved to ${to}’s unit`,
+    id: `${member} pindah ke unit ${to}`,
+  }),
+  leaderChangedLeftDetail: {
+    en: 'Everybody under them moved too. Their history stays with them.',
+    id: 'Semua orang di bawahnya ikut pindah. Riwayatnya tetap bersamanya.',
+  },
+  leaderChangedJoined: ({ member }: { member: string }) => ({
+    en: `${member} now reports to you`,
+    id: `${member} sekarang melapor kepada Anda`,
+  }),
+  leaderChangedJoinedDetail: {
+    en: 'Everybody under them moved with them, with their history.',
+    id: 'Semua orang di bawahnya ikut pindah bersamanya, bersama riwayatnya.',
+  },
   memberRemoved: { en: 'You were removed from your unit', id: 'Anda dikeluarkan dari unit Anda' },
   memberRemovedDetail: {
     en: 'Search for a leader and ask to join again if you want to come back.',

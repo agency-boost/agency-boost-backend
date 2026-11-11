@@ -41,9 +41,10 @@ export class BrandingSettingsController {
   @RequirePermission('tenant_config:write')
   @ApiOperation({
     summary: '*Simpan*: the logos, the two colours and the mascot',
-    description: 'Each group whole or `null` (the KPM then shows its template’s, else AgencyBoost’s). A colour no text '
-      + 'reads on is `422 BRANDING_COLOUR_UNREADABLE` (`details.field`); a stale `expectedVersion` `409 VERSION_CONFLICT`; '
-      + 'an image folder not this KPM’s `400 VALIDATION_FAILED`. Audited `kpm_branding.updated`, old → new.',
+    description: 'Each group whole or `null` (the KPM then shows its template’s, else AgencyBoost’s). Every `#rrggbb` '
+      + 'colour is accepted: one no words read 4.5:1 on is painted as its nearest readable shade, and the colour chosen '
+      + 'is kept. A stale `expectedVersion` is `409 VERSION_CONFLICT`; an image folder not this KPM’s `400 '
+      + 'VALIDATION_FAILED`. Audited `kpm_branding.updated`, old → new, each colour with its fill.',
   })
   async save(@Ctx() ctx: RequestContext, @Body() dto: SaveBrandingDto) {
     return this.branding.save(ctx, dto as never);
@@ -54,7 +55,8 @@ export class BrandingSettingsController {
   @RequirePermission('tenant_config:write')
   @ApiOperation({
     summary: 'The palette of two colours, for the live preview',
-    description: 'Writes nothing. The same `422 BRANDING_COLOUR_UNREADABLE` *Simpan* would answer (acceptance 2).',
+    description: 'Writes nothing. Each colour’s words, their ratio and its `fill`, `adjusted` when the fill is not the '
+      + 'colour chosen.',
   })
   preview(@Body() dto: BrandingPreviewDto) {
     return this.branding.preview(dto.primary, dto.secondary);
@@ -120,7 +122,7 @@ export class TemplateBrandingController {
   @RequirePermission('company_template:write')
   @ApiOperation({
     summary: 'The palette of a template’s two colours, for its editor’s preview',
-    description: 'Writes nothing. `422 BRANDING_COLOUR_UNREADABLE` as the section’s save would answer.',
+    description: 'Writes nothing. Each colour’s words, their ratio and its `fill`, as the KPM’s preview answers.',
   })
   async preview(@Param('companyId') companyId: string, @Param('templateId') templateId: string, @Body() dto: BrandingPreviewDto) {
     await this.branding.requireTemplate(companyId, templateId);

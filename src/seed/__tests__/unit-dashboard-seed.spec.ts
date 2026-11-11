@@ -198,7 +198,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
   });
 
   it('P15-T1 AC-12 Potential Recruits: Indah’s new candidate in Agus’s unit, Budi’s in Sari’s', async () => {
-    expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1 });
+    expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1, abs: 0 });
     expect(row('Indah').leadsCounts.recruitNominated).toBe(1);
     expect(row('Budi').leadsCounts.recruitNominated).toBe(1);
     expect(await col('leads').findOne({ _id: new mongoose.Types.ObjectId(unitDashboardLeadId(agus.kpmId!)) }))
@@ -340,6 +340,30 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
       .toEqual(['Sari', 'Budi', 'Rina', 'Yanti']);
     expect(everyRow(await wired.unitDashboard.read(await as('arief@kpm0417.test'))).map((r) => first(r.name)))
       .toEqual(['Arief', 'Novi', 'Wahyu']);
+  });
+
+  /*
+   * P19.12-T6 (ADR-0249; `unit-views-fixture.ts`): Wilson's reports are all ABs, and he owns *Top Producers 2026* with
+   * Agus in it — so each view reads differently on the seed, and the informal line names the ABs not yet tagged.
+   */
+  it('P19.12-T6 AC-2 Wilson opens on Semua downline; Grup informal brings Agus’s group and names the ABs not in it', async () => {
+    const wilson = await as('owner@kpm0417.test', { owner: true });
+    const office = await wired.unitDashboard.read(wilson);
+    expect(office).toMatchObject({ scope: 'downline', scopes: { offered: ['direct', 'informal', 'downline'], default: 'downline' } });
+    expect(office.tiles.team.direct).toBe(1);
+    expect(office.tiles.team.ab).toBe(office.tiles.team.total - 1);
+    const informal = await wired.unitDashboard.read(wilson, { scope: 'informal' });
+    expect(informal.informal?.groups.map((g) => g.name)).toEqual(['Top Producers 2026']);
+    expect(informal.informal?.abs?.map((p) => first(p.name)).sort()).toEqual(['Maya', 'Satria', 'Yosef']);
+    expect(informal.informal?.absNotInGroup).toBe(3);
+    expect(everyRow(informal).map((r) => first(r.name))).toEqual(expect.arrayContaining(['Wilson', 'Agus', 'Sari', 'Arief']));
+    expect(everyRow(informal).length).toBeLessThan(everyRow(office).length);
+    expect(await wired.unitDashboard.read(wilson, { scope: 'direct' })).toMatchObject({ scope: 'direct', empty: true });
+  });
+
+  it('P19.12-T6 AC-2 Agus, no AB below him, is offered Grup langsung alone — the picker hidden — and reads as before', async () => {
+    expect(view).toMatchObject({ scope: 'direct', scopes: { offered: ['direct'], default: 'direct' }, informal: null, unled: null });
+    expect(view.tiles.team.ab).toBe(0);
   });
 
   it('P15-T1 AC-12 a re-seed without --reset writes nothing more: the lead by its id, the correction by its marker', async () => {

@@ -220,11 +220,17 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
         .toEqual(['Sari Puspita', 'Budi Santoso', 'Rina Wijaya', 'Nina Lestari', 'Dodi Kurniawan']);
     });
 
-    it('P15-T1 AC-1 positive: the Owner, the office’s root AB, is answered the whole office; the Admin, above nobody, an empty unit', async () => {
+    /*
+     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §1):* the Admin above nobody is answered the office too — *Semua downline*,
+     * their default while they lead nobody — where they were answered an empty unit.
+     */
+    it('P15-T1 AC-1 P19.12-T6 AC-2 positive: the Owner and the Admin above nobody are answered the whole office, Semua downline', async () => {
       as('OWNER');
       expect(everyRow((await dashboard().expect(200)).body)).toHaveLength(16);
       as('ADMIN');
-      expect((await dashboard().expect(200)).body).toMatchObject({ empty: true, units: [], yourUnit: { rows: [] } });
+      const admin = (await dashboard().expect(200)).body;
+      expect(admin).toMatchObject({ empty: false, scope: 'downline', scopes: { offered: ['informal', 'downline'], default: 'downline' } });
+      expect(everyRow(admin)).toHaveLength(16);
       // And any leader's unit by `for`.
       expect((await dashboard({ for: office.id.SARI }).expect(200)).body.head).toMatchObject({ name: 'Sari Puspita', isReader: false });
     });
@@ -258,6 +264,75 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       // An elevated one writes as the member, so it may.
       session.current = new RequestContext(agus.userId, 'none', agus.membership, 'u-support', null, false, false);
       expect((await dashboard().expect(200)).body.production.canUpdate).toBe(true);
+    });
+  });
+
+  /**
+   * **The three views over HTTP, per role** (P19.12-T6; ADR-0249 §1). In this office every report of the Owner is an AB,
+   * and nobody stands below Agus but AABs and agents: so Agus is offered *Grup langsung* alone, and the Owner's own
+   * *Grup langsung* is himself. `unit-views.tenancy.spec.ts` reads an AB below an AB, a group and somebody with no leader.
+   */
+  describe('P19.12-T6 GET /unit/dashboard?scope= — the view, per role', () => {
+    it('P19.12-T6 AC-2 a scope it does not know is 400 VALIDATION_FAILED, named in details', async () => {
+      as('AGUS');
+      for (const scope of ['all', 'Direct', 'group']) {
+        const res = await dashboard({ scope }).expect(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(JSON.stringify(res.body.error.details)).toContain('scope');
+      }
+    });
+
+    it('P19.12-T6 AC-2 an AB, an AAB and an Agent who leads: Grup langsung, the only view their units offer', async () => {
+      for (const [who, rows] of [['AGUS', 11], ['SARI', 5], ['LUKAS', 2]] as const) {
+        as(who);
+        const body = (await dashboard().expect(200)).body;
+        expect({ who, scope: body.scope, scopes: body.scopes, informal: body.informal, rows: everyRow(body).length })
+          .toEqual({ who, scope: 'direct', scopes: { offered: ['direct'], default: 'direct' }, informal: null, rows });
+      }
+    });
+
+    it('P19.12-T6 AC-2 a view not offered falls back to the default, never a refusal', async () => {
+      as('AGUS');
+      for (const scope of ['informal', 'downline']) {
+        expect((await dashboard({ scope }).expect(200)).body).toMatchObject({ scope: 'direct', empty: false });
+      }
+    });
+
+    it('P19.12-T6 AC-2 the Owner opens on Semua downline; his Grup langsung, every report an AB, is himself alone', async () => {
+      as('OWNER');
+      expect((await dashboard().expect(200)).body).toMatchObject({
+        scope: 'downline', scopes: { offered: ['direct', 'informal', 'downline'], default: 'downline' },
+      });
+      expect((await dashboard({ scope: 'direct' }).expect(200)).body).toMatchObject({ scope: 'direct', empty: true });
+      const informal = (await dashboard({ scope: 'informal' }).expect(200)).body;
+      // Three ABs below him, none tagged: named, for the Owner may tag them.
+      expect(informal.informal).toMatchObject({ groups: [], absNotInGroup: 3, canTag: true });
+      expect(informal.informal.abs.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Hendra Gunawan', 'Maya Kusuma']);
+    });
+
+    it('P19.12-T6 AC-2 an Admin who leads somebody opens on Grup langsung, Semua downline the office', async () => {
+      const agus = office.as('AGUS');
+      session.current = new RequestContext(agus.userId, 'none', { ...agus.membership!, isKpmAdmin: true });
+      const body = (await dashboard().expect(200)).body;
+      expect(body).toMatchObject({ scope: 'direct', scopes: { offered: ['direct', 'informal', 'downline'], default: 'direct' } });
+      expect(everyRow(body)).toHaveLength(11);
+      expect(everyRow((await dashboard({ scope: 'downline' }).expect(200)).body)).toHaveLength(16);
+    });
+
+    it('P19.12-T6 AC-2 a `for` view opens on Grup langsung, read-only, for the Owner too', async () => {
+      as('OWNER');
+      expect((await dashboard({ for: office.id.AGUS }).expect(200)).body).toMatchObject({
+        scope: 'direct', scopes: { default: 'direct' }, readOnly: true,
+      });
+      as('AGUS');
+      expect((await dashboard({ for: office.id.SARI }).expect(200)).body).toMatchObject({ scope: 'direct', readOnly: false });
+    });
+
+    it('P19.12-T6 AC-2 cross-tenant: a scope names nobody — another office’s leader by `for` is 404 in every view', async () => {
+      as('OWNER');
+      for (const scope of ['direct', 'informal', 'downline']) {
+        expect((await dashboard({ for: office.id.B_AB, scope }).expect(404)).body.error.code).toBe('NOT_FOUND');
+      }
     });
   });
 

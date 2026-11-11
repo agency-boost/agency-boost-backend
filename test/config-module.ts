@@ -953,6 +953,8 @@ export function configModule(
     activityBindings,
     // P19.7-T2 AC-13: `PROPOSALS_MADE` per row.
     proposalReadings,
+    // P19.12-T6 (ADR-0249 §4): the live groups the head owns, for *Grup informal*.
+    new GroupRepository(model(Group.name, GroupSchema) as never),
   );
   // UI V1 (Phase 18.11 T4, UI-001): the Activities tab — the dashboard's reach, the counts and the Ratio page's ratios.
   const unitActivities = new UnitActivitiesService(

@@ -20,6 +20,19 @@ export const UNIT_DASHBOARD = {
    * (`performance-and-scale.md`), so a leader's whole roster always fits one save.
    */
   MAX_ROWS_PER_SAVE: 500,
+  /**
+   * **The three views** (the client's message of 11 November 2026, item 7; ADR-0249; `metrics-and-definitions.md`, *The
+   * views*), in the order the picker draws them: *Grup langsung* (`DIRECT_GROUP`), *Grup informal* (`INFORMAL_GROUP`),
+   * *Semua downline* (`DOWNLINE`). Defined in `domain/metrics/unit-view.ts`.
+   */
+  VIEWS: ['direct', 'informal', 'downline'] as const,
+  /**
+   * The most members one *+ Tambah ke grup* may tag at once (`POST /members/groups/:groupId/members`): the 500-member
+   * ceiling an office is measured at, so every AB below a leader always fits one request.
+   */
+  MAX_TAGGED_PER_ADD: 500,
 } as const;
 
 export type UnitDashboardPeriod = (typeof UNIT_DASHBOARD.PERIODS)[number];
+/** A view of the Unit Dashboard (ADR-0249): `direct`, `informal` or `downline`. */
+export type UnitView = (typeof UNIT_DASHBOARD.VIEWS)[number];

@@ -3,9 +3,10 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { NotificationRepository } from './notification.repository';
 import { NotificationService, providerAnswerOf, TemplateRenderer } from './notification.service';
 import {
-  AUTH_TEMPLATES, isAuthTemplate, NotificationChannel, NotificationChannelAdapter, NotificationTemplate,
+  AUTH_TEMPLATES, DeliveryReceipt, isAuthTemplate, NotificationChannel, NotificationChannelAdapter, NotificationTemplate,
   RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
 } from './notification.types';
+import { ResendError } from './resend-client';
 
 class StubRenderer extends TemplateRenderer {
   render(templateId: string): RenderedMessage {
@@ -22,6 +23,14 @@ class EmailAdapter extends NotificationChannelAdapter {
   async send(to: SendRequest): Promise<void> {
     if (this.refusal) throw this.refusal;
     this.sent.push(to);
+  }
+}
+
+/** An email adapter that answers the provider's id for each message, as Resend's does (P19.12-T1). */
+class ReceiptAdapter extends NotificationChannelAdapter {
+  readonly channel: NotificationChannel = 'email';
+  async send(): Promise<DeliveryReceipt> {
+    return { providerMessageId: '49a3999c-0ce1-4ea6-ab68-afcd6dc2e794' };
   }
 }
 
@@ -142,6 +151,44 @@ describe('P19-T1 the account’s own mail', () => {
     // The adapter's failure itself, with the reply's code and nodemailer's kind beside it.
     expect(errors).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'email', code: 'EAUTH', responseCode: 535 }), 'delivery failed',
+    );
+  });
+
+  it('P19.12-T1 AC-2 records Resend\'s message id on the row, and logs it with the sent line', async () => {
+    const logged = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const { service, created } = makeService([new ReceiptAdapter()], null);
+
+    await service.send({ userId: 'u1', templateId: NotificationTemplate.EMAIL_VERIFICATION, payload: { token: 'secret-token' } });
+    await flush();
+
+    expect(created[0].delivery.email).toEqual({
+      status: 'sent', at: expect.any(Date), providerMessageId: '49a3999c-0ce1-4ea6-ab68-afcd6dc2e794',
+    });
+    expect(logged).toHaveBeenCalledWith(
+      {
+        templateId: 'auth.email_verification', notificationId: 'n1', channel: 'email', status: 'sent',
+        providerMessageId: '49a3999c-0ce1-4ea6-ab68-afcd6dc2e794',
+      },
+      'auth mail sent',
+    );
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('secret-token');
+  });
+
+  it('P19.12-T1 AC-2 records a Resend refusal as it records an SMTP reply: its words, its name and its status', async () => {
+    const errors = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const refusal = new ResendError(
+      'Resend answered 403 validation_error: The notify.agencyboost.id domain is not verified.',
+      'validation_error', 403, 'The notify.agencyboost.id domain is not verified.',
+    );
+    const { service, created } = makeService([new EmailAdapter(refusal)], null);
+
+    await service.send({ userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: { token: 't' } });
+    await flush();
+
+    const error = 'Resend answered 403 validation_error: The notify.agencyboost.id domain is not verified.';
+    expect(created[0].delivery.email).toEqual({ status: 'failed', at: expect.any(Date), error });
+    expect(errors).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'email', code: 'validation_error', responseCode: 403 }), 'delivery failed',
     );
   });
 

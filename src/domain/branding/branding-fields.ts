@@ -1,4 +1,4 @@
-import { derivePalette, normaliseHex, type PaletteResult } from './palette';
+import { normaliseHex } from './palette';
 import { BRANDING, type MascotPose } from '@/domain/constants/branding';
 
 /**
@@ -10,7 +10,8 @@ import { BRANDING, type MascotPose } from '@/domain/constants/branding';
  *   default mascot.
  * - **Every image is a folder of sizes made at confirm under the owner's own folder** (`<env>/<owner>/branding/<ulid>`):
  *   a key naming another KPM's or company's folder is refused, so nobody shows another office's picture.
- * - **Each colour must carry readable words** (acceptance 2), else the field is named.
+ * - **Every colour is accepted** (P19.12-T3 AC-1; ADR-0246 §1): one no words read on is painted as its nearest readable
+ *   shade when the palette is derived (`palette.ts`, `fillOf`); the colour chosen is what is kept.
  */
 export interface CheckedFields {
   logo: { key: string; width: number; height: number } | null;
@@ -24,8 +25,7 @@ export type FieldsProblem =
   | { problem: 'colourPair' }
   | { problem: 'squareNeedsLogo' }
   | { problem: 'poseNeedsDefault' }
-  | { problem: 'notYours'; field: string }
-  | { problem: 'unreadable'; result: Extract<PaletteResult, { ok: false }> };
+  | { problem: 'notYours'; field: string };
 
 const ULID = '[0-9A-HJKMNP-TV-Z]{26}';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -62,10 +62,6 @@ export function checkFields(input: unknown, ownerSegment: string): { ok: true; f
       poses[pose] = key;
     }
     mascot = { default: mascotIn.default, poses };
-  }
-  if (primary && secondary) {
-    const result = derivePalette(primary, secondary);
-    if (!result.ok) return { ok: false, problem: { problem: 'unreadable', result } };
   }
   return {
     ok: true,

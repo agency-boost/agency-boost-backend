@@ -68,6 +68,12 @@ describe('MembershipRepository — the Phase 19 named cross-tenant reads', () =>
       ];
       for (const read of reads) await expect(read()).rejects.toBeInstanceOf(MissingTenantContextError);
     });
+
+    it('P19.12-T2 AC-1 liveMembershipCountsPerUserAcrossTenants refuses an Owner and a signed-in nobody, asking nothing', async () => {
+      for (const ctx of [owner, new RequestContext('u-none', 'none', null)]) {
+        await expect(guarded.liveMembershipCountsPerUserAcrossTenants(ctx)).rejects.toBeInstanceOf(MissingTenantContextError);
+      }
+    });
   });
 
   describe('what each answers, over a real database', () => {
@@ -166,6 +172,19 @@ describe('MembershipRepository — the Phase 19 named cross-tenant reads', () =>
       expect(await repository.distinctAccountsAcrossTenants(sa, [{ kpmId: KPM_A, companyId: 'co-1' }], since)).toEqual({
         companies: new Map(), platform: { members: 0, signedIn7d: 0, signedIn30d: 0 },
       });
+    });
+
+    it('P19.12-T2 AC-1 counts each account’s live memberships in any office — active and pending; ended or erased is none', async () => {
+      const two = await member(KPM_A, '7001');
+      await member(KPM_B, '7002', { userId: two.userId });
+      const pending = await member(KPM_C, '7003', { status: 'pending' });
+      const left = await member(KPM_A, '7004', { status: 'removed', removedAt: new Date('2026-10-01T00:00:00Z') });
+      const erased = await member(KPM_A, '7005', { deletedAt: new Date('2026-10-02T00:00:00Z') });
+
+      const counts = await repository.liveMembershipCountsPerUserAcrossTenants(sa);
+      expect(Object.fromEntries(counts)).toEqual({ [two.userId]: 2, [pending.userId]: 1 });
+      expect(counts.has(left.userId)).toBe(false);
+      expect(counts.has(erased.userId)).toBe(false);
     });
 
     describe('a linked login’s office (UI-169 item 5; ADR-0199 §1, §3)', () => {

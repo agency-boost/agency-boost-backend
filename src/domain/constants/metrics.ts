@@ -352,6 +352,12 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    * (`domain/metrics/own-open-leads.ts`). Not requirable: a figure on one screen, registered after campaign evaluation.
    */
   { key: 'OWN_OPEN_LEADS', name: 'Your open leads', unit: 'count', phase: '19.8', requirable: false },
+  /*
+   * Phase 19.12 (P19.12-T6; ADR-0249 §4; the client's message of 11 November 2026, item 7): ***Grup informal*'s line**,
+   * *"{n} AB di bawah Anda belum masuk grup"* — the active ABs in a head's downline tagged into no live group the head
+   * owns (`domain/metrics/unit-view.ts`). Not requirable: a count about a leader's tags, nobody's achievement.
+   */
+  { key: 'ABS_NOT_IN_INFORMAL_GROUP', name: 'ABs not in your group', unit: 'count', phase: '19.12', requirable: false },
 ];
 
 /**

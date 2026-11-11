@@ -108,11 +108,27 @@ describe('P19.1-T6 the Potensi tab over HTTP', () => {
       ['a month that is not a month', { month: '2026-9' }, 'month'],
       ['a month after this one', { month: '2026-10' }, 'month'],
       ['a parameter of any other name', { view: 'aa' }, 'view'],
+      // P19.12-T6 AC-2 (ADR-0249 §1): the views are the Overview's three, and nothing else.
+      ['a view it does not know', { scope: 'all' }, 'scope'],
     ])('P19.1-T6 AC-12 %s is 400 VALIDATION_FAILED, named in details', async (_, query, named) => {
       as('AGUS');
       const res = await tab(query as Record<string, string>).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
       expect(JSON.stringify(res.body.error.details)).toContain(named);
+    });
+
+    it('P19.12-T6 AC-2 the view: an AB on Grup langsung; the Owner on Semua downline, the office’s cards; a `for` view direct', async () => {
+      as('AGUS');
+      expect((await tab().expect(200)).body).toMatchObject({ scope: 'direct', scopes: { offered: ['direct'] }, informal: null });
+      as('OWNER');
+      const owner = (await tab().expect(200)).body;
+      expect(owner).toMatchObject({ scope: 'downline', scopes: { default: 'downline' } });
+      expect(owner.units.flatMap((u: { people: unknown[] }) => u.people)).toHaveLength(16);
+      // His Grup informal names the three ABs below him to tag.
+      expect((await tab({ scope: 'informal' }).expect(200)).body.informal).toMatchObject({ absNotInGroup: 3, canTag: true });
+      expect((await tab({ for: office.id.AGUS }).expect(200)).body.scope).toBe('direct');
+      as('ADMIN');
+      expect((await tab({ scope: 'direct' }).expect(200)).body).toMatchObject({ scope: 'downline' });
     });
   });
 

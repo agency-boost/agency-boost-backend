@@ -71,7 +71,6 @@ export async function seedBrandingFixture(deps: { clock: Clock; storage: Storage
   }
 
   const palette = derivePalette(BRANDED_DEMO.primary, BRANDED_DEMO.secondary);
-  if (!palette.ok) throw new Error('The demo’s branding colours must be readable.');
   const at = deps.clock.now();
   await Rows.create({
     kpmId: deps.kpmId,
@@ -80,8 +79,8 @@ export async function seedBrandingFixture(deps: { clock: Clock; storage: Storage
     primary: BRANDED_DEMO.primary,
     secondary: BRANDED_DEMO.secondary,
     contrast: {
-      primary: { side: palette.primary.contrast, ratio: palette.primary.ratio },
-      secondary: { side: palette.secondary.contrast, ratio: palette.secondary.ratio },
+      primary: { side: palette.primary.contrast, ratio: palette.primary.ratio, fill: palette.primary.fill },
+      secondary: { side: palette.secondary.contrast, ratio: palette.secondary.ratio, fill: palette.secondary.fill },
     },
     mascot,
     version: 1,

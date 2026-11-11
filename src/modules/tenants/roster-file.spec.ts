@@ -80,7 +80,12 @@ describe('the roster as a file (ADR-0184; A3’s columns since P19.3-T4)', () =>
       const all = guide.join(' ');
       expect(all).toContain('the invitation to choose a password goes there');
       expect(all).toContain('Without one they are added, and cannot be reminded on WhatsApp yet.');
-      expect(all).toContain('A row with a problem is skipped with its reason, and the rest are added together.');
+      // P19.12-T7 AC-2 (ADR-0250 §2): a bad optional cell is left empty; only a required one skips the row.
+      expect(all).toContain('An optional cell written wrongly is left empty, with a warning, and the person is still added.');
+      expect(all).toContain('is skipped with its reason, and the rest are added together.');
+      // P19.12-T7 AC-1 and AC-4: L and P read in a paste; an Agent with no email invited on WhatsApp.
+      expect(all).toContain('L or P and Laki-laki or Perempuan are read too.');
+      expect(all).toContain('A new Agent with no email but a WhatsApp number is invited on WhatsApp');
       // No password is ever passed on by the importer any more (ADR-0205 §10).
       expect(all).not.toContain('You send them their password yourself');
     });

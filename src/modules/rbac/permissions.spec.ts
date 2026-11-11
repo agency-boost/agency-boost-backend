@@ -210,6 +210,37 @@ describe('permission matrix', () => {
     });
   });
 
+  /*
+   * P19.12-T4 (ADR-0247 §2–§3): changing who somebody reports to. The office moves anybody; a leader their direct
+   * reports inside their tree, and asks for the rest. An Agent, the Super Admin and every session nothing.
+   */
+  describe('P19.12-T4 member:reassign_leader and member:transfer_request', () => {
+    it('P19.12-T4 AC-6 member:reassign_leader: the Owner and an Admin the office, an AB and an AAB own-unit; an Agent and the Super Admin none', () => {
+      expect(scopeFor(ctx({ role: NO_CLASS, owner: true }), 'member:reassign_leader')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: NO_CLASS, admin: true }), 'member:reassign_leader')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: 'ab' }), 'member:reassign_leader')).toBe('own-unit');
+      expect(scopeFor(ctx({ role: 'aab' }), 'member:reassign_leader')).toBe('own-unit');
+      expect(can(ctx({ role: 'agent' }), 'member:reassign_leader')).toBe(false);
+      expect(can(ctx({ superAdmin: true, noMembership: true }), 'member:reassign_leader')).toBe(false);
+    });
+
+    it('P19.12-T4 AC-6 member:transfer_request: an AB and an AAB own-unit; the Owner, an Admin, an Agent and the Super Admin none — the office moves directly', () => {
+      expect(scopeFor(ctx({ role: 'ab' }), 'member:transfer_request')).toBe('own-unit');
+      expect(scopeFor(ctx({ role: 'aab' }), 'member:transfer_request')).toBe('own-unit');
+      expect(can(ctx({ role: NO_CLASS, owner: true }), 'member:transfer_request')).toBe(false);
+      expect(can(ctx({ role: NO_CLASS, admin: true }), 'member:transfer_request')).toBe(false);
+      expect(can(ctx({ role: 'agent' }), 'member:transfer_request')).toBe(false);
+      expect(can(ctx({ superAdmin: true, noMembership: true }), 'member:transfer_request')).toBe(false);
+    });
+
+    it('P19.12-T4 AC-6 neither is a session’s: a read-only support session is refused both by their verb', () => {
+      for (const permission of ['member:reassign_leader', 'member:transfer_request'] as const) {
+        expect(isReadLike(permission)).toBe(false);
+        expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: true }), permission)).toBe(false);
+      }
+    });
+  });
+
   describe('P19.7-T2 the proposal’s five grants (ADR-0221 §2; roles §3.7)', () => {
     const PROPOSAL_GRANTS = [
       'proposal:create', 'proposal:read', 'proposal:update', 'proposal:delete', 'proposal:download',
@@ -449,8 +480,7 @@ describe('permission matrix', () => {
       'impersonation:elevate_to_write': `${STRUCK} (P19.4-T2, ADR-0206 §3: a session only looks, so there is no write to approve)`,
       'member:list_directory': UNDECLARED,
       'member:add_leader_by_code': UNDECLARED,
-      'member:reassign_leader': UNDECLARED,
-      'member:move_subtree': UNDECLARED,
+      'member:move_subtree': `${STRUCK} (P19.12-T4, ADR-0247 §2: a move always carries the subtree)`,
       'member:read_removed_log': UNDECLARED,
       'member:restore_removed': UNDECLARED,
       'kpm_registration:switch': UNDECLARED,
@@ -1335,6 +1365,29 @@ describe('permission matrix', () => {
       for (const status of ['removed', 'pending'] as const) {
         expect(can(ctx({ role: 'ab', status }), 'kpm_analytics:read')).toBe(false);
       }
+    });
+  });
+
+  /*
+   * **The office fills a member's blanks** (P19.12-T5 AC-3; ADR-0248 §3): `member:complete_personal`, the Owner's and the
+   * Admins' for the office, nobody else's — no leader, whose one fill is a missing number (`member:update_phone`), and no
+   * Super Admin, who is in no office. A write: a view-only support session holds none of it.
+   */
+  describe('P19.12-T5 — member:complete_personal (ADR-0248 §3)', () => {
+    it.each([
+      ['SUPER_ADMIN', ctx({ superAdmin: true, noMembership: true }), null],
+      ['KPM_OWNER', ctx({ owner: true, role: NO_CLASS }), 'own-kpm'],
+      ['KPM_ADMIN', ctx({ admin: true, role: NO_CLASS }), 'own-kpm'],
+      ['AB', ctx({ role: 'ab' }), null],
+      ['AAB', ctx({ role: 'aab' }), null],
+      ['AGENT', ctx({ role: 'agent' }), null],
+    ] as const)('P19.12-T5 AC-3 member:complete_personal for %s: %s', (_, who, scope) => {
+      expect(scopeFor(who, 'member:complete_personal')).toBe(scope);
+      expect(can(who, 'member:complete_personal')).toBe(scope !== null);
+    });
+
+    it('P19.12-T5 AC-3 the Owner in a view-only support session holds none of it', () => {
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:complete_personal')).toBe(false);
     });
   });
 

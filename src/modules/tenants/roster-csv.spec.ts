@@ -19,7 +19,11 @@ const TODAY = '2026-10-26';
 const said = (issues: RosterIssue[]) => issues.map((issue) => ({ ...issue, message: english(issue.message) }));
 const parseRoster = (text: string) => {
   const parsed = parse(text, TODAY);
-  return { ...parsed, issues: said(parsed.issues), rows: parsed.rows.map((r) => ({ ...r, problems: said(r.problems) })) };
+  return {
+    ...parsed,
+    issues: said(parsed.issues),
+    rows: parsed.rows.map((r) => ({ ...r, problems: said(r.problems), warnings: said(r.warnings) })),
+  };
 };
 
 /** The A3 sample's first row, the template's columns in order. */
@@ -42,7 +46,7 @@ describe('P19.3-T4 the member file (the setup spec’s §A3; ADR-0205 §5)', () 
       expect(rows[0]).toMatchObject({
         line: 2, agentCode: '70045001', fullName: 'Rahmat Hidayat', role: 'AB', leaderAgentCode: '', phone: '+6281245001001',
         email: 'rahmat@contoh.id', joinDate: '2015-03-02', workStatus: 'full_time', dateOfBirth: '1978-05-12', gender: 'male',
-        companyJoinMonth: '2012-03', problems: [],
+        companyJoinMonth: '2012-03', problems: [], warnings: [],
       });
       expect(rows[0].cells).toEqual(RAHMAT.split(','));
     });
@@ -161,8 +165,10 @@ describe('P19.3-T4 the member file (the setup spec’s §A3; ADR-0205 §5)', () 
 
     it('P19.3-T4 AC-8 a row with no WhatsApp number reads without a problem; a number that is none names its cell', () => {
       expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,b@k.test,,,,,\n`).rows[0]).toMatchObject({ phone: null, problems: [] });
-      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,12ab,b@k.test,,,,,\n`).rows[0].problems)
-        .toEqual([{ line: 2, column: 'No. WhatsApp', message: '"12ab" is not a WhatsApp number.' }]);
+      // P19.12-T7 AC-2: named as a warning, the cell left empty and the row kept (ADR-0250 §2).
+      const { rows } = parseRoster(`${H}\n7001,Budi,Agent,7000,12ab,b@k.test,,,,,\n`);
+      expect(rows[0]).toMatchObject({ phone: null, problems: [] });
+      expect(rows[0].warnings).toEqual([{ line: 2, column: 'No. WhatsApp', message: '"12ab" is not a WhatsApp number.' }]);
     });
 
     it('P19.3-T4 AC-8 the four fields of ADR-0158 and the join date are optional: blank is nothing given', () => {
@@ -171,23 +177,66 @@ describe('P19.3-T4 the member file (the setup spec’s §A3; ADR-0205 §5)', () 
       expect(rows[0].problems).toEqual([]);
     });
 
-    it('P19.3-T4 AC-8 a value that is given is checked, and a bad one names its cell', () => {
+    it('P19.12-T7 AC-2 a value that is given is checked: a bad Email is a problem, a bad optional cell a warning', () => {
       const { rows } = parseRoster(`${H}\n7001,Budi,Agent,7000,,not-an-email,31/02/2020,sometimes,10/10/2015,f,2027-01\n`);
       expect(rows[0].problems).toEqual([
         { line: 2, column: 'Email', message: '"not-an-email" is not an email address.' },
+      ]);
+      expect(rows[0].warnings).toEqual([
         { line: 2, column: 'Tanggal bergabung', message: '"31/02/2020" is not a date. Write it DD/MM/YYYY or YYYY-MM-DD.' },
         { line: 2, column: 'Tanggal lahir', message: 'A date of birth must be at least 18 years ago.' },
         { line: 2, column: 'Bulan bergabung di perusahaan', message: 'The company join month cannot be in the future.' },
         { line: 2, column: 'Waktu', message: '"sometimes" is not a work status. Use Full-time or Part-time.' },
-        { line: 2, column: 'Jenis kelamin', message: '"f" is not a gender. Use male or female.' },
+        {
+          line: 2, column: 'Jenis kelamin',
+          message: '"f" is not a gender. Use L or P, Laki-laki or Perempuan, or male or female.',
+        },
       ]);
     });
 
+    it('P19.12-T7 AC-2 each of the six optional cells, given badly, is left empty: its field null, the row kept', () => {
+      // No. WhatsApp, Email, Tanggal bergabung, Waktu, Tanggal lahir, Jenis kelamin, Bulan bergabung di perusahaan.
+      const bad: [cells: string, field: string, column: string][] = [
+        ['nomor saya,b@k.test,,,,,', 'phone', 'No. WhatsApp'],
+        [',b@k.test,01/01/2030,,,,', 'joinDate', 'Tanggal bergabung'],
+        [',b@k.test,,Kadang,,,', 'workStatus', 'Waktu'],
+        [',b@k.test,,,15/05/2015,,', 'dateOfBirth', 'Tanggal lahir'],
+        [',b@k.test,,,,X,', 'gender', 'Jenis kelamin'],
+        [',b@k.test,,,,,13/2020', 'companyJoinMonth', 'Bulan bergabung di perusahaan'],
+      ];
+      for (const [cells, field, column] of bad) {
+        const [row] = parseRoster(`${H}\n7001,Budi,Agent,7000,${cells}\n`).rows;
+        expect(row.problems).toEqual([]);
+        expect(row).toMatchObject({ [field]: null, agentCode: '7001', fullName: 'Budi', role: 'Agent', email: 'b@k.test' });
+        expect(row.warnings.map((w) => w.column)).toEqual([column]);
+      }
+    });
+
+    it('P19.12-T7 AC-2 a bad required cell still skips the row: Kode agen, Nama and Peran stay problems', () => {
+      const { rows } = parseRoster(`${H}\nAB-1,,,7000,nomor saya,b@k.test,,,,,\n`);
+      expect(rows[0].problems.map((p) => p.column)).toEqual(['Kode agen', 'Nama', 'Peran']);
+      expect(rows[0].warnings.map((w) => w.column)).toEqual(['No. WhatsApp']);
+    });
+
+    it('P19.12-T7 AC-1 reads L and P as male and female, in any case, as it reads Laki-laki and Male', () => {
+      const gender = (typed: string) => parseRoster(`${H}\n7001,Budi,Agent,7000,,b@k.test,,,,${typed},\n`).rows[0];
+      expect(gender('L')).toMatchObject({ gender: 'male', warnings: [] });
+      expect(gender('l')).toMatchObject({ gender: 'male', warnings: [] });
+      expect(gender(' P ')).toMatchObject({ gender: 'female', warnings: [] });
+      expect(gender('p')).toMatchObject({ gender: 'female', warnings: [] });
+      expect(gender('Laki-laki')).toMatchObject({ gender: 'male' });
+      expect(gender('Male')).toMatchObject({ gender: 'male' });
+      expect(gender('Perempuan')).toMatchObject({ gender: 'female' });
+      expect(gender('LP')).toMatchObject({ gender: null });
+    });
+
     it('P19.3-T4 AC-8 the join date is no later than the office’s today and no earlier than 1980', () => {
-      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,,27/10/2026,,,,\n`).rows[0].problems[0].message)
-        .toBe('The join date cannot be after today.');
-      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,,26/10/2026,,,,\n`).rows[0].problems).toEqual([]);
-      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,,01/01/1979,,,,\n`).rows[0].problems[0].message)
+      // P19.12-T7 AC-2: a warning, the date left empty — the import's day, as a blank one is.
+      const after = parseRoster(`${H}\n7001,Budi,Agent,7000,,,27/10/2026,,,,\n`).rows[0];
+      expect(after.warnings[0].message).toBe('The join date cannot be after today.');
+      expect(after.joinDate).toBeNull();
+      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,,26/10/2026,,,,\n`).rows[0]).toMatchObject({ joinDate: '2026-10-26', warnings: [] });
+      expect(parseRoster(`${H}\n7001,Budi,Agent,7000,,,01/01/1979,,,,\n`).rows[0].warnings[0].message)
         .toBe('The join date cannot be before 1980.');
     });
 
@@ -218,10 +267,14 @@ describe('P19.3-T4 the member file (the setup spec’s §A3; ADR-0205 §5)', () 
     });
 
     it('P19.3-T4 AC-8 writes each problem in Indonesian too, the file’s own words kept', () => {
-      const { rows } = parse(`${H}\n,,,7000,12ab,,,sometimes,,,\n`, TODAY);
+      const { rows } = parse(`${H}\n,,,7000,12ab,,,sometimes,,L-P,\n`, TODAY);
       expect(rows[0].problems.map((p) => indonesian(p.message))).toEqual([
-        'Kode agen wajib diisi.', 'Nama wajib diisi.', 'Peran wajib diisi.', '"12ab" bukan nomor WhatsApp.',
+        'Kode agen wajib diisi.', 'Nama wajib diisi.', 'Peran wajib diisi.',
+      ]);
+      expect(rows[0].warnings.map((p) => indonesian(p.message))).toEqual([
+        '"12ab" bukan nomor WhatsApp.',
         '"sometimes" bukan status kerja. Gunakan Full-time atau Part-time.',
+        '"L-P" bukan jenis kelamin. Gunakan L atau P, Laki-laki atau Perempuan, atau male atau female.',
       ]);
       expect(indonesian(parse('Nama\nBudi\n', TODAY).issues[0].message))
         .toBe('Kolom Kode agen, Peran tidak ditemukan. Unduh template dan pakai header-nya.');

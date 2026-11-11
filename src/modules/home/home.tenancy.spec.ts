@@ -96,7 +96,10 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   describe('UI-100 the leader’s tiles', () => {
     it('UI-100 Active Agent shows exactly the Unit Dashboard tile: its figure, its manpower and its Unit / AAB split', async () => {
       const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
-      expect(view.leader!.activeAgent).toEqual(dashboard.tiles.potentialActive);
+      // Over Grup langsung, the dashboard's default (ADR-0249 §5): its AB side is nobody, and Home draws none.
+      const { ab, ...split } = dashboard.tiles.potentialActive;
+      expect(ab).toEqual({ count: 0, of: 0 });
+      expect(view.leader!.activeAgent).toEqual(split);
       // Manpower: everybody in the Group, Agus included (UI-013).
       expect(view.leader!.activeAgent.of).toBe(dashboard.tiles.team.total);
       expect(view.month).toBe(dashboard.month);
@@ -104,9 +107,11 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
 
     it('UI-100 the same at every period the dashboard shows, and for an AAB’s own unit', async () => {
       const dashboard = await wired.unitDashboard.read(office.as('AGUS'), { period: 'year' });
-      expect((await read('AGUS')).leader!.activeAgent).toEqual(dashboard.tiles.potentialActive);
+      const { ab: _agusAb, ...agus } = dashboard.tiles.potentialActive;
+      expect((await read('AGUS')).leader!.activeAgent).toEqual(agus);
       const sari = await wired.unitDashboard.read(office.as('SARI'));
-      expect((await read('SARI')).leader!.activeAgent).toEqual(sari.tiles.potentialActive);
+      const { ab: _sariAb, ...sariSplit } = sari.tiles.potentialActive;
+      expect((await read('SARI')).leader!.activeAgent).toEqual(sariSplit);
     });
 
     it('UI-100 Coaching 7 hari counts members coached in the last 7 days over the same manpower, split Unit / AAB', async () => {
@@ -223,11 +228,18 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect(await db().collection('auditLog').countDocuments({ 'after.surface': 'home' })).toBe(before);
     });
 
+    /*
+     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §5):* Home's team is the Owner's *Grup langsung*, and in this office every
+     * report of his is an AB — so his block is there, its list empty, where it listed the office.
+     */
     it('P19.8-T2 AC-10 every leader by role gets the block — an AB, an AAB, the Owner and an Admin with nobody — an Agent none', async () => {
-      for (const who of ['AGUS', 'SARI', 'OWNER'] as Who[]) {
+      for (const who of ['AGUS', 'SARI'] as Who[]) {
         const view = await read(who);
         expect({ who, team: view.leader!.team.length > 0 }).toEqual({ who, team: true });
       }
+      const owner = await read('OWNER');
+      expect(owner.leader).not.toBeNull();
+      expect(owner.leader!.team).toEqual([]);
       // Maya runs the office and leads nobody: the block at zero, as Dewi's.
       expect((await read('ADMIN')).leader).toEqual(ZERO_BLOCK);
       for (const who of ['INDAH', 'RINA', 'DODI'] as Who[]) {

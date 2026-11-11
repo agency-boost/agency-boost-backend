@@ -96,6 +96,12 @@ describe('the audit log in words (P19.4-T3 AC-11; SA UI-016)', () => {
     expect(actionLabel('platform_read.kpm_data', readerIn('en'), '0417')).toBe('KPM 0417 monthly data viewed');
   });
 
+  it('P19.12-T2 AC-1 reads Akun terdaftar’s entry in words (ADR-0245 §1)', () => {
+    expect(actionLabel('platform_read.accounts', readerIn('id'))).toBe('Daftar akun dilihat');
+    expect(actionLabel('platform_read.accounts', readerIn('en'))).toBe('Account list viewed');
+    expect(LABELLED_ACTIONS).toContain('platform_read.accounts');
+  });
+
   it('answers an action nobody labelled as it was recorded, rather than a blank', () => {
     expect(actionLabel('something.new', readerIn('id'))).toBe('something.new');
   });

@@ -6,7 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { InvalidRequestException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import {
   DEFAULT_TENANT_TIMEZONE, KPM_COMPARISON_SORTS, PLATFORM_READ, QUANT,
-  type KpmComparisonSort, type PlatformMemberRole, type PlatformMemberStatus,
+  type KpmComparisonSort, type PlatformAccountKpmFilter, type PlatformMemberRole, type PlatformMemberStatus,
 } from '@/domain/constants';
 import { maaCountInUnit } from '@/domain/metrics/maa-count-in-unit';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
@@ -32,6 +32,7 @@ import { shiftMonth } from '../office-figures';
 import { OfficePeople } from '../office-people';
 import type { KpmAnalyticsPeriod } from '@/domain/constants';
 import { PLATFORM_READS_REFUSALS } from './platform-reads.messages';
+import { invitationStateOf } from '@/modules/org/invitation-state';
 
 /** A company as a platform read names it. */
 export interface CompanyRef { id: string; name: string }
@@ -66,6 +67,40 @@ export interface PlatformMembersQuery {
   role?: PlatformMemberRole;
   status?: PlatformMemberStatus;
   q?: string;
+  page?: number;
+}
+
+/**
+ * **One row of *Akun terdaftar*** (P19.12-T2 AC-1; ADR-0245 §1, §2): a registered account, whether or not it holds a KPM —
+ * the listed fields, and nothing else. The email is the one address a platform read returns (ADR-0245 §2: the account is
+ * what the row is about, and the email is how the person was told to look for it); never a phone, a birth date or a
+ * gender.
+ */
+export interface PlatformAccountRow {
+  userId: string;
+  fullName: string;
+  email: string;
+  /** The insurer the person registered with (`users.companyId`); `null` with none on the account. */
+  company: CompanyRef | null;
+  /** The day the account was made, `YYYY-MM-DD` in `Asia/Jakarta` (ADR-0016): it belongs to no office. */
+  registeredOn: string;
+  emailVerified: boolean;
+  /** The day of the last sign-in, as `registeredOn`; `null`, *"Belum pernah"*. */
+  lastSignInOn: string | null;
+  /** Its live memberships — active or pending — in any KPM; `0` is *Belum punya KPM*. */
+  kpmCount: number;
+}
+
+export interface PlatformAccountsPage {
+  rows: PlatformAccountRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface PlatformAccountsQuery {
+  q?: string;
+  kpm?: PlatformAccountKpmFilter;
   page?: number;
 }
 
@@ -169,7 +204,8 @@ const CONCURRENCY = 4;
  *   `named-cross-tenant-reads.tenancy.spec.ts`. Each refuses anybody but a Super Admin outside a session.
  * - **Audited per read** (ADR-0207 §5): one entry in the platform's log and one in each KPM's whose data was returned,
  *   with the fixed purpose, written after the answer is computed and before it is sent; **a failure fails the read**.
- * - **The listed fields alone** (ADR-0207 §2, §6): never an email, a phone, a survey answer or a note.
+ * - **The listed fields alone** (ADR-0207 §2, §6): never an email, a phone, a survey answer or a note — but for *Akun
+ *   terdaftar*'s rows, which carry the account's own email (P19.12-T2; ADR-0245 §2).
  */
 @Injectable()
 export class PlatformReads {
@@ -231,31 +267,27 @@ export class PlatformReads {
 
   /** The accounts a search names: by name, by email, or by phone — whichever way the number was typed. */
   private async usersMatching(q: string): Promise<string[]> {
-    const pattern = new RegExp(escape(q), 'i');
-    const or: Record<string, unknown>[] = [{ fullName: pattern }, { email: pattern }];
-    const digits = q.replace(/[\s\-().]/g, '');
-    if (/^\+?\d{4,}$/.test(digits)) {
-      // `0812…`, `62812…` and `+62812…` are one number: matched on what follows the country or trunk prefix.
-      const national = digits.replace(/^\+/, '').replace(/^62/, '').replace(/^0/, '');
-      or.push({ phone: new RegExp(escape(national)) });
-    }
-    const rows = await this.users.find({ $or: or }).select('_id').lean().exec();
+    const rows = await this.users.find({ $or: searchOf(q, { phone: true }) }).select('_id').lean().exec();
     return rows.map((u) => String(u._id));
   }
 
-  private async peopleOf(userIds: readonly string[]): Promise<Map<string, { fullName: string; signedIn: boolean }>> {
+  private async peopleOf(
+    userIds: readonly string[],
+  ): Promise<Map<string, { fullName: string; signedIn: boolean; lastLoginAt: Date | null }>> {
     const ids = [...new Set(userIds)].filter((id) => isValidObjectId(id));
     if (ids.length === 0) return new Map();
     const rows = await this.users.find({ _id: { $in: ids } }).select('fullName lastLoginAt').lean().exec() as
       { _id: unknown; fullName: string; lastLoginAt?: Date | null }[];
-    return new Map(rows.map((u) => [String(u._id), { fullName: u.fullName, signedIn: Boolean(u.lastLoginAt) }]));
+    return new Map(rows.map((u) => [
+      String(u._id), { fullName: u.fullName, signedIn: Boolean(u.lastLoginAt), lastLoginAt: u.lastLoginAt ?? null },
+    ]));
   }
 
   private async memberRows(
     ctx: RequestContext,
     slice: readonly MembershipListRow[],
     byOffice: ReadonlyMap<string, KpmDocument>,
-    people: ReadonlyMap<string, { fullName: string; signedIn: boolean }>,
+    people: ReadonlyMap<string, { fullName: string; signedIn: boolean; lastLoginAt: Date | null }>,
   ): Promise<PlatformMemberRow[]> {
     if (slice.length === 0) return [];
     const kpmIds = [...new Set(slice.map((m) => m.kpmId))];
@@ -296,11 +328,91 @@ export class PlatformReads {
         },
         leader: leader === null ? null : { fullName: leader },
         status: m.status,
-        invitation: person?.signedIn ? 'signed_in' : m.invitedAt ? 'invited' : 'not_invited',
+        // One rule with the office's own Directory (ADR-0248 §4).
+        invitation: invitationStateOf(person?.lastLoginAt, m.invitedAt),
         joinedOn: m.joinDate ?? (m.joinedAt ? this.clock.localDateFor(office.timezone, m.joinedAt) : null),
         lastActiveOn: latest.get(m.kpmId)?.get(id) ?? null,
       };
     });
+  }
+
+  // ---- Akun terdaftar (P19.12-T2 AC-1, AC-2; ADR-0245 §1).
+
+  /**
+   * **Every registered account, a KPM or none** (the client's message of 11 November 2026, item 2): *All members* is built
+   * from memberships, so a person who registered and joined no KPM was in no row of it, by email or by name. This reads
+   * the accounts themselves — Super Admins and erased accounts left out — newest registration first, 50 a page, searched
+   * by a name or an email and filtered by whether the account holds a live membership anywhere.
+   *
+   * The memberships are counted through the named cross-tenant read (`liveMembershipCountsPerUserAcrossTenants`, a count
+   * per account and nothing else). Audited per read in the platform's log with the account ids returned (ADR-0207 §5);
+   * no KPM's log, because no KPM's data is returned. A failure to write the entry fails the read.
+   */
+  async accounts(ctx: RequestContext, query: PlatformAccountsQuery): Promise<PlatformAccountsPage> {
+    this.require(ctx, 'platform_members:read');
+    const page = query.page ?? 1;
+    const q = query.q?.trim() ?? '';
+    if (query.q !== undefined && q.length < PLATFORM_READ.SEARCH_MIN_LENGTH) {
+      throw new InvalidRequestException(PLATFORM_READS_REFUSALS.VALIDATION_FAILED.accountSearchTooShort, { field: 'q' });
+    }
+    const live = await this.memberships.liveMembershipCountsPerUserAcrossTenants(ctx);
+    const withKpm = [...live.keys()].filter((id) => isValidObjectId(id));
+    const filter: Record<string, unknown> = { deletedAt: null, platformRole: { $ne: 'super_admin' } };
+    if (q) filter.$or = searchOf(q, { phone: false });
+    if (query.kpm === 'none') filter._id = { $nin: withKpm };
+    if (query.kpm === 'some') filter._id = { $in: withKpm };
+
+    const [total, found] = await Promise.all([
+      this.users.countDocuments(filter).exec(),
+      this.users.find(filter)
+        .select('fullName email companyId createdAt emailVerifiedAt lastLoginAt')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * PLATFORM_READ.PAGE_SIZE)
+        .limit(PLATFORM_READ.PAGE_SIZE)
+        .lean()
+        .exec() as Promise<{
+          _id: unknown; fullName: string; email: string; companyId?: string | null; createdAt?: Date;
+          emailVerifiedAt?: Date | null; lastLoginAt?: Date | null;
+        }[]>,
+    ]);
+    const companyIds = [...new Set(found.flatMap((u) => (u.companyId && isValidObjectId(u.companyId) ? [u.companyId] : [])))];
+    const companies = companyIds.length === 0 ? [] : await this.companies.find({ _id: { $in: companyIds } })
+      .select('name').lean().exec() as { _id: unknown; name: string }[];
+    const companyName = new Map(companies.map((c) => [String(c._id), c.name]));
+    // An account belongs to no office: its days are read in the one zone v1 has (ADR-0016), never the server's.
+    const day = (at: Date | null | undefined) => (at ? this.clock.localDateFor(DEFAULT_TENANT_TIMEZONE, at) : null);
+
+    const rows: PlatformAccountRow[] = found.map((u) => {
+      const userId = String(u._id);
+      const name = u.companyId ? companyName.get(u.companyId) : undefined;
+      return {
+        userId,
+        fullName: u.fullName,
+        email: u.email,
+        company: u.companyId && name !== undefined ? { id: u.companyId, name } : null,
+        registeredOn: day(u.createdAt) ?? '',
+        emailVerified: Boolean(u.emailVerifiedAt),
+        lastSignInOn: day(u.lastLoginAt),
+        kpmCount: live.get(userId) ?? 0,
+      };
+    });
+
+    await this.audit.recordInScopesOrFail(ctx, [{
+      kpmId: null,
+      entry: {
+        action: PLATFORM_READ.ACTION.accounts,
+        targetCollection: 'users',
+        targetId: null,
+        after: {
+          purpose: PLATFORM_READ.PURPOSE.accounts,
+          filters: { q: q || null, kpm: query.kpm ?? null },
+          page,
+          rows: rows.length,
+          userIds: rows.map((r) => r.userId),
+        },
+      },
+    }]);
+    return { rows, page, pageSize: PLATFORM_READ.PAGE_SIZE, total };
   }
 
   // ---- The KPM comparison (SA UI-013, SA R4; AC-3).
@@ -650,6 +762,22 @@ function monthRange(from: string, to: string): string[] {
   const out: string[] = [];
   for (let m = from; m <= to; m = shiftMonth(m, 1)) out.push(m);
   return out;
+}
+
+/**
+ * **What a search matches on an account**: a name or an email, in part and in any case — and, for *All members*, a phone
+ * number, whichever way it was typed. *Akun terdaftar* (ADR-0245 §1) asks a name or an email alone.
+ */
+function searchOf(q: string, { phone }: { phone: boolean }): Record<string, unknown>[] {
+  const pattern = new RegExp(escape(q), 'i');
+  const or: Record<string, unknown>[] = [{ fullName: pattern }, { email: pattern }];
+  const digits = q.replace(/[\s\-().]/g, '');
+  if (phone && /^\+?\d{4,}$/.test(digits)) {
+    // `0812…`, `62812…` and `+62812…` are one number: matched on what follows the country or trunk prefix.
+    const national = digits.replace(/^\+/, '').replace(/^62/, '').replace(/^0/, '');
+    or.push({ phone: new RegExp(escape(national)) });
+  }
+  return or;
 }
 
 function escape(text: string): string {

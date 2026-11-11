@@ -20,6 +20,7 @@ import { generateLeaderCode } from './leader-code';
 import { withLeaderSeat, type ApprovedPastLimit, type LeaderSeatOptions } from './leader-limit';
 import { DirectCounts, HierarchyRole, MembershipDocument } from './membership.schema';
 import { ORG_REFUSALS } from './org.messages';
+import { readLadder, type LadderRung } from './role-rules';
 import { HeldRowsPort, signalCodeRegistered } from './held-rows.port';
 import type { WorkStatus } from '@/domain/constants';
 
@@ -226,9 +227,15 @@ export class HierarchyService {
    * because both callers that need it already depend on it.
    */
   async ownsTheOffice(ctx: RequestContext, membership: { userId: string }): Promise<boolean> {
-    if (!ctx.kpmId) return false;
+    const owner = await this.officeOwnerUserId(ctx);
+    return owner !== null && owner === membership.userId;
+  }
+
+  /** The account that owns the caller's office, or `null` — for a caller asking about many members at once. */
+  async officeOwnerUserId(ctx: RequestContext): Promise<string | null> {
+    if (!ctx.kpmId) return null;
     const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
-    return Boolean(kpm?.ownerUserId) && kpm!.ownerUserId === membership.userId;
+    return kpm?.ownerUserId || null;
   }
 
   /**
@@ -260,6 +267,14 @@ export class HierarchyService {
    */
   async rungClassesOf(kpmId: string): Promise<Map<string, HierarchyRole>> {
     return this.orgLevels.classesByCode(await this.companyOf(kpmId));
+  }
+
+  /**
+   * **The office's ladder, junior first, with the class each rung gives** (ADR-0156 §2) — what `roleChoices` reads
+   * (`role-rules.ts`; P19.12-T4, ADR-0247 §1). Active rungs only, by display order.
+   */
+  async ladderOf(kpmId: string): Promise<LadderRung[]> {
+    return readLadder(this.orgLevels, await this.companyOf(kpmId));
   }
 
   async setLevel(
@@ -627,6 +642,7 @@ export class HierarchyService {
       ctx, membershipId, newAncestors, oldPath.length, newDepth - member.depth,
     );
 
+    // Both leaders and every leader above each (`refreshCounts`), from the rows as they now stand.
     await this.refreshCounts(ctx, previousLeaderId);
     await this.refreshCounts(ctx, target);
     return { previousLeaderId, moved: true };
@@ -668,6 +684,25 @@ export class HierarchyService {
    */
   async refreshCounts(ctx: RequestContext, leaderId: string | null): Promise<void> {
     if (!leaderId) return;
+    await this.refreshLeaderCounts(ctx, leaderId);
+    /*
+     * **Every leader above them too** (P19.12-T4; ADR-0247 §4). `subtreeCount` is everybody below a leader, so a join,
+     * a move or a removal under somebody changes it for every leader on the path to the root — and this refreshed the
+     * direct leader alone, so every leader above kept a stale count until something happened directly under them.
+     * Read from the leader's own materialised path: one count per ancestor, never a walk.
+     */
+    const leader = await this.members.findById(ctx, leaderId);
+    for (const ancestorId of leader?.ancestorIds ?? []) await this.refreshSubtreeCount(ctx, ancestorId);
+  }
+
+  /** One leader's `subtreeCount`, from the live rows below them. */
+  private async refreshSubtreeCount(ctx: RequestContext, leaderId: string): Promise<void> {
+    const subtreeCount = await this.members.count(ctx, { ancestorIds: leaderId, status: 'active' });
+    await this.members.updateById(ctx, leaderId, { $set: { subtreeCount } });
+  }
+
+  /** One leader's `directCounts` and `subtreeCount`. */
+  private async refreshLeaderCounts(ctx: RequestContext, leaderId: string): Promise<void> {
     const directs = await this.members.find(ctx, { leaderId, status: 'active' });
     /*
      * Counted by **ladder code**, and built from what is actually there (P4-T9).

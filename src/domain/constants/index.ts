@@ -435,6 +435,7 @@ export {
   UNIT_DASHBOARD,
   UNIT_DASHBOARD_CORRECTION_REASON,
   type UnitDashboardPeriod,
+  type UnitView,
 } from './unit-dashboard';
 
 export {
@@ -663,6 +664,8 @@ export {
 export {
   PLATFORM_READ, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES, KPM_COMPARISON_SORTS,
   type PlatformMemberRole, type PlatformMemberStatus, type KpmComparisonSort,
+  // P19.12-T2 (ADR-0245 §1): *Akun terdaftar*'s KPM filter.
+  PLATFORM_ACCOUNT_KPM_FILTERS, type PlatformAccountKpmFilter,
 } from './platform-reads';
 
 // Phase 19.6: a KPM's branding — the contrast rule, the palette's shades, the pictures' bounds (§B.36; ADR-0218).

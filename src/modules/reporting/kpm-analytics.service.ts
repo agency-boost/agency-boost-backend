@@ -13,6 +13,7 @@ import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { productionClubTier, type ClubTier } from '@/domain/metrics/production-club-tier';
 import { rateOver, type Rate } from '@/domain/metrics/rate';
 import { rollUpGoal, rollUpLeadCounts, type GoalFigure, type LeadCountsRow } from '@/domain/metrics/unit-rollup';
+import { directGroup as directGroupOf } from '@/domain/metrics/unit-view';
 import { CarrierRules, type CarrierRule } from '@/modules/campaigns/carrier-rules';
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
 import { GoalService } from '@/modules/goals/goal.service';
@@ -77,7 +78,8 @@ export interface AnalyticsAgency extends AnalyticsRow {
  * leading nobody, is one, with a Group of one.
  *
  * **Every figure is over the leader's *Group*** (ADR-0204 §2): the leader and everybody below them on today's edges,
- * reaching below the next AB — the Unit Dashboard's `tiles.team.total` for that leader, through the same `ancestorIds`.
+ * ~~reaching below the next AB~~ **never descending into an AB** (`DIRECT_GROUP`, ADR-0249 §5) — the Unit Dashboard's
+ * `tiles.team.total` for that leader in *Grup langsung*, through the same `ancestorIds`.
  * The period's month's figures (*APE bulan ini*, *Active*) are over the Group's members on the month's last day, a
  * leaver since placed by the edges they left with (OD-24, OD-74), as every row of the comparison is.
  */
@@ -93,7 +95,10 @@ export interface AnalyticsLeader {
   opens: boolean;
   /** *Leader dari* / *"ke Agus"*: the leader's own upline today, `null` for a root (*—*). */
   above: Person | null;
-  /** *"12 di Group"*: the leader and everybody below them today (ADR-0204 §2). */
+  /**
+   * *"12 di Group"*: the leader and everybody below them today, never descending into an AB — `DIRECT_GROUP`, *Grup
+   * langsung* (ADR-0204 §2, amended by ADR-0249 §5).
+   */
   group: number;
   /** *"4 di Unit"*: the leader and their direct agents who lead nobody — the Unit Dashboard's *Your Unit*. */
   unit: number;
@@ -502,11 +507,14 @@ export class KpmAnalyticsService {
 
     // ---- The Leader list (UI-152; P19.3-T3 AC-1, AC-2, AC-6, AC-10). Every figure over the leader's Group.
     const universe = [...active, ...periodLeavers];
-    // Everybody below each person, from the cached path (`ancestorIds`), once: what the Unit Dashboard's group reads.
-    const below = new Map<string, string[]>();
-    for (const p of universe) {
-      for (const ancestor of p.ancestorIds) below.set(ancestor, [...(below.get(ancestor) ?? []), p.membershipId]);
-    }
+    /*
+     * **A leader's Group is `DIRECT_GROUP`** (ADR-0249 §5, amending ADR-0204 §2; the client's message of 11 November 2026,
+     * item 5): the leader and everybody below them on the cached path (`ancestorIds`), never descending into an active AB —
+     * the Unit Dashboard's *Grup langsung* for that leader. A leaver stops nothing, as `partitionAgencies` places them.
+     */
+    const placedForGroups = universe.map((p) => ({
+      membershipId: p.membershipId, leaderId: p.leaderId, role: p.role, ancestorIds: p.ancestorIds, active: activeSet.has(p.membershipId),
+    }));
     // The office's people today, the group's or not: a leader's upline may stand outside the group read.
     const officeById = new Map(officeRoster.active.map((p) => [p.membershipId, p]));
     const activeOver = (ids: readonly string[]) => {
@@ -521,7 +529,7 @@ export class KpmAnalyticsService {
       .filter((p) => p.role === AGENCY_CLASS || p.role === UNIT_CLASS)
       .map((p): AnalyticsLeader => {
         const id = p.membershipId;
-        const groupIds = [id, ...(below.get(id) ?? [])];
+        const groupIds = directGroupOf(id, placedForGroups);
         // *Unit* (ADR-0204 §2): the leader and their direct agents who lead nobody — the Unit Dashboard's *Your Unit*.
         const unitIds = [id, ...universe
           .filter((q) => q.leaderId === id && q.role === AGENT_CLASS && !leaders.has(q.membershipId))

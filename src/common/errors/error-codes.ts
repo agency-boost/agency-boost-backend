@@ -110,9 +110,9 @@ export const ErrorCode = {
    */
   LEAD_AGE_OUT_OF_RANGE: 'LEAD_AGE_OUT_OF_RANGE',
   /**
-   * **A KPM colour no text reads on** (P19.6-T1 AC-7; ADR-0218 §5; acceptance 2): `422`, on *Simpan*, the preview and a
-   * template's *Tampilan*, when neither white nor `#1B2B4B` reaches 4.5:1 on it. `details.field` names it, `primary` or
-   * `secondary`, with both ratios. Nothing is saved.
+   * **Retired** (P19.12-T3; ADR-0246 §4): a KPM colour no text reads on (P19.6-T1 AC-7; ADR-0218 §5). Every colour is
+   * accepted now, painted as its nearest readable shade, so nothing raises it. Kept and never reused: a client may still
+   * branch on it.
    */
   BRANDING_COLOUR_UNREADABLE: 'BRANDING_COLOUR_UNREADABLE',
   /**
@@ -348,6 +348,23 @@ export const ErrorCode = {
   ORG_REQUEST_ALREADY_DECIDED: 'ORG_REQUEST_ALREADY_DECIDED',
   ORG_ROLE_CHANGE_NOT_PERMITTED: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
   ORG_HAS_DIRECT_REPORTS: 'ORG_HAS_DIRECT_REPORTS',
+  /**
+   * **Changing who somebody reports to, refused for who is asking** (P19.12-T4; ADR-0247 §2). `403`, from
+   * `PUT /members/:id/leader` and `POST /members/:id/transfer-request`: the office's owner, whom only the platform moves;
+   * for a leader, somebody who is not their direct report; and for a leader, a new leader outside their own tree —
+   * then `details.canRequest` is `true` when they may ask the Owner or an Admin instead. Nothing is written.
+   */
+  ORG_LEADER_CHANGE_NOT_PERMITTED: 'ORG_LEADER_CHANGE_NOT_PERMITTED',
+  /**
+   * **A new leader who cannot hold a unit** (P19.12-T4; ADR-0247 §2; ADR-0087, ADR-0234): `422`, an Agent who leads
+   * nobody. Somebody can be moved under an AB, an AAB, or an Agent who already leads somebody. Nothing is written.
+   */
+  ORG_LEADER_CANNOT_LEAD: 'ORG_LEADER_CANNOT_LEAD',
+  /**
+   * **Moving somebody who has not joined yet** (P19.12-T4; ADR-0247 §2): `409`, a pending member — they wait to be let
+   * into a unit, which is the request inbox's to do. A removed member is `ORG_ALREADY_REMOVED`. Nothing is written.
+   */
+  ORG_MEMBER_NOT_ACTIVE: 'ORG_MEMBER_NOT_ACTIVE',
   ORG_REMOVAL_NOT_CONFIRMED: 'ORG_REMOVAL_NOT_CONFIRMED',
   ORG_REMOVAL_NOT_PERMITTED: 'ORG_REMOVAL_NOT_PERMITTED',
   ORG_SUBTREE_DISPOSITION_REQUIRED: 'ORG_SUBTREE_DISPOSITION_REQUIRED',
@@ -370,6 +387,14 @@ export const ErrorCode = {
    * number being empty, so two leaders saving at once cannot overwrite each other either. Nothing is written.
    */
   MEMBER_PHONE_ON_FILE: 'MEMBER_PHONE_ON_FILE',
+  /**
+   * **The office's *Lengkapi data* for a field the member already has** (P19.12-T5 AC-3; ADR-0248 §3). `409`, from
+   * `PATCH /members/:membershipId/personal`: the Owner and the Admins fill a blank birth date, gender, company join month,
+   * work status or WhatsApp number, and never replace one — a value on file is the person's own to change, on *Profil
+   * saya* (`PATCH /auth/me`). `details.fields` names the ones on file. Each write is conditional on its fields being
+   * blank, so two saves at once cannot overwrite each other. Nothing is written by the refused request.
+   */
+  MEMBER_DETAIL_ON_FILE: 'MEMBER_DETAIL_ON_FILE',
   ORG_ALREADY_ADMIN: 'ORG_ALREADY_ADMIN',
   ORG_NOT_AN_ADMIN: 'ORG_NOT_AN_ADMIN',
   ORG_ADMIN_TARGET_NOT_ACTIVE: 'ORG_ADMIN_TARGET_NOT_ACTIVE',

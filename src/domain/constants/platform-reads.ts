@@ -16,6 +16,8 @@ export const PLATFORM_READ = {
   PURPOSE: {
     members: 'Platform support: finding a member’s office',
     figures: 'Platform account management: how each KPM uses AgencyBoost',
+    /** P19.12-T2 (ADR-0245 §1): *Akun terdaftar*, every registered account, a KPM or none. */
+    accounts: 'Platform support: finding a registered account',
   },
   /** The audit actions, one per read (ADR-0207 §5). */
   ACTION: {
@@ -26,6 +28,8 @@ export const PLATFORM_READ = {
     companyKpms: 'platform_read.company_kpms',
     /** P19.5-T3 (ADR-0215 §9): *Lihat sebagai KPM*'s *Advanced analytics* tab, each visit. */
     kpmAdvancedAnalytics: 'platform_read.kpm_advanced_analytics',
+    /** P19.12-T2 (ADR-0245 §1): *All members* › *Akun terdaftar*, each read. */
+    accounts: 'platform_read.accounts',
   },
 } as const;
 
@@ -36,6 +40,13 @@ export type PlatformMemberRole = (typeof PLATFORM_MEMBER_ROLES)[number];
 /** *All members*' status filter (SA R1): a membership's own status. */
 export const PLATFORM_MEMBER_STATUSES = ['active', 'pending', 'removed'] as const;
 export type PlatformMemberStatus = (typeof PLATFORM_MEMBER_STATUSES)[number];
+
+/**
+ * *Akun terdaftar*'s KPM filter (P19.12-T2; ADR-0245 §1): `none`, *Tanpa KPM* — no active or pending membership in any
+ * KPM — and `some`, *Punya KPM*. Every account when absent.
+ */
+export const PLATFORM_ACCOUNT_KPM_FILTERS = ['none', 'some'] as const;
+export type PlatformAccountKpmFilter = (typeof PLATFORM_ACCOUNT_KPM_FILTERS)[number];
 
 /** The KPM comparison's sortable columns (ADR-0207 §7): a column, ascending; `-` before it, descending. */
 export const KPM_COMPARISON_SORTS = [

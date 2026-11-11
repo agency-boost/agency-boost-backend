@@ -367,21 +367,30 @@ the console.
 
 **The provider is chosen by the environment alone**
 ([ADR-0182](../docs/04-adr/0182-the-mail-provider-is-chosen-by-env-staging-sends-through-gmail.md)):
-`MAIL_PROVIDER` is `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`, `smtp` (any relay `SMTP_HOST` names) or
-`log`, and a preset fills the host, the port and TLS (`src/modules/notifications/mail-provider.ts`). Staging sends
-through the product's Gmail account, and so does production, each with its own App Password, until a provider on
-`agencyboost.id` is chosen ([ADR-0186](../docs/04-adr/0186-production-sends-through-gmail-until-a-provider-on-the-products-domain-is-chosen.md)).
-Every email is multipart, its HTML
-derived from the text, with `MAIL_REPLY_TO` when set. To switch, add a new version of `api-env-<env>` and redeploy the
-same image (runbook §13); then send one message with that environment's settings and look in the inbox and the spam
-folder:
+`MAIL_PROVIDER` is `resend`, `gmail`, `sendgrid`, `mailjet`, `clicksend`, `ses`, `smtp` (any relay `SMTP_HOST` names)
+or `log` (`src/modules/notifications/mail-provider.ts`).
+
+**Every email goes through Resend** ([ADR-0244](../docs/04-adr/0244-every-email-is-sent-through-resend.md)):
+`MAIL_PROVIDER=resend` sends through Resend's HTTP API (`resend.adapter.ts`, `resend-client.ts`) with
+`RESEND_API_KEY`, a *Sending access* key of each environment's own, from an address on the domain verified in Resend
+(`MAIL_FROM=AgencyBoost <no-reply@notify.agencyboost.id>`). It throttles itself to five requests a second, retries a
+rate limit, a conflict, a server error or a timeout under one idempotency key, and records Resend's id for each email
+on its notification row (`delivery.email.providerMessageId`). Staging and production switch to it once the owner has
+verified the domain and put a key in each secret; until then they send through the product's Gmail account
+(ADR-0186), which stays the **manual rollback**: an edit of `api-env-<env>` and a redeploy, never an automatic
+fallback.
+
+Every email is multipart, its HTML derived from the text, with `MAIL_REPLY_TO` when set. To switch, add a new version
+of `api-env-<env>` and redeploy the same image (runbook §13) — **an image with Resend in it first**: an older one
+refuses `MAIL_PROVIDER=resend` at boot. Then send one message with that environment's settings and look in the inbox
+and the spam folder:
 
 ```bash
 sudo /opt/agencyboost/bin/send-test-mail.sh staging you@example.com    # node dist/cli/send-test-mail.js in api-staging
 ```
 
-It prints the provider, the host, the port and the server's answer, never the password, and exits 0 when the
-server accepted the message. Each provider's recipe, and staying out of spam:
+It prints the provider and the server's answer — with Resend, `Resend id: …` — never the password or the key, and
+exits 0 when the server accepted the message. Each provider's recipe, Resend's step by step, and staying out of spam:
 [`../docs/03-engineering/email-delivery.md`](../docs/03-engineering/email-delivery.md).
 
 ### The Prudential proposal fields

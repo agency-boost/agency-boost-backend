@@ -5,6 +5,9 @@ import { BRANDING, HEX_COLOUR } from '@/domain/constants/branding';
  * picks, every shade the app paints: the contrast words on each, the hovers, the inks, the tints, the focus ring. The
  * contrast rule lives here and nowhere else — the settings page's preview asks the API, the session carries what this
  * returns, the proposal's PDF and the lessons read it too.
+ *
+ * **Every colour is accepted** (P19.12-T3; ADR-0246): one that neither white nor the dark ink reads `CONTRAST_MIN` on
+ * is painted as its nearest shade where one does (`fillOf`), and the palette is derived from that shade.
  */
 
 type Rgb = readonly [number, number, number];
@@ -53,7 +56,7 @@ export interface ContrastChoice {
   colour: string;
   /** Its ratio on the colour, to two decimals. */
   ratio: number;
-  /** Whether it reaches `CONTRAST_MIN`. A colour where it does not is refused. */
+  /** Whether it reaches `CONTRAST_MIN`. A colour where it does not is painted as its nearest shade where it does (`fillOf`). */
   readable: boolean;
 }
 
@@ -71,13 +74,53 @@ export function textOn(hex: string): ContrastChoice {
   };
 }
 
+/** `hex` moved toward `toward` by `INK_STEP`, step by step, until `text` reads `CONTRAST_MIN` on it; and how many steps. */
+function stepUntilRead(hex: string, toward: string, text: string): { colour: string; steps: number } {
+  let colour = hex;
+  let steps = 0;
+  for (; steps < 400 && contrastRatio(colour, text) < BRANDING.CONTRAST_MIN; steps += 1) {
+    colour = mix(colour, toward, BRANDING.INK_STEP);
+  }
+  return { colour, steps };
+}
+
 /** The colour as words on white: moved toward black by `INK_STEP` until it reads `CONTRAST_MIN` there. */
 export function inkOf(hex: string): string {
-  let ink = hex.toLowerCase();
-  for (let i = 0; i < 400 && contrastRatio(ink, BRANDING.TEXT_LIGHT) < BRANDING.CONTRAST_MIN; i += 1) {
-    ink = mix(ink, '#000000', BRANDING.INK_STEP);
-  }
-  return ink;
+  return stepUntilRead(hex.toLowerCase(), '#000000', BRANDING.TEXT_LIGHT).colour;
+}
+
+/**
+ * **A colour as a filled surface carrying words** (P19.12-T3 AC-1, AC-2; ADR-0246 §1): the words the contrast rule
+ * gives it, and the fill they sit on.
+ */
+export interface FilledColour {
+  contrast: ContrastSide;
+  /** The colour of the words. */
+  colour: string;
+  /** Their ratio on the fill, to two decimals: at least `CONTRAST_MIN`. */
+  ratio: number;
+  /** What a button, a pill or a card is filled with: the colour chosen, or its nearest shade the words read on. */
+  fill: string;
+  /** Whether `fill` is not the colour chosen. */
+  adjusted: boolean;
+}
+
+/**
+ * **The fill of a colour** (P19.12-T3; ADR-0246 §1). Where white or the dark ink already reads `CONTRAST_MIN` on it, the
+ * colour itself — every colour the rule of ADR-0218 §5 accepted keeps its palette exactly. Otherwise it is moved by
+ * `INK_STEP` toward black until white reads, and toward white until the dark ink reads, and **the side that needs fewer
+ * steps** is taken — the nearest readable shade; on a tie the darker, with white words. No colour needs more than nine.
+ */
+export function fillOf(hex: string): FilledColour {
+  const chosen = hex.toLowerCase();
+  const on = textOn(chosen);
+  if (on.readable) return { contrast: on.contrast, colour: on.colour, ratio: on.ratio, fill: chosen, adjusted: false };
+  const darker = stepUntilRead(chosen, '#000000', BRANDING.TEXT_LIGHT);
+  const lighter = stepUntilRead(chosen, '#ffffff', BRANDING.TEXT_DARK);
+  const [fill, contrast, colour]: [string, ContrastSide, string] = darker.steps <= lighter.steps
+    ? [darker.colour, 'light', BRANDING.TEXT_LIGHT]
+    : [lighter.colour, 'dark', BRANDING.TEXT_DARK];
+  return { contrast, colour, ratio: round2(contrastRatio(fill, colour)), fill, adjusted: true };
 }
 
 /** A hover: `HOVER_SHIFT` away from its words — darker under white words, lighter under dark ones. */
@@ -119,23 +162,26 @@ export interface BrandingPalette {
   sidebarText: string;
 }
 
-/** What the preview and a save answer: the palette, or the field whose colour no text reads on. */
-export type PaletteResult =
-  | { ok: true; palette: BrandingPalette; primary: ContrastChoice; secondary: ContrastChoice }
-  | { ok: false; field: 'primary' | 'secondary'; primary: ContrastChoice; secondary: ContrastChoice };
+/** What the preview and a save answer: the palette, and each colour's words and fill. */
+export interface PaletteResult {
+  palette: BrandingPalette;
+  primary: FilledColour;
+  secondary: FilledColour;
+}
 
-/** **The palette of two colours**, or which of them is refused. Both must be `#rrggbb`. */
+/**
+ * **The palette of two colours** — never a refusal (P19.12-T3 AC-1; ADR-0246 §1, §2). Both must be `#rrggbb`. Each is
+ * taken as its fill (`fillOf`), and every token is derived from the fill: `primary` and `secondary` are what buttons,
+ * pills and cards are filled with, so every word written on them reads.
+ */
 export function derivePalette(primaryHex: string, secondaryHex: string): PaletteResult {
-  const primary = primaryHex.toLowerCase();
-  const secondary = secondaryHex.toLowerCase();
-  const onPrimary = textOn(primary);
-  const onSecondary = textOn(secondary);
-  if (!onPrimary.readable) return { ok: false, field: 'primary', primary: onPrimary, secondary: onSecondary };
-  if (!onSecondary.readable) return { ok: false, field: 'secondary', primary: onPrimary, secondary: onSecondary };
+  const onPrimary = fillOf(primaryHex);
+  const onSecondary = fillOf(secondaryHex);
+  const primary = onPrimary.fill;
+  const secondary = onSecondary.fill;
   const primaryInk = inkOf(primary);
   const primary100 = tintOf(primary, BRANDING.TINT_100);
   return {
-    ok: true,
     primary: onPrimary,
     secondary: onSecondary,
     palette: {

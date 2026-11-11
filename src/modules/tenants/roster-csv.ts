@@ -113,9 +113,10 @@ const WORK_STATUS_WORDS: Record<string, WorkStatus> = {
   'full-time': 'full_time', 'full time': 'full_time', fulltime: 'full_time', full_time: 'full_time', 'penuh waktu': 'full_time',
   'part-time': 'part_time', 'part time': 'part_time', parttime: 'part_time', part_time: 'part_time', 'paruh waktu': 'part_time',
 };
+/** `L` and `P` too (P19.12-T7 AC-1; ADR-0250 §1): the letters an Indonesian form writes for *Laki-laki* and *Perempuan*. */
 const GENDER_WORDS: Record<string, Gender> = {
-  male: 'male', 'laki-laki': 'male', 'laki laki': 'male', pria: 'male',
-  female: 'female', perempuan: 'female', wanita: 'female',
+  male: 'male', 'laki-laki': 'male', 'laki laki': 'male', pria: 'male', l: 'male',
+  female: 'female', perempuan: 'female', wanita: 'female', p: 'female',
 };
 
 /**
@@ -178,8 +179,18 @@ export interface RosterRow {
   gender: Gender | null;
   /** `YYYY-MM`. */
   companyJoinMonth: string | null;
-  /** What is wrong with the row's own cells. A row with any is skipped for them, each naming its cell. */
+  /**
+   * What is wrong with the row's **required** cells — *Kode agen*, *Nama*, *Peran* — and its *Email*, or with the line.
+   * A row with any is skipped for them, each naming its cell; an *Email* problem only on a new person's row, since an
+   * update never applies the email (the service's to decide, ADR-0250 §2).
+   */
   problems: RosterIssue[];
+  /**
+   * **An optional cell given in a shape its column does not take, left empty** (P19.12-T7 AC-2; ADR-0250 §2): *No.
+   * WhatsApp*, *Tanggal bergabung*, *Waktu*, *Tanggal lahir*, *Jenis kelamin* or *Bulan bergabung di perusahaan*. Its
+   * field is `null` — nothing given — and the row goes on, the warning naming the cell and what was wrong with it.
+   */
+  warnings: RosterIssue[];
 }
 
 export interface ParsedRoster {
@@ -315,8 +326,12 @@ export function parseRoster(text: string, today: LocalDate, codeRule?: AgentCode
     const { line } = lines[i];
     const raw = splitLine(lines[i].text, delimiter);
     const problems: RosterIssue[] = [];
+    const warnings: RosterIssue[] = [];
     const say = (field: RosterField | 'file', message: Message) =>
       problems.push({ line, column: field === 'file' ? 'file' : ROSTER_HEADER_NAMES[field], message });
+    /** An optional cell's problem: the cell is left empty and the row goes on (ADR-0250 §2). */
+    const blank = (field: RosterField, message: Message) =>
+      warnings.push({ line, column: ROSTER_HEADER_NAMES[field], message });
 
     // A row may stop short — a spreadsheet's CSV drops trailing blanks — but never run past the header.
     const extra = raw.slice(fields.length).some((cell) => cell !== '');
@@ -353,38 +368,44 @@ export function parseRoster(text: string, today: LocalDate, codeRule?: AgentCode
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) say('email', SAY.notAnEmail({ value: emailRaw }));
     else if (email && seenEmail.has(email)) say('email', SAY.alreadyOnLine({ line: seenEmail.get(email)! }));
 
+    /*
+     * **The six optional cells forgive** (P19.12-T7 AC-2; ADR-0250 §2, amending ADR-0205 §5): *No. WhatsApp*, the join
+     * date and the four fields of ADR-0158. Blank is nothing given; a value that is given is checked as before, and a
+     * bad one is **left empty with a warning** naming the cell — the field `null`, as if blank — and the person still
+     * imported. Until ADR-0250 a bad one skipped the whole row.
+     */
     const phone = phoneRaw ? normalisePhone(phoneRaw) : null;
-    if (phoneRaw && !phone) say('phone', ROW.notAPhone({ value: phoneRaw }));
+    if (phoneRaw && !phone) blank('phone', ROW.notAPhone({ value: phoneRaw }));
 
-    // **The four fields of ADR-0158 and the join date are optional in an import** (ADR-0205 §5): blank is nothing given;
-    // a value that is given is checked, and a bad one skips the row, naming the cell.
     const joinTyped = value('joinDate');
-    const joinDate = joinTyped ? isoDay(joinTyped) : null;
+    let joinDate: string | null = joinTyped ? isoDay(joinTyped) : null;
     if (joinDate !== null) {
-      if (!isLocalDate(joinDate)) say('joinDate', ROW.notAJoinDate({ value: joinTyped }));
-      else if (joinDate > today) say('joinDate', ROW.joinDateAfterToday);
-      else if (joinDate < JOINING.EARLIEST_JOIN_DATE) {
-        say('joinDate', ROW.joinDateBeforeEarliest({ year: JOINING.EARLIEST_JOIN_DATE.slice(0, 4) }));
-      }
+      const problem = !isLocalDate(joinDate) ? ROW.notAJoinDate({ value: joinTyped })
+        : joinDate > today ? ROW.joinDateAfterToday
+          : joinDate < JOINING.EARLIEST_JOIN_DATE
+            ? ROW.joinDateBeforeEarliest({ year: JOINING.EARLIEST_JOIN_DATE.slice(0, 4) })
+            : null;
+      // Left empty, a new person joins on the import's day, as with a blank cell.
+      if (problem) { blank('joinDate', problem); joinDate = null; }
     }
     const birthTyped = value('dateOfBirth');
-    const dateOfBirth = birthTyped ? isoDay(birthTyped) : null;
+    let dateOfBirth: string | null = birthTyped ? isoDay(birthTyped) : null;
     if (dateOfBirth !== null) {
       const problem = birthDateProblem(dateOfBirth, today);
-      if (problem) say('dateOfBirth', problem);
+      if (problem) { blank('dateOfBirth', problem); dateOfBirth = null; }
     }
     const monthTyped = value('companyJoinMonth');
-    const companyJoinMonth = monthTyped ? isoMonth(monthTyped) : null;
+    let companyJoinMonth: string | null = monthTyped ? isoMonth(monthTyped) : null;
     if (companyJoinMonth !== null) {
       const problem = joinMonthProblem(companyJoinMonth, today);
-      if (problem) say('companyJoinMonth', problem);
+      if (problem) { blank('companyJoinMonth', problem); companyJoinMonth = null; }
     }
     const workTyped = value('workStatus');
     const workStatus = workTyped ? WORK_STATUS_WORDS[workTyped.toLowerCase()] ?? null : null;
-    if (workTyped && !workStatus) say('workStatus', SAY.notAWorkStatus({ value: workTyped }));
+    if (workTyped && !workStatus) blank('workStatus', SAY.notAWorkStatus({ value: workTyped }));
     const genderTyped = value('gender');
     const gender = genderTyped ? GENDER_WORDS[genderTyped.toLowerCase()] ?? null : null;
-    if (genderTyped && !gender) say('gender', SAY.notAGender({ value: genderTyped }));
+    if (genderTyped && !gender) blank('gender', SAY.notAGender({ value: genderTyped }));
 
     // The first row with a code or an address stands; a later one is skipped (A3's *muncul dua kali*).
     if (agentCode && !seenCode.has(agentCode)) seenCode.set(agentCode, line);
@@ -392,8 +413,8 @@ export function parseRoster(text: string, today: LocalDate, codeRule?: AgentCode
 
     rows.push({
       line, cells, agentCode, fullName, role, leaderAgentCode, phone, email,
-      joinDate, workStatus, dateOfBirth: dateOfBirth as LocalDate | null, gender,
-      companyJoinMonth, problems,
+      joinDate: joinDate as LocalDate | null, workStatus, dateOfBirth: dateOfBirth as LocalDate | null, gender,
+      companyJoinMonth, problems, warnings,
     });
   }
 

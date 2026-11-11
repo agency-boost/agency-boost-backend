@@ -11,8 +11,8 @@ import { can, PERMISSIONS, type Permission } from '@/modules/rbac/permissions';
  * path and `@RequirePermission` — so a route Phase 19.5 adds is held to it the day it is written: a route whose path names
  * a survey, an NPS or a qualitative reading, and which the Super Admin's grants reach, must be registered below as an
  * aggregate with its reason, and a route that serves answers per person must stay out of the Super Admin's reach.
- * The Super Admin's own reads (`/admin/members`, the comparison, *Lihat sebagai KPM*, *Data bulanan*, *KPM & data*) are
- * walked too, and none of them names a survey.
+ * The Super Admin's own reads (`/admin/members`, `/admin/users`, the comparison, *Lihat sebagai KPM*, *Data bulanan*,
+ * *KPM & data*) are walked too, and none of them names a survey.
  */
 
 const MODULES = join(__dirname, '../..');
@@ -82,6 +82,8 @@ describe('P19.4-T3 AC-5 no Super Admin route returns a survey answer per person 
     expect(all.map(key)).toEqual(expect.arrayContaining([
       'GET /admin/members', 'GET /admin/analytics/kpms', 'GET /admin/tenants/:id/analytics',
       'GET /admin/tenants/:id/analytics/compliance', 'GET /admin/tenants/:id/data', 'GET /admin/companies/:companyId/kpms',
+      // P19.12-T2 AC-1 (ADR-0245 §1): *Akun terdaftar*.
+      'GET /admin/users',
     ]));
   });
 
@@ -101,7 +103,8 @@ describe('P19.4-T3 AC-5 no Super Admin route returns a survey answer per person 
 
   it('P19.4-T3 AC-5 the platform reads name no survey, and each is a read', () => {
     const platform = all.filter((r) => r.file === 'reporting/platform/platform-reads.controller.ts');
-    expect(platform).toHaveLength(6);
+    // Six since P19.4-T3, and *Akun terdaftar* since P19.12-T2 (ADR-0245 §1).
+    expect(platform).toHaveLength(7);
     for (const route of platform) {
       expect(route.verb).toBe('GET');
       expect(SURVEY.test(route.path)).toBe(false);

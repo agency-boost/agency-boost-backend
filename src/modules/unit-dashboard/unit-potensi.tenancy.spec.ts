@@ -85,13 +85,13 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
   const read = (who: Who, query: Parameters<UnitPotensiService['read']>[1] = {}) => potensi.read(office.as(who), query);
   const everyone = (view: UnitPotensiView): PotensiPerson[] => view.units.flatMap((u) => u.people);
   const person = (view: UnitPotensiView, who: Who) => everyone(view).find((p) => p.membershipId === office.id[who])!;
-  const cardOf = (view: UnitPotensiView, who: Who) => view.units.find((u) => u.leader.membershipId === office.id[who])!;
+  const cardOf = (view: UnitPotensiView, who: Who) => view.units.find((u) => u.leader?.membershipId === office.id[who])!;
 
   describe('AC-2, AC-3 the tiles, and the list grouped per unit', () => {
     // *Changed 2026-11-07 (P19.8-T4 AC-4, MOB UI-179; ADR-0229 §4):* the head's own card first, where it was last.
     it('P19.8-T4 AC-4 MOB UI-179 Unit Anda first, then one card per unit below the AB in the Overview’s order — each leader first', async () => {
       const view = await read('AGUS');
-      expect(view.units.map((u) => [u.kind, u.leader.name, u.people.map((p) => p.name)])).toEqual([
+      expect(view.units.map((u) => [u.kind, u.leader?.name, u.people.map((p) => p.name)])).toEqual([
         ['direct', 'Agus Salim', ['Agus Salim', 'Dimas Pratama', 'Indah Permatasari']],
         ['unit', 'Dewi Lestari', ['Dewi Lestari']],
         ['unit', 'Lukas Hartono', ['Lukas Hartono', 'Tari Anggraini']],
@@ -105,7 +105,7 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
 
     it('P19.1-T6 AC-3 the role words are the company’s rung labels, and the reader is marked', async () => {
       const view = await read('AGUS');
-      expect(cardOf(view, 'SARI').leader.rung.code).toBe('AAB');
+      expect(cardOf(view, 'SARI').leader?.rung.code).toBe('AAB');
       expect(person(view, 'AGUS')).toMatchObject({ isReader: true, rung: { code: 'AB' } });
       expect(person(view, 'AGUS').rung.label).toBeTruthy();
     });
@@ -185,7 +185,7 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
     });
 
     it('P19.8-T4 AC-10 MOB UI-182 an earlier month lists the whole team under each card, as this month does', async () => {
-      const names = (view: UnitPotensiView) => view.units.map((u) => [u.leader.name, u.people.map((p) => p.name)]);
+      const names = (view: UnitPotensiView) => view.units.map((u) => [u.leader?.name, u.people.map((p) => p.name)]);
       const september = await read('AGUS');
       // A month with nothing switched on at all still answers everybody, each at 0.
       const july = await read('AGUS', { month: '2026-07' });

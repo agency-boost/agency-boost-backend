@@ -474,6 +474,30 @@ describe('auth and admin over HTTP', () => {
       expect(JSON.stringify(verification!.toObject())).not.toContain(user.verificationToken);
     });
 
+    /*
+     * P19.12-T2 AC-3 (ADR-0245 §3; the client's message of 11 November 2026, item 6): *Buat akun* signs the account in.
+     * The answer is a session — `/auth/me` reads it with the token it carries — the address still unverified, the
+     * sign-in stamped, and the verification email sent all the same.
+     */
+    it('P19.12-T2 AC-3 registering signs the account in: /auth/me reads it unverified and in no office, its email sent', async () => {
+      const companyId = await anInsurer();
+      e2eCodeSeq += 1;
+      const email = `signed-in-${Math.random()}@kpm.test`;
+      const res = await api().post('/api/v1/auth/register').send({
+        email, password: PASSWORD, fullName: 'Hadi Santoso', companyId, agentCode: String(9000 + e2eCodeSeq), ...PERSONAL,
+      }).expect(201);
+      expect(res.body).toEqual({ status: 'signed_in', accessToken: expect.any(String), expiresIn: expect.any(Number) });
+      expect(String(res.headers['set-cookie'])).toMatch(/^agencyboost_refresh=/);
+
+      const me = await api().get('/api/v1/auth/me').set('Authorization', `Bearer ${res.body.accessToken}`).expect(200);
+      expect(me.body.user).toMatchObject({ email, emailVerified: false });
+      expect(me.body.membership).toBeNull();
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const account = (await users.findOne({ email }).exec())!;
+      expect(account.lastLoginAt).toBeInstanceOf(Date);
+      await waitForMail(String(account._id), 'auth.email_verification');
+    });
+
     it('registers, verifies, signs in and reads its own context', async () => {
       const user = await makeUser('journey@kpm.test');
 
@@ -1499,8 +1523,9 @@ describe('auth and admin over HTTP', () => {
       // Refresh twice: same session, three token rows, one answer.
       await api().post('/api/v1/auth/refresh').set('Cookie', user.refreshCookie).expect(200);
 
+      // Two sessions: registering signs the account in (P19.12-T2 AC-3), and `makeUser` then signs in once more.
       const res = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
-      expect(res.body).toHaveLength(1);
+      expect(res.body).toHaveLength(2);
       expect(res.body[0]).toMatchObject({ current: false });
       expect(res.body[0].sessionId).toEqual(expect.any(String));
     });
@@ -1512,14 +1537,15 @@ describe('auth and admin over HTTP', () => {
       await api().post('/api/v1/auth/login')
         .send({ email: user.email, password: PASSWORD }).expect(200);
 
+      // Three: the registration's own (P19.12-T2 AC-3), `makeUser`'s sign-in and this one.
       const before = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
-      expect(before.body).toHaveLength(2);
+      expect(before.body).toHaveLength(3);
 
       await api().delete(`/api/v1/auth/sessions/${before.body[0].sessionId}`)
         .set(auth).expect(204);
 
       const after = await api().get('/api/v1/auth/sessions').set(auth).expect(200);
-      expect(after.body).toHaveLength(1);
+      expect(after.body).toHaveLength(2);
     });
 
     it('refuses another account’s session as a 404', async () => {
@@ -2025,7 +2051,7 @@ describe('auth and admin over HTTP', () => {
       const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
         .set(auth).send({ rows: file(row(digits(), 'Good', 'AB', good), row(digits(), 'Bad', 'Agent', `bad-${Math.random()}@k.test`, '70049999')) })
         .expect(201);
-      expect(committed.body.counts).toEqual({ imported: 1, updated: 0, skipped: 1 });
+      expect(committed.body.counts).toEqual({ imported: 1, updated: 0, invited: 0, skipped: 1 });
       expect(committed.body.rows[1].messages[0]).toContain('70049999');
       expect(committed.body.skippedCsv).toContain('Alasan');
     });
@@ -2348,22 +2374,33 @@ describe('auth and admin over HTTP', () => {
       expect(res.body.error.message).toContain('1 person reports');
     });
 
-    it('AC-1: an AB who is not an Admin cannot hand out AB', async () => {
+    /*
+     * P19.12-T4 AC-1 (ADR-0247 §1): this said *an AB who is not an Admin cannot hand out AB*. A direct leader now sets any
+     * rung up to their own — an AB leader AB too, AB under AB — and an AAB leader still cannot.
+     */
+    it('P19.12-T4 AC-1: an AB leader hands out AB to a direct report; an AAB leader cannot', async () => {
       const { kpmId, asOwner, agent } = await officeWithAgent();
       await api().patch(`/api/v1/members/${agent.membershipId}/role`)
         .set(asOwner).send({ toRole: 'ab' }).expect(200);
       const theirs = await joins(kpmId, agent.as);
 
-      // Agent ⇄ AAB is theirs to decide…
       await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
         .set(agent.as).send({ toRole: 'aab' }).expect(200);
+      await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'ab' }).expect(200);
+      await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
+        .set(agent.as).send({ toRole: 'agent' }).expect(200);
 
-      // …the shape of the office is not.
+      // An AAB leader: up to AAB, never AB.
+      await api().patch(`/api/v1/members/${agent.membershipId}/role`)
+        .set(asOwner).send({ toRole: 'aab' }).expect(200);
       const res = await api().patch(`/api/v1/members/${theirs.membershipId}/role`)
         .set(agent.as).send({ toRole: 'ab' }).expect(403);
       expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
       // The rung by the name a role is called — the default ladder's *AB* (P18.7-T9 AC-1, ADR-0167 §10).
-      expect(res.body.error.message).toBe('Only the office’s Owner or an Admin can change somebody’s role to or from AB.');
+      expect(res.body.error.message).toBe(
+        'You can set a role up to your own. Only the office’s Owner or an Admin can make somebody AB.',
+      );
       expect(res.body.error.message).not.toContain('Agency Builder');
     });
 
@@ -2373,10 +2410,11 @@ describe('auth and admin over HTTP', () => {
         .set(asOwner).send({ toRole: 'ab' }).expect(200);
       const stranger = await joins(kpmId, asOwner); // reports to the Owner, not to the AB
 
+      // Outside the AB's downline: 404, never a refusal that confirms the id (P19.12's permission review). Somebody
+      // inside it but not a direct report is still 403 *direct leader* (org.tenancy.spec.ts).
       const res = await api().patch(`/api/v1/members/${stranger.membershipId}/role`)
-        .set(agent.as).send({ toRole: 'aab' }).expect(403);
-      expect(res.body.error.code).toBe('ORG_ROLE_CHANGE_NOT_PERMITTED');
-      expect(res.body.error.message).toContain('direct leader');
+        .set(agent.as).send({ toRole: 'aab' }).expect(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
 
       // And their team never listed them, so the control was never offered either.
       const team = await api().get('/api/v1/members/my-team').set(agent.as).expect(200);

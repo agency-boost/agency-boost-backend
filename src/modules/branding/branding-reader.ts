@@ -175,8 +175,8 @@ export function resolve(kpmId: string, name: string, own: BrandingFields, templa
   const fromLogos = logos === 'own' ? own : logos === 'template' ? template : EMPTY;
   const fromColours = colours === 'own' ? own : colours === 'template' ? template : EMPTY;
   const mascot = mascotSource === 'own' ? own.mascot : mascotSource === 'template' ? template.mascot : null;
-  const derived = fromColours.primary && fromColours.secondary ? derivePalette(fromColours.primary, fromColours.secondary) : null;
-  const palette = derived && derived.ok ? derived.palette : null;
+  // Every colour derives a palette (P19.12-T3; ADR-0246): a pair is shown whenever both are set.
+  const palette = fromColours.primary && fromColours.secondary ? derivePalette(fromColours.primary, fromColours.secondary).palette : null;
   const shown = {
     logo: fromLogos.logo,
     logoSquare: fromLogos.logoSquare,

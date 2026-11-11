@@ -14,6 +14,11 @@ import { HierarchyRole, MembershipDocument, MembershipStatus } from './membershi
 import { ORG_MESSAGES } from './org.messages';
 import { rejoinedOn, type RejoinFacts } from './rejoined';
 import { DIRECTORY_READ, siblingsWithinReach, visibleTo, withinReach } from './reader-visibility';
+import { invitationStateOf, type InvitationState } from './invitation-state';
+import {
+  canChangeRoleOf, canPromoteToAbOf, DEFAULT_LADDER, readLadder, roleChoices, roleReaderOf, type LadderRung,
+} from './role-rules';
+import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
 
 export interface DirectoryQuery {
@@ -56,6 +61,13 @@ export interface DirectoryMember {
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
   /**
+   * **Whether they have been invited, and have signed in** (P19.12-T5 AC-4; ADR-0248 §4, `invitationStateOf`): `signed_in`
+   * once the account has signed in, else `invited` when an invitation went (`invitedAt`), else `not_invited`. An
+   * `active` member who has never signed in is *Diundang* or *Belum diundang* on the Directory and the member page, not
+   * *Aktif*; `status` stays what it is.
+   */
+  invitation: InvitationState;
+  /**
    * **The day the person came back to this office, if they did** (P18.9-T4 AC-3, ADR-0176 §5; `rejoinedOn` in
    * `rejoined.ts`): on a live membership that follows a removed one, its own join date — the directory's *Rejoined*;
    * on a removed membership the person has since returned from, the later one's — *Rejoined {date}* under
@@ -79,6 +91,18 @@ export interface DirectoryMember {
   canChangeRole: boolean;
   canPromoteToAb: boolean;
   canRemove: boolean;
+  /**
+   * **The rungs this viewer may put them on**, by ladder code, junior first, their own always among them (P19.12-T4;
+   * ADR-0247 §1, `roleChoices` in `role-rules.ts` — the one rule `RoleChangeService` enforces). `canChangeRole` and
+   * `canPromoteToAb` are read off it, so the person page's select and the write cannot disagree.
+   */
+  roleChoices: string[];
+  /**
+   * **This viewer may change who they report to** — *Ganti* on *Melapor ke* (P19.12-T4; ADR-0247 §2): they hold
+   * `member:reassign_leader`, the member is active and does not own the office, and — for a leader — reports to them
+   * directly. `PUT /members/:id/leader` refuses regardless.
+   */
+  canChangeLeader: boolean;
 
   /**
    * **What the person records** (ADR-0158 §6, P18.5-T4 AC-6): on **one member's read** —
@@ -95,6 +119,11 @@ export interface MemberPersonal {
   gender: Gender | null;
   companyJoinMonth: string | null;
   workStatus: WorkStatus | null;
+  /**
+   * **Their WhatsApp number** (P19.12-T5 AC-2; ADR-0248 §2), as stored — `+62` and its digits — or `null`: the account's,
+   * the number they see on their own profile. To the same three readers as the four above.
+   */
+  phone: string | null;
   /**
    * **The office's company, by name** (ADR-0205 §4, OWN UI-025): what *Bergabung di <company>* names beside
    * `companyJoinMonth` — *Bergabung di Prudential*. `null` for an office with no company, or a company since removed.
@@ -177,7 +206,19 @@ export class DirectoryService {
      * specs that build this service by hand for the roster need not say it; without it the name is `null`.
      */
     @Optional() @InjectModel(Company.name) private readonly companies: Model<CompanyDocument> | null = null,
+    /*
+     * The company's ladder, for `roleChoices` (P19.12-T4, ADR-0247 §1). Optional for the specs that build this service
+     * by hand; without it the default ladder is read.
+     */
+    @Optional() private readonly orgLevels: OrgLevelService | null = null,
   ) {}
+
+  /** The office's ladder, junior first, with each rung's class (`role-rules.ts`). */
+  private async ladder(ctx: RequestContext): Promise<readonly LadderRung[]> {
+    if (!ctx.kpmId || !this.orgLevels) return DEFAULT_LADDER;
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('companyId').exec();
+    return kpm?.companyId ? readLadder(this.orgLevels, kpm.companyId) : DEFAULT_LADDER;
+  }
 
   /** The office's company's name, or `null` (ADR-0205 §4: *Bergabung di <company>*). */
   private async companyName(ctx: RequestContext): Promise<string | null> {
@@ -346,9 +387,10 @@ export class DirectoryService {
     );
 
     const owner = await this.ownerUserId(ctx);
+    const ladder = await this.ladder(ctx);
     const returns = await this.returnsOf(ctx, rows);
     return rows.map((m) => ({
-      ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner),
+      ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner, ladder),
       rejoinedOn: rejoinedOn(rejoinFacts(m), returns.get(m.userId) ?? []),
     }));
   }
@@ -375,6 +417,7 @@ export class DirectoryService {
     leaderNameValue: string | null,
     ctx: RequestContext,
     ownerUserId: string | null,
+    ladder: readonly LadderRung[] = DEFAULT_LADDER,
   ): Omit<DirectoryMember, 'rejoinedOn'> {
     // A person whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
     const fullName = user?.fullName ?? render(ORG_MESSAGES.unknownName, ctx.reader);
@@ -413,15 +456,12 @@ export class DirectoryService {
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
       joinDate: m.joinDate ?? null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
-      // Mirrors `RoleChangeService.permitted` and `RemovalService.remove`, which are
-      // where these are actually enforced. A refusal the screen did not anticipate is a
-      // worse experience than a control that was never offered, so they are computed the
-      // same way — but the service is still the gate.
-      // The Owner's rung is not the office's to change: demoting them from AB would
-      // strip the rights that come with owning it, and only the platform can reassign an
-      // office. `RoleChangeService` refuses it too.
-      canChangeRole: !removed && !isOwner && (tenantAdmin || isDirectLeader),
-      canPromoteToAb: !removed && !isOwner && tenantAdmin,
+      // ADR-0248 §4: a first sign-in decides it; before one, whether an invitation went.
+      invitation: invitationStateOf(user?.lastLoginAt, m.invitedAt),
+      // The rung and the leader by the rules the writes enforce (`role-rules.ts`, ADR-0247), never a copy of them;
+      // removal mirrors `RemovalService.remove`. A refusal the screen did not anticipate is a worse experience than a
+      // control that was never offered — but the service is still the gate.
+      ...this.rungAndLeaderOffers(m, ctx, isOwner, ladder, tenantAdmin, isDirectLeader),
       canRemove:
         !removed &&
         // Not the office's owner. Normally they are also the root, but after a transfer
@@ -433,6 +473,32 @@ export class DirectoryService {
         String(m._id) !== ctx?.membershipId &&
         m.leaderId !== null &&
         (tenantAdmin || isDirectLeader),
+    };
+  }
+
+  /**
+   * **What this viewer may change about where this person stands** (P19.12-T4; ADR-0247 §1–§2): their rung, by the one
+   * rule `RoleChangeService` enforces (`roleChoices`), and their leader, as `LeaderChangeService` decides it — the Owner
+   * and an Admin anybody active but the office's owner, a leader their direct reports. Offers only; the writes refuse
+   * regardless.
+   */
+  private rungAndLeaderOffers(
+    m: MembershipDocument,
+    ctx: RequestContext,
+    isOwner: boolean,
+    ladder: readonly LadderRung[],
+    office: boolean,
+    isDirectLeader: boolean,
+  ): Pick<DirectoryMember, 'roleChoices' | 'canChangeRole' | 'canPromoteToAb' | 'canChangeLeader'> {
+    const roleChoicesOf = roleChoices(roleReaderOf(ctx), {
+      leaderId: m.leaderId, role: m.role, orgLevelCode: m.orgLevelCode, status: m.status, isOwner,
+    }, ladder);
+    return {
+      roleChoices: roleChoicesOf,
+      canChangeRole: canChangeRoleOf(roleChoicesOf),
+      canPromoteToAb: canPromoteToAbOf(roleChoicesOf, ladder),
+      canChangeLeader: m.status === 'active' && !isOwner && String(m._id) !== ctx.membershipId
+        && (office || isDirectLeader) && can(ctx, 'member:reassign_leader'),
     };
   }
 
@@ -471,19 +537,27 @@ export class DirectoryService {
     // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here.
     const office = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
     if (!office && String(scoped._id) !== ctx.membershipId) return decorated;
+    return { ...decorated, personal: await this.personalOf(ctx, scoped) };
+  }
+
+  /**
+   * **What a person records, and their WhatsApp number** (ADR-0158 §6; P19.12-T5 AC-2, ADR-0248 §2): the account's four
+   * and its number, the membership's work status, and the office's company by name. The caller has decided the reader
+   * may see them — `read` above, and `MemberPersonalService` answering the Owner's or an Admin's *Lengkapi data*.
+   */
+  async personalOf(ctx: RequestContext, membership: MembershipDocument): Promise<MemberPersonal> {
     const [user, companyName] = await Promise.all([
-      this.users.findOne({ _id: scoped.userId }).select('dateOfBirth gender companyJoinMonth').exec(),
+      this.users.findOne({ _id: membership.userId }).select('dateOfBirth gender companyJoinMonth phone').exec(),
       this.companyName(ctx),
     ]);
     return {
-      ...decorated,
-      personal: {
-        dateOfBirth: user?.dateOfBirth ?? null,
-        gender: user?.gender ?? null,
-        companyJoinMonth: user?.companyJoinMonth ?? null,
-        workStatus: scoped.workStatus ?? null,
-        companyName,
-      },
+      dateOfBirth: user?.dateOfBirth ?? null,
+      gender: user?.gender ?? null,
+      companyJoinMonth: user?.companyJoinMonth ?? null,
+      workStatus: membership.workStatus ?? null,
+      // An empty string on file is no number (`MemberPhoneService` reads it the same way).
+      phone: user?.phone || null,
+      companyName,
     };
   }
 }

@@ -335,7 +335,7 @@ export class TemplateService {
     if (kind === 'activity_taxonomy') payload = this.checkedTaxonomy(payload);
     // P19.5-T1 (ADR-0214 §2): the section's type, its system columns and locks, the aliases a rename leaves.
     if (kind === 'advanced_analytics') payload = await this.requireAnalytics().checkDraft(ctx, companyId, at.templateId!, payload);
-    // P19.6-T1 (ADR-0218 §3): *Tampilan*'s groups whole, its colours readable, its images the company's own.
+    // P19.6-T1 (ADR-0218 §3): *Tampilan*'s groups whole, its colours `#rrggbb` (any, ADR-0246), its images the company's own.
     if (kind === 'branding') payload = checkedTemplatePayload(companyId, payload);
 
     const existing = await this.templates
@@ -421,7 +421,7 @@ export class TemplateService {
       // P19.5-T1 AC-11 (ADR-0214 §7): whole, and its agent-code pattern tested over every registered code first.
       await this.requireAnalytics().checkPublish(ctx, companyId, at.templateId!, draft.payload);
     } else if (kind === 'branding') {
-      // P19.6-T1 (ADR-0218 §3, §5): the version every KPM on the template reads must carry readable colours.
+      // P19.6-T1 (ADR-0218 §3): the version every KPM on the template reads is whole; any colour (ADR-0246) is painted readable.
       draft.payload = checkedTemplatePayload(companyId, draft.payload);
     } else {
       await this.refuseBroken(at, draft.payload);

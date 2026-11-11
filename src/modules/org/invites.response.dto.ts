@@ -107,6 +107,17 @@ export class TransferDto implements TransferView {
       + 'where they differ, so a code typed for somebody else is seen. `null` on a request made before it was kept.',
   })
   requestedName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    enum: ['add_agent', 'move'],
+    description: 'What made it: *+ Add agent* for a code held in another unit, or a leader moving one of their people to '
+      + 'a leader outside their own tree.',
+  })
+  kind!: 'add_agent' | 'move';
+
+  @ApiProperty({ type: String, nullable: true, description: 'Why the leader asked for a move, as typed; `null` when they said nothing.' })
+  note!: string | null;
 }
 
 /**

@@ -154,6 +154,8 @@ const WOMEN = [
   ...subscriptionPeople('she'),
   // P18.8-T6: Tari, Arief's new hire marked left (`activation-3m-fixture.ts`).
   'tari@kpm0417.test',
+  // P19.12-T2: Citra, registered and signed in unverified, in no KPM (`registered-accounts-fixture.ts`).
+  'citra.baru@agencyboost.test',
   // P13.2-T6: office 0701 (`template-fixture.ts`).
   ...templatePeople('she'),
 ];
@@ -165,6 +167,8 @@ const MEN = [
   'unverified@agencyboost.test',
   // P19-T3: Rudi, the Allianz Life applicant whose request arrived as Prudential (UI-165).
   'rudi@agencyboost.test',
+  // P19.12-T2: Hadi, the leader registered with no KPM (`registered-accounts-fixture.ts`).
+  'hadi.leader@agencyboost.test',
   // P18.8-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
   'lukman@kpm0417.test',
   // P19.9-T6: Fajar, the agent Lina recruited in 0555 — the demo's Agent who leads somebody (`demo.ts`).
@@ -372,7 +376,14 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     const today = '2026-10-02';
     const people = await col('users').find({ deletedAt: null }).toArray();
     expect(people.length).toBeGreaterThan(20);
-    for (const u of people) {
+    /*
+     * P19.12-T5 (`member-page-fixture.ts`): the one member left blank on purpose for *Lengkapi data* — invited, never
+     * signed in, the four taken away. Exactly one, and asserted by `member-page-seed.spec.ts`.
+     */
+    const leftBlank = (await col('memberships').find({ invitedAt: { $ne: null }, workStatus: null, deletedAt: null }).toArray());
+    expect(leftBlank.length).toBeLessThanOrEqual(1);
+    const blankUsers = new Set(leftBlank.map((m) => String(m.userId)));
+    for (const u of people.filter((p) => !blankUsers.has(String(p._id)))) {
       if (u.platformRole === 'super_admin') {
         expect({ email: u.email, dateOfBirth: u.dateOfBirth ?? null, gender: u.gender ?? null }).toEqual({
           email: u.email, dateOfBirth: null, gender: null,
@@ -386,10 +397,12 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       expect({ email: u.email, agentCode: AGENT_CODE_PATTERN.test(u.agentCode) }).toEqual({ email: u.email, agentCode: true });
     }
     const memberships = await col('memberships').find({ deletedAt: null }).toArray();
-    expect(memberships.filter((m) => !WORK_STATUSES.includes(m.workStatus)).map((m) => String(m._id))).toEqual([]);
+    expect(memberships.filter((m) => !WORK_STATUSES.includes(m.workStatus)).map((m) => String(m._id)))
+      .toEqual(leftBlank.map((m) => String(m._id)));
     // Both ways of working are in the demo office, and the gender follows the pronoun the seed gives.
     const kpmId = await office();
-    expect(new Set(memberships.filter((m) => m.kpmId === kpmId).map((m) => m.workStatus))).toEqual(new Set(WORK_STATUSES));
+    expect(new Set(memberships.filter((m) => m.kpmId === kpmId && m.workStatus !== null).map((m) => m.workStatus)))
+      .toEqual(new Set(WORK_STATUSES));
     for (const person of COACHING_CAST) {
       expect((await col('users').findOne({ email: person.email }))!.gender).toBe(person.pronoun === 'she' ? 'female' : 'male');
     }
@@ -400,8 +413,11 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     expect(yoga).toMatchObject({ fullName: 'Yoga Pratama', status: 'invited', emailVerifiedAt: null, agentCode: '81901' });
     expect(await new PasswordService().verify(yoga!.passwordHash, 'demo password field')).toBe(true);
     expect(await col('memberships').countDocuments({ userId: String(yoga!._id) })).toBe(0);
-    // Everybody else signs in verified, as the demo always has.
-    expect(await col('users').countDocuments({ emailVerifiedAt: null, email: { $ne: 'unverified@agencyboost.test' } })).toBe(0);
+    // Everybody else signs in verified, as the demo always has — but Citra, registered today (P19.12-T2,
+    // `registered-accounts-fixture.ts`), who signed in by registering and has not opened the link either.
+    expect(await col('users').countDocuments({
+      emailVerifiedAt: null, email: { $nin: ['unverified@agencyboost.test', 'citra.baru@agencyboost.test'] },
+    })).toBe(0);
   });
 
   it('P11-T7 the demo people have their own pronouns, so coaching writes she and he; the operators keep they', async () => {

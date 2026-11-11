@@ -363,6 +363,52 @@ describe('P18.8-T3 the notices of joining by invite and of a transfer (ADR-0170)
   });
 });
 
+describe('P19.12-T4 the notices of a leader change (ADR-0247)', () => {
+  const ID = readerIn('id');
+
+  it('P19.12-T4 AC-2 a move made at once reads by whom it is for — the person, the leader they left, the one they joined — in both languages', () => {
+    const base = { memberName: 'Maya Anggraini', toLeaderName: 'Hendra Gunawan', reason: null };
+    expect(describeNotification(NotificationTemplate.MEMBER_LEADER_CHANGED, { ...base, audience: 'member' })).toEqual({
+      title: 'You now report to Hendra Gunawan', detail: 'Everybody under you moved with you, and your history stays with you.',
+    });
+    expect(describeNotification(NotificationTemplate.MEMBER_LEADER_CHANGED, { ...base, audience: 'from_leader' })).toEqual({
+      title: 'Maya Anggraini moved to Hendra Gunawan’s unit', detail: 'Everybody under them moved too. Their history stays with them.',
+    });
+    expect(describeNotification(NotificationTemplate.MEMBER_LEADER_CHANGED, { ...base, audience: 'to_leader', reason: 'Closer to your office' }))
+      .toEqual({ title: 'Maya Anggraini now reports to you', detail: 'Closer to your office' });
+    expect(describeNotification(NotificationTemplate.MEMBER_LEADER_CHANGED, { ...base, audience: 'member' }, ID)).toEqual({
+      title: 'Sekarang Anda melapor ke Hendra Gunawan',
+      detail: 'Semua orang di bawah Anda ikut pindah, dan riwayat Anda tetap bersama Anda.',
+    });
+    expect(describeNotification(NotificationTemplate.MEMBER_LEADER_CHANGED, { ...base, audience: 'to_leader' }, ID).title)
+      .toBe('Maya Anggraini sekarang melapor kepada Anda');
+    expect(TEMPLATE_CHANNELS[NotificationTemplate.MEMBER_LEADER_CHANGED]).toEqual(['in_app', 'email']);
+    expect(IN_APP_TEMPLATES).toContain(NotificationTemplate.MEMBER_LEADER_CHANGED);
+  });
+
+  it('P19.12-T4 AC-3 a leader’s move elsewhere says where to; its answers: approved, the new leader, and closed', () => {
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_RECEIVED, {
+      kind: 'move', requesterName: 'Agus Prasetyo', memberName: 'Dimas Pratama', toLeaderName: 'Yosef Tambunan',
+    }, ID)).toEqual({
+      title: 'Agus Prasetyo meminta memindahkan Dimas Pratama ke unit Yosef Tambunan',
+      detail: 'Setujui atau tolak di All Members, pada tab Pending.',
+    });
+    const decided = { memberName: 'Dimas Pratama', toLeaderName: 'Yosef Tambunan', kind: 'move' };
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, decision: 'approved', audience: 'requester' }))
+      .toEqual({ title: 'Your request to move Dimas Pratama was approved', detail: 'They report to Yosef Tambunan now, with everybody under them.' });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, decision: 'approved', audience: 'to_leader' }))
+      .toEqual({
+        title: 'Dimas Pratama joined your unit',
+        detail: 'The office approved the move. Everybody under them came too, with their history.',
+      });
+    expect(describeNotification(NotificationTemplate.TRANSFER_REQUEST_DECIDED, { ...decided, decision: 'cancelled', audience: 'requester' }, ID))
+      .toEqual({
+        title: 'Permintaan Anda untuk memindahkan Dimas Pratama ditutup',
+        detail: 'Dia sudah dipindahkan langsung ke leader lain sejak Anda mengajukannya.',
+      });
+  });
+});
+
 /**
  * **P18.10-T5 AC-4 — the inbox in the reader's language** (ADR-0179 §7): every row composed when it is read, in the
  * reader's language, so a notice stored before the phase reads in it too. A name and a reason in the payload are shown

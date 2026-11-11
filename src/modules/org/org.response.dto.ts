@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { DirectoryMember, DirectoryPage, MemberPersonal, MemberSearchHit } from './directory.service';
 import type { MemberPhone } from './member-phone.service';
+import type { InvitationState } from './invitation-state';
 import type { Gender, WorkStatus } from '@/domain/constants';
 import type { GroupSummary, MemberTags } from './group.service';
 import type { KpmDirectoryEntry, LeaderChoice, JoinState } from './onboarding.service';
@@ -12,6 +13,7 @@ import type { LeaderLimitAction, LeaderLimitRequestStatus } from './leader-limit
 import type { InvitePreview, MyLeaderCode } from './leader-code.service';
 import type { OrgTreeNode, OrgTreeLeader, OrgTree } from './org-tree.service';
 import type { HierarchyRole, MembershipStatus } from './membership.schema';
+import { PendingMoveDto } from './leader-change.response.dto';
 
 /**
  * The organisation module's response shapes, as documented classes.
@@ -64,6 +66,13 @@ export class MemberPersonalDto implements MemberPersonal {
 
   @ApiProperty({ type: String, nullable: true, enum: ['full_time', 'part_time'], description: 'How they work in this office.' })
   workStatus!: WorkStatus | null;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281211002200',
+    description: 'Their WhatsApp number as stored, `+62` and its digits; `null` is *Not recorded*. The account’s: the '
+      + 'number they see on their own profile.',
+  })
+  phone!: string | null;
 
   @ApiProperty({
     type: String, nullable: true, example: 'Prudential',
@@ -160,6 +169,15 @@ export class DirectoryMemberDto implements DirectoryMember {
   removedAt!: string | null;
 
   @ApiProperty({
+    type: String, enum: ['signed_in', 'invited', 'not_invited'],
+    description:
+      'Whether they have been invited, and have signed in: `signed_in` once the account has signed in; before that '
+      + '`invited` when an invitation went (*Diundang*), else `not_invited` (*Belum diundang*). An `active` member who '
+      + 'has never signed in is shown by this, not as *Aktif*; `status` is unchanged by it.',
+  })
+  invitation!: InvitationState;
+
+  @ApiProperty({
     type: String, nullable: true, example: '2026-09-30',
     description:
       'The office date the person **came back** to this office, if they did: on a live membership that follows a '
@@ -192,11 +210,21 @@ export class DirectoryMemberDto implements DirectoryMember {
   })
   lastCoachedDays?: number | null;
 
-  @ApiProperty({ type: Boolean, description: 'May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless.' })
+  @ApiProperty({ type: Boolean, description: 'May **this viewer** change this person’s rung at all: `roleChoices` holds more than their own. Decides what is offered, never what is allowed — the API refuses regardless.' })
   canChangeRole!: boolean;
 
-  @ApiProperty({ type: Boolean, description: 'May they involve the AB rung. The office only — a leader cannot make somebody their own peer.' })
+  @ApiProperty({ type: Boolean, description: 'May they put this person on a senior (AB) rung: one is among `roleChoices`. The Owner and an Admin, and a direct leader who stands on one themselves.' })
   canPromoteToAb!: boolean;
+
+  @ApiProperty({
+    type: [String],
+    example: ['AGENT', 'AAB', 'AB'],
+    description: 'The rungs this viewer may put them on, by ladder code, junior first, their own always among them: the Owner and an Admin every rung (never on the office’s owner), a direct leader any rung no higher than their own.',
+  })
+  roleChoices!: string[];
+
+  @ApiProperty({ type: Boolean, description: 'May this viewer change who they report to (`PUT /members/:id/leader`): the Owner and an Admin anybody active but the office’s owner, a leader their direct reports.' })
+  canChangeLeader!: boolean;
 
   @ApiProperty({ type: Boolean, description: 'May they remove this person. False for yourself, for the office root, and for anybody already removed.' })
   canRemove!: boolean;
@@ -204,8 +232,8 @@ export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({
     type: () => MemberPersonalDto, required: false,
     description: 'On `GET /members/:membershipId` only, and only to the office’s Owner, an Admin, or the person '
-      + 'themselves (ADR-0158 §6): their birth date, gender, company join month and work status. Absent on '
-      + 'the roster and on a leader’s read.',
+      + 'themselves (ADR-0158 §6): their birth date, gender, company join month and work status, and their WhatsApp '
+      + 'number (ADR-0248 §2). Absent on the roster and on a leader’s read.',
   })
   personal?: MemberPersonal;
 }
@@ -457,9 +485,24 @@ export class TeamMemberDto implements TeamMember {
   @ApiProperty({ type: Number })
   directCount!: number;
 
+  @ApiProperty({ type: Number, description: 'Everybody active below them: who moves with them to another leader.' })
+  subtreeCount!: number;
+
   @ApiProperty({ type: Boolean, description: "Whether this viewer may change *this* person's role. Sent rather than inferred, because the rule is a server rule and the screen should not carry a second copy of it that can drift." })
   canChangeRole!: boolean;
 
+  @ApiProperty({
+    type: [String],
+    example: ['AGENT', 'AAB', 'AB'],
+    description: 'The rungs this viewer may put them on, by ladder code, junior first, their own always among them: a direct leader any rung no higher than their own — an AB leader Agent, AAB and AB.',
+  })
+  roleChoices!: string[];
+
+  @ApiProperty({ type: Boolean, description: 'May this viewer move them to another leader: never the office’s owner.' })
+  canChangeLeader!: boolean;
+
+  @ApiProperty({ type: PendingMoveDto, nullable: true, description: 'A move this viewer asked the Owner or an Admin for, still waiting; `null` when none.' })
+  pendingTransfer!: PendingMoveDto | null;
 }
 
 export class RoleChangeEntryDto implements RoleChangeEntry {

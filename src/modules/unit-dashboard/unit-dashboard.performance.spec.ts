@@ -159,8 +159,10 @@ describe('the Unit Dashboard, measured (P15-T1 AC-8)', () => {
     expect(view.yourUnit.rows).toHaveLength(1);
     expect(view.units).toHaveLength(UNITS);
     expect(view.units.map((u) => u.members.length)).toEqual(Array(UNITS).fill(PER_UNIT));
+    // P19.12-T6: the AABs are the reader's *Grup langsung* outside Your Unit, and no AB is below them.
     expect(view.tiles.team).toEqual({
       total: 1 + UNITS * (PER_UNIT + 1), direct: 1, units: UNITS, underUnits: UNITS * PER_UNIT, newHires: 0,
+      aab: UNITS * (PER_UNIT + 1), ab: 0,
     });
   });
 
@@ -172,7 +174,8 @@ describe('the Unit Dashboard, measured (P15-T1 AC-8)', () => {
     expect(large.queries.sort()).toEqual(small.queries.sort());
     // eslint-disable-next-line no-console
     console.log(`  unit dashboard: ${large.queries.length} queries per read — ${large.queries.join(', ')}`);
-    expect(large.queries.length).toBeLessThanOrEqual(30);
+    // 31 since P19.12-T6: the head's own groups, read once whatever the roster, for *Grup informal* (ADR-0249).
+    expect(large.queries.length).toBeLessThanOrEqual(31);
     // The read entries are one insert, whatever the roster: never one per member shown.
     expect(large.queries.filter((q) => q.startsWith('auditLog.')).length).toBeLessThanOrEqual(1);
   });

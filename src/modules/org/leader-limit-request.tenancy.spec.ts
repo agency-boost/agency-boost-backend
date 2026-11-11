@@ -264,9 +264,9 @@ describe('P18.5-T2 — a leader past the limit waits for AgencyBoost', () => {
     it('is refused wherever the write would be: an AAB asking to make somebody an AB, or for a peer’s member', async () => {
       await expect(service.create(await as(KPM_A, aab), agent, { action: 'promote', orgLevelCode: 'AB' }))
         .rejects.toMatchObject({ code: 'ORG_ROLE_CHANGE_NOT_PERMITTED' });
-      // Budi reports to the Owner, not to Sari.
+      // Budi reports to the Owner, not to Sari: outside her downline, so 404 — a refusal would confirm the id (P19.12).
       await expect(service.create(await as(KPM_A, aab), other, promote))
-        .rejects.toMatchObject({ code: 'ORG_ROLE_CHANGE_NOT_PERMITTED' });
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('the Owner lists every request of the office; an AAB the ones they asked', async () => {

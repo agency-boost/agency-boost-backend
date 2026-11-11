@@ -290,6 +290,16 @@ const config: Config = {
      */
     './src/modules/notifications/mail-provider.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
+     * Phase 19.12 T1 (ADR-0244): every email through Resend. The client builds the request and reads the refusal, the
+     * adapter decides what is retried, how fast a burst leaves and what start-up does with a refused key, and the two
+     * small modules choose the adapter and the address. A branch wrong here is an email sent twice, a key in a log, or
+     * production refusing to boot; held whole, as the provider choice is. All four measured 100 the day they landed.
+     */
+    './src/modules/notifications/resend-client.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/notifications/resend.adapter.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/notifications/recipient-address.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    './src/modules/notifications/email-channel.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    /*
      * ADR-0184: the workbook reader and writer, the ZIP guard in front of them, and the upload interceptor both imports
      * receive a file through. A branch wrong in the guard is a zip bomb unpacked; held whole, as the asset sniff is. It
      * measured 100 on every figure the day it landed.
