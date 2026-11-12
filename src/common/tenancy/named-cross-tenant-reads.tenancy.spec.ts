@@ -57,6 +57,12 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*+ Add agent* (P18.8-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
       + 'company — the insurer issued the code and spans offices — answered as a boolean, never a row, an office or a name',
   },
+  'tenants/roster-import.service.ts': {
+    pendingCodeAcrossTenants:
+      'the people import\'s WhatsApp invitation for an Agent row with no email (P19.12-T7, ADR-0250): the same check '
+      + '*+ Add agent* makes, so the preview refuses a code already waiting anywhere in the company — a boolean, never a '
+      + 'row, an office or a name',
+  },
   'org/leader-limit.ts': {
     countPerOfficeAcrossTenants:
       '*Leaders used* per office on the Super Admin\'s offices list (P13.2-T3, ADR-0113): counts, never '
@@ -122,6 +128,10 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*All members* and a KPM\'s *Anggota* (P19.4-T3 AC-1, ADR-0207 §2, §4): every membership of the offices named, the '
       + 'listed fields alone, by the Super Admin who is in none — audited per read in the platform\'s log and each KPM\'s; and '
       + 'the leaders of the page\'s rows, for their names; and *KPM & data*\'s member tiles, live memberships counted',
+    liveMembershipCountsPerUserAcrossTenants:
+      '*All members* › *Akun terdaftar* (P19.12-T2 AC-1, ADR-0245 §1): how many live memberships each account holds in '
+      + 'any office, for *Tanpa KPM*, *Punya KPM* and each row\'s *n KPM*, by the Super Admin who is in none — a count '
+      + 'per account, never an office, a row or a name; audited per read in the platform\'s log',
   },
   'reporting/platform/platform-reads.controller.ts': {
     kpmComparisonAcrossTenants:

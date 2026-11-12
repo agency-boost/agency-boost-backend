@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { baseSchemaOptions } from '@/common/schema/base.schema';
-import { DeliveryStatus, NotificationChannel } from './notification.types';
+import { DeliveryRecord, NotificationChannel } from './notification.types';
 
 export type NotificationDocument = HydratedDocument<Notification>;
 
@@ -22,9 +22,12 @@ export class Notification {
   @Prop({ type: Object, default: {} })
   payload!: Record<string, unknown>;
 
-  /** Per-channel delivery state, so a silent email failure is visible, not assumed. */
+  /**
+   * Per-channel delivery state, so a silent email failure is visible, not assumed. A free-form object, so the
+   * provider's message id (P19.12-T1, ADR-0244) is one more field on it and needed no migration.
+   */
   @Prop({ type: Object, default: {} })
-  delivery!: Record<NotificationChannel, { status: DeliveryStatus; at?: Date; error?: string }>;
+  delivery!: Record<NotificationChannel, DeliveryRecord>;
 
   @Prop({ type: Date, default: null })
   readAt!: Date | null;

@@ -57,10 +57,49 @@ export const ROSTER_ROW_WORDS = messages('modules/tenants roster rows', {
     en: `The upline's row (${code}) is skipped, so this one is too.`,
     id: `Baris upline ${code} dilewati, jadi baris ini juga dilewati.`,
   }),
-  /** A new person's row with no email (ADR-0205 §7): an account signs in by it, and the invitation goes there. */
+  /**
+   * A new person's row with no email (ADR-0205 §7): an account signs in by it, and the invitation goes there. Since
+   * ADR-0250 §4 only where the reader cannot invite by WhatsApp; an Agent's row otherwise is invited there.
+   */
   noEmail: {
     en: 'No email: they cannot be invited, so the row is skipped.',
     id: 'Tanpa email: belum bisa diundang, jadi baris ini dilewati.',
+  },
+  /**
+   * **A new leader's row with no email** (P19.12-T7 AC-4; ADR-0250 §4): only the rung an invitation joins at — `entry`,
+   * the ladder's first, *Agent* — is invited by WhatsApp; anybody else signs in by email.
+   */
+  noEmailNotEntry: ({ entry }: { entry: string }) => ({
+    en: `No email: only an ${entry} can be invited on WhatsApp, so the row is skipped. Fill in their email.`,
+    id: `Tanpa email: hanya ${entry} yang bisa diundang lewat WhatsApp, jadi baris ini dilewati. Isi email-nya.`,
+  }),
+  /** **An Agent's row with neither an email nor a WhatsApp number** (ADR-0250 §4): no way to reach them. */
+  noEmailNoWhatsApp: {
+    en: 'No email and no WhatsApp number: they cannot be invited, so the row is skipped. Fill in their email, or their '
+      + 'WhatsApp number to invite them on WhatsApp.',
+    id: 'Tanpa email dan nomor WhatsApp: belum bisa diundang, jadi baris ini dilewati. Isi email-nya, atau nomor '
+      + 'WhatsApp-nya untuk mengundangnya lewat WhatsApp.',
+  },
+  /**
+   * **Invited on WhatsApp** (P19.12-T7 AC-4; ADR-0250 §4): an Agent's row with no email, a WhatsApp number and a leader
+   * upline. *+ Tambah agent*'s invitation (ADR-0170): a link to register, where they choose their own email and password.
+   */
+  invitedByWhatsApp: {
+    en: 'No email: invited on WhatsApp instead. They register through the link with their own email and password.',
+    id: 'Tanpa email: diundang lewat WhatsApp. Dia mendaftar lewat tautannya dengan email dan kata sandinya sendiri.',
+  },
+  /**
+   * The cells an invitation does not carry (ADR-0250 §4): registration asks the person for them. `fields`, the header
+   * names of the cells the row gave, joined.
+   */
+  detailsAtRegistration: ({ fields }: { fields: string }) => ({
+    en: `${fields} not kept: they give their own when they register.`,
+    id: `${fields} tidak disimpan: dia mengisinya sendiri saat mendaftar.`,
+  }),
+  /** An invitation the commit could not make for a reason it has no sentence for (logged). */
+  inviteNotMade: {
+    en: 'The WhatsApp invitation could not be made. Invite them with + Add agent on New Hires.',
+    id: 'Undangan WhatsApp tidak dapat dibuat. Undang lewat + Tambah agent di New Hires.',
   },
   /** The update of the office's Owner that would change their rung (`RoleChangeService`'s refusal, as a row's reason). */
   ownerRole: {
@@ -76,6 +115,22 @@ export const ROSTER_ROW_WORDS = messages('modules/tenants roster rows', {
   cell: ({ column, problem }: { column: string; problem: string }) => ({
     en: `${column}: ${problem}`,
     id: `${column}: ${problem}`,
+  }),
+  /**
+   * **An optional cell left empty** (P19.12-T7 AC-2; ADR-0250 §2): `column` its header, `problem` what was wrong with
+   * it. The row is imported or updated without it.
+   */
+  cellBlanked: ({ column, problem }: { column: string; problem: string }) => ({
+    en: `${column}: ${problem} Left empty; the rest of the row is imported.`,
+    id: `${column}: ${problem} Dikosongkan; sisa barisnya tetap masuk.`,
+  }),
+  /**
+   * **What a row leaves empty** (P19.12-T7 AC-3; ADR-0250 §3): `fields`, the header names of the person's details the
+   * row and the record both lack, joined. A new person's, or an update's that nothing stored fills.
+   */
+  missingDetails: ({ fields }: { fields: string }) => ({
+    en: `Incomplete: no ${fields}. Import the row again with them to fill them in.`,
+    id: `Data belum lengkap: ${fields} kosong. Impor ulang barisnya untuk melengkapi.`,
   }),
   notAPhone: ({ value }: { value: string }) => ({
     en: `"${value}" is not a WhatsApp number.`,

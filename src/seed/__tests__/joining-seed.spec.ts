@@ -107,8 +107,11 @@ describe('P18.8-T3 the adding-an-agent seed — a run at 10:00 on 27 October 202
 
   it('P18.8-T3 Seed the Owner has Agus’s transfer request for Raka Aditama, who still reports to Satria; Agus sees it as his', async () => {
     const queue = await transfers.queue(await as('owner@kpm0417.test', { owner: true }));
-    expect(queue.map((t) => [t.member.name, t.from?.name, t.to.name, t.requestedBy.name, t.requestedName])).toEqual([
-      ['Raka Aditama', 'Satria Nugraha', 'Agus Prasetyo', 'Agus Prasetyo', 'Raka Aditama'],
+    // *+ Add agent*'s request; beside it, since P19.12-T4, Agus's move of Dimas (`leader-change-fixture.ts`).
+    expect(queue.map((t) => [t.kind, t.member.name, t.from?.name, t.to.name, t.requestedBy.name, t.requestedName])).toEqual([
+      // Oldest first: Dimas's two days ago, Raka's yesterday.
+      ['move', 'Dimas Pratama', 'Agus Prasetyo', 'Yosef Tambunan', 'Agus Prasetyo', null],
+      ['add_agent', 'Raka Aditama', 'Satria Nugraha', 'Agus Prasetyo', 'Agus Prasetyo', 'Raka Aditama'],
     ]);
     expect((await memberOf('raka@kpm0417.test')).leaderId).toBe(String((await memberOf('satria@kpm0417.test'))._id));
     // P18.8-T8 M3: Agus sees the name he typed, and nothing of Satria's unit.
@@ -116,7 +119,7 @@ describe('P18.8-T3 the adding-an-agent seed — a run at 10:00 on 27 October 202
     expect(mine.map((t) => [t.requestedName, t.to.name, t.status])).toEqual([['Raka Aditama', 'Agus Prasetyo', 'pending']]);
     expect(JSON.stringify(mine)).not.toContain('Satria');
     const told = await col('notifications').find({ templateId: 'transfer_request.received' }).toArray();
-    expect(told.map((n) => n.payload.memberName)).toEqual(['Raka Aditama', 'Raka Aditama']);
+    expect(told.map((n) => n.payload.memberName).sort()).toEqual(['Dimas Pratama', 'Dimas Pratama', 'Raka Aditama', 'Raka Aditama']);
   });
 
   it('P18.8-T3 Seed Putri and Fajar stay leaderless, so + Add agent with their codes links them', async () => {
@@ -130,7 +133,9 @@ describe('P18.8-T3 the adding-an-agent seed — a run at 10:00 on 27 October 202
     expect(again.joining.written).toBe(0);
     expect(first.joining.written).toBe(3);
     expect(await col('memberInvites').countDocuments({})).toBe(2);
-    expect(await col('transferRequests').countDocuments({})).toBe(1);
-    expect(await col('notifications').countDocuments({ templateId: 'transfer_request.received' })).toBe(2);
+    expect(await col('transferRequests').countDocuments({ kind: { $ne: 'move' } })).toBe(1);
+    // P19.12-T4: Agus's waiting move, written once too.
+    expect(await col('transferRequests').countDocuments({ kind: 'move', status: 'pending' })).toBe(1);
+    expect(await col('notifications').countDocuments({ templateId: 'transfer_request.received' })).toBe(4);
   }, RUN_MS);
 });

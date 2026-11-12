@@ -35,8 +35,8 @@ const PLAN = {
 };
 const UP = { key: 'up', label: 'Uang pertanggungan', labelSyariah: 'Santunan asuransi', type: 'money', quickAmounts: [100_000_000_00] };
 const PLANS = [
-  { name: 'Silver', highlights: [{ label: 'Kamar', value: 'Rp 1 jt/hari' }] },
-  { name: 'Gold', highlights: [{ label: 'Kamar', value: 'Rp 2 jt/hari' }], popular: true },
+  { name: 'Silver', highlights: [{ label: 'Kamar', value: 'Rp 1 Jt/hari' }] },
+  { name: 'Gold', highlights: [{ label: 'Kamar', value: 'Rp 2 Jt/hari' }], popular: true },
 ];
 const FAQ = [{ question: 'Ada masa tunggu?', answer: 'Ya, 30 hari.\nKecuali kecelakaan.' }];
 const DETAIL = [{

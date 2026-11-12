@@ -5,7 +5,7 @@ import { rateOver } from './rate';
 /**
  * **`ACTIVATION_3M` and `ACTIVATION_3M_PCT`** (ADR-0171 §2, ADR-0173; P18.8-T6 AC-1, AC-2; amended by UI V1, 2026-10-30,
  * the owner's D-24 – D-26 and UI-023; `metrics-and-definitions.md`, *3M activation*) — whether a new hire made their
- * first sale (*pecah telor*) by day 90 of joining, and the share of the decided ones who did. **Defined here once**:
+ * first sale (*pecah telor*) by day 90 of joining, and the share of the due ones who did. **Defined here once**:
  * `/new-hires`, the lock written on the membership, the Strategic Leader Forum's *3M new agent %* row and the seed all
  * call these. They replace `NEW_AGENT_3M_ACTIVE_PCT`, which read a hire's four calendar months of the production file
  * (retired, ADR-0171 §2).
@@ -16,8 +16,9 @@ import { rateOver } from './rate';
  *
  * - **a first sale on or before day 90 is *activated* at once** — decided by the sale (rule A), not on day 91;
  * - **past day 90 with none by then, *not activated*** — and a sale after day 90 does not change that: it makes them
- *   *Teraktivasi* in amber (`activated_late`, *lewat 3M*), **in neither part of the share**;
- * - **otherwise, in progress** — inside the 90 days with no sale, in neither part either.
+ *   *Teraktivasi* in amber (`activated_late`, *lewat 3M*), **in the share's denominator and not its numerator**
+ *   (P19.11-T2 AC-2, UX-4; ADR-0239, amending ADR-0180 §6's rule A, which left them out of both);
+ * - **otherwise, in progress** — inside the 90 days with no sale, not yet due, and in neither part.
  *
  * **Kept once day 90 is over** (`activation3MDecided`). The membership keeps the result the records gave at the end of
  * day 90 (`memberships.activation3M`), and a kept result is the answer from then on, whatever is recorded later — a
@@ -147,24 +148,33 @@ export interface Activation3MOutcome {
 
 /** **`ACTIVATION_3M_PCT`** over a set of new hires: how many of each, and the share. */
 export interface Activation3MShare {
-  /** Activated by day 90: the numerator, and part of the denominator. */
+  /** A first sale by day 90 (`activated`): the numerator, and part of the denominator. */
   activated: number;
-  /** Past day 90 with no first sale: the rest of the denominator. */
+  /** Past day 90 with no first sale: part of the denominator. */
   notActivated: number;
-  /** A first sale after day 90 (`activated_late`): *Teraktivasi*, and in neither part. */
+  /** A first sale after day 90 (`activated_late`): *Teraktivasi* in amber — part of the denominator, not the numerator. */
   late: number;
-  /** Inside the 90 days with no first sale: not decided yet, and in neither part (rule A). */
+  /** Day 90 not over yet and no first sale: not due yet, so in neither part. */
   inProgress: number;
-  /** `activated ÷ (activated + not activated)`, a whole percent (`rateOver`); `null` while nobody is decided. */
+  /** `activated ÷ (activated + late + not activated)`, a whole percent (`rateOver`); `null` while nobody is due. */
   pct: number | null;
 }
 
 /**
- * **`ACTIVATION_3M_PCT`** (rule A, UI V1): activated by day 90 ÷ the new hires whose result is decided — activated by
- * day 90, or past it with no first sale. Inside the 90 days without a sale is not counted yet (Arief 2 of 2 is 100%,
- * not 2 of 3), and a first sale after day 90 is in neither part (Lukman, day 96). A whole percent, as every share the
- * product serves (`rateOver`) — `null` while none of them is decided, never 0%. Whose results they are — a unit, an
- * AAB's group, the tree, the office — is the caller's set.
+ * **`ACTIVATION_3M_PCT`** (P19.11-T2 AC-2, UX-4; ADR-0239, amending rule A of UI V1): of the new hires who are **due**,
+ * the share who made their first sale (*pecah telor*) by day 90.
+ *
+ * - **Due** — the denominator: day 90 is over, activated or not (`activated`, `not_activated`), **or** a first sale at
+ *   any time, on time or late (`activated`, `activated_late`). So a late first sale counts against the share, where rule
+ *   A left it out of both parts and the share could not fall below what was on time.
+ * - **Not due** — in neither part: a hire whose 90 days are not over (day 90 included: **a sale on day 90 is on time**,
+ *   so the day is still theirs) with no first sale yet. Arief's Tari, day 53 and none: 2 of 2, 100%, not 2 of 3.
+ * - **The numerator**: a first sale on or before day 90. Agus's own unit — Dimas, Indah and Siti on time, Lukman on day
+ *   96 — is 3 of 4, **75%**.
+ *
+ * A whole percent, as every share the product serves (`rateOver`) — `null` while nobody is due, never 0%. Whose results
+ * they are — a unit, an AAB's group, the tree, the office — is the caller's set; a set's figure is always counted over
+ * its own hires, never averaged from smaller sets'.
  */
 export function activation3MShare(hires: readonly Activation3MOutcome[]): Activation3MShare {
   let activated = 0;
@@ -178,7 +188,7 @@ export function activation3MShare(hires: readonly Activation3MOutcome[]): Activa
   }
   return {
     activated, notActivated, late, inProgress: hires.length - activated - notActivated - late,
-    pct: rateOver(activated, activated + notActivated).pct,
+    pct: rateOver(activated, activated + late + notActivated).pct,
   };
 }
 

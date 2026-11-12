@@ -19,6 +19,18 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannel[] = ['in_app', 
  */
 export type DeliveryStatus = 'pending' | 'held' | 'sent' | 'failed' | 'suppressed';
 
+/** One channel's delivery, as `notifications.delivery.<channel>` records it. */
+export interface DeliveryRecord {
+  status: DeliveryStatus;
+  at?: Date;
+  error?: string;
+  /**
+   * **The provider's id for a message it accepted** (P19.12-T1, ADR-0244): Resend's, by which its dashboard finds the
+   * email and what became of it after it left. Absent for the in-app row and for a sender that answers none.
+   */
+  providerMessageId?: string;
+}
+
 /**
  * Every template the product sends. Adding one here forces a decision about which
  * channels it uses, rather than defaulting silently to all of them.
@@ -38,6 +50,12 @@ export const NotificationTemplate = {
   TRANSFER_REQUEST_DECIDED: 'transfer_request.decided',
   MEMBER_REMOVED: 'member.removed',
   ROLE_CHANGED: 'member.role_changed',
+  /*
+   * **Somebody was moved to another leader, at once** (P19.12-T4; ADR-0247 §2): the Owner's or an Admin's *Ganti*, or a
+   * leader moving one of their people inside their own tree. To the person, the leader they left and the leader they
+   * joined, each in their own words (`audience`). A move by request is `TRANSFER_REQUEST_DECIDED`.
+   */
+  MEMBER_LEADER_CHANGED: 'member.leader_changed',
   ADMIN_ACCESS_CHANGED: 'member.admin_access_changed',
   /*
    * AgencyBoost's answer to a leader past the office's limit (ADR-0157 §3), to whoever asked. The payload is the
@@ -166,6 +184,7 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.TRANSFER_REQUEST_DECIDED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],
   [NotificationTemplate.ROLE_CHANGED]: ['in_app', 'email'],
+  [NotificationTemplate.MEMBER_LEADER_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.ADMIN_ACCESS_CHANGED]: ['in_app', 'email'],
   [NotificationTemplate.LEADER_LIMIT_REQUEST_APPROVED]: ['in_app', 'email'],
   [NotificationTemplate.LEADER_LIMIT_REQUEST_DECLINED]: ['in_app', 'email'],
@@ -236,10 +255,18 @@ export interface SendRequest {
   readonly toAddress?: string;
 }
 
-/** A channel implementation. Adding WhatsApp means implementing this once. */
+/** What a channel's provider answered a send it accepted (P19.12-T1, ADR-0244). */
+export interface DeliveryReceipt {
+  readonly providerMessageId?: string;
+}
+
+/**
+ * A channel implementation. Adding WhatsApp means implementing this once. `send` resolves when the provider accepted
+ * the message, with its id where it gives one, and rejects with what it answered when it did not.
+ */
 export abstract class NotificationChannelAdapter {
   abstract readonly channel: NotificationChannel;
-  abstract send(to: SendRequest, rendered: RenderedMessage): Promise<void>;
+  abstract send(to: SendRequest, rendered: RenderedMessage): Promise<DeliveryReceipt | void>;
 }
 
 export interface RenderedMessage {

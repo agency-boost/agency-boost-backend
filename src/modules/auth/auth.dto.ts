@@ -40,10 +40,12 @@ export class RegisterDto {
   fullName!: string;
 
   @ApiProperty({
-    description: 'From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says.',
+    description:
+      'From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says; with '
+      + '`leaderCode`, the code’s office’s, and it may be left out.',
     example: '65f1a0c2e4b0a1b2c3d4e5f6',
   })
-  @ValidateIf((o: RegisterDto) => !o.inviteToken)
+  @ValidateIf((o: RegisterDto) => !o.inviteToken && !o.leaderCode)
   @IsMongoId()
   companyId!: string;
 
@@ -75,6 +77,23 @@ export class RegisterDto {
   @IsString()
   @MaxLength(200)
   inviteToken?: string;
+
+  /**
+   * **Registering on a leader's link** (ADR-0236 §1, P19.10-T1 AC-1): the code from `/register?code=…`, which the
+   * leader's link and QR carry. The account takes the code's office's insurer, and its membership there is made active
+   * under the code's leader at once — the code was the approval. A code that opens nothing is refused `410` before any
+   * account is made. Ignored beside `inviteToken`, which names its own leader.
+   */
+  @ApiPropertyOptional({
+    example: 'JOR417',
+    description: 'A leader’s code, from `/register?code=…`. Ignored beside `inviteToken`, which names its own leader.',
+  })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsOptional()
+  @IsString()
+  @MinLength(4)
+  @MaxLength(16)
+  leaderCode?: string;
 
   /*
    * What a person records (ADR-0158, P18.5-T4 AC-3), all four required at registration.

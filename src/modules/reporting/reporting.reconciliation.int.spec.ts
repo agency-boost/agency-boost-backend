@@ -364,7 +364,7 @@ describe('the Owner’s reporting reconciles with every surface that owns a figu
     const after = (await http().get('/kpm/overview').expect(200)).body;
     expect(after.composition.total).toBe(16);
     const analytics = (await http().get('/kpm/analytics').expect(200)).body as Analytics;
-    // P19.3-T3 AC-5: the leaver's 180 jt stays in the one total, on both pages; the rows count today's members.
+    // P19.3-T3 AC-5: the leaver's 180 Jt stays in the one total, on both pages; the rows count today's members.
     expect(after.production.ytd.achievedMinor).toBe(analytics.total.apeAnnual.achievedMinor);
     expect(analytics.agencies.reduce((n, a) => n + (a.apeAnnual.achievedMinor ?? 0), 0) + 180 * M)
       .toBe(analytics.total.apeAnnual.achievedMinor);

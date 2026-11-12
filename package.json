@@ -36,7 +36,7 @@
     "exceljs": "^4.4.0",
     "fflate": "^0.8.3",
     "luxon": "^3.5.0",
-    "mongoose": "^8.9.5",
+    "mongoose": "^8.24.7",
     "nestjs-pino": "^4.2.0",
     "nodemailer": "^10.2.1",
     "pdfmake": "^0.3.13",

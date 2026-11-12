@@ -31,10 +31,25 @@ const CASES: [entry: keyof typeof W, sentence: Message, id: string][] = [
   ['emailKept', W.emailKept, 'Email tidak diubah lewat impor: orangnya sendiri yang menggantinya, lewat tautan ke alamat baru.'],
   ['phoneKept', W.phoneKept, 'Nomor WhatsApp yang sudah tercatat tetap dipakai: orangnya sendiri yang menggantinya di profil.'],
   ['noWhatsApp', W.noWhatsApp, 'Tanpa nomor WhatsApp: masuk, tapi belum bisa diingatkan lewat WhatsApp.'],
+  // P19.12-T7 (ADR-0250): a bad optional cell left empty, what a row leaves out, and the invitation on WhatsApp.
+  ['cellBlanked', W.cellBlanked({ column: 'No. WhatsApp', problem: '"nomor saya" bukan nomor WhatsApp.' }),
+    'No. WhatsApp: "nomor saya" bukan nomor WhatsApp. Dikosongkan; sisa barisnya tetap masuk.'],
+  ['missingDetails', W.missingDetails({ fields: 'Tanggal lahir, Jenis kelamin' }),
+    'Data belum lengkap: Tanggal lahir, Jenis kelamin kosong. Impor ulang barisnya untuk melengkapi.'],
+  ['noEmailNotEntry', W.noEmailNotEntry({ entry: 'Agent' }),
+    'Tanpa email: hanya Agent yang bisa diundang lewat WhatsApp, jadi baris ini dilewati. Isi email-nya.'],
+  ['noEmailNoWhatsApp', W.noEmailNoWhatsApp,
+    'Tanpa email dan nomor WhatsApp: belum bisa diundang, jadi baris ini dilewati. Isi email-nya, atau nomor WhatsApp-nya '
+    + 'untuk mengundangnya lewat WhatsApp.'],
+  ['invitedByWhatsApp', W.invitedByWhatsApp,
+    'Tanpa email: diundang lewat WhatsApp. Dia mendaftar lewat tautannya dengan email dan kata sandinya sendiri.'],
+  ['detailsAtRegistration', W.detailsAtRegistration({ fields: 'Tanggal lahir' }),
+    'Tanggal lahir tidak disimpan: dia mengisinya sendiri saat mendaftar.'],
+  ['inviteNotMade', W.inviteNotMade, 'Undangan WhatsApp tidak dapat dibuat. Undang lewat + Tambah agent di New Hires.'],
 ];
 
 describe('P19.3-T4 AC-8 what each row comes to, in A3’s words', () => {
-  it.each(CASES)('P19.3-T4 AC-8 %s says A3’s line in Indonesian, and its source in English', (_entry, sentence, id) => {
+  it.each(CASES)('P19.3-T4 AC-8 / P19.12-T7 %s says A3’s line in Indonesian, and its source in English', (_entry, sentence, id) => {
     expect(indonesian(sentence)).toBe(id);
     expect(english(sentence)).toBeTruthy();
     if (_entry !== 'cell') expect(english(sentence)).not.toBe(id);
@@ -48,6 +63,13 @@ describe('P19.3-T4 AC-8 what each row comes to, in A3’s words', () => {
     expect(english(W.stillLeads({ count: 1 }))).toBe('1 person reports to them. Move them to another leader first.');
     expect(english(W.stillLeads({ count: 2 }))).toBe('2 people report to them. Move them to another leader first.');
     expect(english(W.uplineNotALeader({ leaders: ['AAB', 'AB'], rung: 'Agent' }))).toBe('The upline must be a leader (AAB or AB), not Agent.');
+  });
+
+  it('P19.12-T7 AC-2 AC-3 names the cell and the fields in English as well', () => {
+    expect(english(W.cellBlanked({ column: 'Tanggal lahir', problem: 'A date of birth must be at least 18 years ago.' })))
+      .toBe('Tanggal lahir: A date of birth must be at least 18 years ago. Left empty; the rest of the row is imported.');
+    expect(english(W.missingDetails({ fields: 'Waktu, Jenis kelamin' })))
+      .toBe('Incomplete: no Waktu, Jenis kelamin. Import the row again with them to fill them in.');
   });
 });
 

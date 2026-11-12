@@ -1,5 +1,6 @@
 import { formatNumber } from '@/common/format/format';
 import { refusals } from '@/common/i18n/sentence';
+import { PHONE_COUNTRY_PREFIX, PHONE_NATIONAL_DIGITS } from '@/domain/constants';
 
 /** A count in an Indonesian sentence: *1.250*. English keeps the number as the API always wrote it. */
 const idCount = (n: number) => formatNumber(n, undefined, 'id');
@@ -45,6 +46,11 @@ export const LEAD_REFUSALS = refusals('modules/leads', {
     contactEmail: {
       en: 'contact.email must be an email address.',
       id: 'contact.email harus berupa alamat email.',
+    },
+    /* P19.11-T3 AC-6 (UX-10): a changed number that `normalisePhone` cannot read, in the words a person's number gets. */
+    contactPhone: {
+      en: `contact.phone must be an Indonesian number: ${PHONE_NATIONAL_DIGITS.min} to ${PHONE_NATIONAL_DIGITS.max} digits after ${PHONE_COUNTRY_PREFIX}.`,
+      id: `contact.phone harus nomor Indonesia: ${PHONE_NATIONAL_DIGITS.min} sampai ${PHONE_NATIONAL_DIGITS.max} digit setelah ${PHONE_COUNTRY_PREFIX}.`,
     },
     /* The client's age and gender (P19.7-T1 AC-1; ADR-0224 §3): the shape here, the bounds `LEAD_AGE_OUT_OF_RANGE`'s. */
     ageShape: {

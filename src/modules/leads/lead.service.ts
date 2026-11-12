@@ -23,10 +23,10 @@ import { leadFlags, type LeadFlag } from './lead-attention';
 import { ageToday, ageWrite } from './lead-age';
 import { LEAD_REFUSALS } from './leads.messages';
 import type { LeadScope } from './lead.dto';
-import { checkLead, type CheckedLead } from './lead-input';
+import { checkContactPhone, checkLead, type CheckedLead } from './lead-input';
 import { isInMemorySort, ladderRanks, leadOrder, SAVED_ORDER, type LeadSortKey } from './lead-order';
 import {
-  byClosedAt, CLOSING_FIELDS, CLOSING_FILTER, closingOf, recruitmentPipelineFacets, type LeadClosing,
+  byClosedAt, byNextAction, CLOSING_FIELDS, CLOSING_FILTER, closingOf, recruitmentPipelineFacets, type LeadClosing,
 } from './lead-readings';
 import { LeadRepository } from './lead.repository';
 import type { LeadDocument, LeadType } from './lead.schema';
@@ -370,9 +370,11 @@ export class LeadService {
     const membershipId = this.me(ctx);
     // The body first, then whose it is: a refusal of the shape (400) comes before one of reach (404).
     const input = checkLead(body);
+    const contact = input.contact ?? { phone: null, email: null };
+    // A new lead has no number yet, so any number it is given must read as one (P19.11-T3 AC-6).
+    checkContactPhone(contact.phone, null);
     const ownerMembershipId = owner === undefined ? membershipId : await this.coachedOwner(ctx, owner);
     const day = await this.days.for(ctx);
-    const contact = input.contact ?? { phone: null, email: null };
 
     const now = this.clock.now();
     const created = await this.leads.create(ctx, {
@@ -518,6 +520,8 @@ export class LeadService {
     const membershipId = this.me(ctx);
     const input = checkLead(body, { partial: true });
     const lead = await this.reachable(ctx, id, 'lead:update', input.version, true);
+    // After the reach, so another office's lead is a 404 before anything about its number (P19.11-T3 AC-6).
+    if (input.contact) checkContactPhone(input.contact.phone, lead.contact?.phone ?? null);
     const next = this.merge(lead, input);
 
     const now = this.clock.now();
@@ -936,6 +940,38 @@ export class LeadService {
     const notes = own ? await this.proposalReadings!.notesOfLead(ctx, lead.ownerMembershipId, id) : [];
     const history = [...moves, ...notes].sort((a, b) => a.at.localeCompare(b.at));
     return { ...(await this.withOwnProposals(ctx, view)), history };
+  }
+
+  /**
+   * **One member's own open leads, as `/leads` draws them** (P19.11-T5 AC-3, AC-4; UX-13): the Personal Summary's
+   * *Leads yang perlu perhatian Anda*, which draws the Leads screen's own card and opens its sheet. **The list's row
+   * shape** — `view`, with the owner's proposals beside their own rows as `list` adds them, and none on anybody else's
+   * (decision 4) — so the two screens cannot draw one lead two ways.
+   *
+   * - **Open**: no outcome, not deleted, owned by `membershipId` — `LeadReadings.openOf`'s set, so the Summary's count
+   *   and its rows agree. A closed lead never appears.
+   * - **What needs attention first** (`byNextAction`; UXQ4 by its default): a dated next action first, the nearest on
+   *   top — an overdue one nearest of all — then the leads with none, the one registered first (waiting longest) first;
+   *   then the id, so two reads never shuffle.
+   * - **Every one**: the screen shows `SUMMARY.LEADS_SHOWN` and opens the rest in place (AC-2).
+   *
+   * **The caller decides who may read them, and records the read**: `SummaryService.of`, on `personal_summary:read`,
+   * hands rows only to a reader whose `lead:read` reaches the member, and `read` writes the one §3.5 entry for somebody
+   * else's. Nothing is checked or recorded here. `day` is the office's, which the caller already holds.
+   */
+  async openRowsOf(ctx: RequestContext, membershipId: string, day: OfficeDay): Promise<LeadView[]> {
+    const found = await this.leads.find(ctx, { ownerMembershipId: membershipId, outcome: null, deletedAt: null });
+    const rows = found
+      .map((row) => ({ row, id: String(row._id), registeredAt: row.dateRegistered?.getTime() ?? 0, nextActionDate: row.nextActionDate }))
+      .sort(byNextAction)
+      .map(({ row }) => row);
+    if (rows.length === 0) return [];
+    const names = await this.attribution(ctx, rows);
+    // The owner's own rows carry their proposals, as `list`'s do: one query for them all, none for a reader who is not.
+    const proposals = this.proposalReadings && membershipId === ctx.membershipId
+      ? await this.proposalReadings.ofLeads(ctx, membershipId, rows.map((row) => String(row._id)))
+      : new Map<string, LeadProposals>();
+    return rows.map((row) => ({ ...this.view(row, day, names), proposals: proposals.get(String(row._id)) ?? null }));
   }
 
   /**

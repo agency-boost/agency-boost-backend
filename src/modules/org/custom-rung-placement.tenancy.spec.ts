@@ -161,15 +161,18 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
       const sm = await place(KPM_A, 'SM', um);
       const leader = await as(KPM_A, um);
       const refusal = (rung: string) => `Only the office’s Owner or an Admin can change somebody’s role to or from ${rung}.`;
+      // P19.12-T4 AC-1 (ADR-0247 §1): a leader asking for a rung above their own is told they may set one up to theirs.
+      const above = (rung: string) =>
+        `You can set a role up to your own. Only the office’s Owner or an Admin can make somebody ${rung}.`;
 
       // Onto a senior rung: the one asked for.
       await expect(roles.change(leader, fa, 'SM')).rejects.toMatchObject({
-        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('SM'),
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: above('SM'),
       });
       await expect(roles.change(leader, fa, 'regional')).rejects.toMatchObject({
-        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('Regional Director'),
+        code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: above('Regional Director'),
       });
-      // Off one: the one they stand on — and, once the company takes it off the ladder, its code.
+      // Off one, standing above the leader: the one they stand on — and, once the company takes it off the ladder, its code.
       await expect(roles.change(leader, sm, 'FA')).rejects.toMatchObject({
         code: 'ORG_ROLE_CHANGE_NOT_PERMITTED', message: refusal('SM'),
       });
@@ -215,7 +218,7 @@ describe('OD-50 — placing a member on a custom rung by its code', () => {
     it('creates people on the company’s own rungs, the class from each tier', async () => {
       const csv = file(row('301', 'Sinta', 'SM'), row('302', 'Umar', 'um', '301'), row('303', 'Fajar', 'Fa', '302'));
       const preview = await roster.preview(ownerOf(KPM_A), KPM_A, csv);
-      expect(preview.counts).toEqual({ imported: 3, updated: 0, skipped: 0 });
+      expect(preview.counts).toEqual({ imported: 3, updated: 0, invited: 0, skipped: 0 });
       await roster.commit(ownerOf(KPM_A), KPM_A, csv);
 
       const made = await mongoose.model(Membership.name).find({ kpmId: KPM_A }).sort({ agentSeq: 1 }).lean().exec();

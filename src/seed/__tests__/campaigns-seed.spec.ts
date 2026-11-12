@@ -123,7 +123,7 @@ describe('Phase 18.2 the campaigns seed — a run at 10:00 on 10 October 2026 in
     expect(ticked).toEqual(['Agus Prasetyo', 'Dimas Pratama', 'Rina Wijaya'].sort());
     expect(view.mdrt.running).toBe(true);
     // The target as ADR-0167 §1 writes a rule's sum: compact where that is exact, in full where it would round.
-    expect(view.mdrt.tooltip).toMatch(/^Chasing MDRT \(Million Dollar Round Table\) this year — APE of Rp (\d{1,3}(\.\d{3})*(,\d)? (rb|jt|M)|\d{1,3}(\.\d{3})*) or more\.$/);
+    expect(view.mdrt.tooltip).toMatch(/^Chasing MDRT \(Million Dollar Round Table\) this year — APE of Rp (\d{1,3}(\.\d{3})*(,\d)? (rb|Jt|M)|\d{1,3}(\.\d{3})*) or more\.$/);
     const mdrt = (await wired.campaignStandingsReader.ofOffice(agus, { codes: ['MDRT_QUALIFICATION'] })).standings;
     expect(mdrt.filter((s) => s.status === 'qualified')).toHaveLength(1);
   });

@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
@@ -31,6 +31,16 @@ export interface GroupSummary {
    * running it, so the flag travels and the screen says both.
    */
   ownerHasLeft: boolean;
+  memberCount: number;
+}
+
+/** *+ Tambah ke grup*'s answer (ADR-0249 §4). */
+export interface GroupMembersAdded {
+  groupId: string;
+  name: string;
+  /** Tagged by this request; somebody already in the group is not counted again. */
+  added: number;
+  /** The group's active members now. */
   memberCount: number;
 }
 
@@ -301,6 +311,46 @@ export class GroupService {
       });
     }
     return this.tagsFor(ctx, membershipId);
+  }
+
+  /**
+   * ***+ Tambah ke grup*** (the client's message of 11 November 2026, item 7; ADR-0249 §4): **tag several members into one
+   * group at once** — the Unit Dashboard's *Grup informal* sheet, for the ABs below a leader not yet in their group.
+   *
+   * Everything is checked before anything is written: the group a live one of **this** office, and **every** id an active
+   * member of it — or `404`, the group's or the membership's, and nothing is tagged (another office's group or member, an
+   * archived group, somebody who left and a malformed id are indistinguishable). Then `$addToSet`, so somebody already in
+   * the group changes nothing; **one `member.tagged` entry per member it tagged**, before and after, as `tag` writes.
+   * Their other groups and their Core Leader tag are untouched. A tag grants nothing (P3-T9 AC-1).
+   */
+  async addMembers(ctx: RequestContext, groupId: string, membershipIds: readonly string[]): Promise<GroupMembersAdded> {
+    this.requireTenantAdmin(ctx);
+    const group = await this.find(ctx, groupId);
+    const wanted = [...new Set(membershipIds)];
+    if (!wanted.every((id) => isValidObjectId(id))) throw new NotFoundException('Membership');
+    const found = await this.members.find(ctx, { _id: { $in: wanted }, status: 'active' });
+    if (found.length !== wanted.length) throw new NotFoundException('Membership');
+
+    const id = String(group._id);
+    const tagging = found.filter((m) => !(m.groupIds ?? []).includes(id));
+    if (tagging.length > 0) {
+      await this.members.updateMany(
+        ctx, { _id: { $in: tagging.map((m) => String(m._id)) } }, { $addToSet: { groupIds: id } },
+      );
+      await this.audit.recordMany(ctx, tagging.map((m) => {
+        const before = m.groupIds ?? [];
+        return {
+          action: 'member.tagged',
+          targetCollection: 'memberships',
+          targetId: String(m._id),
+          targetMembershipId: String(m._id),
+          before: { groupIds: before, isCoreLeader: m.isCoreLeader ?? false },
+          after: { groupIds: [...before, id], isCoreLeader: m.isCoreLeader ?? false },
+        };
+      }));
+    }
+    const memberCount = await this.members.count(ctx, { groupIds: id, status: 'active' });
+    return { groupId: id, name: group.name, added: tagging.length, memberCount };
   }
 
   /**

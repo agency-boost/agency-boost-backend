@@ -177,6 +177,15 @@ export class CalendarTaskDto implements CalendarTaskView {
 
   @ApiProperty({ type: CalendarTaskCoachingDto, nullable: true })
   coaching!: CalendarTaskView['coaching'];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'Ticked done: a lead’s next action ticked from the Calendar, or a coaching action item the person '
+      + 'ticked. It stays on its due date — drawn struck through, never counted in *Tugas · n* — until it is unticked, '
+      + 'or, for a lead, until the lead holds a new next action. `false` while it is open.',
+  })
+  done!: boolean;
 }
 
 /** A compared member’s task while they hide their details (ADR-0110): its day alone, counted and never read. */
@@ -282,9 +291,9 @@ export class CalendarPeriodDto implements CalendarPeriodView {
     type: 'array',
     items: { oneOf: [{ $ref: getSchemaPath(CalendarTaskDto) }, { $ref: getSchemaPath(CalendarHiddenTaskDto) }] },
     description:
-      '**Tugas** (UI V1): the lead next actions and open coaching action items dated in the period, coaching first, '
-      + 'then by name — read from their sources now. For a compared member who hides their details, each is its day '
-      + 'alone, a count.',
+      '**Tugas** (UI V1): the lead next actions and coaching action items dated in the period, coaching first, then by '
+      + 'name — read from their sources now; a ticked one stays on its due date with `done: true`. For a compared member '
+      + 'who hides their details, each open one is its day alone, a count.',
   })
   tasks!: (CalendarTaskView | CalendarHiddenTaskView)[];
 

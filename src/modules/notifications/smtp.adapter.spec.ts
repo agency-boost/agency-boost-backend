@@ -182,6 +182,26 @@ describe('SMTP delivery (P4-T14)', () => {
       expect(verify).not.toHaveBeenCalled();
     });
 
+    it('P19.12-T1 AC-3 builds no transport and checks nothing when Resend is the provider, in production too', async () => {
+      /*
+       * The regression: only `log` gave a null transport, so with `MAIL_PROVIDER=resend` this adapter — constructed by
+       * Nest although not chosen — checked an empty SMTP_HOST at start-up, which in production is fatal.
+       */
+      process.env.NODE_ENV = 'production';
+      const adapter = make({
+        MAIL_TRANSPORT: undefined, MAIL_PROVIDER: 'resend', SMTP_HOST: undefined, SMTP_PORT: undefined, SMTP_USER: undefined,
+        SMTP_PASSWORD: undefined, RESEND_API_KEY: 're_test_key', MAIL_FROM: 'AgencyBoost <no-reply@notify.agencyboost.id>',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+      await expect(adapter.onModuleInit()).resolves.toBeUndefined();
+      expect(verify).not.toHaveBeenCalled();
+      await expect(adapter.send(
+        { userId: 'u1', templateId: NotificationTemplate.PASSWORD_RESET, payload: {} },
+        { subject: 'S', body: 'B' },
+      )).rejects.toThrow('the mail provider is resend: this adapter sends nothing');
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
     it('verifies when it is the chosen transport', async () => {
       verify.mockResolvedValueOnce(true);
       await make().onModuleInit();

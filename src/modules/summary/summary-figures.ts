@@ -41,7 +41,7 @@ export function periodFigures(
   return {
     targetMinor,
     actualMinor,
-    // Half up in integers (P18.9-T3, parity F-254): Rp 23 jt of Rp 40 jt is 58%, which the float read 57.
+    // Half up in integers (P18.9-T3, parity F-254): Rp 23 Jt of Rp 40 Jt is 58%, which the float read 57.
     attainmentPct: Math.min(PERFORMANCE.ATTAINMENT_PCT_CAP, wholePercent(actualMinor, targetMinor)),
     gapMinor: gap,
     overMinor: Math.max(0, actualMinor - targetMinor),
@@ -201,7 +201,10 @@ export interface FigureSource {
    * `typedBy` names them (S2). Kept as the code, and documented as that, in `metrics-and-definitions.md`.
    */
   provenance: 'imported' | 'corrected' | 'self_reported';
-  /** `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own. */
+  /**
+   * `YYYY-MM` — the month the figure is for, or whose year to date it is; `null` for the agent's own year to date. A month
+   * the member typed over the upload on the Summary (P19.11-T4) names that month.
+   */
   month: string | null;
   /**
    * **Who corrected it**, for a correction by hand — the Owner or an Admin at the month table, or a leader on
@@ -347,8 +350,9 @@ function figuresOf(input: GoalFiguresInput, officialOnly: boolean): OfficialGoal
 /**
  * **Whose figure a period's APE produced is** (P19.1-T4, the 6 November handover's UI-157; ADR-0195): the office's file
  * (`official`, imported or corrected), the member's own estimate — *perkiraan Anda*, typed on Goal Settings or the
- * Summary (`self_reported` above zero; a coach's typing is one too, ADR-0183) — or `none` yet. A month's own APE is
- * the office's or nothing: the estimate is the year to date (OD-250).
+ * Summary (`self_reported` above zero; a coach's typing is one too, ADR-0183) — or `none` yet. The year's estimate is
+ * the year to date (OD-250); **a month's own APE is the office's, the member's own figure typed over it on the Summary
+ * (`estimate`, P19.11-T4, `monthWithManual`), or nothing**.
  */
 export type ProductionBasis = 'official' | 'estimate' | 'none';
 
@@ -376,6 +380,58 @@ export function productionHeld(
   }
   const nothing = periodFigures(figures.targetMinor, 0, caseSizeMinor);
   return { production, withoutProduction: { gapMinor: nothing.gapMinor as number, policiesNeeded: nothing.policiesNeeded } };
+}
+
+/**
+ * **Which figure a month's realised APE is** (P19.11-T4; UX-12, UXQ2's default): the member's own, typed over the upload
+ * on their Summary (`manual`), the office's upload for the month (`uploaded`), or neither yet (`none`, *Belum diunggah*).
+ */
+export type MonthApeSource = 'manual' | 'uploaded' | 'none';
+
+/** *Bulanan*'s realised APE: which figure `actualMinor` is, and what lies under it (P19.11-T4). */
+export interface MonthRealised {
+  source: MonthApeSource;
+  /** **The office holds an upload for the month** — in force or not: what *Kembalikan ke data unggahan* goes back to. */
+  uploaded: boolean;
+  /** The member's own figure for the month, when there is one — always the one in force. `typedAt` ISO. */
+  manual: { minor: number; typedAt: string } | null;
+}
+
+/**
+ * **The month's figures with the member's own APE over the upload** (P19.11-T4; UX-12, UXQ2's default): **the manual
+ * figure, then the uploaded one, then *Belum diunggah*** — `manual ?? uploaded`. With a manual figure, `actualMinor` is
+ * it, and the attainment, *Sisa bulan ini* (`gapMinor`, never below 0), *Polis yang dibutuhkan* and `targetMet` are
+ * worked out from it by the same `periodFigures` — or `madeFigures` for a month whose year was made before it began —
+ * against the month's own target, which never moves with the month's figure (ADR-0056). Its source is `self_reported`
+ * for the month (typed in the app, ADR-0183), its `production` `estimate`, no helpers. Without one, the figures as
+ * `goalFigures` made them, `uploaded` or `none`.
+ *
+ * **The member's own Summary only** — and their coach's view of it: `officialGoalFigures`, which every leader's and the
+ * office's screen reads, never calls this. Pure.
+ */
+export function monthWithManual(
+  monthly: PeriodFigures & { source: FigureSource | null },
+  manual: { minor: number; typedAt: Date } | null,
+  input: { month: string; caseSizeMinor: number },
+): PeriodFigures & { source: FigureSource | null } & ProductionHeld & { realised: MonthRealised } {
+  const uploaded = monthly.source !== null;
+  if (manual === null) {
+    return {
+      ...monthly,
+      ...productionHeld(monthly, input.caseSizeMinor),
+      realised: { source: uploaded ? 'uploaded' : 'none', uploaded, manual: null },
+    };
+  }
+  const figures = monthly.targetMinor === 0
+    ? madeFigures(manual.minor)
+    : periodFigures(monthly.targetMinor, manual.minor, input.caseSizeMinor);
+  return {
+    ...figures,
+    source: { provenance: 'self_reported', month: input.month, correctedBy: null, correctedAt: null },
+    production: 'estimate',
+    withoutProduction: null,
+    realised: { source: 'manual', uploaded, manual: { minor: manual.minor, typedAt: manual.typedAt.toISOString() } },
+  };
 }
 
 /**

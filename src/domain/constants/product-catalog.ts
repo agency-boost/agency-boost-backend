@@ -169,7 +169,7 @@ export const PRODUCT_BUDGET_BANDS = [1, 2, 3, 4, 5, 6, 7] as const;
 /**
  * What each band means, from `Overall.html:9527-9533`. The screens read these; nothing keys on them.
  *
- * The budget bands' sums are written compact, as ADR-0167 §1 writes a chip — *Rp 500 rb*, *Rp 2 jt* — where the
+ * The budget bands' sums are written compact, as ADR-0167 §1 writes a chip — *Rp 500 rb*, *Rp 2 Jt* — where the
  * prototype wrote *Rp500K* and *Rp2M*, its `M` a million (*juta*, `jt`; `M` is *miliar*). Literal strings, so the
  * frontend's pin (`lib/product-catalog.spec.ts`) can read them from this file's text.
  */
@@ -177,8 +177,8 @@ export const PRODUCT_AGE_BAND_LABELS: Readonly<Record<number, string>> = {
   1: '< 25', 2: '25–34', 3: '35–49', 4: '50–64', 5: '65+',
 };
 export const PRODUCT_BUDGET_BAND_LABELS: Readonly<Record<number, string>> = {
-  1: '< Rp 500 rb', 2: 'Rp 500 rb–Rp 2 jt', 3: 'Rp 2 jt–Rp 5 jt', 4: 'Rp 5 jt–Rp 10 jt',
-  5: 'Rp 10 jt–Rp 20 jt', 6: '> Rp 20 jt', 7: 'Lump-sum',
+  1: '< Rp 500 rb', 2: 'Rp 500 rb–Rp 2 Jt', 3: 'Rp 2 Jt–Rp 5 Jt', 4: 'Rp 5 Jt–Rp 10 Jt',
+  5: 'Rp 10 Jt–Rp 20 Jt', 6: '> Rp 20 Jt', 7: 'Lump-sum',
 };
 
 /**

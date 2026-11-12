@@ -1,7 +1,8 @@
 import type { DomainException } from '@/common/errors/domain.exception';
 import type { Sentence } from '@/common/i18n/sentence';
 import { indonesianAll } from '../../../test/i18n';
-import { checkGoal, GOAL_BOUNDS, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
+import { englishAll } from '../../../test/i18n';
+import { checkGoal, checkMonthApe, GOAL_BOUNDS, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
 
 /**
  * What a goal's fields may hold (P8-T1).
@@ -254,5 +255,46 @@ describe('P19.8-T5 typedInForce and officialWrittenAt — the newer wins (ADR-02
     expect(checkGoal({ ...base, apeAchievedMinor: null }).apeAchievedMinor).toBe(0);
     expect(checkGoal(base)).not.toHaveProperty('apeAchievedMinor');
     expect(() => checkGoal({ ...base, apeAchievedMinor: 'x' })).toThrow();
+  });
+});
+
+/** **P19.11-T4 — `PUT /goals/:period/ape-month`'s body** (UX-12; UXQ2's default): a month of the plan's year, and its APE. */
+describe('P19.11-T4 checkMonthApe', () => {
+  const refused = (body: unknown, period = '2026'): string[] => {
+    try {
+      checkMonthApe(body, period);
+    } catch (err) {
+      return englishAll((err as DomainException).givenDetails!.violations as Sentence[]);
+    }
+    throw new Error('accepted');
+  };
+
+  it('P19.11-T4 AC-3 takes a month of the year and whole sen — 0 a figure, null a clearing', () => {
+    expect(checkMonthApe({ month: '2026-11', apeAchievedMinor: 216_500_000_00 }, '2026')).toEqual({ month: '2026-11', minor: 216_500_000_00 });
+    expect(checkMonthApe({ month: '2026-01', apeAchievedMinor: 0 }, '2026')).toEqual({ month: '2026-01', minor: 0 });
+    expect(checkMonthApe({ month: '2026-12', apeAchievedMinor: null }, '2026')).toEqual({ month: '2026-12', minor: null });
+  });
+
+  it('P19.11-T4 AC-3 refuses a month of another year: it is kept on that year’s plan', () => {
+    expect(refused({ month: '2025-12', apeAchievedMinor: 1 })).toEqual([
+      "2025-12 is not a month of 2026: a month's APE is kept on the plan for its own year.",
+    ]);
+  });
+
+  it('P19.11-T4 AC-3 refuses a month that is no YYYY-MM, a missing one, and every figure that is no whole sen', () => {
+    for (const month of ['2026-13', '2026-00', '2026-1', '11-2026', 202611]) {
+      expect(refused({ month, apeAchievedMinor: 1 })).toEqual(['month must be a calendar month, written YYYY-MM.']);
+    }
+    expect(refused({ apeAchievedMinor: 1 })).toHaveLength(1);
+    for (const apeAchievedMinor of [-1, 1.5, '100', GOAL_BOUNDS.money.max + 1]) {
+      expect(refused({ month: '2026-11', apeAchievedMinor })).toHaveLength(1);
+    }
+    // Missing is not null: a clearing says so.
+    expect(refused({ month: '2026-11' })).toHaveLength(1);
+  });
+
+  it('P19.11-T4 AC-3 refuses a field nobody defined, and a body that is no object', () => {
+    expect(refused({ month: '2026-11', apeAchievedMinor: 1, for: 'x' })).toHaveLength(1);
+    expect(refused(null).length).toBeGreaterThan(0);
   });
 });

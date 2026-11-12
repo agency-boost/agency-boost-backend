@@ -1,13 +1,21 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import { HOME_QUOTE_POSES, type HomeQuotePose } from '@/domain/constants/home';
+import type { CalendarTaskView, JoinedEvent } from '@/modules/calendar/calendar-auto-items';
+import { CalendarEntryDto, CalendarJoinedEventDto, CalendarTaskDto } from '@/modules/calendar/calendar.response.dto';
+import type { CalendarEntryView } from '@/modules/calendar/calendar-view';
 import type { CountOf, SplitFigure } from './home-figures';
-import type { HomePerson, HomeTeamPerson, HomeView } from './home.service';
+import type { HomeTeamPerson, HomeView } from './home.service';
 
 /** Declared for OpenAPI. The wire shapes live on `HomeService`'s view types. */
 
 class HomeNowDto {
   @ApiProperty({ example: 545, description: 'The agency’s wall clock as the read was made, in minutes since midnight: the greeting’s time of day.' })
   minute!: number;
+  @ApiProperty({
+    example: '2026-10-30T02:05:00.000Z',
+    description: 'The instant the read was made (UTC). The page counts on from it to the agency’s midnight and reads Home again, so *Aksi hari ini* turns with the day.',
+  })
+  at!: string;
 }
 
 class HomeQuoteDto {
@@ -34,49 +42,33 @@ class HomeActivityDto {
 class HomeScheduleDto {
   @ApiProperty({ example: 2, description: 'Timed things today: calendar entries not declined (no trip) and joined events.' })
   meetings!: number;
-  @ApiProperty({ example: 3, description: 'Open *Tugas* today: action items and leads’ next actions due today, none ticked.' })
+  @ApiProperty({ example: 3, description: 'Open *Tugas* today: action items and leads’ next actions due today; a ticked one is not counted.' })
   tasks!: number;
 }
 
-class HomePersonDto implements HomePerson {
-  @ApiProperty() membershipId!: string;
-  @ApiProperty({ example: 'Wilson Tanoto' }) name!: string;
-  @ApiProperty({ type: String, nullable: true, example: '+6281211002200' }) phone!: string | null;
+/** *Aksi hari ini*'s task row (P19.11-T1): the Calendar's own *Tugas*, as the Agenda's checklist reads it. */
+class HomeTaskActionDto {
+  @ApiProperty({ enum: ['task'] }) kind!: 'task';
+  @ApiProperty({
+    type: CalendarTaskDto,
+    description: 'A lead’s next action or a coaching action item due today, `done` when ticked — its checkbox ticks it '
+      + '(`PUT /leads/{id}/next-action/done`, `PUT /coaching/sessions/{sessionId}/action-items/{itemId}/done`).',
+  })
+  task!: CalendarTaskView;
 }
 
-class HomeCoachingActionDto {
-  @ApiProperty({ enum: ['coaching'] }) kind!: 'coaching';
-  @ApiProperty() sessionId!: string;
-  @ApiProperty() itemId!: string;
-  @ApiProperty({ example: 'Siapkan daftar 20 prospek baru' }) text!: string;
-  @ApiProperty({ type: HomePersonDto, nullable: true, description: '*Dari: NAME* — who coached them.' })
-  from!: HomePersonDto | null;
+/** *Aksi hari ini*'s entry row (P19.11-T1): a calendar entry of today's, as `GET /calendar/entries` answers it. */
+class HomeEntryActionDto {
+  @ApiProperty({ enum: ['entry'] }) kind!: 'entry';
+  @ApiProperty({ type: CalendarEntryDto, description: 'Its `entryId` opens `GET /calendar/entries/{entryId}`, the detail Home opens over itself.' })
+  entry!: CalendarEntryView;
 }
 
-class HomeLeadContactDto {
-  @ApiProperty({ type: String, nullable: true }) phone!: string | null;
-  @ApiProperty({ type: String, nullable: true }) email!: string | null;
-}
-
-class HomeLeadActionDto {
-  @ApiProperty({ enum: ['lead'] }) kind!: 'lead';
-  @ApiProperty() leadId!: string;
-  @ApiProperty({ example: 'Ibu Wiwik Setyaningsih' }) name!: string;
-  @ApiProperty({ type: String, nullable: true, enum: ['sales', 'recruitment'] }) type!: 'sales' | 'recruitment' | null;
-  @ApiProperty({ type: String, nullable: true, example: 'Invite BOP' }) note!: string | null;
-  @ApiProperty({ type: HomeLeadContactDto }) contact!: HomeLeadContactDto;
-  @ApiProperty({ example: 3, description: 'The lead’s version, for saving its number.' }) version!: number;
-}
-
-class HomeAgendaActionDto {
-  @ApiProperty({ enum: ['agenda'] }) kind!: 'agenda';
-  @ApiProperty({ enum: ['entry', 'event'] }) source!: 'entry' | 'event';
-  @ApiProperty() id!: string;
-  @ApiProperty({ example: 'meeting', description: 'An entry’s type code, or a joined event’s type as the agency named it.' })
-  type!: string;
-  @ApiProperty({ example: 'Weekly unit huddle' }) title!: string;
-  @ApiProperty({ example: '2026-10-30' }) date!: string;
-  @ApiProperty({ example: '15:00' }) start!: string;
+/** *Aksi hari ini*'s event row (P19.11-T1): an event the reader joined, as the Calendar answers it. */
+class HomeEventActionDto {
+  @ApiProperty({ enum: ['event'] }) kind!: 'event';
+  @ApiProperty({ type: CalendarJoinedEventDto, description: 'Its `eventId` opens `/events/{eventId}`.' })
+  event!: JoinedEvent;
 }
 
 class HomeCountOfDto implements CountOf {
@@ -139,13 +131,14 @@ export class HomeDto implements HomeView {
     maxItems: 3,
     items: {
       oneOf: [
-        { $ref: getSchemaPath(HomeCoachingActionDto) },
-        { $ref: getSchemaPath(HomeLeadActionDto) },
-        { $ref: getSchemaPath(HomeAgendaActionDto) },
+        { $ref: getSchemaPath(HomeTaskActionDto) },
+        { $ref: getSchemaPath(HomeEntryActionDto) },
+        { $ref: getSchemaPath(HomeEventActionDto) },
       ],
     },
-    description: '*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’. An agenda '
-      + 'row’s `id` is the Calendar’s own: an entry’s opens `GET /calendar/entries/{id}`, a joined event’s `/events/{id}`.',
+    description: '*Aksi hari ini*: **today’s alone** (the agency’s day), at most three — today’s tasks first, open and '
+      + 'ticked, in the Calendar’s checklist order; then today’s timed things not yet ended, soonest first, one that '
+      + 'began on an earlier day included. Nothing of another day. Each in the Calendar’s own shape.',
   })
   actions!: HomeView['actions'];
   @ApiProperty({
@@ -172,4 +165,4 @@ export class HomeDto implements HomeView {
 }
 
 /** The union's members, for `ApiExtraModels` (the controller registers them). */
-export const HOME_ACTION_DTOS = [HomeCoachingActionDto, HomeLeadActionDto, HomeAgendaActionDto] as const;
+export const HOME_ACTION_DTOS = [HomeTaskActionDto, HomeEntryActionDto, HomeEventActionDto] as const;

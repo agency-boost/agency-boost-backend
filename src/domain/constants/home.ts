@@ -51,7 +51,10 @@ export const HOME_QUOTE_POSES = ['thinking', 'celebrating', 'pointing', 'phone']
 export type HomeQuotePose = (typeof HOME_QUOTE_POSES)[number];
 
 export const HOME = {
-  /** *Aksi hari ini*: always exactly the top three things on the reader's list, never more (the owner, 30 Oct). */
+  /**
+   * *Aksi hari ini*: the top three things on the reader's list, never more (the owner, 30 Oct) — **today's alone**
+   * (P19.11-T1 AC-3, UX-2), so fewer, or none, when today holds fewer.
+   */
   ACTIONS_SHOWN: 3,
   /** *Aktivitas 7 hari terakhir*: the seven office days ending today, rolling — `ROLLING_7D`, never a second seven. */
   CHART_DAYS: PERIOD.ROLLING_7D_DAYS,

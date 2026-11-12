@@ -1,7 +1,7 @@
 import type { DomainException } from '@/common/errors/domain.exception';
 import type { Sentence } from '@/common/i18n/sentence';
 import { indonesian, indonesianAll } from '../../../test/i18n';
-import { checkLead } from './lead-input';
+import { checkContactPhone, checkLead } from './lead-input';
 
 /**
  * A lead's fields, read without a database (P7-T1).
@@ -36,9 +36,16 @@ describe('reading a lead’s fields (P7-T1)', () => {
   });
 
   describe('contact details', () => {
-    it('lower-cases an email and trims a phone', () => {
+    it('lower-cases an email and trims a phone it cannot read as a number, for the service to judge', () => {
       const read = checkLead({ ...ok, contact: { phone: ' 0812 ', email: ' Budi@Example.COM ' } });
       expect(read.contact).toEqual({ phone: '0812', email: 'budi@example.com' });
+    });
+
+    it.each([
+      ['0812-1100-2200'], ['081211002200'], ['62 812 1100 2200'], ['6281211002200'], ['+62 812-1100-2200'],
+      ['+6281211002200'], [' 812 1100 2200 '], ['0062 812 1100 2200'],
+    ])('P19.11-T3 AC-6 stores %j as +6281211002200: a leading 0, 62 or +62 all read alike', (typed) => {
+      expect(checkLead({ ...ok, contact: { phone: typed } }).contact?.phone).toBe('+6281211002200');
     });
 
     it('reads a blank string as nothing held', () => {
@@ -137,9 +144,9 @@ describe('reading a lead’s fields (P7-T1)', () => {
   });
 
   describe('P13.1-T4 AC-1 — no ground is asked for (ADR-0108 §1)', () => {
-    it('P13.1-T4 AC-1 takes a phone and an email with nothing beside them', () => {
+    it('P13.1-T4 AC-1 takes a phone and an email with nothing beside them (the phone stored as +62…, P19.11-T3 AC-6)', () => {
       expect(checkLead({ ...ok, contact: { phone: '0812-1100-2200', email: 'budi@example.com' } }).contact)
-        .toEqual({ phone: '0812-1100-2200', email: 'budi@example.com' });
+        .toEqual({ phone: '+6281211002200', email: 'budi@example.com' });
     });
 
     it('P13.1-T4 AC-1 refuses lawfulBasis by name, as a field nobody defines any more', () => {
@@ -150,6 +157,41 @@ describe('reading a lead’s fields (P7-T1)', () => {
 
     it('P13.1-T4 AC-1 never hands the service a lawfulBasis to write', () => {
       expect(checkLead({ ...ok, contact: { phone: '0812' } })).not.toHaveProperty('lawfulBasis');
+    });
+  });
+
+  describe('P19.11-T3 AC-6 — a lead’s phone is refused only when it changes to something that is not a number', () => {
+    const refusalOf = (next: string | null, stored: string | null) => {
+      try {
+        checkContactPhone(next, stored);
+        return null;
+      } catch (err) {
+        return err as DomainException;
+      }
+    };
+
+    it('P19.11-T3 AC-6 passes a number stored as +62…, a cleared one, and nothing at all', () => {
+      expect(refusalOf('+6281211002200', null)).toBeNull();
+      expect(refusalOf('+6281211002200', '0812')).toBeNull();
+      expect(refusalOf(null, '0812')).toBeNull();
+      expect(refusalOf(null, null)).toBeNull();
+    });
+
+    it('P19.11-T3 AC-6 refuses a new or changed phone that is not an Indonesian number: 400 VALIDATION_FAILED naming contact.phone', () => {
+      for (const [next, stored] of [['0812', null], ['call me', '+6281211002200'], ['12345', '0812'], ['+1 555 0100', null]] as const) {
+        const refusal = refusalOf(next, stored);
+        expect(refusal).not.toBeNull();
+        expect(refusal!.code).toBe('VALIDATION_FAILED');
+        expect(refusal!.getStatus()).toBe(400);
+        expect(indonesianAll(refusal!.givenDetails!.violations as Sentence[]))
+          .toEqual(['contact.phone harus nomor Indonesia: 9 sampai 13 digit setelah +62.']);
+      }
+    });
+
+    it('P19.11-T3 AC-6 lets the number a lead already holds pass untouched while it is sent back unchanged', () => {
+      // A number typed before the rule: saving the email beside it must not fail over the phone nobody touched.
+      expect(refusalOf('0812', '0812')).toBeNull();
+      expect(checkLead({ contact: { phone: ' 0812 ', email: null } }, { partial: true }).contact?.phone).toBe('0812');
     });
   });
 });

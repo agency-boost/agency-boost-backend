@@ -16,7 +16,8 @@ import { MembershipRepository } from './membership.repository';
 import { MembershipDocument } from './membership.schema';
 import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { TransferRequestRepository } from './org.repositories';
-import { TransferRequestDocument, type TransferRequestStatus } from './transfer-request.schema';
+import { TransferRequestDocument, type TransferRequestKind, type TransferRequestStatus } from './transfer-request.schema';
+import { withOfficeLease } from './leader-limit';
 
 /** A person a transfer names: their membership and their name, never a user id (invariant §2). */
 export interface TransferPerson {
@@ -38,6 +39,21 @@ export interface TransferView {
    * it was kept.
    */
   requestedName: string | null;
+  /**
+   * **What made it** (P19.12-T4; ADR-0247 §3): *+ Add agent* (`add_agent`), or a leader moving one of their people to a
+   * leader outside their tree (`move`) — *{leader} meminta memindahkan {nama} ke unit {to}*.
+   */
+  kind: TransferRequestKind;
+  /** Why the leader asked for a move, as typed; `null` when they said nothing, and on every *+ Add agent* request. */
+  note: string | null;
+}
+
+/** **A move waiting on the office, as the leader who asked sees it** — *Tim Anda*'s *Menunggu persetujuan…* (ADR-0247 §3). */
+export interface PendingMoveView {
+  transferId: string;
+  /** The leader they would move under, by name. */
+  toName: string;
+  requestedAt: string;
 }
 
 /**
@@ -110,6 +126,7 @@ export class TransfersService {
         toLeaderId,
         requestedByMembershipId: ctx.membershipId!,
         requestedName: requestedName.trim(),
+        kind: 'add_agent',
         status: 'pending',
       });
     } catch (err) {
@@ -139,12 +156,142 @@ export class TransfersService {
   }
 
   /**
+   * **A leader asks the office to move one of their people to a leader outside their tree** (P19.12-T4; ADR-0247 §3).
+   * The caller (`LeaderChangeService.requestMove`) has settled who may ask and that the destination is outside their
+   * tree; refused here, before anything is written, a loop (`409 ORG_CYCLE_DETECTED`) and one already waiting (`409
+   * ORG_TRANSFER_PENDING`). The Owner and the Admins are told, with where to; the person stays where they are.
+   */
+  async requestMove(
+    ctx: RequestContext, member: MembershipDocument, leader: MembershipDocument, note: string | null,
+  ): Promise<PendingMoveView> {
+    const membershipId = String(member._id);
+    const toLeaderId = String(leader._id);
+    await this.hierarchy.assertCanMoveUnder(ctx, membershipId, toLeaderId);
+
+    const open = await this.transfers.findOne(ctx, { membershipId, status: 'pending' });
+    if (open) throw transferPending(String(open._id));
+
+    let row: TransferRequestDocument;
+    try {
+      row = await this.transfers.create(ctx, {
+        membershipId,
+        fromLeaderId: member.leaderId,
+        toLeaderId,
+        requestedByMembershipId: ctx.membershipId!,
+        // Nothing was typed for the person: the leader chose them from their own team.
+        requestedName: null,
+        kind: 'move',
+        note,
+        status: 'pending',
+      });
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) throw transferPending(null);
+      throw err;
+    }
+
+    const [view] = await this.views(ctx, [row]);
+    await this.audit.record(ctx, {
+      action: 'transfer_request.created',
+      targetCollection: 'transferRequests',
+      targetId: String(row._id),
+      targetMembershipId: membershipId,
+      after: { kind: 'move', fromLeaderId: member.leaderId, toLeaderId, note },
+    });
+    for (const userId of await this.deciders(ctx)) {
+      await this.notifications.send({
+        userId,
+        kpmId: ctx.kpmId,
+        templateId: NotificationTemplate.TRANSFER_REQUEST_RECEIVED,
+        payload: {
+          transferId: String(row._id), kind: 'move', requesterName: view.requestedBy.name, memberName: view.member.name,
+          toLeaderName: view.to.name,
+        },
+      });
+    }
+    return pendingMove(view);
+  }
+
+  /**
+   * **The moves this leader asked for that still wait, by the person** — *Tim Anda*'s *Menunggu persetujuan pemindahan
+   * ke {to}* (ADR-0247 §3). Only their own: *Batalkan* withdraws nobody else's.
+   */
+  async pendingMovesBy(ctx: RequestContext, membershipIds: string[]): Promise<Map<string, PendingMoveView>> {
+    if (membershipIds.length === 0) return new Map();
+    const rows = await this.transfers.find(ctx, {
+      requestedByMembershipId: ctx.membershipId, status: 'pending', kind: 'move', membershipId: { $in: membershipIds },
+    });
+    const views = await this.views(ctx, rows);
+    return new Map(views.map((view) => [view.member.membershipId, pendingMove(view)]));
+  }
+
+  /**
+   * **Whoever asked withdraws a request still waiting** (ADR-0247 §3): `DELETE /transfer-requests/:transferId`. Anybody
+   * else's — and another office's — is `404`, answered alike; one already decided is `409 ORG_REQUEST_ALREADY_DECIDED`.
+   * Nothing about the person changes; the row stays, `cancelled`. Audited.
+   */
+  async cancelOwn(ctx: RequestContext, transferId: string): Promise<{ transferId: string; status: 'cancelled' }> {
+    const row = await this.transfers.findById(ctx, transferId);
+    if (!row || row.requestedByMembershipId !== ctx.membershipId) throw new NotFoundException('Transfer request');
+    if (row.status !== 'pending') throw alreadyDecided(row);
+    const claimed = await this.transfers.decide(ctx, transferId, {
+      status: 'cancelled', decidedAt: this.clock.now(), decidedByMembershipId: ctx.membershipId,
+    });
+    if (!claimed) throw await this.decided(ctx, transferId);
+    await this.audit.record(ctx, {
+      action: 'transfer_request.cancelled',
+      targetCollection: 'transferRequests',
+      targetId: transferId,
+      targetMembershipId: row.membershipId,
+      before: { status: 'pending' },
+      after: { status: 'cancelled', kind: row.kind ?? 'add_agent' },
+    });
+    return { transferId, status: 'cancelled' };
+  }
+
+  /**
+   * **Close whatever waits for somebody who has just been moved directly** (ADR-0247 §2): the request would move them
+   * from a leader they no longer have. Closed `cancelled`, with why, and whoever asked is told. Nothing else changes.
+   */
+  async closeOvertaken(ctx: RequestContext, membershipId: string): Promise<void> {
+    const open = await this.transfers.find(ctx, { membershipId, status: 'pending' });
+    for (const row of open) {
+      const why = render(ORG_MESSAGES.transferOvertaken, ctx.reader);
+      const claimed = await this.transfers.decide(ctx, String(row._id), {
+        status: 'cancelled', decidedAt: this.clock.now(), decidedByMembershipId: ctx.membershipId, reason: why,
+      });
+      if (!claimed) continue;
+      await this.audit.record(ctx, {
+        action: 'transfer_request.cancelled',
+        targetCollection: 'transferRequests',
+        targetId: String(row._id),
+        targetMembershipId: membershipId,
+        before: { status: 'pending' },
+        after: { status: 'cancelled', kind: row.kind ?? 'add_agent', reason: why },
+      });
+      if (row.requestedByMembershipId === ctx.membershipId) continue;
+      const [view] = await this.views(ctx, [row]);
+      const requester = await this.members.findById(ctx, row.requestedByMembershipId);
+      if (!requester) continue;
+      await this.notifications.send({
+        userId: requester.userId,
+        kpmId: ctx.kpmId,
+        templateId: NotificationTemplate.TRANSFER_REQUEST_DECIDED,
+        payload: { transferId: String(row._id), decision: 'cancelled', audience: 'requester', memberName: askedFor(view), kind: view.kind },
+      });
+    }
+  }
+
+  /**
    * **The transfers the reader asked for, still waiting** — *Transfer requested* on `/new-hires` — as they asked for
    * them: the name they typed, the code, the unit. Never the account's name or its leader (M3).
    */
   async mine(ctx: RequestContext): Promise<RequestedTransferView[]> {
+    // *+ Add agent*'s own: a leader's move of one of their people shows on *Tim Anda*, not here (ADR-0247 §3). `$ne`, so a
+    // row written before `kind` existed is one.
     const rows = await this.transfers.find(
-      ctx, { requestedByMembershipId: ctx.membershipId, status: 'pending' }, { sort: { createdAt: -1 } },
+      ctx,
+      { requestedByMembershipId: ctx.membershipId, status: 'pending', kind: { $ne: 'move' } },
+      { sort: { createdAt: -1 } },
     );
     const views = await this.views(ctx, rows);
     return views.map((view, i) => requested(view, rows[i]));
@@ -196,10 +343,12 @@ export class TransfersService {
 
     const previousLeaderId = member.leaderId;
     try {
-      // The edge's reason is stored, so it is written in the decider's language (P18.10-T5 AC-6).
-      await this.hierarchy.reparent(
+      // The edge's reason is stored, so it is written in the decider's language (P18.10-T5 AC-6). Holding the office's
+      // lease, so two moves of the tree take turns and the cycle check `moveUnder` repeats reads the other's write
+      // (ADR-0247 §4).
+      await withOfficeLease({ kpms: this.kpms, members: this.members, clock: this.clock }, ctx, () => this.hierarchy.reparent(
         ctx, row.membershipId, row.toLeaderId, render(ORG_MESSAGES.transferApproved, ctx.reader),
-      );
+      ));
     } catch (err) {
       // Nobody moved, so nothing is approved: the request waits again, for this decider or another.
       await this.transfers.updateMany(
@@ -219,9 +368,11 @@ export class TransfersService {
       after: { leaderId: row.toLeaderId },
     });
 
-    const payload = { transferId, decision: 'approved', memberName: view.member.name, toLeaderName: view.to.name };
+    const payload = {
+      transferId, decision: 'approved', memberName: view.member.name, toLeaderName: view.to.name, kind: view.kind,
+    };
     const told = new Set<string>();
-    const tell = async (membershipId: string | null, audience: 'member' | 'from_leader' | 'requester') => {
+    const tell = async (membershipId: string | null, audience: 'member' | 'from_leader' | 'requester' | 'to_leader') => {
       if (!membershipId || told.has(membershipId)) return;
       told.add(membershipId);
       const person = await this.members.findById(ctx, membershipId);
@@ -234,10 +385,15 @@ export class TransfersService {
       });
     };
     await tell(row.membershipId, 'member');
-    if (previousLeaderId !== row.toLeaderId) await tell(previousLeaderId, 'from_leader');
-    // Whoever asked is told in their own words: the name they typed (M3).
+    // Whoever asked is told first, in their own words — the name they typed (M3); a leader who asked to move one of
+    // their own people is told it was approved, not that somebody left their unit (ADR-0247 §3).
+    const memberName = payload.memberName;
     payload.memberName = askedFor(view);
     await tell(row.requestedByMembershipId, 'requester');
+    payload.memberName = memberName;
+    if (previousLeaderId !== row.toLeaderId) await tell(previousLeaderId, 'from_leader');
+    // The leader they now report to (ADR-0247 §3) — unless they asked, and were told above.
+    await tell(row.toLeaderId, 'to_leader');
     return this.queue(ctx);
   }
 
@@ -332,8 +488,15 @@ export class TransfersService {
       requestedBy: person(r.requestedByMembershipId),
       requestedAt: (r.get('createdAt') as Date | undefined)?.toISOString() ?? '',
       requestedName: r.requestedName ?? null,
+      kind: r.kind ?? 'add_agent',
+      note: r.note ?? null,
     }));
   }
+}
+
+/** A move as the leader who asked sees it on *Tim Anda*: where to, and since when. */
+function pendingMove(view: TransferView): PendingMoveView {
+  return { transferId: view.transferId, toName: view.to.name, requestedAt: view.requestedAt };
 }
 
 /** A request as whoever asked sees it: what they typed and asked for, from the full view, and nothing else of it. */
@@ -350,6 +513,8 @@ function requested(view: TransferView, row: TransferRequestDocument): RequestedT
 
 /** The person as whoever asked named them: the name they typed, or the code on a request made before it was kept. */
 function askedFor(view: TransferView): string {
+  // A leader's move named somebody from their own team, so their own name is what they know them by (ADR-0247 §3).
+  if (view.kind === 'move') return view.member.name;
   return view.requestedName || view.member.agentCode;
 }
 

@@ -209,6 +209,28 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
+   * **How many live memberships each account holds, in whichever offices hold them** (P19.12-T2 AC-1; ADR-0245 §1): the
+   * Super Admin's *Akun terdaftar* — *Tanpa KPM* is an account with none, *Punya KPM* one with at least one, and each
+   * row's *n KPM*. *Live* is active or pending: a membership that ended (`removed`) or was erased (`deletedAt`) is none.
+   *
+   * **Deliberately unscoped, and named so**, as invariant §1 asks: an account is global and the Super Admin is in no
+   * office. Anybody else is refused as an unscoped read is. It answers a count per user id — never an office, a row, a
+   * name or a rung. Who may call it, and why, is `named-cross-tenant-reads.tenancy.spec.ts`'s register.
+   */
+  async liveMembershipCountsPerUserAcrossTenants(ctx: RequestContext): Promise<Map<string, number>> {
+    if (!ctx.isSuperAdmin) {
+      throw new MissingTenantContextError(this.collectionName, 'liveMembershipCountsPerUserAcrossTenants');
+    }
+    const rows = await this.model
+      .aggregate<{ _id: string; n: number }>([
+        { $match: { deletedAt: null, status: { $in: ['active', 'pending'] } } },
+        { $group: { _id: '$userId', n: { $sum: 1 } } },
+      ])
+      .exec();
+    return new Map(rows.map((row) => [String(row._id), row.n]));
+  }
+
+  /**
    * **How many live memberships stand on one rung, in whichever offices hold them** (ADR-0156 §5, P18.5-T1): what
    * refuses a change of the rung's leader tier while anybody would be re-classed by it.
    *

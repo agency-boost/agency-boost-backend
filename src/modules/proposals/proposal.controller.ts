@@ -51,8 +51,10 @@ export class ProposalController {
     summary: 'Your proposals (*Riwayat*)',
     description:
       'Your own live proposals, newest change first: each row’s client, date, products with their plan, status and '
-      + 'totals per currency. `leadId` narrows to one lead — the lead sheet’s *Proposal* section. A deleted lead’s '
-      + 'proposals stay, under the client’s name, with `leadDeleted`.',
+      + 'totals per currency. `leadId` narrows to one lead. **`status=done` orders by the last *Simpan PDF* (`doneAt`)** '
+      + 'instead — the lead sheet’s *Proposal* section reads `?leadId=…&status=done&pageSize=1`, the lead’s latest '
+      + 'finished proposal, and never shows a draft. A deleted lead’s proposals stay, under the client’s name, with '
+      + '`leadDeleted`.',
   })
   @ApiResponse({ status: 200, type: ProposalPageDto })
   async list(@Ctx() ctx: RequestContext, @Query() query: ListProposalsQueryDto) {
@@ -109,11 +111,13 @@ export class ProposalController {
   @ApiOperation({
     summary: 'Start a proposal (step 1’s *Lanjut*)',
     description:
-      'A *Draf* for one of your own live **Sales** leads, with the client’s name, age and gender copied from it. Another '
+      'A *Draf* for one of your own live **Sales** leads, with the client’s name, age and gender copied from it. **Where '
+      + 'you already have a draft on that lead with no product chosen, that draft is answered instead** — its client’s '
+      + 'copy taken from the lead again — so no lead collects empty drafts; a draft with a product is never reused. Another '
       + 'member’s lead or another office’s is `404 NOT_FOUND`; a Recruit lead, one with no type, or one without an age or '
       + 'a gender is `400`, `details.field: "leadId"` — step 1 saves them to the lead first.',
   })
-  @ApiResponse({ status: 201, type: ProposalResponseDto })
+  @ApiResponse({ status: 201, type: ProposalResponseDto, description: 'The new draft, or the lead’s empty one reused.' })
   @ApiResponse({
     status: 404,
     description: '`NOT_FOUND` — not one of your live leads: somebody else’s, or one in another office. The two are '

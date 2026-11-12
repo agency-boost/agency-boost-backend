@@ -414,7 +414,7 @@
         "x-required-permission": "lead:read"
       },
       "post": {
-        "description": "A name is enough, and a phone number or an email needs nothing beside it: the lawful basis and its rule were removed on 2026-10-07 (ADR-0108 §1). The lead starts on no stage: the first one is a move.\n\nYours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. No notification is sent.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A name is enough, and a phone number or an email needs nothing beside it: the lawful basis and its rule were removed on 2026-10-07 (ADR-0108 §1). A phone is stored as `+62…`, and one that is not an Indonesian number is `400 VALIDATION_FAILED`. The lead starts on no stage: the first one is a move.\n\nYours, or — with `owner` — in the pipeline of somebody you coach: the lead is theirs, and its creation and `lastEditedBy` name you. Anybody you do not coach, yourself included, is a 404. No notification is sent.\n\n**Requires `lead:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_create_v1",
         "parameters": [
           {
@@ -590,7 +590,7 @@
         "x-required-permission": "lead:read"
       },
       "patch": {
-        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. `contact` travels as a pair, so saving the phone never erases the email.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Any of the fields creation takes, one or several. **Not the stage** — that is its own route. `contact` travels as a pair, so saving the phone never erases the email. A phone is stored as `+62…`; a changed one that is not an Indonesian number is `400 VALIDATION_FAILED`, while the number the lead already holds, sent back unchanged, passes untouched.\n\n`version` is the version the write was read at: a stale one is `VERSION_CONFLICT` (409), and nothing is written. **Optional for the lead’s owner, required of anybody else** — a leader’s write without one is `VALIDATION_FAILED` (400). Another office’s lead, or one you cannot reach, is a 404 first.\n\n**Requires `lead:update`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "LeadController_update_v1",
         "parameters": [
           {
@@ -1625,6 +1625,114 @@
         "x-required-permission": "goal:update"
       }
     },
+    "/api/v1/goals/{period}/ape-month": {
+      "put": {
+        "description": "Stores the month’s APE as the caller realised it on their own plan for the year (`apeByMonth`), or clears it with `null`. **On the caller’s own Summary it is in force over the office’s upload for that month** — an upload arriving later does not replace it — and the screen marks it *Diubah manual*; cleared, the upload is read again (*Kembalikan ke data unggahan*), or *Belum diunggah*. The upload (`monthlyAgentData`) is never written. **Read by the member’s own Summary and their coach’s view of it alone** — no leader’s, Unit Dashboard’s or office’s figure reads it. Not a plan input: no revision, the version and `savedAt` unchanged. The same figure again, or clearing a month that holds none, changes nothing. Audited `goal.month_ape_set` / `goal.month_ape_cleared`, never the amount.\n\n**Requires `goal:update`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "GoalController_saveMonthApe_v1",
+        "parameters": [
+          {
+            "name": "period",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMonthApeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalMonthApeResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `month` is no `YYYY-MM`, not a month of the path’s year, after the office’s current month or before the month it opened (`details.field: month`, with `earliest` and `latest`); `apeAchievedMinor` is missing, negative, a fraction of a sen or above the money bound; or the body holds any other field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `goal:update`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — you have no saved plan for the period. Indistinguishable from a plan in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`GOAL_PERIOD_LOCKED` — the period has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Your own APE for one month, over the office’s upload",
+        "tags": [
+          "goals"
+        ],
+        "x-required-permission": "goal:update"
+      }
+    },
     "/api/v1/kpm/data-upload/template": {
       "get": {
         "description": "The header of the KPM’s template, read live (ADR-0214 §5): `Agent Code`, `Agent Name`, each column as `<label> (<unit>) [KODE]` in the reader’s language, then `<label> YTD [KODE_YTD]` for a column whose year to date is uploaded — and one row per active agent with an empty field per column. Named `<kpmCode>-agent-data-<YYYY-MM>.csv`. A name is one quoted field: a quote inside it is doubled, a line break becomes a space, and a name that starts like a formula is written as text. The agent code is written exactly as stored. `version` is the template’s published version.\n\n**Requires `data_upload:download_template`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -2477,7 +2585,7 @@
     },
     "/api/v1/auth/register": {
       "post": {
-        "description": "Always succeeds in shape, even for an address that already exists — confirming that would let anyone enumerate accounts. A verification email follows. Rate limited per client address, 20 attempts an hour, refused or not.",
+        "description": "**An account made here is signed in at once** (ADR-0245 §3): the answer carries the access token and sets the refresh cookie exactly as `/auth/login` does, and stamps the sign-in. The verification email is still sent; verifying is optional (ADR-0190 §4). **An address that already has an account** is answered `verification_sent` with no token and no cookie: nothing is made, and nobody joins anything. A page on a foreign origin is refused before anything is read, as at sign-in. Rate limited per client address, 20 attempts an hour, refused or not.",
         "operationId": "AuthController_register_v1",
         "parameters": [],
         "requestBody": {
@@ -2492,11 +2600,11 @@
         },
         "responses": {
           "201": {
-            "description": "Account created; verification sent.",
+            "description": "`signed_in` with the token, and the refresh cookie set; or `verification_sent`, nothing else.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusAckDto"
+                  "$ref": "#/components/schemas/RegisterAnswerDto"
                 }
               }
             }
@@ -2511,8 +2619,28 @@
               }
             }
           },
+          "403": {
+            "description": "`AUTH_ORIGIN_REFUSED`: an `Origin` that is neither one `CORS_ORIGINS` lists nor the API's own, with or without a cookie. A request with no `Origin` is not refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "404": {
             "description": "`NOT_FOUND` — with `inviteToken`, a link that opens nothing (unknown, cancelled, used or expired), said in plain words, before any account is made — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`ORG_INVITE_EXPIRED` — with `leaderCode`, a code that opens nothing (nobody holds it, its owner has left, or the office has stopped), answered alike, before any account is made.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2542,7 +2670,7 @@
             }
           }
         },
-        "summary": "Create an account",
+        "summary": "Create an account, and sign it in",
         "tags": [
           "auth"
         ]
@@ -6690,7 +6818,7 @@
     },
     "/api/v1/admin/tenants/{id}/roster/preview": {
       "post": {
-        "description": "Each row's result, in the file's order (the setup spec's §A3; ADR-0205 §5 to §8): `imported` (a new person), `updated` (a code already in this office: blank cells keep what is stored, an email is never changed) or `skipped`, with A3's words — a code twice in the file, a role not on the company's ladder, an upline in neither the file nor the office, an upline who is no leader or ranks lower, an Agent or AAB with no upline, a loop, a row whose upline's row is skipped, a code held elsewhere at the insurer (naming no office), a new person with no email, a cell in the wrong shape, a row past the leader limit. `counts` is *N orang baru siap diimpor, M diperbarui, K baris dilewati*; `skippedCsv` the skipped rows with an `Alasan` column. `issues` is only what makes the file unreadable — no *Kode agen*, *Nama* or *Peran* column, an unknown column — and then `rows` is empty. Writes nothing.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Each row's result, in the file's order (the setup spec's §A3; ADR-0205 §5 to §8): `imported` (a new person), `updated` (a code already in this office: blank cells keep what is stored, an email is never changed) or `skipped`, with A3's words — a code twice in the file, a role not on the company's ladder, an upline in neither the file nor the office, an upline who is no leader or ranks lower, an Agent or AAB with no upline, a loop, a row whose upline's row is skipped, a code held elsewhere at the insurer (naming no office), a new person with no email who cannot be invited on WhatsApp, a required cell (or a new person's *Email*) in the wrong shape, a row past the leader limit — or `invited` (ADR-0250 §4): a new Agent with no email but a WhatsApp number and a leader upline, invited as *+ Tambah agent* invites. **An optional cell in the wrong shape is left empty** and the row goes on (ADR-0250 §2); each row's `warnings` say so, and name the details it leaves empty. `L` and `P` are read as a gender. `counts` is *N orang baru siap diimpor, M diperbarui, K baris dilewati*; `skippedCsv` the skipped rows with an `Alasan` column. `issues` is only what makes the file unreadable — no *Kode agen*, *Nama* or *Peran* column, an unknown column — and then `rows` is empty. Writes nothing.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_previewRoster_v1",
         "parameters": [
           {
@@ -6788,7 +6916,7 @@
     },
     "/api/v1/admin/tenants/{id}/roster": {
       "post": {
-        "description": "The whole file checked again — never a preview trusted — then **every valid row as one unit** (ADR-0205 §9): written leader first, and if any write fails, what this commit wrote is undone (its memberships, edges and accounts soft-deleted, its updates put back) before the failure is answered, so the office holds every valid row or none. New people are existing agents (ADR-0169 §6). **No password is returned or shown**: with `invite` (the default) each new person is emailed a one-time link to choose theirs; without it they use *Lupa kata sandi?*. Answers the preview's rows and counts, and `invited`. `400 VALIDATION_FAILED` for a file that cannot be read, or one with no row to import; `409 LEADER_LIMIT_REACHED` when the office fills while it is written.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The whole file checked again — never a preview trusted — then **every valid row as one unit** (ADR-0205 §9): written leader first, and if any write fails, what this commit wrote is undone (its memberships, edges and accounts soft-deleted, its updates put back) before the failure is answered, so the office holds every valid row or none. New people are existing agents (ADR-0169 §6). **No password is returned or shown**: with `invite` (the default) each new person is emailed a one-time link to choose theirs; without it they use *Lupa kata sandi?*. **An `invited` row** is *+ Tambah agent*'s invitation, made once the rest has landed, under the row's upline — no account — its link answered on the row (`invite`) to share on WhatsApp; one that cannot be made skips its row with the refusal's words. Answers the preview's rows and counts, and `invited` (the number emailed). `400 VALIDATION_FAILED` for a file that cannot be read, or one with no row to import; `409 LEADER_LIMIT_REACHED` when the office fills while it is written.\n\n**Requires `kpm:import_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "AdminController_importRoster_v1",
         "parameters": [
           {
@@ -10303,6 +10431,104 @@
         "x-required-permission": "group_informal:archive"
       }
     },
+    "/api/v1/members/groups/{groupId}/members": {
+      "post": {
+        "description": "The Unit Dashboard’s *Grup informal* sheet, *+ Tambah ke grup*: each membership sent is tagged into this group, their other groups and Core Leader tag untouched. Every id must be an active member of this agency and the group a live one of it — otherwise `404` and nothing is tagged. Somebody already in the group is not counted again. One `member.tagged` audit entry per person tagged. A group is a label, never access: nobody sees more for it.\n\n**Requires `member:tag_group`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "OrgController_addGroupMembers_v1",
+        "parameters": [
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddGroupMembersDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMembersAddedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:tag_group`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tag several people into one group at once",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:tag_group"
+      }
+    },
     "/api/v1/members/{membershipId}/tags": {
       "get": {
         "operationId": "OrgController_readTags_v1",
@@ -10878,6 +11104,538 @@
           "organisation"
         ],
         "x-required-permission": "member:update_phone"
+      }
+    },
+    "/api/v1/members/{membershipId}/leader-choices": {
+      "get": {
+        "description": "By part of a name or an agent code (`q`). Never the person, anybody below them, their leader now, or anybody who cannot hold a unit (an Agent who leads nobody). The Owner and an Admin: the office, every one `direct`. An AB or an AAB, for a direct report: their own tree `direct` (moved at once), and the office’s ABs and AABs outside it `direct: false` (asked of the Owner or an Admin). Moved-at-once first, then by name; at most 50.\n\n**Requires `member:reassign_leader`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderChangeController_choices_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Part of a name or an agent code, case-insensitive. Empty or absent lists the first leaders.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeaderMoveChoiceDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold the permission. `ORG_LEADER_CHANGE_NOT_PERMITTED` — the office’s owner, whom only the platform moves; or, as a leader, somebody who is not your direct report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — somebody in another office, or outside your downline as a leader, answered alike. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_ALREADY_REMOVED` — they have left the office. `ORG_MEMBER_NOT_ACTIVE` — they have not joined yet. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The leaders somebody may be moved under",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:reassign_leader"
+      }
+    },
+    "/api/v1/members/{membershipId}/leader": {
+      "put": {
+        "description": "With everybody under them and their history: their open edge closes and a `re_parented` one opens at the same instant, every descendant’s path is re-spliced, and every leader above the old and the new position is recounted. The Owner and an Admin: anybody active but the office’s owner, under anybody who can hold a unit. An AB or an AAB: a direct report, under themselves or anybody below them — elsewhere is `403` with `details.canRequest`, and `POST …/transfer-request` asks instead. The same leader again writes nothing. A transfer request still waiting for them is closed, and whoever asked is told. The person, the leader they left and the leader they joined are told. Answers the member as they now stand. Audited `member.leader_changed`.\n\n**Requires `member:reassign_leader`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderChangeController_move_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeLeaderDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryMemberDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `leaderMembershipId` is not an id, or the reason is over 300 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold the permission. `ORG_LEADER_CHANGE_NOT_PERMITTED` — the office’s owner, whom only the platform moves; or, as a leader, somebody who is not your direct report. `ORG_LEADER_CHANGE_NOT_PERMITTED` with `details.canRequest` — as a leader, a new leader outside your own tree.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — somebody in another office, or outside your downline as a leader, answered alike. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_ALREADY_REMOVED` — they have left the office. `ORG_MEMBER_NOT_ACTIVE` — they have not joined yet. `ORG_CYCLE_DETECTED` — the new leader is the person or somebody below them. `VERSION_CONFLICT` — the office’s tree has been busy for longer than a lease; try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the new leader is not an active member of the office. `ORG_LEADER_CANNOT_LEAD` — an Agent who leads nobody.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Move somebody to another leader, now",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:reassign_leader"
+      }
+    },
+    "/api/v1/members/{membershipId}/transfer-request": {
+      "post": {
+        "description": "An AB or an AAB, for a direct report. The person keeps reporting to you until the Owner or an Admin approves it on *All Members* › *Pending*; they are told, with where to and your note. Answers the move as it waits. Audited.\n\n**Requires `member:transfer_request`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderChangeController_requestMove_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeLeaderDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingMoveDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — the new leader is in your own tree (move them directly), or a field’s shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold the permission. `ORG_LEADER_CHANGE_NOT_PERMITTED` — the office’s owner, whom only the platform moves; or, as a leader, somebody who is not your direct report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — somebody in another office, or outside your downline as a leader, answered alike. ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_ALREADY_REMOVED` — they have left the office. `ORG_MEMBER_NOT_ACTIVE` — they have not joined yet. `ORG_CYCLE_DETECTED` — the new leader is the person or somebody below them. `ORG_TRANSFER_PENDING` — a transfer for them is already waiting.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the new leader is not an active member of the office. `ORG_LEADER_CANNOT_LEAD` — an Agent who leads nobody.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask the office to move one of your people to a leader outside your tree",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:transfer_request"
+      }
+    },
+    "/api/v1/transfer-requests/{transferId}": {
+      "delete": {
+        "description": "Nothing about the person changes; the request stays, cancelled. Only whoever asked: anybody else’s, and another office’s, is 404. Audited.\n\n**Requires `member:transfer_request`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "LeaderChangeController_cancel_v1",
+        "parameters": [
+          {
+            "name": "transferId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelledTransferDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:transfer_request`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no request of yours with that id: somebody else’s, or one in another office, answered alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — it was decided or withdrawn already, which way said.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Withdraw a transfer request you asked for",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:transfer_request"
+      }
+    },
+    "/api/v1/members/{membershipId}/personal": {
+      "patch": {
+        "description": "*Lengkapi data* on the member page: the Owner or an Admin fills a member’s **blank** birth date, gender, company join month, work status or WhatsApp number — at least one, each optional. A member of another office, one who has left, or an id that is none is `404 NOT_FOUND`. The shapes and the rules are the profile’s, the dates measured against today in the office’s calendar (`400 VALIDATION_FAILED`, `details.field`); none is clearable. **Only a blank field is filled**: one already on file is `409 MEMBER_DETAIL_ON_FILE` with `details.fields`, and nothing is written — a recorded value is the person’s own to change (`PATCH /auth/me`). Each write carries the condition, so a race cannot overwrite. The account’s fields are saved on the person’s account, so they are what the person sees on their own profile. One `member.personal_completed` audit entry, naming the fields and never their values. **Refused `403 PERM_DENIED` in any support session.**\n\n**Requires `member:complete_personal`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "MemberPersonalController_complete_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteMemberPersonalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPersonalCompletedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:complete_personal`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fill a member’s blank personal data",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "member:complete_personal"
       }
     },
     "/api/v1/admin/leader-limit-requests": {
@@ -12362,7 +13120,7 @@
     },
     "/api/v1/join/redeem": {
       "post": {
-        "description": "Registers you and tags you to the issuer in one step, with no approval — that is the whole difference from asking a leader. No join request is created: one would sit in their inbox asking them to approve something that already happened.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Registers you and tags you to the issuer in one step, with no approval — that is the whole difference from asking a leader. No join request is created: one would sit in their inbox asking them to approve something that already happened. Somebody still waiting in the code’s office — registered to it, with a request open or none — is placed the same way, and any request they had open is cancelled (ADR-0236 §2). `409 ORG_AGENT_ALREADY_TAGGED` for somebody active in an office, refused before the code is read, and for somebody waiting in another office than the code’s, in words that say so.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OnboardingController_redeem_v1",
         "parameters": [],
         "requestBody": {
@@ -26470,7 +27228,7 @@
     },
     "/api/v1/new-hires": {
       "get": {
-        "description": "Every new hire you coach, at any depth, whose join date is in the year asked for — `year=current`, the default: 1 January of the office’s year to today, so on 1 January the count starts again from nobody; `year=previous`: all of last year — never an existing agent, in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, the day, the first sale with its day and source, the status and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month. A result decided is kept, and never changes after. A year with nobody in it while the other has somebody answers empty sections. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every new hire you coach, at any depth, whose join date is in the year asked for — `year=current`, the default: 1 January of the office’s year to today, so on 1 January the count starts again from nobody; `year=previous`: all of last year — never an existing agent, in three sections by their 3M activation: in progress (days 1 to 90), activated (a first paid and issued case by day 90, or after it) and not activated (none by day 90). Each row: the join date, the day, the first sale with its day and source, the status and their checklist where they have one. At the top, the 3M activation % of everybody listed and of each unit — your direct unit, then each AAB’s or AB’s below you — overall and by join month: of the new hires who are due — past day 90, or with a first sale at any time — the share whose first sale was by day 90, so a late one counts against it. A result decided is kept, and never changes after. Each row carries the person’s photo as a signed link, or `null`. A new hire who left is listed, and opens read-only. A year with nobody in it while the other has somebody answers empty sections. Each new hire shown is a recorded read.\n\n**Requires `new_hires:read_roster`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_roster_v1",
         "parameters": [
           {
@@ -26564,7 +27322,7 @@
     },
     "/api/v1/new-hires/{membershipId}": {
       "get": {
-        "description": "As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The detail page, and a coaching page’s Activation tab. A recorded read. **Empty** (`ActivationEmptyDto`, told apart by its `empty`) once the join date plus twelve calendar months has come — the activation covers the first year only — and for a new hire New Hires lists who has no activation at all: the person, their join date and leader, and nothing of a checklist, recording no read.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "As the hire reads it, in any state — without their own note and date on each item — and, in `newHire`, their 3M standing as their row on New Hires says it: the status, the day and the first sale with its day and source. The detail page, and a coaching page’s Activation tab. A recorded read. **Empty** (`ActivationEmptyDto`, told apart by its `empty`) once the join date plus twelve calendar months has come — the activation covers the first year only — and for a new hire New Hires lists who has no activation at all: the person, their join date and leader, and nothing of a checklist, recording no read. **Everybody New Hires lists opens**: a new hire who left — listed on the edges they left with — is served `readOnly: true`, without their WhatsApp number, and every write on them answers 404.\n\n**Requires `activation:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "NewHiresController_detail_v1",
         "parameters": [
           {
@@ -26615,7 +27373,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation, and no new hire New Hires lists for you: a peer’s hire, somebody in another team, a member who left who was not a new hire of the two years New Hires shows, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26693,7 +27451,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or you do not read their leads.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left — a new hire who left included, whose detail you read but never write — yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or you do not read their leads.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26799,7 +27557,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or their checklist has no item with that code, or the closing named is not theirs.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left — a new hire who left included, whose detail you read but never write — yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists. Or their checklist has no item with that code, or the closing named is not theirs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26917,7 +27675,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left — a new hire who left included, whose detail you read but never write — yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27025,7 +27783,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left, yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
+            "description": "`NOT_FOUND` — nobody you coach with an activation: a peer’s hire, somebody in another team, a member who has left — a new hire who left included, whose detail you read but never write — yourself, or an id that is nobody’s — deliberately indistinguishable from one in another office: a `403` would confirm that somebody exists.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27376,6 +28134,20 @@
               "maxLength": 64,
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "Whose figures: `direct` (*Grup langsung*: the leader and everybody below them, never descending into an AB), `informal` (*Grup informal*: that, and each AB below them tagged into a live group they own, with that AB’s own direct group — never anybody outside their downline) or `downline` (*Semua downline*: everybody below them; for the agency’s owner or an administrator on their own dashboard, every member of the agency). Omitted, or a view not offered for this leader, the reader’s default — answered in `scope`, with `scopes.offered`. Any other value is `400`.",
+            "schema": {
+              "enum": [
+                "direct",
+                "informal",
+                "downline"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -27709,6 +28481,20 @@
               "maxLength": 64,
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "Whose figures: `direct` (*Grup langsung*: the leader and everybody below them, never descending into an AB), `informal` (*Grup informal*: that, and each AB below them tagged into a live group they own, with that AB’s own direct group — never anybody outside their downline) or `downline` (*Semua downline*: everybody below them; for the agency’s owner or an administrator on their own dashboard, every member of the agency). Omitted, or a view not offered for this leader, the reader’s default — answered in `scope`, with `scopes.offered`. Any other value is `400`.",
+            "schema": {
+              "enum": [
+                "direct",
+                "informal",
+                "downline"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -27885,7 +28671,7 @@
     },
     "/api/v1/home": {
       "get": {
-        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today); *Aksi hari ini*, at most three — today’s tasks, then your next timed items; and the quote and the pose of the day; *Leads*, every open lead you own, as `/leads` opens on them (`OWN_OPEN_LEADS`); and *New hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks at zero when nobody reports to them yet (ADR-0189 §4, ADR-0228 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Every block of Home in one read, for the reader alone. **Your own**: your activity today and yesterday and the seven days ending today (the totals Activity Management saved, on the agency’s calendar); today’s timed calendar items and today’s open tasks (your latest 1:1’s action items due today, and your own leads whose next action is today, a ticked one not counted); *Aksi hari ini*, today’s alone and at most three — today’s tasks, open and ticked, then today’s timed items not yet ended, each in the Calendar’s own shape; and the quote and the pose of the day; *Leads*, every open lead you own, as `/leads` opens on them (`OWN_OPEN_LEADS`); and *New hires*, your Group’s new hires before a first sale (0 when you lead nobody). **If you lead somebody**: *Active Agent* exactly as the Unit Dashboard’s tile counts it, *Coaching 7 hari* (members coached in the last 7 days, out of the same manpower), each with its *Unit* and *AAB* split, and *Laporan aktivitas tim* — everybody in your Group but you, yesterday’s and today’s count, nobody-reported first, with their photo (a signed link) and WhatsApp number; each of them recorded as read. **Every leader by role** — an AB or an AAB, an Owner or an Admin — gets those blocks at zero when nobody reports to them yet (ADR-0189 §4, ADR-0228 §4); an Agent who leads nobody gets `leader: null`.\n\n**Requires `personal_summary:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "HomeController_read_v1",
         "parameters": [],
         "responses": {
@@ -29130,6 +29916,110 @@
           }
         ],
         "summary": "All members — every membership on the platform",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_members:read"
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "description": "*All members* › *Akun terdaftar* (ADR-0245 §1): every registered account but a Super Admin’s, 50 a page, newest registration first — a person who registered and joined no KPM included, whom *All members*’ memberships cannot list. Each row: the name, the email, the insurer it registered with, the day it registered, whether the address is verified, the day it last signed in, and how many KPMs it is active or pending in. `q` matches a name or an email; `kpm=none` is *Tanpa KPM*, `kpm=some` *Punya KPM*. Never a phone, a birth date or a gender. View-only. **Audited per read** as `platform_read.accounts` (ADR-0207 §5): one entry in the platform’s log with the purpose, the filters, the page, the number of rows and the accounts returned, written before the answer is sent.\n\n**Requires `platform_members:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "PlatformReadsController_accounts_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "A name or an email address, matched in part. Shorter than two characters is `400`.",
+            "schema": {
+              "minLength": 2,
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "kpm",
+            "required": false,
+            "in": "query",
+            "description": "`none`, *Tanpa KPM*: no active or pending membership in any KPM (a membership that ended counts as none). `some`, *Punya KPM*: at least one. Every account when absent.",
+            "schema": {
+              "enum": [
+                "none",
+                "some"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformAccountsPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `q` shorter than two characters, a `kpm` other than `none` or `some`, a `page` that is no whole number from 1, or a parameter of any other name. `details` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — every tenant role, and a support session (its context is the member’s, holding no platform grant).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — the read’s audit entries could not be written, so the read is not served (ADR-0207 §5).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registered accounts — every account, with or without a KPM",
         "tags": [
           "admin (Super Admin)"
         ],
@@ -33133,7 +34023,7 @@
     },
     "/api/v1/proposals": {
       "get": {
-        "description": "Your own live proposals, newest change first: each row’s client, date, products with their plan, status and totals per currency. `leadId` narrows to one lead — the lead sheet’s *Proposal* section. A deleted lead’s proposals stay, under the client’s name, with `leadDeleted`.\n\n**Requires `proposal:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Your own live proposals, newest change first: each row’s client, date, products with their plan, status and totals per currency. `leadId` narrows to one lead. **`status=done` orders by the last *Simpan PDF* (`doneAt`)** instead — the lead sheet’s *Proposal* section reads `?leadId=…&status=done&pageSize=1`, the lead’s latest finished proposal, and never shows a draft. A deleted lead’s proposals stay, under the client’s name, with `leadDeleted`.\n\n**Requires `proposal:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ProposalController_list_v1",
         "parameters": [
           {
@@ -33253,7 +34143,7 @@
         "x-required-permission": "proposal:read"
       },
       "post": {
-        "description": "A *Draf* for one of your own live **Sales** leads, with the client’s name, age and gender copied from it. Another member’s lead or another office’s is `404 NOT_FOUND`; a Recruit lead, one with no type, or one without an age or a gender is `400`, `details.field: \"leadId\"` — step 1 saves them to the lead first.\n\n**Requires `proposal:create`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "A *Draf* for one of your own live **Sales** leads, with the client’s name, age and gender copied from it. **Where you already have a draft on that lead with no product chosen, that draft is answered instead** — its client’s copy taken from the lead again — so no lead collects empty drafts; a draft with a product is never reused. Another member’s lead or another office’s is `404 NOT_FOUND`; a Recruit lead, one with no type, or one without an age or a gender is `400`, `details.field: \"leadId\"` — step 1 saves them to the lead first.\n\n**Requires `proposal:create`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "ProposalController_create_v1",
         "parameters": [],
         "requestBody": {
@@ -33268,7 +34158,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "The new draft, or the lead’s empty one reused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -34408,7 +35298,7 @@
         "x-required-permission": "tenant_config:read"
       },
       "put": {
-        "description": "Each group whole or `null` (the KPM then shows its template’s, else AgencyBoost’s). A colour no text reads on is `422 BRANDING_COLOUR_UNREADABLE` (`details.field`); a stale `expectedVersion` `409 VERSION_CONFLICT`; an image folder not this KPM’s `400 VALIDATION_FAILED`. Audited `kpm_branding.updated`, old → new.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Each group whole or `null` (the KPM then shows its template’s, else AgencyBoost’s). Every `#rrggbb` colour is accepted: one no words read 4.5:1 on is painted as its nearest readable shade, and the colour chosen is kept. A stale `expectedVersion` is `409 VERSION_CONFLICT`; an image folder not this KPM’s `400 VALIDATION_FAILED`. Audited `kpm_branding.updated`, old → new, each colour with its fill.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "BrandingSettingsController_save_v1",
         "parameters": [],
         "requestBody": {
@@ -34487,7 +35377,7 @@
     },
     "/api/v1/kpm/settings/branding/preview": {
       "post": {
-        "description": "Writes nothing. The same `422 BRANDING_COLOUR_UNREADABLE` *Simpan* would answer (acceptance 2).\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Writes nothing. Each colour’s words, their ratio and its `fill`, `adjusted` when the fill is not the colour chosen.\n\n**Requires `tenant_config:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "BrandingSettingsController_preview_v1",
         "parameters": [],
         "requestBody": {
@@ -34909,7 +35799,7 @@
     },
     "/api/v1/admin/companies/{companyId}/templates/{templateId}/branding/preview": {
       "post": {
-        "description": "Writes nothing. `422 BRANDING_COLOUR_UNREADABLE` as the section’s save would answer.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "Writes nothing. Each colour’s words, their ratio and its `fill`, as the KPM’s preview answers.\n\n**Requires `company_template:write`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "TemplateBrandingController_preview_v1",
         "parameters": [
           {
@@ -35523,6 +36413,57 @@
           "correctedAt"
         ]
       },
+      "MonthManualDto": {
+        "type": "object",
+        "properties": {
+          "minor": {
+            "type": "number",
+            "example": 21650000000,
+            "description": "IDR sen: the month’s APE as the member typed it, in millions on the screen."
+          },
+          "typedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the member typed it."
+          }
+        },
+        "required": [
+          "minor",
+          "typedAt"
+        ]
+      },
+      "MonthRealisedDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "uploaded",
+              "none"
+            ],
+            "description": "Which figure `actualMinor` is — **the member’s own figure typed over the upload, then the office’s upload, then nothing** (*Belum diunggah*). `manual` is the screen’s *Diubah manual*."
+          },
+          "uploaded": {
+            "type": "boolean",
+            "description": "The office holds an upload for the month, in force or not — with `manual`, the screen offers *Kembalikan ke data unggahan*; without, clearing goes back to *Belum diunggah*."
+          },
+          "manual": {
+            "nullable": true,
+            "description": "The member’s own figure for the month (`PUT /goals/:period/ape-month`), always the one in force; `null` without one.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthManualDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "uploaded",
+          "manual"
+        ]
+      },
       "MonthlyFiguresDto": {
         "type": "object",
         "properties": {
@@ -35565,7 +36506,7 @@
               "estimate",
               "none"
             ],
-            "description": "`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183); the year only. `none`: nothing yet."
+            "description": "`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183) — the year to date, or on `monthly` the month’s own figure typed over the upload (`realised.source: manual`). `none`: nothing yet."
           },
           "withoutProduction": {
             "nullable": true,
@@ -35578,10 +36519,18 @@
           },
           "source": {
             "nullable": true,
-            "description": "Where this month’s APE came from; `null` until the file for the month arrives.",
+            "description": "Where this month’s APE came from: the office’s file, or — with `realised.source: manual` — `self_reported` for the month, the member’s own figure typed over it; `null` while neither is held.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/FigureSourceDto"
+              }
+            ]
+          },
+          "realised": {
+            "description": "The realised APE’s source — `manual`, `uploaded` or `none` — and whether an upload exists for the month. `actualMinor` is `manual ?? uploaded`, and the attainment, `gapMinor` (never below 0), `policiesNeeded` and `targetMet` are worked out from it. The member’s own Summary and their coach’s view of it only: no leader’s, Unit Dashboard’s or office’s figure reads the member’s own.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MonthRealisedDto"
               }
             ]
           }
@@ -35596,7 +36545,8 @@
           "targetMet",
           "production",
           "withoutProduction",
-          "source"
+          "source",
+          "realised"
         ]
       },
       "YearlyFiguresDto": {
@@ -35641,7 +36591,7 @@
               "estimate",
               "none"
             ],
-            "description": "`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183); the year only. `none`: nothing yet."
+            "description": "`official`: the office’s file, imported or corrected. `estimate`: the member’s own figure, typed on Goal Settings or the Summary — *perkiraan Anda* (a coach’s typing too, ADR-0183) — the year to date, or on `monthly` the month’s own figure typed over the upload (`realised.source: manual`). `none`: nothing yet."
           },
           "withoutProduction": {
             "nullable": true,
@@ -35950,14 +36900,115 @@
           "yearly"
         ]
       },
-      "OpenLeadDto": {
+      "LeadContactDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "phone",
+          "email"
+        ]
+      },
+      "LeadOwnerDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "description": "The membership whose lead it is — `ownerMembershipId` again."
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Rina Wijaya",
+            "description": "The account’s name behind that membership; `null` for one that can no longer be named, never a placeholder."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name"
+        ]
+      },
+      "LeadLatestProposalDto": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "example": [
+              "PRUWell Medical",
+              "PRUCinta"
+            ],
+            "description": "The item names of the live proposal updated last that has a product, as the proposal shows them, in order. Empty when every live proposal of the lead is still empty.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "products"
+        ]
+      },
+      "LeadLatestDoneProposalDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The proposal’s id: `/proposal/{id}?step=3` on the screen."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "LeadProposalsDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "minimum": 1,
+            "description": "The lead’s live proposals, drafts included."
+          },
+          "latest": {
+            "$ref": "#/components/schemas/LeadLatestProposalDto"
+          },
+          "done": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Among them, the finished ones: `status: \"done\"`, the PDF saved and not changed since. Drafts never count. The card draws its proposal icon only when this is 1 or more."
+          },
+          "latestDone": {
+            "nullable": true,
+            "description": "The finished proposal saved last, by `doneAt`; `null` when none is finished.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadLatestDoneProposalDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "latest",
+          "done",
+          "latestDone"
+        ]
+      },
+      "LeadResponseDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "name": {
-            "type": "string"
+          "ownerMembershipId": {
+            "type": "string",
+            "description": "The membership whose lead it is, never a user id."
           },
           "type": {
             "type": "string",
@@ -35967,22 +37018,100 @@
             ],
             "nullable": true
           },
+          "name": {
+            "type": "string"
+          },
+          "contact": {
+            "description": "No `lawfulBasis` or `consentAt` beside it since 2026-10-07 (ADR-0108 §1).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadContactDto"
+              }
+            ]
+          },
           "statusCode": {
             "type": "string",
-            "nullable": true
-          },
-          "statusLabel": {
-            "type": "string",
             "nullable": true,
-            "description": "The office’s name for the stage, archived stages included."
+            "description": "The code, never the label."
           },
           "thisMonth": {
             "type": "boolean",
-            "description": "Promised for the office’s current month."
+            "description": "**Derived**: is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
+          },
+          "committedMonths": {
+            "example": [
+              "2026-09",
+              "2026-10"
+            ],
+            "description": "Every month this lead was promised for, oldest first, in the office’s timezone. The archive behind *did they do what they said* — written when the promise is made rather than swept somewhere when the month ends.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "closedThisMonth": {
+            "type": "boolean",
+            "description": "**Derived** (UI-153 item 5): marked *Berhasil* inside the office’s current month. With `thisMonth` it is the avatar’s badge — yellow ✓ switched on and not closed, green ✓ switched on and closed this month — and it clears on the 1st with the switch."
+          },
+          "remarks": {
+            "type": "string",
+            "nullable": true
+          },
+          "nextActionDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-02"
+          },
+          "nextActionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "won",
+              "lost"
+            ],
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "dateRegistered": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "age": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 1,
+            "example": 36,
+            "description": "**The client's age at the next birthday, today** (*Umur ulang tahun berikutnya*; ADR-0224 §2): the age written plus the whole years since `ageRecordedOn`, on the office's calendar — one more on each anniversary, at 00:00 WIB. `null` when none was given. Read by whoever reads the lead."
+          },
+          "ageRecordedOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-11-05",
+            "description": "The office's day the age was last written, `YYYY-MM-DD`; `null` with it. Set by the server only."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ],
+            "nullable": true,
+            "description": "*Laki-laki* or *Perempuan* (ADR-0224 §1), or `null`. Printed nowhere, and decides no figure."
+          },
+          "version": {
+            "type": "number",
+            "description": "What a later write pins, so two people cannot overwrite each other."
           },
           "flags": {
             "type": "array",
-            "description": "As the Leads screen derives them (`leadFlags`).",
+            "description": "Computed on read, never stored — a stored flag is one that is wrong at midnight. A closed lead carries none. **A commitment for this month does not suppress them**, unlike the prototype, which shows only the green chip on a lead that is also two weeks overdue.",
             "items": {
               "type": "string",
               "enum": [
@@ -35992,47 +37121,90 @@
               ]
             }
           },
+          "lastEditedBy": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": false,
+            "properties": {
+              "membershipId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
+          },
+          "owner": {
+            "description": "**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadOwnerDto"
+              }
+            ]
+          },
           "overdueDays": {
             "type": "number",
             "nullable": true,
-            "description": "Whole days in the office’s zone; `null` unless overdue."
+            "example": 14,
+            "description": "How late, in the office’s own calendar days — `null` unless `flags` carries `overdue`. Beside `flags` rather than inside it: `flags` is what the list filters on, and a filter key carrying a number is one nobody can match against."
           },
-          "nextActionDate": {
-            "type": "string",
+          "proposals": {
             "nullable": true,
-            "example": "2026-09-18"
-          },
-          "nextActionNote": {
-            "type": "string",
-            "nullable": true
+            "description": "How many live proposals the lead has, and the latest’s products — the card’s *\"PRUWell Medical +1\"*. **`null` on a lead with none, and on every lead that is not yours**: a leader reads a downline’s lead, never what was proposed on it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeadProposalsDto"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "name",
+          "ownerMembershipId",
           "type",
+          "name",
+          "contact",
           "statusCode",
-          "statusLabel",
           "thisMonth",
-          "flags",
-          "overdueDays",
+          "committedMonths",
+          "closedThisMonth",
+          "remarks",
           "nextActionDate",
-          "nextActionNote"
+          "nextActionNote",
+          "outcome",
+          "source",
+          "dateRegistered",
+          "age",
+          "ageRecordedOn",
+          "gender",
+          "version",
+          "flags",
+          "lastEditedBy",
+          "owner",
+          "overdueDays",
+          "proposals"
         ]
       },
       "SummaryLeadsDto": {
         "type": "object",
         "properties": {
           "rows": {
-            "description": "The nearest `SUMMARY.LEADS_SHOWN` (10), nearest next action first, undated last.",
+            "description": "**Every** open lead of the member’s own, in `GET /leads`’ row shape — `proposals` on the reader’s own rows only — what needs attention first: a dated next action first, the nearest (an overdue one) on top, then the leads with none, the one registered first first, then the id. Empty to a reader whose `lead:read` does not reach the member (roles §3.7): `total` still counts them.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OpenLeadDto"
+              "$ref": "#/components/schemas/LeadResponseDto"
             }
           },
           "total": {
             "type": "number",
-            "description": "Every open lead of the reader’s own."
+            "description": "Every open lead of the member’s own."
+          },
+          "shown": {
+            "type": "number",
+            "example": 5,
+            "description": "`SUMMARY.LEADS_SHOWN`: how many rows the section shows before *Lihat semua (N)* opens the rest in place (AC-2)."
           },
           "unitOpen": {
             "type": "number",
@@ -36042,6 +37214,7 @@
         "required": [
           "rows",
           "total",
+          "shown",
           "unitOpen"
         ]
       },
@@ -36165,7 +37338,7 @@
             ]
           },
           "leads": {
-            "description": "*Leads that need you*: the reader’s own open leads.",
+            "description": "*Leads yang perlu perhatian Anda*: the member’s own open leads.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SummaryLeadsDto"
@@ -36380,265 +37553,6 @@
           "production",
           "lastOneOnOne",
           "leads"
-        ]
-      },
-      "LeadContactDto": {
-        "type": "object",
-        "properties": {
-          "phone": {
-            "type": "string",
-            "nullable": true
-          },
-          "email": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "phone",
-          "email"
-        ]
-      },
-      "LeadOwnerDto": {
-        "type": "object",
-        "properties": {
-          "membershipId": {
-            "type": "string",
-            "description": "The membership whose lead it is — `ownerMembershipId` again."
-          },
-          "name": {
-            "type": "string",
-            "nullable": true,
-            "example": "Rina Wijaya",
-            "description": "The account’s name behind that membership; `null` for one that can no longer be named, never a placeholder."
-          }
-        },
-        "required": [
-          "membershipId",
-          "name"
-        ]
-      },
-      "LeadLatestProposalDto": {
-        "type": "object",
-        "properties": {
-          "products": {
-            "example": [
-              "PRUWell Medical",
-              "PRUCinta"
-            ],
-            "description": "The item names of the live proposal updated last that has a product, as the proposal shows them, in order. Empty when every live proposal of the lead is still empty.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "products"
-        ]
-      },
-      "LeadProposalsDto": {
-        "type": "object",
-        "properties": {
-          "count": {
-            "type": "number",
-            "minimum": 1,
-            "description": "The lead’s live proposals, drafts included."
-          },
-          "latest": {
-            "$ref": "#/components/schemas/LeadLatestProposalDto"
-          }
-        },
-        "required": [
-          "count",
-          "latest"
-        ]
-      },
-      "LeadResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "ownerMembershipId": {
-            "type": "string",
-            "description": "The membership whose lead it is, never a user id."
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "sales",
-              "recruitment"
-            ],
-            "nullable": true
-          },
-          "name": {
-            "type": "string"
-          },
-          "contact": {
-            "description": "No `lawfulBasis` or `consentAt` beside it since 2026-10-07 (ADR-0108 §1).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LeadContactDto"
-              }
-            ]
-          },
-          "statusCode": {
-            "type": "string",
-            "nullable": true,
-            "description": "The code, never the label."
-          },
-          "thisMonth": {
-            "type": "boolean",
-            "description": "**Derived**: is there a commitment for the office’s current month? Nothing clears it, so it cannot be left true for an agent who has not opened the app since March."
-          },
-          "committedMonths": {
-            "example": [
-              "2026-09",
-              "2026-10"
-            ],
-            "description": "Every month this lead was promised for, oldest first, in the office’s timezone. The archive behind *did they do what they said* — written when the promise is made rather than swept somewhere when the month ends.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "closedThisMonth": {
-            "type": "boolean",
-            "description": "**Derived** (UI-153 item 5): marked *Berhasil* inside the office’s current month. With `thisMonth` it is the avatar’s badge — yellow ✓ switched on and not closed, green ✓ switched on and closed this month — and it clears on the 1st with the switch."
-          },
-          "remarks": {
-            "type": "string",
-            "nullable": true
-          },
-          "nextActionDate": {
-            "type": "string",
-            "nullable": true,
-            "example": "2026-10-02"
-          },
-          "nextActionNote": {
-            "type": "string",
-            "nullable": true
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "won",
-              "lost"
-            ],
-            "nullable": true
-          },
-          "source": {
-            "type": "string",
-            "nullable": true
-          },
-          "dateRegistered": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "age": {
-            "type": "number",
-            "nullable": true,
-            "minimum": 1,
-            "example": 36,
-            "description": "**The client's age at the next birthday, today** (*Umur ulang tahun berikutnya*; ADR-0224 §2): the age written plus the whole years since `ageRecordedOn`, on the office's calendar — one more on each anniversary, at 00:00 WIB. `null` when none was given. Read by whoever reads the lead."
-          },
-          "ageRecordedOn": {
-            "type": "string",
-            "nullable": true,
-            "example": "2026-11-05",
-            "description": "The office's day the age was last written, `YYYY-MM-DD`; `null` with it. Set by the server only."
-          },
-          "gender": {
-            "type": "string",
-            "enum": [
-              "male",
-              "female"
-            ],
-            "nullable": true,
-            "description": "*Laki-laki* or *Perempuan* (ADR-0224 §1), or `null`. Printed nowhere, and decides no figure."
-          },
-          "version": {
-            "type": "number",
-            "description": "What a later write pins, so two people cannot overwrite each other."
-          },
-          "flags": {
-            "type": "array",
-            "description": "Computed on read, never stored — a stored flag is one that is wrong at midnight. A closed lead carries none. **A commitment for this month does not suppress them**, unlike the prototype, which shows only the green chip on a lead that is also two weeks overdue.",
-            "items": {
-              "type": "string",
-              "enum": [
-                "overdue",
-                "no-next-action",
-                "no-remarks"
-              ]
-            }
-          },
-          "lastEditedBy": {
-            "type": "object",
-            "nullable": true,
-            "additionalProperties": false,
-            "properties": {
-              "membershipId": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string",
-                "nullable": true
-              }
-            },
-            "description": "Who last changed this lead, when that was not the agent whose lead it is (ADR-0044) — `null` otherwise. A proxy edit is recognisable by `updatedBy` differing from `ownerMembershipId`: two columns, so no flag is needed."
-          },
-          "owner": {
-            "description": "**Whose lead it is, by name** (ADR-0232): on every row, your own included, so a leader’s list of the team’s leads can say whose each one is. The name is the account’s, read with the page’s other names in one batch.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LeadOwnerDto"
-              }
-            ]
-          },
-          "overdueDays": {
-            "type": "number",
-            "nullable": true,
-            "example": 14,
-            "description": "How late, in the office’s own calendar days — `null` unless `flags` carries `overdue`. Beside `flags` rather than inside it: `flags` is what the list filters on, and a filter key carrying a number is one nobody can match against."
-          },
-          "proposals": {
-            "nullable": true,
-            "description": "How many live proposals the lead has, and the latest’s products — the card’s *\"PRUWell Medical +1\"*. **`null` on a lead with none, and on every lead that is not yours**: a leader reads a downline’s lead, never what was proposed on it.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LeadProposalsDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "ownerMembershipId",
-          "type",
-          "name",
-          "contact",
-          "statusCode",
-          "thisMonth",
-          "committedMonths",
-          "closedThisMonth",
-          "remarks",
-          "nextActionDate",
-          "nextActionNote",
-          "outcome",
-          "source",
-          "dateRegistered",
-          "age",
-          "ageRecordedOn",
-          "gender",
-          "version",
-          "flags",
-          "lastEditedBy",
-          "owner",
-          "overdueDays",
-          "proposals"
         ]
       },
       "LeadPageDto": {
@@ -36936,7 +37850,7 @@
                 "type": "string"
               }
             },
-            "description": "Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
+            "description": "Both optional, both clearable, sent as a pair. **`phone` is stored as `+62` and its national digits**: `0812-1100-2200`, `62812…` and `+62 812…` all store `+6281211002200`. A phone that is not an Indonesian number (9 to 13 digits after `+62`) is `400 VALIDATION_FAILED` — unless it is the number the lead already holds, sent back unchanged, which passes untouched. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
           },
           "remarks": {
             "type": "string",
@@ -37045,7 +37959,7 @@
                 "type": "string"
               }
             },
-            "description": "Both optional, both clearable, sent as a pair. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
+            "description": "Both optional, both clearable, sent as a pair. **`phone` is stored as `+62` and its national digits**: `0812-1100-2200`, `62812…` and `+62 812…` all store `+6281211002200`. A phone that is not an Indonesian number (9 to 13 digits after `+62`) is `400 VALIDATION_FAILED` — unless it is the number the lead already holds, sent back unchanged, which passes untouched. **No lawful basis is asked for since 2026-10-07** (ADR-0108 §1): `lawfulBasis` is no longer a field, and a body carrying it is refused with `400 VALIDATION_FAILED` like any other unknown field."
           },
           "remarks": {
             "type": "string",
@@ -37700,6 +38614,73 @@
         },
         "required": [
           "apeAchievedMinor"
+        ]
+      },
+      "SaveMonthApeDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-11",
+            "description": "`YYYY-MM`: a month of the path’s year, no later than the office’s current month and no earlier than the month the office opened — the months the Summary’s month selector offers."
+          },
+          "apeAchievedMinor": {
+            "type": "number",
+            "nullable": true,
+            "example": 21650000000,
+            "description": "IDR **sen**, whole and at least 0: the month’s APE as the member realised it — typed in millions on the screen (*216,5* is Rp 216.500.000). In force over the office’s upload for the month on the member’s own Summary (*Diubah manual*). `null` clears it: the upload again (*Kembalikan ke data unggahan*), or *Belum diunggah*."
+          }
+        },
+        "required": [
+          "month",
+          "apeAchievedMinor"
+        ]
+      },
+      "GoalMonthApeManualDto": {
+        "type": "object",
+        "properties": {
+          "minor": {
+            "type": "number",
+            "example": 21650000000,
+            "description": "IDR sen, whole, at least 0."
+          },
+          "typedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the member typed it."
+          }
+        },
+        "required": [
+          "minor",
+          "typedAt"
+        ]
+      },
+      "GoalMonthApeResponseDto": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "example": "2026"
+          },
+          "month": {
+            "type": "string",
+            "example": "2026-11",
+            "description": "`YYYY-MM`."
+          },
+          "manual": {
+            "nullable": true,
+            "description": "The month’s APE as the member typed it — in force over the office’s upload on their own Summary — or `null` once cleared (the upload again, or *Belum diunggah*).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GoalMonthApeManualDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "period",
+          "month",
+          "manual"
         ]
       },
       "CellCorrectionDto": {
@@ -38940,7 +39921,7 @@
           },
           "companyId": {
             "type": "string",
-            "description": "From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says.",
+            "description": "From GET /companies. With `inviteToken`, the invite’s office’s insurer is used, whatever this says; with `leaderCode`, the code’s office’s, and it may be left out.",
             "example": "65f1a0c2e4b0a1b2c3d4e5f6"
           },
           "agentCode": {
@@ -38954,6 +39935,11 @@
           "inviteToken": {
             "type": "string",
             "description": "The token from an invite link, `/register?invite=…`."
+          },
+          "leaderCode": {
+            "type": "string",
+            "example": "JOR417",
+            "description": "A leader’s code, from `/register?code=…`. Ignored beside `inviteToken`, which names its own leader."
           },
           "dateOfBirth": {
             "type": "string",
@@ -38991,6 +39977,30 @@
           "companyJoinMonth",
           "workStatus",
           "gender"
+        ]
+      },
+      "RegisterAnswerDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "signed_in",
+              "verification_sent"
+            ],
+            "description": "`signed_in`: the account was made and is signed in. `verification_sent`: the address already had an account; nothing was made, nobody is signed in, and nobody joined anything."
+          },
+          "accessToken": {
+            "type": "string",
+            "description": "With `signed_in` only."
+          },
+          "expiresIn": {
+            "type": "number",
+            "description": "With `signed_in` only: seconds until the access token expires."
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "LoginDto": {
@@ -40113,6 +41123,23 @@
           "ownerMembershipId"
         ]
       },
+      "AddGroupMembersDto": {
+        "type": "object",
+        "properties": {
+          "membershipIds": {
+            "minItems": 1,
+            "maxItems": 500,
+            "description": "The **memberships** to tag, each an active member of this agency. One that is not, and nothing is written.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "membershipIds"
+        ]
+      },
       "TagMemberDto": {
         "type": "object",
         "properties": {
@@ -40157,6 +41184,59 @@
         "required": [
           "phone"
         ]
+      },
+      "ChangeLeaderDto": {
+        "type": "object",
+        "properties": {
+          "leaderMembershipId": {
+            "type": "string",
+            "description": "The new leader: an active member of the office who can hold a unit."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Lives near Sari’s office",
+            "maxLength": 300,
+            "description": "Why, as typed: kept on the move’s history row and audit row, or shown to whoever decides a request."
+          }
+        },
+        "required": [
+          "leaderMembershipId"
+        ]
+      },
+      "CompleteMemberPersonalDto": {
+        "type": "object",
+        "properties": {
+          "dateOfBirth": {
+            "type": "string",
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`. In the past, and at least 18 years ago in the office’s calendar."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ]
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month they joined the insurer. Not in the future."
+          },
+          "workStatus": {
+            "type": "string",
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "How they work in this office; written on the membership."
+          },
+          "phone": {
+            "type": "string",
+            "example": "0812-1100-2200",
+            "description": "Their WhatsApp number. Spaces, dashes, dots and brackets go, and a leading `+62`, `62` or `0`; what is left must be 9 to 13 digits, stored as `+62…`, else `400 VALIDATION_FAILED` naming `phone`. Not clearable."
+          }
+        }
       },
       "DeclineLeaderLimitRequestDto": {
         "type": "object",
@@ -43297,7 +44377,7 @@
           },
           "budgetBands": {
             "example": [
-              "Rp 2 jt–Rp 5 jt"
+              "Rp 2 Jt–Rp 5 Jt"
             ],
             "description": "The monthly budget bands it is eligible for, by label.",
             "type": "array",
@@ -48393,6 +49473,11 @@
                 "$ref": "#/components/schemas/CalendarTaskCoachingDto"
               }
             ]
+          },
+          "done": {
+            "type": "boolean",
+            "example": false,
+            "description": "Ticked done: a lead’s next action ticked from the Calendar, or a coaching action item the person ticked. It stays on its due date — drawn struck through, never counted in *Tugas · n* — until it is unticked, or, for a lead, until the lead holds a new next action. `false` while it is open."
           }
         },
         "required": [
@@ -48404,7 +49489,8 @@
           "note",
           "phone",
           "lead",
-          "coaching"
+          "coaching",
+          "done"
         ]
       },
       "CalendarHiddenTaskDto": {
@@ -48690,7 +49776,7 @@
                 }
               ]
             },
-            "description": "**Tugas** (UI V1): the lead next actions and open coaching action items dated in the period, coaching first, then by name — read from their sources now. For a compared member who hides their details, each is its day alone, a count."
+            "description": "**Tugas** (UI V1): the lead next actions and coaching action items dated in the period, coaching first, then by name — read from their sources now; a ticked one stays on its due date with `done: true`. For a compared member who hides their details, each open one is its day alone, a count."
           },
           "events": {
             "type": "array",
@@ -49810,25 +50896,25 @@
         "properties": {
           "activated": {
             "type": "number",
-            "description": "Their first sale was on or before day 90 of the join date: the numerator."
+            "description": "Their first sale was on or before day 90 of the join date — day 90 is on time: the numerator, and part of the denominator."
           },
           "notActivated": {
             "type": "number",
-            "description": "Past day 90 with no first sale: with `activated`, the denominator."
+            "description": "Past day 90 with no first sale: part of the denominator."
           },
           "late": {
             "type": "number",
-            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share."
+            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi in amber — part of the denominator, not the numerator."
           },
           "inProgress": {
             "type": "number",
-            "description": "Still within their 90 days with no first sale: in neither part of the share (rule A)."
+            "description": "Day 90 not over yet and no first sale: not due yet, so in neither part of the share."
           },
           "pct": {
             "type": "number",
             "nullable": true,
-            "example": 100,
-            "description": "*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none of them is decided — never 0. The screen shows this alone."
+            "example": 75,
+            "description": "*Aktivasi 3M*: of the new hires who are due — past day 90, or with a first sale at any time — the share whose first sale was by day 90: `activated ÷ (activated + late + notActivated)`, a whole percent; `null` while nobody is due — never 0. Counted over the set’s own hires, never averaged from smaller sets. The screen shows this alone."
           }
         },
         "required": [
@@ -49844,25 +50930,25 @@
         "properties": {
           "activated": {
             "type": "number",
-            "description": "Their first sale was on or before day 90 of the join date: the numerator."
+            "description": "Their first sale was on or before day 90 of the join date — day 90 is on time: the numerator, and part of the denominator."
           },
           "notActivated": {
             "type": "number",
-            "description": "Past day 90 with no first sale: with `activated`, the denominator."
+            "description": "Past day 90 with no first sale: part of the denominator."
           },
           "late": {
             "type": "number",
-            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi, and in neither part of the share."
+            "description": "A first sale after day 90 (*lewat 3M*): Teraktivasi in amber — part of the denominator, not the numerator."
           },
           "inProgress": {
             "type": "number",
-            "description": "Still within their 90 days with no first sale: in neither part of the share (rule A)."
+            "description": "Day 90 not over yet and no first sale: not due yet, so in neither part of the share."
           },
           "pct": {
             "type": "number",
             "nullable": true,
-            "example": 100,
-            "description": "*Aktivasi 3M*: activated by day 90 ÷ (that + past day 90 with no first sale), a whole percent; `null` while none of them is decided — never 0. The screen shows this alone."
+            "example": 75,
+            "description": "*Aktivasi 3M*: of the new hires who are due — past day 90, or with a first sale at any time — the share whose first sale was by day 90: `activated ÷ (activated + late + notActivated)`, a whole percent; `null` while nobody is due — never 0. Counted over the set’s own hires, never averaged from smaller sets. The screen shows this alone."
           },
           "month": {
             "type": "string",
@@ -49903,6 +50989,29 @@
           "byMonth"
         ]
       },
+      "NewHirePersonDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Sari Puspita",
+            "description": "The full name."
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Their profile photo as a signed link, when they have one (`users.avatarUrl`); `null` otherwise, which the row draws as initials. The circle of a hire not activated yet shows it (UX-14), and a unit leader's group row (UI-111)."
+          }
+        },
+        "required": [
+          "membershipId",
+          "name",
+          "photoUrl"
+        ]
+      },
       "NewHireUnitDto": {
         "type": "object",
         "properties": {
@@ -49917,10 +51026,10 @@
           },
           "leader": {
             "nullable": true,
-            "description": "`null` for *Direct Unit*.",
+            "description": "`null` for *Direct Unit*. With their photo.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ActivationPersonDto"
+                "$ref": "#/components/schemas/NewHirePersonDto"
               }
             ]
           },
@@ -49953,10 +51062,10 @@
           },
           "leader": {
             "nullable": true,
-            "description": "`null` for *Direct Unit*.",
+            "description": "`null` for *Direct Unit*. With their photo.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ActivationPersonDto"
+                "$ref": "#/components/schemas/NewHirePersonDto"
               }
             ]
           }
@@ -50003,7 +51112,7 @@
         "type": "object",
         "properties": {
           "hire": {
-            "$ref": "#/components/schemas/ActivationPersonDto"
+            "$ref": "#/components/schemas/NewHirePersonDto"
           },
           "unit": {
             "description": "The unit they are counted in.",
@@ -50050,7 +51159,7 @@
               "activated_late",
               "not_yet"
             ],
-            "description": "Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, outside the share); `not_yet` without one. Leaving is not a status."
+            "description": "Teraktivasi as soon as there is a first sale: `activated` by day 90, `activated_late` after it (amber, in the share’s denominator and not its numerator); `not_yet` without one. Leaving is not a status."
           },
           "activation3M": {
             "type": "string",
@@ -50064,7 +51173,7 @@
           "leftOn": {
             "type": "string",
             "nullable": true,
-            "description": "The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it."
+            "description": "The day they were marked left; `null` while not. Kept as data only: it decides nothing and no screen shows it — their row opens as anybody’s, and their detail is served read-only."
           },
           "checklist": {
             "nullable": true,
@@ -50270,7 +51379,7 @@
             "type": "string",
             "nullable": true,
             "example": "+6281211002200",
-            "description": "Their WhatsApp number as stored (`users.phone`), or `null` with none (UI-027, UI-081): the detail’s *WhatsApp* opens it, or asks for it first."
+            "description": "Their WhatsApp number as stored (`users.phone`), or `null` with none (UI-027, UI-081): the detail’s *WhatsApp* opens it, or asks for it first. `null` for a new hire who left, whom nobody coaches now."
           }
         },
         "required": [
@@ -50390,6 +51499,10 @@
                 "$ref": "#/components/schemas/NewHireStandingDto"
               }
             ]
+          },
+          "readOnly": {
+            "type": "boolean",
+            "description": "`true` for a new hire who left, whom New Hires lists and this detail opens for reading only: nobody coaches them now, so every write route answers 404 for them, and the page draws no write control. `false` for everybody you coach."
           }
         },
         "required": [
@@ -50410,7 +51523,8 @@
           "graduatedAt",
           "graduatedBy",
           "note",
-          "newHire"
+          "newHire",
+          "readOnly"
         ]
       },
       "TickHireActivationItemDto": {
@@ -50818,6 +51932,14 @@
             "type": "number",
             "description": "Everybody under those units’ heads."
           },
+          "aab": {
+            "type": "number",
+            "description": "*AAB*’s chip: the rows of the head’s direct group outside *Your Unit*. `direct`, `aab` and `ab` add up to `total`."
+          },
+          "ab": {
+            "type": "number",
+            "description": "*AB*’s chip, drawn while above 0: the rows outside the head’s direct group — an AB below the head and their people, in *Grup informal* and *Semua downline*; office-wide, other roots’ trees and *Belum punya leader* too."
+          },
           "newHires": {
             "type": "number",
             "description": "Of `total`, the new hires before a first sale: in the team, left out of *Direct Group production*, and in *Active Agent*’s `of` though never its `count` (UI-013)."
@@ -50828,6 +51950,8 @@
           "direct",
           "units",
           "underUnits",
+          "aab",
+          "ab",
           "newHires"
         ]
       },
@@ -50918,7 +52042,15 @@
             ]
           },
           "aab": {
-            "description": "*AAB*: every unit below the head, its head included. `unit` and `aab` add up to the total.",
+            "description": "*AAB*: the rest of the head’s direct group — every AAB unit below the head, its head included.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PotentialActiveDto"
+              }
+            ]
+          },
+          "ab": {
+            "description": "*AB*: everybody on the roster outside the head’s direct group — an AB below the head and their people; none in *Grup langsung*. `unit`, `aab` and `ab` add up to the total; an AB is never counted as an AAB.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/PotentialActiveDto"
@@ -50930,7 +52062,8 @@
           "count",
           "of",
           "unit",
-          "aab"
+          "aab",
+          "ab"
         ]
       },
       "PotentialRecruitsTileDto": {
@@ -50942,12 +52075,17 @@
           },
           "aabs": {
             "type": "number",
-            "description": "The same across every unit below the head."
+            "description": "The same across the rest of the head’s direct group."
+          },
+          "abs": {
+            "type": "number",
+            "description": "The same across the rows outside the head’s direct group; 0 in *Grup langsung*."
           }
         },
         "required": [
           "yourUnit",
-          "aabs"
+          "aabs",
+          "abs"
         ]
       },
       "UnitTilesDto": {
@@ -51574,6 +52712,86 @@
           "total"
         ]
       },
+      "UnitScopesDto": {
+        "type": "object",
+        "properties": {
+          "offered": {
+            "type": "array",
+            "description": "In the order drawn. *Grup langsung* while the head leads somebody; *Grup informal* while they own a live group or have an AB below them; *Semua downline* while an AB is below them, and always for the owner or an administrator on their own dashboard. The picker is hidden with one view or none.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "informal",
+                "downline"
+              ]
+            }
+          },
+          "default": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "informal",
+              "downline"
+            ],
+            "description": "What a read without `scope` answers: the owner’s own dashboard `downline`; an administrator’s `direct` while they lead somebody, else `downline`; every leader’s, and every view of another leader’s unit, `direct`."
+          }
+        },
+        "required": [
+          "offered",
+          "default"
+        ]
+      },
+      "UnitGroupRefDto": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Top Producers 2026"
+          }
+        },
+        "required": [
+          "groupId",
+          "name"
+        ]
+      },
+      "UnitInformalDto": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "description": "The live groups the head owns, A to Z — where *+ Tambah ke grup* tags somebody. Empty: none yet.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitGroupRefDto"
+            }
+          },
+          "absNotInGroup": {
+            "type": "number",
+            "description": "`ABS_NOT_IN_INFORMAL_GROUP`: the active ABs below the head tagged into no live group the head owns — *“{n} AB di bawah Anda belum masuk grup”*."
+          },
+          "abs": {
+            "nullable": true,
+            "description": "Those ABs, A to Z — only to a reader who may tag people into groups (`member:tag_group`); `null` otherwise.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnitPersonDto"
+            }
+          },
+          "canTag": {
+            "type": "boolean",
+            "description": "The reader may tag people into groups: *+ Tambah ke grup* is drawn. The API refuses it too."
+          }
+        },
+        "required": [
+          "groups",
+          "absNotInGroup",
+          "abs",
+          "canTag"
+        ]
+      },
       "UnitProductionStateDto": {
         "type": "object",
         "properties": {
@@ -51678,6 +52896,36 @@
               "$ref": "#/components/schemas/UnitGroupDto"
             }
           },
+          "unled": {
+            "nullable": true,
+            "description": "*Belum punya leader*: in the owner’s or an administrator’s own *Semua downline*, the agency’s people with no leader there who lead nobody, A to Z, and their total. `null` otherwise.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/YourUnitDto"
+              }
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "informal",
+              "downline"
+            ],
+            "description": "The view this answer is over: `direct` (*Grup langsung*: the head and everybody below them, never descending into an AB), `informal` (*Grup informal*: that, and each AB below the head tagged into a live group they own, with that AB’s own direct group) or `downline` (*Semua downline*: everybody below the head; the whole agency for its owner or an administrator on their own dashboard)."
+          },
+          "scopes": {
+            "$ref": "#/components/schemas/UnitScopesDto"
+          },
+          "informal": {
+            "nullable": true,
+            "description": "In `informal` only; `null` in any other view.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitInformalDto"
+              }
+            ]
+          },
           "production": {
             "$ref": "#/components/schemas/UnitProductionStateDto"
           },
@@ -51704,6 +52952,10 @@
           "tiles",
           "yourUnit",
           "units",
+          "unled",
+          "scope",
+          "scopes",
+          "informal",
           "production",
           "mdrt",
           "lastUpload"
@@ -52580,12 +53832,19 @@
             "type": "string",
             "enum": [
               "unit",
-              "direct"
+              "direct",
+              "unled"
             ],
-            "description": "`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 §4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order."
+            "description": "`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 §4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order; `unled`: *Belum punya leader*, last — in the owner’s or an administrator’s own *Semua downline*, the people with no leader there who lead nobody."
           },
           "leader": {
-            "$ref": "#/components/schemas/PotensiLeaderDto"
+            "nullable": true,
+            "description": "The card’s first row; `null` for `unled`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PotensiLeaderDto"
+              }
+            ]
           },
           "people": {
             "description": "The leader first, then the card’s people in the roster’s order.",
@@ -52634,6 +53893,27 @@
             "items": {
               "$ref": "#/components/schemas/PotensiUnitDto"
             }
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "informal",
+              "downline"
+            ],
+            "description": "The view this answer is over, as `GET /unit/dashboard`’s."
+          },
+          "scopes": {
+            "$ref": "#/components/schemas/UnitScopesDto"
+          },
+          "informal": {
+            "nullable": true,
+            "description": "In `informal` only, as `GET /unit/dashboard`’s.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnitInformalDto"
+              }
+            ]
           }
         },
         "required": [
@@ -52642,7 +53922,10 @@
           "today",
           "head",
           "tiles",
-          "units"
+          "units",
+          "scope",
+          "scopes",
+          "informal"
         ]
       },
       "PotensiSheetPersonDto": {
@@ -52813,175 +54096,73 @@
           "kandidat"
         ]
       },
-      "HomePersonDto": {
-        "type": "object",
-        "properties": {
-          "membershipId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "example": "Wilson Tanoto"
-          },
-          "phone": {
-            "type": "string",
-            "nullable": true,
-            "example": "+6281211002200"
-          }
-        },
-        "required": [
-          "membershipId",
-          "name",
-          "phone"
-        ]
-      },
-      "HomeCoachingActionDto": {
+      "HomeTaskActionDto": {
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
             "enum": [
-              "coaching"
+              "task"
             ]
           },
-          "sessionId": {
-            "type": "string"
-          },
-          "itemId": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string",
-            "example": "Siapkan daftar 20 prospek baru"
-          },
-          "from": {
-            "nullable": true,
-            "description": "*Dari: NAME* — who coached them.",
+          "task": {
+            "description": "A lead’s next action or a coaching action item due today, `done` when ticked — its checkbox ticks it (`PUT /leads/{id}/next-action/done`, `PUT /coaching/sessions/{sessionId}/action-items/{itemId}/done`).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/HomePersonDto"
+                "$ref": "#/components/schemas/CalendarTaskDto"
               }
             ]
           }
         },
         "required": [
           "kind",
-          "sessionId",
-          "itemId",
-          "text",
-          "from"
+          "task"
         ]
       },
-      "HomeLeadContactDto": {
-        "type": "object",
-        "properties": {
-          "phone": {
-            "type": "string",
-            "nullable": true
-          },
-          "email": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "phone",
-          "email"
-        ]
-      },
-      "HomeLeadActionDto": {
+      "HomeEntryActionDto": {
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
             "enum": [
-              "lead"
+              "entry"
             ]
           },
-          "leadId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "example": "Ibu Wiwik Setyaningsih"
-          },
-          "type": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "sales",
-              "recruitment"
+          "entry": {
+            "description": "Its `entryId` opens `GET /calendar/entries/{entryId}`, the detail Home opens over itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarEntryDto"
+              }
             ]
-          },
-          "note": {
-            "type": "string",
-            "nullable": true,
-            "example": "Invite BOP"
-          },
-          "contact": {
-            "$ref": "#/components/schemas/HomeLeadContactDto"
-          },
-          "version": {
-            "type": "number",
-            "example": 3,
-            "description": "The lead’s version, for saving its number."
           }
         },
         "required": [
           "kind",
-          "leadId",
-          "name",
-          "type",
-          "note",
-          "contact",
-          "version"
+          "entry"
         ]
       },
-      "HomeAgendaActionDto": {
+      "HomeEventActionDto": {
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
             "enum": [
-              "agenda"
-            ]
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "entry",
               "event"
             ]
           },
-          "id": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "example": "meeting",
-            "description": "An entry’s type code, or a joined event’s type as the agency named it."
-          },
-          "title": {
-            "type": "string",
-            "example": "Weekly unit huddle"
-          },
-          "date": {
-            "type": "string",
-            "example": "2026-10-30"
-          },
-          "start": {
-            "type": "string",
-            "example": "15:00"
+          "event": {
+            "description": "Its `eventId` opens `/events/{eventId}`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CalendarJoinedEventDto"
+              }
+            ]
           }
         },
         "required": [
           "kind",
-          "source",
-          "id",
-          "type",
-          "title",
-          "date",
-          "start"
+          "event"
         ]
       },
       "HomeNowDto": {
@@ -52991,10 +54172,16 @@
             "type": "number",
             "example": 545,
             "description": "The agency’s wall clock as the read was made, in minutes since midnight: the greeting’s time of day."
+          },
+          "at": {
+            "type": "string",
+            "example": "2026-10-30T02:05:00.000Z",
+            "description": "The instant the read was made (UTC). The page counts on from it to the agency’s midnight and reads Home again, so *Aksi hari ini* turns with the day."
           }
         },
         "required": [
-          "minute"
+          "minute",
+          "at"
         ]
       },
       "HomeQuoteDto": {
@@ -53091,7 +54278,7 @@
           "tasks": {
             "type": "number",
             "example": 3,
-            "description": "Open *Tugas* today: action items and leads’ next actions due today, none ticked."
+            "description": "Open *Tugas* today: action items and leads’ next actions due today; a ticked one is not counted."
           }
         },
         "required": [
@@ -53289,17 +54476,17 @@
             "items": {
               "oneOf": [
                 {
-                  "$ref": "#/components/schemas/HomeCoachingActionDto"
+                  "$ref": "#/components/schemas/HomeTaskActionDto"
                 },
                 {
-                  "$ref": "#/components/schemas/HomeLeadActionDto"
+                  "$ref": "#/components/schemas/HomeEntryActionDto"
                 },
                 {
-                  "$ref": "#/components/schemas/HomeAgendaActionDto"
+                  "$ref": "#/components/schemas/HomeEventActionDto"
                 }
               ]
             },
-            "description": "*Aksi hari ini*: at most three — today’s tasks, then today’s timed things, then the next days’. An agenda row’s `id` is the Calendar’s own: an entry’s opens `GET /calendar/entries/{id}`, a joined event’s `/events/{id}`."
+            "description": "*Aksi hari ini*: **today’s alone** (the agency’s day), at most three — today’s tasks first, open and ticked, in the Calendar’s checklist order; then today’s timed things not yet ended, soonest first, one that began on an earlier day included. Nothing of another day. Each in the Calendar’s own shape."
           },
           "leads": {
             "type": "number",
@@ -55403,7 +56590,7 @@
           },
           "mocRulesText": {
             "type": "string",
-            "example": "AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.",
+            "example": "AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (APE ≥ Rp 600 Jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.",
             "description": "The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung first, separated by `\\n`. Empty when the company has none."
           },
           "agencies": {
@@ -55863,6 +57050,92 @@
           "total": {
             "type": "number",
             "description": "Every row the filters match, across the pages."
+          }
+        },
+        "required": [
+          "rows",
+          "page",
+          "pageSize",
+          "total"
+        ]
+      },
+      "PlatformAccountRowDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "The account’s id. Used by no other Super Admin route."
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Hadi Santoso"
+          },
+          "email": {
+            "type": "string",
+            "example": "hadi@example.com",
+            "description": "The address the account signs in with: the one address a platform read returns (ADR-0245 §2)."
+          },
+          "company": {
+            "nullable": true,
+            "description": "The insurer it registered with; `null` with none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompanyRefDto"
+              }
+            ]
+          },
+          "registeredOn": {
+            "type": "string",
+            "example": "2026-11-11",
+            "description": "The day the account was made, in `Asia/Jakarta`."
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "description": "*Terverifikasi* or *Belum diverifikasi*: whether the address was confirmed."
+          },
+          "lastSignInOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-11-11",
+            "description": "The day of the last sign-in, in `Asia/Jakarta`; `null`, *\"Belum pernah\"*."
+          },
+          "kpmCount": {
+            "type": "number",
+            "example": 0,
+            "description": "Its active or pending memberships, in any KPM. `0` is *Belum punya KPM*; a membership that ended is none."
+          }
+        },
+        "required": [
+          "userId",
+          "fullName",
+          "email",
+          "company",
+          "registeredOn",
+          "emailVerified",
+          "lastSignInOn",
+          "kpmCount"
+        ]
+      },
+      "PlatformAccountsPageDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlatformAccountRowDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "pageSize": {
+            "type": "number",
+            "example": 50
+          },
+          "total": {
+            "type": "number",
+            "description": "Every account the filters match, across the pages."
           }
         },
         "required": [
@@ -61800,7 +63073,8 @@
         "type": "object",
         "properties": {
           "primary": {
-            "type": "string"
+            "type": "string",
+            "description": "The primary’s fill: the colour chosen, or its nearest shade its words read 4.5:1 on."
           },
           "primaryHover": {
             "type": "string"
@@ -61829,7 +63103,8 @@
             "type": "string"
           },
           "secondary": {
-            "type": "string"
+            "type": "string",
+            "description": "The secondary’s fill, as the primary’s."
           },
           "secondaryHover": {
             "type": "string"
@@ -63020,6 +64295,19 @@
             "type": "string",
             "nullable": true,
             "description": "The name whoever asked typed in the form, which may not be the account’s — shown beside the account’s own name where they differ, so a code typed for somebody else is seen. `null` on a request made before it was kept."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "add_agent",
+              "move"
+            ],
+            "description": "What made it: *+ Add agent* for a code held in another unit, or a leader moving one of their people to a leader outside their own tree."
+          },
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why the leader asked for a move, as typed; `null` when they said nothing."
           }
         },
         "required": [
@@ -63029,7 +64317,9 @@
           "to",
           "requestedBy",
           "requestedAt",
-          "requestedName"
+          "requestedName",
+          "kind",
+          "note"
         ]
       },
       "ActivityTypeDto": {
@@ -64608,15 +65898,27 @@
             "enum": [
               "light",
               "dark"
-            ]
+            ],
+            "description": "The words on the fill: white (`light`) or #1b2b4b (`dark`)."
           },
           "ratio": {
-            "type": "number"
+            "type": "number",
+            "description": "Their ratio on the fill, to two decimals: at least 4.5."
+          },
+          "fill": {
+            "type": "string",
+            "description": "What buttons, pills and cards are filled with: the colour chosen, or its nearest shade the words read 4.5:1 on. The palette’s `primary` or `secondary`."
+          },
+          "adjusted": {
+            "type": "boolean",
+            "description": "Whether `fill` is not the colour chosen."
           }
         },
         "required": [
           "contrast",
-          "ratio"
+          "ratio",
+          "fill",
+          "adjusted"
         ]
       },
       "BrandingPreviewAnswerDto": {
@@ -65504,6 +66806,27 @@
           "windowDays"
         ]
       },
+      "PendingMoveDto": {
+        "type": "object",
+        "properties": {
+          "transferId": {
+            "type": "string"
+          },
+          "toName": {
+            "type": "string",
+            "description": "The leader they would move under, by name."
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "transferId",
+          "toName",
+          "requestedAt"
+        ]
+      },
       "TeamMemberDto": {
         "type": "object",
         "properties": {
@@ -65535,9 +66858,38 @@
           "directCount": {
             "type": "number"
           },
+          "subtreeCount": {
+            "type": "number",
+            "description": "Everybody active below them: who moves with them to another leader."
+          },
           "canChangeRole": {
             "type": "boolean",
             "description": "Whether this viewer may change *this* person's role. Sent rather than inferred, because the rule is a server rule and the screen should not carry a second copy of it that can drift."
+          },
+          "roleChoices": {
+            "example": [
+              "AGENT",
+              "AAB",
+              "AB"
+            ],
+            "description": "The rungs this viewer may put them on, by ladder code, junior first, their own always among them: a direct leader any rung no higher than their own — an AB leader Agent, AAB and AB.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "canChangeLeader": {
+            "type": "boolean",
+            "description": "May this viewer move them to another leader: never the office’s owner."
+          },
+          "pendingTransfer": {
+            "nullable": true,
+            "description": "A move this viewer asked the Owner or an Admin for, still waiting; `null` when none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMoveDto"
+              }
+            ]
           }
         },
         "required": [
@@ -65548,7 +66900,11 @@
           "role",
           "orgLevelCode",
           "directCount",
-          "canChangeRole"
+          "subtreeCount",
+          "canChangeRole",
+          "roleChoices",
+          "canChangeLeader",
+          "pendingTransfer"
         ]
       },
       "MemberSearchHitDto": {
@@ -65620,6 +66976,351 @@
         "required": [
           "membershipId",
           "phone"
+        ]
+      },
+      "MemberPersonalDto": {
+        "type": "object",
+        "properties": {
+          "dateOfBirth": {
+            "type": "string",
+            "nullable": true,
+            "example": "1990-03-15",
+            "description": "`YYYY-MM-DD`. `null` is *Not recorded*."
+          },
+          "gender": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "male",
+              "female"
+            ]
+          },
+          "companyJoinMonth": {
+            "type": "string",
+            "nullable": true,
+            "example": "2021-07",
+            "description": "`YYYY-MM`: the month they joined the insurer."
+          },
+          "workStatus": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "full_time",
+              "part_time"
+            ],
+            "description": "How they work in this office."
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281211002200",
+            "description": "Their WhatsApp number as stored, `+62` and its digits; `null` is *Not recorded*. The account’s: the number they see on their own profile."
+          },
+          "companyName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Prudential",
+            "description": "The office’s company, which the page names beside the company join month: *Bergabung di Prudential*."
+          }
+        },
+        "required": [
+          "dateOfBirth",
+          "gender",
+          "companyJoinMonth",
+          "workStatus",
+          "phone",
+          "companyName"
+        ]
+      },
+      "MemberPersonalCompletedDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "filled": {
+            "type": "array",
+            "description": "The fields this request filled, by their API names.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "dateOfBirth",
+                "gender",
+                "companyJoinMonth",
+                "workStatus",
+                "phone"
+              ]
+            }
+          },
+          "personal": {
+            "description": "What the member page’s *Data pribadi* now shows.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MemberPersonalDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "membershipId",
+          "filled",
+          "personal"
+        ]
+      },
+      "LeaderMoveChoiceDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string"
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AB",
+            "description": "Their rung, by its code on the company’s ladder."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          },
+          "unitSize": {
+            "type": "number",
+            "description": "How many active people are below them now."
+          },
+          "direct": {
+            "type": "boolean",
+            "description": "The move is made at once (`PUT …/leader`): every choice of the Owner or an Admin, and a leader’s own tree. `false`: a leader outside their tree, asked of the Owner or an Admin (`POST …/transfer-request`)."
+          }
+        },
+        "required": [
+          "membershipId",
+          "fullName",
+          "agentCode",
+          "orgLevelCode",
+          "role",
+          "unitSize",
+          "direct"
+        ]
+      },
+      "DirectoryMemberDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          },
+          "orgLevelCode": {
+            "type": "string",
+            "example": "AAB",
+            "description": "The rung they stand on, by its code on the company’s ladder. `role` is the class it gives."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "pending",
+              "removed"
+            ]
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "preferredName": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string"
+          },
+          "initials": {
+            "type": "string"
+          },
+          "leaderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "leaderName": {
+            "type": "string",
+            "nullable": true
+          },
+          "depth": {
+            "type": "number"
+          },
+          "directCount": {
+            "type": "number"
+          },
+          "subtreeCount": {
+            "type": "number"
+          },
+          "isLeader": {
+            "type": "boolean"
+          },
+          "isKpmOwner": {
+            "type": "boolean"
+          },
+          "isKpmAdmin": {
+            "type": "boolean"
+          },
+          "isCoreLeader": {
+            "type": "boolean",
+            "description": "A Core Leader now (ADR-0159 §1): tagged, on a leader rung — the effective flag. A member tagged and since moved off a leader rung reads `false` here, and their tag stays on `GET /members/:id/tags`."
+          },
+          "canTagCoreLeader": {
+            "type": "boolean",
+            "description": "Whether this viewer may tag or untag this member *Core Leader* from the row: they hold `member:tag_core_leader`, and the member stands on a leader rung and has not left (ADR-0159 §1). An offer, never the gate: `PUT /members/:id/core-leader` refuses regardless."
+          },
+          "joinedAt": {
+            "type": "string",
+            "nullable": true,
+            "description": "The system’s stamp: the instant the membership was made active."
+          },
+          "joinDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-07-14",
+            "description": "The person’s **join date** in this office, an office date their leader gave (ADR-0169): what *Join date* prints. `null` while they are pending."
+          },
+          "removedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "invitation": {
+            "type": "string",
+            "enum": [
+              "signed_in",
+              "invited",
+              "not_invited"
+            ],
+            "description": "Whether they have been invited, and have signed in: `signed_in` once the account has signed in; before that `invited` when an invitation went (*Diundang*), else `not_invited` (*Belum diundang*). An `active` member who has never signed in is shown by this, not as *Aktif*; `status` is unchanged by it."
+          },
+          "rejoinedOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-30",
+            "description": "The office date the person **came back** to this office, if they did: on a live membership that follows a removed one of the same person, its own join date — the directory’s *Rejoined*; on a removed membership the person has since returned from, the later membership’s join date — *Rejoined {date}*. `null` otherwise, and while the later membership is pending. Read only from memberships this reader may see."
+          },
+          "lastActivityOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-10-07",
+            "description": "On the roster’s **active** rows only — absent on the Pending and Removed tabs: their latest day logged, in the agency’s calendar; `null` is *Never*."
+          },
+          "lastActivityDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 2,
+            "description": "On the roster’s active rows only: whole days since it — 0 is *Today*; `null` is *Never*."
+          },
+          "lastCoachedDays": {
+            "type": "number",
+            "nullable": true,
+            "example": 12,
+            "description": "On the roster’s active rows only: `DAYS_SINCE_LAST_COACHING`, as the coaching roster serves it; `null` is *Never*, no 1:1 yet."
+          },
+          "canChangeRole": {
+            "type": "boolean",
+            "description": "May **this viewer** change this person’s rung at all: `roleChoices` holds more than their own. Decides what is offered, never what is allowed — the API refuses regardless."
+          },
+          "canPromoteToAb": {
+            "type": "boolean",
+            "description": "May they put this person on a senior (AB) rung: one is among `roleChoices`. The Owner and an Admin, and a direct leader who stands on one themselves."
+          },
+          "roleChoices": {
+            "example": [
+              "AGENT",
+              "AAB",
+              "AB"
+            ],
+            "description": "The rungs this viewer may put them on, by ladder code, junior first, their own always among them: the Owner and an Admin every rung (never on the office’s owner), a direct leader any rung no higher than their own.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "canChangeLeader": {
+            "type": "boolean",
+            "description": "May this viewer change who they report to (`PUT /members/:id/leader`): the Owner and an Admin anybody active but the office’s owner, a leader their direct reports."
+          },
+          "canRemove": {
+            "type": "boolean",
+            "description": "May they remove this person. False for yourself, for the office root, and for anybody already removed."
+          },
+          "personal": {
+            "description": "On `GET /members/:membershipId` only, and only to the office’s Owner, an Admin, or the person themselves (ADR-0158 §6): their birth date, gender, company join month and work status, and their WhatsApp number (ADR-0248 §2). Absent on the roster and on a leader’s read.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MemberPersonalDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "membershipId",
+          "agentCode",
+          "role",
+          "orgLevelCode",
+          "status",
+          "fullName",
+          "preferredName",
+          "email",
+          "initials",
+          "leaderId",
+          "leaderName",
+          "depth",
+          "directCount",
+          "subtreeCount",
+          "isLeader",
+          "isKpmOwner",
+          "isKpmAdmin",
+          "isCoreLeader",
+          "canTagCoreLeader",
+          "joinedAt",
+          "joinDate",
+          "removedAt",
+          "invitation",
+          "rejoinedOn",
+          "canChangeRole",
+          "canPromoteToAb",
+          "roleChoices",
+          "canChangeLeader",
+          "canRemove"
+        ]
+      },
+      "CancelledTransferDto": {
+        "type": "object",
+        "properties": {
+          "transferId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "cancelled"
+            ]
+          }
+        },
+        "required": [
+          "transferId",
+          "status"
         ]
       },
       "RoleChangeEntryDto": {
@@ -66032,6 +67733,32 @@
           "memberCount"
         ]
       },
+      "GroupMembersAddedDto": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Top Producers 2026"
+          },
+          "added": {
+            "type": "number",
+            "description": "People tagged by this request: somebody already in the group is not counted again."
+          },
+          "memberCount": {
+            "type": "number",
+            "description": "The group’s active members now."
+          }
+        },
+        "required": [
+          "groupId",
+          "name",
+          "added",
+          "memberCount"
+        ]
+      },
       "MemberTagsDto": {
         "type": "object",
         "properties": {
@@ -66062,219 +67789,6 @@
           "groupIds",
           "isCoreLeader",
           "canBeCoreLeader"
-        ]
-      },
-      "MemberPersonalDto": {
-        "type": "object",
-        "properties": {
-          "dateOfBirth": {
-            "type": "string",
-            "nullable": true,
-            "example": "1990-03-15",
-            "description": "`YYYY-MM-DD`. `null` is *Not recorded*."
-          },
-          "gender": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "male",
-              "female"
-            ]
-          },
-          "companyJoinMonth": {
-            "type": "string",
-            "nullable": true,
-            "example": "2021-07",
-            "description": "`YYYY-MM`: the month they joined the insurer."
-          },
-          "workStatus": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "full_time",
-              "part_time"
-            ],
-            "description": "How they work in this office."
-          },
-          "companyName": {
-            "type": "string",
-            "nullable": true,
-            "example": "Prudential",
-            "description": "The office’s company, which the page names beside the company join month: *Bergabung di Prudential*."
-          }
-        },
-        "required": [
-          "dateOfBirth",
-          "gender",
-          "companyJoinMonth",
-          "workStatus",
-          "companyName"
-        ]
-      },
-      "DirectoryMemberDto": {
-        "type": "object",
-        "properties": {
-          "membershipId": {
-            "type": "string"
-          },
-          "agentCode": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "ab",
-              "aab",
-              "agent"
-            ]
-          },
-          "orgLevelCode": {
-            "type": "string",
-            "example": "AAB",
-            "description": "The rung they stand on, by its code on the company’s ladder. `role` is the class it gives."
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "pending",
-              "removed"
-            ]
-          },
-          "fullName": {
-            "type": "string"
-          },
-          "preferredName": {
-            "type": "string",
-            "nullable": true
-          },
-          "email": {
-            "type": "string"
-          },
-          "initials": {
-            "type": "string"
-          },
-          "leaderId": {
-            "type": "string",
-            "nullable": true
-          },
-          "leaderName": {
-            "type": "string",
-            "nullable": true
-          },
-          "depth": {
-            "type": "number"
-          },
-          "directCount": {
-            "type": "number"
-          },
-          "subtreeCount": {
-            "type": "number"
-          },
-          "isLeader": {
-            "type": "boolean"
-          },
-          "isKpmOwner": {
-            "type": "boolean"
-          },
-          "isKpmAdmin": {
-            "type": "boolean"
-          },
-          "isCoreLeader": {
-            "type": "boolean",
-            "description": "A Core Leader now (ADR-0159 §1): tagged, on a leader rung — the effective flag. A member tagged and since moved off a leader rung reads `false` here, and their tag stays on `GET /members/:id/tags`."
-          },
-          "canTagCoreLeader": {
-            "type": "boolean",
-            "description": "Whether this viewer may tag or untag this member *Core Leader* from the row: they hold `member:tag_core_leader`, and the member stands on a leader rung and has not left (ADR-0159 §1). An offer, never the gate: `PUT /members/:id/core-leader` refuses regardless."
-          },
-          "joinedAt": {
-            "type": "string",
-            "nullable": true,
-            "description": "The system’s stamp: the instant the membership was made active."
-          },
-          "joinDate": {
-            "type": "string",
-            "nullable": true,
-            "example": "2026-07-14",
-            "description": "The person’s **join date** in this office, an office date their leader gave (ADR-0169): what *Join date* prints. `null` while they are pending."
-          },
-          "removedAt": {
-            "type": "string",
-            "nullable": true
-          },
-          "rejoinedOn": {
-            "type": "string",
-            "nullable": true,
-            "example": "2026-09-30",
-            "description": "The office date the person **came back** to this office, if they did: on a live membership that follows a removed one of the same person, its own join date — the directory’s *Rejoined*; on a removed membership the person has since returned from, the later membership’s join date — *Rejoined {date}*. `null` otherwise, and while the later membership is pending. Read only from memberships this reader may see."
-          },
-          "lastActivityOn": {
-            "type": "string",
-            "nullable": true,
-            "example": "2026-10-07",
-            "description": "On the roster’s **active** rows only — absent on the Pending and Removed tabs: their latest day logged, in the agency’s calendar; `null` is *Never*."
-          },
-          "lastActivityDays": {
-            "type": "number",
-            "nullable": true,
-            "example": 2,
-            "description": "On the roster’s active rows only: whole days since it — 0 is *Today*; `null` is *Never*."
-          },
-          "lastCoachedDays": {
-            "type": "number",
-            "nullable": true,
-            "example": 12,
-            "description": "On the roster’s active rows only: `DAYS_SINCE_LAST_COACHING`, as the coaching roster serves it; `null` is *Never*, no 1:1 yet."
-          },
-          "canChangeRole": {
-            "type": "boolean",
-            "description": "May **this viewer** move this person between Agent and AAB. A direct leader may; so may the office. Decides what is offered, never what is allowed — the API refuses regardless."
-          },
-          "canPromoteToAb": {
-            "type": "boolean",
-            "description": "May they involve the AB rung. The office only — a leader cannot make somebody their own peer."
-          },
-          "canRemove": {
-            "type": "boolean",
-            "description": "May they remove this person. False for yourself, for the office root, and for anybody already removed."
-          },
-          "personal": {
-            "description": "On `GET /members/:membershipId` only, and only to the office’s Owner, an Admin, or the person themselves (ADR-0158 §6): their birth date, gender, company join month and work status. Absent on the roster and on a leader’s read.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MemberPersonalDto"
-              }
-            ]
-          }
-        },
-        "required": [
-          "membershipId",
-          "agentCode",
-          "role",
-          "orgLevelCode",
-          "status",
-          "fullName",
-          "preferredName",
-          "email",
-          "initials",
-          "leaderId",
-          "leaderName",
-          "depth",
-          "directCount",
-          "subtreeCount",
-          "isLeader",
-          "isKpmOwner",
-          "isKpmAdmin",
-          "isCoreLeader",
-          "canTagCoreLeader",
-          "joinedAt",
-          "joinDate",
-          "removedAt",
-          "rejoinedOn",
-          "canChangeRole",
-          "canPromoteToAb",
-          "canRemove"
         ]
       },
       "DirectoryCountsDto": {
@@ -67675,6 +69189,10 @@
           "updated": {
             "type": "number"
           },
+          "invited": {
+            "type": "number",
+            "description": "Rows invited on WhatsApp (ADR-0250 §4)."
+          },
           "skipped": {
             "type": "number"
           }
@@ -67682,7 +69200,25 @@
         "required": [
           "imported",
           "updated",
+          "invited",
           "skipped"
+        ]
+      },
+      "RosterInviteDto": {
+        "type": "object",
+        "properties": {
+          "link": {
+            "type": "string",
+            "description": "To registration, for somebody with no account (`/register?invite=…`)."
+          },
+          "phone": {
+            "type": "string",
+            "example": "+6281211003300"
+          }
+        },
+        "required": [
+          "link",
+          "phone"
         ]
       },
       "RosterPreviewRowDto": {
@@ -67714,8 +69250,10 @@
             "enum": [
               "imported",
               "updated",
+              "invited",
               "skipped"
-            ]
+            ],
+            "description": "`invited`: a new Agent with no email, invited on WhatsApp as *+ Add agent* invites (ADR-0250 §4) — no account is made; the person registers through the invitation's link."
           },
           "messages": {
             "description": "A3's words for the row, in the reader's language: why it is skipped, or what importing or updating it notes.",
@@ -67723,6 +69261,21 @@
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "description": "What the row leaves out, in the reader's language (ADR-0250 §2, §3): each optional cell left empty for its shape, no WhatsApp number, and the details neither the row nor the record holds. Empty for a skipped row.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "invite": {
+            "description": "On the commit's answer only, for an `invited` row: the invitation's link and the number to share it to. Made once; the server keeps only its hash.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RosterInviteDto"
+              }
+            ]
           }
         },
         "required": [
@@ -67733,7 +69286,8 @@
           "leaderAgentCode",
           "email",
           "outcome",
-          "messages"
+          "messages",
+          "warnings"
         ]
       },
       "RosterPreviewDto": {
@@ -67809,7 +69363,7 @@
           },
           "invited": {
             "type": "number",
-            "description": "How many new people were emailed an invitation."
+            "description": "How many new people were emailed an invitation. Those invited on WhatsApp are `counts.invited`."
           }
         },
         "required": [

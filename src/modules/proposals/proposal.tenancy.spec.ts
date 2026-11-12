@@ -349,6 +349,78 @@ describe('P19.7-T2 the proposal (service, tenancy)', () => {
     });
   });
 
+  describe('P19.11-T3 AC-7 and AC-8: the lead sheet’s one finished proposal, and no empty draft twice', () => {
+    it('P19.11-T3 AC-7 status=done for a lead lists finished ones only, the last saved by doneAt first', async () => {
+      let older = await completeProposal(wired, agent(), leads.budi);
+      older = await wired.proposals.done(agent(), older.id, older.version);
+      clock().set(new Date('2026-11-06T03:00:00Z'));
+      let newer = await completeProposal(wired, agent(), leads.budi, [P.EDU]);
+      newer = await wired.proposals.done(agent(), newer.id, newer.version);
+      clock().set(new Date('2026-11-07T03:00:00Z'));
+      await completeProposal(wired, agent(), leads.budi, [P.LIFE]); // a draft, changed last
+      // The older one's row stamped newer than the newer's: the order is `doneAt`'s, never `updatedAt`'s.
+      await db().collection('proposals').updateOne(
+        { _id: new mongoose.Types.ObjectId(older.id) }, { $set: { updatedAt: new Date('2026-12-01T00:00:00Z') } },
+      );
+      const page = await wired.proposals.list(agent(), { leadId: leads.budi, status: 'done' });
+      expect(page.rows.map((r) => [r.id, r.status])).toEqual([[newer.id, 'done'], [older.id, 'done']]);
+      expect((await wired.proposals.list(agent(), { leadId: leads.budi, status: 'done', pageSize: 1 })).rows.map((r) => r.id))
+        .toEqual([newer.id]);
+      // Without the filter, Riwayat's own order stands: newest change first.
+      expect((await wired.proposals.list(agent(), { leadId: leads.budi })).total).toBe(3);
+    });
+
+    it('P19.11-T3 AC-7 a lead with drafts only lists nothing finished: the section shows only Buat proposal', async () => {
+      await completeProposal(wired, agent(), leads.budi);
+      await wired.proposals.create(agent(), leads.budi);
+      expect((await wired.proposals.list(agent(), { leadId: leads.budi, status: 'done' })).rows).toEqual([]);
+    });
+
+    it('P19.11-T3 AC-8 a second create on the same lead answers the empty draft, never another row', async () => {
+      const first = await wired.proposals.create(agent(), leads.budi);
+      const again = await wired.proposals.create(agent(), leads.budi);
+      expect(again).toMatchObject({ id: first.id, version: 1, status: 'draft', items: [] });
+      expect(await db().collection('proposals').countDocuments()).toBe(1);
+      expect((await wired.proposals.list(agent(), {})).total).toBe(1);
+    });
+
+    it('P19.11-T3 AC-8 the reused draft takes the lead’s current name, age and gender again', async () => {
+      const first = await wired.proposals.create(agent(), leads.budi);
+      const lead = await wired.leadRecords.read(agent(), leads.budi);
+      await wired.leadRecords.update(agent(), leads.budi, { name: 'Pak Budi S.', age: 40, gender: 'male', version: lead.version });
+      const again = await wired.proposals.create(agent(), leads.budi);
+      expect(again).toMatchObject({ id: first.id, version: 2, client: { name: 'Pak Budi S.', age: 40, gender: 'male' } });
+      expect(await db().collection('proposals').countDocuments()).toBe(1);
+      // Recorded as a change to the draft, by field name only.
+      const entry = await db().collection('auditLog').findOne({ action: 'proposal.updated', targetId: first.id });
+      expect(entry?.after).toEqual({ fields: ['client'], reused: true });
+    });
+
+    it('P19.11-T3 AC-8 a draft with a product is never reused, nor a finished one: those leave a new draft', async () => {
+      const worked = await completeProposal(wired, agent(), leads.budi);
+      const fresh = await wired.proposals.create(agent(), leads.budi);
+      expect(fresh.id).not.toBe(worked.id);
+      let finished = await completeProposal(wired, agent(), leads.budi, [P.EDU]);
+      expect(finished.id).toBe(fresh.id); // the empty one, filled
+      finished = await wired.proposals.done(agent(), finished.id, finished.version);
+      const third = await wired.proposals.create(agent(), leads.budi);
+      expect([worked.id, finished.id]).not.toContain(third.id);
+      expect(await db().collection('proposals').countDocuments()).toBe(3);
+    });
+
+    it('P19.11-T3 AC-8 another member’s empty draft on another lead, or another office’s, is never answered (tenancy)', async () => {
+      const theirs = await wired.proposals.create(agentB(), leads.officeB);
+      const lead = await wired.leadRecords.create(owner(), { name: 'Klien Owner', type: 'sales', age: 50, gender: 'female' });
+      const owners = await wired.proposals.create(owner(), lead.id);
+      const mine = await wired.proposals.create(agent(), leads.budi);
+      expect([theirs.id, owners.id]).not.toContain(mine.id);
+      // Nobody reaches the agent's lead through create, so nobody is answered the agent's draft.
+      expect(await refusal(wired.proposals.create(agentB(), leads.budi))).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect(await refusal(wired.proposals.create(ab(), leads.budi))).toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      expect(await db().collection('proposals').countDocuments()).toBe(3);
+    });
+  });
+
   it('P19.7-T2 PDP no audit entry copies a name, an age or a premium: ids and counts only (ADR-0221 §12)', async () => {
     let p = await completeProposal(wired, agent(), leads.budi, [P.EDU]);
     p = await wired.proposals.done(agent(), p.id, p.version);

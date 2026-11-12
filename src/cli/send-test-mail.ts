@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import { isEmail } from 'class-validator';
 import { createTransport } from 'nodemailer';
@@ -7,6 +8,7 @@ import {
   describeMail, isReservedAddress, MailConfigError, type MailSettings, mailSettingsFrom, type ResolvedMailSettings,
   transportOptionsFrom,
 } from '@/modules/notifications/mail-provider';
+import { type FetchLike, ResendClient } from '@/modules/notifications/resend-client';
 
 /**
  * **One test email, sent with an environment's own mail settings** (P18.11-T18, ADR-0182).
@@ -25,6 +27,10 @@ import {
  * - **The same shape as the API's mail**: multipart, the text and the HTML derived from it, `MAIL_REPLY_TO` when set.
  * - **It prints** the provider, the host and the port, then the server's answer or its error with a hint, and
  *   **never the password**: the configured one is masked in everything it writes.
+ * - **With `MAIL_PROVIDER=resend`** (P19.12-T1 AC-3, ADR-0244) it posts the same message to Resend's API with the
+ *   client the API uses (`resend-client.ts`) and prints Resend's id for it, by which Resend's dashboard finds the
+ *   email. `RESEND_API_KEY` is masked as the password is. One attempt and no throttle: a person is waiting, and a
+ *   refusal is what they came to read.
  * - Exits `0` when the server accepted the message, `2` on a usage error and `1` on any other failure.
  */
 export const USAGE = 'Usage: node dist/cli/send-test-mail.js <to> [--subject "<subject>"]\n'
@@ -98,11 +104,44 @@ export function testMailText(settings: MailSettings, sentAt: Date, appOrigin: st
   ].join('\n');
 }
 
-/** The SMTP fields nodemailer puts on an error, when it has them. */
+/** The SMTP fields nodemailer puts on an error, when it has them; `ResendError` carries the same. */
 interface SmtpError {
   message: string;
   code?: string;
   responseCode?: number;
+}
+
+/** Resend's names for a key it refuses; an invalid key is a `validation_error` saying *API key is invalid*. */
+const RESEND_KEY_REFUSALS = ['missing_api_key', 'restricted_api_key', 'suspended_api_key'];
+
+/**
+ * What to look at first when Resend refused the test message (P19.12-T1), by Resend's error `name`, status and words
+ * (its *Errors* page, read 2026-11-11): the key, the domain, a field, the plan, or the network. `undefined` for
+ * anything else, which is printed as it is.
+ */
+function resendHint(code: string | undefined, responseCode: number | undefined, message: string): string | undefined {
+  if ((code !== undefined && RESEND_KEY_REFUSALS.includes(code)) || /api key/i.test(message)) {
+    return 'Resend refused RESEND_API_KEY: missing, invalid, not active or suspended. Make a new key in Resend (API '
+      + 'Keys, Create API key, Sending access) and put it in RESEND_API_KEY, unquoted.';
+  }
+  if (code === 'validation_error' && responseCode === 403) {
+    return 'Resend refused the sender: MAIL_FROM\'s domain is not verified in Resend (Domains, then Verify DNS Records '
+      + 'once its records are in DNS), or the key is limited to another domain.';
+  }
+  if (responseCode === 422 || (code === 'validation_error' && responseCode === 400)) {
+    return 'Resend refused a field of the message: most often MAIL_FROM or MAIL_REPLY_TO is not an address. Write '
+      + 'MAIL_FROM as AgencyBoost <no-reply@notify.agencyboost.id>, on the verified domain.';
+  }
+  if (code === 'daily_quota_exceeded' || code === 'monthly_quota_exceeded') {
+    return 'Resend\'s plan has no email left for this period, shared by staging and production. Wait, or move to a '
+      + 'larger plan (Resend, Settings, Billing).';
+  }
+  if (code === 'rate_limit_exceeded') return 'Too many requests a second to Resend. Try again in a moment.';
+  if (code !== undefined && responseCode === undefined) {
+    // No answer at all: `ETIMEDOUT`, or the network's own code (`ENOTFOUND`, `ECONNRESET` …).
+    return 'Could not reach api.resend.com over HTTPS. Check the VM\'s outbound access to port 443.';
+  }
+  return undefined;
 }
 
 /**
@@ -115,6 +154,10 @@ export function explainSendError(err: unknown, settings: MailSettings): string {
   ) as SmtpError;
   const detail = [code, responseCode].filter((part) => part !== undefined).join(' ');
   const said = `Sending failed: ${message}${detail ? ` (${detail})` : ''}`;
+  if (settings.provider === 'resend') {
+    const hint = resendHint(code, responseCode, message);
+    return hint ? `${said}\n${hint}` : said;
+  }
   if (code === 'EAUTH' || responseCode === 535 || responseCode === 534) {
     return `${said}\nThe server refused SMTP_USER or SMTP_PASSWORD. Gmail takes an App Password, made after 2-Step `
       + 'Verification is on, never the account\'s own password; SendGrid\'s SMTP_USER is the word apikey.';
@@ -130,13 +173,17 @@ export interface Io {
   stdout: Writable;
   stderr: Writable;
   env: Readonly<Record<string, string | undefined>>;
+  /** How Resend is reached; Node's own `fetch` unless a spec answers for Resend. */
+  fetch?: FetchLike;
 }
 
 /** The command, start to finish; resolves to its exit code. */
 export async function run(argv: readonly string[], io: Io, clock: Clock = new SystemClock()): Promise<number> {
-  // Masked in everything written, whatever produced the text: the password as configured, and as Gmail's is read.
-  const secrets = [io.env.SMTP_PASSWORD ?? '', (io.env.SMTP_PASSWORD ?? '').replace(/\s+/g, '')]
-    .filter((secret) => secret.trim() !== '');
+  // Masked in everything written, whatever produced the text: the password as configured, and as Gmail's is read, and
+  // Resend's API key (P19.12-T1).
+  const secrets = [
+    io.env.SMTP_PASSWORD ?? '', (io.env.SMTP_PASSWORD ?? '').replace(/\s+/g, ''), (io.env.RESEND_API_KEY ?? '').trim(),
+  ].filter((secret) => secret.trim() !== '');
   const write = (stream: Writable, text: string) => {
     stream.write(secrets.reduce((masked, secret) => masked.split(secret).join('********'), text));
   };
@@ -153,7 +200,7 @@ export async function run(argv: readonly string[], io: Io, clock: Clock = new Sy
     const resolved: ResolvedMailSettings = settings;
     if (resolved.provider === 'log') {
       throw new CliError('The mail provider is log: this environment writes email to its log and sends none. '
-        + 'Set MAIL_PROVIDER to gmail, sendgrid, mailjet, clicksend, ses or smtp.');
+        + 'Set MAIL_PROVIDER to resend, gmail, sendgrid, mailjet, clicksend, ses or smtp.');
     }
     for (const warning of resolved.warnings) write(io.stderr, `Warning: ${warning}\n`);
     if (resolved.provider !== 'smtp' && isReservedAddress(args.to)) {
@@ -164,6 +211,22 @@ export async function run(argv: readonly string[], io: Io, clock: Clock = new Sy
     write(io.stderr, `Mail: ${describeMail(resolved)}\nSending to ${args.to}\n`);
     const sentAt = clock.now();
     const text = testMailText(resolved, sentAt, io.env.APP_ORIGIN);
+    if (resolved.provider === 'resend') {
+      const client = new ResendClient(resolved.apiKey, io.fetch ?? ((url, init) => fetch(url, init)));
+      const { id } = await client.sendEmail({
+        from: resolved.from,
+        to: args.to,
+        subject: args.subject ?? testMailSubject(sentAt),
+        text,
+        html: toHtml(text),
+        replyTo: resolved.replyTo,
+        template: 'send-test-mail',
+      }, randomUUID());
+      write(io.stdout, 'Sent. Resend accepted the message.\n'
+        + `Resend id: ${id ?? '(none given)'}\n`
+        + 'Now look for it in the inbox, and in the spam folder. Resend\'s dashboard, Emails, shows what became of it.\n');
+      return 0;
+    }
     const transport = createTransport(transportOptionsFrom(resolved));
     try {
       const info = await transport.sendMail({

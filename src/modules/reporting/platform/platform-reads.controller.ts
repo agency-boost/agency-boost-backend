@@ -7,11 +7,11 @@ import { PLATFORM_READ } from '@/domain/constants';
 import { ComplianceQueryDto } from '../compliance/compliance.dto';
 import { KpmAnalyticsQueryDto } from '../reporting.dto';
 import {
-  CompanyKpmsQueryDto, KpmComparisonQueryDto, KpmDataQueryDto, PlatformMembersQueryDto,
+  CompanyKpmsQueryDto, KpmComparisonQueryDto, KpmDataQueryDto, PlatformAccountsQueryDto, PlatformMembersQueryDto,
 } from './platform-reads.dto';
 import { PlatformReads } from './platform-reads.service';
 import {
-  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformMembersPageDto,
+  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformAccountsPageDto, PlatformMembersPageDto,
 } from './platform-reads.response.dto';
 import { KpmAnalyticsDto } from '../reporting.response.dto';
 import { ComplianceViewDto } from '../compliance/compliance.response.dto';
@@ -35,7 +35,7 @@ const AUDITED = (action: string) =>
 
 /**
  * **The Super Admin's reads across KPMs** (ADR-0207; P19.4-T3; `functional/kpm-analytics.md` and
- * `functional/tenant-provisioning.md`, the Data contracts): five named reads, each reached from one screen. Every figure is
+ * `functional/tenant-provisioning.md`, the Data contracts): six named reads, each reached from one screen. Every figure is
  * the KPM's own, through the function its Owner's page uses; every route is a `GET`.
  */
 @ApiTags('admin (Super Admin)')
@@ -63,6 +63,29 @@ export class PlatformReadsController {
   @ApiResponse({ status: 200, type: PlatformMembersPageDto })
   async members(@Ctx() ctx: RequestContext, @Query() query: PlatformMembersQueryDto) {
     return this.reads.members(ctx, query);
+  }
+
+  @Get('users')
+  @RequirePermission('platform_members:read')
+  @ApiOperation({
+    summary: 'Registered accounts — every account, with or without a KPM',
+    description:
+      `*All members* › *Akun terdaftar* (ADR-0245 §1): every registered account but a Super Admin’s, `
+      + `${PLATFORM_READ.PAGE_SIZE} a page, newest registration first — a person who registered and joined no KPM `
+      + 'included, whom *All members*’ memberships cannot list. Each row: the name, the email, the insurer it registered '
+      + 'with, the day it registered, whether the address is verified, the day it last signed in, and how many KPMs it '
+      + 'is active or pending in. `q` matches a name or an email; `kpm=none` is *Tanpa KPM*, `kpm=some` *Punya KPM*. '
+      + 'Never a phone, a birth date or a gender. View-only. **Audited per read** as '
+      + `\`${PLATFORM_READ.ACTION.accounts}\` (ADR-0207 §5): one entry in the platform’s log with the purpose, the filters, `
+      + 'the page, the number of rows and the accounts returned, written before the answer is sent.',
+  })
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — `q` shorter than two characters, a `kpm` other than `none` or `some`, '
+    + 'a `page` that is no whole number from 1, or a parameter of any other name. `details` names it.'))
+  @ApiResponse(PLATFORM_ONLY)
+  @ApiResponse(UNRECORDED)
+  @ApiResponse({ status: 200, type: PlatformAccountsPageDto })
+  async accounts(@Ctx() ctx: RequestContext, @Query() query: PlatformAccountsQueryDto) {
+    return this.reads.accounts(ctx, query);
   }
 
   @Get('analytics/kpms')

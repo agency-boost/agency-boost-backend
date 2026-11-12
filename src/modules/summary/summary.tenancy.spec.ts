@@ -4,6 +4,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule, provisionOffice } from '../../../test/config-module';
 import { Goal } from '@/modules/goals/goal.schema';
+import { SUMMARY } from '@/domain/constants';
 
 /** 09:00 in Jakarta on 14 September — day 14 of a 30-day month, 17 days left today included. */
 const NOW = new Date('2026-09-14T02:00:00Z');
@@ -217,6 +218,8 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       targetMet: true, source: { provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null },
       // P19.1-T4: the office's figure, so nothing to count as 0.
       production: 'official', withoutProduction: null,
+      // P19.11-T4 AC-4: the upload is the month's figure — nothing typed over it.
+      realised: { source: 'uploaded', uploaded: true, manual: null },
     });
     expect(view.pace).toMatchObject({ targetMet: true, neededPerWeek: 0 });
   });
@@ -523,14 +526,19 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
     };
     const names = async (ctx = agent()) => (await wired.summary.read(ctx)).leads.rows.map((r) => r.name);
 
-    it('AC-1: your own open leads, nearest next action first and undated last', async () => {
+    it('AC-1, P19.11-T5 AC-3: your own open leads — a dated next action first, the most overdue on top — then the undated, oldest registered first', async () => {
       await lead('Undated, registered first');
       await lead('Next week', { nextActionDate: '2026-09-20' });
       await lead('Four days late', { nextActionDate: '2026-09-10' });
       await lead('Today', { nextActionDate: '2026-09-14' });
-      await lead('Undated, registered second');
+      // A note with no date is not a dated action: it waits with the undated, by when it was registered (UXQ4).
+      await lead('Undated, a note only', { nextActionNote: 'Telepon lagi' });
+      await lead('Undated, registered third');
+      await lead('Won, dated', { nextActionDate: '2026-09-01', outcome: 'won' });
 
-      expect(await names()).toEqual(['Four days late', 'Today', 'Next week', 'Undated, registered first', 'Undated, registered second']);
+      expect(await names()).toEqual([
+        'Four days late', 'Today', 'Next week', 'Undated, registered first', 'Undated, a note only', 'Undated, registered third',
+      ]);
     });
 
     it('AC-1: leaves out a closed lead, a deleted one, and anybody else’s — a leader’s downline included', async () => {
@@ -567,7 +575,7 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
 
         const view = await wired.summary.read(asAb());
 
-        expect(view.leads).toEqual({ rows: [], total: 0, unitOpen: 2 });
+        expect(view.leads).toEqual({ rows: [], total: 0, shown: SUMMARY.LEADS_SHOWN, unitOpen: 2 });
       });
 
       it('P18.5-T15 AC-4 counts none in another office, under the same ids', async () => {
@@ -601,51 +609,103 @@ describe('the Personal Summary — goal versus actual, and the gap (P10-T4)', ()
       });
     });
 
-    it('AC-1: each with its flags as the Leads screen derives them — the commitment hiding none (I-103)', async () => {
+    it('AC-1, P19.11-T5 AC-4: each with its flags and the commitment as the Leads screen derives them — the commitment hiding none (I-103)', async () => {
       await lead('Late and promised', { nextActionDate: '2026-09-10', commitments: [{ month: '2026-09', at: NOW }] });
       await lead('Nothing written', { remarks: null, statusCode: null, type: null });
 
       const [late, blank] = (await wired.summary.read(agent())).leads.rows;
 
       expect(late).toMatchObject({
-        name: 'Late and promised', thisMonth: true, flags: ['overdue'], overdueDays: 4,
-        statusCode: 'FOLLOW_UP', statusLabel: 'Follow-up', type: 'sales', nextActionDate: '2026-09-10',
+        name: 'Late and promised', thisMonth: true, committedMonths: ['2026-09'], flags: ['overdue'], overdueDays: 4,
+        statusCode: 'FOLLOW_UP', type: 'sales', nextActionDate: '2026-09-10', outcome: null,
       });
       expect(blank).toMatchObject({
-        thisMonth: false, flags: ['no-next-action', 'no-remarks'], overdueDays: null, statusLabel: null, type: null,
+        thisMonth: false, flags: ['no-next-action', 'no-remarks'], overdueDays: null, statusCode: null, type: null,
       });
     });
 
-    it('AC-1: still names a stage the office has since archived', async () => {
+    it('P19.11-T5 AC-4: every row is the one `GET /leads` answers for the same lead — the shared card draws both alike', async () => {
+      await lead('Late and promised', {
+        nextActionDate: '2026-09-10', nextActionNote: 'Kirim ilustrasi', commitments: [{ month: '2026-09', at: NOW }],
+        contact: { phone: '+6281234567890', email: 'budi@example.com' },
+      });
+      await lead('Undated');
+
+      const rows = (await wired.summary.read(agent())).leads.rows;
+      const listed = (await wired.leadRecords.list(agent(), { outcome: 'open' })).rows;
+
+      expect(rows).toHaveLength(2);
+      for (const row of rows) expect(row).toEqual(listed.find((l) => l.id === row.id));
+      // What the card and its sheet need, beyond the old summary row: the contact, the version, whose it is.
+      expect(rows[0]).toMatchObject({
+        contact: { phone: '+6281234567890', email: 'budi@example.com' }, version: 1, ownerMembershipId: ME,
+        owner: { membershipId: ME }, closedThisMonth: false,
+      });
+    });
+
+    it('P19.11-T5 AC-4: keeps the code of a stage the office has since archived — the card names it as `/leads` does', async () => {
       await mongoose.connection.db!.collection('leadStatuses').updateOne({ code: 'FOLLOW_UP' }, { $set: { status: 'archived' } });
       await lead('On an archived stage');
 
-      expect((await wired.summary.read(agent())).leads.rows[0].statusLabel).toBe('Follow-up');
+      expect((await wired.summary.read(agent())).leads.rows[0]).toMatchObject({ name: 'On an archived stage', statusCode: 'FOLLOW_UP' });
     });
 
-    it('lists the nearest ten and counts the rest', async () => {
+    it('P19.11-T5 AC-3: answers every open lead, uncut, and says how many the section shows before *Lihat semua*', async () => {
       for (let i = 1; i <= 12; i += 1) await lead(`Lead ${i}`, { nextActionDate: `2026-09-${String(i + 14).padStart(2, '0')}` });
 
       const view = await wired.summary.read(agent());
 
       expect(view.leads.total).toBe(12);
-      expect(view.leads.rows.map((r) => r.name)).toEqual(Array.from({ length: 10 }, (_, i) => `Lead ${i + 1}`));
+      expect(view.leads.shown).toBe(SUMMARY.LEADS_SHOWN);
+      expect(view.leads.rows.map((r) => r.name)).toEqual(Array.from({ length: 12 }, (_, i) => `Lead ${i + 1}`));
     });
 
-    it('reads its own office’s leads and stage names — another office’s do not reach it', async () => {
+    it('P19.11-T5 AC-4: the reader’s own rows carry their proposals, as `/leads`’ do', async () => {
+      await lead('With a proposal');
+      const [row] = (await wired.summary.read(agent())).leads.rows;
+      await mongoose.connection.db!.collection('proposals').insertOne({
+        kpmId: KPM, ownerMembershipId: ME, leadId: row.id, channel: 'agency', items: [], status: 'draft',
+        version: 1, deletedAt: null, createdAt: NOW, updatedAt: NOW,
+      } as never);
+
+      const [again] = (await wired.summary.read(agent())).leads.rows;
+      const [listed] = (await wired.leadRecords.list(agent(), { outcome: 'open' })).rows;
+
+      expect(again.proposals).toMatchObject({ count: 1 });
+      expect(again.proposals).toEqual(listed.proposals);
+    });
+
+    it('P19.11-T5 AC-3: the row builder answers no row for a member with no open lead — a closed one included', async () => {
+      await lead('Won', { outcome: 'won' });
+      const day = { today: '2026-09-14', month: '2026-09', timezone: 'Asia/Jakarta' };
+
+      expect(await wired.leadRecords.openRowsOf(agent(), ME, day)).toEqual([]);
+    });
+
+    it('P19.11-T5 AC-3: a Summary built without the row builder (a coaching snapshot’s) counts the leads and lists none', async () => {
+      await lead('Mine');
+      const held = (wired.summary as unknown as { leadRows: unknown }).leadRows;
+      Object.assign(wired.summary, { leadRows: null });
+      try {
+        expect((await wired.summary.read(agent())).leads).toMatchObject({ rows: [], total: 1, shown: SUMMARY.LEADS_SHOWN });
+      } finally {
+        Object.assign(wired.summary, { leadRows: held });
+      }
+    });
+
+    it('reads its own office’s leads — another office’s do not reach it (P19.11-T5 AC-4)', async () => {
       await provisionOffice(wired, OTHER_KPM, COMPANY);
-      await mongoose.connection.db!.collection('leadStatuses').updateOne(
-        { kpmId: OTHER_KPM, code: 'FOLLOW_UP' }, { $set: { label: 'Office B follow-up' } },
-      );
       await lead('Mine');
       await lead('Theirs', { kpmId: OTHER_KPM });
 
       const mine = await wired.summary.read(agent());
       const theirs = await wired.summary.read(agent({ kpmId: OTHER_KPM }));
 
-      expect(mine.leads.rows).toEqual([expect.objectContaining({ name: 'Mine', statusLabel: 'Follow-up' })]);
+      expect(mine.leads.rows).toEqual([expect.objectContaining({ name: 'Mine', ownerMembershipId: ME })]);
+      expect(mine.leads.total).toBe(1);
       // The same member id in office B reads office B's — the fixture is real, not a no-op.
-      expect(theirs.leads.rows).toEqual([expect.objectContaining({ name: 'Theirs', statusLabel: 'Office B follow-up' })]);
+      expect(theirs.leads.rows).toEqual([expect.objectContaining({ name: 'Theirs', ownerMembershipId: ME })]);
+      expect(JSON.stringify(mine.leads)).not.toContain('Theirs');
     });
   });
 

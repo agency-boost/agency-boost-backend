@@ -4,7 +4,7 @@ import { FilterQuery, Model } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { TenantScopedRepository } from '@/common/tenancy/tenant-scoped.repository';
 import { Notification, NotificationDocument } from './notification.schema';
-import type { DeliveryStatus, NotificationChannel } from './notification.types';
+import type { DeliveryRecord, NotificationChannel } from './notification.types';
 
 /** Which coalesced notice a write is about: one per key, template and recipient in an office. */
 export interface CoalescedNoticeKey {
@@ -91,7 +91,7 @@ export class NotificationRepository extends TenantScopedRepository<NotificationD
     ctx: RequestContext,
     id: string,
     channel: NotificationChannel,
-    outcome: { status: DeliveryStatus; at?: Date; error?: string },
+    outcome: DeliveryRecord,
   ): Promise<void> {
     await this.model
       .updateOne(

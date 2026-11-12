@@ -6,7 +6,7 @@ import type { BrandingPalette, LessonColours } from '@/domain/branding/palette';
  * `domain/branding/palette.ts` and set on `<html>` by the shell under the names `lib/branding.ts` maps.
  */
 export class BrandingPaletteDto implements BrandingPalette {
-  @ApiProperty() primary!: string;
+  @ApiProperty({ description: 'The primary’s fill: the colour chosen, or its nearest shade its words read 4.5:1 on.' }) primary!: string;
   @ApiProperty() primaryHover!: string;
   @ApiProperty({ description: 'White or #1b2b4b: the words on the primary, at least 4.5:1.' }) primaryContrast!: string;
   @ApiProperty({ description: 'The primary darkened until it reads 4.5:1 on white.' }) primaryInk!: string;
@@ -15,7 +15,7 @@ export class BrandingPaletteDto implements BrandingPalette {
   @ApiProperty() primary50!: string;
   @ApiProperty() primary100!: string;
   @ApiProperty() focusRing!: string;
-  @ApiProperty() secondary!: string;
+  @ApiProperty({ description: 'The secondary’s fill, as the primary’s.' }) secondary!: string;
   @ApiProperty() secondaryHover!: string;
   @ApiProperty() secondaryContrast!: string;
   @ApiProperty() secondaryInk!: string;
@@ -113,8 +113,12 @@ export class BrandingSettingsDto {
 }
 
 export class ContrastResultDto {
-  @ApiProperty({ enum: ['light', 'dark'] }) contrast!: 'light' | 'dark';
-  @ApiProperty() ratio!: number;
+  @ApiProperty({ enum: ['light', 'dark'], description: 'The words on the fill: white (`light`) or #1b2b4b (`dark`).' })
+  contrast!: 'light' | 'dark';
+  @ApiProperty({ description: 'Their ratio on the fill, to two decimals: at least 4.5.' }) ratio!: number;
+  @ApiProperty({ description: 'What buttons, pills and cards are filled with: the colour chosen, or its nearest shade the words read 4.5:1 on. The palette’s `primary` or `secondary`.' })
+  fill!: string;
+  @ApiProperty({ description: 'Whether `fill` is not the colour chosen.' }) adjusted!: boolean;
 }
 
 /** `POST /kpm/settings/branding/preview`. */

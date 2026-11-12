@@ -32,6 +32,14 @@ describe('byNextAction — nearest first, undated last (P10-T6)', () => {
     expect(rows.sort(byNextAction).map((r) => r.id)).toEqual(['c', 'b', 'a', 'd']);
   });
 
+  it('P19.11-T5 AC-3 the Summary’s order: the most overdue on top, then today and later, then the undated — waiting longest first', () => {
+    const rows = [
+      row('undated-new', null, 9), row('later', '2026-09-30'), row('today', '2026-09-14'),
+      row('undated-old', null, 1), row('overdue', '2026-08-20'),
+    ];
+    expect(rows.sort(byNextAction).map((r) => r.id)).toEqual(['overdue', 'today', 'later', 'undated-old', 'undated-new']);
+  });
+
   it('keeps registration order between equals, then the id — two reads never shuffle', () => {
     const rows = [row('z', '2026-09-20', 2), row('y', '2026-09-20', 1), row('b', null, 5), row('a', null, 5)];
     expect(rows.sort(byNextAction).map((r) => r.id)).toEqual(['y', 'z', 'a', 'b']);

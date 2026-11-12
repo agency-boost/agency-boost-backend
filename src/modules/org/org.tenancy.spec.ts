@@ -126,18 +126,6 @@ describe('organisation', () => {
       clock,
     );
 
-    leaderCodes = new LeaderCodeService(
-      members,
-      hierarchy,
-      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
-      kpmModel as never,
-      mongoose.model(Company.name) as never,
-      users as never,
-      new AuditService(mongoose.model(AuditLog.name) as never),
-      notifications as never,
-      clock,
-    );
-
     approvals = new ApprovalsService(
       members,
       hierarchy,
@@ -148,6 +136,20 @@ describe('organisation', () => {
       notifications as never,
       clock,
     );
+
+    leaderCodes = new LeaderCodeService(
+      members,
+      hierarchy,
+      new JoinRequestRepository(mongoose.model(JoinRequest.name) as never),
+      approvals,
+      kpmModel as never,
+      mongoose.model(Company.name) as never,
+      users as never,
+      new AuditService(mongoose.model(AuditLog.name) as never),
+      notifications as never,
+      clock,
+    );
+
 
     roles = new RoleChangeService(
       members,
@@ -597,17 +599,19 @@ describe('organisation', () => {
      * the person page's *Personal* card — and to nobody else. A leader reads their unit's people
      * without it, and no roster row carries it.
      */
-    it('P18.5-T4 AC-6: one member\'s read carries what they record to the Owner, an Admin and themselves only', async () => {
+    // P19.12-T5 AC-2 (ADR-0248 §2): and their WhatsApp number, to the same three readers.
+    it('P18.5-T4 AC-6, P19.12-T5 AC-2: one member\'s read carries what they record and their WhatsApp number to the Owner, an Admin and themselves only', async () => {
       const ab = await join(KPM_A, 'ab');
       const agent = await join(KPM_A, 'agent', ab);
       const row = await members.findById(ctx(KPM_A), agent);
       await users.updateOne({ _id: row!.userId }, {
-        $set: { dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07' },
+        $set: { dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07', phone: '+6281211002200' },
       });
       await members.updateById(ctx(KPM_A), agent, { $set: { workStatus: 'part_time' } });
       // `companyName` null: this directory is built without the company model, as the roster's specs build it.
       const recorded = {
-        dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07', workStatus: 'part_time', companyName: null,
+        dateOfBirth: '1990-03-15', gender: 'female', companyJoinMonth: '2021-07', workStatus: 'part_time',
+        phone: '+6281211002200', companyName: null,
       };
 
       // The Owner, and an Admin who does not own the office.
@@ -642,8 +646,37 @@ describe('organisation', () => {
     it('P18.5-T4 AC-6: reads as not recorded for somebody who arrived before it was asked', async () => {
       const agent = await join(KPM_A, 'agent');
       expect((await directory.read(ctx(KPM_A), agent)).personal).toEqual({
-        dateOfBirth: null, gender: null, companyJoinMonth: null, workStatus: null, companyName: null,
+        dateOfBirth: null, gender: null, companyJoinMonth: null, workStatus: null, phone: null, companyName: null,
       });
+    });
+
+    it('P19.12-T5 AC-2 an empty number on file reads as none', async () => {
+      const agent = await join(KPM_A, 'agent');
+      const row = await members.findById(ctx(KPM_A), agent);
+      await users.updateOne({ _id: row!.userId }, { $set: { phone: '' } });
+      expect((await directory.read(ctx(KPM_A), agent)).personal?.phone).toBeNull();
+    });
+
+    /*
+     * P19.12-T5 AC-4 (ADR-0248 §4; ADR-0212 §2): every row and one member's read say whether they were invited and have
+     * signed in — `signed_in`, `invited` (*Diundang*), `not_invited` (*Belum diundang*) — whatever their status says.
+     */
+    it('P19.12-T5 AC-4 each row says signed_in, invited or not_invited, from the sign-in and the invitation', async () => {
+      const signedIn = await join(KPM_A, 'agent');
+      const invited = await join(KPM_A, 'agent');
+      const neither = await join(KPM_A, 'agent');
+      const userOf = async (id: string) => (await members.findById(ctx(KPM_A), id))!.userId;
+      await users.updateOne({ _id: await userOf(signedIn) }, { $set: { lastLoginAt: new Date('2026-11-10T02:00:00Z') } });
+      await members.updateById(ctx(KPM_A), signedIn, { $set: { invitedAt: new Date('2026-11-01T02:00:00Z') } });
+      await members.updateById(ctx(KPM_A), invited, { $set: { invitedAt: new Date('2026-11-09T02:00:00Z') } });
+
+      const page = await directory.list(ctx(KPM_A));
+      const state = (id: string) => page.members.find((m) => m.membershipId === id)?.invitation;
+      expect([state(signedIn), state(invited), state(neither)]).toEqual(['signed_in', 'invited', 'not_invited']);
+      // Status is a different question: all three are in the office.
+      expect(page.members.filter((m) => [signedIn, invited, neither].includes(m.membershipId)).map((m) => m.status))
+        .toEqual(['active', 'active', 'active']);
+      expect((await directory.read(ctx(KPM_A), invited)).invitation).toBe('invited');
     });
 
     /*
@@ -1424,10 +1457,39 @@ describe('organisation', () => {
       });
       await onboarding.requestLeader(asJoiner, leader);
 
-      // They are pending, so redeeming refuses — they already have an office.
-      await expect(leaderCodes.redeem(asJoiner, leaderCode)).rejects.toMatchObject({
-        code: 'ORG_AGENT_ALREADY_TAGGED',
+      // P19.10-T1 AC-3 (ADR-0236 §2): waiting in the code's office, they are placed by it — until then this refused
+      // them as already registered, and the code they were sent did nothing.
+      await leaderCodes.redeem(asJoiner, leaderCode);
+      expect(await mongoose.model(Membership.name).findById(registered!._id)).toMatchObject({ status: 'active', leaderId: leader });
+      const requests = await mongoose.model(JoinRequest.name).find({ membershipId: String(registered!._id) });
+      expect(requests.map((r) => r.get('status'))).toEqual(['cancelled']);
+    });
+
+    it('P19.10-T1 a code places only somebody still waiting: an active member is refused before the code is read', async () => {
+      const agent = await join(KPM_A, 'agent', leader);
+      const row = await members.findById(ctx(KPM_A), agent);
+      const asAgent = new RequestContext(row!.userId, 'none', {
+        membershipId: agent, kpmId: KPM_A, orgLevelCode: 'AGENT', hierarchyRole: 'agent',
+        status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 0,
       });
+      await expect(leaderCodes.redeem(asAgent, 'ZZZZZZ')).rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+    });
+
+    it('P19.10-T1 placing by a code refuses anybody not waiting, and the office’s owner, before anything is written', async () => {
+      const agent = await join(KPM_A, 'agent', leader);
+      const joiner = ctx(KPM_A, { membershipId: agent, isKpmOwner: false });
+      await expect(approvals.placeByCode(joiner, agent, leader, leaderCode)).rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+      await expect(approvals.placeByCode(joiner, new mongoose.Types.ObjectId().toString(), leader, leaderCode))
+        .rejects.toMatchObject({ code: 'ORG_AGENT_ALREADY_TAGGED' });
+
+      // An office whose owner is still waiting in it: a code does not put the owner under somebody.
+      const ownerId = await person('Pending Owner');
+      await onboarding.registerKpm(new RequestContext(ownerId, 'none', null), KPM_A);
+      const owner = await mongoose.model(Membership.name).findOne({ userId: ownerId });
+      await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { ownerUserId: ownerId } });
+      await expect(approvals.placeByCode(ctx(KPM_A), String(owner!._id), leader, leaderCode))
+        .rejects.toMatchObject({ code: 'ORG_NOT_PERMITTED_TO_TAG' });
+      expect(await mongoose.model(Membership.name).findById(owner!._id)).toMatchObject({ status: 'pending', leaderId: null });
     });
 
     it('notifies the code owner that somebody walked in', async () => {
@@ -3601,12 +3663,28 @@ describe('organisation', () => {
       expect(team.every((t) => t.canChangeRole)).toBe(true);
     });
 
-    it('AC-1: never offers the control for an AB report, even to their leader', async () => {
+    /*
+     * P19.12-T4 AC-1 (ADR-0247 §1; the client's message of 11 November 2026, item 4): this said *never offers the
+     * control for an AB report, even to their leader*. An AB under an AB is ordinary (ADR-0014), and their leader may
+     * now set it — Maya, an AB, reads *AB* checked among *Agent · AAB · AB*.
+     */
+    it('P19.12-T4 AC-1 offers an AB leader the control for an AB report, every rung up to their own, the AB checked', async () => {
       const otherAb = await join(KPM_A, 'ab', ab);
       await hierarchy.refreshCounts(ctx(KPM_A), ab);
 
       const team = await roles.team(await asMember(ab));
-      expect(team.find((t) => t.membershipId === otherAb)?.canChangeRole).toBe(false);
+      const row = team.find((t) => t.membershipId === otherAb);
+      expect(row).toMatchObject({ canChangeRole: true, roleChoices: ['AGENT', 'AAB', 'AB'], orgLevelCode: 'AB' });
+    });
+
+    it('P19.12-T4 AC-1 offers an AAB leader Agent and AAB, and nothing for a report who stands above them', async () => {
+      const theirs = await join(KPM_A, 'agent', aab);
+      const aboveThem = await join(KPM_A, 'ab', aab);
+      await hierarchy.refreshCounts(ctx(KPM_A), aab);
+
+      const team = await roles.team(await asMember(aab));
+      expect(team.find((t) => t.membershipId === theirs)).toMatchObject({ canChangeRole: true, roleChoices: ['AGENT', 'AAB'] });
+      expect(team.find((t) => t.membershipId === aboveThem)).toMatchObject({ canChangeRole: false, roleChoices: ['AB'] });
     });
 
     it('AC-1: promotes an agent to AAB, and back', async () => {
@@ -3695,34 +3773,41 @@ describe('organisation', () => {
         expect((await members.findById(ctx(KPM_A), aab))?.role).toBe('agent');
       });
 
-      it('does not block a promotion, which orphans nobody', async () => {
+      it('does not block a promotion, which orphans nobody — an AB leader makes their AAB an AB (P19.12-T4 AC-1)', async () => {
         await join(KPM_A, 'agent', aab);
         await hierarchy.refreshCounts(ctx(KPM_A), aab);
-        await expect(roles.change(abCtx, aab, 'ab')).rejects.toMatchObject({
-          // Refused for a different reason: AB is not a leader's call.
-          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
-        });
+        await expect(roles.change(abCtx, aab, 'ab')).resolves.toBeDefined();
+        expect((await members.findById(ctx(KPM_A), aab))?.role).toBe('ab');
       });
     });
 
     describe('who may change what', () => {
-      it('refuses a leader who is not the direct one', async () => {
+      it('refuses a leader who is not the direct one — 404 for somebody outside their downline, never confirming the id', async () => {
+        // A peer AB: the agent is not below them. 404, not 403 (P19.12's permission review): a refusal would confirm the id.
         const stranger = await join(KPM_A, 'ab');
-        await expect(roles.change(await asMember(stranger), agent, 'aab')).rejects.toMatchObject({
-          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
-        });
+        await expect(roles.change(await asMember(stranger), agent, 'aab')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('agent');
       });
 
-      it('refuses a direct leader making somebody an AB, naming the rung as a role is called (P18.7-T9 AC-1)', async () => {
-        await expect(roles.change(abCtx, agent, 'ab')).rejects.toMatchObject({
-          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
-          message: 'Only the office’s Owner or an Admin can change somebody’s role to or from AB.',
-        });
+      it('P19.12-T4 AC-1 lets an AB leader make a direct report AB — AB under AB — and take it away again', async () => {
+        await roles.change(abCtx, agent, 'ab');
+        expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('ab');
+        await roles.change(abCtx, agent, 'agent');
+        expect((await members.findById(ctx(KPM_A), agent))?.role).toBe('agent');
       });
 
-      it('refuses a direct leader unmaking an AB, naming the rung they stand on (P18.7-T9 AC-1)', async () => {
-        const abReport = await join(KPM_A, 'ab', ab);
-        await expect(roles.change(abCtx, abReport, 'agent')).rejects.toMatchObject({
+      it('P19.12-T4 AC-1 refuses an AAB leader making somebody an AB, naming the rung as a role is called (P18.7-T9 AC-1)', async () => {
+        const theirs = await join(KPM_A, 'agent', aab);
+        await expect(roles.change(await asMember(aab), theirs, 'ab')).rejects.toMatchObject({
+          code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
+          message: 'You can set a role up to your own. Only the office’s Owner or an Admin can make somebody AB.',
+        });
+        expect((await members.findById(ctx(KPM_A), theirs))?.role).toBe('agent');
+      });
+
+      it('P19.12-T4 AC-1 refuses an AAB leader unmaking an AB who reports to them, naming the rung they stand on', async () => {
+        const abReport = await join(KPM_A, 'ab', aab);
+        await expect(roles.change(await asMember(aab), abReport, 'agent')).rejects.toMatchObject({
           code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
           message: 'Only the office’s Owner or an Admin can change somebody’s role to or from AB.',
         });
@@ -3823,14 +3908,23 @@ describe('organisation', () => {
       expect(one).toMatchObject({ canChangeRole: true, canPromoteToAb: true, canRemove: true });
     });
 
-    it('AC-4: a direct leader may move them between Agent and AAB, and no further', async () => {
-      // The two matrix rows the screen has to tell apart. A leader cannot make somebody
-      // their own peer.
+    it('P19.12-T4 AC-1 a direct leader may set any rung up to their own: an AB leader AB too, an AAB leader no further than AAB', async () => {
+      // The flags are read off `roleChoices`, the rule the write enforces (ADR-0247 §1).
       const leader = await join(KPM_A, 'ab');
       const agent = await join(KPM_A, 'agent', leader);
+      const aabLeader = await join(KPM_A, 'aab', leader);
+      const theirs = await join(KPM_A, 'agent', aabLeader);
+      const asAab = new RequestContext('u-other', 'none', {
+        membershipId: aabLeader, kpmId: KPM_A, orgLevelCode: 'AAB', hierarchyRole: 'aab', status: 'active',
+        isKpmOwner: false, isKpmAdmin: false, directCount: 1,
+      });
 
-      const one = await directory.read(outsider(leader), agent);
-      expect(one).toMatchObject({ canChangeRole: true, canPromoteToAb: false, canRemove: true });
+      expect(await directory.read(outsider(leader), agent)).toMatchObject({
+        canChangeRole: true, canPromoteToAb: true, canRemove: true, roleChoices: ['AGENT', 'AAB', 'AB'], canChangeLeader: true,
+      });
+      expect(await directory.read(asAab, theirs)).toMatchObject({
+        canChangeRole: true, canPromoteToAb: false, roleChoices: ['AGENT', 'AAB'], canChangeLeader: true,
+      });
     });
 
     it('AC-4: somebody else\u2019s leader never reaches the page at all', async () => {
@@ -3925,11 +4019,14 @@ describe('organisation', () => {
       const theirs = await join(KPM_A, 'agent', leader);
       const viewer = outsider(leader);
 
-      // A leader may not touch the AB rung, and the service says the same.
-      expect((await directory.read(viewer, theirs)).canPromoteToAb).toBe(false);
-      await expect(roles.change(viewer, theirs, 'ab')).rejects.toMatchObject({
+      // An AB leader may set the AB rung (P19.12-T4 AC-1), and the service says the same; somebody who is not their
+      // direct leader may not, and the service says that too.
+      expect((await directory.read(viewer, theirs)).canPromoteToAb).toBe(true);
+      expect((await directory.read(outsider(root), theirs)).canChangeRole).toBe(false);
+      await expect(roles.change(outsider(root), theirs, 'ab')).rejects.toMatchObject({
         code: 'ORG_ROLE_CHANGE_NOT_PERMITTED',
       });
+      await expect(roles.change(viewer, theirs, 'ab')).resolves.toBeDefined();
 
       // Nobody may remove themselves, whatever else they hold.
       expect((await directory.read(office, leader)).canRemove).toBe(true);

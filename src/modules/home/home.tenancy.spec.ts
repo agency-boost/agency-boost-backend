@@ -1,7 +1,5 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
-import { LeadRepository } from '@/modules/leads/lead.repository';
-import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -43,7 +41,6 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       wired.coachingReadings,
       wired.activityReadings,
       wired.memberships,
-      new LeadRepository(mongoose.model(Lead.name, LeadSchema) as never),
       wired.leadReadings,
       wired.calendar,
       wired.subjectReads,
@@ -99,7 +96,10 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   describe('UI-100 the leader’s tiles', () => {
     it('UI-100 Active Agent shows exactly the Unit Dashboard tile: its figure, its manpower and its Unit / AAB split', async () => {
       const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
-      expect(view.leader!.activeAgent).toEqual(dashboard.tiles.potentialActive);
+      // Over Grup langsung, the dashboard's default (ADR-0249 §5): its AB side is nobody, and Home draws none.
+      const { ab, ...split } = dashboard.tiles.potentialActive;
+      expect(ab).toEqual({ count: 0, of: 0 });
+      expect(view.leader!.activeAgent).toEqual(split);
       // Manpower: everybody in the Group, Agus included (UI-013).
       expect(view.leader!.activeAgent.of).toBe(dashboard.tiles.team.total);
       expect(view.month).toBe(dashboard.month);
@@ -107,9 +107,11 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
 
     it('UI-100 the same at every period the dashboard shows, and for an AAB’s own unit', async () => {
       const dashboard = await wired.unitDashboard.read(office.as('AGUS'), { period: 'year' });
-      expect((await read('AGUS')).leader!.activeAgent).toEqual(dashboard.tiles.potentialActive);
+      const { ab: _agusAb, ...agus } = dashboard.tiles.potentialActive;
+      expect((await read('AGUS')).leader!.activeAgent).toEqual(agus);
       const sari = await wired.unitDashboard.read(office.as('SARI'));
-      expect((await read('SARI')).leader!.activeAgent).toEqual(sari.tiles.potentialActive);
+      const { ab: _sariAb, ...sariSplit } = sari.tiles.potentialActive;
+      expect((await read('SARI')).leader!.activeAgent).toEqual(sariSplit);
     });
 
     it('UI-100 Coaching 7 hari counts members coached in the last 7 days over the same manpower, split Unit / AAB', async () => {
@@ -226,11 +228,18 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect(await db().collection('auditLog').countDocuments({ 'after.surface': 'home' })).toBe(before);
     });
 
+    /*
+     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §5):* Home's team is the Owner's *Grup langsung*, and in this office every
+     * report of his is an AB — so his block is there, its list empty, where it listed the office.
+     */
     it('P19.8-T2 AC-10 every leader by role gets the block — an AB, an AAB, the Owner and an Admin with nobody — an Agent none', async () => {
-      for (const who of ['AGUS', 'SARI', 'OWNER'] as Who[]) {
+      for (const who of ['AGUS', 'SARI'] as Who[]) {
         const view = await read(who);
         expect({ who, team: view.leader!.team.length > 0 }).toEqual({ who, team: true });
       }
+      const owner = await read('OWNER');
+      expect(owner.leader).not.toBeNull();
+      expect(owner.leader!.team).toEqual([]);
       // Maya runs the office and leads nobody: the block at zero, as Dewi's.
       expect((await read('ADMIN')).leader).toEqual(ZERO_BLOCK);
       for (const who of ['INDAH', 'RINA', 'DODI'] as Who[]) {
@@ -318,13 +327,15 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       }
     });
 
-    it('P19.8-T2 AC-7 an agenda row’s id opens the Calendar’s own detail, and only for its reader: another office’s read is 404', async () => {
+    it('P19.8-T2 AC-7 P19.11-T1 AC-3 an entry row is the Calendar’s own entry, which opens its detail, and only for its reader: another office’s read is 404', async () => {
       const view = await read('INDAH');
-      const row = view.actions.find((a) => a.kind === 'agenda' && a.source === 'entry')!;
+      const row = view.actions.find((a) => a.kind === 'entry');
       expect(row).toBeDefined();
-      const id = (row as { id: string }).id;
+      const id = row!.kind === 'entry' ? row!.entry.entryId : '';
       const entry = await wired.calendar.readOne(office.as('INDAH'), id);
       expect(entry.title).toBe('Weekly unit huddle');
+      // The row is what the detail reads, field for field.
+      expect(row!.kind === 'entry' && row!.entry).toEqual(entry);
       await expect(wired.calendar.readOne(office.as('B_AB'), id)).rejects.toMatchObject({ status: 404 });
     });
   });
@@ -355,31 +366,59 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect(view.schedule).toEqual({ meetings: 2, tasks: 1 });
     });
 
-    it('UI-100 Aksi hari ini: today’s Tugas first, then today’s next timed item, then the next day’s — three at most', async () => {
-      const view = await read('INDAH');
-      expect(view.actions).toEqual([
-        {
-          kind: 'lead', leadId: expect.any(String), name: 'Ibu Wiwik Setyaningsih', type: 'sales', note: 'Invite BOP',
-          contact: { phone: '+6281211002200', email: 'wiwik@example.test' }, version: 4,
+    // *Rewritten 2026-11-10 (P19.11-T1 AC-3, UX-2):* today's alone, in the Calendar's own shapes — where the third row was
+    // the next day's *Client review*, and the rows were Home's own.
+    it('P19.11-T1 AC-3 Aksi hari ini is today’s alone: its Tugas first, then today’s timed item still to come — never the next day’s', async () => {
+      const [view, calendar] = await Promise.all([read('INDAH'), wired.calendar.today(office.as('INDAH'))]);
+      expect(view.actions.map((a) => a.kind)).toEqual(['task', 'entry']);
+      // The Calendar's own task, as the Agenda's checklist reads it.
+      expect(view.actions[0]).toEqual({ kind: 'task', task: calendar.taskItems[0] });
+      expect(view.actions[0]).toMatchObject({
+        kind: 'task',
+        task: {
+          source: 'lead', name: 'Ibu Wiwik Setyaningsih', note: 'Invite BOP', date: ROSTER_TODAY, phone: '+6281211002200',
+          lead: { version: 4 }, coaching: null, done: false,
         },
-        {
-          kind: 'agenda', source: 'entry', id: expect.any(String), type: 'meeting', title: 'Weekly unit huddle',
-          date: ROSTER_TODAY, start: '15:00',
-        },
-        {
-          kind: 'agenda', source: 'entry', id: expect.any(String), type: 'client', title: 'Client review',
-          date: '2026-09-15', start: '09:00',
-        },
-      ]);
+      });
+      expect(view.actions[1]).toMatchObject({
+        kind: 'entry',
+        entry: { type: 'meeting', title: 'Weekly unit huddle', date: ROSTER_TODAY, start: '15:00', end: '16:00', readerIs: 'organiser' },
+      });
+      // Tomorrow's entry and lead, an entry already over, a trip: none of them.
+      expect(JSON.stringify(view.actions)).not.toMatch(/Client review|Pak Teddy|Early stand-up|Surabaya/);
     });
 
-    it('UI-100 a coaching action item due today is a Tugas from the leader who coached them, with their number', async () => {
+    it('P19.11-T1 AC-1 AC-2 AC-3 a task ticked today stays on Aksi hari ini in its place, done, and Jadwal hari ini no longer counts it', async () => {
+      const wiwik = { kpmId: KPM_A, name: 'Ibu Wiwik Setyaningsih' };
+      await db().collection('leads').updateOne(wiwik, {
+        $set: {
+          nextActionDate: null, nextActionNote: null,
+          nextActionDone: { date: ROSTER_TODAY, note: 'Invite BOP', at: ROSTER_NOW, byMembershipId: office.id.INDAH },
+        },
+      });
+      try {
+        const view = await read('INDAH');
+        expect(view.schedule).toEqual({ meetings: 2, tasks: 0 });
+        expect(view.actions.map((a) => a.kind)).toEqual(['task', 'entry']);
+        expect(view.actions[0]).toMatchObject({
+          kind: 'task', task: { name: 'Ibu Wiwik Setyaningsih', note: 'Invite BOP', date: ROSTER_TODAY, done: true },
+        });
+      } finally {
+        await db().collection('leads').updateOne(wiwik, { $set: { nextActionDate: ROSTER_TODAY, nextActionNote: 'Invite BOP', nextActionDone: null } });
+      }
+    });
+
+    it('UI-100 P19.11-T1 AC-3 a coaching action item due today is a Tugas from the leader who coached them, with their number', async () => {
       await db().collection('users').updateOne({ fullName: 'Sari Puspita' }, { $set: { phone: '+6281277778888' } });
       const view = await read('RINA');
       expect(view.schedule.tasks).toBe(1);
       expect(view.actions[0]).toEqual({
-        kind: 'coaching', sessionId: expect.any(String), itemId: 'RINA-1', text: 'Book two presentations',
-        from: { membershipId: office.id.SARI, name: 'Sari Puspita', phone: '+6281277778888' },
+        kind: 'task',
+        task: {
+          taskId: expect.stringMatching(/^coaching:.+:RINA-1$/), source: 'coaching', date: ROSTER_TODAY, ownerMembershipId: office.id.RINA,
+          name: 'Sari Puspita', note: 'Book two presentations', phone: '+6281277778888', lead: null,
+          coaching: { sessionId: expect.any(String), itemId: 'RINA-1', coachMembershipId: office.id.SARI }, done: false,
+        },
       });
     });
 
@@ -389,9 +428,9 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       await db().collection('memberships').updateOne({ _id: sari }, { $set: { status: 'removed' } });
       try {
         const view = await read('RINA');
-        expect(view.actions[0]).toEqual({
-          kind: 'coaching', sessionId: expect.any(String), itemId: 'RINA-1', text: 'Book two presentations',
-          from: { membershipId: office.id.SARI, name: 'Sari Puspita', phone: null },
+        expect(view.actions[0]).toMatchObject({
+          kind: 'task',
+          task: { source: 'coaching', name: 'Sari Puspita', phone: null, coaching: { itemId: 'RINA-1', coachMembershipId: office.id.SARI } },
         });
         expect(JSON.stringify(view)).not.toContain('81277778888');
       } finally {
@@ -399,7 +438,8 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       }
     });
 
-    it('UI-100 still short after today: an event they joined on a later day fills a row, another office’s never', async () => {
+    // *Rewritten 2026-11-10 (P19.11-T1 AC-3, UX-2):* a later day's event filled a short list; it never does now.
+    it('P19.11-T1 AC-3 an event they joined today is a row in the Calendar’s shape, with its end; a later day’s and another office’s never', async () => {
       const event = (kpmId: string, title: string, startsAt: string, endsAt: string) => {
         const _id = new mongoose.Types.ObjectId();
         return {
@@ -408,31 +448,41 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
           audience: { issuer: 'kpm', scope: 'all' }, version: 1, status: 'active', archivedAt: null, deletedAt: null,
         };
       };
-      const going = event(KPM_A, 'BOP Surabaya', '2026-09-16T02:00:00Z', '2026-09-16T04:00:00Z');
-      const elsewhere = event(KPM_B, 'Office B BOP', '2026-09-15T02:00:00Z', '2026-09-15T04:00:00Z');
+      // 15:00 to 17:00 today in Jakarta; the 16th; office B's today.
+      const going = event(KPM_A, 'BOP Surabaya', '2026-09-14T08:00:00Z', '2026-09-14T10:00:00Z');
+      const later = event(KPM_A, 'BOP Malang', '2026-09-16T02:00:00Z', '2026-09-16T04:00:00Z');
+      const elsewhere = event(KPM_B, 'Office B BOP', '2026-09-14T06:00:00Z', '2026-09-14T07:00:00Z');
       await db().collection('eventTypes').insertOne({
         kpmId: KPM_A, code: 'BOP', label: 'Business Opportunity Presentation', displayOrder: 1, version: 1, status: 'active',
         deletedAt: null,
       });
-      await db().collection('events').insertMany([going, elsewhere]);
-      await db().collection('eventRsvps').insertMany([going, elsewhere].map((e) => ({
+      await db().collection('events').insertMany([going, later, elsewhere]);
+      await db().collection('eventRsvps').insertMany([going, later, elsewhere].map((e) => ({
         kpmId: e.kpmId, eventId: String(e._id), membershipId: office.id.DODI, rsvpStatus: 'going', rsvpAt: null,
         cancelledAt: null, claimedAt: null, confirmedAttended: null, deletedAt: null,
       })));
       try {
         expect((await read('DODI')).actions).toEqual([{
-          kind: 'agenda', source: 'event', id: String(going._id), type: 'Business Opportunity Presentation',
-          title: 'BOP Surabaya', date: '2026-09-16', start: '09:00',
+          kind: 'event',
+          event: {
+            eventId: String(going._id), title: 'BOP Surabaya', type: { code: 'BOP', label: 'Business Opportunity Presentation' },
+            location: 'Kantor KPM', allDay: false, date: ROSTER_TODAY, start: '15:00', end: '17:00', startsOn: null, endsOn: null,
+            startsAt: '2026-09-14T08:00:00.000Z', endsAt: '2026-09-14T10:00:00.000Z',
+          },
         }]);
       } finally {
         await db().collection('eventRsvps').deleteMany({ membershipId: office.id.DODI });
-        await db().collection('events').deleteMany({ _id: { $in: [going._id, elsewhere._id] } });
+        await db().collection('events').deleteMany({ _id: { $in: [going._id, later._id, elsewhere._id] } });
         await db().collection('eventTypes').deleteMany({ code: 'BOP' });
       }
     });
 
-    it('UI-100 nothing to do and nothing ahead: no rows', async () => {
+    it('P19.11-T1 AC-4 nothing today: no rows — the screen says so', async () => {
       expect((await read('DODI')).actions).toEqual([]);
+    });
+
+    it('P19.11-T1 AC-5 now carries the instant the read was made, from which the page counts on to midnight', async () => {
+      expect((await read('INDAH')).now).toEqual({ minute: 10 * 60, at: ROSTER_NOW.toISOString() });
     });
 
     it('UI-100 the quote and the pose of the day are the office day’s', async () => {

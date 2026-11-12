@@ -2,6 +2,7 @@ import mongoose, { type Model } from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { LeadStatus, LeadStatusSchema } from '@/modules/config/lead-status.schema';
 import { Lead, LeadSchema } from '@/modules/leads/lead.schema';
 import { Product, ProductSchema, type ProductDocument } from '@/modules/products/product.schema';
 import { importProposalFields, type ProposalFieldsImportReport } from '@/modules/products/proposal-fields-import';
@@ -9,6 +10,7 @@ import { PRUDENTIAL_PROPOSAL_IMPORT, PRUDENTIAL_PROPOSAL_ROWS } from '@/modules/
 import type { FaqEntry, PlanOption } from '@/modules/products/proposal-fields';
 import { Proposal, ProposalSchema } from '@/modules/proposals/proposal.schema';
 import { applyItemPatch, itemName, newItem, type ItemPatch, type StoredItem } from '@/modules/proposals/proposal-items';
+import { seedObjectId } from './coaching-fixture';
 
 /**
  * **The proposal's lead and catalogue fields, seeded** (P19.7-T1 AC-1, AC-4; ADR-0224, ADR-0225 §10;
@@ -20,6 +22,8 @@ import { applyItemPatch, itemName, newItem, type ItemPatch, type StoredItem } fr
  * | **Plans and a FAQ** on *PRUWell Medical* and *PRUCerah* — **demo figures, not Prudential's** | the same section's *Plan* and *Tanya-jawab*; `owner@kpm0417.test` at `/kpm/settings/products` → *PRUWell Medical* → *Sesuaikan*: the FAQ and each plan's highlights, *Mengikuti Prudential* |
  * | **The client's age and gender** on two of Rina's leads, and on none of the others | `rina@kpm0417.test` at `/leads`: *Ibu Rosa Damayanti* and *Pak Hendro Gunawan* open with *Umur* and *Laki-laki / Perempuan* filled; *Ibu Wulan Sari* with neither |
  * | **Two of Rina's proposals** (P19.7-T2): a *Selesai* one for Ibu Rosa — *Syariah*, PRUWell Medical Syariah and PRUCerah for her daughter, saved an hour before the seed ran — and a *Draf* for Pak Hendro, PRUWell Medical with its premium still to type | `rina@kpm0417.test` at `/proposal` (*Riwayat*: *Draf* and *Selesai*); `/leads`: both cards carry the pill, *Belum ada proposal* leaves Ibu Wulan Sari; Ibu Rosa's sheet: the *Proposal* section and *"Proposal dibuat · …"* in *Riwayat*; her leader on `/unit/dashboard`: *Proposal* 1 this month, and no client |
+ *
+ * | **The AB's finished and drafts-only leads** (P19.11-T3; `PROPOSAL_DEMO_AB_LEADS`) | `agus@kpm0417.test` at `/leads`: *Ibu Natalia Prameswari*'s card wears the proposal icon, opening her *Selesai* proposal, and her sheet's *Proposal* shows it alone (a later *Draf* hidden); *Pak Benny Tanoto* (drafts only) has no icon and *Buat proposal* alone; both drafts in `/proposal` |
  *
  * **Written once, until `--reset`.** The import changes nothing on a second run (it is the operator's, and says so);
  * the plans and the FAQ are written only onto a product that has neither, and an age only onto a lead with none — so a
@@ -86,12 +90,55 @@ export const PROPOSAL_DEMO_PROPOSALS: readonly {
   { lead: 'Pak Hendro Gunawan', channel: 'conventional', done: false, items: [{ code: 'PRUWELL_MEDICAL', patch: {} }] },
 ];
 
+/**
+ * **The AB demo login's two Sales leads and their proposals** (P19.11-T3 AC-1, AC-7; UX-9, UX-11), so the card's icon
+ * rule and the sheet's one finished proposal show in a browser as `agus@kpm0417.test`:
+ *
+ * - *Ibu Natalia Prameswari*: a **Selesai** proposal saved yesterday, and a **Draf** changed since — the card wears the
+ *   proposal icon, which opens the finished one; her sheet's *Proposal* shows that one alone, above *Buat proposal*.
+ * - *Pak Benny Tanoto*: **drafts only** — one with a product, one still empty — so his card has no icon and his sheet's
+ *   *Proposal* is *Buat proposal* alone. Both stay in *Riwayat proposal*, where a draft is resumed.
+ *
+ * Clients take names no member of the office has (`calendar-fixture.ts`). Ids derived (`seedObjectId`), so a second run
+ * writes nothing. **Demo figures, not Prudential's.**
+ */
+export const PROPOSAL_DEMO_AB_LEADS: readonly {
+  key: string;
+  name: string;
+  age: number;
+  gender: 'male' | 'female';
+  phone: string;
+  stage: string;
+  proposals: { done: boolean; hoursAgo: number; items: { code: string; patch: ItemPatch }[] }[];
+}[] = [
+  {
+    key: 'agus-finished', name: 'Ibu Natalia Prameswari', age: 38, gender: 'female', phone: '+6281355502468',
+    stage: 'APPROVED_NOT_PAID',
+    proposals: [
+      { done: true, hoursAgo: 26, items: [{ code: 'PRUWELL_MEDICAL', patch: { premium: { amountMinor: 950_000_00 } } }] },
+      { done: false, hoursAgo: 2, items: [{ code: 'PRUWELL_MEDICAL', patch: {} }] },
+    ],
+  },
+  {
+    key: 'agus-drafts', name: 'Pak Benny Tanoto', age: 45, gender: 'male', phone: '+6281355502469', stage: 'FOLLOW_UP',
+    proposals: [
+      { done: false, hoursAgo: 5, items: [{ code: 'PRUWELL_MEDICAL', patch: {} }] },
+      { done: false, hoursAgo: 3, items: [] },
+    ],
+  },
+];
+
+/** The AB's seeded lead's id: derived, so a re-seed finds it (`seedObjectId`). */
+export const proposalDemoLeadId = (kpmId: string, key: string) => seedObjectId('proposal-fixture', 'lead', kpmId, key);
+
 export interface ProposalFixtureDeps {
   clock: Clock;
   /** The demo's Prudential company. */
   companyId: string;
   kpm0417: string;
   rina: string;
+  /** The AB demo login's membership (`agus@kpm0417.test`), for `PROPOSAL_DEMO_AB_LEADS`. */
+  agus: string;
   superAdminUserId: string;
 }
 
@@ -101,6 +148,9 @@ export interface ProposalFixture {
   aged: number;
   /** Rina's proposals written by this run: two the first time, none after. */
   proposals: number;
+  /** The AB's leads and proposals written by this run (P19.11-T3): two and four the first time, none after. */
+  abLeads: number;
+  abProposals: number;
   guide: string;
 }
 
@@ -180,6 +230,49 @@ export async function seedProposalFixture(deps: ProposalFixtureDeps): Promise<Pr
     }
   }
 
+  // The AB demo login's two leads and their proposals (P19.11-T3), each written once by its derived id.
+  const LeadStatuses = mongoose.model(LeadStatus.name, LeadStatusSchema, undefined, RECOMPILE);
+  let abLeads = 0;
+  let abProposals = 0;
+  for (const plan of PROPOSAL_DEMO_AB_LEADS) {
+    const leadId = proposalDemoLeadId(deps.kpm0417, plan.key);
+    if (await Leads.exists({ _id: new mongoose.Types.ObjectId(leadId) }).exec()) continue;
+    const status = await LeadStatuses.findOne({ kpmId: deps.kpm0417, code: plan.stage }).lean().exec() as { _id: unknown } | null;
+    const registered = new Date(clock.now().getTime() - 12 * 24 * 60 * 60 * 1000);
+    await Leads.create({
+      _id: new mongoose.Types.ObjectId(leadId),
+      kpmId: deps.kpm0417, ownerMembershipId: deps.agus, name: plan.name, type: 'sales',
+      contact: { phone: plan.phone, email: null },
+      statusCode: plan.stage, statusId: status ? String(status._id) : null,
+      commitments: [], remarks: null, nextActionDate: null, nextActionNote: null,
+      outcome: null, outcomeAt: null, dateRegistered: registered, source: null, joinedMembershipId: null,
+      age: plan.age, ageRecordedOn: today, gender: plan.gender,
+      version: 2, transitions: [{ fromStatusCode: null, toStatusCode: plan.stage, at: registered, byMembershipId: deps.agus }],
+      deletedAt: null, createdBy: deps.agus, updatedBy: deps.agus,
+    });
+    abLeads += 1;
+    for (const [index, proposal] of plan.proposals.entries()) {
+      const items: StoredItem[] = [];
+      for (const { code, patch } of proposal.items) {
+        const product = await Products.findOne({ companyId, code, deletedAt: null }).exec();
+        if (!product) continue;
+        items.push(applyItemPatch(newItem(seedObjectId('proposal-fixture', 'item', leadId, String(index), code), product, product.name), patch));
+      }
+      const at = new Date(clock.now().getTime() - proposal.hoursAgo * 60 * 60 * 1000);
+      await Proposals.create({
+        _id: new mongoose.Types.ObjectId(seedObjectId('proposal-fixture', 'proposal', leadId, String(index))),
+        kpmId: deps.kpm0417, ownerMembershipId: deps.agus, leadId,
+        client: { name: plan.name, age: plan.age, gender: plan.gender },
+        channel: 'conventional', payFrequency: 'monthly', showTotal: false,
+        status: proposal.done ? 'done' : 'draft', doneAt: proposal.done ? at : null, firstDoneAt: proposal.done ? at : null,
+        firstDoneProducts: proposal.done ? items.map((item) => itemName(item.snapshot, 'conventional')) : [],
+        items, duplicatedFrom: null, version: 1, createdBy: deps.agus, updatedBy: deps.agus,
+        createdAt: at, updatedAt: at,
+      });
+      abProposals += 1;
+    }
+  }
+
   const guide = `
   THE PROPOSAL'S FIELDS  (from src/seed/proposal-fixture.ts)
     superadmin@agencyboost.test  /admin/companies → Prudential → Produk → a product → Proposal: the Prudential
@@ -194,6 +287,10 @@ export async function seedProposalFixture(deps: ProposalFixtureDeps): Promise<Pr
                                  Medical, premium to type); /leads: both cards carry the proposal pill, Ibu Rosa's
                                  sheet has the Proposal section and "Proposal dibuat" in Riwayat
     her leader, /unit/dashboard  the Proposal column: 1 for Rina this month, and nothing about the client
+    agus@kpm0417.test            /leads: Ibu Natalia Prameswari wears the proposal icon (a Selesai proposal; a later
+                                 Draf hidden) and it opens the Selesai one; Pak Benny Tanoto (drafts only) has none.
+                                 Her sheet's Proposal shows the one Selesai proposal above Buat proposal; his shows
+                                 Buat proposal alone. Both drafts are in /proposal (Riwayat), where a draft is resumed
 `;
-  return { imported, worded, aged, proposals, guide };
+  return { imported, worded, aged, proposals, abLeads, abProposals, guide };
 }

@@ -339,7 +339,7 @@ describe('who may set whose goal (P8-T4)', () => {
     it('P18.11-T5 UI-014 works a downline’s plan out for their leader and saves nothing', async () => {
       const worked = await preview(aab(), AGENT, { caseSizeMinor: 9_000_000_00 });
 
-      // 500 jt over 5 months is 100 jt a month: 12 policies of 9 jt, 40 meetings at 30%, 134 appointments at 30%.
+      // 500 Jt over 5 months is 100 Jt a month: 12 policies of 9 Jt, 40 meetings at 30%, 134 appointments at 30%.
       expect(worked.projected).toMatchObject({ monthlyApeTargetMinor: 100_000_000_00, policiesPerMonth: 12, leadsPerMonth: 134 });
       expect(await goals()).toBe(0);
       expect(wired.sentNotifications).toHaveLength(0);

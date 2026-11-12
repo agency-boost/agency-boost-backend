@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -7,6 +7,7 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render } from '@/common/i18n/sentence';
 import { isLeaderClass, shortOfRung } from '@/domain/constants';
+import { can } from '@/modules/rbac/permissions';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
@@ -18,6 +19,8 @@ import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument } from './membership.schema';
 import type { ApprovedPastLimit } from './leader-limit';
 import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
+import { canChangeRoleOf, rankOf, roleChoices, roleReaderOf, sameCode, type LadderRung } from './role-rules';
+import { TransfersService, type PendingMoveView } from './transfers.service';
 
 const SAY = ORG_REFUSALS;
 
@@ -30,12 +33,24 @@ export interface TeamMember {
   /** The rung they stand on, by its ladder code; `role` is the class it gives (ADR-0156). */
   orgLevelCode: string;
   directCount: number;
+  /** Everybody active below them — who moves with them (*{nama} dan {n} orang di bawahnya pindah…*, ADR-0247 §2). */
+  subtreeCount: number;
   /**
    * Whether this viewer may change *this* person's role. Sent rather than inferred,
    * because the rule is a server rule and the screen should not carry a second copy of
-   * it that can drift.
+   * it that can drift. `roleChoices` has more than one rung.
    */
   canChangeRole: boolean;
+  /**
+   * **The rungs this viewer may put them on**, by ladder code, junior first, their own always among them (P19.12-T4;
+   * ADR-0247 §1, `role-rules.ts`): an AB leader *Agent · AAB · AB*, an AAB leader *Agent · AAB*. The role sheet offers
+   * exactly these and checks the current one.
+   */
+  roleChoices: string[];
+  /** This viewer may move them to another leader — *Pindahkan ke leader lain* (ADR-0247 §2). Not the office's owner. */
+  canChangeLeader: boolean;
+  /** **A move this viewer asked the office for, still waiting** (ADR-0247 §3), or `null`. */
+  pendingTransfer: PendingMoveView | null;
 }
 
 export interface RoleChangeEntry {
@@ -52,10 +67,11 @@ export interface RoleChangeEntry {
 /**
  * Changing what somebody is.
  *
- * Two rules, and they come from different places. **Agent ⇄ AAB is the direct leader's
- * call** — they are the person who knows whether somebody is ready to lead. **Anything
- * involving AB is the Owner's or an Admin's**, because an AB sits at or near the root
- * and the shape of the office is not a unit-level decision.
+ * **One rule, `roleChoices`** (`role-rules.ts`; P19.12-T4, ADR-0247 §1 — the client's message of 11 November 2026,
+ * item 4, and the owner's: *AB on AB must be possible*). The direct leader may set any rung no higher than their own —
+ * an AB leader makes an AB, an AAB leader an AAB at most — and take it away the same; the Owner and an Admin any rung,
+ * on anybody but the office's owner. Until then anything involving AB was the office's alone, a rule the prototype's
+ * select implied and nothing else asked for.
  *
  * A role change never moves anybody. The prototype is explicit about this in its own
  * copy — *"they'll keep reporting to you"* — and it is right: promoting somebody is a
@@ -71,6 +87,11 @@ export class RoleChangeService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /*
+     * The moves this reader asked the office for, for *Tim Anda*'s rows (P19.12-T4, ADR-0247 §3). Optional so the specs
+     * that build this service by hand need not say it; without it no row has one waiting.
+     */
+    @Optional() private readonly transfers: TransfersService | null = null,
   ) {}
 
   private requireMember(ctx: RequestContext): string {
@@ -84,23 +105,9 @@ export class RoleChangeService {
     return ctx.membershipId;
   }
 
-  /**
-   * May this person change that person's role, and to what?
-   *
-   * One function, because the screen and the write both need the answer and two copies
-   * would drift — which is exactly how a control ends up rendered for something the
-   * server then refuses.
-   */
-  private permitted(
-    ctx: RequestContext,
-    target: { leaderId: string | null; role: HierarchyRole },
-  ): { agentAndAab: boolean; anythingWithAb: boolean } {
-    const tenantAdmin = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
-    return {
-      // The direct leader, and only the direct leader.
-      agentAndAab: tenantAdmin || target.leaderId === ctx.membershipId,
-      anythingWithAb: tenantAdmin,
-    };
+  /** The office's ladder, junior first (`HierarchyService.ladderOf`). */
+  private async ladder(ctx: RequestContext): Promise<LadderRung[]> {
+    return this.hierarchy.ladderOf(ctx.kpmId as string);
   }
 
   /** The people who report to this leader, with what they may do to each. */
@@ -114,13 +121,22 @@ export class RoleChangeService {
     );
     if (rows.length === 0) return [];
 
-    const users = await this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec();
+    const [users, ladder, owner, waiting] = await Promise.all([
+      this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec(),
+      this.ladder(ctx),
+      this.hierarchy.officeOwnerUserId(ctx),
+      this.transfers ? this.transfers.pendingMovesBy(ctx, rows.map((r) => String(r._id))) : new Map<string, PendingMoveView>(),
+    ]);
     const byUser = new Map(users.map((u) => [String(u._id), u]));
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
+    const reader = roleReaderOf(ctx);
+    const mayMove = can(ctx, 'member:reassign_leader');
 
     return rows.map((r) => {
       const fullName = byUser.get(r.userId)?.fullName ?? unknown;
-      const rules = this.permitted(ctx, r);
+      const isOwner = owner !== null && r.userId === owner;
+      // ADR-0247 §1: the one rule the write below enforces — an AB report is an AB leader's to change too.
+      const choices = roleChoices(reader, { leaderId: r.leaderId, role: r.role, orgLevelCode: r.orgLevelCode, status: r.status, isOwner }, ladder);
       return {
         membershipId: String(r._id),
         fullName,
@@ -129,9 +145,11 @@ export class RoleChangeService {
         role: r.role,
         orgLevelCode: r.orgLevelCode,
         directCount: r.directCounts?.total ?? 0,
-        // An AB report never gets the control, even for a leader who manages the rest —
-        // AC-1. The prototype does the same, and it is the honest place to draw the line.
-        canChangeRole: r.role === 'ab' ? rules.anythingWithAb : rules.agentAndAab,
+        subtreeCount: r.subtreeCount ?? 0,
+        canChangeRole: canChangeRoleOf(choices),
+        roleChoices: choices,
+        canChangeLeader: mayMove && !isOwner,
+        pendingTransfer: waiting.get(String(r._id)) ?? null,
       };
     });
   }
@@ -204,6 +222,12 @@ export class RoleChangeService {
   ): Promise<{ target: MembershipDocument; toClass: HierarchyRole; levelCode: string } | null> {
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
+    const reader = roleReaderOf(ctx);
+    // 404, not 403, for somebody outside a leader's own downline (P19.12's permission review): a refusal would confirm
+    // the id exists. The reader's own membership is theirs to know of, and the rules below refuse it.
+    const inReach = reader.office || String(target._id) === reader.membershipId
+      || (reader.membershipId !== null && (target.ancestorIds ?? []).includes(reader.membershipId));
+    if (!inReach) throw new NotFoundException('Membership');
     // `toRole` names the rung — `ab` is the `AB` rung, and a company's own rung (`SM`) is named the same way
     // (OD-50, the custom-rung placement gap); what the rules below weigh is the **class** that rung gives
     // (ADR-0156 §2), so a rung marked otherwise than its code suggests is judged by what it makes somebody.
@@ -222,14 +246,14 @@ export class RoleChangeService {
       );
     }
 
-    const rules = this.permitted(ctx, target);
-    const involvesAb = target.role === 'ab' || toClass === 'ab';
-    if (involvesAb ? !rules.anythingWithAb : !rules.agentAndAab) {
+    // ADR-0247 §1: the rung asked for must be one `roleChoices` offers this reader — the same answer the screen drew.
+    const choices = roleChoices(reader, {
+      leaderId: target.leaderId, role: target.role, orgLevelCode: target.orgLevelCode, status: target.status, isOwner: false,
+    }, await this.ladder(ctx));
+    if (!choices.some((code) => sameCode(code, level.code))) {
       throw new DomainException(
         ErrorCode.ORG_ROLE_CHANGE_NOT_PERMITTED,
-        involvesAb
-          ? SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.officeOnly({ rung: await this.seniorRungName(ctx, target, toClass, level) })
-          : SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.directLeaderOnly,
+        await this.refusalFor(ctx, reader, target, toClass, level),
         HttpStatus.FORBIDDEN,
         { membershipId, fromRole: target.role, toRole },
       );
@@ -249,6 +273,27 @@ export class RoleChangeService {
       );
     }
     return { target, toClass, levelCode: level.code };
+  }
+
+  /**
+   * **Why a change `roleChoices` does not offer is refused, in words that say what to do** (ADR-0247 §1): somebody who
+   * is not their direct leader is told only a direct leader may; a direct leader asking for a rung above their own is
+   * told they may set one up to theirs, and who can make somebody that; a leader moving somebody who stands above
+   * them is told the office does.
+   */
+  private async refusalFor(
+    ctx: RequestContext,
+    reader: ReturnType<typeof roleReaderOf>,
+    target: MembershipDocument,
+    toClass: HierarchyRole,
+    level: { code: string; label: string },
+  ) {
+    const direct = reader.membershipId !== null && target.leaderId === reader.membershipId && reader.role !== null;
+    if (!direct || !reader.role) return SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.directLeaderOnly;
+    if (rankOf(target.role) > rankOf(reader.role)) {
+      return SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.officeOnly({ rung: await this.seniorRungName(ctx, target, toClass, level) });
+    }
+    return SAY.ORG_ROLE_CHANGE_NOT_PERMITTED.aboveOwnRung({ rung: shortOfRung(level) });
   }
 
   /**

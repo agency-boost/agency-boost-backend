@@ -14,7 +14,7 @@ import { HomeController } from './home.controller';
 import { HomeService, type HomeView } from './home.service';
 
 const VIEW: HomeView = {
-  today: '2026-10-30', yesterday: '2026-10-29', month: '2026-10', now: { minute: 545 },
+  today: '2026-10-30', yesterday: '2026-10-29', month: '2026-10', now: { minute: 545, at: '2026-10-30T02:05:00.000Z' },
   quote: { index: 16, text: 'Plans are only good intentions unless they immediately degenerate into hard work.', person: 'Peter Drucker', pose: 'thinking' },
   activity: { today: 0, yesterday: 5, days: [], total: 18 },
   schedule: { meetings: 2, tasks: 3 },
@@ -73,7 +73,7 @@ describe('UI-100 GET /home — who may read it', () => {
 
   it('UI-100 a Super Admin belongs to no office: the read refuses them before it reads anything', async () => {
     // The real service, with nothing behind it: it must refuse before it touches a dependency.
-    const service = new HomeService(...(Array.from({ length: 15 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
+    const service = new HomeService(...(Array.from({ length: 14 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
     await expect(service.read(SUPER_ADMIN)).rejects.toBeInstanceOf(NoMembershipException);
   });
 });

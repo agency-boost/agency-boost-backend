@@ -171,6 +171,34 @@ export function checkEstimate(body: unknown): number {
   return f.done({ apeAchievedMinor: value as number }).apeAchievedMinor;
 }
 
+/** A calendar month, `YYYY-MM`, January to December. */
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * **What `PUT /goals/:period/ape-month` takes** (P19.11-T4; UX-12, UXQ2's default): `{ month, apeAchievedMinor }` — a
+ * month of the plan's own year, `YYYY-MM`, and that month's APE as the member realised it, whole IDR sen in the goal's
+ * money bounds (0 included: *nothing this month* is a figure), or `null`, which clears it back to the upload or to
+ * *Belum diunggah*. Nothing else. Whether the month has begun, and whether the office was open in it, is the service's:
+ * it needs the office's calendar.
+ */
+export function checkMonthApe(body: unknown, period: string): { month: string; minor: number | null } {
+  const f = new Fields(body, ['month', 'apeAchievedMinor']);
+  const month = raw(body, 'month');
+  let checkedMonth: string | undefined;
+  if (month === undefined) f.violations.push(REQUIRED({ field: 'month' }));
+  else if (typeof month !== 'string' || !MONTH.test(month)) f.violations.push(SAY.monthShape);
+  else if (month.slice(0, 4) !== period) f.violations.push(SAY.monthOutsidePeriod({ month, period }));
+  else checkedMonth = month;
+
+  let minor: number | null | undefined = null;
+  if (raw(body, 'apeAchievedMinor') !== null) {
+    minor = f.number('apeAchievedMinor', GOAL_BOUNDS.money, true);
+    if (minor !== undefined && !Number.isInteger(minor)) f.violations.push(SAY.wholeSen({ field: 'apeAchievedMinor' }));
+  }
+  f.done({});
+  return { month: checkedMonth as string, minor: minor as number | null };
+}
+
 /**
  * **Which typed *APE yang sudah dicapai tahun ini* a save or a preview keeps** (ADR-0075, partly reversed by
  * ADR-0183).

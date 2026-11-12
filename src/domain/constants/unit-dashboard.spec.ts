@@ -16,4 +16,9 @@ describe('the Unit Dashboard constants', () => {
   it('P15-T3 AC-3 pins one save at the 500-member ceiling an office is measured at', () => {
     expect(UNIT_DASHBOARD.MAX_ROWS_PER_SAVE).toBe(500);
   });
+
+  it('P19.12-T6 AC-2 pins the three views in the order the picker draws them, and one add at the same ceiling', () => {
+    expect(UNIT_DASHBOARD.VIEWS).toEqual(['direct', 'informal', 'downline']);
+    expect(UNIT_DASHBOARD.MAX_TAGGED_PER_ADD).toBe(500);
+  });
 });

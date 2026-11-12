@@ -1217,6 +1217,18 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
   ],
+  /*
+   * **The office fills a member's blank personal data** (P19.12-T5 AC-3; ADR-0248 §3, amending ADR-0158 §3; the client's
+   * TI-2) — `PATCH /members/:membershipId/personal`, *Lengkapi data* on the member page: a missing birth date, gender,
+   * company join month, work status or WhatsApp number. The Owner and the Admins, for the office. **Blanks only**: a
+   * value on file is the person's own to change, on *Profil saya* (`409 MEMBER_DETAIL_ON_FILE`). No leader grant — a
+   * leader fills only a missing number (`member:update_phone`) — and no Super Admin, who is in no office. Personal
+   * data, so refused in every support session (`@RefuseInSupportSession`); not read-like, so a view-only one too.
+   */
+  'member:complete_personal': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   // Tags, and only the office's admins set them. A group is not hierarchy and not
   // access, so no leader grant: it is the office's own way of organising, not a unit's.
   'member:tag_group': [
@@ -1344,6 +1356,31 @@ export const PERMISSIONS = {
   'member:transfer_approve': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * **Changing who somebody reports to, at once** (P19.12-T4; ADR-0247 §2; the client's message of 11 November 2026,
+   * item 8): `PUT /members/:membershipId/leader`, and the picker's `GET …/leader-choices`. The Owner and an Admin anybody
+   * in the office but its owner, under anybody who can hold a unit. An AB and an AAB **their direct reports** — `own-unit`
+   * read as the edge rule (roles §2): a leader closes only an edge they own — and only to a leader **inside their own
+   * tree**; elsewhere is `member:transfer_request`. The person always moves with everybody under them, which is why
+   * `member:move_subtree` was struck rather than built. **Not an Agent's**, even one who leads (ADR-0234; whether they
+   * should is left open), **not the Super Admin's**, and refused in a support session by its verb.
+   */
+  'member:reassign_leader': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
+  ],
+  /*
+   * **A leader asks the office to move one of their people elsewhere** (P19.12-T4; ADR-0247 §3, amending ADR-0170 §4):
+   * `POST /members/:membershipId/transfer-request` for a direct report and a leader outside the asker's tree, and
+   * `DELETE /transfer-requests/:transferId` to withdraw their own. An AB and an AAB, `own-unit`. The Owner and an Admin
+   * never ask — they move directly. Decided under `member:transfer_approve`. Refused in a support session by its verb.
+   */
+  'member:transfer_request': [
+    { grantee: AB, scope: 'own-unit' },
+    { grantee: AAB, scope: 'own-unit' },
   ],
   // The Owner and an Admin decide anywhere in the office — a request whose leader never
   // looks is the failure the queue exists to prevent. This matched the matrix nowhere

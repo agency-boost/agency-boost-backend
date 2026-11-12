@@ -112,8 +112,8 @@ export class AuthService {
 
   /**
    * **`register`, saying whether it made the account** (P18.8-T3 AC-4). Registration on an invite's link joins the
-   * office only for an account made here and now: an address that already exists answers the same shape as ever —
-   * confirming it would be the enumeration oracle `register` refuses to be — and must not join anybody to anything.
+   * office only for an account made here and now: an address that already exists makes nothing and must not join
+   * anybody to anything. Since P19.12-T2 (ADR-0245 §3) the route also signs in only an account made here and now.
    */
   async registerAccount(input: RegistrationInput, reader?: Reader): Promise<{ user: UserDocument; created: boolean }> {
     const problems = this.passwords.validate(input.password);
@@ -132,9 +132,9 @@ export class AuthService {
     const email = normalisedEmail(input.email);
     const existing = await this.users.findOne({ email }).exec();
     if (existing) {
-      // Do not confirm that the address is taken: that is an enumeration oracle. The
-      // caller gets the same shape as a success, and the real account owner gets an
-      // email telling them someone tried.
+      // Nothing is made, and nobody is told: the attempt is logged, and **no email is sent** to the account's owner (an
+      // earlier comment and the docs said one was; none ever was — ADR-0245 §4). The route answers `verification_sent`
+      // with no session, so an account made by this form is the only one it signs in (ADR-0245 §3).
       this.logger.warn({ email }, 'registration attempted for an existing address');
       return { user: existing, created: false };
     }
@@ -153,8 +153,7 @@ export class AuthService {
     /*
      * **This one says so, where the email above deliberately does not.**
      *
-     * A taken address is answered silently because confirming it is an enumeration
-     * oracle and the real owner is emailed instead. A taken agent code has no such
+     * A taken address is answered without a session and nothing more (ADR-0245 §3, §4). A taken agent code has no such
      * escape: the person is holding a card with that number on it, they cannot proceed
      * until somebody sorts it out, and staying quiet would send them away waiting for a
      * verification email that is never coming. The leak — that this code is in use at

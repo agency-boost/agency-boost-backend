@@ -20,15 +20,15 @@ import { seedObjectId } from './coaching-fixture';
  * |---|---|---|---|
  * | `APE_SPRINT` | seasonal; M−2 to M (the month before last is the office's empty one) | APE ≥ Rp X; New Hire ≥ Rina's + 1 | Running; Rina's dialog: APE ✓, New Hire *Not uploaded yet* |
  * | `NEW_HIRE_BLITZ` | seasonal; M | New Hire ≥ 3 | Running |
- * | `APE_CHALLENGE_NEXT` | seasonal; the next calendar quarter | APE ≥ Rp 300 jt | Upcoming, chaseable |
+ * | `APE_CHALLENGE_NEXT` | seasonal; the next calendar quarter | APE ≥ Rp 300 Jt | Upcoming, chaseable |
  * | `PERSISTENCY_PUSH` | seasonal; last month, locked from the 8th | persistency ≥ Rina's — or the first of APE, New Hire, new active agents and touches on which she is above Budi; the title says which | Ended; **final** on the first read: Rina qualified, Budi not met |
- * | `YEAR_END_DRIVE` | Phase 5's, its dates snapped to whole months, M−1 to M+1 | APE ≥ Rp 500 jt | Running |
+ * | `YEAR_END_DRIVE` | Phase 5's, its dates snapped to whole months, M−1 to M+1 | APE ≥ Rp 500 Jt | Running |
  * | `RECRUIT_SPRINT` | Phase 5's | Recruitment success rate ≥ 0.3 | Ended |
- * | `PROMOTION_AGENT_AAB` | structural promotion; rolling 12 months; `AGENT` | APE ≥ Rp 1.200 jt; New active agents ≥ 3 | Never final |
+ * | `PROMOTION_AGENT_AAB` | structural promotion; rolling 12 months; `AGENT` | APE ≥ Rp 1.200 Jt; New active agents ≥ 3 | Never final |
  * | `PROMOTION_AAB_AB` | structural promotion; rolling 12 months; `AAB` | Active agents in unit ≥ 5; New Hire ≥ 6 | An agent sees it with the chase disabled |
  * | `MDRT_QUALIFICATION` | structural ongoing; calendar year | APE ≥ Rp Z for the year | One chaser over Z |
  * | `ARCHIVED_DRIVE` | archived | — | On no agent's list |
- * | 0555's `GADING_PUSH` | seasonal; M | APE ≥ Rp 50 jt | Isolation |
+ * | 0555's `GADING_PUSH` | seasonal; M | APE ≥ Rp 50 Jt | Isolation |
  *
  * Chases: Rina `APE_SPRINT`, `MDRT_QUALIFICATION` and `PERSISTENCY_PUSH`; Agus MDRT; Dimas MDRT and `APE_SPRINT`; Sari
  * `PROMOTION_AAB_AB`; Budi `PERSISTENCY_PUSH`, made while it ran (an ended chase is on no list, so his Summary is empty).

@@ -109,8 +109,11 @@ export interface ActivationView {
  */
 export interface NewHireUnitRefView {
   kind: 'direct' | 'aab' | 'ab';
-  /** `null` for `direct`. */
-  leader: ActivationPersonView | null;
+  /**
+   * `null` for `direct`. With their photo (2026-11-10, UI-111): the group's row draws their avatar, which showed initials
+   * for a leader who has a photo.
+   */
+  leader: NewHirePersonView | null;
 }
 
 /** A new hire's checklist, where they have one (an Agent placed by a leader, ADR-0103): how far it is, and overdue. */
@@ -129,9 +132,18 @@ export interface NewHireChecklistView {
  */
 export type FirstSaleSourceView = 'sales' | 'manual';
 
+/**
+ * A new hire as their row names them (P19.11-T2 AC-4, UX-14): the person, and their profile photo as a signed link —
+ * `null` without one, which the row draws as initials — for the circle of a hire not activated yet. A unit's leader
+ * the same way, for the group's row (UI-111).
+ */
+export interface NewHirePersonView extends ActivationPersonView {
+  photoUrl: string | null;
+}
+
 /** One new hire on `/new-hires` (ADR-0173 §2; P18.8-T6 AC-3; UI V1, UI-023). */
 export interface NewHireRowView {
-  hire: ActivationPersonView;
+  hire: NewHirePersonView;
   unit: NewHireUnitRefView;
   /** *Join date*: day 1. */
   joinDate: LocalDate;
@@ -145,14 +157,14 @@ export interface NewHireRowView {
   firstSaleSource: FirstSaleSourceView | null;
   /**
    * **The row's status** (UI V1, D-24): `activated` — a first sale by day 90; `activated_late` — a first sale after it,
-   * amber, outside the 3M share; `not_yet` — none.
+   * amber, in the 3M share's denominator and not its numerator (P19.11-T2 AC-2); `not_yet` — none.
    */
   status: NewHireStatusView;
   /** `ACTIVATION_3M`: the 3M result itself — `activated` by day 90, `not_activated` past it, else `in_progress`. */
   activation3M: Activation3MResultView;
   /**
    * The office day they were marked left; `null` while not. **Stored, not a status** (UI V1, D-24, UI-025): nothing on
-   * the page reads it, and it decides nothing.
+   * the page reads it, and it decides nothing — their row opens as anybody's (P19.11-T2 AC-1), their detail read-only.
    */
   leftOn: LocalDate | null;
   /** `null` for a new hire with no checklist: an AB or an AAB, or an office with none published. */
@@ -166,18 +178,19 @@ export type Activation3MResultView = 'in_progress' | 'activated' | 'not_activate
 export type NewHireStatusView = 'activated' | 'activated_late' | 'not_yet';
 
 /**
- * `ACTIVATION_3M_PCT` over a set (rule A, UI V1): the counts and the share, `pct` `null` while nobody is decided. The
- * screen shows the `pct` only (D-24); the counts are for the reader of the API.
+ * `ACTIVATION_3M_PCT` over a set (P19.11-T2 AC-2; ADR-0239): the counts and the share, `pct` `null` while nobody is due.
+ * The screen shows the `pct` only (D-24); the counts are for the reader of the API.
  */
 export interface Activation3MShareView {
-  /** Activated by day 90: the numerator. */
+  /** A first sale by day 90: the numerator, and part of the denominator. */
   activated: number;
-  /** Past day 90 with no first sale: with `activated`, the denominator. */
+  /** Past day 90 with no first sale: part of the denominator. */
   notActivated: number;
-  /** A first sale after day 90: in neither part. */
+  /** A first sale after day 90: part of the denominator, not the numerator. */
   late: number;
-  /** Inside the 90 days with no first sale: in neither part. */
+  /** Day 90 not over and no first sale: not due yet, in neither part. */
   inProgress: number;
+  /** `activated ÷ (activated + late + notActivated)`, a whole percent; `null` while nobody is due. */
   pct: number | null;
 }
 
@@ -244,7 +257,8 @@ export interface NewHireStandingView {
   leader: NewHireLeaderView | null;
   /**
    * **Their WhatsApp number** (UI V1, UI-027; UI-081, D-22): `users.phone` as stored, `+62…`, or `null` with none — the
-   * detail's *WhatsApp* opens it, or *Isi nomor WhatsApp* first. Read only by a leader who coaches them.
+   * detail's *WhatsApp* opens it, or *Isi nomor WhatsApp* first. Read only by a leader who coaches them: `null` for a
+   * new hire who left (P19.11-T2 AC-1), whom nobody coaches now.
    */
   phone: string | null;
 }
@@ -257,6 +271,12 @@ export interface NewHireLeaderView extends ActivationPersonView {
 /** One hire's activation as a leader reads it on `/new-hires/:membershipId` (and its writes): the view and the standing. */
 export interface NewHireDetailView extends ActivationView {
   newHire: NewHireStandingView | null;
+  /**
+   * **Nothing on it may be written** (P19.11-T2 AC-1, UX-3; ADR-0239): a new hire who left, whom New Hires lists and the
+   * detail opens for reading — nobody coaches them now, so every write route answers 404. `false` for everybody the reader
+   * coaches. The page draws no write control while it is `true`.
+   */
+  readOnly: boolean;
 }
 
 /** Why an activation is served empty (P19.9-T3 AC-5): its first year is over, or there never was one. */

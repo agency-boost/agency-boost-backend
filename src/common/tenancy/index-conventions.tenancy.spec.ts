@@ -62,7 +62,7 @@ import {
   LeadCommitmentSchema, LeadContactSchema, LeadNextActionDoneSchema, LeadSchema, LeadTransitionSchema,
 } from '@/modules/leads/lead.schema';
 import {
-  GoalCascadeMappingSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
+  GoalCascadeMappingSchema, GoalMonthApeSchema, GoalRevisionSchema, GoalSchema, GoalSnapshotSchema,
 } from '@/modules/goals/goal.schema';
 import { PolicySchema } from '@/modules/production/policy.schema';
 import { ProductionMonthSchema } from '@/modules/production/production-month.schema';
@@ -367,6 +367,12 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a plan the goal replaced, inside the goal: no collection and no _id of its own',
   ],
   [
+    'goalMonthApe (subdocument)',
+    GoalMonthApeSchema,
+    'one month\'s APE the member typed over the upload (P19.11-T4), a value of the goal\'s `apeByMonth` map: no collection '
+      + 'and no _id of its own',
+  ],
+  [
     'activityLogCorrection (subdocument)',
     ActivityLogCorrectionSchema,
     'a prior state of an activity log, held inside the day it belongs to',
@@ -574,6 +580,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [UnregisteredAgentDataSchema, 'UnregisteredAgentDataSchema'],
   [MetricValueSchema, 'MetricValueSchema'],
   [GoalRevisionSchema, 'GoalRevisionSchema'],
+  [GoalMonthApeSchema, 'GoalMonthApeSchema'],
   [ActivityLogEntrySchema, 'ActivityLogEntrySchema'],
   [ActivityLogCorrectionSchema, 'ActivityLogCorrectionSchema'],
   [CampaignSchema, 'CampaignSchema'],

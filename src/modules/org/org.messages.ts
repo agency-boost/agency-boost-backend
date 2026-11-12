@@ -135,6 +135,42 @@ export const ORG_REFUSALS = refusals('modules/org', {
       en: 'Only somebody’s direct leader can change their role.',
       id: 'Hanya leader langsung seseorang yang dapat mengubah perannya.',
     },
+    /**
+     * A direct leader asking for a rung above their own (ADR-0247 §1): `rung` the rung asked for, `own` the reader's
+     * class as its rung is called — an AAB leader cannot make an AB.
+     */
+    aboveOwnRung: ({ rung }: { rung: string }) => ({
+      en: `You can set a role up to your own. Only the office’s Owner or an Admin can make somebody ${rung}.`,
+      id: `Anda dapat mengatur peran sampai setingkat peran Anda sendiri. Hanya Owner atau Admin KPM yang dapat menjadikan seseorang ${rung}.`,
+    }),
+  },
+  ORG_LEADER_CHANGE_NOT_PERMITTED: {
+    owner: {
+      en: 'They own this office. Only the platform can move the office’s owner.',
+      id: 'Dia pemilik KPM ini. Hanya platform yang dapat memindahkan pemilik KPM.',
+    },
+    directReportsOnly: {
+      en: 'You can move only the people who report to you directly.',
+      id: 'Anda hanya dapat memindahkan orang yang melapor langsung kepada Anda.',
+    },
+    outsideYourTree: {
+      en: 'That leader is outside your team. Ask the office’s Owner or an Admin to move them instead.',
+      id: 'Leader itu di luar tim Anda. Ajukan permintaan ke Owner atau Admin KPM untuk memindahkannya.',
+    },
+  },
+  ORG_LEADER_CANNOT_LEAD: {
+    agentLeadsNobody: {
+      en: 'That person cannot hold a unit yet: they are an Agent who leads nobody. Choose an AB, an AAB, or an Agent '
+        + 'who already leads somebody.',
+      id: 'Orang itu belum dapat memegang unit: dia Agent yang belum memimpin siapa pun. Pilih AB, AAB, atau Agent '
+        + 'yang sudah memimpin seseorang.',
+    },
+  },
+  ORG_MEMBER_NOT_ACTIVE: {
+    notJoinedYet: {
+      en: 'They have not joined the office yet, so there is nobody to move. Let them into a unit first.',
+      id: 'Dia belum bergabung dengan KPM ini, jadi belum ada yang dapat dipindahkan. Masukkan dia ke unit terlebih dahulu.',
+    },
   },
   ORG_HAS_DIRECT_REPORTS: {
     moveFirst: ({ count }: { count: number }) => ({
@@ -239,6 +275,24 @@ export const ORG_REFUSALS = refusals('modules/org', {
       en: 'That change does not make a new leader, so it needs nobody’s approval. Make it directly.',
       id: 'Perubahan itu tidak menambah leader baru, jadi tidak perlu persetujuan siapa pun. Lakukan langsung.',
     },
+    /** A leader asking the office for a move inside their own tree (ADR-0247 §3). */
+    moveDirectly: {
+      en: 'That leader is in your own team, so the move needs nobody’s approval. Move them directly.',
+      id: 'Leader itu ada di tim Anda sendiri, jadi pemindahan ini tidak perlu persetujuan siapa pun. Pindahkan langsung.',
+    },
+    /** The Owner or an Admin asking the office for a move (ADR-0247 §3): they make it. */
+    officeMovesDirectly: {
+      en: 'As the office’s Owner or an Admin you need nobody’s approval. Move them directly.',
+      id: 'Sebagai Owner atau Admin KPM, Anda tidak perlu persetujuan siapa pun. Pindahkan langsung.',
+    },
+    leaderMembershipIdShape: {
+      en: 'leaderMembershipId must be a membership id',
+      id: 'leaderMembershipId harus berupa id keanggotaan',
+    },
+    moveReasonShape: {
+      en: 'reason must be at most 300 characters',
+      id: 'reason paling banyak 300 karakter',
+    },
     /* The DTOs' own sentences (`field`), each naming its field as the API names it. */
     toRoleShape: {
       en: 'toRole must be a rung code',
@@ -270,6 +324,11 @@ export const ORG_MESSAGES = messages('modules/org', {
   }),
   /** The reason on the `re_parented` edge a transfer's approval opens. */
   transferApproved: { en: 'Transfer request approved', id: 'Permintaan pemindahan disetujui' },
+  /** The reason a waiting transfer request is closed with when somebody moves the person directly (ADR-0247 §2). */
+  transferOvertaken: {
+    en: 'They were moved to another leader directly',
+    id: 'Dia sudah dipindahkan langsung ke leader lain',
+  },
   /** What a removed member's notice tells them to do next — the prototype's own copy. */
   removedNextStep: {
     en: 'Search for a leader and request to join again if you want to come back.',

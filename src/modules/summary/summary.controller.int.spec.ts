@@ -6,6 +6,7 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { Goal } from '@/modules/goals/goal.schema';
+import { SUMMARY } from '@/domain/constants';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
@@ -65,6 +66,8 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
     expect(res.body).toMatchObject({ year: '2026', month: '2026-09', today: '2026-09-14', goal: { set: false } });
     // Nothing measured is sent as null, not dropped: a missing key and a zero would read alike.
     expect(res.body.monthly).toHaveProperty('attainmentPct', null);
+    // P19.11-T4 AC-4 (UX-12): the month's realised APE says which figure it is — nothing yet — and that no upload is held.
+    expect(res.body.monthly.realised).toEqual({ source: 'none', uploaded: false, manual: null });
     expect(res.body).toHaveProperty('pace', null);
     // P10-T5: the chips go out for both periods, with a null target rather than none.
     for (const period of ['monthly', 'yearly']) {
@@ -73,8 +76,9 @@ describe('the Personal Summary over HTTP (P10-T4)', () => {
       expect(res.body.activity[period]).toHaveProperty('total');
       expect(res.body.activity[period]).toHaveProperty('sections');
     }
-    // P10-T6: the reader's own open leads, and how many; P18.5-T15 AC-4: and those of anybody they lead.
-    expect(res.body.leads).toEqual({ rows: [], total: 0, unitOpen: 0 });
+    // P10-T6: the reader's own open leads, and how many; P18.5-T15 AC-4: and those of anybody they lead; P19.11-T5 AC-2:
+    // how many the section shows before *Lihat semua*.
+    expect(res.body.leads).toEqual({ rows: [], total: 0, shown: SUMMARY.LEADS_SHOWN, unitOpen: 0 });
     // P10-T7: nobody has logged anything here, so the one card is that rule's — named, with its facts.
     expect(res.body.insights).toEqual([
       { rule: 'NOTHING_LOGGED', kind: 'action', facts: { windowDays: expect.any(Number), lastLoggedOn: null } },

@@ -21,6 +21,15 @@ export const GOAL_REFUSALS = refusals('modules/goals', {
       en: `${field} must be a percentage, written as a number like 30 or 12.5.`,
       id: `${field} harus berupa persentase, ditulis sebagai angka seperti 30 atau 12,5.`,
     }),
+    /** P19.11-T4 (UX-12): `PUT /goals/:period/ape-month`'s month. */
+    monthShape: {
+      en: 'month must be a calendar month, written YYYY-MM.',
+      id: 'month harus berupa bulan kalender, dengan format YYYY-MM.',
+    },
+    monthOutsidePeriod: ({ month, period }: { month: string; period: string }) => ({
+      en: `${month} is not a month of ${period}: a month's APE is kept on the plan for its own year.`,
+      id: `${month} bukan bulan di ${period}: APE suatu bulan disimpan pada rencana tahunnya sendiri.`,
+    }),
   },
   GOAL_INVALID_ASSUMPTION: {
     commissionRate: {

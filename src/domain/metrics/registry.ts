@@ -412,6 +412,10 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- Home (Phase 19.8, P19.8-T2; ADR-0228 §4; redefined by P19.9-T1, ADR-0232; `own-open-leads.ts`) ----
   // The leads as they stand now: every open one the reader owns, as `/leads` opens on them.
   OWN_OPEN_LEADS: { period: 'POINT_IN_TIME', threshold: null },
+
+  // ---- The Unit Dashboard's views (Phase 19.12, P19.12-T6; ADR-0249 §4; `unit-view.ts`) ----
+  // The tags as they stand now: the ABs below a head in no live group of theirs.
+  ABS_NOT_IN_INFORMAL_GROUP: { period: 'POINT_IN_TIME', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

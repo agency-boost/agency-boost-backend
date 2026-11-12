@@ -1,7 +1,7 @@
 import {
-  addressIn, describeMail, isReservedAddress, MAIL_PRESETS, MAIL_PROVIDERS, MailConfig, MailConfigError,
-  mailConfigProblems, mailSettingsFrom, resolveMailProvider, SMTP_SOCKET_TIMEOUT_MS, SMTP_TIMEOUT_MS_DEFAULT,
-  transportOptionsFrom,
+  addressIn, describeMail, domainOf, isReservedAddress, isSmtpProvider, MAIL_PRESETS, MAIL_PROVIDERS, MailConfig,
+  MailConfigError, mailConfigProblems, mailSettingsFrom, resolveMailProvider, SMTP_SOCKET_TIMEOUT_MS,
+  SMTP_TIMEOUT_MS_DEFAULT, transportOptionsFrom,
 } from './mail-provider';
 
 /** A configuration as `ConfigService` or the raw environment answers it: a key, or nothing. */
@@ -41,7 +41,7 @@ describe('the mail provider, chosen by the environment (P18.11-T18, ADR-0182)', 
 
     it('P18.11-T18 refuses a value neither key takes, by name — the test command reads the raw environment', () => {
       expect(() => resolveMailProvider(config({ MAIL_PROVIDER: 'postmark' }))).toThrow(MailConfigError);
-      expect(() => resolveMailProvider(config({ MAIL_PROVIDER: 'postmark' }))).toThrow(/MAIL_PROVIDER must be one of gmail, sendgrid/);
+      expect(() => resolveMailProvider(config({ MAIL_PROVIDER: 'postmark' }))).toThrow(/MAIL_PROVIDER must be one of resend, gmail, sendgrid/);
       expect(() => resolveMailProvider(config({ MAIL_TRANSPORT: 'gmail' }))).toThrow(/MAIL_TRANSPORT must be smtp or log, not "gmail"/);
     });
   });
@@ -92,7 +92,7 @@ describe('the mail provider, chosen by the environment (P18.11-T18, ADR-0182)', 
 
     it('P18.11-T18 log needs no host, no port and no credentials', () => {
       expect(mailSettingsFrom(config({ MAIL_PROVIDER: 'log', MAIL_FROM: FROM }))).toEqual({
-        provider: 'log', host: '', port: 0, secure: false, user: '', pass: '', from: FROM, replyTo: undefined,
+        provider: 'log', host: '', port: 0, secure: false, user: '', pass: '', apiKey: '', from: FROM, replyTo: undefined,
         timeoutMs: SMTP_TIMEOUT_MS_DEFAULT, warnings: [],
       });
     });
@@ -265,6 +265,108 @@ describe('the mail provider, chosen by the environment (P18.11-T18, ADR-0182)', 
       expect(describeMail(mailSettingsFrom(config({ SMTP_HOST: 'h', MAIL_FROM: FROM }))))
         .toBe(`provider smtp via h:587 (STARTTLS if offered), as (no login), from ${FROM}`);
       expect(describeMail(mailSettingsFrom(config({ MAIL_PROVIDER: 'log', MAIL_FROM: FROM })))).toMatch(/^provider log: .* none is sent$/);
+    });
+  });
+
+  /**
+   * **Resend, the provider every email moves to** (P19.12-T1, ADR-0244): its key instead of an SMTP login, a From it
+   * can send from, and the key in no line anybody reads.
+   */
+  describe('Resend (P19.12-T1)', () => {
+    const KEY = 're_Ab12Cd34_secretpart';
+    const RESEND_FROM = 'AgencyBoost <no-reply@notify.agencyboost.id>';
+    const resend = { MAIL_PROVIDER: 'resend', RESEND_API_KEY: KEY, MAIL_FROM: RESEND_FROM };
+
+    it('P19.12-T1 AC-1 reads RESEND_API_KEY, needs no SMTP key, and dials Resend\'s API over HTTPS', () => {
+      expect(mailSettingsFrom(config(resend))).toEqual({
+        provider: 'resend', host: 'api.resend.com', port: 443, secure: true, user: '', pass: '', apiKey: KEY,
+        from: RESEND_FROM, replyTo: undefined, timeoutMs: SMTP_TIMEOUT_MS_DEFAULT, warnings: [],
+      });
+      // Blank is unset, and the key is read trimmed, as a pasted line may carry a space.
+      expect(mailSettingsFrom(config({ ...resend, RESEND_API_KEY: ` ${KEY} `, MAIL_REPLY_TO: 'help@agencyboost.id' })))
+        .toMatchObject({ apiKey: KEY, replyTo: 'help@agencyboost.id' });
+    });
+
+    it('P19.12-T1 AC-1 is not an SMTP provider; every preset and a plain relay are, and log is not', () => {
+      expect(MAIL_PROVIDERS.filter(isSmtpProvider)).toEqual(['gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp']);
+    });
+
+    it.each([undefined, '', '   '])('P19.12-T1 AC-1 refuses RESEND_API_KEY=%j, by that key and saying what goes in it', (key) => {
+      expect(problemsOf({ ...resend, RESEND_API_KEY: key })).toEqual({
+        RESEND_API_KEY: expect.stringMatching(/^is required when MAIL_PROVIDER is resend: an API key made in Resend .*Sending access.* starts re_\.$/),
+      });
+    });
+
+    it.each(['sk_live_abc', `"${KEY}"`, 'abcd efgh ijkl mnop'])(
+      'P19.12-T1 AC-1 refuses a RESEND_API_KEY that is not a Resend key (%j), without repeating it',
+      (key) => {
+        const problems = problemsOf({ ...resend, RESEND_API_KEY: key });
+        expect(problems).toEqual({ RESEND_API_KEY: expect.stringMatching(/^is not a Resend API key: every one starts re_\. .*no quotes/) });
+        expect(JSON.stringify(problems)).not.toContain(key.replace(/"/g, ''));
+      },
+    );
+
+    it.each(['AgencyBoost <agencyboostid@gmail.com>', 'x@GoogleMail.com'])(
+      'P19.12-T1 AC-1 refuses MAIL_FROM=%s: Resend sends from a verified domain, and Gmail\'s DMARC refuses anybody else',
+      (from) => {
+        expect(problemsOf({ ...resend, MAIL_FROM: from })).toEqual({
+          MAIL_FROM: expect.stringMatching(/^may not be a (gmail|googlemail)\.com address when MAIL_PROVIDER is resend: .*no-reply@notify\.agencyboost\.id/),
+        });
+      },
+    );
+
+    it.each(['AgencyBoost <no-reply@agencyboost.test>', 'no-reply@example.com'])(
+      'P19.12-T1 AC-1 refuses MAIL_FROM=%s, in a reserved domain nobody can verify',
+      (from) => {
+        expect(problemsOf({ ...resend, MAIL_FROM: from })).toEqual({
+          MAIL_FROM: expect.stringMatching(/^may not be in .*, a reserved domain no provider can verify/),
+        });
+      },
+    );
+
+    it('P19.12-T1 AC-1 refuses a MAIL_FROM with no address in it, and reports a missing one once', () => {
+      expect(problemsOf({ ...resend, MAIL_FROM: 'AgencyBoost' })).toEqual({
+        MAIL_FROM: expect.stringMatching(/^must hold an address on the domain verified in Resend/),
+      });
+      expect(problemsOf({ MAIL_PROVIDER: 'resend' })).toEqual({
+        MAIL_FROM: expect.stringMatching(/^is required/), RESEND_API_KEY: expect.stringMatching(/^is required/),
+      });
+    });
+
+    it('P19.12-T1 AC-1 warns about an SMTP login left in the file: read by nothing, and a secret with no reason to exist', () => {
+      expect(mailSettingsFrom(config({ ...resend, SMTP_PASSWORD: 'abcd efgh ijkl mnop' })).warnings).toEqual([
+        'SMTP_PASSWORD is ignored: MAIL_PROVIDER=resend sends through Resend\'s API with RESEND_API_KEY. Remove them, and '
+          + 'revoke the old password where it was made.',
+      ]);
+      const { warnings } = mailSettingsFrom(config({
+        ...resend, SMTP_HOST: 'smtp.gmail.com', SMTP_PORT: 465, SMTP_USER: 'agencyboostid@gmail.com', SMTP_PASSWORD: 'x',
+      }));
+      expect(warnings).toEqual([expect.stringMatching(/^SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD are ignored: /)]);
+      expect(warnings.join('\n')).not.toContain('abcd');
+      // SMTP_TIMEOUT_MS has a default, so it is always present, and is no leftover.
+      expect(mailSettingsFrom(config({ ...resend, SMTP_TIMEOUT_MS: 5_000 })).warnings).toEqual([]);
+    });
+
+    it('P19.12-T1 AC-1 warns when MAIL_TRANSPORT=log is left beside it, as for any provider that sends', () => {
+      expect(mailSettingsFrom(config({ ...resend, MAIL_TRANSPORT: 'log' })).warnings)
+        .toEqual(['MAIL_TRANSPORT=log is ignored: MAIL_PROVIDER=resend decides. Remove MAIL_TRANSPORT.']);
+    });
+
+    it('P19.12-T1 AC-1 the start-up line names Resend\'s API and the sender, and never the key, nor any part of it', () => {
+      const line = describeMail(mailSettingsFrom(config(resend)));
+      expect(line).toBe(`provider resend via the HTTP API at api.resend.com, from ${RESEND_FROM}`);
+      expect(line).not.toMatch(/re_|secret|Ab12/);
+    });
+
+    it('P19.12-T1 AC-1 the configuration error names each key, never the key\'s value', () => {
+      expect(() => mailSettingsFrom(config({ ...resend, RESEND_API_KEY: 'sk_live_abc', MAIL_FROM: 'x@gmail.com' })))
+        .toThrow(/^The mail configuration is unusable: RESEND_API_KEY is not a Resend API key.*; MAIL_FROM may not be a gmail\.com address/);
+      expect(() => mailSettingsFrom(config({ ...resend, RESEND_API_KEY: 'sk_live_abc' }))).not.toThrow(/sk_live/);
+    });
+
+    it('P19.12-T1 reads the domain of an address, as the start-up check compares it with Resend\'s', () => {
+      expect(domainOf('AgencyBoost <No-Reply@Notify.AgencyBoost.id.>')).toBe('notify.agencyboost.id');
+      expect(domainOf('AgencyBoost')).toBe('');
     });
   });
 });

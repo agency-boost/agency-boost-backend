@@ -24,11 +24,12 @@ import {
   LINKED_REFRESH_COOKIE, REFRESH_COOKIE, REFRESH_COOKIE_MAX_AGE_MS, refreshCookieOptions,
 } from '@/modules/auth/refresh-cookie';
 import { isForeignOrigin, ownOriginOf } from '@/modules/auth/request-origin';
-import { AccessTokenDto } from '@/modules/auth/session.response.dto';
+import { AccessTokenDto, RegisterAnswerDto } from '@/modules/auth/session.response.dto';
 import { can, PERMISSIONS, Permission } from '@/modules/rbac/permissions';
 import { ActivationNav, activationNavFor } from '@/modules/activation/activation-nav.port';
 import { ProfileLineReader, profileLineFor } from '@/modules/org/profile-line';
 import { InvitesService } from '@/modules/org/invites.service';
+import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { BrandingReader } from '@/modules/branding/branding-reader';
 import { AuthService } from './auth.service';
@@ -140,6 +141,11 @@ export class AuthController {
      */
     @Optional() @Inject(InvitesService) private readonly invites: InvitesService | null = null,
     /*
+     * P19.10-T1 AC-1 (ADR-0236 §1): registration on a leader's link joins the code's leader's unit. By its token, as
+     * the invite above.
+     */
+    @Optional() @Inject(LeaderCodeService) private readonly leaderCodes: LeaderCodeService | null = null,
+    /*
      * **The photo's signed link** (UI V1, UI-111): `users.avatarUrl` holds the photo's storage key and the bucket is
      * private, so `/auth/me` signs a link for the title row and the *Lainnya* sheet. Optional, as the readers above are:
      * a spec that builds this controller for something else reads no photo, `null`, and the initials are drawn.
@@ -225,6 +231,7 @@ export class AuthController {
    * Every route that sets or spends the refresh cookie calls it first, before anything is read or written:
    * - **`login`, always.** A `<form>` on a sibling host needs no preflight, and the cookie its answer sets
    *   is kept, because the hosts are same-site: the browser would be signed in to somebody else's account.
+   * - **`register`, always** (P19.12-T2; ADR-0245 §3): it sets the cookie too, since an account made is signed in.
    * - **`refresh` and `logout`, when the cookie is there.** The harm is the browser sending somebody's
    *   session on a page's behalf; a request without the cookie has none to send, and is answered as before.
    */
@@ -264,13 +271,21 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiOperation({
-    summary: 'Create an account',
+    summary: 'Create an account, and sign it in',
     description:
-      'Always succeeds in shape, even for an address that already exists — confirming ' +
-      'that would let anyone enumerate accounts. A verification email follows. Rate limited per client address, ' +
-      `${REGISTRATION.MAX_PER_ADDRESS} attempts an hour, refused or not.`,
+      '**An account made here is signed in at once** (ADR-0245 §3): the answer carries the access token and sets the '
+      + 'refresh cookie exactly as `/auth/login` does, and stamps the sign-in. The verification email is still sent; '
+      + 'verifying is optional (ADR-0190 §4). **An address that already has an account** is answered '
+      + '`verification_sent` with no token and no cookie: nothing is made, and nobody joins anything. A page on a '
+      + 'foreign origin is refused before anything is read, as at sign-in. Rate limited per client address, '
+      + `${REGISTRATION.MAX_PER_ADDRESS} attempts an hour, refused or not.`,
   })
-  @ApiResponse({ status: 201, description: 'Account created; verification sent.' })
+  @ApiResponse({
+    status: 201,
+    description: '`signed_in` with the token, and the refresh cookie set; or `verification_sent`, nothing else.',
+    type: RegisterAnswerDto,
+  })
+  @ApiResponse(LOGIN_ORIGIN_REFUSED_RESPONSE)
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
     description:
@@ -279,30 +294,68 @@ export class AuthController {
     type: ApiErrorEnvelope,
   })
   @ApiResponse({
+    status: HttpStatus.GONE,
+    description:
+      '`ORG_INVITE_EXPIRED` — with `leaderCode`, a code that opens nothing (nobody holds it, its owner has left, or the '
+      + 'office has stopped), answered alike, before any account is made.',
+    type: ApiErrorEnvelope,
+  })
+  @ApiResponse({
     status: HttpStatus.TOO_MANY_REQUESTS,
     description: '`AUTH_RATE_LIMITED` — too many sign-ups from this address in the hour; `details.retryAfterSeconds`.',
     type: ApiErrorEnvelope,
   })
-  async register(@Body() dto: RegisterDto, @Req() req: Request) {
+  async register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<RegisterAnswerDto> {
+    /*
+     * **Before the limiter, as at sign-in** (P19.12-T2 AC-3; ADR-0245 §3): registering now sets this browser's session,
+     * so a `<form>` on a sibling host must not — and a forged sign-up spends nobody's budget.
+     */
+    this.refuseForeignOrigin(req);
     // Per client address, before anything is read (the P18.8 exit review, L2): a script making accounts, or walking
     // agent codes against `AGENT_CODE_TAKEN`, is stopped here, as an invite link's banner stops one walking tokens.
     this.limit(registrationLimitKey(req.ip ?? 'unknown'), REGISTRATION.MAX_PER_ADDRESS, REGISTRATION.WINDOW_SECONDS);
-    const { inviteToken, ...input } = dto;
-    if (!inviteToken || !this.invites) {
-      // The verification email in the language of the page that asked (P18.10-T5 AC-5).
-      await this.auth.register(input, readerOfRequest(req));
-      return { status: 'verification_sent' };
+    const { inviteToken, leaderCode, ...input } = dto;
+    // The verification email in the language of the page that asked (P18.10-T5 AC-5).
+    const reader = readerOfRequest(req);
+    let made: { user: UserDocument; created: boolean };
+    if (!inviteToken && leaderCode && this.leaderCodes) {
+      /*
+       * **On a leader's link** (ADR-0236 §1, P19.10-T1 AC-1): the code's office's insurer, and the membership made at
+       * once under the code's leader — the code was the approval — for an account made here and now. A code that opens
+       * nothing is refused before any account is made; an address that already exists joins nobody, as on an invite.
+       */
+      const held = await this.leaderCodes.forRegistration(leaderCode);
+      made = await this.auth.registerAccount({ ...input, ...held }, reader);
+      if (made.created) await this.leaderCodes.joinNewAccount(leaderCode, String(made.user._id));
+    } else if (!inviteToken || !this.invites) {
+      made = await this.auth.registerAccount(input, reader);
+    } else {
+      /*
+       * **On a leader's invite** (ADR-0170 §3, P18.8-T3 AC-4): the invite's insurer and code, whatever the form sent,
+       * and the membership made at once under the leader — for an account made here and now. An address that already
+       * exists joins nobody to anything: that would let anybody holding a link attach somebody else's account to an
+       * office.
+       */
+      const held = await this.invites.forRegistration(inviteToken);
+      made = await this.auth.registerAccount({ ...input, ...held }, reader);
+      if (made.created) await this.invites.acceptForNewAccount(inviteToken, String(made.user._id));
     }
     /*
-     * **On a leader's invite** (ADR-0170 §3, P18.8-T3 AC-4): the invite's insurer and code, whatever the form sent,
-     * and the membership made at once under the leader — for an account made here and now. An address that already
-     * exists answers as it always has, and joins nobody to anything: that would let anybody holding a link attach
-     * somebody else's account to an office.
+     * **An address that already had an account is signed in to nothing** (ADR-0245 §3): a form is not proof of who owns
+     * the account, so it gets the neutral answer it always had, no token and no cookie.
      */
-    const held = await this.invites.forRegistration(inviteToken);
-    const { user, created } = await this.auth.registerAccount({ ...input, ...held }, readerOfRequest(req));
-    if (created) await this.invites.acceptForNewAccount(inviteToken, String(user._id));
-    return { status: 'verification_sent' };
+    if (!made.created) return { status: 'verification_sent' };
+    // **A sign-in in every respect but the form** (ADR-0245 §3): `lastLoginAt`, a new token family, login's cookie.
+    const pair = await this.auth.signInProven(String(made.user._id), {
+      ip: req.ip ?? 'unknown',
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+    this.setRefreshCookie(res, pair.refreshToken);
+    return { status: 'signed_in', accessToken: pair.accessToken, expiresIn: pair.expiresIn };
   }
 
   @Public()

@@ -127,6 +127,17 @@ export function describeNotification(
         detail: say(SAY.inviteAcceptedDetail),
       };
     case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
+      // P19.12-T4 (ADR-0247 §3): a leader's move of one of their people says where to.
+      if (payload.kind === 'move') {
+        return {
+          title: say(SAY.transferMoveRequested({
+            requester: name(payload, 'requesterName', say(SAY.aLeader)),
+            member: name(payload, 'memberName', say(SAY.aMember)),
+            to: name(payload, 'toLeaderName', say(SAY.anotherLeader)),
+          })),
+          detail: say(SAY.transferRequestedDetail),
+        };
+      }
       return {
         title: say(SAY.transferRequested({
           requester: name(payload, 'requesterName', say(SAY.aLeader)),
@@ -140,6 +151,8 @@ export function describeNotification(
       return { title: say(SAY.memberRemoved), detail: reasonOr(SAY.memberRemovedDetail) };
     case NotificationTemplate.ROLE_CHANGED:
       return { title: say(SAY.roleChanged), detail: reasonOr(SAY.roleChangedDetail) };
+    case NotificationTemplate.MEMBER_LEADER_CHANGED:
+      return leaderChanged(payload, say);
     case NotificationTemplate.ADMIN_ACCESS_CHANGED:
       return payload.granted === true
         ? { title: say(SAY.adminGranted), detail: say(SAY.adminGrantedDetail) }
@@ -261,9 +274,36 @@ function transferDecided(payload: Record<string, unknown>, say: (sentence: Sente
   if (payload.audience === 'from_leader') {
     return { title: say(SAY.transferLeftYourUnit({ member, to })), detail: say(SAY.transferLeftYourUnitDetail) };
   }
+  // P19.12-T4 (ADR-0247 §3): the leader they now report to, and a request closed because they were moved directly.
+  if (payload.audience === 'to_leader') {
+    return { title: say(SAY.transferJoinedYourUnit({ member })), detail: say(SAY.transferJoinedYourUnitDetail) };
+  }
+  if (payload.decision === 'cancelled') {
+    return { title: say(SAY.transferClosed({ member })), detail: say(SAY.transferClosedDetail) };
+  }
+  if (payload.decision === 'approved' && payload.kind === 'move') {
+    return { title: say(SAY.transferApproved({ member })), detail: say(SAY.transferMoveApprovedDetail({ to })) };
+  }
   return payload.decision === 'approved'
     ? { title: say(SAY.transferApproved({ member })), detail: say(SAY.transferApprovedDetail) }
     : { title: say(SAY.transferDeclined({ member })), detail: name(payload, 'reason', say(SAY.transferDeclinedDetail)) };
+}
+
+/**
+ * **Somebody moved to another leader at once** (P19.12-T4; ADR-0247 §2), by who it is addressed to (`audience`): the
+ * person, the leader they left, the leader they joined. The reason, when one was given, is the detail.
+ */
+function leaderChanged(payload: Record<string, unknown>, say: (sentence: Sentence) => string): NoticeWords {
+  const member = name(payload, 'memberName', say(SAY.aMember));
+  const to = name(payload, 'toLeaderName', say(SAY.anotherLeader));
+  const reason = name(payload, 'reason', '');
+  if (payload.audience === 'from_leader') {
+    return { title: say(SAY.leaderChangedLeft({ member, to })), detail: reason || say(SAY.leaderChangedLeftDetail) };
+  }
+  if (payload.audience === 'to_leader') {
+    return { title: say(SAY.leaderChangedJoined({ member })), detail: reason || say(SAY.leaderChangedJoinedDetail) };
+  }
+  return { title: say(SAY.leaderChangedYou({ to })), detail: reason || say(SAY.leaderChangedYouDetail) };
 }
 
 /**

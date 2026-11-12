@@ -115,6 +115,23 @@ export class GoalRevision {
 export const GoalRevisionSchema = SchemaFactory.createForClass(GoalRevision);
 
 /**
+ * **A month's APE as the member typed it on their Summary** (P19.11-T4; UX-12, UXQ2's default): the realised APE of one
+ * calendar month, typed in millions on *Target vs. realisasi (APE)* and stored whole, in IDR sen. **In force over the
+ * office's upload for that month**, whenever it is there — an upload arriving later does not replace it — until the
+ * member clears it (*Kembalikan ke data unggahan*). The upload itself (`monthlyAgentData`) is never written.
+ */
+@Schema({ _id: false })
+export class GoalMonthApe {
+  @Prop({ type: Number, required: true })
+  minor!: number;
+
+  /** When it was typed: the moment the member last changed it. */
+  @Prop({ type: Date, required: true })
+  typedAt!: Date;
+}
+export const GoalMonthApeSchema = SchemaFactory.createForClass(GoalMonthApe);
+
+/**
  * One agent's agreed plan for one period (P8-T1).
  *
  * **`configSchemaOptions`, because this collection owns the word `version`.** It is the goal's own
@@ -204,6 +221,16 @@ export class Goal {
    */
   @Prop({ type: Date, default: null })
   apeAchievedTypedAt!: Date | null;
+
+  /**
+   * **The months' APE the member typed over the upload, by month** (P19.11-T4; UX-12, UXQ2's default): keyed `YYYY-MM`,
+   * a month of this plan's year, each a `GoalMonthApe`. Absent is none — the office's upload, or *Belum diunggah*.
+   * Written by `PUT /goals/:period/ape-month`, read by the member's own Summary (and their coach's view of it) and by
+   * no leader's or office's figure. **Not a plan input**: no cascade reads it, and setting one is no revision. Not the
+   * year-to-date figure above (`apeAchievedMinor`), which stays what it is (ADR-0230).
+   */
+  @Prop({ type: Map, of: GoalMonthApeSchema, default: () => new Map() })
+  apeByMonth!: Map<string, GoalMonthApe>;
 
   @Prop({ type: Number, required: true, default: 0 })
   caseSizeMinor!: number;

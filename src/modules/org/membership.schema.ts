@@ -359,3 +359,8 @@ MembershipSchema.index({ kpmId: 1, leaderId: 1, status: 1 });
 /** The descendant query — the most common in the product, behind every rollup. */
 MembershipSchema.index({ kpmId: 1, ancestorIds: 1, status: 1 });
 MembershipSchema.index({ kpmId: 1, status: 1, agentSeq: 1 });
+/**
+ * Who a group holds (P19.12-T6, ADR-0249 §4): *People › Groups*' counts, KPM Analytics' group filter and *+ Tambah ke
+ * grup*'s count read `{ groupIds, status }`. Multikey on the tags; the office first.
+ */
+MembershipSchema.index({ kpmId: 1, groupIds: 1, status: 1 });

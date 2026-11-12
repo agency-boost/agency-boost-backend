@@ -81,12 +81,12 @@ describe('the leader limit', () => {
       members, hierarchy, kpms as never, companies as never, users as never, requests, audit,
       notifications as never, clock,
     );
-    leaderCodes = new LeaderCodeService(
-      members, hierarchy, requests, kpms as never, companies as never, users as never, audit,
-      notifications as never, clock,
-    );
     approvals = new ApprovalsService(
       members, hierarchy, requests, historyRepo, users as never, audit, notifications as never, clock,
+    );
+    leaderCodes = new LeaderCodeService(
+      members, hierarchy, requests, approvals, kpms as never, companies as never, users as never, audit,
+      notifications as never, clock,
     );
     const tokens = mongoose.models[AuthToken.name] ?? mongoose.model(AuthToken.name, AuthTokenSchema);
     rosterOver = (h) => new RosterImportService(

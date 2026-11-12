@@ -48,6 +48,7 @@ describe('P18.10-T5 every code’s refusal, in both languages', () => {
    * nothing, so the list cannot hide one that is.
    */
   const NOT_RAISED: Readonly<Partial<Record<ErrorCodeValue, string>>> = {
+    BRANDING_COLOUR_UNREADABLE: 'Retired by ADR-0246 (P19.12-T3): every KPM colour is accepted; kept and never reused.',
     CONFIG_RATIO_FORMULA_FIXED: 'Retired by ADR-0024, kept and never reused: a client may still branch on it.',
     IMPERSONATION_SETUP_TARGET: 'Retired by ADR-0206 (P19.4-T2): there is no setup session, so nothing raises it; kept and never reused.',
     ORG_INVITE_EXHAUSTED: 'Catalogued for an invite with a use limit; every invite is single-use, answered ORG_INVITE_EXPIRED.',

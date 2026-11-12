@@ -60,7 +60,7 @@ describe('the activation instance (P13-T1)', () => {
     hierarchy = new HierarchyService(members, kpms as never, users as never, history, clock, wired.orgLevels);
     approvals = new ApprovalsService(members, hierarchy, requests, history, users as never, audit, notifications, clock, withStarter);
     codes = new LeaderCodeService(
-      members, hierarchy, requests, kpms as never, mongoose.model(Company.name, CompanySchema) as never,
+      members, hierarchy, requests, approvals, kpms as never, mongoose.model(Company.name, CompanySchema) as never,
       users as never, audit, notifications, clock, withStarter,
     );
     const roles = new RoleChangeService(members, hierarchy, history, users as never, audit, notifications, clock);

@@ -1,7 +1,7 @@
 import { CASCADE_ACTIVITY_CODES, SEED_ACTIVITY_CATEGORIES, SEED_ACTIVITY_TYPES } from '@/domain/constants';
 import {
-  activityTargets, goalFigures, madeFigures, monthlyApeTarget, officialGoalFigures, paceFor, periodFigures, productionHeld,
-  sectionChips, summaryPlan, totalLogged, ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
+  activityTargets, goalFigures, madeFigures, monthlyApeTarget, monthWithManual, officialGoalFigures, paceFor, periodFigures,
+  productionHeld, sectionChips, summaryPlan, totalLogged, ytdBeforeThisMonth, type PlannedGoal, type ShownSection,
 } from './summary-figures';
 
 const RP = 100; // minor units per rupiah
@@ -27,7 +27,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(periodFigures(1 * M, 50 * M, 18 * M).attainmentPct).toBe(999);
     });
 
-    it('P18.9-T3 F-254 rounds an exact half up in integers: Rp 23 jt of Rp 40 jt is 58%, which the float read 57', () => {
+    it('P18.9-T3 F-254 rounds an exact half up in integers: Rp 23 Jt of Rp 40 Jt is 58%, which the float read 57', () => {
       expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
       expect(periodFigures(40 * M, 23 * M, 18 * M).attainmentPct).toBe(58);
       // The cap and the zero target's null are kept: only the rounding changed.
@@ -432,7 +432,7 @@ describe('the Personal Summary’s figures (P10-T4)', () => {
       expect(plan).toMatchObject({ monthlyTargetMinor: 85 * M, monthlyCounts: null, yearlyCounts: null });
     });
 
-    /** `goalFigures` over the goal above: Rp 500 jt for the year, Rp 240 jt done, Rp 18 jt a case. */
+    /** `goalFigures` over the goal above: Rp 500 Jt for the year, Rp 240 Jt done, Rp 18 Jt a case. */
     const figuresOf = (over: Partial<PlannedGoal> = {}) => goalFigures({
       goal: goal(over), month: '2026-09', throughLastMonth: { minor: 160 * M }, thisMonth: null, yearToDate: null, names: new Map(),
     });
@@ -512,5 +512,70 @@ describe('P19.1-T4 a member’s estimate and the office’s figures', () => {
     expect(productionHeld({ ...periodFigures(null, null, 18 * M), source: null }, 18 * M).withoutProduction).toBeNull();
     expect(productionHeld({ ...madeFigures(null), source: null }, 18 * M).withoutProduction).toBeNull();
     expect(productionHeld({ ...periodFigures(95 * M, null, 0), source: null }, 0).withoutProduction).toEqual({ gapMinor: 95 * M, policiesNeeded: null });
+  });
+});
+
+/*
+ * **P19.11-T4 — a month's APE typed over the upload** (UX-12; UXQ2's default): the manual figure, then the upload, then
+ * *Belum diunggah*; the gap, the policies and the bar worked out from whichever is in force, never below 0.
+ */
+describe('P19.11-T4 monthWithManual: the member’s own month over the upload', () => {
+  const MONTH = '2026-11';
+  const TYPED_AT = new Date('2026-11-09T05:00:00Z');
+  const uploadedSource = { provenance: 'imported' as const, month: MONTH, correctedBy: null, correctedAt: null };
+  const at = { month: MONTH, caseSizeMinor: 18 * M };
+  const uploaded = { ...periodFigures(216.5 * M, 55 * M, 18 * M), source: uploadedSource };
+  const nothing = { ...periodFigures(216.5 * M, null, 18 * M), source: null };
+
+  it('P19.11-T4 AC-4 the manual figure is in force over the upload: the gap and the policies from it, the upload beneath', () => {
+    expect(monthWithManual(uploaded, { minor: 100 * M, typedAt: TYPED_AT }, at)).toEqual({
+      targetMinor: 216.5 * M, actualMinor: 100 * M, attainmentPct: 46, gapMinor: 116.5 * M, overMinor: 0,
+      // ⌈116,5 ÷ 18⌉ = 7.
+      policiesNeeded: 7, targetMet: false,
+      source: { provenance: 'self_reported', month: MONTH, correctedBy: null, correctedAt: null },
+      production: 'estimate', withoutProduction: null,
+      realised: { source: 'manual', uploaded: true, manual: { minor: 100 * M, typedAt: '2026-11-09T05:00:00.000Z' } },
+    });
+  });
+
+  it('P19.11-T4 AC-4 with nothing uploaded the manual figure is the month’s, and there is no upload to go back to', () => {
+    expect(monthWithManual(nothing, { minor: 18.5 * M, typedAt: TYPED_AT }, at)).toMatchObject({
+      actualMinor: 18.5 * M, gapMinor: 198 * M, policiesNeeded: 11, production: 'estimate', withoutProduction: null,
+      realised: { source: 'manual', uploaded: false },
+    });
+  });
+
+  it('P19.11-T4 AC-4 never negative: a figure past the target is Tercapai — Rp 0 left, no policies, how far over', () => {
+    expect(monthWithManual(uploaded, { minor: 250 * M, typedAt: TYPED_AT }, at)).toMatchObject({
+      gapMinor: 0, policiesNeeded: 0, targetMet: true, overMinor: 33.5 * M, attainmentPct: 115,
+    });
+  });
+
+  it('P19.11-T4 AC-4 a manual 0 is a figure — nothing this month — not Belum diunggah: the whole target, no helpers', () => {
+    expect(monthWithManual(nothing, { minor: 0, typedAt: TYPED_AT }, at)).toMatchObject({
+      actualMinor: 0, gapMinor: 216.5 * M, policiesNeeded: 13, attainmentPct: 0,
+      production: 'estimate', withoutProduction: null, realised: { source: 'manual', uploaded: false },
+    });
+  });
+
+  it('P19.11-T4 AC-4 a month made before it began stays made, the manual figure all over', () => {
+    expect(monthWithManual({ ...madeFigures(null), source: null }, { minor: 40 * M, typedAt: TYPED_AT }, at)).toMatchObject({
+      targetMinor: 0, actualMinor: 40 * M, gapMinor: 0, overMinor: 40 * M, policiesNeeded: 0, targetMet: true,
+    });
+  });
+
+  it('P19.11-T4 AC-4 without one, the figures as they were: uploaded, or none with the helpers counting 0', () => {
+    expect(monthWithManual(uploaded, null, at)).toEqual({
+      ...uploaded, production: 'official', withoutProduction: null, realised: { source: 'uploaded', uploaded: true, manual: null },
+    });
+    expect(monthWithManual(nothing, null, at)).toEqual({
+      ...nothing, production: 'none', withoutProduction: { gapMinor: 216.5 * M, policiesNeeded: 13 },
+      realised: { source: 'none', uploaded: false, manual: null },
+    });
+  });
+
+  it('P19.11-T4 AC-4 no target, no measure: the manual figure is shown, nothing worked out from it', () => {
+    expect(monthWithManual({ ...periodFigures(null, null, 18 * M), source: null }, { minor: 30 * M, typedAt: TYPED_AT }, at))
+      .toMatchObject({ targetMinor: null, actualMinor: 30 * M, gapMinor: null, policiesNeeded: null, attainmentPct: null });
   });
 });

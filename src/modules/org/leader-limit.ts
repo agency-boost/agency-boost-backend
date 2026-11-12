@@ -202,6 +202,32 @@ export async function withLeaderSeat<T>(
 }
 
 /**
+ * **Run a change to the office's tree holding its lease** (P19.12-T4; ADR-0247 §4): the same lease
+ * {@link withLeaderSeat} takes (`kpms.leaderLimitLock`), taken **whatever the office's limit**, so two moves of the
+ * tree take turns. Two crossing moves — A under somebody below B, and B under somebody below A — each passed the cycle
+ * check on rows the other had not written yet, and together made a loop. Held, the second reads the first's write.
+ * `work` must read what it checks itself, with the lease held, and must not take the lease again: it is not re-entrant.
+ */
+export async function withOfficeLease<T>(deps: LeaderLimitDeps, ctx: RequestContext, work: () => Promise<T>): Promise<T> {
+  const kpmId = ctx.kpmId;
+  if (!kpmId) {
+    throw new DomainException(
+      ErrorCode.INTERNAL_ERROR,
+      LEADER_LIMIT_REFUSALS.INTERNAL_ERROR.noOffice,
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+  const { token } = await takeLease(deps, kpmId);
+  try {
+    return await work();
+  } finally {
+    await deps.kpms
+      .updateOne({ _id: kpmId, 'leaderLimitLock.token': token }, { $set: { leaderLimitLock: null } })
+      .exec();
+  }
+}
+
+/**
  * Take the office's leader lease: free, or held past its time. Waits while it is held.
  *
  * Giving up is a `409 VERSION_CONFLICT` — somebody else is changing this office's leaders and has

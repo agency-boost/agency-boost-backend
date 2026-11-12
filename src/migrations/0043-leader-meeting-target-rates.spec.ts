@@ -47,7 +47,7 @@ describe('P18.9-T1 AC-11 migration 0043 — the forum’s typed targets, as rate
     for (const none of ['TBD', 'tbd', '  ', '']) {
       expect(rateCellOf('ape', none, 4)).toEqual({ cell: { rate: null, typed: null, version: 4 }, read: 'none' });
     }
-    for (const text of ['8', 'About 8', '8 per unit', 'Rp 1,2 M (Rp 150 jt @ unit)', '<b>9</b>']) {
+    for (const text of ['8', 'About 8', '8 per unit', 'Rp 1,2 M (Rp 150 Jt @ unit)', '<b>9</b>']) {
       expect(rateCellOf('flc', text, 1)).toEqual({ cell: { rate: null, typed: text, version: 1 }, read: 'kept' });
     }
   });

@@ -15,7 +15,6 @@ describe('the lessons’ constants (P19.6-T3)', () => {
 
   it('P19.6-T3 AC-5 names exactly what the API’s palette gives a lesson, each value one the reader accepts', () => {
     const derived = derivePalette('#0e7c66', '#1f2a44');
-    if (!derived.ok) throw new Error('the two colours are readable');
     const colours = lessonColoursOf(derived.palette)!;
     expect(Object.keys(colours).sort()).toEqual(Object.keys(LESSON_COLOUR_VARIABLES).sort());
     for (const [name, value] of Object.entries(colours)) {

@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { MoneyDto, RateDto } from '../reporting.response.dto';
 import type {
   CompanyKpmRow, CompanyKpmsView, CompanyRef, KpmComparisonPage, KpmComparisonRow, KpmDataMonth, KpmDataUpload,
-  KpmDataView, PlatformMemberRow, PlatformMembersPage,
+  KpmDataView, PlatformAccountRow, PlatformAccountsPage, PlatformMemberRow, PlatformMembersPage,
 } from './platform-reads.service';
 
 /*
@@ -61,6 +61,39 @@ export class PlatformMembersPageDto implements PlatformMembersPage {
   @ApiProperty({ example: 1 }) page!: number;
   @ApiProperty({ example: 50 }) pageSize!: number;
   @ApiProperty({ description: 'Every row the filters match, across the pages.' }) total!: number;
+}
+
+export class PlatformAccountRowDto implements PlatformAccountRow {
+  @ApiProperty({ description: 'The account’s id. Used by no other Super Admin route.' }) userId!: string;
+  @ApiProperty({ example: 'Hadi Santoso' }) fullName!: string;
+  @ApiProperty({
+    example: 'hadi@example.com',
+    description: 'The address the account signs in with: the one address a platform read returns (ADR-0245 §2).',
+  })
+  email!: string;
+  @ApiProperty({ type: CompanyRefDto, nullable: true, description: 'The insurer it registered with; `null` with none.' })
+  company!: CompanyRefDto | null;
+  @ApiProperty({ example: '2026-11-11', description: 'The day the account was made, in `Asia/Jakarta`.' })
+  registeredOn!: string;
+  @ApiProperty({ description: '*Terverifikasi* or *Belum diverifikasi*: whether the address was confirmed.' })
+  emailVerified!: boolean;
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-11-11',
+    description: 'The day of the last sign-in, in `Asia/Jakarta`; `null`, *"Belum pernah"*.',
+  })
+  lastSignInOn!: string | null;
+  @ApiProperty({
+    example: 0,
+    description: 'Its active or pending memberships, in any KPM. `0` is *Belum punya KPM*; a membership that ended is none.',
+  })
+  kpmCount!: number;
+}
+
+export class PlatformAccountsPageDto implements PlatformAccountsPage {
+  @ApiProperty({ type: [PlatformAccountRowDto] }) rows!: PlatformAccountRowDto[];
+  @ApiProperty({ example: 1 }) page!: number;
+  @ApiProperty({ example: 50 }) pageSize!: number;
+  @ApiProperty({ description: 'Every account the filters match, across the pages.' }) total!: number;
 }
 
 class ComparisonActiveDto {

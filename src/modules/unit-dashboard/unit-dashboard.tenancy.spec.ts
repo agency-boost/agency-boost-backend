@@ -115,18 +115,22 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(JSON.stringify(view)).not.toContain(office.id.PEER_AGENT);
     });
 
-    it('P15-T1 AC-1 a member who leads nobody — an Agent, an AAB with no reports, the Admin above nobody — is answered an empty unit, never refused', async () => {
-      for (const who of ['INDAH', 'DEWI', 'ADMIN', 'TARI'] as const) {
+    /*
+     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §1):* the Admin above nobody is answered the office — *Semua downline*, an
+     * Admin's default while they lead nobody — and no longer an empty unit (`unit-views.tenancy.spec.ts`).
+     */
+    it('P15-T1 AC-1 a member who leads nobody — an Agent, an AAB with no reports — is answered an empty unit, never refused', async () => {
+      for (const who of ['INDAH', 'DEWI', 'TARI'] as const) {
         const view = await read(who);
         expect({ who, empty: view.empty, rows: view.yourUnit.rows, units: view.units }).toEqual({ who, empty: true, rows: [], units: [] });
         expect(view.head).toEqual({ membershipId: office.id[who], name: office.name[who], isReader: true });
         expect(view.tiles).toEqual({
-          team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
+          team: { total: 0, direct: 0, units: 0, underUnits: 0, aab: 0, ab: 0, newHires: 0 },
           directGroupProduction: {
             targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
           },
-          potentialActive: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 } },
-          potentialRecruits: { yourUnit: 0, aabs: 0 },
+          potentialActive: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 }, ab: { count: 0, of: 0 } },
+          potentialRecruits: { yourUnit: 0, aabs: 0, abs: 0 },
         });
         expect(view.production.canUpdate).toBe(false);
       }
@@ -417,28 +421,30 @@ describe('the Unit Dashboard (Phase 15)', () => {
           newHires: view.tiles.team.newHires, closings: all.reduce((s, r) => s + r.closings, 0),
           proposalsMade: all.reduce((s, r) => s + r.proposalsMade, 0),
         });
-        // UI-013: Active Agent's of is Your team's number, and its Unit / AAB split adds up to it — Unit is Your Unit.
-        const { unit, aab, of } = view.tiles.potentialActive;
+        // UI-013: Active Agent's of is Your team's number, and its Unit / AAB / AB split adds up to it — Unit is Your Unit
+        // (ADR-0249 §3: AB the rows outside the head's direct group — the Owner's whole office here, every report an AB).
+        const { unit, aab, ab, of } = view.tiles.potentialActive;
         expect(of).toBe(view.tiles.team.total);
         expect(unit).toEqual(view.yourUnit.total.potentialActive);
-        expect([unit.count + aab.count, unit.of + aab.of]).toEqual([view.tiles.potentialActive.count, of]);
-        expect(aab.of).toBe(view.units.reduce((n, g) => n + rowsOf(g).length, 0));
+        expect([unit.count + aab.count + ab.count, unit.of + aab.of + ab.of]).toEqual([view.tiles.potentialActive.count, of]);
+        expect(aab.of + ab.of).toBe(view.units.reduce((n, g) => n + rowsOf(g).length, 0));
         expect(view.tiles.team).toEqual({
           total: all.length, direct: view.yourUnit.rows.length, units: view.units.length,
           underUnits: all.length - view.yourUnit.rows.length - view.units.length,
+          aab: aab.of, ab: ab.of,
           newHires: all.filter((r) => r.newHireBeforeFirstSale).length,
         });
-        expect(view.tiles.potentialRecruits).toEqual({
-          yourUnit: view.yourUnit.rows.reduce((s, r) => s + r.leadsCounts.recruitNominated, 0),
-          aabs: view.units.flatMap(rowsOf).reduce((s, r) => s + r.leadsCounts.recruitNominated, 0),
-        });
+        expect(view.tiles.team.direct + view.tiles.team.aab + view.tiles.team.ab).toBe(all.length);
+        const recruits = (rows: UnitRow[]) => rows.reduce((s, r) => s + r.leadsCounts.recruitNominated, 0);
+        expect(view.tiles.potentialRecruits.yourUnit).toBe(recruits(view.yourUnit.rows));
+        expect(view.tiles.potentialRecruits.aabs + view.tiles.potentialRecruits.abs).toBe(recruits(view.units.flatMap(rowsOf)));
       }
     });
 
     it('P15-T1 AC-4 Agus’s tiles, worked: eleven people; Indah’s nomination in his unit, Rina’s in Sari’s', async () => {
       const view = await read('AGUS');
-      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, newHires: 0 });
-      expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1 });
+      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, aab: 8, ab: 0, newHires: 0 });
+      expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1, abs: 0 });
       // Four rows hold this month's APE — Indah, Dimas, Rina and Sari — and seven hold none.
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
     });

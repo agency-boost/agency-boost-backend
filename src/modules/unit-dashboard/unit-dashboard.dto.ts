@@ -5,13 +5,21 @@ import {
   ValidateIf, ValidateNested,
 } from 'class-validator';
 import { field } from '@/common/validation/violations';
-import { UNIT_DASHBOARD, type UnitDashboardPeriod } from '@/domain/constants';
+import { UNIT_DASHBOARD, type UnitDashboardPeriod, type UnitView } from '@/domain/constants';
 import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
 import { ACTIVITY_SPANS, type ActivitySpan } from './unit-figures';
 
+/** The view's description, shared by the Overview's read and the *Potensi* tab's (ADR-0249 §1). */
+export const SCOPE_DESCRIPTION =
+  'Whose figures: `direct` (*Grup langsung*: the leader and everybody below them, never descending into an AB), '
+  + '`informal` (*Grup informal*: that, and each AB below them tagged into a live group they own, with that AB’s own '
+  + 'direct group — never anybody outside their downline) or `downline` (*Semua downline*: everybody below them; for the '
+  + 'agency’s owner or an administrator on their own dashboard, every member of the agency). Omitted, or a view not '
+  + 'offered for this leader, the reader’s default — answered in `scope`, with `scopes.offered`. Any other value is `400`.';
+
 /**
- * **`period` and `for`, and nothing else** (P15-T1 AC-10): a period it does not know, or a parameter of any
- * other name, is refused by name — as the coaching roster refuses one — rather than ignored.
+ * **`period`, `for` and `scope`, and nothing else** (P15-T1 AC-10; ADR-0249 §1): a period or a view it does not know, or
+ * a parameter of any other name, is refused by name — as the coaching roster refuses one — rather than ignored.
  */
 export class UnitDashboardQueryDto {
   @ApiPropertyOptional({
@@ -37,6 +45,11 @@ export class UnitDashboardQueryDto {
   @IsString()
   @MaxLength(64)
   for?: string;
+
+  @ApiPropertyOptional({ enum: UNIT_DASHBOARD.VIEWS, description: SCOPE_DESCRIPTION })
+  @IsOptional()
+  @IsIn(UNIT_DASHBOARD.VIEWS)
+  scope?: UnitView;
 }
 
 /**

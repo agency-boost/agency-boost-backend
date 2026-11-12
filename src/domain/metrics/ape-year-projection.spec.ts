@@ -34,7 +34,7 @@ describe('APE_YEAR_PROJECTION (D-figures)', () => {
   it('P19.3-T1 AC-12 only the current month held — January, or a first upload this month — projects nothing', () => {
     expect(projectionMonth(['2026-01'], '2026-01')).toEqual({ month: null, number: 0 });
     expect(apeYearProjection(10 * M, projectionMonth(['2026-01'], '2026-01').number)).toBeNull();
-    // Never ×12 / (3/31): a 3 January upload of Rp 10 jt is no Rp 1,24 M year.
+    // Never ×12 / (3/31): a 3 January upload of Rp 10 Jt is no Rp 1,24 M year.
     expect(apeYearProjection(10 * M, projectionMonth(['2026-01'], '2026-01').number)).not.toBe(Math.round(10 * M * 12 * 31 / 3));
   });
 

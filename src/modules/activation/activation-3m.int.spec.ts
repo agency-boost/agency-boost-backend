@@ -211,19 +211,42 @@ describe('P18.8-T6 — 3M activation and /new-hires (ADR-0171 §2, ADR-0173)', (
       expect(sari.activation3M.all).toEqual(r.units[1].activation3M.all);
     });
 
-    it('UI-023 rule A: a sale after day 90 is in neither part, nor is a hire inside their 90 days with none', async () => {
+    /*
+     * *Changed 2026-11-10 (P19.11-T2 AC-2, UX-4; ADR-0239):* this pinned rule A — a sale after day 90 in neither part, 50%.
+     * A late first sale is due now: in the denominator, not the numerator.
+     */
+    it('P19.11-T2 AC-2 a sale after day 90 is in the denominator and not the numerator; a hire inside their 90 days with none is in neither', async () => {
       await h.start('INDAH', '2026-06-10');
-      await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z'); // day 22: activated
-      await h.start('DIMAS', '2026-06-01'); // past day 90, no sale: not activated
+      await sold('INDAH', 'Pak Yusuf', '2026-07-01T03:00:00Z'); // day 22: on time
+      await h.start('DIMAS', '2026-06-01'); // past day 90, no sale: due, not activated
       await h.start('TARI', '2026-06-01');
-      await sold('TARI', 'Ibu Wati', '2026-09-01T03:00:00Z'); // day 93: late, in neither part
-      await h.start('BUDI', '2026-07-15'); // Sari's, day 62, no sale: in neither part
+      await sold('TARI', 'Ibu Wati', '2026-09-01T03:00:00Z'); // day 93: late — due, not on time
+      await h.start('BUDI', '2026-07-15'); // Sari's, day 62, no sale: not due
       const r = await roster();
-      expect(r.activation3M.all).toEqual({ activated: 1, notActivated: 1, late: 1, inProgress: 1, pct: 50 });
-      // Each leader's group by the same function: Sari's one hire is undecided, so hers has no figure, never 0%.
+      expect(r.activation3M.all).toEqual({ activated: 1, notActivated: 1, late: 1, inProgress: 1, pct: 33 });
+      // Each leader's group by the same function: Sari's one hire is not due, so hers has no figure, never 0%.
       expect(r.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all.pct])).toEqual([
-        ['Direct Unit', 50], ['Sari Puspita', null],
+        ['Direct Unit', 33], ['Sari Puspita', null],
       ]);
+    });
+
+    it('P19.11-T2 AC-2 the brief’s example: three on time and one on day 96 is 75%, the tile rolled up from every row, never an average', async () => {
+      for (const who of ['INDAH', 'DIMAS', 'TARI', 'BUDI'] as const) await h.start(who, '2026-06-01'); // day 106
+      await sold('INDAH', 'Ibu A', '2026-06-20T03:00:00Z'); // day 20
+      await sold('DIMAS', 'Ibu B', '2026-07-08T03:00:00Z'); // day 38
+      await sold('TARI', 'Ibu C', '2026-09-04T03:00:00Z'); // day 96: late
+      await sold('BUDI', 'Ibu D', '2026-07-01T03:00:00Z'); // Sari's, day 31
+      await h.start('RINA', '2026-08-20'); // Sari's, day 26, none: not due
+      const r = await roster();
+      expect(r.units.map((u) => [u.leader?.name ?? 'Direct Unit', u.activation3M.all])).toEqual([
+        ['Direct Unit', { activated: 2, notActivated: 0, late: 1, inProgress: 0, pct: 67 }],
+        ['Sari Puspita', { activated: 1, notActivated: 0, late: 0, inProgress: 1, pct: 100 }],
+      ]);
+      // The tile is 3 of 4 over every row — never the average of 67% and 100%.
+      expect(r.activation3M.all).toEqual({ activated: 3, notActivated: 0, late: 1, inProgress: 1, pct: 75 });
+      // Last year's page reads by the same rule: nobody joined then, so no figure.
+      h.as('AGUS');
+      expect(((await h.http().get('/new-hires?year=previous').expect(200)).body as Roster).activation3M.all.pct).toBeNull();
     });
 
     it('UI-023 cross-tenant: office B’s Teraktivasi hire is in office B’s figure alone — never in office A’s rows or share', async () => {

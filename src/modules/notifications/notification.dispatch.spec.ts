@@ -8,7 +8,7 @@ import {
 import { NotificationRepository } from './notification.repository';
 import { NotificationService, TemplateRenderer } from './notification.service';
 import {
-  NotificationChannel, NotificationChannelAdapter, NotificationTemplate, RenderedMessage, SendRequest,
+  DeliveryReceipt, NotificationChannel, NotificationChannelAdapter, NotificationTemplate, RenderedMessage, SendRequest,
 } from './notification.types';
 
 const NOW = new Date('2026-10-03T03:00:00Z');
@@ -141,6 +141,31 @@ describe('notifications: the email leaves after the request (P12.1-T1)', () => {
     const settled = await emailReaches('sent');
     expect(settled.delivery).toEqual({ in_app: { status: 'sent', at: NOW }, email: { status: 'sent', at: NOW } });
     expect(email.sent).toHaveLength(1);
+  });
+
+  it('P19.12-T1 AC-2 a sent email keeps the provider\'s message id on the stored row: the free-form map needs no migration', async () => {
+    class ReceiptEmail extends NotificationChannelAdapter {
+      readonly channel: NotificationChannel = 'email';
+      async send(): Promise<DeliveryReceipt> {
+        return { providerMessageId: '49a3999c-0ce1-4ea6-ab68-afcd6dc2e794' };
+      }
+    }
+    service = new NotificationService(
+      mongoose.model(Notification.name) as never,
+      new NotificationRepository(mongoose.model(Notification.name) as never),
+      mongoose.model(NotificationPreferences.name) as never,
+      new StubRenderer(),
+      new FixedClock(NOW),
+      { record: async () => undefined } as never,
+      [inApp, new ReceiptEmail()],
+    );
+
+    await invite();
+    const settled = await emailReaches('sent');
+    expect(settled.delivery).toEqual({
+      in_app: { status: 'sent', at: NOW },
+      email: { status: 'sent', at: NOW, providerMessageId: '49a3999c-0ce1-4ea6-ab68-afcd6dc2e794' },
+    });
   });
 
   it('P12.1-T1 a failing adapter records failed, with the error, on the delivery map, and logs at error level', async () => {

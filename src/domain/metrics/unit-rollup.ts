@@ -189,16 +189,21 @@ export function rollUpProduction(rows: readonly ProductionRow[]): ProductionRoll
 }
 
 /**
- * ***Active Agent*'s Unit and AAB split** (UI V1, UI-013; D-16): the tile's figure over the reader's *Unit* — the head
- * and their direct agents — and over the *AAB* side — every unit below them — each a `count` of `of`, the two adding up
- * to the total. Home's *Active Agent* reads the same (Appendix D, UI-100).
+ * ***Active Agent*'s Unit, AAB and AB split** (UI V1, UI-013; D-16; ADR-0249 §3): the tile's figure over the reader's
+ * *Unit* — the head and their direct agents — over the *AAB* side — the rest of `DIRECT_GROUP` — and over the *AB* side —
+ * everybody on the roster outside `DIRECT_GROUP`, none in *Grup langsung* — each a `count` of `of`, the three adding up to
+ * the total. Home's *Active Agent* reads the same over *Grup langsung* (Appendix D, UI-100), its *AB* always none.
  */
 export function activeAgentSplit(
-  unit: readonly ProductionRow[], aab: readonly ProductionRow[],
-): { count: number; of: number; unit: { count: number; of: number }; aab: { count: number; of: number } } {
+  unit: readonly ProductionRow[], aab: readonly ProductionRow[], ab: readonly ProductionRow[] = [],
+): {
+  count: number; of: number; unit: { count: number; of: number }; aab: { count: number; of: number };
+  ab: { count: number; of: number };
+} {
   const u = rollUpProduction(unit).potentialActive;
   const a = rollUpProduction(aab).potentialActive;
-  return { count: u.count + a.count, of: u.of + a.of, unit: u, aab: a };
+  const b = rollUpProduction(ab).potentialActive;
+  return { count: u.count + a.count + b.count, of: u.of + a.of + b.of, unit: u, aab: a, ab: b };
 }
 
 /** A person's four lead counts (D-leads; `lead-counts.ts`). */

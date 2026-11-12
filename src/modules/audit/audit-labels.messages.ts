@@ -96,6 +96,8 @@ const ACTIONS = {
   'goal.created': { en: 'Goal set', id: 'Target ditetapkan' },
   'goal.estimate_cleared': { en: 'Production estimate cleared', id: 'Perkiraan produksi dihapus' },
   'goal.estimate_set': { en: 'Production estimate set', id: 'Perkiraan produksi diisi' },
+  'goal.month_ape_cleared': { en: 'Month’s APE back to the upload', id: 'APE bulan dikembalikan ke data unggahan' },
+  'goal.month_ape_set': { en: 'Month’s APE changed manually', id: 'APE bulan diubah manual' },
   'goal.updated': { en: 'Goal changed', id: 'Target diubah' },
   'group.archived': { en: 'Group archived', id: 'Grup diarsipkan' },
   'group.created': { en: 'Group created', id: 'Grup dibuat' },
@@ -176,7 +178,10 @@ const ACTIONS = {
   'leader_request.approved': { en: 'Leader request approved', id: 'Permintaan leader disetujui' },
   'leader_request.created': { en: 'Leader requested', id: 'Leader diminta' },
   'leader_request.declined': { en: 'Leader request declined', id: 'Permintaan leader ditolak' },
+  'member.personal_completed': { en: 'Member’s details completed', id: 'Data anggota dilengkapi' },
   'member.phone_updated': { en: 'WhatsApp number changed', id: 'No. WhatsApp diubah' },
+  // P19.12-T4 (ADR-0247 §2): somebody moved to another leader at once, with everybody under them.
+  'member.leader_changed': { en: 'Member’s leader changed', id: 'Leader anggota diganti' },
   'member.removed': { en: 'Member removed', id: 'Anggota dikeluarkan' },
   'member.role_changed': { en: 'Member’s role changed', id: 'Peran anggota diubah' },
   'member.tagged': { en: 'Member tagged', id: 'Anggota ditandai' },
@@ -193,6 +198,8 @@ const ACTIONS = {
   'org_level.created': { en: 'Role added', id: 'Peran ditambahkan' },
   'org_level.deleted': { en: 'Role deleted', id: 'Peran dihapus' },
   'org_level.updated': { en: 'Role changed', id: 'Peran diubah' },
+  // P19.12-T2 (ADR-0245 §1): *All members* › *Akun terdaftar*, each read.
+  'platform_read.accounts': { en: 'Account list viewed', id: 'Daftar akun dilihat' },
   'platform_read.company_kpms': { en: 'Company’s KPMs & data viewed', id: 'KPM & data perusahaan dilihat' },
   'platform_read.kpm_analytics': ({ kpm }) => kpmOf(
     kpm, 'KPM {kpm} analytics viewed', 'Analytics KPM {kpm} dilihat', 'KPM analytics viewed', 'Analytics KPM dilihat',
@@ -265,6 +272,8 @@ const ACTIONS = {
   'training_skill.restored': { en: 'Training skill restored', id: 'Skill training dipulihkan' },
   'training_skill.updated': { en: 'Training skill changed', id: 'Skill training diubah' },
   'transfer_request.approved': { en: 'Transfer approved', id: 'Perpindahan disetujui' },
+  // P19.12-T4 (ADR-0247 §3): withdrawn by whoever asked, or closed because the person was moved directly.
+  'transfer_request.cancelled': { en: 'Transfer request cancelled', id: 'Permintaan perpindahan dibatalkan' },
   'transfer_request.created': { en: 'Transfer requested', id: 'Perpindahan diminta' },
   'transfer_request.declined': { en: 'Transfer declined', id: 'Perpindahan ditolak' },
   'upload.cell_corrected': { en: 'Uploaded figure corrected', id: 'Angka unggahan diperbaiki' },

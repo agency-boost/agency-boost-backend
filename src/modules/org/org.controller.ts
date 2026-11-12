@@ -6,6 +6,7 @@ import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 import { DirectoryService } from './directory.service';
 import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
+import { AddGroupMembersDto } from './group-members.dto';
 import { OrgTreeService } from './org-tree.service';
 import {
   ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, OrgTreeQueryDto,
@@ -275,6 +276,24 @@ export class OrgController {
   })
   async archiveGroup(@Ctx() ctx: RequestContext, @Param('groupId') groupId: string) {
     return this.groups.archive(ctx, groupId);
+  }
+
+  @Post('groups/:groupId/members')
+  @RequirePermission('member:tag_group')
+  @ApiOperation({
+    summary: 'Tag several people into one group at once',
+    description:
+      'The Unit Dashboard’s *Grup informal* sheet, *+ Tambah ke grup*: each membership sent is tagged into this group, '
+      + 'their other groups and Core Leader tag untouched. Every id must be an active member of this agency and the group '
+      + 'a live one of it — otherwise `404` and nothing is tagged. Somebody already in the group is not counted again. '
+      + 'One `member.tagged` audit entry per person tagged. A group is a label, never access: nobody sees more for it.',
+  })
+  async addGroupMembers(
+    @Ctx() ctx: RequestContext,
+    @Param('groupId') groupId: string,
+    @Body() dto: AddGroupMembersDto,
+  ) {
+    return this.groups.addMembers(ctx, groupId, dto.membershipIds);
   }
 
   @Get(':membershipId/tags')

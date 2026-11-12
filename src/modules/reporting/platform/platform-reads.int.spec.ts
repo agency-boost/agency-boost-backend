@@ -132,6 +132,8 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
   it('P19.4-T3 AC-16 declares the platform grants on every route', () => {
     expect(declaredPermissions(PlatformReadsController)).toEqual({
       members: 'platform_members:read',
+      // P19.12-T2 AC-1 (ADR-0245 §1): *Akun terdaftar*, under the same grant (`platform-accounts.int.spec.ts`).
+      accounts: 'platform_members:read',
       comparison: 'platform_kpm_figures:read',
       analytics: 'platform_kpm_figures:read',
       compliance: 'platform_kpm_figures:read',

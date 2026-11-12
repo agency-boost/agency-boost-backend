@@ -12,7 +12,7 @@ import {
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
 import { checkFields, type CheckedFields } from '@/domain/branding/branding-fields';
-import { derivePalette, type BrandingPalette, type ContrastChoice } from '@/domain/branding/palette';
+import { derivePalette, type BrandingPalette, type FilledColour } from '@/domain/branding/palette';
 import {
   BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE, type BrandingUploadKind, type MascotPose,
 } from '@/domain/constants/branding';
@@ -51,11 +51,16 @@ export interface BrandingSettings {
   canWrite: boolean;
 }
 
+/** Each colour's words and fill, as the preview answers them: the field's note says when the fill is not the colour. */
+export type PreviewColour = Pick<FilledColour, 'contrast' | 'ratio' | 'fill' | 'adjusted'>;
+
 export interface PreviewAnswer {
   palette: BrandingPalette;
-  primary: { contrast: ContrastChoice['contrast']; ratio: number };
-  secondary: { contrast: ContrastChoice['contrast']; ratio: number };
+  primary: PreviewColour;
+  secondary: PreviewColour;
 }
+
+const previewOf = ({ contrast, ratio, fill, adjusted }: FilledColour): PreviewColour => ({ contrast, ratio, fill, adjusted });
 
 export interface ConfirmedImage {
   storageKey: string;
@@ -123,15 +128,13 @@ export class BrandingService {
     };
   }
 
-  /** **`POST /kpm/settings/branding/preview`**: the palette of two colours, or the field no text reads on. Writes nothing. */
+  /**
+   * **`POST /kpm/settings/branding/preview`**: the palette of two colours, and each one's words and fill — every colour
+   * is accepted (P19.12-T3 AC-1, AC-3; ADR-0246). Writes nothing.
+   */
   preview(primary: string, secondary: string): PreviewAnswer {
     const result = derivePalette(primary, secondary);
-    if (!result.ok) throw unreadable(result.field, result.primary, result.secondary);
-    return {
-      palette: result.palette,
-      primary: { contrast: result.primary.contrast, ratio: result.primary.ratio },
-      secondary: { contrast: result.secondary.contrast, ratio: result.secondary.ratio },
-    };
+    return { palette: result.palette, primary: previewOf(result.primary), secondary: previewOf(result.secondary) };
   }
 
   /**
@@ -149,10 +152,11 @@ export class BrandingService {
       for (const [pose, key] of Object.entries(fields.mascot.poses)) await this.storedSize(`${key}/mascot-120.webp`, `mascot.poses.${pose}`);
     }
     const colours = fields.primary && fields.secondary ? derivePalette(fields.primary, fields.secondary) : null;
-    const contrast = colours && colours.ok
+    // P19.12-T3 (ADR-0246 §3): each colour's words, their ratio and the fill they read on, as measured now.
+    const contrast = colours
       ? {
-        primary: { side: colours.primary.contrast, ratio: colours.primary.ratio },
-        secondary: { side: colours.secondary.contrast, ratio: colours.secondary.ratio },
+        primary: { side: colours.primary.contrast, ratio: colours.primary.ratio, fill: colours.primary.fill },
+        secondary: { side: colours.secondary.contrast, ratio: colours.secondary.ratio, fill: colours.secondary.fill },
       }
       : null;
     const set = { ...fields, contrast };
@@ -358,12 +362,11 @@ export class BrandingService {
   }
 }
 
-/** **The fields, checked or refused** in the API's words: `422` for a colour, `400` for anything else. */
+/** **The fields, checked or refused** in the API's words: `400`. Every colour is accepted (P19.12-T3; ADR-0246). */
 export function checkedFields(input: unknown, owner: AssetOwner): CheckedFields {
   const result = checkFields(input, ownerSegment(owner));
   if (result.ok) return result.fields;
   const { problem } = result;
-  if (problem.problem === 'unreadable') throw unreadable(problem.result.field, problem.result.primary, problem.result.secondary);
   if (problem.problem === 'notYours') throw new InvalidRequestException(BRANDING_REFUSALS.VALIDATION_FAILED.notYours, { field: problem.field });
   throw new InvalidRequestException(BRANDING_REFUSALS.VALIDATION_FAILED[problem.problem], { field: problem.problem });
 }
@@ -374,15 +377,6 @@ export function checkedFields(input: unknown, owner: AssetOwner): CheckedFields 
  */
 export function checkedTemplatePayload(companyId: string, payload: unknown): Record<string, unknown> {
   return { ...checkedFields(payload, { kind: 'company', companyId }) } as unknown as Record<string, unknown>;
-}
-
-function unreadable(field: 'primary' | 'secondary', primary: ContrastChoice, secondary: ContrastChoice): DomainException {
-  return new DomainException(
-    ErrorCode.BRANDING_COLOUR_UNREADABLE,
-    BRANDING_REFUSALS.BRANDING_COLOUR_UNREADABLE.unreadable,
-    HttpStatus.UNPROCESSABLE_ENTITY,
-    { field, ratios: { primary: primary.ratio, secondary: secondary.ratio }, minimum: BRANDING.CONTRAST_MIN },
-  );
 }
 
 function imageRefused(reason: string): DomainException {
@@ -409,7 +403,7 @@ function refuseType(kind: BrandingUploadKind, mimeType: string): void {
   }
 }
 
-/** **The audit's old → new** (AC-15): each colour with its contrast, and each image by its folder and size. */
+/** **The audit's old → new** (AC-15): each colour with its contrast and fill, and each image by its folder and size. */
 function auditFields(fields: BrandingFields, row: Pick<KpmBranding, 'contrast'>): Record<string, unknown> {
   return {
     logo: fields.logo ? { key: fields.logo.key, width: fields.logo.width, height: fields.logo.height } : null,

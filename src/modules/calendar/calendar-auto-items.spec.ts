@@ -1,10 +1,44 @@
-import { byTaskOrder, instantTiming, type CalendarTaskView } from './calendar-auto-items';
+import { byTaskOrder, instantTiming, leadTaskOf, type CalendarTaskView } from './calendar-auto-items';
 
 const JAKARTA = 'Asia/Jakarta';
 
 const task = (over: Partial<CalendarTaskView>): CalendarTaskView => ({
   taskId: 'lead:1', source: 'lead', date: '2026-09-14', ownerMembershipId: 'me', name: 'Ibu Wiwik', note: '', phone: null,
-  lead: null, coaching: null, ...over,
+  lead: null, coaching: null, done: false, ...over,
+});
+
+/**
+ * **P19.11-T1 AC-1 (UX-1) — a lead's task, open or ticked, in a range**: the rule `tasksOf` reads every lead with, so a
+ * ticked next action stays on the day it was due.
+ */
+describe('P19.11-T1 AC-1 a lead’s Tugas in a range: its open next action, else the one last ticked done', () => {
+  const ticked = (date: string | null, note: string | null = 'Invite BOP') => ({
+    date, note, at: new Date('2026-09-14T03:00:00Z'), byMembershipId: 'me',
+  });
+
+  it('P19.11-T1 AC-1 an open next action in the range is an open task on its date, its note trimmed', () => {
+    expect(leadTaskOf({ nextActionDate: '2026-09-15', nextActionNote: '  Invite BOP ', nextActionDone: null }, '2026-09-14', '2026-09-20'))
+      .toEqual({ date: '2026-09-15', note: 'Invite BOP', done: false });
+  });
+
+  it('P19.11-T1 AC-1 a ticked next action is a done task on the date it was due, with the note it had', () => {
+    expect(leadTaskOf({ nextActionDate: null, nextActionNote: null, nextActionDone: ticked('2026-09-14') }, '2026-09-14', '2026-09-14'))
+      .toEqual({ date: '2026-09-14', note: 'Invite BOP', done: true });
+    expect(leadTaskOf({ nextActionDate: null, nextActionNote: null, nextActionDone: ticked('2026-09-14', null) }, '2026-09-14', '2026-09-14'))
+      .toEqual({ date: '2026-09-14', note: '', done: true });
+  });
+
+  it('P19.11-T1 AC-1 outside the range, or ticked with no date, it is nobody’s task there', () => {
+    expect(leadTaskOf({ nextActionDate: '2026-09-21', nextActionNote: null, nextActionDone: null }, '2026-09-14', '2026-09-20')).toBeNull();
+    expect(leadTaskOf({ nextActionDate: null, nextActionNote: null, nextActionDone: ticked('2026-09-13') }, '2026-09-14', '2026-09-20')).toBeNull();
+    expect(leadTaskOf({ nextActionDate: null, nextActionNote: 'A note alone', nextActionDone: ticked(null) }, '2026-09-14', '2026-09-20')).toBeNull();
+    expect(leadTaskOf({ nextActionDate: null, nextActionNote: null, nextActionDone: null }, '2026-09-14', '2026-09-20')).toBeNull();
+  });
+
+  it('P19.11-T1 AC-1 the open next action is read first: one task per lead, never two', () => {
+    expect(leadTaskOf({ nextActionDate: '2026-09-16', nextActionNote: 'New', nextActionDone: ticked('2026-09-15') }, '2026-09-14', '2026-09-20'))
+      .toEqual({ date: '2026-09-16', note: 'New', done: false });
+  });
 });
 
 /**

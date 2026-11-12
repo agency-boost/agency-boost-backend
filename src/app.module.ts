@@ -68,6 +68,8 @@ import { UserAddressBook } from '@/modules/notifications/user-address-book';
 import { RecipientLanguages, UserLanguages } from '@/modules/notifications/recipient-languages';
 import { InAppChannelAdapter, LogEmailAdapter } from '@/modules/notifications/local-adapters';
 import { resolveMailProvider } from '@/modules/notifications/mail-provider';
+import { ResendEmailAdapter } from '@/modules/notifications/resend.adapter';
+import { emailAdapterFor } from '@/modules/notifications/email-channel';
 import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
@@ -322,7 +324,11 @@ import { HierarchyService } from '@/modules/org/hierarchy.service';
 import { DirectoryService } from '@/modules/org/directory.service';
 import { OrgController } from '@/modules/org/org.controller';
 import { MemberPhoneController } from '@/modules/org/member-phone.controller';
+import { LeaderChangeController } from '@/modules/org/leader-change.controller';
+import { LeaderChangeService } from '@/modules/org/leader-change.service';
 import { MemberPhoneService } from '@/modules/org/member-phone.service';
+import { MemberPersonalController } from '@/modules/org/member-personal.controller';
+import { MemberPersonalService } from '@/modules/org/member-personal.service';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { LeaderLimitRequestAdminController } from '@/modules/org/leader-limit-request.controller';
@@ -570,6 +576,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     OrgController,
     // UI V1 (2026-10-30; UI-081, D-22): a leader saves an agent's WhatsApp number.
     MemberPhoneController,
+    // ADR-0247: changing who somebody reports to — the picker, a move, a leader's request, withdrawing one.
+    LeaderChangeController,
+    // ADR-0248 §3: the Owner and the Admins fill a member's blank personal data.
+    MemberPersonalController,
     // ADR-0157: the Super Admin's queue of leaders past an office's limit.
     LeaderLimitRequestAdminController,
     OnboardingController,
@@ -674,6 +684,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     InAppChannelAdapter,
     LogEmailAdapter,
     SmtpChannelAdapter,
+    ResendEmailAdapter,
     /*
      * How mail actually leaves (P4-T14, ADR-0019).
      *
@@ -685,18 +696,20 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      * log for a developer with no mail catcher. `log`, by either key, is refused in production by
      * `env.validation.ts`, so this factory cannot quietly choose the wrong one there: the process
      * will not have started. An env file with `MAIL_TRANSPORT` alone still chooses as it did.
+     * P19.12-T1 (ADR-0244): or through Resend's HTTP API, `MAIL_PROVIDER=resend` (`emailAdapterFor`).
      */
     {
       provide: NOTIFICATION_ADAPTERS,
-      inject: [ConfigService, InAppChannelAdapter, LogEmailAdapter, SmtpChannelAdapter],
+      inject: [ConfigService, InAppChannelAdapter, LogEmailAdapter, SmtpChannelAdapter, ResendEmailAdapter],
       useFactory: (
         config: ConfigService,
         inApp: InAppChannelAdapter,
         log: LogEmailAdapter,
         smtp: SmtpChannelAdapter,
+        resend: ResendEmailAdapter,
       ) => [
         inApp,
-        resolveMailProvider(config).provider === 'log' ? log : smtp,
+        emailAdapterFor(resolveMailProvider(config).provider, { log, smtp, resend }),
       ],
     },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
@@ -868,7 +881,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     InvitesService,
     TransfersService,
     RoleChangeService,
+    LeaderChangeService,
     MemberPhoneService,
+    MemberPersonalService,
     // UI V1 (UI-111): the profile photo, its signed links, and the profile's read-only facts.
     AvatarService,
     AvatarLinks,

@@ -12,13 +12,12 @@ import { activeAgentSplit, type ProductionRow } from '@/domain/metrics/unit-roll
 import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
+import type { CalendarTaskView } from '@/modules/calendar/calendar-auto-items';
 import { officeClockOf } from '@/modules/calendar/calendar-time';
-import { CalendarService } from '@/modules/calendar/calendar.service';
+import { CalendarService, type CalendarTodayItem } from '@/modules/calendar/calendar.service';
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
 import { PaceStatusReadings } from '@/modules/coaching/pace-status';
 import { LeadReadings } from '@/modules/leads/lead-readings';
-import { LeadRepository } from '@/modules/leads/lead.repository';
-import type { LeadType } from '@/modules/leads/lead.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
@@ -35,40 +34,15 @@ export interface HomePerson {
 }
 
 /**
- * One row of ***Aksi hari ini*** (UI-100): today's open *Tugas* — the coaching action items, then the leads' next
- * actions — and then the next agenda items.
+ * One row of ***Aksi hari ini*** (UI-100; P19.11-T1 AC-3, UX-2), **in the Calendar's own shapes**, so Home draws each
+ * with the Calendar's own row: a *Tugas* as the Agenda's checklist answers it (`CalendarTaskView`, `done` included — the
+ * row's checkbox ticks it at its source), a calendar entry as `GET /calendar/entries` answers it, an event the reader
+ * joined as the Calendar answers it. *Changed 2026-11-10: the rows were Home's own — `coaching`, `lead` and `agenda`,
+ * a start with no end — and the list filled up with the days after today.*
  */
 export type HomeAction =
-  | {
-    kind: 'coaching';
-    sessionId: string;
-    itemId: string;
-    text: string;
-    /** *Dari: NAME* — the leader who coached them; `null` when that membership can no longer be named. */
-    from: HomePerson | null;
-  }
-  | {
-    kind: 'lead';
-    leadId: string;
-    name: string;
-    type: LeadType | null;
-    note: string | null;
-    contact: { phone: string | null; email: string | null };
-    /** The lead's `version`, for *Isi nomor WhatsApp*'s `PATCH /leads/:id`. */
-    version: number;
-  }
-  | {
-    kind: 'agenda';
-    /** A calendar entry, or an event the reader joined (UI-104 point 1). */
-    source: 'entry' | 'event';
-    id: string;
-    /** An entry's type code (`meeting`, `client`, …), or a joined event's type as the office named it. */
-    type: string;
-    title: string;
-    /** The office day and the office time it starts: `2026-10-30`, `15:00`. */
-    date: LocalDate;
-    start: string;
-  };
+  | { kind: 'task'; task: CalendarTaskView }
+  | CalendarTodayItem;
 
 /** One person on ***Laporan tim*** (UI-101), in its order. */
 export interface HomeTeamPerson extends HomePerson {
@@ -92,16 +66,20 @@ export interface HomeView {
   yesterday: LocalDate;
   /** The office's month, `YYYY-MM`: *Active Agent Oktober*. */
   month: string;
-  /** The office's wall clock as the read was made: the greeting's time of day. */
-  now: { minute: number };
+  /**
+   * The office's wall clock as the read was made: `minute`, the greeting's time of day; `at`, the instant, from which the
+   * page counts on to the office's midnight and reads itself again (P19.11-T1 AC-5), as the Calendar's `now` does.
+   */
+  now: { minute: number; at: string };
   quote: { index: number; text: string; person: string; pose: HomeQuotePose };
   /** *Aktivitas saya* and the chart: the reader's saved totals, the seven days ending today, oldest first. */
   activity: { today: number; yesterday: number; days: { date: LocalDate; count: number }[]; total: number };
   /** *Jadwal hari ini*: timed items today, and today's open *Tugas*. */
   schedule: { meetings: number; tasks: number };
   /**
-   * *Aksi hari ini*. An agenda row's `id` is the Calendar's own — an entry's `GET /calendar/entries/:id` (the detail Home
-   * opens over itself, P19.8-T2 AC-7), a joined event's `/events/:id` — so the row needs no route of its own.
+   * *Aksi hari ini* (P19.11-T1 AC-3): **today's alone** — its *Tugas*, open and ticked, then its timed things not yet
+   * ended — at most `HOME.ACTIONS_SHOWN`. An entry's `entryId` is the Calendar's own — `GET /calendar/entries/:id`, the
+   * detail Home opens over itself (P19.8-T2 AC-7) — and a joined event's `eventId` opens `/events/:id`.
    */
   actions: HomeAction[];
   /**
@@ -158,9 +136,9 @@ export interface HomeLeader {
  *   OD-288): `/new-hires`' own count of this calendar year (`NewHiresService.countThisYear`); 0 with nobody.
  * - **Jadwal hari ini and Aksi hari ini**: Calendar's own count of the reader's today (`CalendarService.today`, UI-104
  *   point 7) — timed things (entries not declined, a trip left out, and the events they joined) and open *Tugas* (the
- *   action items of their newest 1:1 due today and their own open leads whose next action is today, a ticked one gone),
- *   in the Agenda checklist's order. *Aksi hari ini* takes three: the *Tugas*, then today's timed things not yet ended,
- *   then the next timed things on the days after, the events they joined included (`CalendarService.nextAfterToday`).
+ *   action items of their newest 1:1 due today and their own open leads whose next action is today, a ticked one not
+ *   counted), in the Agenda checklist's order. *Aksi hari ini* takes three, **today's alone** (P19.11-T1 AC-3, UX-2): the
+ *   *Tugas*, a ticked one kept in its place, then today's timed things not yet ended. Nothing of another day.
  * - **The quote and the pose**: `quoteOfTheDay`, by the office's day.
  *
  * **Reach**: the reader's own data on `personal_summary:read`; the leader's blocks by `unit_dashboard:read`'s reach
@@ -177,7 +155,7 @@ export class HomeService {
     private readonly coaching: CoachingReadings,
     private readonly activity: ActivityReadings,
     private readonly memberships: MembershipRepository,
-    private readonly leads: LeadRepository,
+    // P19.11-T1 AC-3: no lead repository — *Aksi hari ini*'s task rows are the Calendar's own, which carry all they need.
     private readonly leadCounts: LeadReadings,
     private readonly calendar: CalendarService,
     private readonly subjectReads: SubjectReadAudit,
@@ -201,7 +179,7 @@ export class HomeService {
     const [mine, people, schedule, own, newHires] = await Promise.all([
       this.activity.perPersonPerDay(ctx, [me], chartDays),
       this.unit.people(ctx),
-      this.scheduleOf(ctx, me, office),
+      this.scheduleOf(ctx),
       // *Leads* (P19.9-T1 AC-5): every open lead the reader owns, as `/leads` opens on them — one count.
       this.leadCounts.ownOpenOf(ctx, me),
       // *New hires* (P19.9-T3 AC-6): this calendar year's, as `/new-hires` opens on them — one count.
@@ -216,7 +194,7 @@ export class HomeService {
       today: office.today,
       yesterday,
       month: office.month,
-      now: { minute: officeClockOf(office.timezone, now).minute },
+      now: { minute: officeClockOf(office.timezone, now).minute, at: now.toISOString() },
       quote: quoteOfTheDay(office.today),
       activity: {
         today: days[days.length - 1].count,
@@ -303,56 +281,20 @@ export class HomeService {
   }
 
   /**
-   * **Today's schedule and the top of the list** (UI-100 *Jadwal hari ini*, *Aksi hari ini*; UI-104 point 7):
-   * Calendar's own count of the reader's today (`CalendarService.today`) — its timed things and its open *Tugas*, in the
-   * Agenda checklist's order — so a tick in Calendar lowers Home at once. The three rows are today's *Tugas* first;
-   * then today's timed things not yet ended; then, still short, the reader's next timed things on the days after —
-   * entries and joined events, from Calendar (`CalendarService.nextAfterToday`).
+   * **Today's schedule and the top of the list** (UI-100 *Jadwal hari ini*, *Aksi hari ini*; UI-104 point 7; P19.11-T1
+   * AC-3, UX-2): Calendar's own read of the reader's today (`CalendarService.today`), so a tick in Calendar shows on Home
+   * at once. **Today's alone**, the office's day (invariant §9): its *Tugas* first — open and ticked, in the Agenda
+   * checklist's order — then its timed things not yet ended, soonest first, at most `HOME.ACTIONS_SHOWN`. Nothing of
+   * another day: *Changed 2026-11-10 — a list short of three filled up with the days after (UX-2: 10 and 11 Nov on the
+   * 9th).*
    */
-  private async scheduleOf(ctx: RequestContext, me: string, office: Office) {
+  private async scheduleOf(ctx: RequestContext) {
     const today = await this.calendar.today(ctx);
-    const tasks = today.taskItems.slice(0, HOME.ACTIONS_SHOWN);
-    // A lead row's WhatsApp saves the number with the email beside it (`PATCH /leads/:id` writes the pair): both, read here.
-    const leadIds = tasks.flatMap((task) => (task.lead ? [task.lead.leadId] : []));
-    const leadRows = leadIds.length === 0 ? [] : await this.leads.find(ctx, { _id: { $in: leadIds }, ownerMembershipId: me });
-    const leadOf = new Map(leadRows.map((lead) => [String(lead._id), lead]));
-
-    const rows: HomeAction[] = tasks.map((task): HomeAction => {
-      if (task.coaching) {
-        return {
-          kind: 'coaching',
-          sessionId: task.coaching.sessionId,
-          itemId: task.coaching.itemId,
-          text: task.note,
-          from: task.name ? { membershipId: task.coaching.coachMembershipId, name: task.name, phone: task.phone } : null,
-        };
-      }
-      const lead = leadOf.get(task.lead!.leadId);
-      return {
-        kind: 'lead',
-        leadId: task.lead!.leadId,
-        name: task.name,
-        type: lead?.type ?? null,
-        note: task.note || null,
-        contact: { phone: lead?.contact?.phone ?? task.phone, email: lead?.contact?.email ?? null },
-        version: lead?.version ?? task.lead!.version,
-      };
-    });
-    for (const item of today.upcoming) {
-      if (rows.length >= HOME.ACTIONS_SHOWN) break;
-      rows.push({
-        kind: 'agenda', source: item.kind, id: item.id, type: item.type, title: item.title, date: office.today, start: item.start,
-      });
-    }
-
-    // Still short: the reader's next timed things after today — their entries and the events they joined, soonest
-    // first (Calendar's own read, so Home never writes Calendar's rules again).
-    for (const item of await this.calendar.nextAfterToday(ctx, HOME.ACTIONS_SHOWN - rows.length)) {
-      rows.push({
-        kind: 'agenda', source: item.kind, id: item.id, type: item.type, title: item.title, date: item.date, start: item.start,
-      });
-    }
-    return { meetings: today.meetings, tasks: today.tasks, actions: rows };
+    const actions: HomeAction[] = [
+      ...today.taskItems.map((task): HomeAction => ({ kind: 'task', task })),
+      ...today.upcoming,
+    ].slice(0, HOME.ACTIONS_SHOWN);
+    return { meetings: today.meetings, tasks: today.tasks, actions };
   }
 
   /**

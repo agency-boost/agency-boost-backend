@@ -40,7 +40,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
       expect(rollUpGoal([{ targetMinor: 1, actualMinor: 100 * M }]).attainmentPct).toBe(PERFORMANCE.ATTAINMENT_PCT_CAP);
     });
 
-    it('P18.9-T3 F-254 rounds the sums’ attainment half up in integers: Rp 23 jt of Rp 40 jt is 58%, never 57', () => {
+    it('P18.9-T3 F-254 rounds the sums’ attainment half up in integers: Rp 23 Jt of Rp 40 Jt is 58%, never 57', () => {
       const total = rollUpGoal([{ targetMinor: 25 * M, actualMinor: 15 * M }, { targetMinor: 15 * M, actualMinor: 8 * M }]);
       expect(Math.round(((23 * M) / (40 * M)) * 100)).toBe(57);
       expect(total).toEqual({ targetMinor: 40 * M, actualMinor: 23 * M, attainmentPct: 58, missing: 0 });
@@ -65,7 +65,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
   /*
    * ADR-0165 §1 (P18.5-T15 AC-6; the client's UI review, UI-004): the Unit Dashboard's totals pair each target with the
    * production it measures. The client's unit read *5% · Rp 264.666.667 short · Rp 13.000.000 of Rp 277.666.667*: the
-   * target held Budi's Rp 37 jt and Yanti's Rp 98 jt, whose production was not uploaded.
+   * target held Budi's Rp 37 Jt and Yanti's Rp 98 Jt, whose production was not uploaded.
    */
   describe('the paired rollup — the Unit Dashboard’s totals (ADR-0165 §1)', () => {
     it('P18.5-T15 AC-6 counts a member in the target only when their production is held, and works the gap from the pairs', () => {
@@ -167,7 +167,7 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
         potentialActive: { count: 1, of: 3 },
         newHires: 1,
       });
-      // Counted, the new hire's Rp 100 jt target with nothing sold would read 28%, not 63%.
+      // Counted, the new hire's Rp 100 Jt target with nothing sold would read 28%, not 63%.
       expect(rollUpGoalPaired(rows.map((r) => r.goal)).attainmentPct).toBe(28);
       expect(rollUpProduction(rows).goal).toMatchObject({ targetMinor: 80 * M, actualMinor: 50 * M, attainmentPct: 63, missing: 0 });
     });
@@ -204,13 +204,26 @@ describe('the Unit Dashboard’s rollups (Phase 15, D-metrics)', () => {
         ...Array.from({ length: 4 }, () => row({ pacingToMaa: false })),
       ];
       const split = activeAgentSplit(unit, aab);
-      expect(split).toEqual({ count: 4, of: 12, unit: { count: 1, of: 4 }, aab: { count: 3, of: 8 } });
+      expect(split).toEqual({ count: 4, of: 12, unit: { count: 1, of: 4 }, aab: { count: 3, of: 8 }, ab: { count: 0, of: 0 } });
       expect(split.unit.count + split.aab.count).toBe(split.count);
       expect(split.unit.of + split.aab.of).toBe(split.of);
       // The tile reads it whole: 4 of 12 is 33%.
       expect(Math.round((split.count / split.of) * 100)).toBe(33);
       // And the total is the rollup over everybody: the split is a partition of it.
       expect(rollUpProduction([...unit, ...aab]).potentialActive).toEqual({ count: 4, of: 12 });
+    });
+
+    it('P19.12-T6 AC-1 an AB below is never an AAB: the AB side is its own, and the three add up to the total', () => {
+      const unit = [row({}), row({ pacingToMaa: false })];
+      const aab = [row({}), row({ pacingToMaa: false })];
+      // Two people outside the direct group: an AB below and one of their agents, one pacing.
+      const ab = [row({}), row({ pacingToMaa: false })];
+      const split = activeAgentSplit(unit, aab, ab);
+      expect(split).toEqual({
+        count: 3, of: 6, unit: { count: 1, of: 2 }, aab: { count: 1, of: 2 }, ab: { count: 1, of: 2 },
+      });
+      expect(split.unit.of + split.aab.of + split.ab.of).toBe(split.of);
+      expect(rollUpProduction([...unit, ...aab, ...ab]).potentialActive).toEqual({ count: split.count, of: split.of });
     });
   });
 

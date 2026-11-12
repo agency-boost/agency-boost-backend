@@ -18,6 +18,10 @@ const KPM_0417 = '66f0000000000000000004a1';
  * **One KPM branded, for a reviewer** (P19.6-T1; `branding-fixture.ts`): 0555 shows its own teal and deep blue, a logo
  * and a mascot when storage is configured, read back through the product's own reader; 0417 keeps AgencyBoost's; and a
  * second run writes nothing.
+ *
+ * **The seed keeps colours both words read on** (P19.12-T3; ADR-0246): its logo and mascot are drawn in the same two
+ * hexes, so an adjusted fill would paint the shell a shade off its own pictures, and a re-run leaves an existing row as
+ * it is anyway. An adjusted colour is reviewed by typing one — `#a96800` — into *Tampilan KPM* as 0555's Owner.
  */
 describe('the branding seed (P19.6-T1)', () => {
   const clock = new FixedClock(new Date('2026-11-06T03:00:00Z'));
@@ -49,6 +53,9 @@ describe('the branding seed (P19.6-T1)', () => {
     expect(first).toEqual({ kpmId: KPM_0555, written: 1, images: 'stored' });
     const shown = (await reader.shownFor(KPM_0555))!;
     expect(shown.palette).toMatchObject({ primary: BRANDED_DEMO.primary, secondary: BRANDED_DEMO.secondary, primaryContrast: '#ffffff' });
+    // P19.12-T3: the stored measure names each fill, the colour itself.
+    const row = await mongoose.models[KpmBranding.name]!.findOne({ kpmId: KPM_0555 }).lean<{ contrast: unknown }>();
+    expect(row!.contrast).toMatchObject({ primary: { fill: BRANDED_DEMO.primary }, secondary: { fill: BRANDED_DEMO.secondary } });
     expect(shown.logo).toMatchObject({ key: `dev/${KPM_0555}/${BRANDED_DEMO.logoFolder}`, height: 96 });
     expect(shown.mascot).toEqual({ default: `dev/${KPM_0555}/${BRANDED_DEMO.mascotFolder}`, poses: {} });
     expect(storage.puts).toContain(`dev/${KPM_0555}/${BRANDED_DEMO.logoFolder}/icon-512.png`);

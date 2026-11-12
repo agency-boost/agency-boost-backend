@@ -61,7 +61,8 @@ export class CoachingSnapshotBuilder {
   async build(ctx: RequestContext, subject: Subject): Promise<CoachingSnapshot> {
     const takenAt = this.clock.now();
     const [summary, ratios, week] = await Promise.all([
-      this.summary.of(ctx, subject),
+      // The office's figures (P19.11-T4): a member's typed month APE never enters a leader's frozen record.
+      this.summary.of(ctx, subject, {}, { official: true }),
       this.activity.ratiosOf(ctx, subject),
       this.activity.weekOf(ctx, subject),
     ]);

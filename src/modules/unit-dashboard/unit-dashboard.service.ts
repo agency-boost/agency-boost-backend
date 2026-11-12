@@ -7,7 +7,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import type { Sentence } from '@/common/i18n/sentence';
 import { localDayOf, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import {
-  MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, type UnitDashboardPeriod,
+  MDRT_CAMPAIGN_CODE, PERIOD, UNIT_DASHBOARD, type UnitDashboardPeriod, type UnitView,
 } from '@/domain/constants';
 import { UNIT_DASHBOARD_MESSAGES } from '@/domain/constants/unit-dashboard.messages';
 import { oneOnOneOverdue } from '@/domain/metrics/coaching-recency';
@@ -18,6 +18,10 @@ import {
   activeAgentSplit, cascadeActivityTouches, rollUpCounts, rollUpLeadCounts, rollUpProduction,
   type CountAgainst, type LeadCountsRow, type PairedGoal,
 } from '@/domain/metrics/unit-rollup';
+import {
+  absNotInInformalGroup, directGroup, informalGroup, placeView, viewChosen, viewsOffered,
+  type ViewMember, type ViewPlacement, type ViewReader, type ViewsOffered,
+} from '@/domain/metrics/unit-view';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { CampaignChaseReadings, type ChaseReading } from '@/modules/campaigns/campaign-chase-readings';
@@ -31,6 +35,7 @@ import { ProposalReadings } from '@/modules/proposals/proposal-readings';
 import { CoachResolver, type Coachee } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { GroupRepository } from '@/modules/org/org.repositories';
 import type { Provenance } from '@/modules/production/monthly-agent-data.schema';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { ProductionCorrections } from '@/modules/production/production-correction.service';
@@ -198,18 +203,43 @@ export interface UnitDashboardView {
      * Everybody on the roster, a new hire from their join date (ADR-0172 §1); `newHires` of them before a first sale,
      * whom *Direct Group production* leaves out (§2) — and *Active Agent*'s count, never its `of` (UI-013).
      */
-    team: { total: number; direct: number; units: number; underUnits: number; newHires: number };
+    team: {
+      total: number; direct: number; units: number; underUnits: number;
+      /**
+       * ***Tim Anda*'s chips** (ADR-0249 §3): *{direct} langsung · {aab} AAB*, and *{ab} AB* while somebody outside
+       * `DIRECT_GROUP` is on the roster — the three add up to `total`. `aab` is every row of `DIRECT_GROUP` outside *Your
+       * Unit*; `ab` every row outside `DIRECT_GROUP`: an AB below the head and their people, a tagged one's included, and
+       * office-wide the other roots' trees and *Belum punya leader*. **An AB is never counted as an AAB.**
+       */
+      aab: number; ab: number;
+      newHires: number;
+    };
     directGroupProduction: PairedGoal & { period: 'month' | 'year' };
     /**
      * ***Active Agent*** (UI V1, UI-013; D-16): `POTENTIAL_MAA_COUNT_IN_UNIT` out of **manpower** — every row, the head and
      * the new hires included, the same number as `team.total` — with its *Unit* (the head and their direct agents) and
      * *AAB* (every unit below) split, the two adding up to it.
      */
-    potentialActive: { count: number; of: number; unit: { count: number; of: number }; aab: { count: number; of: number } };
-    potentialRecruits: { yourUnit: number; aabs: number };
+    potentialActive: {
+      count: number; of: number; unit: { count: number; of: number }; aab: { count: number; of: number };
+      /** *AB* (ADR-0249 §3): the rows outside `DIRECT_GROUP` — `{0, 0}` in *Grup langsung*. */
+      ab: { count: number; of: number };
+    };
+    potentialRecruits: { yourUnit: number; aabs: number; abs: number };
   };
   yourUnit: { rows: UnitRow[]; total: UnitTotal };
   units: UnitGroup[];
+  /**
+   * ***Belum punya leader*** (ADR-0249 §2): office-wide *Semua downline* only — the office's people with no leader in the
+   * view who lead nobody in it, A to Z, and their total. `null` in every other view, and with nobody such.
+   */
+  unled: { rows: UnitRow[]; total: UnitTotal } | null;
+  /** The view this answer is over (ADR-0249 §1): the one asked for while it is offered, else `scopes.default`. */
+  scope: UnitView;
+  /** The views this head is offered, in the order drawn, and the reader's default — the picker hides with one or none. */
+  scopes: ViewsOffered;
+  /** *Grup informal*'s line and its sheet (ADR-0249 §4); `null` in any other view. */
+  informal: UnitInformal | null;
   production: { month: string; revision: number; locked: boolean; canUpdate: boolean };
   /**
    * *Chasing MDRT*'s header (P18.2-T7 AC-7, OD-152): whether the office runs an `MDRT_QUALIFICATION` campaign not
@@ -224,13 +254,41 @@ export interface UnitDashboardView {
   lastUpload: LocalDate | null;
 }
 
+/**
+ * ***Grup informal*'s line** (the client's message of 11 November 2026, item 7; ADR-0249 §4): *"{n} AB di bawah Anda belum
+ * masuk grup"* — `ABS_NOT_IN_INFORMAL_GROUP` — and what *+ Tambah ke grup* needs.
+ */
+export interface UnitInformal {
+  /** The live groups the head owns, A to Z: where a tag puts somebody. Empty: the sheet offers to make one. */
+  groups: { groupId: string; name: string }[];
+  /** `ABS_NOT_IN_INFORMAL_GROUP(H)`. */
+  absNotInGroup: number;
+  /** Those ABs, A to Z — only to a reader holding `member:tag_group`, whose sheet lists them; `null` to anybody else. */
+  abs: UnitPerson[] | null;
+  /** The reader holds `member:tag_group` (the Owner and an Admin): *+ Tambah ke grup* is drawn. The API refuses it too. */
+  canTag: boolean;
+}
+
 /** Whose unit a read is, and who is in it, by the roster's scopes (UI-001's *Unit | Group*; `rosterScopes`). */
 export interface UnitPeople {
   head: { membershipId: string; orgLevelCode: string; isReader: boolean };
   /** The head and their direct agents who lead nobody, in the roster's order. */
   unit: string[];
-  /** Everybody, the head first, in the roster's order; only the head when they lead nobody. */
+  /**
+   * Everybody in the view, the head first, in the roster's order; only the head when they lead nobody. **`DIRECT_GROUP`**
+   * unless a view was asked for (ADR-0249 §5: *Group* is *Grup langsung* on Activities and Home).
+   */
   group: string[];
+  /** Each member's parent in the view, the head left out (`placeView`): `null` under *Belum punya leader*. */
+  parentOf: ReadonlyMap<string, string | null>;
+  /** Hung from the head though the head is not their leader: a unit of their own (`placeView`). */
+  attached: ReadonlySet<string>;
+  /** `DIRECT_GROUP(H)`: the split's *Unit* and *AAB* against *AB* (ADR-0249 §3). */
+  direct: ReadonlySet<string>;
+  /** The view read, the views offered and *Grup informal*'s line — `direct`, and `informal: null`, without `views`. */
+  scope: UnitView;
+  scopes: ViewsOffered;
+  informal: UnitInformal | null;
   names: ReadonlyMap<string, string>;
   /**
    * Each person's rung (`orgLevelCode`), the head's included (P19.8-T4 AC-7): a person's own ratios apply the definitions
@@ -257,6 +315,23 @@ interface Head {
   coachedByReader: ReadonlySet<string>;
   /** Another leader's unit read through the office's own grant (P19.3-T3 AC-3): the view writes nothing. */
   readOnly: boolean;
+  /** The reader's grant on `unit_dashboard:read` is the office's own (`own-kpm`, `all`). */
+  office: boolean;
+}
+
+/**
+ * **A head, and the view's people on their roster** (ADR-0249): `members` are the view's but the head, each with the
+ * view's depth; `placement` hangs them together.
+ */
+interface Roster {
+  head: Head;
+  members: Coachee[];
+  placement: ViewPlacement;
+  direct: ReadonlySet<string>;
+  scope: UnitView;
+  scopes: ViewsOffered;
+  /** *Grup informal*'s facts, names not yet read; `null` in any other view. */
+  informal: { groups: { groupId: string; name: string }[]; abs: string[]; canTag: boolean } | null;
 }
 
 /**
@@ -316,20 +391,27 @@ export class UnitDashboardService {
      * nothing else of a proposal. Optional, the token named; without it every row reads 0.
      */
     @Optional() @Inject(ProposalReadings) private readonly proposals: ProposalReadings | null = null,
+    /*
+     * ADR-0249 §4: the live groups the head owns, for *Grup informal* — one read per view, whatever the size. Optional, the
+     * token named; without it the head owns none, and *Grup informal* is offered only for an AB below them.
+     */
+    @Optional() @Inject(GroupRepository) private readonly groups: GroupRepository | null = null,
   ) {}
 
   async read(
-    ctx: RequestContext, query: { period?: UnitDashboardPeriod; for?: string } = {},
+    ctx: RequestContext, query: { period?: UnitDashboardPeriod; for?: string; scope?: UnitView } = {},
   ): Promise<UnitDashboardView> {
     const me = requireMembership(ctx);
     const period = query.period ?? UNIT_DASHBOARD.DEFAULT_PERIOD;
     const office = await this.days.office(ctx);
-    const head = await this.headOf(ctx, me, query.for);
+    const roster = await this.rosterOf(ctx, me, query.for, query.scope, true);
+    const { head } = roster;
     const window = windowOf(period, office.today);
-    if (head.coachees.length === 0) return this.empty(ctx, office, period, window, head);
+    const informal = await this.informalOf(ctx, roster);
+    if (roster.members.length === 0) return this.empty(ctx, office, period, window, roster, informal);
     const goalPeriod: 'month' | 'year' = period === 'year' ? 'year' : 'month';
 
-    const ids = [head.membershipId, ...head.coachees.map((c) => c.membershipId)];
+    const ids = [head.membershipId, ...roster.members.map((c) => c.membershipId)];
     // Coaching's *Last 1:1* is about somebody coached: the reader's own row has none (P15-T4 AC-1).
     const coached = ids.filter((id) => id !== me);
 
@@ -369,7 +451,7 @@ export class UnitDashboardService {
      */
     const standings = new Map<string, ProductionStanding>([
       [head.membershipId, standingOf(headMembership)],
-      ...head.coachees.map((c): [string, ProductionStanding] => [c.membershipId, standingOf(c.membership)]),
+      ...roster.members.map((c): [string, ProductionStanding] => [c.membershipId, standingOf(c.membership)]),
     ]);
     // Every row's id is the head's or a coachee's, so each has its standing.
     const newHire = (id: string) => newHireBeforeFirstSale(standings.get(id)!, office.today);
@@ -463,7 +545,7 @@ export class UnitDashboardService {
           ytd: productionCell(ledger.thisMonthCells.ytd, person),
         },
         leadsCounts: leadCounts.get(id)!,
-        closings: closingsIn(closed.get(id) ?? [], window, office.timezone),
+        closings: closingsIn(closed.get(id)!, window, office.timezone),
         proposalsMade: made.get(id) ?? 0,
         activity: {
           leads: leadsChip, appointments: appointmentsChip, closings: closingsChip,
@@ -483,16 +565,25 @@ export class UnitDashboardService {
       };
     };
 
-    // The tree below the head, each level A to Z — the coaching roster's order (`coaching-roster.service.ts`).
+    /*
+     * **The tree below the head, in the view** (ADR-0249 §2; `placeView`), each level A to Z — the coaching roster's order
+     * (`coaching-roster.service.ts`). A member whose leader is outside the view hangs from the head as a unit of their own
+     * (`attached`: a tagged AB under an untagged one, another root of the office), after the head's own units; office-wide,
+     * somebody with no leader in it who leads nobody is under *Belum punya leader* (`unled`).
+     */
     const below = new Map<string, Coachee[]>();
-    for (const c of head.coachees) {
-      const leader = c.membership.leaderId as string;
-      below.set(leader, [...(below.get(leader) ?? []), c]);
+    const unledPeople: Coachee[] = [];
+    for (const c of roster.members) {
+      const parent = roster.placement.parentOf.get(c.membershipId) ?? null;
+      if (parent === null) unledPeople.push(c);
+      else below.set(parent, [...(below.get(parent) ?? []), c]);
     }
     const aToZ = (a: Coachee, b: Coachee) =>
       nameOf(a.membershipId).localeCompare(nameOf(b.membershipId)) || a.membershipId.localeCompare(b.membershipId);
     for (const level of below.values()) level.sort(aToZ);
+    unledPeople.sort(aToZ);
     const leadsSomebody = (c: Coachee) => below.has(c.membershipId);
+    const attached = (c: Coachee) => roster.placement.attached.has(c.membershipId);
     const rowOf = (c: Coachee) => row(c.membershipId, c.membership.orgLevelCode, c.depth, leadsSomebody(c));
 
     const group = (c: Coachee): UnitGroup => {
@@ -503,20 +594,26 @@ export class UnitDashboardService {
       return { head: headRow, members, units, total: totalOf([headRow, ...members, ...units.flatMap(rowsOf)]) };
     };
 
-    // The head leads somebody (an empty unit answered above), so somebody reports to them directly.
-    const direct = below.get(head.membershipId) as Coachee[];
+    const direct = below.get(head.membershipId) ?? [];
     const headRow = row(head.membershipId, head.orgLevelCode, 0, direct.length > 0);
-    const yourUnitRows = [
-      headRow,
-      ...direct.filter((c) => c.membership.role === 'agent' && !leadsSomebody(c)).map(rowOf),
-    ];
-    const units = direct.filter((c) => c.membership.role !== 'agent' || leadsSomebody(c)).map(group);
-    const everyRow = [...yourUnitRows, ...units.flatMap(rowsOf)];
+    const inYourUnit = (c: Coachee) => !attached(c) && c.membership.role === 'agent' && !leadsSomebody(c);
+    const yourUnitRows = [headRow, ...direct.filter(inYourUnit).map(rowOf)];
+    const units = [
+      ...direct.filter((c) => !inYourUnit(c) && !attached(c)),
+      ...direct.filter(attached),
+    ].map(group);
+    const unledRows = unledPeople.map(rowOf);
+    const everyRow = [...yourUnitRows, ...units.flatMap(rowsOf), ...unledRows];
     // The tiles' production and *on pace*, over the people who count for production (ADR-0172 §2).
-    const roster = rollUpProduction(everyRow);
+    const rolled = rollUpProduction(everyRow);
+    // ADR-0249 §3: *AAB* is `DIRECT_GROUP` outside *Your Unit*; *AB* everybody outside `DIRECT_GROUP` — never an AAB.
+    const yourUnitIds = new Set(yourUnitRows.map((r) => r.membershipId));
+    const aabRows = everyRow.filter((r) => !yourUnitIds.has(r.membershipId) && roster.direct.has(r.membershipId));
+    const abRows = everyRow.filter((r) => !roster.direct.has(r.membershipId));
+    const recruits = (rows: readonly UnitRow[]) => rollUpLeadCounts(rows.map((r) => r.leadsCounts)).recruitNominated;
 
     const view: UnitDashboardView = {
-      ...this.frame(ctx, office, period, window, head, nameOf(head.membershipId), state),
+      ...this.frame(ctx, office, period, window, roster, nameOf(head.membershipId), state, informal),
       empty: false,
       tiles: {
         // Everybody, a new hire included from their join date (ADR-0172 §1).
@@ -525,19 +622,19 @@ export class UnitDashboardService {
           direct: yourUnitRows.length,
           units: units.length,
           underUnits: everyRow.length - yourUnitRows.length - units.length,
-          newHires: roster.newHires,
+          aab: aabRows.length,
+          ab: abRows.length,
+          newHires: rolled.newHires,
         },
         // Paired, as a unit's total is (ADR-0165 §1): a target counts only beside the production it measures.
-        directGroupProduction: { ...roster.goal, period: goalPeriod },
-        // UI-013: out of manpower, as *Your team* counts it, split Unit / AAB.
-        potentialActive: activeAgentSplit(yourUnitRows, units.flatMap(rowsOf)),
-        potentialRecruits: {
-          yourUnit: rollUpLeadCounts(yourUnitRows.map((r) => r.leadsCounts)).recruitNominated,
-          aabs: rollUpLeadCounts(units.flatMap(rowsOf).map((r) => r.leadsCounts)).recruitNominated,
-        },
+        directGroupProduction: { ...rolled.goal, period: goalPeriod },
+        // UI-013: out of manpower, as *Your team* counts it, split Unit / AAB / AB (ADR-0249 §3).
+        potentialActive: activeAgentSplit(yourUnitRows, aabRows, abRows),
+        potentialRecruits: { yourUnit: recruits(yourUnitRows), aabs: recruits(aabRows), abs: recruits(abRows) },
       },
       yourUnit: { rows: yourUnitRows, total: totalOf(yourUnitRows) },
       units,
+      unled: unledRows.length > 0 ? { rows: unledRows, total: totalOf(unledRows) } : null,
       mdrt: chases.mdrt,
       lastUpload,
     };
@@ -629,7 +726,7 @@ export class UnitDashboardService {
     if (asked === undefined) {
       return {
         membershipId: me, orgLevelCode: ctx.membership!.orgLevelCode, isReader: true, coachees: unit.below, coachedByReader,
-        readOnly: false,
+        readOnly: false, office: unit.office,
       };
     }
     const subject = await this.coach.subject(ctx, asked, 'unit_dashboard:read', 'Unit');
@@ -638,15 +735,131 @@ export class UnitDashboardService {
     const coachees = await this.coach.coacheesOf(ctx, asked);
     if (coachees.length === 0) throw new NotFoundException('Unit');
     // The office's own grant reading another leader's unit: as that leader sees it, read-only (P19.3-T3 AC-3).
-    return { membershipId: asked, orgLevelCode: subject.orgLevelCode, isReader: false, coachees, coachedByReader, readOnly: unit.office };
+    return {
+      membershipId: asked, orgLevelCode: subject.orgLevelCode, isReader: false, coachees, coachedByReader, readOnly: unit.office,
+      office: unit.office,
+    };
+  }
+
+  /**
+   * **The head, and the view's people** (ADR-0249; `metrics-and-definitions.md`, *The views*): the head as `headOf`
+   * answers it — the same reach and the same 404s — then `DOWNLINE(H)`: the head's coachees, or **every active member of
+   * the office** for the Owner or an Admin on their own dashboard (one read more). Of it the view asked for while it is
+   * offered (`viewsOffered`), else the reader's default; and **without `views`** — Activities and Home, whose *Group* is
+   * *Grup langsung* (§5) — `DIRECT_GROUP` and no read more.
+   *
+   * *Grup informal* reads the live groups the head owns once (`GroupRepository`), and the tags off the members already
+   * read (`memberships.groupIds`): **a tag reaches nobody outside `DOWNLINE(H)`** (P3-T9 AC-1).
+   */
+  private async rosterOf(
+    ctx: RequestContext, me: string, asked: string | undefined, wanted: UnitView | undefined, views: boolean,
+  ): Promise<Roster> {
+    const head = await this.headOf(ctx, me, asked);
+    const reader: ViewReader = asked !== undefined || !head.office ? 'leader'
+      : ctx.membership?.isKpmOwner ? 'owner' : ctx.membership?.isKpmAdmin ? 'admin' : 'leader';
+    const officeWide = views && reader !== 'leader';
+    const pool = officeWide ? await this.officeMembers(ctx, head.membershipId) : head.coachees;
+    const members = pool.map(viewMemberOf);
+    const direct = directGroup(head.membershipId, members);
+    const leadsSomebody = head.coachees.some((c) => c.membership.leaderId === head.membershipId);
+
+    if (!views) {
+      const scopes = viewsOffered({ reader, leadsSomebody, ownsLiveGroup: false, abBelow: 0 });
+      return this.placed(head, pool, members, direct, 'direct', scopes, null, false);
+    }
+
+    const owned = this.groups
+      ? await this.groups.find(
+        ctx, { ownerMembershipId: head.membershipId, status: 'active' }, { sort: { name: 1 }, projection: { name: 1 } },
+      )
+      : [];
+    const live = new Set(owned.map((g) => String(g._id)));
+    const tagged = new Set(pool
+      .filter((c) => c.membership.groupIds.some((id) => live.has(id)))
+      .map((c) => c.membershipId));
+    const scopes = viewsOffered({
+      reader,
+      leadsSomebody,
+      ownsLiveGroup: owned.length > 0,
+      abBelow: members.filter((m) => m.role === 'ab').length,
+    });
+    const scope = viewChosen(wanted, scopes);
+    const ids = scope === 'direct' ? direct
+      : scope === 'informal' ? informalGroup(head.membershipId, members, tagged)
+        : [head.membershipId, ...members.map((m) => m.membershipId)];
+    const informal = scope !== 'informal' ? null : {
+      groups: owned.map((g) => ({ groupId: String(g._id), name: g.name })),
+      abs: absNotInInformalGroup(head.membershipId, members, tagged),
+      canTag: can(ctx, 'member:tag_group'),
+    };
+    return this.placed(head, pool, members, ids, scope, scopes, informal, scope === 'downline' && officeWide);
+  }
+
+  /** A roster from a view's ids: its members placed, each with the view's depth (`placeView`). */
+  private placed(
+    head: Head, pool: readonly Coachee[], members: readonly ViewMember[], ids: readonly string[], scope: UnitView,
+    scopes: ViewsOffered, informal: Roster['informal'], unled: boolean,
+  ): Roster {
+    const placement = placeView(head.membershipId, members, ids, { unled });
+    const inView = new Set(ids);
+    return {
+      head,
+      // `placeView` gives everybody in the view but the head a depth, and the pool never holds the head.
+      members: pool
+        .filter((c) => inView.has(c.membershipId))
+        .map((c) => ({ ...c, depth: placement.depth.get(c.membershipId)! })),
+      placement,
+      direct: new Set(directGroup(head.membershipId, members)),
+      scope,
+      scopes,
+      informal,
+    };
+  }
+
+  /**
+   * **The office, for its Owner or an Admin on their own dashboard** (ADR-0249 §1, *Semua downline*): every active member
+   * but the head, nearest the root first and then in join order — one read on `{kpmId, status, agentSeq}`.
+   */
+  private async officeMembers(ctx: RequestContext, headId: string): Promise<Coachee[]> {
+    const everybody = await this.memberships.find(
+      ctx, { status: 'active', _id: { $ne: headId } }, { sort: { depth: 1, agentSeq: 1 } },
+    );
+    return everybody.map((m) => ({ membershipId: String(m._id), depth: m.ancestorIds.length + 1, membership: m }));
+  }
+
+  /**
+   * ***Grup informal*'s line, named** (ADR-0249 §4): the ABs not yet tagged, A to Z, for a reader who may tag them — one
+   * read of their names, only then; their number to anybody.
+   */
+  private async informalOf(ctx: RequestContext, roster: Roster): Promise<UnitInformal | null> {
+    const facts = roster.informal;
+    if (!facts) return null;
+    const names = facts.canTag && facts.abs.length > 0 ? await this.names.byMembershipId(ctx, facts.abs) : new Map<string, string>();
+    return {
+      groups: facts.groups,
+      absNotInGroup: facts.abs.length,
+      abs: facts.canTag
+        ? facts.abs
+          .map((id) => ({ membershipId: id, name: names.get(id) ?? '' }))
+          .sort((a, b) => a.name.localeCompare(b.name) || a.membershipId.localeCompare(b.membershipId))
+        : null,
+      canTag: facts.canTag,
+    };
   }
 
   /** What every answer carries, rows or none. */
   private frame(
     ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate },
-    head: Head, headName: string, state: MonthState,
-  ): Pick<UnitDashboardView, 'today' | 'month' | 'year' | 'period' | 'window' | 'overdueAfterDays' | 'head' | 'production' | 'readOnly'> {
+    roster: Roster, headName: string, state: MonthState, informal: UnitInformal | null,
+  ): Pick<
+    UnitDashboardView,
+    'today' | 'month' | 'year' | 'period' | 'window' | 'overdueAfterDays' | 'head' | 'production' | 'readOnly' | 'scope' | 'scopes' | 'informal'
+  > {
+    const { head } = roster;
     return {
+      scope: roster.scope,
+      scopes: roster.scopes,
+      informal,
       today: office.today,
       month: office.month,
       year: office.today.slice(0, 4),
@@ -661,7 +874,7 @@ export class UnitDashboardService {
         locked: state.locked,
         // The write's own grant, which a read-only support session never holds (`can`), over a unit with rows — and
         // never in the office's read-only view of another leader's unit (P19.3-T3 AC-3).
-        canUpdate: head.coachees.length > 0 && can(ctx, 'unit_dashboard:update_production') && !head.readOnly,
+        canUpdate: roster.members.length > 0 && can(ctx, 'unit_dashboard:update_production') && !head.readOnly,
       },
     };
   }
@@ -672,8 +885,10 @@ export class UnitDashboardService {
    * figure is read and no entry is written.
    */
   private async empty(
-    ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate }, head: Head,
+    ctx: RequestContext, office: Office, period: UnitDashboardPeriod, window: { from: LocalDate; to: LocalDate }, roster: Roster,
+    informal: UnitInformal | null,
   ): Promise<UnitDashboardView> {
+    const { head } = roster;
     const [state, names, chases, lastUpload] = await Promise.all([
       this.months.state(ctx, office.month),
       this.names.byMembershipId(ctx, [head.membershipId]),
@@ -682,16 +897,17 @@ export class UnitDashboardService {
     ]);
     const nothing = totalOf([]);
     return {
-      ...this.frame(ctx, office, period, window, head, names.get(head.membershipId) ?? '', state),
+      ...this.frame(ctx, office, period, window, roster, names.get(head.membershipId) ?? '', state, informal),
       empty: true,
       tiles: {
-        team: { total: 0, direct: 0, units: 0, underUnits: 0, newHires: 0 },
+        team: { total: 0, direct: 0, units: 0, underUnits: 0, aab: 0, ab: 0, newHires: 0 },
         directGroupProduction: { ...nothing.goal, period: period === 'year' ? 'year' : 'month' },
-        potentialActive: activeAgentSplit([], []),
-        potentialRecruits: { yourUnit: 0, aabs: 0 },
+        potentialActive: activeAgentSplit([], [], []),
+        potentialRecruits: { yourUnit: 0, aabs: 0, abs: 0 },
       },
       yourUnit: { rows: [], total: nothing },
       units: [],
+      unled: null,
       mdrt: chases.mdrt,
       lastUpload,
     };
@@ -702,27 +918,40 @@ export class UnitDashboardService {
    * — the reader, or `for`, by the same reach and the same 404s (`headOf`) — and the roster's two scopes, in its order
    * (`rosterScopes`), with everybody's name. Reads no figure and writes no entry: the caller reads and records its own.
    */
-  async people(ctx: RequestContext, asked?: string): Promise<UnitPeople> {
+  async people(
+    ctx: RequestContext, asked?: string, options: { views?: boolean; scope?: UnitView } = {},
+  ): Promise<UnitPeople> {
     const me = requireMembership(ctx);
-    const head = await this.headOf(ctx, me, asked);
-    const ids = [head.membershipId, ...head.coachees.map((c) => c.membershipId)];
-    const names = await this.names.byMembershipId(ctx, ids);
+    const roster = await this.rosterOf(ctx, me, asked, options.scope, options.views ?? false);
+    const { head } = roster;
+    const ids = [head.membershipId, ...roster.members.map((c) => c.membershipId)];
+    const [names, informal] = await Promise.all([this.names.byMembershipId(ctx, ids), this.informalOf(ctx, roster)]);
     const scopes = rosterScopes(
       head.membershipId,
-      head.coachees.map((c) => ({
-        membershipId: c.membershipId, leaderId: c.membership.leaderId as string, role: c.membership.role,
+      roster.members.map((c) => ({
+        membershipId: c.membershipId,
+        leaderId: roster.placement.parentOf.get(c.membershipId) ?? null,
+        role: c.membership.role,
+        attached: roster.placement.attached.has(c.membershipId),
       })),
       (id) => names.get(id) ?? '',
     );
     return {
       head: { membershipId: head.membershipId, orgLevelCode: head.orgLevelCode, isReader: head.isReader },
-      ...scopes,
+      unit: scopes.unit,
+      group: scopes.group,
       names,
       rungs: new Map([
         [head.membershipId, head.orgLevelCode],
-        ...head.coachees.map((c): [string, string] => [c.membershipId, c.membership.orgLevelCode]),
+        ...roster.members.map((c): [string, string] => [c.membershipId, c.membership.orgLevelCode]),
       ]),
-      empty: head.coachees.length === 0,
+      empty: roster.members.length === 0,
+      parentOf: roster.placement.parentOf,
+      attached: roster.placement.attached,
+      direct: roster.direct,
+      scope: roster.scope,
+      scopes: roster.scopes,
+      informal,
     };
   }
 
@@ -741,6 +970,16 @@ export class UnitDashboardService {
   }
 }
 
+/** What the views read of a member (`unit-view.ts`): the edge, the cached path and the class. */
+function viewMemberOf(c: Coachee): ViewMember {
+  return {
+    membershipId: c.membershipId,
+    leaderId: c.membership.leaderId ?? null,
+    role: c.membership.role,
+    ancestorIds: c.membership.ancestorIds,
+  };
+}
+
 /** The grants on `personal_summary:read` that reach somebody else: the ones the coaching tabs read through. */
 const OPENS_A_SUBJECT: readonly (Scope | null)[] = ['own-unit', 'own-downline', 'own-kpm', 'all'];
 
@@ -749,7 +988,8 @@ function chaseCells(
   chases: ChaseReading, reach: ReadonlySet<string>, id: string,
 ): Pick<UnitRow, 'chasingMdrt' | 'campaigns'> {
   if (!reach.has(id)) return { chasingMdrt: null, campaigns: null };
-  const mine = chases.byMember.get(id) ?? [];
+  // The chases were read for exactly the reach, and `ofMany` answers every id it is asked about.
+  const mine = chases.byMember.get(id)!;
   return {
     chasingMdrt: mine.some((c) => c.code === MDRT_CAMPAIGN_CODE),
     campaigns: mine.map((c) => ({ code: c.code, title: c.title }))

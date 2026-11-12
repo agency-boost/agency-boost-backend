@@ -18,18 +18,20 @@ import {
   NotificationPreferences, NotificationPreferencesDocument,
 } from './notification.schema';
 import {
-  DeliveryStatus, isAuthTemplate, NotificationChannel, NotificationChannelAdapter,
+  DeliveryRecord, isAuthTemplate, NotificationChannel, NotificationChannelAdapter,
   NotificationTemplateId, RenderedMessage, SendRequest, TEMPLATE_CHANNELS,
 } from './notification.types';
 
 /** One channel's delivery record, as `notifications.delivery` holds it. */
-type Delivery = { status: DeliveryStatus; at?: Date; error?: string };
+type Delivery = DeliveryRecord;
 
 /**
  * **What the provider answered a send it refused** (P19-T1 AC-7; UI-163): nodemailer carries the SMTP server's reply on
  * the error (`response`, `responseCode`) and its own kind of failure (`code`: `EAUTH`, `ETIMEDOUT` …). The error's text
  * usually quotes the reply; where it does not, the reply is added, so the delivery row and the log say what the server
- * said and not only that it failed.
+ * said and not only that it failed. *Since P19.12-T1 (ADR-0244)* `ResendError` carries the same three — Resend's error
+ * `name` as `code`, the HTTP status as `responseCode`, its message as `response` — so a Resend refusal is recorded the
+ * same way.
  */
 export function providerAnswerOf(err: unknown): { error: string; code?: string; responseCode?: number; response?: string } {
   if (!(err instanceof Error)) return { error: String(err) };
@@ -66,7 +68,9 @@ interface Dispatch {
  * (`stop_grace_period` in `deploy/compose.yml`). An SMTP send is bounded by `SMTP_TIMEOUT_MS`
  * (5 s by default) per dial and per greeting, so ten seconds covers a slow relay and leaves the
  * rest of the grace period for the HTTP server and the database to close. It is an operational
- * bound, not a business number, so it lives here beside the code that waits.
+ * bound, not a business number, so it lives here beside the code that waits. *Since P19.12-T1 (ADR-0244):* a Resend
+ * send normally answers in well under a second; one being retried, or queued behind a burst, can outlast the wait, and
+ * is then named in the log and left `pending` like any other.
  */
 export const NOTIFICATION_DRAIN_TIMEOUT_MS = 10_000;
 
@@ -297,10 +301,14 @@ export class NotificationService {
    * **Every auth send, in the log with its outcome** (P19-T1 AC-7; UI-163: *"log every send with its result so failures
    * are visible"*): `sent` at log level, `failed` at error level with what the provider answered — the same text the
    * row's `delivery.<channel>.error` records — both naming the template and the notification row, never the address
-   * or the token.
+   * or the token. A sent mail's line carries the provider's message id where it answered one (P19.12-T1, ADR-0244), so a
+   * mail somebody did not receive is found in Resend's dashboard from the log.
    */
   private logAuthDelivery(templateId: string, notificationId: string, channel: string, outcome: Delivery): void {
-    const line = { templateId, notificationId, channel, status: outcome.status };
+    const line = {
+      templateId, notificationId, channel, status: outcome.status,
+      ...(outcome.providerMessageId ? { providerMessageId: outcome.providerMessageId } : {}),
+    };
     if (outcome.status === 'failed') this.logger.error({ ...line, error: outcome.error }, 'auth mail not sent');
     else this.logger.log(line, `auth mail ${outcome.status}`);
   }
@@ -522,7 +530,8 @@ export class NotificationService {
   /**
    * One channel, through its adapter. A failing adapter — a rejection or a synchronous throw — is recorded
    * and logged at error level, and never thrown. An external channel's message is rendered here, for its recipient
-   * (`renderFor`), so a failure to render it is recorded as its delivery's, too.
+   * (`renderFor`), so a failure to render it is recorded as its delivery's, too. A `sent` delivery keeps the provider's
+   * message id when the adapter answers one (P19.12-T1, ADR-0244: Resend's), which is how a sent mail is traced.
    */
   private async deliverOne(
     channel: NotificationChannel,
@@ -534,8 +543,9 @@ export class NotificationService {
     if (settled) return settled;
     const adapter = this.adapters.get(channel) as NotificationChannelAdapter;
     try {
-      await adapter.send(request, typeof rendered === 'function' ? await rendered() : rendered);
-      return { status: 'sent', at: this.clock.now() };
+      const receipt = await adapter.send(request, typeof rendered === 'function' ? await rendered() : rendered);
+      const providerMessageId = receipt ? receipt.providerMessageId : undefined;
+      return { status: 'sent', at: this.clock.now(), ...(providerMessageId ? { providerMessageId } : {}) };
     } catch (err) {
       // With the provider's answer where it gave one (P19-T1 AC-7): the SMTP reply, its code, nodemailer's kind.
       const { error, ...answer } = providerAnswerOf(err);

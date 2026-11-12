@@ -190,7 +190,7 @@ export function documentSlotLabel(key: ProductDocumentSlot): Sentence<null> {
 
 /**
  * **A budget band's label** (`PRODUCT_BUDGET_BAND_LABELS`), as a sentence where it is a word — *Lump-sum* — and `null`
- * where it is a range of sums, which reads the same in both (*Rp 500 rb–Rp 2 jt*, ADR-0167 §1).
+ * where it is a range of sums, which reads the same in both (*Rp 500 rb–Rp 2 Jt*, ADR-0167 §1).
  */
 export function budgetBandWords(band: number): Sentence<null> | null {
   return band === PRODUCT_LUMP_SUM_BUDGET_BAND ? PRODUCTS_MESSAGES.lumpSumBand : null;

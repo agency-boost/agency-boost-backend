@@ -28,6 +28,7 @@ import {
 } from './kpm.schema';
 import { OwnerInvitations } from './owner-invitations';
 import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
+import { invitationStateOf, type InvitationState } from '@/modules/org/invitation-state';
 import { INSURERS_ONLY, isTemplateLibrary } from './template-library';
 import {
   subscriptionStateOf, validateSubscription, type SubscriptionInput, type SubscriptionState,
@@ -173,6 +174,13 @@ export interface KpmPeople {
 
 /** The Owner's state as the console reads it (ADR-0212 §2). */
 export type OwnerState = 'none' | 'not_invited' | 'invited' | 'active';
+
+/**
+ * ADR-0212 §2's state as the console spells it: `invitationStateOf`'s (`org/invitation-state.ts`, the one rule, ADR-0248
+ * §4), with *signed in* written `active`, as `ownerState` and `KpmPeople.admins[].state` have always carried it.
+ */
+const consoleState = (state: InvitationState): 'active' | 'invited' | 'not_invited' =>
+  state === 'signed_in' ? 'active' : state;
 
 /** The fields `ownerFacts` adds to an office's admin view. */
 type OwnerFacts = Pick<
@@ -416,7 +424,7 @@ export class TenantService {
       const row = kpm.ownerUserId ? ownerRows.find((m) => m.kpmId === id && m.userId === kpm.ownerUserId) : undefined;
       const invitedAt = row?.invitedAt ?? null;
       const ownerState: OwnerState = kpm.ownerUserId
-        ? (user?.lastLoginAt ? 'active' : invitedAt ? 'invited' : 'not_invited')
+        ? consoleState(invitationStateOf(user?.lastLoginAt, invitedAt))
         : (kpm.pendingOwner ? 'not_invited' : 'none');
       const memberCount = live.get(id) ?? 0;
       return [id, {
@@ -1968,7 +1976,7 @@ export class TenantService {
         const user = byUser.get(m.userId);
         return {
           fullName: user?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, ctx.reader),
-          state: user?.lastLoginAt ? 'active' as const : m.invitedAt ? 'invited' as const : 'not_invited' as const,
+          state: consoleState(invitationStateOf(user?.lastLoginAt, m.invitedAt)),
         };
       }).sort((a, b) => a.fullName.localeCompare(b.fullName)),
       membersByRole: codes.map((code) => ({

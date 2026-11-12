@@ -78,7 +78,7 @@ describe('environment validation', () => {
     });
 
     it('P18.11-T18 accepts every provider the module knows, and refuses one it does not, by name', () => {
-      expect(MAIL_PROVIDERS).toEqual(['gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp', 'log']);
+      expect(MAIL_PROVIDERS).toEqual(['resend', 'gmail', 'sendgrid', 'mailjet', 'clicksend', 'ses', 'smtp', 'log']);
       expect(() => validateEnv({ ...valid, MAIL_PROVIDER: 'postmark' })).toThrow(/MAIL_PROVIDER/);
       expect(() => validateEnv({ ...valid, MAIL_PROVIDER: 'Gmail' })).toThrow(/MAIL_PROVIDER/);
     });
@@ -137,6 +137,53 @@ describe('environment validation', () => {
 
     it('P18.11-T18 keeps MAIL_REPLY_TO, trimmed', () => {
       expect(validateEnv({ ...valid, MAIL_REPLY_TO: ' support@agencyboost.id ' }).MAIL_REPLY_TO).toBe('support@agencyboost.id');
+    });
+  });
+
+  describe('Resend (P19.12-T1, ADR-0244)', () => {
+    const KEY = 're_Ab12Cd34_secretpart';
+    const resend = (extra: Record<string, string | undefined> = {}) => {
+      const { SMTP_HOST: _none, ...withoutHost } = valid;
+      return {
+        ...withoutHost, MAIL_PROVIDER: 'resend', RESEND_API_KEY: KEY, MAIL_FROM: 'AgencyBoost <no-reply@notify.agencyboost.id>', ...extra,
+      };
+    };
+    const production = {
+      NODE_ENV: 'production', GCS_BUCKET: 'agencyboost-prod-assets', STORAGE_KEY_PREFIX: 'prod', TRUST_PROXY: '1',
+    };
+
+    it('P19.12-T1 AC-1 boots resend with its key and no SMTP key at all', () => {
+      const env = validateEnv(resend());
+      expect(providerOf(env)).toBe('resend');
+      expect(env).toMatchObject({ RESEND_API_KEY: KEY, SMTP_USER: '', SMTP_PASSWORD: '' });
+      expect(env.SMTP_HOST).toBeUndefined();
+    });
+
+    it('P19.12-T1 AC-1 is accepted in production, unlike log', () => {
+      expect(providerOf(validateEnv(resend(production)))).toBe('resend');
+    });
+
+    it.each([undefined, '', '  '])('P19.12-T1 AC-1 refuses resend with RESEND_API_KEY=%j, by name', (key) => {
+      expect(() => validateEnv(resend({ RESEND_API_KEY: key }))).toThrow(/RESEND_API_KEY: is required when MAIL_PROVIDER is resend/);
+      expect(() => validateEnv(resend({ ...production, RESEND_API_KEY: key }))).toThrow(/RESEND_API_KEY/);
+    });
+
+    it('P19.12-T1 AC-1 refuses a gmail.com or a reserved MAIL_FROM through resend, by name', () => {
+      expect(() => validateEnv(resend({ MAIL_FROM: 'AgencyBoost <agencyboostid@gmail.com>' })))
+        .toThrow(/MAIL_FROM: may not be a gmail\.com address when MAIL_PROVIDER is resend/);
+      expect(() => validateEnv(resend({ MAIL_FROM: 'AgencyBoost <no-reply@example.test>' })))
+        .toThrow(/MAIL_FROM: may not be in example\.test, a reserved domain/);
+    });
+
+    it('P19.12-T1 AC-1 never repeats the key in a refusal', () => {
+      const wrong = 'sk_live_0123456789';
+      expect(() => validateEnv(resend({ RESEND_API_KEY: wrong }))).toThrow(/RESEND_API_KEY: is not a Resend API key/);
+      expect(() => validateEnv(resend({ RESEND_API_KEY: wrong }))).not.toThrow(new RegExp(wrong));
+    });
+
+    it('P19.12-T1 reads RESEND_API_KEY as unset when blank, and ignores it for every other provider', () => {
+      expect(validateEnv({ ...valid, RESEND_API_KEY: ' ' }).RESEND_API_KEY).toBeUndefined();
+      expect(providerOf(validateEnv({ ...valid, RESEND_API_KEY: KEY }))).toBe('smtp');
     });
   });
 

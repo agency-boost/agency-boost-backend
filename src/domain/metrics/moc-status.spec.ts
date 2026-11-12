@@ -104,12 +104,12 @@ describe('MOC_STATUS (OD-22 → option 1, D-moc)', () => {
 
   it('P18-T2 AC-4, P18.7-T1 AC-4, P18.9-T3 AC-2 the MOC column’s tooltip, composed from the company’s rules in the prototype’s words (`KPM_Owner.html:1248`), its sums and percentages as ADR-0174 writes them', () => {
     expect(mocRulesText([AAB, AB], EN)).toBe(
-      'AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (APE ≥ Rp 600 jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
+      'AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (APE ≥ Rp 600 Jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     );
     // A carrier that moves a threshold moves the sentence; no rule, no sentence.
     const raised: MocRule = { ...AAB, criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'MOC_APE', comparator: 'gt', value: RP(250_500_000) }] }] };
-    expect(mocRulesText([raised], EN)).toBe('AAB: APE > Rp 250,5 jt.');
+    expect(mocRulesText([raised], EN)).toBe('AAB: APE > Rp 250,5 Jt.');
     // A threshold is a rule: one the compact form would round is written in full, never rounded (lossless).
     const exact: MocRule = { ...AAB, criteriaGroups: [{ mode: 'all', criteria: [
       { metricKey: 'MOC_APE', comparator: 'gte', value: RP(250_550_000) },
@@ -161,8 +161,8 @@ describe('MOC_STATUS (OD-22 → option 1, D-moc)', () => {
 
   it('P18.10-T5 AC-4 the tooltip in the reader’s language: DAN and ATAU, and each threshold in their figures', () => {
     expect(mocRulesText([AAB, AB], ID)).toBe(
-      'AAB: APE ≥ Rp 200 jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (APE ≥ Rp 600 jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
+      'AAB: APE ≥ Rp 200 Jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
+      + 'AB: (APE ≥ Rp 600 Jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
     );
     // A reader of English figures: *IDR 200M*, a decimal point — the English words with them.
     expect(mocRulesText([AAB], readerIn('en'))).toBe('AAB: APE ≥ IDR 200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.');
@@ -194,7 +194,7 @@ describe('MOC_STATUS (OD-22 → option 1, D-moc)', () => {
       expect(moc.status).toBe('met');
       expect(moc.criteria[0]).toMatchObject({ code: 'MOC_APE', label: 'APE', current: RP(250_000_000), met: true });
       // Its threshold is still money in the tooltip, never a bare count of sen.
-      expect(mocRulesText([legacy], EN)).toBe('AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2.');
+      expect(mocRulesText([legacy], EN)).toBe('AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2.');
       expect(criterionLabel('NET_APE', legacy)).toBe('APE');
     });
 

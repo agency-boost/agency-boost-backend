@@ -843,8 +843,8 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       const sari = agus.aabUnits.find((u: { head: { name: string } }) => u.head.name === 'Sari Puspita');
       expect(sari.moc.path).toBe('Syarat AAB tidak memiliki jalur alternatif — ketiganya harus terpenuhi.');
       expect(mocRulesText).toBe(
-        'AAB: APE ≥ Rp 200 jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
-        + 'AB: (APE ≥ Rp 600 jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
+        'AAB: APE ≥ Rp 200 Jt DAN Monthly2 AA ≥ 2 DAN Rolling Persistency DU ≥ 75%.\n'
+        + 'AB: (APE ≥ Rp 600 Jt DAN Monthly2 AA DU ≥ 4 / DG ≥ 6 DAN Rolling Persistency DU/DG ≥ 75%) ATAU Direct AB (AB on AB) ≥ 5.',
       );
       // English, as it always read; every figure the same in both.
       const englishAgus = english.agencies.find((a: { head: { name: string } }) => a.head.name === 'Agus Salim');
@@ -857,7 +857,7 @@ describe('the Owner’s reporting over HTTP (Phase 18)', () => {
       as('OWNER');
       const { mocRulesText } = (await http().get('/kpm/analytics').expect(200)).body;
       // The suite reads in English (`test/setup.ts`); since the default went live an English reader's sums are English
-      // too (P18.10-T5 AC-1) — IDR 200M where nobody's choice read Rp 200 jt before.
+      // too (P18.10-T5 AC-1) — IDR 200M where nobody's choice read Rp 200 Jt before.
       expect(mocRulesText).toBe(
         'AAB: APE ≥ IDR 200M AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
         + 'AB: (APE ≥ IDR 600M AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',

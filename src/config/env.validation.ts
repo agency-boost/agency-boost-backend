@@ -55,8 +55,16 @@ export const envSchema = z.object({
    * read the link and finish a registration. **It is refused in production** (ADR-0019): an API that accepts a
    * registration and writes the verification link to stdout is the defect this was added to make impossible, not a
    * fallback. The refusal, and every rule that joins two keys, is below, in `superRefine`.
+   *
+   * *Since P19.12-T1 (ADR-0244):* `resend` too, which sends through Resend's HTTP API with `RESEND_API_KEY` and reads
+   * no `SMTP_*` key. It is accepted in production.
    */
   MAIL_PROVIDER: z.preprocess(blankIsUnset, z.enum(MAIL_PROVIDERS).optional()),
+  /**
+   * **Resend's API key** (P19.12-T1, ADR-0244): required when `MAIL_PROVIDER` is `resend` and read by nothing else
+   * (below, in `superRefine`). A *Sending access* key, each environment its own. Never logged and never printed.
+   */
+  RESEND_API_KEY: z.preprocess(blankIsUnset, z.string().trim().optional()),
   /** The key `MAIL_PROVIDER` replaces, read only when that is unset: `smtp` or `log`. */
   MAIL_TRANSPORT: z.preprocess(blankIsUnset, z.enum(LEGACY_MAIL_TRANSPORTS).optional()),
   /** Required for `smtp` alone (below); a preset has its own host. */
@@ -159,7 +167,8 @@ export const envSchema = z.object({
   /*
    * Mail (P18.11-T18, ADR-0182): the provider either key chose, and the rules that join two keys — `SMTP_HOST` for a
    * plain relay, the credentials for a preset, SendGrid's `apikey` — written once, in `mail-provider.ts`, which the
-   * adapter and the test command read too. Each is reported against its key.
+   * adapter and the test command read too. Each is reported against its key. *Since P19.12-T1:* and Resend's, its key
+   * and a `MAIL_FROM` it could send from.
    */
   const mail = { get: (key: string) => (env as Record<string, unknown>)[key] };
   const chosen = resolveMailProvider(mail);

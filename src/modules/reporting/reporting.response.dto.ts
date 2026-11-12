@@ -548,7 +548,7 @@ export class KpmAnalyticsDto implements KpmAnalyticsView {
   @ApiProperty({ example: '2026-10', description: 'The period’s month.' }) month!: string;
   @ApiProperty({ type: ReportingThresholdsDto }) thresholds!: { statusSplitPct: number };
   @ApiProperty({
-    example: 'AAB: APE ≥ Rp 200 jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (APE ≥ Rp 600 jt AND '
+    example: 'AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\nAB: (APE ≥ Rp 600 Jt AND '
       + 'Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
     description: 'The MOC column’s tooltip, composed from the company’s MOC rules: a line per rule, the junior rung '
       + 'first, separated by `\\n`. Empty when the company has none.',

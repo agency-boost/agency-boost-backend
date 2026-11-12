@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GOAL_MODES } from './goal.schema';
 import type { CascadeResult } from './goal-cascade';
-import type { GoalAchieved, GoalMeasured, GoalOfficial, GoalPreview, GoalSnapshotView, GoalTypist, GoalView } from './goal.service';
+import type {
+  GoalAchieved, GoalMeasured, GoalMonthApeView, GoalOfficial, GoalPreview, GoalSnapshotView, GoalTypist, GoalView,
+} from './goal.service';
 
 export class GoalMeasuredDto implements GoalMeasured {
   @ApiProperty({ example: '2026-08-30' }) from!: string;
@@ -296,4 +298,22 @@ export class GoalPreviewDto implements GoalPreview {
       + 'that with `GOAL_INVALID_ASSUMPTION`.',
   })
   projected!: CascadeResult | null;
+}
+
+/** A month's APE the member typed, and when (P19.11-T4). */
+class GoalMonthApeManualDto {
+  @ApiProperty({ example: 216_500_000_00, description: 'IDR sen, whole, at least 0.' }) minor!: number;
+  @ApiProperty({ type: String, format: 'date-time', description: 'When the member typed it.' }) typedAt!: string;
+}
+
+/** **`PUT /goals/:period/ape-month`'s answer** (P19.11-T4; UX-12): the month, and the figure now stored for it. */
+export class GoalMonthApeResponseDto implements GoalMonthApeView {
+  @ApiProperty({ example: '2026' }) period!: string;
+  @ApiProperty({ example: '2026-11', description: '`YYYY-MM`.' }) month!: string;
+  @ApiProperty({
+    type: GoalMonthApeManualDto, nullable: true,
+    description: 'The month’s APE as the member typed it — in force over the office’s upload on their own Summary — or '
+      + '`null` once cleared (the upload again, or *Belum diunggah*).',
+  })
+  manual!: { minor: number; typedAt: string } | null;
 }

@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -19,17 +20,20 @@ import { PasswordService } from '@/modules/auth/password.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { HierarchyService } from '@/modules/org/hierarchy.service';
+import { InvitesService } from '@/modules/org/invites.service';
 import { countLeadersUsed } from '@/modules/org/leader-limit';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipDocument } from '@/modules/org/membership.schema';
 import type { MembershipHistoryDocument } from '@/modules/org/membership-history.schema';
-import { MembershipHistoryRepository } from '@/modules/org/org.repositories';
+import { ONBOARDING_REFUSALS } from '@/modules/org/onboarding.messages';
+import { MemberInviteRepository, MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from './kpm.schema';
 import { OrgLevelService, type OrgLevelRow } from './org-level.service';
 import {
-  parseRoster, skippedRowsCsv, type ParsedRoster, type RosterRow, type AgentCodeRule,
+  parseRoster, ROSTER_COLUMNS, ROSTER_HEADER_NAMES, skippedRowsCsv, type AgentCodeRule, type ParsedRoster, type RosterField,
+  type RosterRow,
 } from './roster-csv';
 import { rosterTextOf, rosterWorkbook } from './roster-file';
 import { ROSTER_ROW_WORDS } from './roster-import.messages';
@@ -47,8 +51,11 @@ export interface RosterIssueView {
   message: string;
 }
 
-/** **Skipped, updated or imported** (A3): what a row comes to. */
-export type RosterOutcome = 'imported' | 'updated' | 'skipped';
+/**
+ * **Skipped, updated or imported** (A3): what a row comes to — or, since ADR-0250 §4, **invited**: a new Agent with no
+ * email, invited on WhatsApp as *+ Tambah agent* invites (ADR-0170), who registers through the link.
+ */
+export type RosterOutcome = 'imported' | 'updated' | 'invited' | 'skipped';
 
 /** One row of the file and what it comes to, in the file's order. */
 export interface RosterRowView {
@@ -62,6 +69,17 @@ export interface RosterRowView {
   outcome: RosterOutcome;
   /** A3's words for the row, written for the reader: why it is skipped, or what importing or updating it notes. */
   messages: string[];
+  /**
+   * **What the row leaves out, written for the reader** (P19.12-T7 AC-2, AC-3; ADR-0250 §2, §3): each optional cell
+   * left empty for its shape, no WhatsApp number, and the person's details neither the row nor the record holds. Empty
+   * for a skipped row, whose bad cells are among its `messages`.
+   */
+  warnings: string[];
+  /**
+   * **The invitation the commit made, to share on WhatsApp** (ADR-0250 §4): its link — to registration — and the number
+   * it goes to. Only in the commit's answer, only for an `invited` row: the link is made once and kept only as a hash.
+   */
+  invite?: { link: string; phone: string };
 }
 
 export interface RosterPreview {
@@ -69,8 +87,8 @@ export interface RosterPreview {
   issues: RosterIssueView[];
   /** The file's header, as it reads — what the skipped rows are written back under. */
   header: string[];
-  /** *"N orang baru siap diimpor, M diperbarui, K baris dilewati"* (A3). */
-  counts: { imported: number; updated: number; skipped: number };
+  /** *"N orang baru siap diimpor, M diperbarui, K baris dilewati"* (A3), and *J diundang lewat WhatsApp* (ADR-0250 §4). */
+  counts: { imported: number; updated: number; invited: number; skipped: number };
   rows: RosterRowView[];
   /**
    * **The skipped rows, as a CSV** (A3's *"⬇ Unduh baris yang dilewati"*; ADR-0205 §8): the file's columns and an
@@ -79,7 +97,10 @@ export interface RosterPreview {
   skippedCsv: string | null;
 }
 
-/** What the commit did: the same rows, now done, and how many new people were mailed an invitation. */
+/**
+ * What the commit did: the same rows, now done, and how many new people were **mailed** an invitation — not those invited
+ * on WhatsApp, who are `counts.invited`.
+ */
 export interface RosterCommitResult extends RosterPreview {
   invited: number;
 }
@@ -90,6 +111,8 @@ interface Plan {
   outcome: RosterOutcome;
   /** For a skipped row, why (the first reason found, A3's order); otherwise what importing or updating it notes. */
   reasons: Message[];
+  /** What it leaves out (ADR-0250 §2, §3): the cells left empty, and the details missing. */
+  warnings: Message[];
   rung: OrgLevelRow | null;
   /** The member an update row updates. */
   existing: MembershipDocument | null;
@@ -120,6 +143,32 @@ type Node = { code: string; rung: OrgLevelRow; leader: string } | 'skipped' | nu
 
 /** Written on every edge an import opens, so the Role change log says where the change came from. */
 const IMPORT_REASON = 'Member import';
+
+/**
+ * **A person's details an import may leave empty** (ADR-0250 §3), in the template's order: the join date and work status
+ * the membership holds, the birth date, gender and join month the account holds.
+ */
+const DETAILS = ['joinDate', 'workStatus', 'dateOfBirth', 'gender', 'companyJoinMonth'] as const satisfies readonly RosterField[];
+type Detail = (typeof DETAILS)[number];
+/** The header names of some fields, joined for a sentence. */
+const headers = (fields: readonly RosterField[]) => fields.map((field) => ROSTER_HEADER_NAMES[field]).join(', ');
+
+/**
+ * **An update never applies its email** (ADR-0181; ADR-0205 §5), so an address in the wrong shape on an update row is a
+ * warning, not a reason to skip it (ADR-0250 §2): the row's *Email* problems become warnings and its email is blank.
+ */
+function forgivingEmail(row: RosterRow): RosterRow {
+  const column = ROSTER_HEADER_NAMES.email;
+  const bad = row.problems.filter((problem) => problem.column === column);
+  if (bad.length === 0) return row;
+  const order = (c: string) => ROSTER_COLUMNS.indexOf(c);
+  return {
+    ...row,
+    email: '',
+    problems: row.problems.filter((problem) => problem.column !== column),
+    warnings: [...row.warnings, ...bad].sort((a, b) => order(a.column) - order(b.column)),
+  };
+}
 
 /**
  * **The member import** (P3.2-T4; rewritten for the setup spec's §A3 by P19.3-T4, ADR-0205 §5 to §11): the Owner and
@@ -164,6 +213,15 @@ export class RosterImportService {
      * build this by hand; without it the global `AGENT_CODE_PATTERN` stands.
      */
     @Optional() private readonly analytics?: AnalyticsConfigReader,
+    /**
+     * **The invitation *+ Tambah agent* makes** (ADR-0250 §4; ADR-0170): a new Agent with no email is invited through it,
+     * on WhatsApp. `@Optional` for the specs that build this by hand; without it such a row is skipped, as before.
+     */
+    @Optional() private readonly invitations?: InvitesService,
+    /** Whether an agent code already has an invitation waiting (`ORG_INVITE_PENDING`), asked in the preview too. */
+    @Optional() private readonly inviteRows?: MemberInviteRepository,
+    /** The app's origin, for the invitation's link — as `/new-hires/agents` reads it. */
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   /** The format the KPM's template publishes for its agent codes, or none (the global pattern). */
@@ -286,11 +344,17 @@ export class RosterImportService {
     // theirs). A Super Admin wrote with the office named for them until P19.4-T2.
     const created = await this.write(ctx, kpm, plans);
     const invited = invite ? await this.invite(ctx, kpm, created) : 0;
-    return { ...this.answer(ctx, parsed, plans), invited };
+    const shared = await this.inviteOnWhatsApp(ctx, plans);
+    return { ...this.answer(ctx, parsed, plans, shared), invited };
   }
 
-  /** The rows' results, each written for the reader, and the skipped rows' file. */
-  private answer(ctx: RequestContext, parsed: ParsedRoster, plans: Plan[]): RosterPreview {
+  /**
+   * The rows' results, each written for the reader, and the skipped rows' file. `shared`: the invitations a commit made
+   * on WhatsApp, by row (ADR-0250 §4).
+   */
+  private answer(
+    ctx: RequestContext, parsed: ParsedRoster, plans: Plan[], shared = new Map<Plan, { link: string; phone: string }>(),
+  ): RosterPreview {
     const say = (message: Message) => render(message, ctx.reader);
     const rows = plans.map((p): RosterRowView => ({
       line: p.row.line,
@@ -301,13 +365,17 @@ export class RosterImportService {
       email: p.row.email,
       outcome: p.outcome,
       messages: p.reasons.map(say),
+      warnings: p.warnings.map(say),
+      ...(shared.has(p) ? { invite: shared.get(p) } : {}),
     }));
     const skipped = plans.filter((p) => p.outcome === 'skipped');
     const count = (outcome: RosterOutcome) => plans.filter((p) => p.outcome === outcome).length;
     return {
       issues: parsed.issues.map((issue) => ({ ...issue, message: say(issue.message) })),
       header: parsed.header,
-      counts: { imported: count('imported'), updated: count('updated'), skipped: count('skipped') },
+      counts: {
+        imported: count('imported'), updated: count('updated'), invited: count('invited'), skipped: count('skipped'),
+      },
       rows,
       skippedCsv: skipped.length === 0
         ? null
@@ -369,8 +437,9 @@ export class RosterImportService {
 
     const skip = (p: Plan, reason: Message) => { p.outcome = 'skipped'; p.reasons = [reason]; };
 
-    const plans = parsed.rows.map((row): Plan => {
-      const plan: Plan = { row, outcome: 'imported', reasons: [], rung: null, existing: null, account: null };
+    const plans = parsed.rows.map((given): Plan => {
+      const row = activeByCode.has(given.agentCode) ? forgivingEmail(given) : given;
+      const plan: Plan = { row, outcome: 'imported', reasons: [], warnings: [], rung: null, existing: null, account: null };
       if (row.problems.length > 0) {
         plan.outcome = 'skipped';
         plan.reasons = row.problems.map((problem) => (problem.column === 'file'
@@ -488,11 +557,18 @@ export class RosterImportService {
     };
     settle();
 
-    // **A new person's row needs an email** (ADR-0205 §7): an account signs in by it, and the invitation goes there.
+    // **A new person's row needs an email** (ADR-0205 §7): an account signs in by it, and the invitation goes there —
+    // or, for an Agent, a WhatsApp number, to be invited as *+ Tambah agent* invites (ADR-0250 §4).
+    const byWhatsApp = await this.whatsAppRule(ctx, kpm, ladder, plans);
     for (const p of plans) {
       if (p.outcome !== 'imported') continue;
-      if (!p.row.email) skip(p, ROW.noEmail);
-      else if (office.emailTaken.has(p.row.email)) skip(p, SAY.emailHasAccount);
+      if (p.row.email) {
+        if (office.emailTaken.has(p.row.email)) skip(p, SAY.emailHasAccount);
+        continue;
+      }
+      const why = byWhatsApp(p);
+      if (why) skip(p, why);
+      else p.outcome = 'invited';
     }
     settle();
 
@@ -509,17 +585,74 @@ export class RosterImportService {
       settle();
     }
 
-    // What importing or updating a row notes (A3, ADR-0205 §5 and §7).
+    // What importing or updating a row notes (A3, ADR-0205 §5 and §7), and what it leaves out (ADR-0250 §2, §3).
     for (const p of plans) {
+      const cells = p.row.warnings.map((w) => ({ column: w.column, problem: render(w.message, ctx.reader) }));
+      if (p.outcome === 'skipped') {
+        // Nothing of a skipped row goes in, so a bad optional cell is one more thing to fix, said as a cell's problem.
+        p.reasons.push(...cells.map((cell) => ROW.cell(cell)));
+        continue;
+      }
+      p.warnings = cells.map((cell) => ROW.cellBlanked(cell));
       if (p.outcome === 'imported') {
-        p.reasons = p.row.phone ? [] : [ROW.noWhatsApp];
+        p.reasons = [];
+        if (!p.row.phone) p.warnings.push(ROW.noWhatsApp);
+        const missing = DETAILS.filter((field) => p.row[field] === null);
+        if (missing.length > 0) p.warnings.push(ROW.missingDetails({ fields: headers(missing) }));
       } else if (p.outcome === 'updated') {
         p.reasons = [ROW.updated];
         if (p.row.email && p.account && p.row.email !== p.account.email) p.reasons.push(ROW.emailKept);
         if (p.row.phone && p.account?.phone && p.row.phone !== p.account.phone) p.reasons.push(ROW.phoneKept);
+        const missing = DETAILS.filter((field) => p.row[field] === null && this.storedIsEmpty(p, field));
+        if (missing.length > 0) p.warnings.push(ROW.missingDetails({ fields: headers(missing) }));
+      } else {
+        // Invited: registration asks the person for their own details, so a row's are not kept (ADR-0250 §4).
+        p.reasons = [ROW.invitedByWhatsApp];
+        const given = DETAILS.filter((field) => field !== 'joinDate' && p.row[field] !== null);
+        if (given.length > 0) p.reasons.push(ROW.detailsAtRegistration({ fields: headers(given) }));
       }
     }
     return plans;
+  }
+
+  /**
+   * Whether an update's member has nothing stored for one of their details (ADR-0250 §3): the membership's join date and
+   * work status, the account's other three. An account that cannot be read is not reported on.
+   */
+  private storedIsEmpty(p: Plan, field: Detail): boolean {
+    if (field === 'joinDate' || field === 'workStatus') return !p.existing?.[field];
+    return p.account !== null && !p.account[field];
+  }
+
+  /**
+   * **Whether a new person's row with no email can be invited on WhatsApp** (P19.12-T7 AC-4; ADR-0250 §4) — the reason it
+   * cannot, or `null`. *+ Tambah agent*'s invitation (ADR-0170): the person joins at the ladder's entry rung, under a
+   * leader, through a link to registration sent to their WhatsApp. So the row is the entry rung's (*Agent*), with a
+   * number, and no invitation is already waiting for its code (`ORG_INVITE_PENDING`, as the form refuses it); its upline
+   * has met the upline checks, which ask a leader of it. A reader who cannot invite (`member:invite`) is answered as
+   * before ADR-0250, *Tanpa email*.
+   */
+  private async whatsAppRule(
+    ctx: RequestContext, kpm: KpmDocument, ladder: OrgLevelRow[], plans: Plan[],
+  ): Promise<(p: Plan) => Message | null> {
+    const asking = plans.filter((p) => p.outcome === 'imported' && !p.row.email);
+    if (asking.length === 0 || !this.invitations || !this.inviteRows || !can(ctx, 'member:invite')) return () => ROW.noEmail;
+    const entry = await this.orgLevels.entryRungCode(kpm.companyId, 'joiner').catch(() => null);
+    if (entry === null) return () => ROW.noEmail;
+    const entryRung = ladder.find((rung) => rung.code === entry);
+    const now = this.clock.now();
+    const waiting = new Set<string>();
+    for (const p of asking) {
+      if (await this.inviteRows.pendingCodeAcrossTenants(kpm.companyId, p.row.agentCode, now)) waiting.add(p.row.agentCode);
+    }
+    return (p) => {
+      if ((p.rung as OrgLevelRow).code !== entry) {
+        return ROW.noEmailNotEntry({ entry: entryRung ? shortOfRung(entryRung) : entry });
+      }
+      if (!p.row.phone) return ROW.noEmailNoWhatsApp;
+      if (waiting.has(p.row.agentCode)) return ONBOARDING_REFUSALS.ORG_INVITE_PENDING.waiting({ agentCode: p.row.agentCode });
+      return null;
+    };
   }
 
   /**
@@ -583,6 +716,8 @@ export class RosterImportService {
 
     try {
       for (const plan of this.leaderFirst(plans)) {
+        // Invited on WhatsApp: nothing is written here — the invitation is made once everything has landed.
+        if (plan.outcome === 'invited') continue;
         if (plan.existing) await this.update(scoped, at, plan, idOf, undo, afterwards);
         else {
           await this.create(scoped, kpm, plan, idOf, unusable, undo);
@@ -610,6 +745,8 @@ export class RosterImportService {
         count: created.length,
         agentCodes: created.map((p) => p.row.agentCode),
         updated: plans.filter((p) => p.outcome === 'updated').map((p) => p.row.agentCode),
+        // ADR-0250 §4: each invitation audits itself (`member_invite.created`) as it is made, after this.
+        invitedOnWhatsApp: plans.filter((p) => p.outcome === 'invited').map((p) => p.row.agentCode),
         skipped: plans.filter((p) => p.outcome === 'skipped').length,
       },
     });
@@ -865,5 +1002,43 @@ export class RosterImportService {
       });
     }
     return invited;
+  }
+
+  /**
+   * **The invitations on WhatsApp** (P19.12-T7 AC-4; ADR-0250 §4): for each `invited` row, once everything else has
+   * landed, *+ Tambah agent*'s own invitation (`InvitesService.addAgent`, ADR-0170) under the row's upline — its code
+   * checked across the company, its join date the row's or the office's today, audited `member_invite.created`, and
+   * listed on New Hires › *Menunggu bergabung* with *Kirim ulang*. Its link is answered once, for the reader to share.
+   * **One that cannot be made skips its row**, with the refusal's words (an invitation that came to wait for the code
+   * since the check, say); the rest of the import stands.
+   */
+  private async inviteOnWhatsApp(ctx: RequestContext, plans: Plan[]): Promise<Map<Plan, { link: string; phone: string }>> {
+    const shared = new Map<Plan, { link: string; phone: string }>();
+    const asked = plans.filter((p) => p.outcome === 'invited');
+    if (asked.length === 0 || !this.invitations) return shared;
+    const origin = this.config?.get<string>('APP_ORIGIN') ?? 'http://localhost:3000';
+    for (const p of asked) {
+      const { row } = p;
+      try {
+        const leader = await this.members.findOne(ctx, { agentCode: row.leaderAgentCode, status: 'active' });
+        if (!leader) throw new NotFoundException('Membership');
+        const made = await this.invitations.addAgent(ctx, {
+          agentCode: row.agentCode,
+          fullName: row.fullName,
+          phone: row.phone as string,
+          ...(row.joinDate ? { joinDate: row.joinDate } : {}),
+          leaderMembershipId: String(leader._id),
+        }, origin);
+        if (made.outcome === 'invited') shared.set(p, { link: made.link, phone: made.invite.phone });
+      } catch (err) {
+        if (!(err instanceof DomainException)) {
+          this.logger.error({ err, kpmId: ctx.kpmId }, 'a member import could not make one WhatsApp invitation');
+        }
+        p.outcome = 'skipped';
+        p.reasons = [err instanceof DomainException ? err.sentence : ROW.inviteNotMade];
+        p.warnings = [];
+      }
+    }
+    return shared;
   }
 }

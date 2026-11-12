@@ -3,19 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
 import { toHtml } from './email-html';
 import {
-  describeMail, isReservedAddress, mailSettingsFrom, type ResolvedMailSettings, transportOptionsFrom,
+  describeMail, isSmtpProvider, mailSettingsFrom, type ResolvedMailSettings, transportOptionsFrom,
 } from './mail-provider';
 import {
   NotificationChannel, NotificationChannelAdapter, RenderedMessage, SendRequest,
 } from './notification.types';
+import { RecipientAddressBook, recipientAddress } from './recipient-address';
 
-/** Where a message is addressed. The service knows the recipient; the adapter needs an address. */
-export abstract class RecipientAddressBook {
-  abstract addressOf(userId: string): Promise<string | null>;
-}
+// Its home since P19.12-T1, which Resend's adapter shares; re-exported for the imports that name it here.
+export { RecipientAddressBook };
 
 /**
  * Delivery over SMTP (P4-T14, ADR-0019), through the provider the environment names (P18.11-T18, ADR-0182).
+ *
+ * *Since P19.12-T1 (ADR-0244), one of two senders:* `MAIL_PROVIDER=resend` sends through Resend's HTTP API
+ * (`ResendEmailAdapter`) and this adapter then builds nothing and checks nothing at start-up. It stays for every SMTP
+ * provider, Gmail above all, which is the manual rollback: an env edit and a redeploy.
  *
  * **Own SMTP rather than a vendor API**, decided 2026-09-11. **Which relay is `MAIL_PROVIDER`'s**: Gmail, SendGrid,
  * Mailjet, ClickSend, SES or any relay `SMTP_HOST` names, each a preset of host, port and TLS in `mail-provider.ts`,
@@ -41,7 +44,11 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
   readonly channel: NotificationChannel = 'email';
   private readonly logger = new Logger(SmtpChannelAdapter.name);
   private readonly settings: ResolvedMailSettings;
-  /** `null` when the provider is `log`: nothing to dial, so a log setup needs no `SMTP_HOST`. */
+  /**
+   * `null` when the provider is not SMTP's — `log` or `resend` — so neither needs an `SMTP_HOST`. *Until P19.12-T1* only
+   * `log` gave `null`, and with `resend` chosen this adapter would have checked an empty host at start-up: fatal in
+   * production, for a transport nothing sends through.
+   */
   private readonly transport: Transporter | null;
 
   constructor(
@@ -52,7 +59,7 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
     // Nest constructs every provider, chosen or not. Reading the settings is pure and `createTransport` opens no
     // connection, so a provider that is constructed but not chosen costs nothing; it is verified only when chosen.
     this.settings = mailSettingsFrom(config);
-    this.transport = this.settings.provider === 'log' ? null : createTransport(transportOptionsFrom(this.settings));
+    this.transport = isSmtpProvider(this.settings.provider) ? createTransport(transportOptionsFrom(this.settings)) : null;
   }
 
   async onModuleInit(): Promise<void> {
@@ -100,24 +107,13 @@ export class SmtpChannelAdapter extends NotificationChannelAdapter implements On
   }
 
   async send(to: SendRequest, rendered: RenderedMessage): Promise<void> {
-    // The email change's link goes to the address being proved (`toAddress`), which the account does not hold yet.
-    const address = to.toAddress ?? (to.userId ? await this.addresses.addressOf(to.userId) : null);
-    if (!address) {
-      // Thrown rather than swallowed: `NotificationService` turns it into a recorded
-      // `failed` with this reason on it, which is exactly the audit trail wanted.
-      throw new Error(`no email address for user ${to.userId ?? '(none)'}`);
-    }
     if (!this.transport) {
-      // `app.module.ts` never chooses this adapter for `log`; reaching here is a wiring defect, said as one.
-      throw new Error('the mail provider is log: this adapter sends nothing');
+      // `app.module.ts` never chooses this adapter for `log` or `resend`; reaching here is a wiring defect, said as one.
+      throw new Error(`the mail provider is ${this.settings.provider}: this adapter sends nothing`);
     }
-    if (this.settings.provider !== 'smtp' && isReservedAddress(address)) {
-      // The seed's `.test` people on staging: a real relay would accept the mail and bounce it, spending the sender's
-      // reputation. Recorded `failed` with this reason, which names the kind of address and not the address.
-      throw new Error(
-        `not sent: the address is in a reserved domain no mail server receives for (RFC 2606), and ${this.settings.provider} would only bounce it`,
-      );
-    }
+    // The address the account has now, or the email change's `toAddress`; none, or a reserved one through a real
+    // provider, is thrown and recorded `failed` with the reason (`recipient-address.ts`).
+    const address = await recipientAddress(to, this.addresses, this.settings.provider);
 
     await this.transport.sendMail({
       from: this.settings.from,

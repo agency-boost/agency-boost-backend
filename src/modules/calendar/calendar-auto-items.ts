@@ -22,9 +22,11 @@ import { officeClockOf, type OfficeTiming } from './calendar-time';
  * to break. Read-only in Calendar; a tap opens the source.
  *
  * - **Tugas** — items with a date and no time: **a lead's next action**, for the lead's owner, on its date (open leads
- *   only: a closed lead's next action is no longer work); and **an open coaching action item**, for the coachee, on its
- *   due date — the typed items of the coachee's newest finalized 1:1, whoever led it (the session the next *Start*
- *   reviews), not ticked done. Never a coaching session itself.
+ *   only: a closed lead's next action is no longer work); and **a coaching action item**, for the coachee, on its due
+ *   date — the typed items of the coachee's newest finalized 1:1, whoever led it (the session the next *Start*
+ *   reviews). Never a coaching session itself. **A ticked one stays on its due date, `done`** (P19.11-T1 AC-1; UX-1):
+ *   a lead's from `nextActionDone` — the date and note the tick moved there — and a coaching item marked in
+ *   `actionItemsDone`. *Changed 2026-11-10: a ticked task left the calendar (UI-104 point 4), so it vanished on a refresh.*
  * - **Joined events** — an event (`/events`) whose RSVP is *going*, at its start and end, with its own type. A
  *   cancelled, declined or withdrawn RSVP, an archived or deleted event: not on the calendar.
  *
@@ -54,6 +56,11 @@ export interface CalendarTaskView {
   lead: { leadId: string; version: number } | null;
   /** A coaching item's: its session, its id, and the coach. */
   coaching: { sessionId: string; itemId: string; coachMembershipId: string } | null;
+  /**
+   * **Ticked done** (P19.11-T1 AC-1; UX-1): `true` for a lead's next action ticked from the Calendar or a coaching item
+   * the coachee ticked — still on its due date, drawn struck through, never counted; `false` while it is open.
+   */
+  done: boolean;
 }
 
 /** A task of somebody who hides their calendar's details (ADR-0110): its day, and nothing else. */
@@ -90,6 +97,25 @@ export function byTaskOrder(a: CalendarTaskView, b: CalendarTaskView): number {
   return a.name.localeCompare(b.name, 'id') || a.taskId.localeCompare(b.taskId);
 }
 
+/** What a lead's task needs of the lead: its next action, and the one last ticked done. */
+type LeadTaskFields = Pick<LeadDocument, 'nextActionDate' | 'nextActionNote' | 'nextActionDone'>;
+
+/**
+ * **A lead's *Tugas* in `[from, to]`, open or ticked** (P19.11-T1 AC-1; UX-1): its next action, open, on its date; else
+ * the next action last ticked done (`nextActionDone`), on the date it was due, with the note it had. `null` when neither
+ * falls in the range. The two never coexist — writing a new next action clears the tick (`LeadService.update`) — so a
+ * completed task leaves its day once its lead holds a new next action; the open one is read first all the same.
+ */
+export function leadTaskOf(
+  lead: LeadTaskFields, from: LocalDate, to: LocalDate,
+): { date: LocalDate; note: string; done: boolean } | null {
+  const within = (date: string | null | undefined): date is LocalDate => !!date && date >= from && date <= to;
+  if (within(lead.nextActionDate)) return { date: lead.nextActionDate, note: lead.nextActionNote?.trim() ?? '', done: false };
+  const ticked = lead.nextActionDone ?? null;
+  if (ticked && within(ticked.date)) return { date: ticked.date, note: ticked.note?.trim() ?? '', done: true };
+  return null;
+}
+
 /**
  * **An instant span in the office's terms**: its date and times, and — when it runs past its first day — its two
  * dates, as a timed trip is answered. An end at midnight belongs to the day before it.
@@ -124,15 +150,21 @@ export class CalendarAutoItems {
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
   ) {}
 
-  /** A member's *Tugas* from `from` to `to`, inclusive, in the checklist's order. */
+  /**
+   * A member's *Tugas* from `from` to `to`, inclusive, in the checklist's order — **the open and the ticked alike**
+   * (P19.11-T1 AC-1), each with `done`, so a tick keeps its place in the list.
+   */
   async tasksOf(ctx: RequestContext, membershipId: string, from: LocalDate, to: LocalDate): Promise<CalendarTaskView[]> {
+    const inRange = { $gte: from, $lte: to };
     const [leads, session] = await Promise.all([
       this.leads.find(ctx, {
-        ownerMembershipId: membershipId, outcome: null, nextActionDate: { $gte: from, $lte: to },
+        ownerMembershipId: membershipId, outcome: null,
+        // Open on its date, or ticked on the date it was due: a tick moves the date into `nextActionDone`.
+        $or: [{ nextActionDate: inRange }, { 'nextActionDone.date': inRange }],
       } as FilterQuery<LeadDocument>),
       this.newestFinalized(ctx, membershipId),
     ]);
-    const items = session ? this.openItems(session, from, to) : [];
+    const items = session ? this.itemsDue(session, from, to) : [];
     const coachId = session?.coachMembershipId ?? null;
     const [coachNames, phones] = await Promise.all([
       coachId ? this.names.byMembershipId(ctx, [coachId]) : Promise.resolve(new Map<string, string>()),
@@ -140,18 +172,23 @@ export class CalendarAutoItems {
     ]);
 
     const tasks: CalendarTaskView[] = [
-      ...leads.map((lead): CalendarTaskView => ({
-        taskId: `lead:${String(lead._id)}`,
-        source: 'lead',
-        date: lead.nextActionDate as LocalDate,
-        ownerMembershipId: membershipId,
-        name: lead.name,
-        note: lead.nextActionNote?.trim() ?? '',
-        phone: lead.contact?.phone ?? null,
-        lead: { leadId: String(lead._id), version: lead.version },
-        coaching: null,
-      })),
-      ...items.map((item): CalendarTaskView => ({
+      ...leads.flatMap((lead): CalendarTaskView[] => {
+        const due = leadTaskOf(lead, from, to);
+        if (!due) return [];
+        return [{
+          taskId: `lead:${String(lead._id)}`,
+          source: 'lead',
+          date: due.date,
+          ownerMembershipId: membershipId,
+          name: lead.name,
+          note: due.note,
+          phone: lead.contact?.phone ?? null,
+          lead: { leadId: String(lead._id), version: lead.version },
+          coaching: null,
+          done: due.done,
+        }];
+      }),
+      ...items.map(({ item, done }): CalendarTaskView => ({
         taskId: `coaching:${String(session!._id)}:${item.itemId}`,
         source: 'coaching',
         date: item.dueDate as LocalDate,
@@ -161,6 +198,7 @@ export class CalendarAutoItems {
         phone: phones.get(coachId as string) ?? null,
         lead: null,
         coaching: { sessionId: String(session!._id), itemId: item.itemId, coachMembershipId: coachId as string },
+        done,
       })),
     ];
     return tasks.sort(byTaskOrder);
@@ -205,14 +243,17 @@ export class CalendarAutoItems {
     return newest ?? null;
   }
 
-  /** Its typed items with a due date in the range, not ticked done. */
-  private openItems(session: CoachingSessionDocument, from: LocalDate, to: LocalDate) {
+  /**
+   * Its typed items with a due date in the range, **each with whether the coachee ticked it** (P19.11-T1 AC-1): a ticked
+   * item stays on its due date, done. A session stored before items could be ticked has no `actionItemsDone`: all open.
+   */
+  private itemsDue(session: CoachingSessionDocument, from: LocalDate, to: LocalDate) {
     const agreed = latestFinalized(session);
     if (!agreed) return [];
-    const done = new Set(session.actionItemsDone.map((d) => d.itemId));
-    return agreed.actionItems.filter((item) => (
-      item.dueDate !== null && item.dueDate >= from && item.dueDate <= to && !done.has(item.itemId) && item.text.trim() !== ''
-    ));
+    const ticked = new Set((session.actionItemsDone ?? []).map((d) => d.itemId));
+    return agreed.actionItems
+      .filter((item) => item.dueDate !== null && item.dueDate >= from && item.dueDate <= to && item.text.trim() !== '')
+      .map((item) => ({ item, done: ticked.has(item.itemId) }));
   }
 
   /**

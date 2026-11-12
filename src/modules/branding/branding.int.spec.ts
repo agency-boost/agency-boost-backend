@@ -229,18 +229,31 @@ describe('P19.6-T1 KPM branding (ADR-0218)', () => {
 
     it('P19.6-T1 AC-9 previews the palette of two colours and writes nothing', async () => {
       const res = await http().post(`${SETTINGS}/preview`).send({ primary: '#0a6e5c', secondary: '#f2c14e' }).expect(200);
-      expect(res.body.primary).toEqual({ contrast: 'light', ratio: expect.any(Number) });
+      expect(res.body.primary).toEqual({ contrast: 'light', ratio: 6.18, fill: '#0a6e5c', adjusted: false });
       expect(res.body.secondary.contrast).toBe('dark');
       expect(res.body.palette).toMatchObject({ primary: '#0a6e5c', primaryContrast: '#ffffff', secondaryContrast: '#1b2b4b' });
       expect((await http().get(SETTINGS).expect(200)).body.own).toBeNull();
     });
 
-    it('B7-AC2 P19.6-T1 AC-7 refuses a colour no text reads on, naming it, on the preview and on Simpan', async () => {
-      const preview = await http().post(`${SETTINGS}/preview`).send({ primary: '#808080', secondary: '#1b2b4b' }).expect(422);
-      expect(preview.body.error).toMatchObject({ code: 'BRANDING_COLOUR_UNREADABLE', details: { field: 'primary' } });
-      const save = await http().put(SETTINGS).send({ primary: '#0a6e5c', secondary: '#808080', expectedVersion: 0 }).expect(422);
-      expect(save.body.error.details.field).toBe('secondary');
+    it('P19.12-T3 AC-1, AC-3 previews a colour no text read on as its nearest readable shade, and says so', async () => {
+      // The client's #a96800: white reads 4.4996:1 on it, refused until P19.12-T3 (ADR-0246).
+      const res = await http().post(`${SETTINGS}/preview`).send({ primary: '#a96800', secondary: '#808080' }).expect(200);
+      expect(res.body.primary).toEqual({ contrast: 'light', ratio: 4.64, fill: '#a66600', adjusted: true });
+      expect(res.body.secondary).toEqual({ contrast: 'light', ratio: 4.61, fill: '#757575', adjusted: true });
+      expect(res.body.palette).toMatchObject({ primary: '#a66600', primaryContrast: '#ffffff', secondary: '#757575' });
       expect((await http().get(SETTINGS).expect(200)).body.own).toBeNull();
+    });
+
+    it('P19.12-T3 AC-1, AC-2 Simpan keeps #a96800 as chosen, paints #a66600, and audits the fill', async () => {
+      const saved = await http().put(SETTINGS).send({ primary: '#A96800', secondary: '#1b2b4b', expectedVersion: 0 }).expect(200);
+      expect(saved.body.own).toMatchObject({ primary: '#a96800', secondary: '#1b2b4b' });
+      expect(saved.body.shown.palette).toMatchObject({ primary: '#a66600', primaryContrast: '#ffffff', secondary: '#1b2b4b' });
+      for (const ctx of [AGENT, ADMIN]) expect((await reader.forSession(ctx))!.palette!.primary).toBe('#a66600');
+      const entry = (await wired.audit.findForTenant(FIXTURE_KPM)).find((e) => e.action === 'kpm_branding.updated');
+      expect(entry!.after).toMatchObject({
+        primary: { hex: '#a96800', contrast: { side: 'light', ratio: 4.64, fill: '#a66600' } },
+        secondary: { hex: '#1b2b4b', contrast: { side: 'light', ratio: 14.06, fill: '#1b2b4b' } },
+      });
     });
 
     it('P19.6-T1 AC-5 saves the two colours together, or refuses one alone', async () => {
@@ -317,9 +330,15 @@ describe('P19.6-T1 KPM branding (ADR-0218)', () => {
       expect((await reader.shownFor(FIXTURE_KPM))!.palette!.primary).toBe('#7a1f5c');
     });
 
-    it('P19.6-T1 AC-11 a template’s Tampilan with an unreadable colour, or another company’s picture, is refused', async () => {
-      await expect(wired.templateService.saveDraft(SUPER_ADMIN, COMPANY, 'branding', { primary: '#808080', secondary: '#1b2b4b' }, templateId))
-        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'BRANDING_COLOUR_UNREADABLE' }) });
+    it('P19.12-T3 AC-1 a template’s Tampilan takes any colour: drafted, published, and painted as its readable shade', async () => {
+      await wired.templateService.saveDraft(SUPER_ADMIN, COMPANY, 'branding', { primary: '#808080', secondary: '#1b2b4b' }, templateId);
+      await wired.templateService.publish(SUPER_ADMIN, COMPANY, 'branding', templateId);
+      const shown = (await reader.shownFor(FIXTURE_KPM))!;
+      expect(shown).toMatchObject({ primary: '#808080', palette: { primary: '#757575', primaryContrast: '#ffffff' } });
+      expect(shown.source.colours).toBe('template');
+    });
+
+    it('P19.6-T1 AC-11 a template’s Tampilan with another company’s picture is refused', async () => {
       await expect(wired.templateService.saveDraft(SUPER_ADMIN, COMPANY, 'branding', {
         logo: { key: `dev/company/66f0000000000000000000c9/branding/01JBXXXXXXXXXXXXXXXXXXXXXX`, width: 1, height: 1 },
       }, templateId)).rejects.toMatchObject({ status: 400 });
@@ -329,7 +348,9 @@ describe('P19.6-T1 KPM branding (ADR-0218)', () => {
       const base = `/admin/companies/${COMPANY}/templates/${templateId}/branding/preview`;
       const ok = await http().post(base).send({ primary: '#7a1f5c', secondary: '#1b2b4b' }).expect(200);
       expect(ok.body.palette.primaryContrast).toBe('#ffffff');
-      await http().post(base).send({ primary: '#808080', secondary: '#1b2b4b' }).expect(422);
+      // P19.12-T3 AC-1: no colour is refused here either.
+      const grey = await http().post(base).send({ primary: '#808080', secondary: '#1b2b4b' }).expect(200);
+      expect(grey.body.primary).toMatchObject({ fill: '#757575', adjusted: true });
       session.current = OWNER;
       await http().post(base).send({ primary: '#7a1f5c', secondary: '#1b2b4b' }).expect(403);
     });

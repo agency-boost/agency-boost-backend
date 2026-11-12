@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
   AccountChoice, AccountOffice, AttentionItem, CompanyCard, KpmAdminView, KpmCreated, KpmView, OwnerState, PlatformAdminRow,
   PlatformOverview,
@@ -553,6 +553,15 @@ export class RosterIssueDto {
   message!: string;
 }
 
+/** The invitation an import made on WhatsApp (ADR-0250 §4), to share. */
+export class RosterInviteDto {
+  @ApiProperty({ type: String, description: 'To registration, for somebody with no account (`/register?invite=…`).' })
+  link!: string;
+
+  @ApiProperty({ type: String, example: '+6281211003300' })
+  phone!: string;
+}
+
 /** One row of a member file and what it comes to (A3). */
 export class RosterPreviewRowDto {
   @ApiProperty({ type: Number })
@@ -573,14 +582,32 @@ export class RosterPreviewRowDto {
   @ApiProperty({ type: String, description: 'Empty when the row gives none.' })
   email!: string;
 
-  @ApiProperty({ enum: ['imported', 'updated', 'skipped'] })
-  outcome!: 'imported' | 'updated' | 'skipped';
+  @ApiProperty({
+    enum: ['imported', 'updated', 'invited', 'skipped'],
+    description: '`invited`: a new Agent with no email, invited on WhatsApp as *+ Add agent* invites (ADR-0250 §4) — no '
+      + 'account is made; the person registers through the invitation\'s link.',
+  })
+  outcome!: 'imported' | 'updated' | 'invited' | 'skipped';
 
   @ApiProperty({
     type: [String],
     description: 'A3\'s words for the row, in the reader\'s language: why it is skipped, or what importing or updating it notes.',
   })
   messages!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: 'What the row leaves out, in the reader\'s language (ADR-0250 §2, §3): each optional cell left empty for '
+      + 'its shape, no WhatsApp number, and the details neither the row nor the record holds. Empty for a skipped row.',
+  })
+  warnings!: string[];
+
+  @ApiPropertyOptional({
+    type: RosterInviteDto,
+    description: 'On the commit\'s answer only, for an `invited` row: the invitation\'s link and the number to share it to. '
+      + 'Made once; the server keeps only its hash.',
+  })
+  invite?: RosterInviteDto;
 }
 
 export class RosterCountsDto {
@@ -589,6 +616,9 @@ export class RosterCountsDto {
 
   @ApiProperty({ type: Number })
   updated!: number;
+
+  @ApiProperty({ type: Number, description: 'Rows invited on WhatsApp (ADR-0250 §4).' })
+  invited!: number;
 
   @ApiProperty({ type: Number })
   skipped!: number;
@@ -616,6 +646,9 @@ export class RosterPreviewDto {
 
 /** What the commit did: the same rows, now done. **No password**: new people are invited to choose their own. */
 export class RosterCommitDto extends RosterPreviewDto {
-  @ApiProperty({ type: Number, description: 'How many new people were emailed an invitation.' })
+  @ApiProperty({
+    type: Number,
+    description: 'How many new people were emailed an invitation. Those invited on WhatsApp are `counts.invited`.',
+  })
   invited!: number;
 }

@@ -26,7 +26,8 @@ import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { measuredRates, type MeasuredRates } from '@/domain/metrics/measured-rates';
 import { rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { computeCascade, defaultMonthsLeft, defaultRates, type CascadeInputs, type CascadeResult } from './goal-cascade';
-import { checkEstimate, checkGoal, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
+import { summaryPeriod } from '@/modules/summary/summary-period';
+import { checkEstimate, checkGoal, checkMonthApe, officialWrittenAt, typedApeOf, typedByAfter, typedInForce } from './goal-input';
 import { GOAL_REFUSALS } from './goals.messages';
 import { GoalRepository } from './goal.repository';
 import type { GoalDocument, GoalMode } from './goal.schema';
@@ -221,6 +222,18 @@ export interface GoalPreview {
   achieved: GoalAchieved;
   /** `null` when the inputs cannot make a plan, as a read answers it. */
   projected: CascadeResult | null;
+}
+
+/**
+ * **`PUT /goals/:period/ape-month`'s answer** (P19.11-T4; UX-12): the month, and the APE the member typed for it — now in
+ * force over any upload on their own Summary — or `null` once cleared.
+ */
+export interface GoalMonthApeView {
+  period: string;
+  /** `YYYY-MM`. */
+  month: string;
+  /** IDR sen, and when it was typed (ISO); `null` when the month holds none. */
+  manual: { minor: number; typedAt: string } | null;
 }
 
 /** One goal, as a caller reads it. */
@@ -701,6 +714,58 @@ export class GoalService {
       current, day, await this.achievedFor(ctx, membershipId, period, current),
       await this.measuring(ctx, membershipId, day), await this.binding(ctx),
     );
+  }
+
+  /**
+   * **A month's APE, typed by the member over the office's upload** (P19.11-T4; UX-12, UXQ2's default):
+   * `PUT /goals/:period/ape-month`, from the headline of the Summary's *Target vs. realisasi (APE)* on *Bulanan*.
+   *
+   * - **The caller's own plan only**, and only a saved one (`404 Goal` without it): no `for`. A coach reads the figure on
+   *   the member's Summary tab and cannot change it.
+   * - **A month of the plan's year** (400 otherwise, `checkMonthApe`), **one the office's Summary can show** — not after
+   *   its current month, not before the month it opened (`summaryPeriod`'s refusals, 400) — **of a plan not locked**
+   *   (`GOAL_PERIOD_LOCKED`, 409).
+   * - **Stored on the plan, per month** (`apeByMonth`, keyed `YYYY-MM`), **never in `monthlyAgentData`**: the upload is
+   *   never written. The member's own Summary reads it over the upload — an upload arriving later does not replace it —
+   *   and no leader's or office's figure reads it at all.
+   * - **`null` clears it** — *Kembalikan ke data unggahan*, or back to *Belum diunggah* where nothing is uploaded.
+   * - **Not a plan input**: no revision, no version, `savedAt` and the snapshot untouched. Audited `goal.month_ape_set` or
+   *   `goal.month_ape_cleared`, `{ period, month }`, never the amount. The same figure again, or clearing a month that
+   *   holds none, writes and records nothing.
+   */
+  async saveMonthApe(ctx: RequestContext, period: string, body: unknown): Promise<GoalMonthApeView> {
+    const membershipId = this.me(ctx);
+    const { month, minor } = checkMonthApe(body, period);
+    const goal = await this.goals.findOne(ctx, { membershipId, period });
+    if (!goal) throw new NotFoundException('Goal');
+    const calendar = await this.days.calendar(ctx);
+    this.requireOpenPeriod(period, calendar);
+    // The months the Summary's selector offers, and their refusals: not begun yet, or before the office opened.
+    summaryPeriod(calendar, { month });
+
+    const held = goal.apeByMonth?.get(month) ?? null;
+    const path = `apeByMonth.${month}`;
+    if (minor === null ? held === null : held?.minor === minor) {
+      return { period, month, manual: held ? { minor: held.minor, typedAt: held.typedAt.toISOString() } : null };
+    }
+    const typedAt = this.clock.now();
+    await this.goals.updateById(ctx, String(goal._id), minor === null
+      ? { $unset: { [path]: '' } }
+      : { $set: { [path]: { minor, typedAt } } });
+    await this.record(ctx, minor === null ? 'goal.month_ape_cleared' : 'goal.month_ape_set', String(goal._id), { period, month });
+    return { period, month, manual: minor === null ? null : { minor, typedAt: typedAt.toISOString() } };
+  }
+
+  /**
+   * **The month's APE the member typed, if any** (P19.11-T4): what `GET /summary` reads over the office's upload on the
+   * member's own Summary — and their coach's view of it. Read from the member's plan for the month's year; `null` without
+   * a plan or a figure. **No leader's or office's figure asks here** (`officialGoalFigures` never reads it). It checks
+   * nobody's reach: the caller resolved the member first, as `planOf`'s callers do.
+   */
+  async monthApeOf(ctx: RequestContext, membershipId: string, month: string): Promise<{ minor: number; typedAt: Date } | null> {
+    const goal = await this.goals.findOne(ctx, { membershipId, period: month.slice(0, 4) });
+    const held = goal?.apeByMonth?.get(month) ?? null;
+    return held ? { minor: held.minor, typedAt: held.typedAt } : null;
   }
 
   /**
