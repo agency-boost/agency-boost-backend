@@ -2431,7 +2431,7 @@ describe('organisation', () => {
     });
 
     describe('creating and naming', () => {
-      it('names the owner by membership, and reads their name back', async () => {
+      it('P19.13-T3 AC-2 names the ★ by membership, reads their name back, and places them in the group (ADR-0253 §2)', async () => {
         const list = await groups.create(owner, {
           name: 'New Agent Mentoring Circle',
           ownerMembershipId: ab,
@@ -2440,9 +2440,51 @@ describe('organisation', () => {
           name: 'New Agent Mentoring Circle',
           ownerMembershipId: ab,
           ownerHasLeft: false,
-          memberCount: 0,
+          memberCount: 1,
         });
         expect(list[0].ownerName).toBeTruthy();
+        expect((await members.findById(ctx(KPM_A), ab))!.groupIds).toEqual([list[0].groupId]);
+      });
+
+      it('P19.13-T3 AC-4 makes a group with no ★ — Belum ada group leader — and nobody in it', async () => {
+        expect(await groups.create(owner, { name: 'CAHYO', ownerMembershipId: null })).toEqual([
+          expect.objectContaining({ name: 'CAHYO', ownerMembershipId: null, ownerName: null, ownerHasLeft: false, memberCount: 0 }),
+        ]);
+        expect(await groups.create(owner, { name: 'DAMAR' })).toHaveLength(2);
+      });
+
+      it('P19.13-T3 AC-2 refuses an Agent as ★ (422 ORG_GROUP_LEADER_NOT_A_LEADER), and writes nothing', async () => {
+        await expect(groups.create(owner, { name: 'Agents', ownerMembershipId: agent })).rejects.toMatchObject({
+          code: 'ORG_GROUP_LEADER_NOT_A_LEADER', status: 422, details: { ownerMembershipId: agent, role: 'agent' },
+        });
+        expect(await groups.list(owner)).toEqual([]);
+        const [made] = await groups.create(owner, { name: 'Kept', ownerMembershipId: null });
+        await expect(groups.rename(owner, made.groupId, { name: 'Kept', ownerMembershipId: agent }))
+          .rejects.toMatchObject({ code: 'ORG_GROUP_LEADER_NOT_A_LEADER' });
+      });
+
+      it('P19.13-T3 AC-2 appointing moves the star: the former ★ stays a member; null clears it; absent keeps it', async () => {
+        const [made] = await groups.create(owner, { name: 'Star', ownerMembershipId: root });
+        let [row] = await groups.rename(owner, made.groupId, { name: 'Star', ownerMembershipId: ab });
+        expect(row).toMatchObject({ ownerMembershipId: ab, memberCount: 2 });
+        expect((await members.findById(ctx(KPM_A), root))!.groupIds).toEqual([made.groupId]);
+        [row] = await groups.rename(owner, made.groupId, { name: 'Renamed' });
+        expect(row).toMatchObject({ name: 'Renamed', ownerMembershipId: ab });
+        [row] = await groups.rename(owner, made.groupId, { name: 'Renamed', ownerMembershipId: null });
+        expect(row).toMatchObject({ ownerMembershipId: null, memberCount: 2 });
+        const updates = await mongoose.connection.db!.collection('auditLog')
+          .find({ action: 'group.updated', targetId: made.groupId }).sort({ _id: 1 }).toArray();
+        expect(updates.map((e) => [e.before.ownerMembershipId, e.after.ownerMembershipId, e.after.name])).toEqual([
+          [null, root, 'Star'], [root, ab, 'Star'], [ab, ab, 'Renamed'], [ab, null, 'Renamed'],
+        ]);
+      });
+
+      it('P19.13-T3 AC-2 a ★ appointed to a second group leaves the first, and takes its star off', async () => {
+        const [first] = await groups.create(owner, { name: 'First', ownerMembershipId: ab });
+        const list = await groups.create(owner, { name: 'Second', ownerMembershipId: ab });
+        expect(list.map((g) => [g.name, g.ownerMembershipId, g.memberCount])).toEqual([['First', null, 0], ['Second', ab, 1]]);
+        expect((await members.findById(ctx(KPM_A), ab))!.groupIds).toEqual([list[1].groupId]);
+        expect(first.groupId).toBe(list[0].groupId);
       });
 
       it('refuses a second live group with the same name', async () => {
@@ -2476,7 +2518,7 @@ describe('organisation', () => {
       });
 
       it('counts the people tagged into it', async () => {
-        const [made] = await groups.create(owner, { name: 'Circle', ownerMembershipId: root });
+        const [made] = await groups.create(owner, { name: 'Circle', ownerMembershipId: null });
         await groups.tag(owner, ab, { groupIds: [made.groupId], isCoreLeader: false });
         await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
 
@@ -2521,14 +2563,26 @@ describe('organisation', () => {
     });
 
     describe('retiring one', () => {
-      it('archives rather than deleting, and keeps the tags on the people', async () => {
-        // The prototype splices the row and strips everybody tags in the same breath,
-        // so the record that a cohort existed is gone.
+      it('P19.13-T3 AC-4 archives rather than deleting, and its members become Tanpa group; Core tags unchanged; audited (ADR-0253 §3)', async () => {
+        // *Changed 2026-11-12:* the tags stayed on the people until P19.13-T3 (P3-T9). The audit log keeps the cohort.
         const [made] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
-        await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
+        const [other] = (await groups.create(owner, { name: 'Other', ownerMembershipId: null })).filter((g) => g.name === 'Other');
+        await groups.tag(owner, agent, { groupIds: [made.groupId, other.groupId], isCoreLeader: false });
+        await groups.setCoreLeader(owner, root, true);
 
-        expect(await groups.archive(owner, made.groupId)).toEqual([]);
-        expect((await members.findById(ctx(KPM_A), agent))!.groupIds).toEqual([made.groupId]);
+        expect(await groups.archive(owner, made.groupId)).toEqual([expect.objectContaining({ name: 'Other' })]);
+        expect((await members.findById(ctx(KPM_A), agent))!.groupIds).toEqual([other.groupId]);
+        expect((await members.findById(ctx(KPM_A), root))!).toMatchObject({ groupIds: [], isCoreLeader: true });
+        const db = mongoose.connection.db!;
+        expect(await db.collection('groups').findOne({ _id: new mongoose.Types.ObjectId(made.groupId) }))
+          .toMatchObject({ status: 'archived', deletedAt: null });
+        expect(await db.collection('auditLog').findOne({ action: 'group.archived', targetId: made.groupId }))
+          .toMatchObject({ after: { status: 'archived', untagged: 2 } });
+        const untagged = await db.collection('auditLog')
+          .find({ action: 'member.tagged', targetId: agent }).sort({ _id: -1 }).limit(1).toArray();
+        expect(untagged[0]).toMatchObject({
+          before: { groupIds: [made.groupId, other.groupId] }, after: { groupIds: [other.groupId], isCoreLeader: false },
+        });
       });
 
       it('frees the name for reuse once it is retired', async () => {
@@ -2553,20 +2607,36 @@ describe('organisation', () => {
 
     describe('tagging one person', () => {
       it('sets and clears groups, and the Core Leader flag, together', async () => {
-        const [a] = await groups.create(owner, { name: 'A', ownerMembershipId: root });
-        const list = await groups.create(owner, { name: 'B', ownerMembershipId: root });
+        const [a] = await groups.create(owner, { name: 'A', ownerMembershipId: null });
+        const list = await groups.create(owner, { name: 'B', ownerMembershipId: null });
         const b = list.find((g) => g.name === 'B')!;
 
-        let tags = await groups.tag(owner, ab, {
-          groupIds: [a.groupId, b.groupId],
-          isCoreLeader: true,
-        });
+        // An Agent may carry several groups.
+        let tags = await groups.tag(owner, agent, { groupIds: [a.groupId, b.groupId], isCoreLeader: false });
         expect(tags.groupIds.sort()).toEqual([a.groupId, b.groupId].sort());
-        expect(tags).toMatchObject({ isCoreLeader: true, canBeCoreLeader: true });
 
-        tags = await groups.tag(owner, ab, { groupIds: [a.groupId], isCoreLeader: false });
-        expect(tags.groupIds).toEqual([a.groupId]);
+        tags = await groups.tag(owner, ab, { groupIds: [a.groupId], isCoreLeader: true });
+        expect(tags).toMatchObject({ groupIds: [a.groupId], isCoreLeader: true, canBeCoreLeader: true });
+
+        tags = await groups.tag(owner, ab, { groupIds: [], isCoreLeader: false });
+        expect(tags.groupIds).toEqual([]);
         expect(tags.isCoreLeader).toBe(false);
+      });
+
+      it('P19.13-T3 AC-2 refuses a leader into two groups (400 ORG_GROUP_ONE_PER_LEADER), and writes nothing', async () => {
+        const [a] = await groups.create(owner, { name: 'A', ownerMembershipId: null });
+        const b = (await groups.create(owner, { name: 'B', ownerMembershipId: null })).find((g) => g.name === 'B')!;
+        await expect(groups.tag(owner, ab, { groupIds: [a.groupId, b.groupId], isCoreLeader: false })).rejects.toMatchObject({
+          code: 'ORG_GROUP_ONE_PER_LEADER', status: 400,
+        });
+        expect((await members.findById(ctx(KPM_A), ab))!.groupIds).toEqual([]);
+      });
+
+      it('P19.13-T3 AC-2 a ★ tagged out of their group takes its star off', async () => {
+        const [made] = await groups.create(owner, { name: 'Led', ownerMembershipId: ab });
+        await groups.tag(owner, ab, { groupIds: [], isCoreLeader: false });
+        expect((await groups.list(owner))[0]).toMatchObject({ ownerMembershipId: null, memberCount: 0 });
+        expect(made.ownerMembershipId).toBe(ab);
       });
 
       describe('P18.5-T5 AC-2 — the Core Leader tag is a leader’s (ADR-0159 §1)', () => {
@@ -2653,10 +2723,12 @@ describe('organisation', () => {
         });
       });
 
-      it('keeps a tag on a retired group, because it is the record of a past cohort', async () => {
-        const [old] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
-        await groups.tag(owner, agent, { groupIds: [old.groupId], isCoreLeader: false });
-        await groups.archive(owner, old.groupId);
+      it('keeps a tag on a group retired before P19.13-T3, because it was the record of a past cohort', async () => {
+        const [old] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: null });
+        // Retired as it was until P19.13-T3: archived, the tag left on the person (ADR-0253 §3 untags from now on).
+        await members.updateById(ctx(KPM_A), agent, { $set: { groupIds: [old.groupId] } });
+        await mongoose.connection.db!.collection('groups')
+          .updateOne({ _id: new mongoose.Types.ObjectId(old.groupId) }, { $set: { status: 'archived' } });
 
         const [now] = await groups.create(owner, { name: 'Class of 2026', ownerMembershipId: root });
         const tags = await groups.tag(owner, agent, {
@@ -4519,7 +4591,7 @@ describe('organisation', () => {
       expect(tags.fullName).toBe('Unknown');
     });
 
-    it('keeps a tag on an archived group, because it is the record of a past cohort', async () => {
+    it('keeps a tag on a group archived before P19.13-T3, because it was the record of a past cohort', async () => {
       /*
        * The prototype splices the row and strips the id from everybody in one breath, so
        * the record that these people were ever a cohort is gone. Here the tag survives
@@ -4540,7 +4612,9 @@ describe('organisation', () => {
       await groups.tag(admin, memberId, {
         groupIds: [retired.groupId, live.groupId], isCoreLeader: false,
       });
-      await groups.archive(admin, retired.groupId);
+      // Retired as it was until P19.13-T3 (ADR-0253 §3 untags from now on): archived, the tag left on the person.
+      await mongoose.connection.db!.collection('groups')
+        .updateOne({ _id: new mongoose.Types.ObjectId(retired.groupId) }, { $set: { status: 'archived' } });
 
       // The panel now offers only the live group, and an edit that names just it must not
       // silently drop the archived tag.

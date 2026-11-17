@@ -33,7 +33,7 @@
 #      Mongo's uid 999, and the sentinel file
 #   5. /opt/agencyboost/{bin,env,state}, the files from deploy/, and env/compose.env
 #   6. Docker credentials for Artifact Registry, through the VM's own service account
-#   7. the systemd units: the stack enabled for boot, the nightly backup timer started
+#   7. the systemd units: the stack enabled for boot, the nightly backup and the daily run timers started
 #   8. the deployers' sudoers rules: gh-deployer-staging may run `deploy.sh staging …` and
 #      `seed.sh staging …`, gh-deployer-prod `deploy.sh prod …`, and nothing else
 #
@@ -323,6 +323,8 @@ systemctl daemon-reload
 # Enabled for boot, not started: it waits for a first deploy (ConditionPathExistsGlob=state/*/current).
 systemctl enable agencyboost.service >/dev/null
 systemctl enable --now agencyboost-backup.timer >/dev/null
+# P19.15-T4 (ADR-0261): the daily run, the premium table notices. A VM that predates it enables it once by hand.
+systemctl enable --now agencyboost-daily.timer >/dev/null
 
 # --- 8. the deployers' one privilege each ----------------------------------------------------------
 

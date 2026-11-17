@@ -20,7 +20,6 @@ import { FIRST_SALE_STAGE_CODE } from '@/domain/constants';
 import { isLocalDate, localDayOf, type LocalDate } from '@/common/time/local-day';
 import type { FieldSentence } from '@/common/validation/fields';
 import { leadFlags, type LeadFlag } from './lead-attention';
-import { ageToday, ageWrite } from './lead-age';
 import { LEAD_REFUSALS } from './leads.messages';
 import type { LeadScope } from './lead.dto';
 import { checkContactPhone, checkLead, type CheckedLead } from './lead-input';
@@ -146,15 +145,6 @@ export interface LeadView {
   outcome: 'won' | 'lost' | null;
   source: string | null;
   dateRegistered: string | null;
-  /**
-   * **The client's age at the next birthday, today** (P19.7-T1 AC-1; ADR-0224 §2): the stored age plus the whole years
-   * since `ageRecordedOn`, on the office's calendar — it moves up on each anniversary. `null` when none was given.
-   */
-  age: number | null;
-  /** The office's day the age was last written, `YYYY-MM-DD`; `null` with it. The server's, never a body's. */
-  ageRecordedOn: string | null;
-  /** `male`, `female`, or `null` (ADR-0224 §1). */
-  gender: 'male' | 'female' | null;
   version: number;
   /** Computed on read, so the screen and the service cannot disagree about what is overdue. */
   flags: LeadFlag[];
@@ -390,10 +380,6 @@ export class LeadService {
       nextActionDate: input.nextActionDate ?? null,
       nextActionNote: input.nextActionNote ?? null,
       source: input.source ?? null,
-      // The client's age, recorded today when given, and the gender (ADR-0224 §3).
-      age: input.age ?? null,
-      ageRecordedOn: typeof input.age === 'number' ? day.today : null,
-      gender: input.gender ?? null,
       // A promise is a row with the month on it, so nothing has to clear it later (P7-T5).
       commitments: input.thisMonth
         ? [{ month: day.month, at: now, byMembershipId: membershipId }]
@@ -537,19 +523,7 @@ export class LeadService {
       updatedBy: membershipId,
     };
 
-    /*
-     * **The age moves only when it differs from today's reading** (P19.7-T1 AC-1; ADR-0224 §3): saving the sheet with
-     * the age it shows leaves the age and its day as they were; another age is stored with today's day; `null` clears
-     * both. The gender is written as sent.
-     */
-    const aged = input.age === undefined ? null : ageWrite(lead, input.age, day.today);
-    if (aged) Object.assign($set, aged);
-    if (input.gender !== undefined) $set.gender = input.gender;
-    const changed = [
-      ...Object.keys(this.writable(input)),
-      ...(aged ? ['age'] : []),
-      ...(input.gender !== undefined && input.gender !== (lead.gender ?? null) ? ['gender'] : []),
-    ];
+    const changed = Object.keys(this.writable(input));
 
     /*
      * **Changing the ladder clears the rung, and the commitment with it.**
@@ -969,7 +943,7 @@ export class LeadService {
     const names = await this.attribution(ctx, rows);
     // The owner's own rows carry their proposals, as `list`'s do: one query for them all, none for a reader who is not.
     const proposals = this.proposalReadings && membershipId === ctx.membershipId
-      ? await this.proposalReadings.ofLeads(ctx, membershipId, rows.map((row) => String(row._id)))
+      ? await this.proposalReadings.ofLeads(ctx, membershipId, rows.map((row) => String(row._id)), day.today)
       : new Map<string, LeadProposals>();
     return rows.map((row) => ({ ...this.view(row, day, names), proposals: proposals.get(String(row._id)) ?? null }));
   }
@@ -1086,7 +1060,7 @@ export class LeadService {
     // The caller's own rows carry their proposals (P19.7-T2 AC-12): one query for the page, none per lead.
     const own = shown.filter((row) => row.ownerMembershipId === ctx.membershipId).map((row) => String(row._id));
     const proposals = this.proposalReadings && own.length > 0
-      ? await this.proposalReadings.ofLeads(ctx, ctx.membershipId as string, own)
+      ? await this.proposalReadings.ofLeads(ctx, ctx.membershipId as string, own, day.today)
       : new Map<string, LeadProposals>();
     const answer = {
       rows: shown.map((row) => ({ ...this.view(row, day, names), proposals: proposals.get(String(row._id)) ?? null })),
@@ -1262,9 +1236,6 @@ export class LeadService {
       outcome: doc.outcome,
       source: doc.source,
       dateRegistered: doc.dateRegistered ? doc.dateRegistered.toISOString() : null,
-      age: ageToday(doc.age, doc.ageRecordedOn, day.today),
-      ageRecordedOn: doc.age === null || doc.age === undefined ? null : doc.ageRecordedOn ?? null,
-      gender: doc.gender ?? null,
       version: doc.version,
       flags: flags,
       /*
@@ -1288,7 +1259,8 @@ export class LeadService {
    */
   private async withOwnProposals(ctx: RequestContext, view: LeadView): Promise<LeadView> {
     if (!this.proposalReadings || view.ownerMembershipId !== ctx.membershipId) return view;
-    const held = await this.proposalReadings.ofLeads(ctx, view.ownerMembershipId, [view.id]);
+    const day = await this.days.for(ctx);
+    const held = await this.proposalReadings.ofLeads(ctx, view.ownerMembershipId, [view.id], day.today);
     return { ...view, proposals: held.get(view.id) ?? null };
   }
 

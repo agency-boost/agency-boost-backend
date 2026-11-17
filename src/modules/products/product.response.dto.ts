@@ -1,10 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES, PRODUCT_KINDS, PRODUCT_LIFECYCLES, PRODUCT_NEEDS,
-  PROPOSAL_DEFAULT_INSURED,
+  PROPOSAL_CALC_TYPES, PROPOSAL_DEFAULT_INSURED, PROPOSAL_NEED_TAGS, PROPOSAL_PAY_FREQUENCIES,
 } from '@/domain/constants';
 import {
-  CommissionYearDto, DefaultAttackPlanDto, FaqEntryDto, PdfDetailBlockDto, PlanOptionDto, ProposalFieldDto,
+  CommissionYearDto, DefaultAttackPlanDto, EntryAgeDto, FaqEntryDto, PayTermDto, PdfDetailBlockDto, PlanOptionDto,
+  PlanRuleDto, ProposalFieldDto,
 } from './product.dto';
 
 /** One product of a company's shelf, as every route here returns it. */
@@ -98,6 +99,36 @@ export class ProductResponseDto {
 
   @ApiProperty({ type: String, nullable: true, description: 'As stored; `null` reads the category\'s label.' })
   proposalTypeLabel!: string | null;
+
+  @ApiProperty({ enum: PROPOSAL_CALC_TYPES, description: 'ADR-0255 §4. `manual` where none is stored.' })
+  calcType!: string;
+
+  @ApiProperty({ type: EntryAgeDto, nullable: true })
+  entryAge!: EntryAgeDto | null;
+
+  @ApiProperty({ type: [PayTermDto] })
+  payTerms!: PayTermDto[];
+
+  @ApiProperty({ enum: PROPOSAL_PAY_FREQUENCIES, isArray: true, description: 'As stored: `[]` reads the four periodic ones.' })
+  frequencies!: string[];
+
+  @ApiProperty({ type: Boolean })
+  smokerRated!: boolean;
+
+  @ApiProperty({ type: PlanRuleDto, nullable: true })
+  planRule!: PlanRuleDto | null;
+
+  @ApiProperty({ type: Number, nullable: true }) upStep!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) upMin!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) upMax!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) premiumMin!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) premiumMax!: number | null;
+
+  @ApiProperty({ type: String, nullable: true, description: '`null` — every product until 19.15 — is `manual`.' })
+  rateTableId!: string | null;
+
+  @ApiProperty({ enum: PROPOSAL_NEED_TAGS, nullable: true, description: 'As stored; `null` reads its needs\' or category\'s.' })
+  needTag!: string | null;
 
   @ApiProperty({ type: String, enum: PRODUCT_LIFECYCLES })
   lifecycle!: string;

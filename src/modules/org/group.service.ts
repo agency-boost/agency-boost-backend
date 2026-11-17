@@ -6,7 +6,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render } from '@/common/i18n/sentence';
-import { isLeaderClass } from '@/domain/constants';
+import { isLeaderClass, LEADER_CLASSES } from '@/domain/constants';
+import { placeLeaders } from '@/domain/metrics/leader-groups';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -21,8 +22,9 @@ const SAY = ORG_REFUSALS;
 export interface GroupSummary {
   groupId: string;
   name: string;
-  ownerMembershipId: string;
-  ownerName: string;
+  /** The ★ group leader as stored (ADR-0253 §2), or `null` — *Belum ada group leader*. */
+  ownerMembershipId: string | null;
+  ownerName: string | null;
   /**
    * The owner has been removed from the office.
    *
@@ -69,6 +71,10 @@ export interface MemberTags {
  * Strategic Leader Forum (Phase 18.1, D-coeditors) and the office's KPM analytics, read-only (ADR-0159 §2). It
  * widens no scope of the hierarchy: what a Core Leader sees of their own unit is what they saw before.
  *
+ * **Since P19.13-T3 (ADR-0253)** a leader (AB or AAB) has one group or none, and a group has at most one ★ group
+ * leader — its `ownerMembershipId`, a leader who is a member of it. *Core leaders & groups* (`CoreLeadersService`) reads
+ * and writes them through `placement`, `retag`, `appoint` and `releaseStars` below; deleting a group untags its members.
+ *
  * P3-T9 AC-1 is the load-bearing one: **a group never participates in scope
  * resolution.** `visibleTo` reads the graph and nothing else, and there is a test that
  * fails if tagging somebody changes what anybody can see. A tag that quietly granted
@@ -84,7 +90,7 @@ export class GroupService {
     private readonly clock: Clock,
   ) {}
 
-  private requireTenantAdmin(ctx: RequestContext): string {
+  requireTenantAdmin(ctx: RequestContext): string {
     if (!ctx.kpmId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
@@ -113,9 +119,8 @@ export class GroupService {
       }
     }
 
-    const owners = await this.members.find(ctx, {
-      _id: { $in: [...new Set(rows.map((g) => g.ownerMembershipId))] },
-    });
+    const ownerIds = [...new Set(rows.flatMap((g) => (g.ownerMembershipId ? [g.ownerMembershipId] : [])))];
+    const owners = ownerIds.length > 0 ? await this.members.find(ctx, { _id: { $in: ownerIds } }) : [];
     const named = await this.namesFor(owners.map((o) => o.userId));
     // An owner whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
@@ -126,28 +131,36 @@ export class GroupService {
       ]),
     );
 
-    return rows.map((g) => ({
-      groupId: String(g._id),
-      name: g.name,
-      ownerMembershipId: g.ownerMembershipId,
-      ownerName: byMembership.get(g.ownerMembershipId)?.name ?? unknown,
-      ownerHasLeft: byMembership.get(g.ownerMembershipId)?.hasLeft ?? true,
-      memberCount: counts.get(String(g._id)) ?? 0,
-    }));
+    return rows.map((g) => {
+      const owner = g.ownerMembershipId ?? null;
+      return {
+        groupId: String(g._id),
+        name: g.name,
+        ownerMembershipId: owner,
+        // No ★ (ADR-0253 §2): nobody named, and nobody to have left.
+        ownerName: owner === null ? null : byMembership.get(owner)?.name ?? unknown,
+        ownerHasLeft: owner === null ? false : byMembership.get(owner)?.hasLeft ?? true,
+        memberCount: counts.get(String(g._id)) ?? 0,
+      };
+    });
   }
 
+  /**
+   * **A new group** — with no ★ (*+ Group baru*, ADR-0253 §2), or with one named, who is appointed: an active leader of
+   * this office, placed in the group (their one group from now, a ★ they held elsewhere released) and given its star.
+   */
   async create(
     ctx: RequestContext,
-    input: { name: string; ownerMembershipId: string },
+    input: { name: string; ownerMembershipId?: string | null },
   ): Promise<GroupSummary[]> {
     this.requireTenantAdmin(ctx);
     const name = input.name.trim();
-    await this.requireOwnerInOffice(ctx, input.ownerMembershipId);
+    const owner = input.ownerMembershipId ? await this.requireLeaderInOffice(ctx, input.ownerMembershipId) : null;
     await this.requireNameFree(ctx, name, null);
 
     const created = await this.groups.create(ctx, {
       name,
-      ownerMembershipId: input.ownerMembershipId,
+      ownerMembershipId: null,
       status: 'active',
       createdByMembershipId: ctx.membershipId,
     } as Partial<GroupDocument>);
@@ -156,51 +169,78 @@ export class GroupService {
       action: 'group.created',
       targetCollection: 'groups',
       targetId: String(created._id),
-      after: { name, ownerMembershipId: input.ownerMembershipId },
+      after: { name, ownerMembershipId: null },
     });
-
-    return this.list(ctx);
-  }
-
-  async rename(
-    ctx: RequestContext,
-    groupId: string,
-    input: { name: string; ownerMembershipId: string },
-  ): Promise<GroupSummary[]> {
-    this.requireTenantAdmin(ctx);
-    const group = await this.find(ctx, groupId);
-    const name = input.name.trim();
-    await this.requireOwnerInOffice(ctx, input.ownerMembershipId);
-    await this.requireNameFree(ctx, name, groupId);
-
-    const before = { name: group.name, ownerMembershipId: group.ownerMembershipId };
-    await this.groups.updateById(ctx, groupId, {
-      $set: { name, ownerMembershipId: input.ownerMembershipId },
-    });
-
-    await this.audit.record(ctx, {
-      action: 'group.updated',
-      targetCollection: 'groups',
-      targetId: groupId,
-      before,
-      after: { name, ownerMembershipId: input.ownerMembershipId },
-    });
+    if (owner) await this.appoint(ctx, created, owner);
 
     return this.list(ctx);
   }
 
   /**
-   * Retiring a group.
+   * **Rename a group, and appoint or clear its ★** (ADR-0253 §2). `ownerMembershipId` absent keeps the ★; `null` clears
+   * it (*Belum ditunjuk*); a membership appoints them — an active leader of this office, placed in the group if they
+   * were not, so **the ★ is always a member**, and the star moves: the group's former ★ keeps their place in it. The
+   * members follow a rename: they carry the group's id, never its name.
+   */
+  async rename(
+    ctx: RequestContext,
+    groupId: string,
+    input: { name: string; ownerMembershipId?: string | null },
+  ): Promise<GroupSummary[]> {
+    this.requireTenantAdmin(ctx);
+    const group = await this.find(ctx, groupId);
+    const name = input.name.trim();
+    const owner = input.ownerMembershipId ? await this.requireLeaderInOffice(ctx, input.ownerMembershipId) : null;
+    await this.requireNameFree(ctx, name, groupId);
+
+    if (name !== group.name) {
+      await this.groups.updateById(ctx, groupId, { $set: { name } });
+      await this.audit.record(ctx, {
+        action: 'group.updated',
+        targetCollection: 'groups',
+        targetId: groupId,
+        before: { name: group.name, ownerMembershipId: group.ownerMembershipId ?? null },
+        after: { name, ownerMembershipId: group.ownerMembershipId ?? null },
+      });
+    }
+    if (owner) {
+      await this.appoint(ctx, (await this.find(ctx, groupId)), owner);
+    } else if (input.ownerMembershipId === null && (group.ownerMembershipId ?? null) !== null) {
+      await this.setOwner(ctx, groupId, name, group.ownerMembershipId ?? null, null);
+    }
+
+    return this.list(ctx);
+  }
+
+  /**
+   * **Deleting a group** (*Hapus*, ADR-0253 §3, amending P3-T9): the group is **archived** — never deleted — **and every
+   * member's tag on it is removed**, so its members read *Tanpa group*; their Core leader tag is untouched. One
+   * `member.tagged` entry per member, before and after, then `group.archived` with how many it untagged: the record that
+   * the cohort existed is the audit log now, as the owner's *"n leader di group ini akan jadi Tanpa group"* asks.
    *
-   * The prototype splices the row and strips the id from everybody's tags in the same
-   * breath, with no confirmation — so the record that these people were ever a cohort is
-   * gone. Here the group is archived and **the tags stay**: the group stops being offered
-   * and stops being counted, and anybody looking at last year's mentoring circle can
-   * still see who was in it.
+   * *Changed 2026-11-12 (P19.13-T3):* until now the tags stayed on the members as the cohort's record (P3-T9).
    */
   async archive(ctx: RequestContext, groupId: string): Promise<GroupSummary[]> {
     this.requireTenantAdmin(ctx);
     const group = await this.find(ctx, groupId);
+    const id = String(group._id);
+
+    const tagged = await this.members.find(ctx, { groupIds: id });
+    if (tagged.length > 0) {
+      await this.members.updateMany(ctx, { _id: { $in: tagged.map((m) => String(m._id)) } }, { $pull: { groupIds: id } });
+      await this.audit.recordMany(ctx, tagged.map((m) => {
+        const before = m.groupIds ?? [];
+        const isCoreLeader = m.isCoreLeader ?? false;
+        return {
+          action: 'member.tagged',
+          targetCollection: 'memberships',
+          targetId: String(m._id),
+          targetMembershipId: String(m._id),
+          before: { groupIds: before, isCoreLeader },
+          after: { groupIds: before.filter((g) => g !== id), isCoreLeader },
+        };
+      }));
+    }
 
     await this.groups.updateById(ctx, groupId, {
       $set: { status: 'archived', archivedAt: this.clock.now() },
@@ -211,7 +251,7 @@ export class GroupService {
       targetCollection: 'groups',
       targetId: groupId,
       before: { status: 'active', name: group.name },
-      after: { status: 'archived' },
+      after: { status: 'archived', untagged: tagged.length },
     });
 
     return this.list(ctx);
@@ -260,6 +300,16 @@ export class GroupService {
       }
     }
 
+    // A leader has one group or none (ADR-0253 §1); an Agent may carry several, as before.
+    if (wanted.length > 1 && isLeaderClass(member.role)) {
+      throw new DomainException(
+        ErrorCode.ORG_GROUP_ONE_PER_LEADER,
+        SAY.ORG_GROUP_ONE_PER_LEADER.oneGroup,
+        HttpStatus.BAD_REQUEST,
+        { membershipId, groupIds: wanted },
+      );
+    }
+
     // Tags on archived groups are kept — they are the record of a past cohort — so the
     // write is a union of what the panel offered and what it could not.
     const offered = new Set(
@@ -272,6 +322,8 @@ export class GroupService {
     await this.members.updateById(ctx, membershipId, {
       $set: { groupIds, isCoreLeader: input.isCoreLeader },
     });
+    // Out of a group they led, the ★ goes with them (ADR-0253 §2).
+    await this.releaseStars(ctx, [membershipId], new Set(groupIds));
 
     await this.audit.record(ctx, {
       action: 'member.tagged',
@@ -333,11 +385,18 @@ export class GroupService {
 
     const id = String(group._id);
     const tagging = found.filter((m) => !(m.groupIds ?? []).includes(id));
-    if (tagging.length > 0) {
+    /*
+     * **A leader is moved, an Agent added** (ADR-0253 §1): a leader has one group, so an AB tagged here leaves the group
+     * they were in — and its ★, if it was theirs — while an Agent keeps their other groups, as before.
+     */
+    const leaders = tagging.filter((m) => isLeaderClass(m.role));
+    const agents = tagging.filter((m) => !isLeaderClass(m.role));
+    if (leaders.length > 0) await this.retag(ctx, leaders, { groupId: id });
+    if (agents.length > 0) {
       await this.members.updateMany(
-        ctx, { _id: { $in: tagging.map((m) => String(m._id)) } }, { $addToSet: { groupIds: id } },
+        ctx, { _id: { $in: agents.map((m) => String(m._id)) } }, { $addToSet: { groupIds: id } },
       );
-      await this.audit.recordMany(ctx, tagging.map((m) => {
+      await this.audit.recordMany(ctx, agents.map((m) => {
         const before = m.groupIds ?? [];
         return {
           action: 'member.tagged',
@@ -354,13 +413,100 @@ export class GroupService {
   }
 
   /**
+   * **Leaders into one group, or none, and their Core leader tag** (ADR-0253 §1, §6): what *Core leaders & groups* writes
+   * for one leader or many. `groupId` (when given) replaces each leader's groups — `[groupId]`, or `[]` for *Tanpa
+   * group* — and the ★ of any group a leader leaves is released; `isCoreLeader` (when given) is set. The values are the
+   * same for every leader, so **one write** carries them all; one `member.tagged` entry per leader whose tags changed,
+   * before and after. Callers have checked every row an active leader of this office, the group live, and the Core
+   * leader permission. Answers how many changed.
+   */
+  async retag(
+    ctx: RequestContext, rows: readonly MembershipDocument[], change: { groupId?: string | null; isCoreLeader?: boolean },
+  ): Promise<number> {
+    const nextGroups = (m: MembershipDocument): string[] => (change.groupId === undefined
+      ? m.groupIds ?? []
+      : change.groupId === null ? [] : [change.groupId]);
+    const nextCore = (m: MembershipDocument): boolean => change.isCoreLeader ?? m.isCoreLeader ?? false;
+    const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+    const changed = rows.filter((m) => !same(m.groupIds ?? [], nextGroups(m)) || (m.isCoreLeader ?? false) !== nextCore(m));
+    if (changed.length > 0) {
+      const set: Record<string, unknown> = {};
+      if (change.groupId !== undefined) set.groupIds = change.groupId === null ? [] : [change.groupId];
+      if (change.isCoreLeader !== undefined) set.isCoreLeader = change.isCoreLeader;
+      await this.members.updateMany(ctx, { _id: { $in: changed.map((m) => String(m._id)) } }, { $set: set });
+      await this.audit.recordMany(ctx, changed.map((m) => ({
+        action: 'member.tagged',
+        targetCollection: 'memberships',
+        targetId: String(m._id),
+        targetMembershipId: String(m._id),
+        before: { groupIds: m.groupIds ?? [], isCoreLeader: m.isCoreLeader ?? false },
+        after: { groupIds: nextGroups(m), isCoreLeader: nextCore(m) },
+      })));
+    }
+    if (change.groupId !== undefined) {
+      await this.releaseStars(ctx, rows.map((m) => String(m._id)), new Set(change.groupId ? [change.groupId] : []));
+    }
+    return changed.length;
+  }
+
+  /**
+   * **The ★ of a group its leader has left is released** (ADR-0253 §2): each live group one of `membershipIds` leads,
+   * other than the groups in `kept`, loses its star — `group.updated`, before and after.
+   */
+  async releaseStars(ctx: RequestContext, membershipIds: readonly string[], kept: ReadonlySet<string>): Promise<void> {
+    if (membershipIds.length === 0) return;
+    const led = await this.groups.find(ctx, { status: 'active', ownerMembershipId: { $in: [...membershipIds] } });
+    for (const group of led.filter((g) => !kept.has(String(g._id)))) {
+      await this.setOwner(ctx, String(group._id), group.name, group.ownerMembershipId ?? null, null);
+    }
+  }
+
+  /**
+   * **Appoint a ★** (ADR-0253 §2): the leader placed in the group if they were not — their one group from now, a star
+   * they held elsewhere released — and the group's owner set to them, so the former ★ loses theirs.
+   */
+  async appoint(ctx: RequestContext, group: GroupDocument, leader: MembershipDocument): Promise<void> {
+    const groupId = String(group._id);
+    await this.retag(ctx, [leader], { groupId });
+    const owner = group.ownerMembershipId ?? null;
+    if (owner !== String(leader._id)) await this.setOwner(ctx, groupId, group.name, owner, String(leader._id));
+  }
+
+  /** **A group's ★ set or cleared**, audited `group.updated` before and after. */
+  async setOwner(ctx: RequestContext, groupId: string, name: string, before: string | null, after: string | null): Promise<void> {
+    await this.groups.updateById(ctx, groupId, { $set: { ownerMembershipId: after } });
+    await this.audit.record(ctx, {
+      action: 'group.updated',
+      targetCollection: 'groups',
+      targetId: groupId,
+      before: { name, ownerMembershipId: before },
+      after: { name, ownerMembershipId: after },
+    });
+  }
+
+  /** The office's live groups and its active leaders, placed (`placeLeaders`): each leader's one group, each group's ★. */
+  async placement(ctx: RequestContext): Promise<{
+    groups: GroupDocument[]; leaders: MembershipDocument[]; groupOf: Map<string, string | null>; headOf: Map<string, string | null>;
+  }> {
+    const [groups, leaders] = await Promise.all([
+      this.groups.find(ctx, { status: 'active' }, { sort: { name: 1 } }),
+      this.members.find(ctx, { status: 'active', role: { $in: [...LEADER_CLASSES] } }),
+    ]);
+    const { groupOf, headOf } = placeLeaders(
+      leaders.map((m) => ({ membershipId: String(m._id), groupIds: m.groupIds ?? [] })),
+      groups.map((g) => ({ groupId: String(g._id), name: g.name, ownerMembershipId: g.ownerMembershipId ?? null })),
+    );
+    return { groups, leaders, groupOf, headOf };
+  }
+
+  /**
    * **A change to the Core Leader tag** (ADR-0159 §1): checked against `member:tag_core_leader` — the permission the
    * matrix names for it, which `member:tag_group` on the route does not imply — and **set only on a leader**:
    * `400 CORE_LEADER_NOT_A_LEADER` for a member whose rung is not a leader rung. Nothing is asked when the tag is
    * not changing, so a member tagged and since moved to an Agent's rung can still have their groups saved, the tag
    * kept and without effect; and untagging them is always taken.
    */
-  private requireCoreLeaderChange(ctx: RequestContext, member: MembershipDocument, wanted: boolean): void {
+  requireCoreLeaderChange(ctx: RequestContext, member: MembershipDocument, wanted: boolean): void {
     if (wanted === (member.isCoreLeader ?? false)) return;
     if (!can(ctx, 'member:tag_core_leader')) throw new PermissionDeniedException('member:tag_core_leader');
     if (wanted && !isLeaderClass(member.role)) {
@@ -379,15 +525,19 @@ export class GroupService {
    * A malformed id is "not here", not a 500 — the repository already answers `null` for an
    * id that cannot match anything, so the `catch` this used to carry is gone with it.
    */
-  private async find(ctx: RequestContext, groupId: string): Promise<GroupDocument> {
+  async find(ctx: RequestContext, groupId: string): Promise<GroupDocument> {
     const group = await this.groups.findOne(ctx, { _id: groupId, status: 'active' });
     if (!group) throw new NotFoundException('Group');
     return group;
   }
 
-  private async requireOwnerInOffice(ctx: RequestContext, membershipId: string): Promise<void> {
+  /**
+   * **A ★ to appoint** (ADR-0253 §2): an active member of this office — `422 ORG_GROUP_OWNER_NOT_IN_KPM` otherwise, another
+   * office's, a leaver and a pending member alike — on a leader rung: `422 ORG_GROUP_LEADER_NOT_A_LEADER` for an Agent.
+   */
+  private async requireLeaderInOffice(ctx: RequestContext, membershipId: string): Promise<MembershipDocument> {
     const owner = await this.members.findById(ctx, membershipId);
-    if (!owner || owner.status === 'removed') {
+    if (!owner || owner.status !== 'active') {
       throw new DomainException(
         ErrorCode.ORG_GROUP_OWNER_NOT_IN_KPM,
         SAY.ORG_GROUP_OWNER_NOT_IN_KPM.ownerInOffice,
@@ -395,6 +545,15 @@ export class GroupService {
         { ownerMembershipId: membershipId },
       );
     }
+    if (!isLeaderClass(owner.role)) {
+      throw new DomainException(
+        ErrorCode.ORG_GROUP_LEADER_NOT_A_LEADER,
+        SAY.ORG_GROUP_LEADER_NOT_A_LEADER.leadersOnly,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        { ownerMembershipId: membershipId, role: owner.role },
+      );
+    }
+    return owner;
   }
 
   private async requireNameFree(

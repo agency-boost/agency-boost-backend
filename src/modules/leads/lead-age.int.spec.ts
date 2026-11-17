@@ -15,11 +15,12 @@ const NOW = new Date('2026-11-05T03:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
 
 /**
- * **P19.7-T1 AC-1 — the lead's age and gender over HTTP** (ADR-0224 §3, §6): the pipe lets both through, takes no birth
- * date and no `ageRecordedOn`, refuses a shape with `400` and a whole number outside 1–100 with `422
- * LEAD_AGE_OUT_OF_RANGE`, `details: { min, max }`, in the reader's language.
+ * **P19.14-T1 AC-4 — a lead carries no age and no gender, over HTTP** (ADR-0254 §1, superseding ADR-0224): the lead
+ * stays general. `age` and `gender` in a body are unknown fields, refused `400` as `birthDate` and `ageRecordedOn` always
+ * were, and no answer carries them. The client's age and gender are each proposal's, entered at its step 1 — and the
+ * age's own refusal, `422 LEAD_AGE_OUT_OF_RANGE`, is the proposal's now (`proposal.int.spec.ts`).
  */
-describe('P19.7-T1 AC-1 the lead’s age and gender over HTTP', () => {
+describe('P19.14-T1 AC-4 a lead carries no age or gender (HTTP)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
 
@@ -53,55 +54,44 @@ describe('P19.7-T1 AC-1 the lead’s age and gender over HTTP', () => {
   const http = () => request(app.getHttpServer());
   const add = (body: Record<string, unknown>) => http().post('/leads').send({ name: 'Pak Budi', ...body });
 
-  it('P19.7-T1 AC-1 takes age and gender through the pipe on POST and PATCH, and answers them with the day', async () => {
-    const created = await add({ type: 'sales', age: 36, gender: 'male' }).expect(201);
-    expect(created.body).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05', gender: 'male' });
-    const patched = await http().patch(`/leads/${created.body.id}`).send({ gender: 'female', age: 40 }).expect(200);
-    expect(patched.body).toMatchObject({ age: 40, ageRecordedOn: '2026-11-05', gender: 'female' });
+  it.each([
+    [{ age: 36 }], [{ gender: 'male' }], [{ age: null }], [{ gender: null }], [{ birthDate: '1990-03-01' }], [{ ageRecordedOn: '2020-01-01' }],
+  ])('P19.14-T1 AC-4 refuses %p on POST /leads as an unknown field: 400, nothing written', async (extra) => {
+    const res = await add({ type: 'sales', ...extra }).expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect((await http().get('/leads').expect(200)).body.total).toBe(0);
+  });
+
+  it('P19.14-T1 AC-4 refuses an age or a gender on PATCH /leads/:id, and changes nothing', async () => {
+    const lead = await add({ type: 'sales' }).expect(201);
+    for (const body of [{ age: 40 }, { gender: 'female' }]) {
+      const res = await http().patch(`/leads/${lead.body.id}`).send({ ...body, version: lead.body.version }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    }
+    expect((await http().get(`/leads/${lead.body.id}`).expect(200)).body.version).toBe(lead.body.version);
+  });
+
+  it('P19.14-T1 AC-4 answers no age, no ageRecordedOn and no gender on a write or a read', async () => {
+    const created = await add({ type: 'sales', contact: { phone: '0812 1100 2200', email: null } }).expect(201);
     const read = await http().get(`/leads/${created.body.id}`).expect(200);
-    expect(read.body).toMatchObject({ age: 40, gender: 'female' });
+    const page = await http().get('/leads').expect(200);
+    for (const view of [created.body, read.body, page.body.rows[0]]) {
+      for (const key of ['age', 'ageRecordedOn', 'gender']) expect(view).not.toHaveProperty(key);
+    }
   });
 
-  it('P19.7-T1 AC-1 refuses a birth date as an unknown field: 400, nothing written (minimisation)', async () => {
-    const res = await add({ birthDate: '1990-03-01' }).expect(400);
-    expect(res.body.error.code).toBe('VALIDATION_FAILED');
-    expect(JSON.stringify(res.body)).toMatch(/birthDate/);
-    const lead = await add({}).expect(201);
-    await http().patch(`/leads/${lead.body.id}`).send({ birthDate: '1990-03-01' }).expect(400);
+  it('P19.14-T1 AC-2 + Lead baru saves the name and an optional phone as a Sales lead, then moves it to its first stage', async () => {
+    const res = await add({ name: 'Ibu Wulan', type: 'sales', contact: { phone: '0812 1100 2200', email: null } }).expect(201);
+    expect(res.body).toMatchObject({ name: 'Ibu Wulan', type: 'sales', contact: { phone: '+6281211002200' } });
+    // The screen's second call, as the lead sheet's *+ Tambah lead* makes it: the Sales ladder's first stage (*Baru* in
+    // the spec; the office's own first stage, *Belum didekati* in the seed).
+    const moved = await http().patch(`/leads/${res.body.id}/status`).send({ statusCode: 'NOT_YET_APPROACHED', version: res.body.version }).expect(200);
+    expect(moved.body).toMatchObject({ type: 'sales', statusCode: 'NOT_YET_APPROACHED' });
   });
 
-  it('P19.7-T1 AC-1 refuses ageRecordedOn in a body: the day is the server’s', async () => {
-    const res = await add({ age: 30, ageRecordedOn: '2020-01-01' }).expect(400);
-    expect(JSON.stringify(res.body)).toMatch(/ageRecordedOn/);
-  });
-
-  it.each([[36.5], ['36'], [true], [{ $gt: 1 }]])('P19.7-T1 AC-1 refuses an age that is not a whole number (%p): 400', async (age) => {
-    const res = await add({ age }).expect(400);
-    expect(res.body.error.code).toBe('VALIDATION_FAILED');
-  });
-
-  it.each([['x'], ['MALE'], [1]])('P19.7-T1 AC-1 refuses a gender that is not male, female or null (%p): 400', async (gender) => {
-    await add({ gender }).expect(400);
-  });
-
-  it.each([[0], [101], [150]])('P19.7-T1 AC-1 refuses %p with 422 LEAD_AGE_OUT_OF_RANGE, details { min: 1, max: 100 }', async (age) => {
-    const res = await add({ age }).expect(422);
-    expect(res.body.error).toMatchObject({ code: 'LEAD_AGE_OUT_OF_RANGE', details: { min: 1, max: 100 } });
-  });
-
-  it('P19.7-T1 AC-1 says the screen’s own sentence in Indonesian: "Umur harus 1–100."', async () => {
-    const res = await add({ age: 0 }).set('Accept-Language', 'id').expect(422);
-    expect(res.body.error.message).toBe('Umur harus 1–100.');
-  });
-
-  it('P19.7-T1 AC-1 accepts the bounds themselves, 1 and 100', async () => {
-    await add({ age: 1 }).expect(201);
-    await add({ age: 100 }).expect(201);
-  });
-
-  it('P19.7-T1 AC-1 refuses the Super Admin outside a session: no membership, no lead', async () => {
+  it('P19.14-T1 AC-4 refuses the Super Admin outside a session: no membership, no lead', async () => {
     session.current = SUPER_ADMIN;
-    const res = await add({ age: 36 });
+    const res = await add({ type: 'sales' });
     expect(res.status).toBe(403);
   });
 });

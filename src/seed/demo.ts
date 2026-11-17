@@ -74,6 +74,9 @@ import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
 import { seedPotensiFixture } from './potensi-fixture';
 import { seedProposalFixture } from './proposal-fixture';
+import { seedProductDataAccessFixture } from './product-data-access-fixture';
+import { seedRateTableFixture } from './rate-table-fixture';
+import { seedProductDataIntakeFixture } from './product-data-intake-fixture';
 import { seedAvatarFixture } from './avatar-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
@@ -261,10 +264,14 @@ const FORMER_REASONS: Readonly<Record<keyof typeof DEMO_REASONS, string>> = {
 const DEMO_EVENTS = CONFIGURED_EVENTS;
 type DemoEventCode = keyof typeof DEMO_EVENTS;
 
-/** The two informal groups in 0417, and the name the first had before P18.10-T7. */
+/**
+ * The informal groups in 0417, and the name the first had before P18.10-T7. *LEADER MUDA* since P19.13-T3: a group with
+ * no ★ yet, so *Core leaders & groups* shows *Belum ada group leader*.
+ */
 export const DEMO_GROUPS = {
   mentoring: { name: 'Mentoring Agen Baru', formerly: 'New Agent Mentoring Circle' },
   topProducers: { name: 'Top Producers 2026' },
+  leaderMuda: { name: 'LEADER MUDA' },
 } as const;
 
 type Role = 'ab' | 'aab' | 'agent';
@@ -345,6 +352,12 @@ const OWNED_COLLECTIONS = [
   'analyticsTargets', 'quantRuns',
   // P19.6-T1, with the writer that fills it (`branding-fixture.ts`): 0555's own logo, colours and mascot (ADR-0218).
   'kpmBranding',
+  // P19.15-T4, with the writer that fills it (`product-data-access-fixture.ts`): Maya's *Kelola data produk* (ADR-0260).
+  'productDataGrants',
+  // P19.15-T2, T3, with the writer that fills them (`product-data-intake-fixture.ts`): a demo upload, its cards, an illustration.
+  'uploadIntakes', 'intakeItems', 'illustrations',
+  // P19.15-T1, with the writer that fills them (`rate-table-fixture.ts`): sample premium tables and their rows (ADR-0258).
+  'rateTables', 'rateRows',
 ] as const;
 
 /**
@@ -1642,10 +1655,17 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * Seeded so the Groups tab has something to show and the person page has a tag to
    * render. Deliberately cutting across the hierarchy — Rina reports to Sari, Maya to
    * the Owner — because that is the whole point of a group: it is not the tree.
+   *
+   * *Since P19.13-T3 (ADR-0253; `functional/org-hierarchy.md`, *Core leaders & groups*):* **a leader has one group, and a
+   * group's ★ is a leader in it.** *Top Producers 2026*: ★ Wilson, with Agus. *Mentoring Agen Baru*: ★ Sari, with her
+   * agents Rina and Budi (an Agent may still carry several). *LEADER MUDA*: Dewi and Arief, no ★ yet. Maya, Yosef, Winda
+   * and Satria are *Tanpa group*, so Wilson's *Grup informal* still names three ABs not in his group (P19.12-T6). A
+   * leader's tags are set, not added, so a database seeded before — Sari in *Top Producers* too — converges.
    */
   const groupSeeds = [
-    { ...DEMO_GROUPS.mentoring, owner: sari.id, members: [rina.id, budi.id] },
-    { ...DEMO_GROUPS.topProducers, owner: owner.id, members: [ab.id, sari.id] },
+    { ...DEMO_GROUPS.topProducers, head: owner.id as string | null, leaders: [owner.id, ab.id], agents: [] as string[] },
+    { ...DEMO_GROUPS.mentoring, head: sari.id as string | null, leaders: [sari.id], agents: [rina.id, budi.id] },
+    { ...DEMO_GROUPS.leaderMuda, head: null as string | null, leaders: [dewi.id, cast.arief.id], agents: [] as string[] },
   ];
   for (const seed of groupSeeds) {
     // Found under the name an earlier run gave it too, so a database seeded before P18.10-T7 gets no second group.
@@ -1656,14 +1676,20 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       (await Groups.create({
         kpmId: id0417,
         name: seed.name,
-        ownerMembershipId: seed.owner,
+        ownerMembershipId: seed.head,
         status: 'active',
         createdByMembershipId: owner.id,
       }));
-    await Memberships.updateMany(
-      { _id: { $in: seed.members } },
-      { $addToSet: { groupIds: String(group._id) } },
-    ).exec();
+    if (existing && (existing.ownerMembershipId ?? null) !== seed.head) {
+      await Groups.updateOne({ _id: existing._id }, { $set: { ownerMembershipId: seed.head } }).exec();
+    }
+    await Memberships.updateMany({ _id: { $in: seed.leaders } }, { $set: { groupIds: [String(group._id)] } }).exec();
+    if (seed.agents.length > 0) {
+      await Memberships.updateMany(
+        { _id: { $in: seed.agents } },
+        { $addToSet: { groupIds: String(group._id) } },
+      ).exec();
+    }
   }
   // Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum's
   // meetings (built in Phase 18.1, `leader-forum-fixture.ts`), and nothing else.
@@ -4286,7 +4312,7 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   const advancedAnalytics = await seedAdvancedAnalyticsFixture({
     clock,
     companyId: String(prudential._id),
-    office0417: { kpmId: id0417, agus: ab.id, owner: owner.id },
+    office0417: { kpmId: id0417, agus: ab.id, owner: owner.id, sari: sari.id, dewi: dewi.id },
     peers: peerOffices.filter((p): p is { code: string; kpmId: string } => p !== null),
   });
   log(advancedAnalytics.guide);
@@ -4298,6 +4324,21 @@ Sign in at POST /api/v1/auth/login, then send the access token as
       ...COACHING_CAST.map((p) => p.email), ...Object.values(ACTIVATION_3M_SEED).map((p) => p.email),
       'owner@kpm0417.test', 'admin@kpm0417.test',
     ]),
+  })).guide);
+  // ------------------- P19.15-T1 (ADR-0258): Prudential's premium tables — SAMPLE numbers, never its rates — before the
+  // notices below read them (`rate-table-fixture.ts`).
+  log((await seedRateTableFixture({
+    clock, companyId: String(prudential._id), superAdminUserId: String(superAdmin._id),
+  })).guide);
+  // ------------------- P19.15-T4: *Kelola data produk* for Maya on Prudential, and the premium table notices — the daily
+  // run over the premium tables the demo holds, so last of all (`product-data-access-fixture.ts`; ADR-0260, ADR-0261).
+  log((await seedProductDataAccessFixture({
+    clock, companyId: String(prudential._id), maya: { userId: String(adminUser._id) },
+    superAdminUserId: String(superAdmin._id),
+  })).guide);
+  // P19.15-T2, T3 (ADR-0259): *Unggah file*'s demo upload and *Ilustrasi*'s draft, written as stored data — no AI call.
+  log((await seedProductDataIntakeFixture({
+    clock, companyId: String(prudential._id), superAdminUserId: String(superAdmin._id),
   })).guide);
   log(activation3M.guide);
   log(`Profile photos (${avatars.images}, ${avatars.written} written): Agus, Arief and Tari — Tari's not-yet circle on `

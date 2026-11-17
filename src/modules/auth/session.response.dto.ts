@@ -323,6 +323,14 @@ export class MeDto {
   permissions!: string[];
 
   @ApiProperty({
+    type: String, isArray: true,
+    description: 'ADR-0260 §5: the insurer companies the reader\'s *Kelola data produk* ticks — non-empty '
+      + 'only for an active KPM Owner or Admin holding a live grant (in a support session too, where the page only '
+      + 'looks). The office menu\'s *Data produk* reads it. Resolved on every request.',
+  })
+  productDataCompanyIds!: string[];
+
+  @ApiProperty({
     type: () => MeActivationDto, nullable: true,
     description: 'Your 90-day activation, for the *New agent* section: `null` when you have none.',
   })

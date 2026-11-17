@@ -3,23 +3,30 @@ import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
 import { proposalsMade } from '@/domain/metrics/proposals-made';
+import { clientPrefillOf, type ProposalClientDetails } from './proposal-client';
 import { itemName, type StoredItem } from './proposal-items';
 import { ProposalRepository } from './proposal.repository';
 import type { ProposalDocument } from './proposal.schema';
 
-/** A lead's proposals, as the lead list's row carries them (ADR-0221 §6). */
+/** A lead's proposals, as the lead list's row carries them (ADR-0221 §6; ADR-0257 §1, §2). */
 export interface LeadProposals {
   /** The lead's live proposals, drafts included. */
   count: number;
-  /** Among them, the one updated last that has a product: its item names, as the proposal shows them, in order. */
-  latest: { products: string[] };
   /**
-   * **Among them, the finished ones** (P19.11-T3 AC-1; UX-9; UXQ3): `status: 'done'` — its PDF saved and not changed
-   * since. The card draws its proposal icon only when this is 1 or more. Drafts never count.
+   * **The pill** (P19.14-T4 AC-1; ADR-0257 §1): among them, the one updated last that has a product — **a draft
+   * included** — its id and its item names, in order. The card reads *"PRUWell Medical +1"*: the first, and how many
+   * more it holds. `id: null`, no names, when every live proposal is still empty.
    */
+  latest: { id: string | null; products: string[] };
+  /** **Among them, the finished ones** (P19.11-T3 AC-1): `status: 'done'` — its PDF saved and not changed since. */
   done: number;
-  /** The finished one saved last, by `doneAt` — what the card's icon opens. `null` when none is finished. */
+  /** The finished one saved last, by `doneAt`. `null` when none is finished. */
   latestDone: { id: string } | null;
+  /**
+   * **What the next proposal for this lead starts from** (P19.14-T1 AC-5; ADR-0254 §4): the client of the proposal
+   * updated last, its age moved up by the whole years since it was entered. Never the lead's: the lead holds none.
+   */
+  client: { age: number | null; gender: 'male' | 'female' | null; details: ProposalClientDetails } | null;
 }
 
 /** One *"Proposal dibuat · …"* note in a lead's *Riwayat*: derived, never written to the lead (ADR-0221 §6). */
@@ -43,10 +50,13 @@ export class ProposalReadings {
   constructor(private readonly proposals: ProposalRepository, private readonly clock: Clock) {}
 
   /**
-   * **The pill for a page of the owner's own leads**, by lead id (Acc. 4). One query over the `(kpmId, leadId, …)`
-   * index; a lead with none is absent from the map.
+   * **The pill and the prefill for a page of the owner's own leads**, by lead id (Acc. 4; ADR-0257 §1; ADR-0254 §4).
+   * One query over the `(kpmId, leadId, …)` index; a lead with none is absent from the map. `today` is the office's day,
+   * which moves the prefilled age up.
    */
-  async ofLeads(ctx: RequestContext, ownerMembershipId: string, leadIds: readonly string[]): Promise<Map<string, LeadProposals>> {
+  async ofLeads(
+    ctx: RequestContext, ownerMembershipId: string, leadIds: readonly string[], today: string,
+  ): Promise<Map<string, LeadProposals>> {
     const out = new Map<string, LeadProposals>();
     if (leadIds.length === 0) return out;
     const rows = await this.proposals.find(
@@ -54,21 +64,28 @@ export class ProposalReadings {
       { ownerMembershipId, leadId: { $in: [...leadIds] } },
       {
         sort: { updatedAt: -1, _id: -1 },
-        projection: { leadId: 1, channel: 1, items: 1, updatedAt: 1, status: 1, doneAt: 1 },
+        projection: { leadId: 1, client: 1, items: 1, updatedAt: 1, status: 1, doneAt: 1 },
       },
     );
     /** The `doneAt` of each lead's `latestDone`, to compare the next finished one against. */
     const doneAtOf = new Map<string, number>();
     for (const row of rows) {
-      const names = (row.items ?? []).map((item: StoredItem) => itemName(item.snapshot, row.channel));
+      const names = (row.items ?? []).map((item: StoredItem) => itemName(item.snapshot));
       let held = out.get(row.leadId);
       if (!held) {
-        held = { count: 0, latest: { products: names }, done: 0, latestDone: null };
+        // Newest first: the first row read is the proposal updated last — the prefill's.
+        held = {
+          count: 0,
+          latest: { id: names.length > 0 ? String(row._id) : null, products: names },
+          done: 0,
+          latestDone: null,
+          client: row.client ? clientPrefillOf(row.client, today) : null,
+        };
         out.set(row.leadId, held);
       }
       held.count += 1;
       // Newest first: the first with a product is the latest that has one.
-      if (held.latest.products.length === 0 && names.length > 0) held.latest = { products: names };
+      if (held.latest.products.length === 0 && names.length > 0) held.latest = { id: String(row._id), products: names };
       if (row.status === 'done') {
         held.done += 1;
         // By `doneAt`, not by the list's order: the last *Simpan PDF* is what "latest" means (UXQ3).

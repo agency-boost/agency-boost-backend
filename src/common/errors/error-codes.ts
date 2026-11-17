@@ -140,6 +140,26 @@ export const ErrorCode = {
    * Nothing written; the screen takes the agent to the first gap.
    */
   PROPOSAL_INCOMPLETE: 'PROPOSAL_INCOMPLETE',
+  /**
+   * **A premium table version that is no longer a draft** (P19.15-T1 AC-3; ADR-0258 §2): `409`. Its file, columns,
+   * rules, dates and test profiles change only while it is a draft; an activated version is replaced by a new one,
+   * never edited. `details.status` names its state.
+   */
+  RATE_TABLE_NOT_EDITABLE: 'RATE_TABLE_NOT_EDITABLE',
+  /**
+   * **A draft not ready to activate** (P19.15-T1 AC-2; ADR-0258 §6): `422`, `details.reason` — `unmapped` (the columns
+   * not confirmed), `no_rows`, `rules` (the *Ketentuan* read from the file not confirmed) or `tests` (the three profiles
+   * not all matching within Rp1 and no written reason), with `details.tests` the profiles' results.
+   */
+  RATE_TABLE_NOT_READY: 'RATE_TABLE_NOT_READY',
+  /** **A version a proposal has used** (P19.15-T1 AC-3): `409` on delete. Turn it off instead; proposals keep it. */
+  RATE_TABLE_IN_USE: 'RATE_TABLE_IN_USE',
+  /**
+   * **A table's cells that cannot be read under the columns chosen** (P19.15-T1 AC-1): `422`, `details.problems` —
+   * up to `PRODUCT_DATA.PROBLEMS_MAX` of `{ row, column, value, reason }`, `row` as the sheet numbers it — and
+   * `details.count`. Nothing is written; the columns stay unconfirmed.
+   */
+  RATE_TABLE_ROWS_INVALID: 'RATE_TABLE_ROWS_INVALID',
   /** Already won or lost. Reopening is an explicit act, not a side effect of the next write. */
   LEAD_ALREADY_CLOSED: 'LEAD_ALREADY_CLOSED',
   /**
@@ -373,6 +393,21 @@ export const ErrorCode = {
   ORG_GROUP_NAME_TAKEN: 'ORG_GROUP_NAME_TAKEN',
   ORG_GROUP_OWNER_NOT_IN_KPM: 'ORG_GROUP_OWNER_NOT_IN_KPM',
   ORG_GROUP_NOT_FOUND: 'ORG_GROUP_NOT_FOUND',
+  /**
+   * **A leader into more than one group at once** (P19.13-T3; ADR-0253 §1). `400`, from `PUT /members/:id/tags`: a leader
+   * (AB or AAB) has one group or none; an Agent may still carry several. Nothing is written.
+   */
+  ORG_GROUP_ONE_PER_LEADER: 'ORG_GROUP_ONE_PER_LEADER',
+  /**
+   * **A ★ group leader who is no leader** (P19.13-T3; ADR-0253 §2). `422`, from `POST /members/groups` and `PUT
+   * /members/groups/:groupId`: the ★ is an active member on a leader rung (AB or AAB). Nothing is written.
+   */
+  ORG_GROUP_LEADER_NOT_A_LEADER: 'ORG_GROUP_LEADER_NOT_A_LEADER',
+  /**
+   * **★ Group leader without a group** (P19.13-T3; ADR-0253 §2). `400`, from `PUT /members/core-leaders/:membershipId`:
+   * the switch is held off while *Tanpa group* is chosen, and the API refuses it too. Nothing is written.
+   */
+  ORG_GROUP_LEADER_NEEDS_GROUP: 'ORG_GROUP_LEADER_NEEDS_GROUP',
   /**
    * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.5-T5 AC-2). `400`. The tag is
    * a leader's: a Core Leader reads the whole office's analytics, and a tagged Agent would read every member's
@@ -645,6 +680,12 @@ export const ErrorCode = {
    * (`scriptApprovals`), and riders attached to it (`riders`).
    */
   PRODUCT_IN_USE: 'PRODUCT_IN_USE',
+  /**
+   * ***Kelola data produk* for somebody who cannot hold it** (ADR-0260 §1; P19.15-T4 AC-2): `PUT
+   * /admin/product-data-grants/:userId` for a person who is not an active KPM Owner or KPM Admin — an agent, a leader,
+   * a Super Admin, somebody in no KPM. `409`, `details.userId`. Nothing is written.
+   */
+  PRODUCT_DATA_GRANT_NOT_ELIGIBLE: 'PRODUCT_DATA_GRANT_NOT_ELIGIBLE',
 
   /*
    * The surveys (P19.5-T4; ADR-0216; `functional/surveys.md`, *Data contract*). A run of another KPM, a cancelled one and
@@ -672,6 +713,27 @@ export const ErrorCode = {
    * another KPM is `NOT_FOUND`.
    */
   SURVEY_ANSWERS_HIDDEN: 'SURVEY_ANSWERS_HIDDEN',
+
+  // P19.15-T2, T3 (ADR-0259): *Unggah file* and the illustration.
+  /**
+   * **Reading files with Claude is not switched on** (ADR-0259 §6): the deployment has no `ANTHROPIC_API_KEY`. `503`, as
+   * `STORAGE_NOT_CONFIGURED` for a missing bucket. The screens disable the button with the same sentence; the premium
+   * table's own Excel/CSV upload is unaffected.
+   */
+  AI_READING_OFF: 'AI_READING_OFF',
+  /** An intake card confirmed with a question still unanswered. `409`, `details: { open }` the open questions' ids. */
+  INTAKE_QUESTIONS_OPEN: 'INTAKE_QUESTIONS_OPEN',
+  /** An intake card answered, confirmed or rejected after it was applied or rejected, or while its upload is read. `409`. */
+  INTAKE_ITEM_DECIDED: 'INTAKE_ITEM_DECIDED',
+  /**
+   * **A confirmed card that cannot be applied as it stands** (ADR-0259 §4): a table with no price read exactly, a
+   * percentage with no table in force to apply it to, nothing applicable. `409`, `details: { reason }`. Nothing is written.
+   */
+  INTAKE_APPLY_REFUSED: 'INTAKE_APPLY_REFUSED',
+  /** An illustration published while a formula does not match the illustration's numbers. `409`, `details: { rows }`. */
+  ILLUSTRATION_FORMULA_MISMATCH: 'ILLUSTRATION_FORMULA_MISMATCH',
+  /** An illustration edited, previewed as a draft or published while it is read, failed, or already published. `409`. */
+  ILLUSTRATION_NOT_DRAFT: 'ILLUSTRATION_NOT_DRAFT',
 
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',

@@ -10,7 +10,7 @@ import { configModule } from '../../../test/config-module';
 import { productionPipe, session, StubAuth } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import {
-  NOW, PRODUCT_IDS as P, aab, ab, agent, agentB, completeProposal, seedProposalOffice, type SeededLeads,
+  CLIENT, NOW, PRODUCT_IDS as P, aab, ab, agent, agentB, completeProposal, seedProposalOffice, type SeededLeads,
 } from '../../../test/proposals';
 import { LeadController } from './lead.controller';
 import { LeadService } from './lead.service';
@@ -53,21 +53,23 @@ describe('P19.7-T2 AC-12 proposals on the Leads page (HTTP)', () => {
   const http = () => request(app.getHttpServer());
   const rowOf = (body: { rows: { id: string }[] }, id: string) => body.rows.find((r) => r.id === id) as Record<string, unknown> | undefined;
 
-  it('P19.7-T2 AC-12 answers each own lead’s count and its latest proposal’s products, with no extra call (Acc. 4)', async () => {
-    await completeProposal(wired, agent(), leads.budi, [P.HEALTH, P.EDU]);
-    await wired.proposals.create(agent(), leads.budi); // an empty draft, updated last: counted, never the "latest"
+  it('P19.14-T4 AC-1 answers each own lead’s pill — the latest proposal with a product, a draft included — and the prefill, with no extra call', async () => {
+    const worked = await completeProposal(wired, agent(), leads.budi, [P.HEALTH, P.EDU]);
+    // An empty draft, updated last: counted, never the pill's — but its client is the prefill's, the latest entered.
+    await wired.proposals.create(agent(), leads.budi, { age: 37, gender: 'male', details: { city: 'Solo' } });
     const res = await http().get('/leads').expect(200);
     // Neither is finished (P19.11-T3 AC-1): `done` 0, no `latestDone`.
     expect(rowOf(res.body, leads.budi)?.proposals).toEqual({
-      count: 2, latest: { products: ['PRUWell Medical', 'PRUCerah'] }, done: 0, latestDone: null,
+      count: 2, latest: { id: worked.id, products: ['PRUWell Medical', 'PRUCerah'] }, done: 0, latestDone: null,
+      client: { age: 37, gender: 'male', details: { status: null, dependants: null, occupation: null, city: 'Solo', needs: [], needsOther: null } },
     });
     expect(rowOf(res.body, leads.sari)?.proposals).toBeNull();
   });
 
-  it('P19.7-T2 AC-12 answers only empty drafts as a count with no products', async () => {
-    await wired.proposals.create(agent(), leads.budi);
+  it('P19.14-T4 AC-1 answers only empty drafts as a count with no products: no pill, the prefill still there', async () => {
+    await wired.proposals.create(agent(), leads.budi, CLIENT);
     const res = await http().get('/leads').expect(200);
-    expect(rowOf(res.body, leads.budi)?.proposals).toEqual({ count: 1, latest: { products: [] }, done: 0, latestDone: null });
+    expect(rowOf(res.body, leads.budi)?.proposals).toMatchObject({ count: 1, latest: { id: null, products: [] }, done: 0, latestDone: null, client: { age: 36 } });
   });
 
   it('P19.11-T3 AC-1 counts the finished proposals server-side and names the one saved last, by doneAt, never a draft', async () => {

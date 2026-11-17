@@ -7,6 +7,10 @@ import {
 } from '@/modules/notifications/notification.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { AccountLinkSchema } from '@/modules/auth/account-link.schema';
+import { ProductDataGrantSchema } from '@/modules/product-data/product-data-grant.schema';
+import { RateRowSchema, RateTableSchema } from '@/modules/product-data/rate-table.schema';
+import { IntakeItemSchema, UploadIntakeSchema } from '@/modules/product-data/upload-intake.schema';
+import { IllustrationSchema } from '@/modules/product-data/illustration.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -404,6 +408,46 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       'verification and password reset all predate membership',
   ],
   [
+    'rateTables',
+    RateTableSchema,
+    'company-partitioned, not tenant-scoped (ADR-0258, as `products` per ADR-0033): a product\'s premium table '
+      + 'versions belong to the insurer, every office of the company calculates with the same one, live. Read by '
+      + '`companyId` and the product on the Proposal tab, and by product id — a product of the office\'s own shelf — '
+      + 'for the agent\'s card (`PremiumCalculator`)',
+  ],
+  [
+    'rateRows',
+    RateRowSchema,
+    'the rows of one premium table version (ADR-0258 §1), read only through their version\'s id, which is '
+      + 'company-partitioned: no office owns a price, so no `kpmId`',
+  ],
+  [
+    'uploadIntakes',
+    UploadIntakeSchema,
+    'company-partitioned, not tenant-scoped (ADR-0259, as `products` per ADR-0033): *Unggah file*\'s uploads of an '
+      + 'insurer\'s product data, `companyId` the insurer or `null` for the Super Admin\'s *Perusahaan* upload. Read '
+      + 'by company through `ProductDataAccess`, never by an office',
+  ],
+  [
+    'intakeItems',
+    IntakeItemSchema,
+    'the cards of one upload (ADR-0259 §4), read through their intake\'s id, which is company-partitioned: no office '
+      + 'owns an insurer\'s product data, so no `kpmId`',
+  ],
+  [
+    'illustrations',
+    IllustrationSchema,
+    'company-partitioned, not tenant-scoped (ADR-0259 §8, as `products` per ADR-0033): a product\'s official '
+      + 'illustration and the PDF detail it publishes belong to the insurer; read by `companyId` and the product',
+  ],
+  [
+    'productDataGrants',
+    ProductDataGrantSchema,
+    '*Kelola data produk* (ADR-0260 §1): a grant to one person, keyed by the global userId, to manage insurer '
+      + 'companies\' proposal data — a company\'s, which no office owns. Read by the person\'s own userId on each of '
+      + 'their requests (`ContextResolver`) and by the Super Admin; no office reads it',
+  ],
+  [
     'accountLinks',
     AccountLinkSchema,
     'two logins of one person, linked (ADR-0199 §3): logins are global (invariant 2), and a link may join a Super '
@@ -605,6 +649,12 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
   [AccountLinkSchema, 'AccountLinkSchema'],
+  [ProductDataGrantSchema, 'ProductDataGrantSchema'],
+  [RateTableSchema, 'RateTableSchema'],
+  [RateRowSchema, 'RateRowSchema'],
+  [UploadIntakeSchema, 'UploadIntakeSchema'],
+  [IntakeItemSchema, 'IntakeItemSchema'],
+  [IllustrationSchema, 'IllustrationSchema'],
   [CompanySchema, 'CompanySchema'],
   [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],

@@ -4,9 +4,8 @@ import { Injectable } from '@nestjs/common';
 import pdfmake from 'pdfmake';
 import type { DynamicContent, TDocumentDefinitions } from 'pdfmake/interfaces';
 import { PROPOSAL } from '@/domain/constants';
-import {
-  levelsFrom, PDF_FONTS, proposalDocument, type PdfFace, type PdfInput, type PdfLevel, type PdfMeasure,
-} from './proposal-pdf.layout';
+import { fitProposal, PDF_FONTS, proposalDocument, type PdfDensity, type PdfFace, type PdfMeasure } from './proposal-pdf.layout';
+import type { PdfModel } from './proposal-pdf.model';
 
 /** The three Inter files (ADR-0222 §3): 400, 600 and 700, SIL Open Font License (`assets/fonts/OFL.txt`). */
 const FONT_FILES = { regular: 'Inter-Regular.ttf', semibold: 'Inter-SemiBold.ttf', bold: 'Inter-Bold.ttf' } as const;
@@ -54,15 +53,14 @@ const FACES: Record<PdfFace, [string, boolean]> = {
   bold: [PDF_FONTS.REGULAR, true],
 };
 
-/** pdfkit's font, as pdfmake hands it out: what it measures a run of text with. */
-interface MeasuredFont { widthOfString(text: string, size: number): number }
+/** pdfkit's font, as pdfmake hands it out: what it measures a run of text with, and how tall its line is. */
+interface MeasuredFont { widthOfString(text: string, size: number): number; lineHeight(size: number): number }
 
 let ruler: PdfMeasure | null = null;
 
 /**
- * **The ruler the layout sets its slots with** (`proposal-pdf.layout.ts`, *What makes the two pages provable*): the very
- * fonts the file is drawn in, opened once in a document that is never written, so a line the layout keeps is a line the
- * renderer keeps.
+ * **The ruler the layout sets every line with**: the very fonts the file is drawn in, opened once in a document that is
+ * never written — a line the layout keeps is a line the renderer keeps, and a line's height is the one `pdfmake` gives it.
  */
 export function pdfRuler(): PdfMeasure {
   if (ruler) return ruler;
@@ -78,21 +76,27 @@ export function pdfRuler(): PdfMeasure {
   const faces = Object.fromEntries(
     (Object.entries(FACES) as [PdfFace, [string, boolean]][]).map(([face, [family, bold]]) => [face, document.provideFont(family, bold, false)]),
   ) as Record<PdfFace, MeasuredFont>;
-  ruler = { width: (text, face, size) => faces[face].widthOfString(text, size) };
+  // The three weights share Inter's vertical metrics: one line height for all.
+  ruler = { width: (text, face, size) => faces[face].widthOfString(text, size), lineHeight: (size) => faces.regular.lineHeight(size) };
   return ruler;
 }
 
 /** A document's bytes, and how many pages it laid out. */
 export interface RenderedPdf { bytes: Buffer; pages: number }
 
-/** What the builder answers: the file, its pages, and the level page 2 was laid out at. */
-export interface BuiltPdf extends RenderedPdf { level: PdfLevel }
+/** What the builder answers: the file, its pages, and each page's density. */
+export interface BuiltPdf extends RenderedPdf { densities: PdfDensity[] }
 
-/** **Were level D ever not to fit** (a bound raised without the worst-case test): a `500`, never a third page. */
+/** **A page that fits at no density** (a bound raised without the worst-case test): a `500`, never a third page. */
 export class ProposalPdfTooLong extends Error {
   constructor(readonly pages: number) {
-    super(`The proposal’s PDF did not fit ${PROPOSAL.PDF_PAGES} pages at its last level (${pages} pages).`);
+    super(`The proposal’s PDF did not fit ${pages} page(s) at its last density.`);
   }
+}
+
+/** **The pages a file has** (AC-1): one for one product, `PROPOSAL.PDF_PAGES` (two) for more. */
+export function pagesFor(items: number): number {
+  return items <= 1 ? PROPOSAL.PDF_PAGES_ONE_PRODUCT : PROPOSAL.PDF_PAGES;
 }
 
 /** Lay a document out and render it, counting its pages from the footer every page is given. */
@@ -112,13 +116,13 @@ export async function renderPdf(definition: TDocumentDefinitions): Promise<Rende
 }
 
 /**
- * **The proposal's file, built in memory each time and never kept** (P19.7-T3; ADR-0222 §2, §3; ADR-0223 §5).
+ * **The proposal's file, built in memory each time and never kept** (P19.14-T3; ADR-0222 §2, §3; ADR-0256 §1).
  *
- * - **The fitting rule** (AC-6; Acc. 15): page 2 is laid out from its starting level — A for one or two products, C for
- *   three or more — and moved down one level at a time until the document is exactly `PROPOSAL.PDF_PAGES` pages. A
- *   product's block is unbreakable, so a page breaks only between products.
- * - **Level D always fits**, by the catalogue's bounds; a test lays out the worst case. Were it not to,
- *   {@link ProposalPdfTooLong} — the service answers `500`, and no third page is ever made.
+ * - **The fitting rule** (AC-1): the layout tries each page at its densities, most room first, and keeps the first that
+ *   fits ({@link fitProposal}); the render then confirms the file has {@link pagesFor} pages — one for one product,
+ *   two for more. A product is never split: its card is page 1's and its box page 2's.
+ * - **The last density always fits**, by the catalogue's bounds; a test lays out the worst case. Were it not to,
+ *   {@link ProposalPdfTooLong} — the service answers `500`, and no extra page is ever made.
  * - **At most `PROPOSAL.PDF_CONCURRENCY` renders at once** in one process; the others wait their turn, so a burst cannot
  *   carry the 512 MB container past its limit.
  */
@@ -131,22 +135,21 @@ export class ProposalPdfBuilder {
     pdfRuler();
   }
 
-  async build(input: PdfInput, createdAt: Date): Promise<BuiltPdf> {
+  async build(model: PdfModel, createdAt: Date): Promise<BuiltPdf> {
+    const expected = pagesFor(model.items.length);
+    const layout = fitProposal(model, pdfRuler());
+    if (!layout) throw new ProposalPdfTooLong(expected);
     await this.turn();
     try {
-      let last = 0;
-      for (const level of levelsFrom(input.proposal.items.length)) {
-        const rendered = await this.render(proposalDocument(input, level, pdfRuler(), createdAt));
-        if (rendered.pages === PROPOSAL.PDF_PAGES) return { ...rendered, level };
-        last = rendered.pages;
-      }
-      throw new ProposalPdfTooLong(last);
+      const rendered = await this.render(proposalDocument(model, layout, createdAt));
+      if (rendered.pages !== expected) throw new ProposalPdfTooLong(expected);
+      return { ...rendered, densities: layout.densities };
     } finally {
       this.done();
     }
   }
 
-  /** One render; a seam a test replaces to make a level that does not fit. */
+  /** One render; a seam a test replaces to make a file of the wrong length. */
   protected render(definition: TDocumentDefinitions): Promise<RenderedPdf> {
     return renderPdf(definition);
   }

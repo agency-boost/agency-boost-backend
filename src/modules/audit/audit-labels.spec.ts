@@ -32,8 +32,10 @@ const NOT_ACTIONS = new Map<string, string>([
   ['overrides.objections', 'an office product override’s field path'],
   ['overrides.faq', 'an office product override’s field path (P19.7-T1, ADR-0225 §5)'],
   ['client.name', 'a proposal’s field path, searched by Riwayat (`proposals/proposal.service.ts`)'],
+  ['items.premium', 'a proposal’s field path a recalculated draft’s audit names (`proposals/proposal.service.ts`, P19.15-T1)'],
   ['logo.png', 'a branding image’s file name (`branding/branding.service.ts`, P19.6-T1)'],
   ['mascot.default', 'a branding field path a refusal names (`branding/branding.service.ts`, P19.6-T1)'],
+  ['ilustrasi.pdf', 'an illustration’s default file name (`product-data/illustration.service.ts`, P19.15-T2)'],
 ]);
 
 /** Actions written by a template literal, which a literal search cannot see: `kpm.${status}` over `SetStatusDto`'s values. */

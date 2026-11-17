@@ -1,7 +1,7 @@
 import { Workbook } from 'exceljs';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { SPREADSHEET } from '@/domain/constants';
-import { cellText, plainNumber, readXlsx } from './read-xlsx';
+import { cellText, plainNumber, readWorkbookSheets, readXlsx } from './read-xlsx';
 
 /** A workbook made here, as its bytes. */
 async function book(build: (workbook: Workbook) => void): Promise<Uint8Array> {
@@ -211,11 +211,37 @@ describe('reading a workbook (ADR-0184)', () => {
       }
       view.setUint32(entry + 24, Math.floor(parts[name].length / 10), true);
       await expect(readXlsx(repacked, { isHeader })).rejects.toMatchObject({ code: 'UPLOAD_MALFORMED_CSV' });
+      // The same bytes, read sheet by sheet (P19.15-T1's premium tables): the same refusal.
+      await expect(readWorkbookSheets(repacked)).rejects.toMatchObject({ code: 'UPLOAD_MALFORMED_CSV' });
     });
 
     it('refuses a zip bomb before opening it', async () => {
       const zip = zipSync({ 'xl/worksheets/sheet1.xml': new Uint8Array(30 * 1024 * 1024) }, { level: 9 });
       await expect(readXlsx(zip, { isHeader })).rejects.toMatchObject({ code: 'ASSET_TOO_LARGE', status: 413 });
+    });
+  });
+
+  /** P19.15-T1 (ADR-0258 §3): a premium table's workbook is read whole — its *Data* sheet and its *Ketentuan*. */
+  describe('every sheet of a workbook', () => {
+    it('reads each sheet, in order, as the same rows of text', async () => {
+      const bytes = await book((wb) => {
+        const data = wb.addWorksheet('Data');
+        data.addRow(['Usia', 'Tarif per 1.000 UP']);
+        data.addRow([35, 12.43]);
+        const rules = wb.addWorksheet('Ketentuan');
+        rules.addRow(['Ketentuan', 'Nilai']);
+        rules.addRow(['UP minimum', '100000000']);
+      });
+      await expect(readWorkbookSheets(bytes)).resolves.toEqual([
+        { sheet: 'Data', rows: [['Usia', 'Tarif per 1.000 UP'], ['35', '12.43']] },
+        { sheet: 'Ketentuan', rows: [['Ketentuan', 'Nilai'], ['UP minimum', '100000000']] },
+      ]);
+    });
+
+    it('reads a ZIP that holds no workbook as no sheets, and refuses a zip bomb before opening it', async () => {
+      await expect(readWorkbookSheets(zipSync({ 'notes.txt': strToU8('hello') }))).resolves.toEqual([]);
+      const zip = zipSync({ 'xl/worksheets/sheet1.xml': new Uint8Array(30 * 1024 * 1024) }, { level: 9 });
+      await expect(readWorkbookSheets(zip)).rejects.toMatchObject({ code: 'ASSET_TOO_LARGE', status: 413 });
     });
   });
 });

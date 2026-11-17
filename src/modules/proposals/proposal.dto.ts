@@ -4,8 +4,9 @@ import {
   Allow, IsBoolean, IsIn, IsInt, IsMongoId, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import {
-  LEAD_AGE, PROPOSAL, PROPOSAL_CHANNELS, PROPOSAL_INSURED_RELATIONS, PROPOSAL_PAY_FREQUENCIES, PROPOSAL_STATUSES,
-  type ProposalChannel, type ProposalInsuredRelation, type ProposalPayFrequency, type ProposalStatus,
+  LEAD_AGE, LEAD_GENDERS, PROPOSAL, PROPOSAL_CLIENT_NEEDS, PROPOSAL_CLIENT_STATUSES, PROPOSAL_CLIENT_TEXT_MAX,
+  PROPOSAL_INSURED_RELATIONS, PROPOSAL_PAY_FREQUENCIES, PROPOSAL_STATUSES,
+  type ProposalInsuredRelation, type ProposalPayFrequency, type ProposalStatus,
 } from '@/domain/constants';
 
 /**
@@ -54,28 +55,64 @@ export class ListProposalsQueryDto {
   pageSize?: number;
 }
 
-/** `GET /proposals/catalog` (ADR-0225 §7). */
+/** `GET /proposals/catalog` (ADR-0225 §7; ADR-0255 §8): no channel since P19.14 — a syariah product is its own. */
 export class ProposalCatalogQueryDto {
-  @ApiProperty({ enum: PROPOSAL_CHANNELS })
-  @IsIn(PROPOSAL_CHANNELS as unknown as string[])
-  channel!: ProposalChannel;
-
-  @ApiProperty({ type: Number, minimum: LEAD_AGE.MIN, maximum: LEAD_AGE.MAX, description: 'The client’s age at the next birthday.' })
+  @ApiPropertyOptional({
+    type: Number, minimum: LEAD_AGE.MIN, maximum: LEAD_AGE.MAX,
+    description: 'The client’s age at the next birthday: each product says `outOfAge` against its entry ages. Absent, none is.',
+  })
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(LEAD_AGE.MIN)
   @Max(LEAD_AGE.MAX)
-  age!: number;
+  age?: number;
 }
 
-/** `POST /proposals`: step 1's *Lanjut* (ADR-0221 §3). */
-export class CreateProposalDto {
-  @ApiProperty({
-    type: String,
-    description: 'One of your own live **Sales** leads, with an age and a gender — step 1 saves them to the lead first.',
+/** *Detail klien* as a write sends it (ADR-0254 §3): read whole by `checkClientDetails`. */
+export class ProposalClientDetailsInputDto {
+  @ApiPropertyOptional({ enum: PROPOSAL_CLIENT_STATUSES, nullable: true }) status?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: PROPOSAL_CLIENT_TEXT_MAX.DEPENDANTS }) dependants?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: PROPOSAL_CLIENT_TEXT_MAX.OCCUPATION }) occupation?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: PROPOSAL_CLIENT_TEXT_MAX.CITY }) city?: string | null;
+  @ApiPropertyOptional({ enum: PROPOSAL_CLIENT_NEEDS, isArray: true, description: 'Stored once each, in order.' }) needs?: string[];
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: PROPOSAL_CLIENT_TEXT_MAX.NEEDS_OTHER, description: 'Kept with `OTHER` only.' }) needsOther?: string | null;
+}
+
+/**
+ * **The client, as step 1 sends it** (P19.14-T1; ADR-0254 §2): the age at the next birthday and the gender —
+ * **required on a new proposal** — and the optional details. The name is the lead's, never sent. Read whole by
+ * `proposal-client.ts`, which names the path it refuses.
+ */
+export class ProposalClientInputDto {
+  @ApiPropertyOptional({
+    type: Number, minimum: LEAD_AGE.MIN, maximum: LEAD_AGE.MAX,
+    description: 'The age at the next birthday. Outside 1–100 is `422 LEAD_AGE_OUT_OF_RANGE`, `details: { min, max, field }`.',
   })
+  @Allow()
+  age?: number;
+
+  @ApiPropertyOptional({ enum: LEAD_GENDERS })
+  @Allow()
+  gender?: string;
+
+  @ApiPropertyOptional({ type: ProposalClientDetailsInputDto, description: 'Replaces the whole details when sent.' })
+  @Allow()
+  details?: ProposalClientDetailsInputDto;
+}
+
+/** `POST /proposals`: step 1's *Lanjut* (ADR-0221 §3; ADR-0254 §1). */
+export class CreateProposalDto {
+  @ApiProperty({ type: String, description: 'One of your own live **Sales** leads.' })
   @IsMongoId()
   leadId!: string;
+
+  @ApiProperty({
+    type: ProposalClientInputDto,
+    description: 'The client’s age and gender (both required) and details — the proposal’s, never written to the lead.',
+  })
+  @IsObject()
+  client!: ProposalClientInputDto;
 }
 
 /** A write's pin, alone: `POST …/done`. */
@@ -95,31 +132,29 @@ export class PinnedQueryDto {
   expectedVersion!: number;
 }
 
-/** `PATCH /proposals/:proposalId`: the settings, and step 1's lead. */
+/** `PATCH /proposals/:proposalId`: *Tampilkan total*, and step 1 — the lead and the client. */
 export class UpdateProposalDto extends PinnedDto {
-  @ApiPropertyOptional({ enum: PROPOSAL_CHANNELS, description: '*Konvensional / Syariah*. Items no longer offered are removed.' })
-  @IsOptional()
-  @IsIn(PROPOSAL_CHANNELS as unknown as string[])
-  channel?: ProposalChannel;
-
-  @ApiPropertyOptional({ enum: PROPOSAL_PAY_FREQUENCIES, description: '*Cara bayar*. A change empties every premium.' })
-  @IsOptional()
-  @IsIn(PROPOSAL_PAY_FREQUENCIES as unknown as string[])
-  payFrequency?: ProposalPayFrequency;
-
-  @ApiPropertyOptional({ type: Boolean, description: '*Tampilkan total premi*.' })
+  @ApiPropertyOptional({ type: Boolean, description: '*Tampilkan total*.' })
   @IsOptional()
   @IsBoolean()
   showTotal?: boolean;
 
   @ApiPropertyOptional({
     type: String,
-    description: 'Step 1: this lead, or another of your own Sales leads. Takes the client’s copy again; items no longer '
-      + 'offered at the client’s age are removed.',
+    description: 'Step 1: this lead, or another of your own Sales leads. Takes its name.',
   })
   @IsOptional()
   @IsMongoId()
   leadId?: string;
+
+  @ApiPropertyOptional({
+    type: ProposalClientInputDto,
+    description: 'Laid over the stored client. A new age removes the products whose entry ages it leaves '
+      + '(`removedItemIds`) and holds each client-insured pay term to it.',
+  })
+  @IsOptional()
+  @IsObject()
+  client?: ProposalClientInputDto;
 }
 
 /** `POST /proposals/:proposalId/items`. */
@@ -149,6 +184,20 @@ export class InsuredPatchDto {
   })
   @Allow()
   age?: number | null;
+
+  @ApiPropertyOptional({ enum: LEAD_GENDERS, nullable: true, description: 'Anyone but *Klien*: asked, never required.' })
+  @Allow()
+  gender?: 'male' | 'female' | null;
+}
+
+/** The sum assured, as a write sends it: the currency is the item's own. */
+export class UpPatchDto {
+  @ApiProperty({
+    type: Number, nullable: true, minimum: 0, maximum: PROPOSAL.MONEY_MAX_MINOR,
+    description: 'On an `up_premium` product only, minor units of the item’s currency; `null` clears it.',
+  })
+  @Allow()
+  amountMinor!: number | null;
 }
 
 /** The premium, as a write sends it: the currency is the item's own. */
@@ -174,12 +223,40 @@ export class UpdateProposalItemDto extends PinnedDto {
     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'integer' }], nullable: true },
     example: { plan: 'Gold', up: 50000000000 },
     description: 'Merged. A `chips` field takes one of its options’ labels; a `money` field minor units of the item’s '
-      + 'currency, or `null` to clear it. A `fixed` field or a key the product does not have is `400`. A change of the '
-      + 'currency field empties the item’s money values and its premium.',
+      + 'currency, or `null` to clear it. A `fixed` or `derived` field, or a key the product does not have, is `400`. A '
+      + 'change of the currency field empties the item’s money values, its sum assured and its premium.',
   })
   @IsOptional()
   @IsObject()
   fieldValues?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ type: Boolean, description: '*Merokok?*, on a smoker-rated product only.' })
+  @IsOptional()
+  @IsBoolean()
+  smoker?: boolean;
+
+  @ApiPropertyOptional({
+    type: String, maxLength: 40,
+    description: 'A pay term’s `key` the insured’s age allows. A single term makes *Cara bayar* `single`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  payTerm?: string;
+
+  @ApiPropertyOptional({
+    enum: PROPOSAL_PAY_FREQUENCIES,
+    description: '*Cara bayar*, one the product offers. A change empties this item’s premium.',
+  })
+  @IsOptional()
+  @IsIn(PROPOSAL_PAY_FREQUENCIES as unknown as string[])
+  payFrequency?: ProposalPayFrequency;
+
+  @ApiPropertyOptional({ type: UpPatchDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpPatchDto)
+  up?: UpPatchDto;
 
   @ApiPropertyOptional({ type: PremiumPatchDto })
   @IsOptional()

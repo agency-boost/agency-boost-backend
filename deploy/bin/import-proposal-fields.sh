@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Import the Prudential proposal fields draft of 3 November 2026 into one company's catalogue (P19.7-T1 AC-4,
-# ADR-0225 §10). Run it by hand, over IAP SSH, once the company exists:
+# Import the Prudential proposal fields of 11 November 2026 — with each product's calculation fields — into one
+# company's catalogue (P19.7-T1 AC-4, ADR-0225 §10; P19.14-T2 AC-5, ADR-0255 §9). It replaces the draft of 3 November
+# wherever nobody has edited a product since. Run it by hand, over IAP SSH, once the company exists:
 #
 #   sudo /opt/agencyboost/bin/import-proposal-fields.sh prod <company id or slug>
 #

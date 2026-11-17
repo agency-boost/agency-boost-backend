@@ -181,3 +181,25 @@ from `SEED_ACTIVITY_TYPES` by code where it holds none (the key missing, `null` 
 published snapshot the same, so the working copy and what agents read agree and no publish bar speaks. An office's own
 short name, and a type of its own code, are left alone. No version moves; templates are not written (a template type
 without the key gives the seed's words by code when an office is provisioned or pushed). A second run writes none.
+`0061-group-leader-is-a-member` (Phase 19.13, P19.13-T3; ADR-0253 §2, UI-199) prints `{ tagged, cleared, current }`:
+every live group with an owner, whose owner is now its ★ group leader — a leader who is a member of it. An owner who is
+an active AB or AAB of the office is tagged into the group (`tagged`; their other tags stay, and they read as the group
+they lead); an owner who left, is pending, is on an Agent's rung or was erased is cleared to `null`, *Belum ada group
+leader* (`cleared`); a leader owning several groups keeps the first by name and the others are cleared; an owner already
+a member is `current`. Each write has its audit row, `member.tagged` or `group.updated`, named to the job, with what it
+replaced. A second run writes none.
+`0062-subgroup-targets-by-year` (Phase 19.13, P19.13-T3; ADR-0253 §4, UI-199) prints `{ dated, created, dropped }`: every
+`analyticsTargets` row of kind `subgroup` with no `year` given the current year on its office's clock (`kpms.timezone`,
+else `Asia/Jakarta`); `one_subgroup_target_per_leader_and_year` built, then `kpmId_1_kind_1_headMembershipId_1` — one row
+per head — dropped. A field added and an index swapped: no row is deleted or changed otherwise. A second run does
+nothing; with no `analyticsTargets` collection it does nothing.
+`0063-proposal-items-carry-cara-bayar` (Phase 19.14, P19.14-T1 and T2; ADR-0254 §1, ADR-0255 §1, §2) prints
+`{ proposals, items, renamed }`: every proposal that still carried the proposal-wide `channel` or `payFrequency`,
+soft-deleted ones too, given the 11 November shape — each item its own `payFrequency` (the proposal's), `isSyariah` (the
+proposal was *Syariah*), the insured's `gender`, `smoker`, `payTerm` and `up` as `null`, `fixedField: 'none'`, a premium
+not typed as `null`, and a snapshot that is `manual` with no pay terms, the four periodic *Cara bayar* and its category's
+need; the client given `ageSetOn` (the KPM's day the proposal was made) and empty `details`; `channel` and
+`payFrequency` removed and kept as `migrated0063` with each item's former name — `renamed` counts the items of a
+*Syariah* proposal that took their product's `syariahName`, as they showed. **No lead is touched.** A second run writes
+none. **It has a `down`** (not run by `pnpm migrate`; call it by hand) that puts the 3 November shape back from
+`migrated0063`.

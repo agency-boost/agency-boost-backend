@@ -286,6 +286,34 @@ import { AvatarLinks, AvatarService } from '@/modules/users/avatar.service';
 import { PasswordService } from '@/modules/auth/password.service';
 import { RateLimiter } from '@/modules/auth/rate-limiter';
 import { ContextResolver } from '@/modules/auth/context-resolver';
+// P19.15-T1, T4 AC-1 (ADR-0258): premium tables by version, the engine, the Proposal tab.
+import { RateRow, RateRowSchema, RateTable, RateTableSchema } from '@/modules/product-data/rate-table.schema';
+import { RateTableService } from '@/modules/product-data/rate-table.service';
+import { PremiumCalculator } from '@/modules/product-data/premium-calculator.service';
+import { ProductRulesService } from '@/modules/product-data/product-rules.service';
+import { ProductDataService } from '@/modules/product-data/product-data.service';
+import { ProductDataAccess } from '@/modules/product-data/product-data-access.service';
+import { ProductDataController } from '@/modules/product-data/product-data.controller';
+import { IllustrationSummaries } from '@/modules/product-data/illustration-summaries.port';
+// P19.15-T2, T3 (ADR-0259): *Unggah file* read by Claude, *Yang kami pahami*, and the *Ilustrasi* tab.
+import { UploadIntake, UploadIntakeSchema, IntakeItem, IntakeItemSchema } from '@/modules/product-data/upload-intake.schema';
+import { Illustration, IllustrationSchema } from '@/modules/product-data/illustration.schema';
+import { IntakeController } from '@/modules/product-data/intake.controller';
+import { IllustrationController } from '@/modules/product-data/illustration.controller';
+import { IntakeService } from '@/modules/product-data/intake.service';
+import { IntakeReading } from '@/modules/product-data/intake-reading';
+import { IntakeCatalogue } from '@/modules/product-data/intake-catalogue';
+import { IntakeTargets } from '@/modules/product-data/intake-targets';
+import { RateTableIntakeTargets } from '@/modules/product-data/intake-targets.service';
+import { IllustrationService } from '@/modules/product-data/illustration.service';
+import { PublishedIllustrations } from '@/modules/product-data/published-illustrations';
+import { PRODUCT_DATA_READER_PROVIDER } from '@/modules/product-data/ai/reader.provider';
+import { ProductDataGrant, ProductDataGrantSchema } from '@/modules/product-data/product-data-grant.schema';
+import {
+  ProductDataCompaniesController, ProductDataGrantController,
+} from '@/modules/product-data/product-data-grant.controller';
+import { ProductDataGrantService } from '@/modules/product-data/product-data-grant.service';
+import { ProductDataCompaniesService } from '@/modules/product-data/product-data-companies.service';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import { Hs256TokenSigner, TokenSigner } from '@/modules/auth/token-signer';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
@@ -341,6 +369,7 @@ import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
+import { CoreLeadersService } from '@/modules/org/core-leaders.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
@@ -550,6 +579,15 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       // P19.7-T2: the proposals, one document each, items inside.
       { name: Proposal.name, schema: ProposalSchema },
       { name: KpmBranding.name, schema: KpmBrandingSchema },
+      // P19.15-T4 (ADR-0260): *Kelola data produk*, one live grant per person, for the insurers ticked.
+      { name: ProductDataGrant.name, schema: ProductDataGrantSchema },
+      // P19.15-T1 (ADR-0258): a product's premium table versions and their rows, company data like `products`.
+      { name: RateTable.name, schema: RateTableSchema },
+      { name: RateRow.name, schema: RateRowSchema },
+      // P19.15-T2, T3 (ADR-0259): *Unggah file*'s uploads and cards, and the illustrations — company data like `products`.
+      { name: UploadIntake.name, schema: UploadIntakeSchema },
+      { name: IntakeItem.name, schema: IntakeItemSchema },
+      { name: Illustration.name, schema: IllustrationSchema },
     ]),
   ],
   controllers: [
@@ -668,6 +706,15 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     PublicBrandingController,
     // P19.6-T5 (ADR-0219 §4): the Super Admin's guide, INTERNAL — `platform_guide:read`.
     PlatformGuideController,
+    // P19.15-T4 (ADR-0260): *Kelola data produk* — the Super Admin's grants and *Perubahan oleh pengelola*, and the
+    // companies *Data produk* opens.
+    ProductDataGrantController,
+    ProductDataCompaniesController,
+    // P19.15-T1, T4 AC-1 (ADR-0258): the Proposal tab — overview, Isian, Tabel premi, Uji coba.
+    ProductDataController,
+    // P19.15-T2, T3 (ADR-0259): *Unggah file* and the *Ilustrasi* tab.
+    IntakeController,
+    IllustrationController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -954,6 +1001,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // P18.8-T6 (ADR-0171 §2, ADR-0173 §3): each new hire's 3M activation, kept once decided, and *Mark left*.
     Activation3MService,
     GroupService,
+    // P19.13-T3 (ADR-0253): *Core leaders & groups*.
+    CoreLeadersService,
     // P18.5-T6: the groups and the office on the sidebar's profile line, read with `/auth/me` (ADR-0159 §5).
     ProfileLineReader,
     AdminDelegationService,
@@ -1044,6 +1093,26 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ProposalPdfService,
     // P19.6-T5 (ADR-0219 §4): the guide's two files, read once from `assets/panduan/`.
     SuperAdminGuide,
+    // P19.15-T4 (ADR-0260): *Kelola data produk* given and removed, and the companies *Data produk* opens.
+    ProductDataGrantService,
+    ProductDataCompaniesService,
+    // P19.15-T1, T4 AC-1 (ADR-0258): who may read and manage, the tables, the engine's loader, Isian, the tab. The
+    // *Ilustrasi* column reads `IllustrationSummaries`, which *Ilustrasi* (T2) provides; nothing until then.
+    ProductDataAccess,
+    RateTableService,
+    PremiumCalculator,
+    ProductRulesService,
+    ProductDataService,
+    // P19.15-T2 (ADR-0259 §8): the *Ilustrasi* column, from the published illustrations.
+    { provide: IllustrationSummaries, useClass: PublishedIllustrations },
+    // P19.15-T2, T3 (ADR-0259): the reading (Claude with `ANTHROPIC_API_KEY`, refused without), the intake and its cards,
+    // T1's flows a confirmed card goes through, and the illustrations.
+    PRODUCT_DATA_READER_PROVIDER,
+    IntakeCatalogue,
+    IntakeReading,
+    IntakeService,
+    { provide: IntakeTargets, useClass: RateTableIntakeTargets },
+    IllustrationService,
   ],
   exports: [Clock, AuditService],
 })

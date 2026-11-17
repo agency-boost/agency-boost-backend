@@ -107,6 +107,15 @@ export class RequestContext {
      * A context built for a job, or by hand in a test, reads as a reader who has chosen nothing.
      */
     readonly reader: Reader = readerOf(),
+    /**
+     * **The insurer companies this person may manage the product data of** (ADR-0260 §2; P19.15-T4 AC-2): the
+     * companies ticked on their live *Kelola data produk* grant (`productDataGrants`), read by `ContextResolver` on
+     * every request — so a grant given, changed or removed is in force from the next request, never at a token's
+     * refresh. Empty for everybody without one, and for anybody who is not an active KPM Owner or KPM Admin, whatever
+     * the grant says (`holds`, the `grant` grantee). `ProductDataAccess` reads it for the company; `can()` only for
+     * whether there is one.
+     */
+    readonly productDataCompanyIds: readonly string[] = [],
   ) {
     Object.freeze(this);
   }
@@ -115,7 +124,7 @@ export class RequestContext {
   withReader(reader: Reader): RequestContext {
     return new RequestContext(
       this.userId, this.platformRole, this.membership, this.impersonatorUserId, this.actingInKpmId,
-      this.mustChangePassword, this.impersonationReadOnly, reader,
+      this.mustChangePassword, this.impersonationReadOnly, reader, this.productDataCompanyIds,
     );
   }
 

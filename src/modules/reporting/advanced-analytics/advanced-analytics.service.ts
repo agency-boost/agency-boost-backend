@@ -16,6 +16,7 @@ import { rateOver } from '@/domain/metrics/rate';
 import {
   daysLogged, eventNpsForPeriod, oneOnOnesPerWeek, powerUserCount, targetAttainment, weeklyActivityTarget,
 } from '@/domain/metrics/subgroup';
+import { subgroupOf } from '@/domain/metrics/leader-groups';
 import { oneDecimal } from '@/domain/metrics/quant';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -38,7 +39,7 @@ import { SurveyRunRepository } from '@/modules/surveys/survey.repositories';
 import { runState } from '@/modules/surveys/survey-rules';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
-import { partitionAgencies } from '../agency-partition';
+import { OfficeGroups } from '../office-groups';
 import { OfficePeople, rungsFor } from '../office-people';
 import { ADVANCED_ANALYTICS_REFUSALS as SAY } from './advanced-analytics.messages';
 import { AnalyticsTargetRepository } from './advanced-analytics.repositories';
@@ -103,12 +104,19 @@ export interface MapaView {
 }
 
 export interface SubgroupRow {
-  head: { membershipId: string; name: string };
+  /** The informal group (ADR-0253 §5), or `null`: *Tidak ada group*, everybody no grouped leader stands above. */
+  group: { groupId: string; name: string } | null;
+  /** The group's ★ group leader, or `null` — *Belum ada group leader*, and always for *Tidak ada group*. */
+  head: { membershipId: string; name: string } | null;
+  /** The row's active members. */
   manpower: number;
+  /** The row's active leaders (AB and AAB): the leaders whose targets it sums. */
   leaders: number;
   maa: { baseline: number | null; lastMonth: number | null; mtd: number | null; asOf: string | null };
+  /** The sum of the row's leaders' targets for the year; `isDefault` when none of them has one set. */
   targets: { aa: number; rec: number; isDefault: boolean };
-  adoption: { headDays: number; downlinePct: number | null };
+  /** `headDays` `null` with no ★. */
+  adoption: { headDays: number | null; downlinePct: number | null };
   powerUsers: number;
   oneOnOnesPerWeek: number;
   weeklyActivityTarget: number;
@@ -159,6 +167,8 @@ export class AdvancedAnalyticsService {
     private readonly surveyRuns: SurveyRunRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    /** P19.13-T3 (ADR-0253 §5): Perbaikan sub-group's rows are the informal groups. */
+    private readonly officeGroups: OfficeGroups,
   ) {}
 
   // ------------------------------------------------------------------------------------------------- reads
@@ -335,7 +345,13 @@ export class AdvancedAnalyticsService {
     };
   }
 
-  /** **`GET …/subgroup`** — one row per AB's agency, this month (AC-10). */
+  /**
+   * **`GET …/subgroup`** — one row per informal group, then *Tidak ada group*, this month (P19.13-T3 AC-6; ADR-0253 §5,
+   * amending ADR-0215 §7's one row per AB's agency). Each person is in the row of their nearest leader — themselves
+   * or the nearest above them — that leader's group or *Tidak ada group* (`subgroupOf`), so the rows partition the
+   * office; a row's targets are the sum of its leaders' targets for the year, each the template's `subgroupHeadDefaults`
+   * until set.
+   */
   async subgroup(ctx: RequestContext): Promise<SubgroupView> {
     reader(ctx);
     const config = await this.section(ctx, 'SUBGROUP');
@@ -345,7 +361,7 @@ export class AdvancedAnalyticsService {
     const lastYear = String(Number(year) - 1);
     const lastMonth = shift(office.month, -1);
     const roster = await this.people.read(ctx, this.clock.startOfLocalDay(office.timezone, `${lastYear}-01-01`), office.timezone);
-    const { agencies } = partitionAgencies(roster.everyone.map((p) => ({ ...p, active: p.status === 'active' })));
+    const placement = await this.officeGroups.leaderPlacement(ctx);
     const activeIds = roster.active.map((p) => p.membershipId);
     const windowDays = Math.max(DAYS_ADOPTION, t.powerUserWindow);
     const days = Array.from({ length: windowDays }, (_, i) => addDays(office.today, -i));
@@ -356,7 +372,7 @@ export class AdvancedAnalyticsService {
       this.production.officeMonths(ctx, { from: `${lastYear}-01`, to: office.month }),
       this.activity.perPersonPerDay(ctx, activeIds, days),
       this.coaching.countedSince(ctx, activeIds, addDays(office.today, -(DAYS_ADOPTION - 1))),
-      this.targets.subgroupAll(ctx),
+      this.targets.subgroupFor(ctx, year),
       this.completeness.forRange(ctx, { from: `${year}-01`, to: office.month }),
     ]);
     const cell = new Map(rows.map((r) => [`${r.membershipId}|${r.month}`, r]));
@@ -376,38 +392,51 @@ export class AdvancedAnalyticsService {
     const names = roster.names;
     const byId = new Map(roster.everyone.map((p) => [p.membershipId, p]));
 
-    const out: SubgroupRow[] = agencies.map((agency) => {
-      const ids = agency.memberIds;
-      const leaders = ids.filter((id) => (LEADER_CLASSES as readonly string[]).includes(byId.get(id)?.role ?? ''));
+    const isActive = (id: string) => byId.get(id)?.status === 'active';
+    const isLeader = (id: string) => (LEADER_CLASSES as readonly string[]).includes(byId.get(id)?.role ?? '');
+    const members = new Map<string | null, string[]>([...placement.groups.map((g) => [g.groupId, []] as [string, string[]]), [null, []]]);
+    for (const person of roster.everyone) members.get(subgroupOf(person, placement.groupOf))!.push(person.membershipId);
+    const rowsOf = [
+      ...placement.groups.map((g) => ({ group: { groupId: g.groupId, name: g.name }, headId: g.headMembershipId, ids: members.get(g.groupId)! })),
+      // *Tidak ada group* last — shown while somebody is in it, and always for an office with no groups.
+      ...(members.get(null)!.length > 0 || placement.groups.length === 0 ? [{ group: null, headId: null, ids: members.get(null)! }] : []),
+    ];
+
+    const out: SubgroupRow[] = rowsOf.map(({ group, headId, ids }) => {
+      const active = ids.filter(isActive);
+      const leaders = active.filter(isLeader);
       const maaOf = (m: string) => maaCountInUnit(ids.map((id) => activeIn(id, m)), held.get(m)?.held === true);
-      const own = set.get(agency.headId);
-      const targets = own
-        ? { aa: own.aaTarget, rec: own.recTarget, isDefault: false }
-        : { aa: t.subgroupHeadDefaults.aa, rec: t.subgroupHeadDefaults.rec, isDefault: true };
+      const own = leaders.map((id) => set.get(id));
+      const targets = {
+        aa: own.reduce((sum, row) => sum + (row ? row.aaTarget : t.subgroupHeadDefaults.aa), 0),
+        rec: own.reduce((sum, row) => sum + (row ? row.recTarget : t.subgroupHeadDefaults.rec), 0),
+        isDefault: own.every((row) => row === undefined),
+      };
       const baseline = maaMonthlyAvg(yearMonths(lastYear, `${lastYear}-12`).map(maaOf));
       const mtd = maaOf(office.month);
       const ytd = recruitmentOf(ids, yearMonths(year, office.month));
-      const downline = ids.filter((id) => id !== agency.headId);
+      const downline = active.filter((id) => id !== headId);
       const coaches = new Set(leaders);
       const aa = targetAttainment(mtd, targets.aa, t.subgroupOkPct);
       const rec = targetAttainment(ytd, targets.rec, t.subgroupOkPct);
       return {
-        head: { membershipId: agency.headId, name: names.get(agency.headId) ?? '' },
-        manpower: ids.length,
+        group,
+        head: headId === null ? null : { membershipId: headId, name: names.get(headId) ?? '' },
+        manpower: active.length,
         leaders: leaders.length,
         maa: { baseline: baseline === null ? null : oneDecimal(baseline), lastMonth: maaOf(lastMonth), mtd, asOf: held.get(office.month)?.asOf ?? null },
         targets,
         adoption: {
-          headDays: daysLogged(savedDays.get(agency.headId), adoptionDays),
+          headDays: headId === null ? null : daysLogged(savedDays.get(headId), adoptionDays),
           downlinePct: rateOver(downline.filter((id) => daysLogged(savedDays.get(id), adoptionDays) > 0).length, downline.length).pct,
         },
-        powerUsers: powerUserCount(ids, savedDays, powerDays, t.powerUserDays),
+        powerUsers: powerUserCount(active, savedDays, powerDays, t.powerUserDays),
         oneOnOnesPerWeek: oneOnOnesPerWeek(sessions.filter((s) => coaches.has(s.coachMembershipId)).length),
         weeklyActivityTarget: weeklyActivityTarget(t.subgroupWeekMultiplier, targets.aa),
         recruitment: { baseline: recruitmentOf(ids, yearMonths(lastYear, `${lastYear}-12`)), ytd, missingMonths: recruitmentMissing },
         attainment: { aaPct: aa.pct, aaOk: aa.ok, recPct: rec.pct, recOk: rec.ok },
       };
-    }).sort((a, b) => a.head.name.localeCompare(b.head.name));
+    });
 
     return {
       month: office.month,
@@ -434,24 +463,29 @@ export class AdvancedAnalyticsService {
     return { month: input.month, row: input.row, value: input.value };
   }
 
-  /** **`PUT …/targets/subgroup/:headMembershipId`** — a head of group's targets; a head who is no AB of this KPM is 404. */
+  /**
+   * **`PUT …/targets/subgroup/:headMembershipId`** — **a leader's** targets for this year (P19.13-T3; ADR-0253 §4): an
+   * active AB or AAB of this KPM, anybody else `404`; the year the office's clock reads. Written from *Core leaders &
+   * groups*' leader edit; Perbaikan sub-group sums them per group.
+   */
   async setSubgroupTarget(
     ctx: RequestContext, headMembershipId: string, input: { aaTarget: number; recTarget: number },
-  ): Promise<{ headMembershipId: string; aaTarget: number; recTarget: number }> {
+  ): Promise<{ headMembershipId: string; year: string; aaTarget: number; recTarget: number }> {
     requireMember(ctx);
     await this.section(ctx, 'SUBGROUP');
-    const head = await this.memberships.findOne(ctx, { _id: headMembershipId, status: 'active', role: 'ab' });
+    const head = await this.memberships.findOne(ctx, { _id: headMembershipId, status: 'active', role: { $in: [...LEADER_CLASSES] } });
     if (!head) throw new NotFoundException('Membership');
-    const { id, before } = await this.targets.setSubgroup(ctx, headMembershipId, input.aaTarget, input.recTarget);
+    const year = (await this.tenantDay.office(ctx)).month.slice(0, 4);
+    const { id, before } = await this.targets.setSubgroup(ctx, headMembershipId, year, input.aaTarget, input.recTarget);
     if (!before || before.aaTarget !== input.aaTarget || before.recTarget !== input.recTarget) {
       await this.audit.record(ctx, {
         action: 'advanced_analytics.target_set', targetCollection: 'analyticsTargets', targetId: id,
         targetMembershipId: headMembershipId,
-        before: before ? { kind: 'subgroup', ...before } : null,
-        after: { kind: 'subgroup', aaTarget: input.aaTarget, recTarget: input.recTarget },
+        before: before ? { kind: 'subgroup', year, ...before } : null,
+        after: { kind: 'subgroup', year, aaTarget: input.aaTarget, recTarget: input.recTarget },
       });
     }
-    return { headMembershipId, ...input };
+    return { headMembershipId, year, ...input };
   }
 
   // ------------------------------------------------------------------------------- the Super Admin's read

@@ -112,9 +112,11 @@ export class AdvancedAnalyticsController {
   @RequirePermission('advanced_analytics:read')
   @ApiOperation({
     summary: '*Perbaikan sub-group*',
-    description: 'One row per AB’s agency: manpower and leaders, MAA as a baseline, last month and this month as of '
-      + 'its upload, the AA and recruitment targets, adoption, power users, one-on-ones a week, the weekly activity '
-      + 'target, and recruitment as a baseline and this year.',
+    description: 'One row per informal group, A to Z, each with its ★ group leader, then *Tidak ada group* ('
+      + 'ADR-0253 §5): each person in the row of their nearest leader (themselves, or the nearest above) — that '
+      + 'leader\u2019s group, or *Tidak ada group*. Manpower and leaders, MAA as a baseline, last month and this month as of its upload, the AA and '
+      + 'recruitment targets — the sum of the row’s leaders’ targets for the year — adoption, power users, one-on-ones '
+      + 'a week, the weekly activity target, and recruitment as a baseline and this year.',
   })
   @ApiResponse({ status: 200, type: SubgroupDto })
   @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a query parameter of any name.'))
@@ -157,13 +159,15 @@ export class AdvancedAnalyticsController {
   @Put('targets/subgroup/:headMembershipId')
   @RequirePermission('advanced_analytics:write')
   @ApiOperation({
-    summary: 'Set a head of group’s targets',
-    description: 'The AA and recruitment targets of one AB’s agency, whole numbers from 0. Audited with before and after.',
+    summary: 'Set a leader’s targets for this year',
+    description: 'The AA and recruitment targets of one leader — an AB or an AAB — for the year on the office’s clock, '
+      + 'whole numbers from 0 (ADR-0253 §4). Written from *Core leaders & groups*’ leader edit; Perbaikan '
+      + 'sub-group sums a group’s leaders’ targets. Audited with before and after.',
   })
   @ApiResponse({ status: 200, type: SubgroupTargetDto })
   @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a target that is no whole number from 0 to 1000.'))
   @ApiResponse(WRITE_403)
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no active AB of this office with this id, or *Perbaikan sub-group* is off. Indistinguishable from another office’s.'))
+  @ApiResponse(refusal(404, '`NOT_FOUND` — no active AB or AAB of this office with this id, or *Perbaikan sub-group* is off. Indistinguishable from another office’s.'))
   setSubgroupTarget(
     @Ctx() ctx: RequestContext, @Param('headMembershipId') headMembershipId: string, @Body() body: SetSubgroupTargetDto,
   ) {

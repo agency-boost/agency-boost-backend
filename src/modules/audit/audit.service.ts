@@ -71,6 +71,21 @@ export class AuditService {
     }
   }
 
+  /**
+   * **A change to a company's data, recorded in the platform's log whoever made it** (ADR-0260 §6, amended
+   * 2026-11-12): the catalogue, its premium tables and rules, its uploads and illustrations belong to the insurer, not
+   * to any office. Written as `record` writes — never throwing, the actor from the context — but in the `kpmId: null`
+   * scope, so a *Kelola data produk* holder's change to another insurer's data never lands in their own office's log,
+   * where that office's Owner would read the other insurer's figures. The Super Admin's own writes were there already.
+   */
+  async recordForCompany(ctx: RequestContext, entry: AuditEntry): Promise<void> {
+    try {
+      await this.model.create({ ...this.rowOf(ctx, entry), kpmId: null });
+    } catch (err) {
+      this.logger.error({ err, action: entry.action }, 'failed to write audit entry');
+    }
+  }
+
   /** The row an entry is written as: both actors under impersonation, and whether it was on somebody's behalf. */
   private rowOf(ctx: RequestContext, entry: AuditEntry): Record<string, unknown> {
     const { actorUserId, effectiveUserId } = ctx.auditActors;

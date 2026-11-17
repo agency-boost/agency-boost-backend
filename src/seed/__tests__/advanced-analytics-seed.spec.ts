@@ -79,11 +79,17 @@ describe('P19.5-T3 the Advanced analytics seed — a run at 10:00 on 6 November 
     expect(quant.metrics.find((m) => m.code === 'A2')).toMatchObject({ median: null, peers: 2, status: null });
   });
 
-  it('P19.5-T3 AC-10 Sub-group: Agus on his own targets, everybody else the template’s', async () => {
+  it('P19.13-T3 AC-6 Sub-group: one row per informal group with its ★, then Tidak ada group; a row sums its leaders’ targets', async () => {
     const view = await wired.advancedAnalytics.subgroup(owner);
-    const agus = view.rows.find((r) => r.head.name.startsWith('Agus'))!;
-    expect(agus.targets).toEqual({ aa: 4, rec: 8, isDefault: false });
-    expect(view.rows.filter((r) => r !== agus).every((r) => r.targets.isDefault)).toBe(true);
+    expect(view.rows.map((r) => [r.group?.name ?? null, r.head?.name.split(' ')[0] ?? null])).toEqual([
+      ['LEADER MUDA', null], ['Mentoring Agen Baru', 'Sari'], ['Top Producers 2026', 'Wilson'], [null, null],
+    ]);
+    // Wilson's group: Wilson (3 · 6, unset) and Agus (4 · 8) — Sari and Dewi have groups of their own.
+    expect(view.rows.find((r) => r.group?.name === 'Top Producers 2026')!.targets).toEqual({ aa: 7, rec: 14, isDefault: false });
+    // Dewi (1 · 3) and Arief (3 · 6, unset).
+    expect(view.rows.find((r) => r.group?.name === 'LEADER MUDA')!.targets).toEqual({ aa: 4, rec: 9, isDefault: false });
+    const total = view.rows.reduce((sum, r) => sum + r.manpower, 0);
+    expect(total).toBe((await wired.officePeople.read(owner, null, 'Asia/Jakarta')).active.length);
   });
 
   it('P19.5-T3 the fixture writes nothing the second time', async () => {

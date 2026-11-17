@@ -34,6 +34,12 @@ const CALLERS: Record<string, Record<string, string>> = {
       'the offices list, a KPM\'s page and *Perlu perhatian Anda* (P19.4-T3 AC-8, SA R5, ADR-0212): each office\'s live '
       + 'memberships, for *Anggota* and *"KPM {code} belum punya anggota"* — a count per office, never a row',
   },
+  'product-data/product-data-grant.service.ts': {
+    findAcrossAllTenants:
+      '*Kelola data produk* (ADR-0260 §1, §4; `product_data_grant:read`, `:manage`): whether the people the Super Admin '
+      + 'gives it to, or lists, are an active KPM Owner or KPM Admin now — their live memberships, by userId, by the Super '
+      + 'Admin who is in no office; the role and the KPM, never another member\'s row',
+  },
   'assets/asset.service.ts': {
     findAcrossAllTenants:
       'the orphan sweep: storage accounting is a platform job, and a per-office sweep would never see '

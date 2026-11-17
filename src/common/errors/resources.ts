@@ -47,6 +47,16 @@ export const RESOURCE_NAMES = {
   'Org level': 'Jenjang',
   Override: 'Koreksi manual',
   Product: 'Produk',
+  /* P19.15-T4 (ADR-0260): a person's live *Kelola data produk*, removed when there is none. */
+  'Product data access': 'Akses Kelola data produk',
+  /* P19.15-T1 (ADR-0258): a premium table version, by its id, within its company. */
+  'Premium table': 'Tabel premi',
+  /* P19.15-T3 (ADR-0259): *Unggah file*'s upload, one of its cards, and an original file it kept. */
+  Intake: 'Unggahan',
+  'Intake item': 'Kartu unggahan',
+  'Intake file': 'File unggahan',
+  /* P19.15-T2 (ADR-0259 §8): an official illustration on the *Ilustrasi* tab. */
+  Illustration: 'Ilustrasi',
   Ratio: 'Ratio',
   Session: 'Sesi',
   /* P19.3-T2 (UI-149): a page `PUT /kpm/settings/:page/reviewed` does not know — not one of the setup card's four. */

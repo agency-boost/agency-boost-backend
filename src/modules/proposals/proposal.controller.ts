@@ -51,10 +51,9 @@ export class ProposalController {
     summary: 'Your proposals (*Riwayat*)',
     description:
       'Your own live proposals, newest change first: each row’s client, date, products with their plan, status and '
-      + 'totals per currency. `leadId` narrows to one lead. **`status=done` orders by the last *Simpan PDF* (`doneAt`)** '
-      + 'instead — the lead sheet’s *Proposal* section reads `?leadId=…&status=done&pageSize=1`, the lead’s latest '
-      + 'finished proposal, and never shows a draft. A deleted lead’s proposals stay, under the client’s name, with '
-      + '`leadDeleted`.',
+      + 'totals per currency and *Cara bayar*. `leadId` narrows to one lead — the lead sheet’s *Proposal* section reads '
+      + '`?leadId=…`, one row per proposal, drafts included (ADR-0257). **`status=done` orders by the last *Simpan PDF* '
+      + '(`doneAt`)** instead. A deleted lead’s proposals stay, under the client’s name, with `leadDeleted`.',
   })
   @ApiResponse({ status: 200, type: ProposalPageDto })
   async list(@Ctx() ctx: RequestContext, @Query() query: ListProposalsQueryDto) {
@@ -66,14 +65,15 @@ export class ProposalController {
   @ApiOperation({
     summary: 'The products step 2 may add',
     description:
-      'Your KPM’s shelf, base products on sale, in the channel (a *Syariah* proposal: syariah products, and a conventional '
-      + 'product’s syariah name where it has one) and with the client’s age in one of their age bands — each with its '
-      + 'fields, plans and *Tanya-jawab* as your KPM approved them, and the riders that *can be added* to it, which are '
-      + 'never products of their own here. Nothing to offer is an empty list, never an error.',
+      'Your KPM’s shelf, base products on sale — conventional and syariah side by side, a syariah product by its own '
+      + 'name (no channel since P19.14) — each with its fields, pay terms, *Cara bayar*, calculation type and entry ages, '
+      + 'its plans and *Tanya-jawab* as your KPM approved them, the riders that *can be added* to it (never products of '
+      + 'their own here), and **`outOfAge`** for the client’s `age`: listed and greyed, never hidden, and never added. '
+      + 'Nothing to offer is an empty list, never an error.',
   })
   @ApiResponse({ status: 200, type: ProposalCatalogDto })
   async catalog(@Ctx() ctx: RequestContext, @Query() query: ProposalCatalogQueryDto) {
-    return this.proposals.catalog(ctx, query.channel, query.age);
+    return this.proposals.catalog(ctx, query.age ?? null);
   }
 
   @Get(':proposalId')
@@ -90,10 +90,10 @@ export class ProposalController {
   @Header('Cache-Control', 'no-store, private')
   @Header('X-Content-Type-Options', 'nosniff')
   @ApiOperation({
-    summary: 'The proposal’s PDF (step 3, *Simpan PDF*, *Unduh lagi*)',
+    summary: 'The proposal’s PDF (the result, *Simpan PDF*, *Unduh lagi*)',
     description:
-      'Two A4 pages, *Ringkasan* and *Rincian*, built now from the stored proposal with the KPM’s branding as it shows '
-      + 'today, and kept nowhere (ADR-0222, ADR-0223). A *Draf* is built too; nothing about the proposal changes — '
+      'One A4 page for one product, two for more, built now from the stored proposal with the KPM’s branding as it '
+      + 'shows today, and kept nowhere (ADR-0222, ADR-0256). A *Draf* is built too; nothing about the proposal changes — '
       + '*Selesai* is `POST …/done`. `Content-Disposition: attachment` names it `Proposal-{Nama klien}-{tanggal}.pdf`. '
       + '**A view-only session is refused** (`403 PERM_DENIED`, `details.permission: "proposal:download"`): it opens a '
       + 'proposal and cannot take it away (Acc. 22).',
@@ -111,11 +111,13 @@ export class ProposalController {
   @ApiOperation({
     summary: 'Start a proposal (step 1’s *Lanjut*)',
     description:
-      'A *Draf* for one of your own live **Sales** leads, with the client’s name, age and gender copied from it. **Where '
-      + 'you already have a draft on that lead with no product chosen, that draft is answered instead** — its client’s '
-      + 'copy taken from the lead again — so no lead collects empty drafts; a draft with a product is never reused. Another '
-      + 'member’s lead or another office’s is `404 NOT_FOUND`; a Recruit lead, one with no type, or one without an age or '
-      + 'a gender is `400`, `details.field: "leadId"` — step 1 saves them to the lead first.',
+      'A *Draf* for one of your own live **Sales** leads: the client’s name copied from the lead, **the age at the next '
+      + 'birthday, the gender and the optional details from `client` — the proposal’s, never written to the lead**. '
+      + 'Without an age or a gender, `400`, `details.field: "client.age"` or `"client.gender"`; an age outside 1–100 '
+      + '`422 LEAD_AGE_OUT_OF_RANGE`. **Where you already have a draft on that lead with no product chosen, that draft '
+      + 'is answered instead**, its client taken from this write, so no lead collects empty drafts; a draft with a product '
+      + 'is never reused. Another member’s lead or another office’s is `404 NOT_FOUND`; a Recruit lead or one with no type '
+      + '`400`, `details.field: "leadId"`.',
   })
   @ApiResponse({ status: 201, type: ProposalResponseDto, description: 'The new draft, or the lead’s empty one reused.' })
   @ApiResponse({
@@ -125,18 +127,18 @@ export class ProposalController {
     type: ApiErrorEnvelope,
   })
   async create(@Ctx() ctx: RequestContext, @Body() body: CreateProposalDto) {
-    return this.proposals.create(ctx, body.leadId);
+    return this.proposals.create(ctx, body.leadId, body.client ?? {});
   }
 
   @Patch(':proposalId')
   @RequirePermission('proposal:update')
   @ApiOperation({
-    summary: 'Change a proposal’s settings, or its lead',
+    summary: 'Change *Tampilkan total*, or step 1’s lead and client',
     description:
-      '*Konvensional / Syariah*, *Cara bayar*, *Tampilkan total premi*, and step 1’s lead. A `leadId` takes the client’s '
-      + 'copy again. **A change of channel or of the client’s age removes the products no longer offered**, in the same '
-      + 'write, and answers their item ids (`removedItemIds`). **A change of *Cara bayar* empties every premium.** '
-      + PINNED_WRITE,
+      '*Tampilkan total*, and step 1: a `leadId` takes that lead’s name; `client` lays the age, gender and details over '
+      + 'what is stored — never onto the lead. **A change of the client’s age removes the products whose entry ages it '
+      + 'leaves**, in the same write, and answers their item ids (`removedItemIds`); each client-insured pay term is held '
+      + 'to the new age. ' + PINNED_WRITE,
   })
   @ApiResponse({ status: 200, type: ProposalPatchedDto })
   @ApiResponse({ status: 404, description: NOT_YOURS, type: ApiErrorEnvelope })
@@ -150,10 +152,11 @@ export class ProposalController {
   @ApiOperation({
     summary: 'Add a product',
     description:
-      'With a copy of the product as it is now (its fields and their labels, never refreshed), every choice field '
-      + 'preselected and the product’s own *Tertanggung*. A product already in, or a sixth, is `400`. A product the '
+      'With a copy of the product as it is now (its fields, pay terms, *Cara bayar* and labels, never refreshed), every '
+      + 'choice field preselected, the derived one worked out, the product’s own *Tertanggung*, its default pay term the '
+      + 'age allows and *Cara bayar* *Bulanan* where offered. A product already in, or a sixth, is `400`. A product the '
       + 'catalogue does not offer is `422 PROPOSAL_PRODUCT_WITHDRAWN`, `details.reason`: `withdrawn`, `closed`, `rider`, '
-      + '`not_on_shelf`, `channel` or `age`. ' + PINNED_WRITE,
+      + '`not_on_shelf` or `age` (the client outside its entry ages). ' + PINNED_WRITE,
   })
   @ApiResponse({ status: 201, type: ProposalResponseDto })
   @ApiResponse({ status: 404, description: NOT_YOURS, type: ApiErrorEnvelope })
@@ -166,10 +169,13 @@ export class ProposalController {
   @Patch(':proposalId/items/:itemId')
   @RequirePermission('proposal:update')
   @ApiOperation({
-    summary: 'Change a product’s *Tertanggung*, fields or premium',
+    summary: 'Change a product’s *Tertanggung*, fields, pay term, *Cara bayar*, sum assured or premium',
     description:
-      'Each checked against the item’s own copy of the product: a value outside its options or bounds, a fixed field, an '
-      + 'unknown key or item is `400`; an insured’s age outside 1–100 is `422 LEAD_AGE_OUT_OF_RANGE`. ' + PINNED_WRITE,
+      'Each checked against the item’s own copy of the product: a value outside its options or bounds, a fixed or derived '
+      + 'field, an unknown key or item, a pay term the insured’s age does not allow, a *Cara bayar* the product does not '
+      + 'offer, *Merokok?* on a product not smoker-rated, or a sum assured on a product without one is `400`; an insured’s '
+      + 'age outside 1–100 is `422 LEAD_AGE_OUT_OF_RANGE`. A change of the insured’s age moves a pay term it no longer '
+      + 'allows to the longest it does; a change of *Cara bayar* empties this item’s premium. ' + PINNED_WRITE,
   })
   @ApiResponse({ status: 200, type: ProposalResponseDto })
   @ApiResponse({ status: 404, description: NOT_YOURS, type: ApiErrorEnvelope })
@@ -201,7 +207,8 @@ export class ProposalController {
     summary: '*Simpan PDF*: mark it *Selesai*',
     description:
       'Needs a complete proposal — a product at least, each premium above zero, a name and an age for anyone insured but '
-      + 'the client, a value for every choice field — else `422 PROPOSAL_INCOMPLETE`, `details.items: [{ itemId, missing }]`; '
+      + 'the client, a value for every choice and derived field, a pay term where the product has any — else `422 '
+      + 'PROPOSAL_INCOMPLETE`, `details.items: [{ itemId, missing }]`; '
       + 'and every product still offered, else `422 PROPOSAL_PRODUCT_WITHDRAWN`, `details.itemIds`. The first time, the '
       + 'lead’s *Riwayat* gains *"Proposal dibuat · …"* — derived, nothing is written to the lead. Step 3’s button.',
   })
@@ -218,8 +225,9 @@ export class ProposalController {
   @ApiOperation({
     summary: 'Duplicate a proposal',
     description:
-      'A new *Draf* for the same lead: the client’s copy taken from the lead again, the products copied with their values, '
-      + 'and any product no longer offered left out (`droppedProductIds`). A deleted lead’s proposal is `404 NOT_FOUND`.',
+      'A new *Draf* for the same lead: the lead’s name, the client’s age moved up by the years since it was entered, the '
+      + 'products copied with their values, and any product no longer offered left out (`droppedProductIds`). A deleted '
+      + 'lead’s proposal is `404 NOT_FOUND`.',
   })
   @ApiResponse({ status: 201, type: ProposalDuplicatedDto })
   @ApiResponse({ status: 404, description: `${NOT_YOURS} Or \`NOT_FOUND\` — its lead was deleted.`, type: ApiErrorEnvelope })

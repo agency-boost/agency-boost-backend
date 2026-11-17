@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -11,6 +11,7 @@ import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
+import { ProductDataGrant, ProductDataGrantDocument } from '@/modules/product-data/product-data-grant.schema';
 import { AUTH_REFUSALS } from './auth.messages';
 
 /**
@@ -30,6 +31,12 @@ export class ContextResolver {
     @InjectModel(Membership.name) private readonly memberships: Model<MembershipDocument>,
     // The office's today, for the end of its subscription (ADR-0112 §3). Never `new Date()`.
     private readonly clock: Clock,
+    /*
+     * **The person's *Kelola data produk* grant** (ADR-0260 §2; P19.15-T4 AC-2), read here on every request of an active
+     * Owner or Admin, so giving, changing or removing it is in force from their next request. Optional so a spec that is
+     * about something else may build the resolver without it: nobody then holds one.
+     */
+    @Optional() @InjectModel(ProductDataGrant.name) private readonly grants?: Model<ProductDataGrantDocument>,
   ) {}
 
   async resolve(
@@ -133,7 +140,24 @@ export class ContextResolver {
       // Every session, and never outside one: somebody acting as themselves is not being restrained.
       impersonatorUserId !== null,
       reader,
+      await this.productDataCompaniesOf(userId, membership),
     );
+  }
+
+  /**
+   * **The companies their *Kelola data produk* grant ticks** (ADR-0260 §2): read only for an **active KPM Owner or KPM
+   * Admin**, who alone may hold it — anybody else is answered empty without a read, so an agent's request costs nothing
+   * more. A grant removed, or an Admin whose access the Owner took away, holds nothing from the next request. In a
+   * support session it is read as for the person, so the session sees their *Data produk* — read-only, as every
+   * session is (`can()`, by the permission's verb).
+   */
+  private async productDataCompaniesOf(userId: string, membership: TenantMembership | null): Promise<readonly string[]> {
+    if (!this.grants || membership?.status !== 'active' || !(membership.isKpmOwner || membership.isKpmAdmin)) return [];
+    const grant = await this.grants
+      .findOne({ userId, revokedAt: null, deletedAt: null }, { companyIds: 1 })
+      .lean()
+      .exec() as { companyIds?: string[] } | null;
+    return grant?.companyIds ?? [];
   }
 
   /**

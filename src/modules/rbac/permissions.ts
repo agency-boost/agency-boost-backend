@@ -34,6 +34,14 @@ export type Grantee =
    */
   | { kind: 'hierarchy'; roleClass: HierarchyRole }
   /**
+   * **Somebody the Super Admin gave a grant to, by name** (ADR-0260 §2; P19.15-T4 AC-2): *Kelola data produk*, the one
+   * kind there is. Not a role: a KPM Owner or KPM Admin holds it only while their *Kelola data produk* grant is live
+   * and they are still an active Owner or Admin (`holds`). **Its reach is the companies the grant ticks**, which no
+   * `Scope` can say: the grant is declared `own` — the holder's own grant — and `ProductDataAccess` answers for the
+   * company on every route that names one.
+   */
+  | { kind: 'grant'; grant: 'product_data' }
+  /**
    * Anyone signed in, membership or not. Exactly one permission uses it, and the
    * documentation says why: the office directory is `all` for every authenticated user
    * *including one with no KPM yet*, because otherwise nobody could ever join one.
@@ -47,6 +55,8 @@ export const AB: Grantee = { kind: 'hierarchy', roleClass: 'ab' };
 export const AAB: Grantee = { kind: 'hierarchy', roleClass: 'aab' };
 export const AGENT: Grantee = { kind: 'hierarchy', roleClass: 'agent' };
 export const AUTHENTICATED: Grantee = { kind: 'authenticated' };
+/** **A product data manager** (ADR-0260): a KPM Owner or Admin holding a live *Kelola data produk* grant. */
+export const PRODUCT_DATA_MANAGER: Grantee = { kind: 'grant', grant: 'product_data' };
 
 export interface Grant {
   readonly grantee: Grantee;
@@ -1241,6 +1251,17 @@ export const PERMISSIONS = {
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
   ],
+  /*
+   * **Reading the tags: *Core leaders & groups*** (P19.13-T3; UI-199; ADR-0253 §7) — `GET /members/core-leaders`, every
+   * leader of the office with their group, ★ and Core leader tag and their targets. The same holders as the two tag
+   * writes, and **read-like**, so the Super Admin's view-as session reads the page while `can()` refuses it every write
+   * (`member:tag_group` is a write's verb, which a session never holds — reading the page on it would refuse the view).
+   */
+  'member:read_tags': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
   'group_informal:create': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -1709,6 +1730,43 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
   ],
+  /*
+   * ***Kelola data produk*, read** (ADR-0260 §4, §6; P19.15-T4 AC-2): `GET /admin/product-data-grants` — who holds it,
+   * for which insurers — and `GET /admin/product-data-grants/changes`, *Perubahan oleh pengelola*. The Super Admin's
+   * alone; a support session acts as its member, whose context holds no platform grant.
+   */
+  'product_data_grant:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * ***Kelola data produk*, given, changed and removed** (ADR-0260 §1, §4; the P1b spec's *Giving access*): `PUT` and
+   * `DELETE /admin/product-data-grants/:userId`. The Super Admin's alone, and on `BLOCKED_WHILE_IMPERSONATING`, as
+   * `kpm_admin:grant` is: a grant is never handed out from inside somebody's session.
+   */
+  'product_data_grant:manage': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * **An insurer's proposal data, read** (ADR-0258 §9, ADR-0260 §3; P19.15-T4 AC-1 to AC-3; the P1b spec's *Who can do
+   * what*): every `GET` under `/product-data/companies/:companyId/…` and `GET /product-data/companies`. The Super Admin,
+   * every company; a KPM Owner and a KPM Admin, **their own KPM's company, read-only** (`own-kpm`); a product data manager
+   * (*Kelola data produk*), the companies ticked as well. Which company is `ProductDataAccess`'s: one outside the
+   * reader's is `404`. Leaders and agents hold nothing here — they see the result in the proposal. A read by its verb,
+   * so a support session keeps it.
+   */
+  'product_data:read': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: PRODUCT_DATA_MANAGER, scope: 'own' },
+  ],
+  /*
+   * **An insurer's proposal data, changed** (ADR-0258 §9, ADR-0260 §2; P19.15-T4 AC-2): every write under
+   * `/product-data/…` — a premium table uploaded, mapped, tested, activated, turned off or deleted, a product's rules, an
+   * upload confirmed, an illustration published. The Super Admin, every company; **a product data manager, the companies
+   * their *Kelola data produk* ticks** — `ProductDataAccess.assertManage` answers `403 PERM_DENIED` for one they may only
+   * read. A KPM Owner or Admin without it holds nothing; a write, so no support session holds it.
+   */
+  'product_data:manage': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: PRODUCT_DATA_MANAGER, scope: 'own' },
+  ],
 } as const satisfies Record<string, readonly Grant[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -1775,6 +1833,8 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   'billing:send_quote',
   'kpm_admin:grant',
   'kpm_admin:revoke',
+  // ADR-0260 §4 (P19.15-T4): *Kelola data produk* is given and removed by the Super Admin as themselves, never in a session.
+  'product_data_grant:manage',
   'notification_preference:manage',
   /*
    * ADR-0199 §7 (UI-169 item 5): **a support session never changes somebody's logins** — linking one, switching to one
@@ -1924,7 +1984,26 @@ function holds(ctx: RequestContext, grant: Grant): boolean {
         ctx.membership!.hierarchyRole === grantee.roleClass
       );
     }
+    case 'grant': {
+      /*
+       * ADR-0260 §2: **a live *Kelola data produk* grant, held by an active KPM Owner or KPM Admin**. The companies come
+       * from the grant, read on every request (`ContextResolver`), so one removed grants nothing from the next request;
+       * the role is checked here again, so an Admin whose access the Owner took away holds nothing although the grant
+       * is still on record. Which company is `ProductDataAccess`'s question.
+       */
+      const member = ctx.membership;
+      return ctx.productDataCompanyIds.length > 0 && member?.status === 'active' && (member.isKpmOwner || member.isKpmAdmin);
+    }
   }
+}
+
+/**
+ * **Does `ctx` hold this named grant now?** (ADR-0260 §2): a live *Kelola data produk* grant, held by an active KPM Owner
+ * or KPM Admin — the `grant` grantee's own test, so `ProductDataAccess` asks the same question `can()` does before it
+ * reads the grant's companies.
+ */
+export function holdsGrant(ctx: RequestContext, grant: 'product_data'): boolean {
+  return holds(ctx, { grantee: { kind: 'grant', grant }, scope: 'own' });
 }
 
 const SCOPE_ORDER: readonly Scope[] = ['own', 'own-unit', 'own-downline', 'own-kpm', 'all'];

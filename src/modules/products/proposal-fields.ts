@@ -5,7 +5,10 @@ import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
   PDF_DETAIL_BLOCKS, PROPOSAL, PROPOSAL_DEFAULT_INSURED, PROPOSAL_FIELD_KEY_PATTERN, PROPOSAL_FIELD_TYPES,
   PROPOSAL_RESERVED_KEYS, PROPOSAL_TEXT_MAX, PRODUCT_CURRENCIES, PROPOSAL_TYPE_LABEL_BY_CATEGORY, defaultInsuredFor,
-  type PdfDetailBlockKind, type ProductCurrency, type ProposalDefaultInsured, type ProposalFieldType,
+  PROPOSAL_CALC_TYPES, PROPOSAL_CATALOGUE, PROPOSAL_NEED_TAGS, PROPOSAL_PAY_FREQUENCIES, PROPOSAL_PAY_TERM_KEY_PATTERN,
+  PROPOSAL_PERIODIC_FREQUENCIES, needTagFor,
+  type PdfDetailBlockKind, type ProductCurrency, type ProposalCalcType, type ProposalDefaultInsured,
+  type ProposalFieldType, type ProposalNeedTag, type ProposalPayFrequency,
 } from '@/domain/constants';
 import { checkFormula } from './proposal-formula';
 import { PROPOSAL_FIELDS_REFUSALS } from './proposal-fields.messages';
@@ -36,7 +39,7 @@ export interface ProposalField {
   labelSyariah: string | null;
   type: ProposalFieldType;
   options: ProposalOption[];
-  /** A `chips` field's preselected option, by label; a `fixed` field's one; `null` on a `money` field. */
+  /** A `chips` field's preselected option, by label; a `fixed` field's one; `null` on a `money` or `derived` field. */
   default: string | null;
   /** A `money` field's quick amounts, IDR minor units, smallest first. */
   quickAmounts: number[];
@@ -86,8 +89,70 @@ export interface PdfDetailBlock {
   notGuaranteed: boolean;
 }
 
+/**
+ * **One pay term of a product** (P19.14-T2; ADR-0255 §2; the 11 Nov spec's `payTerms[]`): *5 th*, *s/d usia 60*,
+ * *Sekali bayar*, or a sentence (*"Diperbarui tiap tahun s/d usia 99"*). **`maxEntryAge` is the oldest age at the next
+ * birthday it is offered at**: an insured older than it sees it crossed out.
+ */
+export interface PayTerm {
+  key: string;
+  label: string;
+  /** The whole years of paying — *Total dibayar selama N tahun* reads them — or `null`. */
+  years: number | null;
+  /** Paying until this age (*s/d usia 60*), or `null`. */
+  toAge: number | null;
+  /** *Sekali bayar*: the item's *Cara bayar* is `single` while it is chosen. */
+  single: boolean;
+  /** The oldest age at the next birthday the term is offered at, or `null` for no limit. */
+  maxEntryAge: number | null;
+  /** The term a new item starts on (the Prudential list's bold one); at most one, else the first the insured may take. */
+  default: boolean;
+}
+
+/** One rule of a derived plan: *when these chips read these options, the plan is this*. */
+export interface PlanRuleEntry {
+  when: Record<string, string>;
+  value: string;
+}
+
+/** **How a derived field is worked out** (ADR-0255 §3): the rules, first match wins; none matching leaves it empty. */
+export interface PlanRule {
+  /** The product's `derived` field. */
+  field: string;
+  rules: PlanRuleEntry[];
+}
+
+/**
+ * **The catalogue's calculation fields** (P19.14-T2 AC-5; ADR-0255 §4, §5; the 11 Nov spec's *Products (catalog)*):
+ * what decides the amounts an agent's card shows, the pay terms and *Cara bayar* it offers, and — once 19.15 loads a
+ * table — the premium. Every one has a default that changes nothing for a product nobody filled.
+ */
+export interface ProposalCalcSettings {
+  /** `manual` by default; every product is typed by the agent until `rateTableId` is set (19.15). */
+  calcType: ProposalCalcType;
+  /** The ages at the next birthday a client may enter at; `null` for no limit. */
+  entryAge: { min: number; max: number } | null;
+  /** `[]` for none: the card shows no *Masa bayar* row, and a `paymentYears` field (ADR-0225 §1) still counts. */
+  payTerms: PayTerm[];
+  /** *Cara bayar* offered, in `PROPOSAL_PAY_FREQUENCIES`' order; `[]` reads the four periodic ones. */
+  frequencies: ProposalPayFrequency[];
+  /** *Merokok?* is asked only where the premium differs for smokers. */
+  smokerRated: boolean;
+  planRule: PlanRule | null;
+  /** The sum assured is rounded down to a multiple of this, minor units; `null` for none (19.15). */
+  upStep: number | null;
+  upMin: number | null;
+  upMax: number | null;
+  premiumMin: number | null;
+  premiumMax: number | null;
+  /** The active premium table's version (19.15); `null` — every product today — is `manual`. */
+  rateTableId: string | null;
+  /** The need tile it ticks; `null` reads {@link needTagFor}'s. */
+  needTag: ProposalNeedTag | null;
+}
+
 /** Everything the proposal reads from a product, as stored. */
-export interface ProposalSettings {
+export interface ProposalSettings extends ProposalCalcSettings {
   proposalFields: ProposalField[];
   planOptions: PlanOption[];
   faq: FaqEntry[];
@@ -99,9 +164,16 @@ export interface ProposalSettings {
   proposalTypeLabel: string | null;
 }
 
-/** The keys a product's write may carry for the proposal (ADR-0225 §1). */
+/** The calculation keys (ADR-0255 §5), in the order the editor shows them. */
+export const PROPOSAL_CALC_KEYS = [
+  'calcType', 'entryAge', 'payTerms', 'frequencies', 'smokerRated', 'planRule', 'upStep', 'upMin', 'upMax',
+  'premiumMin', 'premiumMax', 'rateTableId', 'needTag',
+] as const satisfies readonly (keyof ProposalCalcSettings)[];
+
+/** The keys a product's write may carry for the proposal (ADR-0225 §1; ADR-0255 §5). */
 export const PROPOSAL_SETTING_KEYS = [
   'proposalFields', 'planOptions', 'faq', 'pdfDetail', 'syariahName', 'defaultInsured', 'proposalTypeLabel',
+  ...PROPOSAL_CALC_KEYS,
 ] as const satisfies readonly (keyof ProposalSettings)[];
 
 /** What a save checks the proposal fields against: the product as it will be once written. */
@@ -113,11 +185,47 @@ export interface ProductFacts {
   today: string;
 }
 
+/** Nothing calculated: `manual`, no limits, no pay terms, the four periodic *Cara bayar* (ADR-0255 §5). */
+export const EMPTY_CALC_SETTINGS: ProposalCalcSettings = {
+  calcType: 'manual', entryAge: null, payTerms: [], frequencies: [], smokerRated: false, planRule: null,
+  upStep: null, upMin: null, upMax: null, premiumMin: null, premiumMax: null, rateTableId: null, needTag: null,
+};
+
 /** Nothing set: a product with no proposal fields is still offered, with *Tertanggung* and the premium (§1). */
 export const EMPTY_PROPOSAL_SETTINGS: ProposalSettings = {
   proposalFields: [], planOptions: [], faq: [], pdfDetail: [], syariahName: null, defaultInsured: null,
-  proposalTypeLabel: null,
+  proposalTypeLabel: null, ...EMPTY_CALC_SETTINGS,
 };
+
+/** **A product's calculation fields as stored, each absent one its default** — a product nobody filled reads `manual`. */
+export function calcSettingsOf(product: Partial<Record<keyof ProposalCalcSettings, unknown>>): ProposalCalcSettings {
+  const out = { ...EMPTY_CALC_SETTINGS } as Record<string, unknown>;
+  for (const key of PROPOSAL_CALC_KEYS) {
+    const value = product[key];
+    if (value !== undefined && value !== null) out[key] = value;
+  }
+  return JSON.parse(JSON.stringify(out)) as ProposalCalcSettings;
+}
+
+/** ***Cara bayar* a product offers** (ADR-0255 §2): its own, else the four periodic ones. */
+export function frequenciesOf(product: { frequencies?: readonly string[] | null }): ProposalPayFrequency[] {
+  const own = (product.frequencies ?? []).filter((f): f is ProposalPayFrequency =>
+    (PROPOSAL_PAY_FREQUENCIES as readonly string[]).includes(f));
+  return own.length > 0 ? own : [...PROPOSAL_PERIODIC_FREQUENCIES];
+}
+
+/** **The need tile a product ticks** (ADR-0255 §5): its own, else its first need's or its category's. */
+export function needTagOf(product: { needTag?: string | null; category: string; primaryNeeds?: readonly string[] | null }): ProposalNeedTag {
+  return (PROPOSAL_NEED_TAGS as readonly string[]).includes(product.needTag ?? '')
+    ? product.needTag as ProposalNeedTag
+    : needTagFor(product.category, product.primaryNeeds ?? []);
+}
+
+/**
+ * **A syariah product** (ADR-0255 §1): `channel: 'syariah'` — no flag of its own, so the two can never disagree. It reads
+ * *Kontribusi*, *Santunan asuransi* and *Peserta*.
+ */
+export const isSyariahProduct = (product: { channel: string }): boolean => product.channel === 'syariah';
 
 /** The PDF's type label a product prints: its own, else its category's (ADR-0225 §1). */
 export function typeLabelOf(product: { proposalTypeLabel?: string | null; category: string }): string {
@@ -233,7 +341,7 @@ function readField(raw: unknown, path: string, facts: ProductFacts): ProposalFie
     }
   };
   onType('paymentYears', ['chips', 'fixed']);
-  onType('plan', ['chips']);
+  onType('plan', ['chips', 'derived']);
   onType('currency', ['chips']);
 
   const options = list(o.options, `${path}.options`, PROPOSAL.CHIP_OPTIONS_MAX)
@@ -258,7 +366,13 @@ function readField(raw: unknown, path: string, facts: ProductFacts): ProposalFie
     const labels = options.map((option) => option.label);
     const twice = labels.find((label, i) => labels.indexOf(label) !== i);
     if (twice !== undefined) refuse(SAY.labelsTwice({ field: `${path}.options`, label: twice }), `${path}.options`);
-    if (type === 'fixed') {
+    if (type === 'derived') {
+      // ADR-0255 §3: the values the plan rule may give, nothing preselected — the rule fills it.
+      if (options.length < 1) {
+        refuse(SAY.listBetween({ field: `${path}.options`, min: 1, max: PROPOSAL.CHIP_OPTIONS_MAX }), `${path}.options`);
+      }
+      if (o.default !== undefined && o.default !== null) refuse(SAY.notForType({ field: `${path}.default`, type }), `${path}.default`);
+    } else if (type === 'fixed') {
       if (options.length !== 1) refuse(SAY.fixedOneOption({ field: `${path}.options` }), `${path}.options`);
       if (o.default !== undefined && o.default !== null && o.default !== labels[0]) {
         refuse(SAY.defaultNotAnOption({ field: `${path}.default` }), `${path}.default`);
@@ -314,6 +428,8 @@ function readFields(value: unknown, facts: ProductFacts): ProposalField[] {
     const marked = fields.map((f, i) => (f[name] ? i : -1)).filter((i) => i >= 0);
     if (marked.length > 1) refuse(SAY.onlyOneFlag({ field: `proposalFields[${marked[1]}].${name}`, flag: name }), `proposalFields[${marked[1]}].${name}`);
   }
+  const derived = fields.map((f, i) => (f.type === 'derived' ? i : -1)).filter((i) => i >= 0);
+  if (derived.length > 1) refuse(SAY.derivedNeedsRule({ field: `proposalFields[${derived[1]}].type` }), `proposalFields[${derived[1]}].type`);
   return fields;
 }
 
@@ -363,9 +479,19 @@ export function readFaq(value: unknown, path = 'faq'): FaqEntry[] {
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * **The names a `pdfDetail` formula may use** (ADR-0225 §4; P19.15-T2, ADR-0259 §8): the product's own `money` fields,
+ * and `up` on an `up_premium` product — the item's sum assured, which is no field since ADR-0255 §4 and which the PDF
+ * already reads as `up` (`proposal-pdf.model.ts`, `moneyValuesOf`).
+ */
+export function formulaNamesOf(fields: readonly Pick<ProposalField, 'key' | 'type'>[], calcType: ProposalCalcType): string[] {
+  const keys = fields.filter((f) => f.type === 'money').map((f) => f.key);
+  return calcType === 'up_premium' && !keys.includes('up') ? [...keys, 'up'] : keys;
+}
+
 /** Page 2's blocks: each once, its rows bounded, its formulas naming only this product's money keys (§2, §4). */
-function readDetail(value: unknown, fields: readonly ProposalField[], facts: ProductFacts): PdfDetailBlock[] {
-  const moneyKeys = fields.filter((f) => f.type === 'money').map((f) => f.key);
+function readDetail(value: unknown, fields: readonly ProposalField[], facts: ProductFacts, calcType: ProposalCalcType): PdfDetailBlock[] {
+  const moneyKeys = formulaNamesOf(fields, calcType);
   const blocks = list(value, 'pdfDetail', PDF_DETAIL_BLOCKS.length).map((raw, i) => {
     const path = `pdfDetail[${i}]`;
     const b = record(raw, path, ['block', 'rows', 'source', 'notGuaranteed']);
@@ -409,6 +535,124 @@ function readDetail(value: unknown, fields: readonly ProposalField[], facts: Pro
   return blocks;
 }
 
+// ------------------------------------------------------------------------- the calculation fields (ADR-0255)
+
+/** An age at the next birthday, 1 to `PROPOSAL_CATALOGUE.AGE_MAX`, or `null`. */
+function age(value: unknown, path: string): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > PROPOSAL_CATALOGUE.AGE_MAX) {
+    refuse(SAY.ageShape({ field: path, max: PROPOSAL_CATALOGUE.AGE_MAX }), path);
+  }
+  return value;
+}
+
+/** A whole sum in minor units, zero or more (or above zero), or `null`. */
+function amount(value: unknown, path: string, positive = false): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < (positive ? 1 : 0) || value > PROPOSAL.MONEY_MAX_MINOR) {
+    refuse(positive ? SAY.positiveAmount({ field: path }) : SAY.wholeAmount({ field: path }), path);
+  }
+  return value;
+}
+
+function readEntryAge(value: unknown): { min: number; max: number } | null {
+  if (value === undefined || value === null) return null;
+  const o = record(value, 'entryAge', ['min', 'max']);
+  const min = age(o.min, 'entryAge.min');
+  const max = age(o.max, 'entryAge.max');
+  if (min === null) refuse(COMMON.required({ field: 'entryAge.min' }), 'entryAge.min');
+  if (max === null) refuse(COMMON.required({ field: 'entryAge.max' }), 'entryAge.max');
+  if (min > max) refuse(SAY.entryAgeOrder({ field: 'entryAge' }), 'entryAge');
+  return { min, max };
+}
+
+function readPayTerms(value: unknown): PayTerm[] {
+  const terms = list(value, 'payTerms', PROPOSAL_CATALOGUE.PAY_TERMS_MAX).map((raw, i) => {
+    const path = `payTerms[${i}]`;
+    const o = record(raw, path, ['key', 'label', 'years', 'toAge', 'single', 'maxEntryAge', 'default']);
+    if (typeof o.key !== 'string' || !PROPOSAL_PAY_TERM_KEY_PATTERN.test(o.key)) refuse(SAY.keyShape({ field: `${path}.key` }), `${path}.key`);
+    const years = o.years === undefined || o.years === null ? null : o.years;
+    if (years !== null && (typeof years !== 'number' || !Number.isInteger(years) || years < 1 || years > PROPOSAL.PAYMENT_YEARS_MAX)) {
+      refuse(SAY.yearsShape({ field: `${path}.years`, max: PROPOSAL.PAYMENT_YEARS_MAX }), `${path}.years`);
+    }
+    const toAge = age(o.toAge, `${path}.toAge`);
+    const single = flag(o.single, `${path}.single`, false);
+    if ([years !== null, toAge !== null, single].filter(Boolean).length > 1) refuse(SAY.payTermShape({ field: path }), path);
+    return {
+      key: o.key,
+      label: text(o.label, `${path}.label`, PROPOSAL_CATALOGUE.PAY_TERM_LABEL_MAX),
+      years: years as number | null,
+      toAge,
+      single,
+      maxEntryAge: age(o.maxEntryAge, `${path}.maxEntryAge`),
+      default: flag(o.default, `${path}.default`, false),
+    };
+  });
+  const keys = terms.map((t) => t.key);
+  const twice = keys.findIndex((key, i) => keys.indexOf(key) !== i);
+  if (twice >= 0) refuse(SAY.payTermKeyTwice({ field: `payTerms[${twice}].key`, key: keys[twice] }), `payTerms[${twice}].key`);
+  const defaults = terms.map((t, i) => (t.default ? i : -1)).filter((i) => i >= 0);
+  if (defaults.length > 1) refuse(SAY.onlyOneFlag({ field: `payTerms[${defaults[1]}].default`, flag: 'default' }), `payTerms[${defaults[1]}].default`);
+  return terms;
+}
+
+/** The *Cara bayar* offered, each once, stored in `PROPOSAL_PAY_FREQUENCIES`' order. */
+function readFrequencies(value: unknown): ProposalPayFrequency[] {
+  const given = list(value, 'frequencies', PROPOSAL_PAY_FREQUENCIES.length)
+    .map((f, i) => oneOf(f, `frequencies[${i}]`, PROPOSAL_PAY_FREQUENCIES));
+  const twice = given.findIndex((f, i) => given.indexOf(f) !== i);
+  if (twice >= 0) refuse(SAY.frequencyTwice({ field: `frequencies[${twice}]`, frequency: given[twice] }), `frequencies[${twice}]`);
+  return PROPOSAL_PAY_FREQUENCIES.filter((f) => given.includes(f));
+}
+
+/**
+ * **The plan rule** (ADR-0255 §3): it names the product's one `derived` field, and each rule's conditions name its
+ * `chips` fields and their options, its value an option of the derived field. A derived field without a rule, or a
+ * rule without a derived field, is refused: the plan would read nothing.
+ */
+function readPlanRule(value: unknown, fields: readonly ProposalField[]): PlanRule | null {
+  const derived = fields.findIndex((f) => f.type === 'derived');
+  if (value === undefined || value === null) {
+    if (derived >= 0) refuse(SAY.derivedNeedsRule({ field: `proposalFields[${derived}].type` }), `proposalFields[${derived}].type`);
+    return null;
+  }
+  const o = record(value, 'planRule', ['field', 'rules']);
+  const target = fields[derived];
+  if (!target || o.field !== target.key) refuse(SAY.ruleField({ field: 'planRule.field' }), 'planRule.field');
+  const chips = new Map(fields.filter((f) => f.type === 'chips').map((f) => [f.key, f.options.map((option) => option.label)]));
+  const rules = list(o.rules, 'planRule.rules', PROPOSAL_CATALOGUE.PLAN_RULES_MAX, 1).map((raw, i) => {
+    const path = `planRule.rules[${i}]`;
+    const r = record(raw, path, ['when', 'value']);
+    if (r.when === null || typeof r.when !== 'object' || Array.isArray(r.when)) refuse(SAY.notAnObject({ field: `${path}.when` }), `${path}.when`);
+    const entries = Object.entries(r.when as Record<string, unknown>);
+    if (entries.length < 1 || entries.length > PROPOSAL_CATALOGUE.PLAN_RULE_WHEN_MAX) {
+      refuse(SAY.listBetween({ field: `${path}.when`, min: 1, max: PROPOSAL_CATALOGUE.PLAN_RULE_WHEN_MAX }), `${path}.when`);
+    }
+    const when: Record<string, string> = {};
+    for (const [key, option] of entries) {
+      if (typeof option !== 'string' || !chips.get(key)?.includes(option)) refuse(SAY.ruleWhen({ field: `${path}.when.${key}` }), `${path}.when.${key}`);
+      when[key] = option;
+    }
+    if (typeof r.value !== 'string' || !target.options.some((option) => option.label === r.value)) {
+      refuse(SAY.ruleValue({ field: `${path}.value` }), `${path}.value`);
+    }
+    return { when, value: r.value };
+  });
+  return { field: target.key, rules };
+}
+
+/** The limits, each a whole sum or `null`, and each minimum no larger than its maximum. */
+function readLimits(pick: (key: keyof ProposalCalcSettings) => unknown) {
+  const upStep = amount(pick('upStep'), 'upStep', true);
+  const upMin = amount(pick('upMin'), 'upMin');
+  const upMax = amount(pick('upMax'), 'upMax');
+  const premiumMin = amount(pick('premiumMin'), 'premiumMin');
+  const premiumMax = amount(pick('premiumMax'), 'premiumMax');
+  if (upMin !== null && upMax !== null && upMin > upMax) refuse(SAY.limitOrder({ field: 'upMin' }), 'upMin');
+  if (premiumMin !== null && premiumMax !== null && premiumMin > premiumMax) refuse(SAY.limitOrder({ field: 'premiumMin' }), 'premiumMin');
+  return { upStep, upMin, upMax, premiumMin, premiumMax };
+}
+
 /**
  * **A product's proposal settings as a save checks them** (ADR-0225 §2): the stored settings with the write's laid over
  * them, every rule held across the whole — a plan card names an option of the plan field the same write may have
@@ -427,7 +671,9 @@ export function checkProposalSettings(
   const proposalFields = readFields(pick('proposalFields'), facts);
   const planOptions = readPlans(pick('planOptions'), proposalFields);
   const faq = readFaq(pick('faq'));
-  const pdfDetail = readDetail(pick('pdfDetail'), proposalFields, facts);
+  // P19.15-T2 (ADR-0259 §8): the calculation type first, so an `up_premium` product's formulas may name its `up`.
+  const calcType = oneOf(pick('calcType') ?? 'manual', 'calcType', PROPOSAL_CALC_TYPES);
+  const pdfDetail = readDetail(pick('pdfDetail'), proposalFields, facts, calcType);
   const syariahName = optionalText(pick('syariahName'), 'syariahName', PROPOSAL_TEXT_MAX.SYARIAH_NAME);
   // One product for both versions only (§3): a syariah product is offered under Syariah by its own name.
   if (syariahName !== null && facts.channel !== 'conventional') refuse(SAY.syariahNameOnSyariah, 'syariahName');
@@ -435,7 +681,21 @@ export function checkProposalSettings(
   const defaultInsured = insured === null || insured === undefined
     ? null : oneOf(insured, 'defaultInsured', PROPOSAL_DEFAULT_INSURED);
   const proposalTypeLabel = optionalText(pick('proposalTypeLabel'), 'proposalTypeLabel', PROPOSAL_TEXT_MAX.TYPE_LABEL);
-  return { proposalFields, planOptions, faq, pdfDetail, syariahName, defaultInsured, proposalTypeLabel };
+
+  // P19.14-T2 (ADR-0255 §5): the calculation fields, each its default where nothing was stored.
+  const tag = pick('needTag');
+  return {
+    proposalFields, planOptions, faq, pdfDetail, syariahName, defaultInsured, proposalTypeLabel,
+    calcType,
+    entryAge: readEntryAge(pick('entryAge')),
+    payTerms: readPayTerms(pick('payTerms')),
+    frequencies: readFrequencies(pick('frequencies')),
+    smokerRated: flag(pick('smokerRated'), 'smokerRated', false),
+    planRule: readPlanRule(pick('planRule'), proposalFields),
+    ...readLimits(pick),
+    rateTableId: optionalText(pick('rateTableId'), 'rateTableId', 64),
+    needTag: tag === null || tag === undefined ? null : oneOf(tag, 'needTag', PROPOSAL_NEED_TAGS),
+  };
 }
 
 // --------------------------------------------------------------------------- an office's FAQ and highlights

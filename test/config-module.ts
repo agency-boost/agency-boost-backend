@@ -1035,7 +1035,7 @@ export function configModule(
       officePeople, productionReadings, monthRows, memberships, clock,
       new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
     ),
-    analyticsTargets, quantRuns, surveyRunRows, audit, clock,
+    analyticsTargets, quantRuns, surveyRunRows, audit, clock, officeGroups,
   );
   const adminAdvancedAnalytics = new AdminAdvancedAnalytics(kpms as never, advancedAnalytics, surveys.kpm, audit);
   const directoryColumns = new DirectoryColumns(

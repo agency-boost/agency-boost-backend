@@ -4,11 +4,11 @@ import { configSchemaOptions } from '@/common/schema/base.schema';
 import { ProductDocumentRefSchema } from './kpm-product-config.schema';
 import {
   PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES, PRODUCT_DEFAULT_CURRENCIES, PRODUCT_KINDS,
-  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PROPOSAL_DEFAULT_INSURED,
+  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PROPOSAL_CALC_TYPES, PROPOSAL_DEFAULT_INSURED, PROPOSAL_NEED_TAGS,
   type ProductCategory, type ProductChannel, type ProductCurrency, type ProductKind, type ProductLifecycle,
-  type ProductNeed, type ProposalDefaultInsured,
+  type ProductNeed, type ProposalCalcType, type ProposalDefaultInsured, type ProposalNeedTag, type ProposalPayFrequency,
 } from '@/domain/constants';
-import type { FaqEntry, PdfDetailBlock, PlanOption, ProposalField } from './proposal-fields';
+import type { FaqEntry, PayTerm, PdfDetailBlock, PlanOption, PlanRule, ProposalField } from './proposal-fields';
 
 export type ProductDocument = HydratedDocument<Product>;
 
@@ -208,6 +208,61 @@ export class Product {
    */
   @Prop({ type: Object, default: null })
   proposalFieldsSource!: { import: string; hash: string } | null;
+
+  /*
+   * **The catalogue's calculation fields** (P19.14-T2 AC-5; ADR-0255 §4, §5; the 11 Nov spec's *Products (catalog)*):
+   * checked on every save with the proposal fields (`checkProposalSettings`), so stored as plain values, the shapes in
+   * `proposal-fields.ts`. Each defaults to what changes nothing: `manual`, no limits, the four periodic *Cara bayar*.
+   * **No syariah flag**: `channel: 'syariah'` is it (`isSyariahProduct`). **No currency field**: `currencies` and the
+   * `currency` proposal field are it (ADR-0225 §8).
+   */
+
+  /** `up_premium`, `goal`, `premium_benefit`, `plan_priced` or `manual` — which amounts the card shows. */
+  @Prop({ type: String, enum: PROPOSAL_CALC_TYPES, default: 'manual' })
+  calcType!: ProposalCalcType;
+
+  /** The ages at the next birthday a client may enter at; `null` for no limit. */
+  @Prop({ type: Object, default: null })
+  entryAge!: { min: number; max: number } | null;
+
+  /** Each with its `maxEntryAge`; `[]` for none. */
+  @Prop({ type: [Object], default: [] })
+  payTerms!: PayTerm[];
+
+  /** *Cara bayar* offered; `[]` reads the four periodic ones. */
+  @Prop({ type: [String], default: [] })
+  frequencies!: ProposalPayFrequency[];
+
+  @Prop({ type: Boolean, default: false })
+  smokerRated!: boolean;
+
+  /** How the `derived` field is worked out, or `null`. */
+  @Prop({ type: Object, default: null })
+  planRule!: PlanRule | null;
+
+  /** Minor units of the item's currency, each `null` for none; read by 19.15's calculation. */
+  @Prop({ type: Number, default: null })
+  upStep!: number | null;
+
+  @Prop({ type: Number, default: null })
+  upMin!: number | null;
+
+  @Prop({ type: Number, default: null })
+  upMax!: number | null;
+
+  @Prop({ type: Number, default: null })
+  premiumMin!: number | null;
+
+  @Prop({ type: Number, default: null })
+  premiumMax!: number | null;
+
+  /** The active premium table's version (19.15); `null` is `manual`. */
+  @Prop({ type: String, default: null })
+  rateTableId!: string | null;
+
+  /** The need tile it ticks; `null` reads its first need's or its category's (`needTagOf`). */
+  @Prop({ type: String, enum: [...PROPOSAL_NEED_TAGS, null], default: null })
+  needTag!: ProposalNeedTag | null;
 
   @Prop({ type: String, enum: PRODUCT_LIFECYCLES, default: 'active', index: true })
   lifecycle!: ProductLifecycle;

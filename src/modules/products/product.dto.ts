@@ -8,6 +8,7 @@ import {
   PDF_DETAIL_BLOCKS, PRODUCT_AGE_BANDS, PRODUCT_BUDGET_BANDS, PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES,
   PRODUCT_KINDS, PRODUCT_NEEDS, PRODUCT_OBJECTION_TEXT_MAX_LENGTH, PRODUCT_OBJECTIONS_MAX, PRODUCT_TAGLINE_MAX_LENGTH,
   PROPOSAL, PROPOSAL_DEFAULT_INSURED, PROPOSAL_FIELD_TYPES, PROPOSAL_TEXT_MAX,
+  PROPOSAL_CALC_TYPES, PROPOSAL_CATALOGUE, PROPOSAL_NEED_TAGS, PROPOSAL_PAY_FREQUENCIES,
 } from '@/domain/constants';
 import { field } from '@/common/validation/violations';
 import { PRODUCTS_REFUSALS } from './products.messages';
@@ -246,6 +247,63 @@ export class PdfDetailBlockDto {
 }
 
 /** Everything a product carries except its identity and its lifecycle. */
+/** *Usia masuk* (P19.14-T2; ADR-0255 §5): the ages at the next birthday a client may enter at. */
+export class EntryAgeDto {
+  @ApiProperty({ type: Number, minimum: 1, maximum: PROPOSAL_CATALOGUE.AGE_MAX, example: 21 })
+  min!: number;
+
+  @ApiProperty({ type: Number, minimum: 1, maximum: PROPOSAL_CATALOGUE.AGE_MAX, example: 70 })
+  max!: number;
+}
+
+/** One pay term (P19.14-T2; ADR-0255 §2): years, up to an age, or single — and the oldest entry age it is offered at. */
+export class PayTermDto {
+  @ApiProperty({ example: 'y10', description: '`^[a-z][a-z0-9_]{0,39}$`, unique in the product.' })
+  key!: string;
+
+  @ApiProperty({ maxLength: PROPOSAL_CATALOGUE.PAY_TERM_LABEL_MAX, example: '10 tahun' })
+  label!: string;
+
+  @ApiProperty({ type: Number, nullable: true, minimum: 1, maximum: PROPOSAL.PAYMENT_YEARS_MAX, description: 'Whole years of paying, or `null`.' })
+  years!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, minimum: 1, maximum: PROPOSAL_CATALOGUE.AGE_MAX, description: 'Paying until this age, or `null`.' })
+  toAge!: number | null;
+
+  @ApiProperty({ type: Boolean, description: '*Sekali bayar*. At most one of `years`, `toAge` and `single`.' })
+  single!: boolean;
+
+  @ApiProperty({
+    type: Number, nullable: true, minimum: 1, maximum: PROPOSAL_CATALOGUE.AGE_MAX,
+    description: 'The oldest age at the next birthday it is offered at; `null` for no limit. An older insured sees it crossed out.',
+  })
+  maxEntryAge!: number | null;
+
+  @ApiProperty({ type: Boolean, description: 'The term a new item starts on; at most one.' })
+  default!: boolean;
+}
+
+/** One rule of a derived plan. */
+export class PlanRuleEntryDto {
+  @ApiProperty({
+    type: 'object', additionalProperties: { type: 'string' }, example: { wilayah: 'Indonesia', kamar: '2 tempat tidur' },
+    description: 'A chips field\'s key and one of its options, for each condition (1 to 4).',
+  })
+  when!: Record<string, string>;
+
+  @ApiProperty({ example: 'Bronze A', description: 'One of the derived field\'s options.' })
+  value!: string;
+}
+
+/** How the product's `derived` field is worked out (P19.14-T2; ADR-0255 §3): the first rule that matches wins. */
+export class PlanRuleDto {
+  @ApiProperty({ example: 'plan', description: 'The product\'s one `derived` field.' })
+  field!: string;
+
+  @ApiProperty({ type: [PlanRuleEntryDto], minItems: 1, maxItems: PROPOSAL_CATALOGUE.PLAN_RULES_MAX })
+  rules!: PlanRuleEntryDto[];
+}
+
 export class ProductFieldsDto {
   @ApiPropertyOptional({ example: 'PRUMapan' })
   @IsOptional() @IsString() @MaxLength(200)
@@ -395,6 +453,70 @@ export class ProductFieldsDto {
   })
   @Allow()
   proposalTypeLabel?: string | null;
+
+  // ---- P19.14-T2 (ADR-0255 §4, §5): the calculation fields, each read whole by `checkProposalSettings` ----
+
+  @ApiPropertyOptional({
+    enum: PROPOSAL_CALC_TYPES,
+    description: 'Which amounts the agent\'s card shows — `up_premium` the sum assured and the premium, every other the '
+      + 'premium — and, once a premium table is loaded (19.15), which it fills. `manual` by default.',
+  })
+  @Allow()
+  calcType?: string;
+
+  @ApiPropertyOptional({ type: EntryAgeDto, nullable: true, description: 'The entry ages; `null` for no limit.' })
+  @Allow()
+  entryAge?: EntryAgeDto | null;
+
+  @ApiPropertyOptional({ type: [PayTermDto], maxItems: PROPOSAL_CATALOGUE.PAY_TERMS_MAX, description: 'The whole list is sent.' })
+  @Allow()
+  payTerms?: PayTermDto[];
+
+  @ApiPropertyOptional({
+    enum: PROPOSAL_PAY_FREQUENCIES, isArray: true,
+    description: '*Cara bayar* offered, each once; `[]` reads the four periodic ones. `single` is *Sekali bayar*.',
+  })
+  @Allow()
+  frequencies?: string[];
+
+  @ApiPropertyOptional({ type: Boolean, description: '*Merokok?* is asked only where this is true.' })
+  @Allow()
+  smokerRated?: boolean;
+
+  @ApiPropertyOptional({ type: PlanRuleDto, nullable: true, description: 'Required with a `derived` field, refused without one.' })
+  @Allow()
+  planRule?: PlanRuleDto | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true, minimum: 1, description: 'The sum assured\'s rounding step, minor units.' })
+  @Allow()
+  upStep?: number | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true, minimum: 0, description: 'Minor units; no larger than `upMax`.' })
+  @Allow()
+  upMin?: number | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true, minimum: 0 })
+  @Allow()
+  upMax?: number | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true, minimum: 0, description: 'Minor units; no larger than `premiumMax`.' })
+  @Allow()
+  premiumMin?: number | null;
+
+  @ApiPropertyOptional({ type: Number, nullable: true, minimum: 0 })
+  @Allow()
+  premiumMax?: number | null;
+
+  @ApiPropertyOptional({
+    type: String, nullable: true, maxLength: 64,
+    description: 'The active premium table\'s version, which 19.15 sets. `null` — every product today — is `manual`.',
+  })
+  @Allow()
+  rateTableId?: string | null;
+
+  @ApiPropertyOptional({ enum: PROPOSAL_NEED_TAGS, nullable: true, description: 'The need tile it ticks; `null` reads its needs\' or category\'s.' })
+  @Allow()
+  needTag?: string | null;
 }
 
 export class CreateProductDto extends ProductFieldsDto {

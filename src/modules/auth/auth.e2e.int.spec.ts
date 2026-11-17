@@ -2835,17 +2835,18 @@ describe('auth and admin over HTTP', () => {
       const { kpmId, asOwner, ownerMembershipId } = await office();
       const them = await joins(kpmId, asOwner);
 
+      // The ★ is always a member of the group they lead (ADR-0253 §2), so the Owner counts from the start.
       const made = await api().post('/api/v1/members/groups').set(asOwner)
         .send({ name: 'New Agent Mentoring Circle', ownerMembershipId })
         .expect(201);
-      expect(made.body[0]).toMatchObject({ name: 'New Agent Mentoring Circle', memberCount: 0 });
+      expect(made.body[0]).toMatchObject({ name: 'New Agent Mentoring Circle', memberCount: 1 });
       const groupId = made.body[0].groupId;
 
       await api().put(`/api/v1/members/${them.membershipId}/tags`).set(asOwner)
         .send({ groupIds: [groupId], isCoreLeader: false }).expect(200);
 
       const listed = await api().get('/api/v1/members/groups').set(asOwner).expect(200);
-      expect(listed.body[0].memberCount).toBe(1);
+      expect(listed.body[0].memberCount).toBe(2);
 
       const renamed = await api().put(`/api/v1/members/groups/${groupId}`).set(asOwner)
         .send({ name: 'Top Producers 2026', ownerMembershipId }).expect(200);
@@ -2866,7 +2867,8 @@ describe('auth and admin over HTTP', () => {
         .send({ name: 'Task Force', ownerMembershipId }).expect(201);
     });
 
-    it('AC-1: retiring keeps the tag, so who was in a cohort stays readable', async () => {
+    // Changed 2026-11-12 (P19.13-T3 AC-4, ADR-0253 §3): deleting a group untags its members; the audit log keeps the cohort.
+    it('P19.13-T3 AC-4: deleting a group leaves its members in no group', async () => {
       const { kpmId, asOwner, ownerMembershipId } = await office();
       const them = await joins(kpmId, asOwner);
       const made = await api().post('/api/v1/members/groups').set(asOwner)
@@ -2879,7 +2881,7 @@ describe('auth and admin over HTTP', () => {
 
       const tags = await api().get(`/api/v1/members/${them.membershipId}/tags`)
         .set(asOwner).expect(200);
-      expect(tags.body.groupIds).toEqual([groupId]);
+      expect(tags.body.groupIds).toEqual([]);
       expect(await api().get('/api/v1/members/groups').set(asOwner).expect(200))
         .toHaveProperty('body', []);
     });
@@ -3025,22 +3027,27 @@ describe('auth and admin over HTTP', () => {
       expect((await api().get('/api/v1/auth/me').set(mine.leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
     });
 
+    // Changed 2026-11-12 (ADR-0253 §1): a leader has one group, so the A-to-Z list is an Agent's, who may have several.
     it('P18.5-T6 AC-1 /auth/me names the live tag groups A to Z and the office’s code and branch', async () => {
-      const { asOwner, leader, code } = await office();
-      const ownerMembershipId = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members
-        .find((m: { isKpmOwner: boolean }) => m.isKpmOwner).membershipId;
+      const { asOwner, leader, agent, code } = await office();
       const make = async (name: string) => (await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name, ownerMembershipId }).expect(201)).body.find((g: { name: string }) => g.name === name).groupId as string;
+        .send({ name }).expect(201)).body.find((g: { name: string }) => g.name === name).groupId as string;
       const top = await make('Top Producers 2026');
       const circle = await make('Mentoring Circle');
       const retired = await make('Class of 2025');
       await api().put(`/api/v1/members/${leader.membershipId}/tags`).set(asOwner)
-        .send({ groupIds: [top, circle, retired], isCoreLeader: true }).expect(200);
+        .send({ groupIds: [top], isCoreLeader: true }).expect(200);
+      await api().put(`/api/v1/members/${agent.membershipId}/tags`).set(asOwner)
+        .send({ groupIds: [top, circle, retired], isCoreLeader: false }).expect(200);
       await api().delete(`/api/v1/members/groups/${retired}`).set(asOwner).expect(200);
 
-      const me = (await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership;
-      expect(me).toMatchObject({
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership).toMatchObject({
         isCoreLeader: true,
+        groups: ['Top Producers 2026'],
+        office: { code, branch: 'Cempaka Putih' },
+      });
+      expect((await api().get('/api/v1/auth/me').set(agent.as).expect(200)).body.membership).toMatchObject({
+        isCoreLeader: false,
         groups: ['Mentoring Circle', 'Top Producers 2026'],
         office: { code, branch: 'Cempaka Putih' },
       });

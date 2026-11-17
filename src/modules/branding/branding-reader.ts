@@ -59,13 +59,19 @@ export interface SessionBranding {
   lesson: LessonColours | null;
 }
 
-/** **What the proposal's PDF draws** (P19.7-T3; ADR-0223 §3, §6): the wide logo's PNG, and four colours. */
+/**
+ * **What the proposal's PDF draws of a KPM** (P19.7-T3; *redrawn 2026-11-12 by P19.14-T3, ADR-0256 §3, §5*): its name,
+ * whether it shows any branding at all, its logo — **the square one, else the wide one** — and the two colours it
+ * picked, as picked (the PDF derives its own shades from them; `null` where it shows none).
+ */
 export interface BrandingForPdf {
+  /** The KPM's name, as the sign-in page writes it: its branch name. */
+  name: string;
+  /** A logo or a pair of colours — the KPM's own or its template's. Without either, the file is AgencyBoost's. */
+  branded: boolean;
   logo: { png: Buffer; width: number; height: number } | null;
-  primary: string;
-  primaryInk: string;
-  secondary: string;
-  secondaryInk: string;
+  primary: string | null;
+  secondary: string | null;
 }
 
 /** AgencyBoost's, for the PDF without branding: the tokens' defaults (ADR-0218 §6). */
@@ -150,20 +156,30 @@ export class BrandingReader {
   }
 
   /**
-   * **The proposal's PDF** (P19.7-T3 AC-7; ADR-0223 §6): the wide logo's PNG bytes, read from storage, and the four
-   * colours; AgencyBoost's where the KPM shows none.
+   * **The proposal's PDF** (P19.7-T3; *since 2026-11-12, P19.14-T3 AC-4, ADR-0256 §5*): the KPM's name; its logo's PNG
+   * bytes read from storage — the square `logo-square.png` where it has one, the wide `logo.png` else, `null` when
+   * neither reads; and the two colours it shows. A logo that cannot be read is left out, never a failed file.
    */
   async forPdf(kpmId: string): Promise<BrandingForPdf> {
     const shown = await this.shownFor(kpmId);
-    const palette = shown?.palette ?? null;
+    if (!shown) return { name: '', branded: false, logo: null, primary: null, secondary: null };
+    const read = (key: string) => this.storage.read(key, BRANDING.IMAGE_MAX_BYTES).catch(() => null);
     let logo: BrandingForPdf['logo'] = null;
-    if (shown?.logo) {
-      const png = await this.storage.read(`${shown.logo.key}/logo.png`, BRANDING.IMAGE_MAX_BYTES).catch(() => null);
+    if (shown.logoSquare) {
+      const png = await read(`${shown.logoSquare.key}/logo-square.png`);
+      if (png && png.length > 0) logo = { png, width: BRANDING.SQUARE_MIN_PX, height: BRANDING.SQUARE_MIN_PX };
+    }
+    if (!logo && shown.logo) {
+      const png = await read(`${shown.logo.key}/logo.png`);
       if (png && png.length > 0) logo = { png, width: shown.logo.width, height: shown.logo.height };
     }
-    return palette
-      ? { logo, primary: palette.primary, primaryInk: palette.primaryInk, secondary: palette.secondary, secondaryInk: palette.secondaryInk }
-      : { logo, ...AGENCYBOOST_COLOURS };
+    return {
+      name: shown.name,
+      branded: Boolean(shown.logo || shown.logoSquare || shown.palette),
+      logo,
+      primary: shown.palette ? shown.primary : null,
+      secondary: shown.palette ? shown.secondary : null,
+    };
   }
 }
 

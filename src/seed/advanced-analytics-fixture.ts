@@ -11,7 +11,7 @@ import { seedObjectId } from './coaching-fixture';
  * | What | Where | What a reviewer sees |
  * |---|---|---|
  * | MAPA targets for this year's months so far: *APE* and *FLC* | `analyticsTargets` (`mapa`) | *MAPA driver*'s target cells filled; later months *TBD* |
- * | Agus's agency's targets, 4 and 8 | `analyticsTargets` (`subgroup`) | *Perbaikan sub-group*: Agus's row on its own targets, every other head the template's 3 and 6 |
+ * | This year's targets of Agus (4, 8), Sari (2, 4) and Dewi (1, 3) | `analyticsTargets` (`subgroup`, with `year`) | *Core leaders & groups*' *Target 2026*; *Perbaikan sub-group* sums each group's leaders', every other leader the template's 3 and 6 (P19.13-T3) |
  * | The company's other KPMs' runs for the latest period, frozen: 0555, 0601 and 0602 complete, 0603 incomplete | `quantRuns` | *Analitik kuantitatif*'s latest run: a median from three peers on every metric; 0603 left out |
  * | 0417's run for the period before, frozen, complete, its medians stored — A2 on two peers | `quantRuns` | Picking the earlier run: every chip — above, in line, below — and *"Belum cukup KPM pembanding (2 dari 3)"* on A2 |
  *
@@ -54,7 +54,8 @@ function peerFigure(metric: QuantMetric, k: number): number {
 export async function seedAdvancedAnalyticsFixture(deps: {
   clock: Clock;
   companyId: string;
-  office0417: { kpmId: string; agus: string; owner: string };
+  /** P19.13-T3: Sari and Dewi too, whose targets *Core leaders & groups* shows set (ADR-0253 §4). */
+  office0417: { kpmId: string; agus: string; owner: string; sari?: string; dewi?: string };
   peers: { code: string; kpmId: string }[];
 }): Promise<AdvancedAnalyticsFixture> {
   const db = mongoose.connection.db!;
@@ -83,11 +84,20 @@ export async function seedAdvancedAnalyticsFixture(deps: {
       headMembershipId: null, aaTarget: null, recTarget: null, ...stamp,
     });
   }
-  // ---- Agus's agency's targets.
-  await once('analyticsTargets', {
-    _id: oid(kpm0417, 'subgroup', deps.office0417.agus), kpmId: kpm0417, kind: 'subgroup', month: null, row: null, value: null,
-    headMembershipId: deps.office0417.agus, aaTarget: 4, recTarget: 8, ...stamp,
-  });
+  // ---- This year's targets of three leaders (P19.13-T3; ADR-0253 §4): Agus's, Sari's and Dewi's — every other leader on
+  // the template's 3 and 6. The ids carry no year, so a database seeded before (Agus's row, given its year by migration
+  // 0062) gets no second row for the same leader and year.
+  const year = thisMonth.slice(0, 4);
+  const leaderTargets: [string | undefined, number, number][] = [
+    [deps.office0417.agus, 4, 8], [deps.office0417.sari, 2, 4], [deps.office0417.dewi, 1, 3],
+  ];
+  for (const [head, aaTarget, recTarget] of leaderTargets) {
+    if (!head) continue;
+    await once('analyticsTargets', {
+      _id: oid(kpm0417, 'subgroup', head), kpmId: kpm0417, kind: 'subgroup', month: null, row: null, value: null,
+      headMembershipId: head, year, aaTarget, recTarget, ...stamp,
+    });
+  }
 
   // ---- The peers' latest runs, frozen: three complete, the last incomplete (left out of 0417's median).
   for (const [i, peer] of deps.peers.entries()) {
@@ -122,7 +132,10 @@ Advanced analytics (P19.5-T3; sign in as the 0417 owner, KPM → Advanced analyt
   MAPA driver          APE and FLC targets typed for ${thisMonth.slice(0, 4)} so far; later months TBD
   Analitik kuantitatif ${latest}: 0417 computed live (Belum lengkap, no chip), medians from ${deps.peers.slice(0, 3).map((p) => p.code).join(', ')}
                        ${previous}: 0417's frozen demonstration run — every chip; A2 "Belum cukup KPM pembanding (2 dari 3)"
-  Perbaikan sub-group  Agus's agency on its own targets (4 · 8); every other head the template's 3 · 6
+  Perbaikan sub-group  one row per informal group with its ★ (Top Producers 2026 ★ Wilson, Mentoring Agen Baru ★ Sari,
+                       LEADER MUDA no ★), then Tidak ada group; each row's targets the sum of its leaders' ${thisMonth.slice(0, 4)}
+                       targets — Agus 4 · 8, Sari 2 · 4, Dewi 1 · 3, every other leader the template's 3 · 6.
+                       Grouping and Ubah target open People › Core leaders & groups (/people/core-leaders)
   The peers' runs and 0417's ${previous} run are demonstration figures, frozen (from src/seed/advanced-analytics-fixture.ts)
 `,
   };

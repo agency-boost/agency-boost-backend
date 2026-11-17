@@ -18,7 +18,7 @@ import { KpmProductConfigRepository } from './kpm-product.repository';
 import { Product, ProductDocument } from './product.schema';
 import { PRODUCTS_REFUSALS, referenceWords } from './products.messages';
 import {
-  checkProposalSettings, PROPOSAL_SETTING_KEYS,
+  calcSettingsOf, checkProposalSettings, PROPOSAL_CALC_KEYS, PROPOSAL_SETTING_KEYS, type ProposalCalcSettings,
   type FaqEntry, type PdfDetailBlock, type PlanOption, type ProposalField, type ProposalSettings,
 } from './proposal-fields';
 
@@ -83,6 +83,20 @@ export interface ProductView {
   defaultInsured: ProposalDefaultInsured | null;
   /** As stored: `null` reads the category's. */
   proposalTypeLabel: string | null;
+  /** P19.14-T2 (ADR-0255 §5): the calculation fields, each its default where none is stored. */
+  calcType: ProposalCalcSettings['calcType'];
+  entryAge: ProposalCalcSettings['entryAge'];
+  payTerms: ProposalCalcSettings['payTerms'];
+  frequencies: ProposalCalcSettings['frequencies'];
+  smokerRated: boolean;
+  planRule: ProposalCalcSettings['planRule'];
+  upStep: number | null;
+  upMin: number | null;
+  upMax: number | null;
+  premiumMin: number | null;
+  premiumMax: number | null;
+  rateTableId: string | null;
+  needTag: ProposalCalcSettings['needTag'];
   lifecycle: ProductLifecycle;
   replacedByProductId: string | null;
   activeByDefault: boolean;
@@ -103,6 +117,7 @@ export function proposalSettingsOf(doc: Partial<ProposalSettings>): ProposalSett
     syariahName: doc.syariahName ?? null,
     defaultInsured: doc.defaultInsured ?? null,
     proposalTypeLabel: doc.proposalTypeLabel ?? null,
+    ...calcSettingsOf(doc),
   });
 }
 
@@ -205,7 +220,15 @@ export class ProductService {
    */
   async update(
     ctx: RequestContext, companyId: string, productId: string, input: Record<string, unknown>,
+    /** P19.15-T1 (ADR-0258 §7): the Proposal tab's *Isian* writes through here, audited as `product_rules.updated`. */
+    opts: { action?: 'product.updated' | 'product_rules.updated' } = {},
   ): Promise<ProductView> {
+    /*
+     * P19.15-T1 (ADR-0258 §2): `rateTableId` is the premium tables' record of their latest activated version, written by
+     * activation, turning off and deleting — never by the catalogue's write, which would point it at a version nobody
+     * activated.
+     */
+    if (input.rateTableId !== undefined) throw new InvalidRequestException(SAY.rateTableIdIsTables, { field: 'rateTableId' });
     const set = this.writable(input);
     const expected = typeof input.expectedVersion === 'number' ? input.expectedVersion : undefined;
     const kindChange = input.kind !== undefined || input.attachesTo !== undefined;
@@ -261,7 +284,9 @@ export class ProductService {
 
     const was = previous.toObject() as unknown as Record<string, unknown>;
     const before = Object.fromEntries(Object.keys(set).map((field) => [field, was[field] ?? null]));
-    await this.record(ctx, 'product.updated', updated, set, before);
+    // P19.15-T1: *Isian*'s change names its company and product on both sides, as *Perubahan oleh pengelola* reads them.
+    const scope = opts.action === 'product_rules.updated' ? { companyId, productId: String(updated._id) } : null;
+    await this.record(ctx, opts.action ?? 'product.updated', updated, scope ? { ...scope, ...set } : set, scope ? { ...scope, ...before } : before);
     return this.view(updated, true);
   }
 
@@ -398,7 +423,7 @@ export class ProductService {
       { $set: { sortOrder: index + 1, updatedBy: ctx.userId } },
     ).exec()));
 
-    await this.audit.record(ctx, {
+    await this.audit.recordForCompany(ctx, {
       action: 'product.reordered',
       targetCollection: 'products',
       targetId: companyId,
@@ -671,7 +696,7 @@ export class ProductService {
     ctx: RequestContext, action: string, doc: ProductDocument, after: Record<string, unknown>,
     before: Record<string, unknown> | null = null,
   ) {
-    return this.audit.record(ctx, {
+    return this.audit.recordForCompany(ctx, {
       action,
       targetCollection: 'products',
       targetId: String(doc._id),
@@ -718,6 +743,7 @@ export class ProductService {
       ...(proposalSettingsOf({
         proposalFields: doc.proposalFields, planOptions: doc.planOptions, faq: doc.faq, pdfDetail: doc.pdfDetail,
         syariahName: doc.syariahName, defaultInsured: doc.defaultInsured, proposalTypeLabel: doc.proposalTypeLabel,
+        ...Object.fromEntries(PROPOSAL_CALC_KEYS.map((key) => [key, doc[key]])),
       })),
       lifecycle: doc.lifecycle,
       replacedByProductId: doc.replacedByProductId,

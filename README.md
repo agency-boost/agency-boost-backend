@@ -363,6 +363,16 @@ The password is asked for twice and never echoed. It runs in `api-prod`, so the 
 production's database. It refuses when a Super Admin already exists; after the first, make others from
 the console.
 
+### Reading uploads with Claude
+
+*Unggah file* and the illustration's condensing (P19.15-T2, T3) send the uploaded files to Anthropic's Claude API
+([ADR-0259](../docs/04-adr/0259-uploads-and-illustrations-are-read-by-claude-and-applied-only-when-a-person-confirms.md))
+with `ANTHROPIC_API_KEY`, a key of each environment's own made in the Anthropic Console (API Keys), in
+`api-env-<env>` beside `RESEND_API_KEY`. `ANTHROPIC_MODEL` defaults to `claude-opus-5-5`. **Both are optional**: without
+the key the screens say reading is not switched on and the premium table's own Excel/CSV upload still works. The key is
+checked for its shape at boot (`sk-ant-…`), never logged, and read only by `src/modules/product-data/ai/claude-reader.ts`.
+Tests never call the API: they inject a fake reader (`PRODUCT_DATA_READER`).
+
 ### Mail
 
 **The provider is chosen by the environment alone**

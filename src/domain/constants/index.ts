@@ -437,6 +437,8 @@ export {
   type UnitDashboardPeriod,
   type UnitView,
 } from './unit-dashboard';
+// P19.13-T3 (ADR-0253): *Core leaders & groups*' bulk bound.
+export { CORE_LEADERS } from './core-leaders';
 
 export {
   EVENT_ISSUERS,
@@ -655,9 +657,14 @@ export {
   PDF_DETAIL_BLOCKS, type PdfDetailBlockKind, PROPOSAL_DEFAULT_INSURED, type ProposalDefaultInsured,
   PROPOSAL_FIELD_KEY_PATTERN, PROPOSAL_RESERVED_KEYS, PROPOSAL_TYPE_LABEL_BY_CATEGORY, defaultInsuredFor,
   // P19.7-T2 (ADR-0221): the proposal's own words and bounds, and the age band its catalogue filters by.
-  PROPOSAL_CHANNELS, type ProposalChannel, PROPOSAL_PAY_FREQUENCIES, type ProposalPayFrequency,
+  PROPOSAL_PAY_FREQUENCIES, type ProposalPayFrequency,
   PROPOSAL_STATUSES, type ProposalStatus, PROPOSAL_INSURED_RELATIONS, type ProposalInsuredRelation,
   PROPOSAL_REFUSAL_REASONS, type ProposalRefusalReason, PRODUCT_AGE_BAND_FLOORS, ageBandOf,
+  // P19.14 (ADR-0254, ADR-0255): cara bayar per product, the catalogue's calculation fields, the client's details.
+  PROPOSAL_PERIODIC_FREQUENCIES, type ProposalPeriodicFrequency, PROPOSAL_CALC_TYPES, type ProposalCalcType,
+  PROPOSAL_FIXED_FIELDS, type ProposalFixedField, PROPOSAL_CLIENT_STATUSES, type ProposalClientStatus,
+  PROPOSAL_CLIENT_NEEDS, type ProposalClientNeed, PROPOSAL_NEED_TAGS, type ProposalNeedTag, needTagFor,
+  PROPOSAL_CLIENT_TEXT_MAX, PROPOSAL_CATALOGUE, PROPOSAL_PAY_TERM_KEY_PATTERN,
 } from './proposal';
 
 // Phase 19.4: the Super Admin's reads across KPMs — the page, the purposes, the actions (§B.35; ADR-0207).
@@ -673,3 +680,22 @@ export {
   BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE, HEX_COLOUR,
   type BrandingUploadKind, type MascotPose, type BrandingIconFile,
 } from './branding';
+
+// P19.15-T1 (ADR-0258): premium tables, their rules, the three test profiles and the calculation (§B.39).
+export {
+  RATE_BASES, type RateBasis, RATE_TABLE_STATUSES, type RateTableStatus, RATE_TABLE_SOURCES, type RateTableSource,
+  RATE_COLUMN_ROLES, type RateColumnRole, PRODUCT_DATA_STATUSES, type ProductDataStatus, PRODUCT_DATA_CHECK_REASONS,
+  type ProductDataCheckReason, CALC_STATES, type CalcState, CALC_NOTES, type CalcNote, CALC_LIMIT_KINDS,
+  type CalcLimitKind, RATE_GAP_KINDS, type RateGapKind, PRODUCT_DATA,
+} from './product-data';
+
+// P19.15-T2, T3 (ADR-0259): *Unggah file*'s bounds, the intake's kinds and states, and the illustration's blocks (§B.40).
+export {
+  INTAKE, INTAKE_FILE_KINDS, type IntakeFileKind, INTAKE_STATUSES, type IntakeStatus, INTAKE_ITEM_KINDS,
+  type IntakeItemKind, INTAKE_ITEM_STATUSES, type IntakeItemStatus, INTAKE_QUESTION_KINDS, type IntakeQuestionKind,
+  INTAKE_RULE_KEYS, type IntakeRuleKey, INTAKE_FIELD_KEYS, type IntakeFieldKey, ILLUSTRATION_STATUSES,
+  type IllustrationStatus, ILLUSTRATION, ILLUSTRATION_CHECK_STATES, type IllustrationCheckState,
+} from './product-data-intake';
+
+// P19.15-T4 (ADR-0260, ADR-0261): *Perubahan oleh pengelola*'s page, and the premium table notices' days and time (§B.41).
+export { PRODUCT_DATA_CHANGES, PREMIUM_TABLE_NOTICES } from './product-data-access';

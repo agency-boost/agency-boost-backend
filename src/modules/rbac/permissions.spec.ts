@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HierarchyRole, RequestContext } from '@/common/context/request-context';
 import {
-  AAB, AB, AGENT, BLOCKED_WHILE_IMPERSONATING, can, isBlockedWhileImpersonating, isOwnerReserved, isReadLike, PERMISSIONS,
-  Permission, Scope, scopeFor,
+  AAB, AB, AGENT, BLOCKED_WHILE_IMPERSONATING, can, holdsGrant, isBlockedWhileImpersonating, isOwnerReserved, isReadLike,
+  PERMISSIONS, Permission, Scope, scopeFor,
 } from './permissions';
 
 /**
@@ -1346,6 +1346,21 @@ describe('permission matrix', () => {
       expect(can(ROLES[role], 'member:tag_core_leader')).toBe(scope !== null);
     });
 
+    it.each([
+      ['SUPER_ADMIN', 'all'], ['KPM_OWNER', 'own-kpm'], ['KPM_ADMIN', 'own-kpm'], ['AB', null], ['AAB', null], ['AGENT', null],
+    ] as const)('P19.13-T3 AC-1 member:read_tags for %s: %s', (role, scope) => {
+      expect(scopeFor(ROLES[role], 'member:read_tags')).toBe(scope);
+      expect(can(ROLES[role], 'member:read_tags')).toBe(scope !== null);
+    });
+
+    it('P19.13-T3 AC-1 a view-as session reads Core leaders & groups and holds none of its writes (ADR-0253 §7)', () => {
+      const session = ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true });
+      expect(can(session, 'member:read_tags')).toBe(true);
+      for (const write of ['member:tag_group', 'member:tag_core_leader', 'group_informal:create', 'group_informal:update', 'group_informal:archive'] as const) {
+        expect(can(session, write)).toBe(false);
+      }
+    });
+
     it('P18.5-T5 AC-2 a read-only support session cannot set the tag; an elevated one can, as its member', () => {
       expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:tag_core_leader')).toBe(false);
       expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: false }), 'member:tag_core_leader')).toBe(true);
@@ -2194,5 +2209,85 @@ describe('permission matrix', () => {
       expect(scopeFor(session, 'survey:respond')).toBe('own');
       expect(isReadLike('survey_answers:read')).toBe(true);
     });
+  });
+});
+
+/**
+ * **P19.15-T4 AC-2, AC-3 — *Kelola data produk*, the `grant` grantee** (ADR-0260 §2; the P1b spec's *Who can do what*):
+ * held by an **active KPM Owner or KPM Admin** whose live grant ticks at least one insurer — the companies come with the
+ * context, read on every request — and by nobody else, a leader or an agent with companies on their context included.
+ * `product_data:read` is every Owner's and Admin's, their own company; `product_data:manage` is the Super Admin's and a
+ * holder's. Which company is `ProductDataAccess`'s question, pinned in its own spec.
+ */
+describe('P19.15-T4 Kelola data produk — the grant grantee', () => {
+  const PRU = '66f0000000000000000000c1';
+  function person(opts: {
+    owner?: boolean; admin?: boolean; role?: HierarchyRole; status?: 'active' | 'pending' | 'removed';
+    companies?: string[]; noMembership?: boolean; impersonatedBy?: string; superAdmin?: boolean;
+  }): RequestContext {
+    return new RequestContext(
+      'u1', opts.superAdmin ? 'super_admin' : 'none',
+      opts.noMembership ? null : {
+        membershipId: 'mem-1', kpmId: 'kpm-a', orgLevelCode: 'AGENT', hierarchyRole: opts.role ?? 'agent',
+        status: opts.status ?? 'active', isKpmOwner: opts.owner ?? false, isKpmAdmin: opts.admin ?? false, directCount: 0,
+      },
+      opts.impersonatedBy ?? null, null, false, opts.impersonatedBy !== undefined, undefined, opts.companies ?? [],
+    );
+  }
+
+  it('P19.15-T4 AC-2 a KPM Admin and a KPM Owner holding the grant may manage product data', () => {
+    expect(can(person({ admin: true, companies: [PRU] }), 'product_data:manage')).toBe(true);
+    expect(can(person({ owner: true, companies: [PRU] }), 'product_data:manage')).toBe(true);
+    expect(holdsGrant(person({ admin: true, companies: [PRU] }), 'product_data')).toBe(true);
+    expect(scopeFor(person({ admin: true, companies: [PRU] }), 'product_data:manage')).toBe('own');
+  });
+
+  it('P19.15-T4 AC-3 a KPM Owner or Admin without it reads their company and manages nothing', () => {
+    for (const reader of [person({ admin: true }), person({ owner: true })]) {
+      expect(can(reader, 'product_data:read')).toBe(true);
+      expect(scopeFor(reader, 'product_data:read')).toBe('own-kpm');
+      expect(can(reader, 'product_data:manage')).toBe(false);
+      expect(holdsGrant(reader, 'product_data')).toBe(false);
+    }
+  });
+
+  it('P19.15-T4 AC-2 a grant on record holds nothing for somebody no longer an active Owner or Admin', () => {
+    // The Owner took the Admin's access away: the grant stays on record and grants nothing.
+    expect(can(person({ companies: [PRU] }), 'product_data:manage')).toBe(false);
+    expect(can(person({ admin: true, status: 'pending', companies: [PRU] }), 'product_data:manage')).toBe(false);
+    expect(can(person({ admin: true, status: 'removed', companies: [PRU] }), 'product_data:manage')).toBe(false);
+    expect(can(person({ noMembership: true, companies: [PRU] }), 'product_data:manage')).toBe(false);
+  });
+
+  it('P19.15-T4 AC-3 leaders and agents reach nothing here, companies on their context or not', () => {
+    for (const role of ['ab', 'aab', 'agent'] as HierarchyRole[]) {
+      expect(can(person({ role }), 'product_data:read')).toBe(false);
+      expect(can(person({ role, companies: [PRU] }), 'product_data:read')).toBe(false);
+      expect(can(person({ role, companies: [PRU] }), 'product_data:manage')).toBe(false);
+    }
+  });
+
+  it('P19.15-T4 AC-2 the Super Admin reads and manages, and alone gives and removes the grant', () => {
+    const root = person({ superAdmin: true, noMembership: true });
+    expect(can(root, 'product_data:read')).toBe(true);
+    expect(can(root, 'product_data:manage')).toBe(true);
+    expect(can(root, 'product_data_grant:read')).toBe(true);
+    expect(can(root, 'product_data_grant:manage')).toBe(true);
+    for (const other of [person({ admin: true, companies: [PRU] }), person({ owner: true }), person({ role: 'ab' })]) {
+      expect(can(other, 'product_data_grant:read')).toBe(false);
+      expect(can(other, 'product_data_grant:manage')).toBe(false);
+    }
+  });
+
+  it('P19.15-T4 AC-2 a support session as a holder only looks: it reads, manages nothing and never grants', () => {
+    const session = person({ admin: true, companies: [PRU], impersonatedBy: 'root' });
+    expect(can(session, 'product_data:read')).toBe(true);
+    expect(can(session, 'product_data:manage')).toBe(false);
+    expect(isBlockedWhileImpersonating('product_data_grant:manage')).toBe(true);
+  });
+
+  it('P19.15-T4 AC-2 the context keeps the companies through a change of reader', () => {
+    const holder = person({ admin: true, companies: [PRU] });
+    expect(holder.withReader({ language: 'en', figures: 'en' }).productDataCompanyIds).toEqual([PRU]);
   });
 });

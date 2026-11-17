@@ -322,31 +322,60 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
 
   describe('AC-10 Sub-group', () => {
     beforeAll(() => clock().set(REPORTING_NOW));
+    const activeTotal = async () => (await wired.officePeople.read(as('OWNER'), null, 'Asia/Jakarta')).active.length;
 
-    it('P19.5-T3 AC-10 one row per AB’s agency, the targets the template’s defaults until set', async () => {
+    it('P19.13-T3 AC-6 AC-7 with no group, one row — Tidak ada group, the whole office, no ★ — its targets every leader’s default', async () => {
       const view = await page().subgroup(as('OWNER'));
-      const heads = view.rows.map((r) => r.head.membershipId).sort();
-      expect(heads).toEqual([office.id.OWNER, office.id.ADMIN, office.id.AGUS, office.id.PEER_AB].sort());
-      const agus = view.rows.find((r) => r.head.membershipId === office.id.AGUS)!;
-      expect(agus).toMatchObject({ targets: { aa: 3, rec: 6, isDefault: true }, weeklyActivityTarget: 6 });
-      expect(agus.manpower).toBeGreaterThan(agus.leaders);
-      expect(agus.recruitment.ytd).toBe(3);
+      expect(view.rows).toHaveLength(1);
+      // 0417's eight active leaders: the Owner, the Admin, Agus, Sari, Nina, Dewi, Hendra and Putu — 3 and 6 each.
+      expect(view.rows[0]).toMatchObject({
+        group: null, head: null, manpower: await activeTotal(), leaders: 8,
+        targets: { aa: 24, rec: 48, isDefault: true }, adoption: { headDays: null },
+      });
       expect(view.thresholds).toEqual({ okPct: 80, powerUserDays: 10, powerUserWindow: 30 });
-      const total = (await wired.officePeople.read(as('OWNER'), null, 'Asia/Jakarta')).active.length;
-      expect(view.rows.reduce((s, r) => s + r.manpower, 0)).toBe(total);
     });
 
-    it('P19.5-T3 AC-10 the Owner sets a head’s targets, audited; a head who is no AB, or another KPM’s, is 404', async () => {
-      await page().setSubgroupTarget(as('OWNER'), office.id.AGUS, { aaTarget: 4, recTarget: 1 });
-      const agus = (await page().subgroup(as('OWNER'))).rows.find((r) => r.head.membershipId === office.id.AGUS)!;
-      expect(agus.targets).toEqual({ aa: 4, rec: 1, isDefault: false });
-      expect(agus.weeklyActivityTarget).toBe(8);
-      expect(agus.attainment).toMatchObject({ recPct: 300, recOk: true });
+    it('P19.13-T3 AC-6 ADR-0253 §5 one row per group, A to Z, each with its ★; each person in their nearest leader’s group; the rows sum to the office', async () => {
+      // One group per AB, each AB its ★, and each AAB in their AB's: the rows read as the agencies did (ADR-0215 §7).
+      const groups = [['AGUS', 'AGUS'], ['HENDRA', 'PEER_AB'], ['MAYA', 'ADMIN'], ['WILSON', 'OWNER']] as const;
+      const alsoIn: Record<string, readonly Who[]> = { AGUS: ['SARI', 'NINA', 'DEWI'], HENDRA: ['PEER_AAB'] };
+      for (const [name, who] of groups) {
+        const { insertedId } = await db().collection('groups').insertOne({
+          kpmId: KPM_A, name, ownerMembershipId: office.id[who], status: 'active', archivedAt: null, deletedAt: null,
+        });
+        await db().collection('memberships').updateMany(
+          { _id: { $in: [who, ...(alsoIn[name] ?? [])].map((w) => new mongoose.Types.ObjectId(office.id[w])) } },
+          { $set: { groupIds: [String(insertedId)] } },
+        );
+      }
+      const view = await page().subgroup(as('OWNER'));
+      expect(view.rows.map((r) => [r.group?.name, r.head?.membershipId])).toEqual(
+        groups.map(([name, who]) => [name, office.id[who]]),
+      );
+      expect(view.rows.reduce((s, r) => s + r.manpower, 0)).toBe(await activeTotal());
+      const agus = view.rows.find((r) => r.group?.name === 'AGUS')!;
+      // Agus, Sari, Nina and Dewi, each on the template's 3 and 6.
+      expect(agus).toMatchObject({ leaders: 4, targets: { aa: 12, rec: 24, isDefault: true }, weeklyActivityTarget: 24 });
+      expect(agus.manpower).toBeGreaterThan(agus.leaders);
+      expect(agus.recruitment.ytd).toBe(3);
+    });
+
+    it('P19.13-T3 AC-6 ADR-0253 §4 the Owner sets a leader’s targets for the year — an AB’s or an AAB’s — audited; the group sums them; an Agent, or another KPM’s, is 404', async () => {
+      expect(await page().setSubgroupTarget(as('OWNER'), office.id.AGUS, { aaTarget: 4, recTarget: 1 }))
+        .toEqual({ headMembershipId: office.id.AGUS, year: '2026', aaTarget: 4, recTarget: 1 });
+      await page().setSubgroupTarget(as('OWNER'), office.id.SARI, { aaTarget: 2, recTarget: 3 });
+      const agus = (await page().subgroup(as('OWNER'))).rows.find((r) => r.group?.name === 'AGUS')!;
+      // 4 + 2 + Nina's 3 + Dewi's 3; 1 + 3 + 6 + 6.
+      expect(agus.targets).toEqual({ aa: 12, rec: 16, isDefault: false });
+      expect(agus.weeklyActivityTarget).toBe(24);
+      expect(await db().collection('analyticsTargets').findOne({ kpmId: KPM_A, kind: 'subgroup', headMembershipId: office.id.SARI }))
+        .toMatchObject({ year: '2026', aaTarget: 2, recTarget: 3 });
       expect(await db().collection('auditLog').findOne({ action: 'advanced_analytics.target_set', targetMembershipId: office.id.AGUS }))
-        .toMatchObject({ before: null, after: { kind: 'subgroup', aaTarget: 4, recTarget: 1 } });
+        .toMatchObject({ before: null, after: { kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 1 } });
       expect(await refusal(page().setSubgroupTarget(as('OWNER'), office.id.INDAH, { aaTarget: 1, recTarget: 1 }))).toMatchObject({ status: 404 });
       expect(await refusal(page().setSubgroupTarget(office.ownerOfB(), office.id.AGUS, { aaTarget: 1, recTarget: 1 }))).toMatchObject({ status: 404 });
-      expect((await page().subgroup(office.ownerOfB())).rows.map((r) => r.head.membershipId)).toEqual([office.id.B_AB]);
+      // P19.13-T3 AC-9: 0555 has no group of its own and reads none of 0417's: its one row is itself.
+      expect((await page().subgroup(office.ownerOfB())).rows.map((r) => [r.group, r.head, r.manpower])).toEqual([[null, null, 2]]);
     });
   });
 
@@ -508,17 +537,17 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       const entries = () => db().collection('auditLog')
         .find({ action: 'advanced_analytics.target_set', targetMembershipId: office.id.AGUS }).sort({ _id: 1 }).toArray();
       const before = (await entries()).length;
-      expect((await page().subgroup(as('OWNER'))).rows.find((r) => r.head.membershipId === office.id.AGUS)!.targets)
-        .toEqual({ aa: 4, rec: 1, isDefault: false });
+      expect((await wired.analyticsTargets.subgroupFor(as('OWNER'), '2026')).get(office.id.AGUS))
+        .toEqual({ aaTarget: 4, recTarget: 1 });
       await page().setSubgroupTarget(as('OWNER'), office.id.AGUS, { aaTarget: 4, recTarget: 1 });
       expect(await entries()).toHaveLength(before);
       await page().setSubgroupTarget(as('ADMIN'), office.id.AGUS, { aaTarget: 4, recTarget: 2 });
       await page().setSubgroupTarget(as('ADMIN'), office.id.AGUS, { aaTarget: 5, recTarget: 2 });
       expect((await entries()).slice(before).map((e) => [e.before, e.after])).toEqual([
-        [{ kind: 'subgroup', aaTarget: 4, recTarget: 1 }, { kind: 'subgroup', aaTarget: 4, recTarget: 2 }],
-        [{ kind: 'subgroup', aaTarget: 4, recTarget: 2 }, { kind: 'subgroup', aaTarget: 5, recTarget: 2 }],
+        [{ kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 1 }, { kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 2 }],
+        [{ kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 2 }, { kind: 'subgroup', year: '2026', aaTarget: 5, recTarget: 2 }],
       ]);
-      expect(await db().collection('analyticsTargets').countDocuments({ kpmId: KPM_A, kind: 'subgroup', headMembershipId: office.id.AGUS })).toBe(1);
+      expect(await db().collection('analyticsTargets').countDocuments({ kpmId: KPM_A, kind: 'subgroup', headMembershipId: office.id.AGUS, year: '2026' })).toBe(1);
     });
 
     it('P19.5-T3 AC-13 nobody outside a session types a target: TENANT_NO_MEMBERSHIP', async () => {
@@ -536,7 +565,7 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       });
       try {
         const rows = (await page().subgroup(as('OWNER'))).rows;
-        expect(rows.map((r) => [r.head.membershipId, r.maa.baseline]).sort()).toEqual([
+        expect(rows.map((r) => [r.head!.membershipId, r.maa.baseline]).sort()).toEqual([
           [office.id.ADMIN, 0], [office.id.AGUS, 1], [office.id.OWNER, 0], [office.id.PEER_AB, 0],
         ].sort());
       } finally {
@@ -544,13 +573,14 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       }
     });
 
-    it('P19.5-T3 AC-2 AC-10 an AB whose account is gone is still offered and still a row — with no name, first', async () => {
+    it('P19.5-T3 AC-2 AC-10 an AB whose account is gone is still offered and still a row’s ★ — with no name', async () => {
       const userId = new mongoose.Types.ObjectId(await office.userIdOf('PEER_AB'));
       const account = await db().collection('users').findOne({ _id: userId });
       await db().collection('users').deleteOne({ _id: userId });
       try {
         expect((await page().demographics(as('OWNER'), {})).abs[0]).toEqual({ membershipId: office.id.PEER_AB, name: '' });
-        expect((await page().subgroup(as('OWNER'))).rows[0].head).toEqual({ membershipId: office.id.PEER_AB, name: '' });
+        expect((await page().subgroup(as('OWNER'))).rows.find((r) => r.head?.membershipId === office.id.PEER_AB)!.head)
+          .toEqual({ membershipId: office.id.PEER_AB, name: '' });
       } finally {
         await db().collection('users').insertOne(account!);
       }

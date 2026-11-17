@@ -1,379 +1,545 @@
+import { inflateSync } from 'node:zlib';
 import sharp from 'sharp';
 import type { TDocumentDefinitions } from 'pdfmake/interfaces';
+import { contrastRatio } from '@/domain/branding/palette';
 import { PROPOSAL } from '@/domain/constants';
-import { contrastOnWhite, readPdf, type ReadPdf } from '../../../test/pdf-text';
+import { AGENCYBOOST_COLOURS } from '@/modules/branding/branding-reader';
+import { CHECK_ILLUSTRATION } from '@/modules/products/proposal-fields-prudential';
+import { readPdf, type ReadPdf } from '../../../test/pdf-text';
 import {
-  DOLLAR, EDUCATION, HEALTH, KPM_BRANDING, PLAIN, WORST_AGENT, WORST_INSURER, pdfInput, proposalView, worstCase,
-  type ProposalSpec,
+  BUDI, CRITICAL, DOLLAR, EDUCATION, FUTURE, HEALTH, KPM_GREEN, KPM_LIGHT, SYARIAH, field, input, item, option, proposal,
+  worstCase,
 } from '../../../test/proposal-pdf-fixtures';
-import { AGENCYBOOST_PDF_BRANDING, type PdfBranding } from './proposal-branding';
-import { ProposalPdfBuilder, ProposalPdfTooLong, pdfRuler, renderPdf, type RenderedPdf } from './proposal-pdf.builder';
+import { agencyBoostLogo, artOf, type ArtKind } from './proposal-pdf.art';
+import { AGENCYBOOST_PDF_BRANDING, pdfBrandingOf, type PdfBranding } from './proposal-branding';
+import { ProposalPdfBuilder, ProposalPdfTooLong, pagesFor, pdfRuler, type RenderedPdf } from './proposal-pdf.builder';
 import {
-  detailValueOf, dispositionOf, inLines, levelsFrom, moneyCompact, moneyInFull, proposalDocument, proposalFileName,
-  startLevelOf, usdInFull, type PdfInput, type PdfLevel,
+  PDF_ROLE_MIN, PDF_TYPE, densitiesFor, dispositionOf, fitProposal, inLines, proposalDocument, proposalFileName,
+  type PdfLayout,
 } from './proposal-pdf.layout';
+import {
+  PDF_INK, addressOf, artOfItem, coloursOf, moneyInFull, moneyInWords, pdfModelOf, rowsOfItem, totalOf, usdInFull,
+  type PdfModelInput, type PdfItemSource,
+} from './proposal-pdf.model';
 
 /**
- * **P19.7-T3 — the proposal's PDF, rendered and read back** (ADR-0222, ADR-0223; `functional/proposal.md`, *The PDF*).
- * Every test here builds the real file with the real fonts and reads it as a viewer would (`test/pdf-text.ts`): its
- * pages, the text on each, the size and colour of every run of text.
+ * **P19.14-T3 — the proposal's PDF, redrawn** (ADR-0256; `functional/proposal.md`, *The PDF*; the 11 Nov spec's *The PDF
+ * design*). Each test builds the real file with the real fonts and reads it back as a viewer would (`test/pdf-text.ts`)
+ * — or reads the layout the file is drawn from: every line's place, size, colour and role.
  */
-const NOW = new Date('2026-11-05T03:00:00Z');
+const NOW = new Date('2026-11-11T03:00:00Z');
 const builder = new ProposalPdfBuilder();
+const ruler = pdfRuler();
 
-async function built(spec: ProposalSpec, over: Partial<PdfInput> = {}): Promise<ReadPdf & { level: PdfLevel; bytes: Buffer }> {
-  const file = await builder.build(pdfInput(proposalView(spec), over), NOW);
-  return { ...readPdf(file.bytes), level: file.level, bytes: file.bytes };
-}
+interface Built extends ReadPdf { bytes: Buffer; layout: PdfLayout }
 
-async function at(level: PdfLevel, spec: ProposalSpec, over: Partial<PdfInput> = {}): Promise<ReadPdf> {
-  const file = await renderPdf(proposalDocument(pdfInput(proposalView(spec), over), level, pdfRuler(), NOW));
-  return readPdf(file.bytes);
+async function built(source: PdfModelInput): Promise<Built> {
+  const model = pdfModelOf(source);
+  const file = await builder.build(model, NOW);
+  return { ...readPdf(file.bytes), bytes: file.bytes, layout: fitProposal(model, ruler)! };
 }
 
 const textOf = (pdf: ReadPdf) => pdf.pages.map((p) => p.text).join('\n');
-const FOOTER = 'Dibuat dengan AgencyBoost';
+const flat = (s: string) => s.replace(/ /g, ' ').replace(/\s+/g, ' ');
+const ONE = () => input(proposal([HEALTH]));
+const FOUR = (over: Parameters<typeof proposal>[1] = {}) => input(proposal([HEALTH, CRITICAL, EDUCATION, FUTURE], { showTotal: true, ...over }));
 
 async function withLogo(branding: PdfBranding): Promise<PdfBranding> {
-  const png = await sharp({ create: { width: 480, height: 96, channels: 4, background: '#7C3AED' } }).png().toBuffer();
-  return { ...branding, logo: { png, width: 480, height: 96 } };
+  const png = await sharp({ create: { width: 512, height: 512, channels: 4, background: '#0F6E56' } }).png().toBuffer();
+  return { ...branding, logo: { png, width: 512, height: 512 } };
 }
 
-describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
-  describe('AC-8: a real file a phone opens and a printer prints', () => {
-    it('P19.7-T3 AC-8 is a PDF of two A4 pages, Inter embedded, that reads back as text', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      expect(pdf.header.startsWith('%PDF-')).toBe(true);
-      expect(pdf.bytes.subarray(-6).toString('latin1')).toContain('%%EOF');
+/** Every stream of a PDF inflated, with its raw bytes: what a search through the file finds. */
+function everything(bytes: Buffer): string {
+  const raw = bytes.toString('latin1');
+  const out = [raw];
+  for (const m of raw.matchAll(/stream\r?\n/g)) {
+    const start = m.index! + m[0].length;
+    const end = raw.indexOf('endstream', start);
+    try {
+      out.push(inflateSync(bytes.subarray(start, end)).toString('latin1'));
+    } catch {
+      // not a Flate stream (an image's own encoding): searched raw above
+    }
+  }
+  return out.join('\n');
+}
+
+/** A text as a PDF string may hold it: UTF-16BE hex, the way pdfkit writes the document's info. */
+const utf16Hex = (s: string) => Buffer.from(s, 'utf16le').swap16().toString('hex').toUpperCase();
+
+/** An info value read back: a literal UTF-16BE string (its byte-order mark first) decoded. */
+const infoText = (s: string) => (s.startsWith('\u00fe\u00ff') ? Buffer.from(s.slice(2), 'latin1').swap16().toString('utf16le') : s);
+
+describe('P19.14-T3 the proposal’s PDF (ADR-0256)', () => {
+  describe('AC-1: one page for one product, exactly two for more, never a product split', () => {
+    it('P19.14-T3 AC-1 one product prints exactly one A4 page, Inter embedded, that reads back', async () => {
+      const pdf = await built(ONE());
+      expect(pdf.header).toBe('%PDF-1.3');
+      expect(pdf.pages).toHaveLength(PROPOSAL.PDF_PAGES_ONE_PRODUCT);
+      expect(pdf.pages[0].width).toBeCloseTo(595.28, 1);
+      expect(pdf.bytes.toString('latin1')).toMatch(/\/FontName \/[A-Z]{6}\+Inter-Bold/);
+      expect(pagesFor(1)).toBe(1);
+    });
+
+    it.each([2, 3, 4])('P19.14-T3 AC-1 %i products print exactly two pages', async (n) => {
+      const pdf = await built(input(proposal([HEALTH, CRITICAL, EDUCATION, FUTURE].slice(0, n), { showTotal: true })));
       expect(pdf.pages).toHaveLength(PROPOSAL.PDF_PAGES);
-      for (const page of pdf.pages) expect(page.width).toBeCloseTo(595.28, 1);
-      const fonts = new Set(pdf.pages.flatMap((p) => p.fragments.map((f) => f.font)));
-      expect([...fonts].sort()).toEqual(['Inter-Bold', 'Inter-Regular', 'Inter-SemiBold']);
-      expect(pdf.pages[0].text).toContain('Proposal untuk Bapak/Ibu Pak Budi Santoso');
-      expect(pdf.pages[1].text).toContain('Rincian');
+      expect(pagesFor(n)).toBe(2);
     });
 
-    it('P19.7-T3 AC-8 names itself for the client and the KPM, made by AgencyBoost, naming no insurer (ADR-0222 §6)', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      expect(pdf.info).toMatchObject({
-        Title: 'Proposal untuk Bapak/Ibu Pak Budi Santoso', Author: 'KPM Cahaya Jakarta', Producer: 'AgencyBoost', Creator: 'AgencyBoost',
+    it(`P19.14-T3 AC-1 the worst case — ${PROPOSAL.ITEMS_MAX} products, every bound at its maximum, the longest names — is two pages`, async () => {
+      const pdf = await built(worstCase());
+      expect(pdf.pages).toHaveLength(PROPOSAL.PDF_PAGES);
+      // It needed the last densities: a page fits, never by a third page.
+      expect(pdf.layout.pages.every((p) => p.over <= 0)).toBe(true);
+    });
+
+    it('P19.14-T3 AC-1 no page break inside a product: its card whole on page 1, its box whole on page 2', async () => {
+      const pdf = await built(FOUR());
+      const blocks = pdf.layout.pages.flatMap((p) => p.blocks);
+      for (const at of [0, 1, 2, 3]) {
+        const mine = blocks.filter((b) => b.item === at);
+        expect(mine.map((b) => [b.where, b.page])).toEqual([['card', 1], ['box', 2]]);
+        for (const b of mine) expect(b.bottom).toBeLessThan(841.89);
+      }
+      // Each product's whole name on page 1 (its card) and page 2 (its box).
+      expect(flat(pdf.pages[0].text)).toContain('PRUTahapan Cemerlang · PRO');
+      expect(flat(pdf.pages[1].text)).toContain('PRUTahapan Cemerlang');
+    });
+
+    it('P19.14-T3 AC-1 a file that renders to the wrong length is refused, never printed', async () => {
+      class Long extends ProposalPdfBuilder {
+        protected override async render(): Promise<RenderedPdf> {
+          return { bytes: Buffer.from('%PDF-'), pages: 3 };
+        }
+      }
+      await expect(new Long().build(pdfModelOf(FOUR()), NOW)).rejects.toBeInstanceOf(ProposalPdfTooLong);
+    });
+
+    it('P19.14-T3 AC-1 boxes start at 7 rows with two products and 5 with more; rows come most important first, Nilai tunai last', () => {
+      expect(densitiesFor('second', 2)[0].rows).toBe(PROPOSAL.PDF_BOX_ROWS_FEW);
+      expect(densitiesFor('second', 3)[0].rows).toBe(PROPOSAL.PDF_BOX_ROWS_MANY);
+      expect(densitiesFor('one', 1)[0].rows).toBe(PROPOSAL.PDF_HERO_ROWS_MAX);
+      const rich = item({
+        snapshot: {
+          fields: [field({ key: 'up', label: 'Uang pertanggungan', type: 'money' })],
+          pdfDetail: [
+            { block: 'nilai_tunai', rows: [{ label: 'Tahun ke-10', note: null, formula: '10% × up', text: null }], notGuaranteed: true },
+            { block: 'manfaat', rows: [{ label: 'Meninggal dunia', note: null, formula: '100% × up', text: null }] },
+          ],
+          benefits: ['Santunan'],
+        },
+        fieldValues: { up: 100_000_000_00 },
       });
-      expect(pdf.info.CreationDate).toBe('D:20261105030000Z');
-      expect(JSON.stringify(pdf.info)).not.toContain('Prudential');
+      const rows = rowsOfItem(rich, false);
+      expect(rows.map((r) => r.kind)).toEqual(['value', 'detail', 'benefit', 'cash']);
+      expect(rows[rows.length - 1].label).toBe('Tahun ke-10 (tidak dijamin)');
+    });
+  });
+
+  describe('AC-2: large type, dark text, no placeholder ever', () => {
+    it('P19.14-T3 AC-2 sets every size at least its floor: body 12, labels 10, product names 15, premiums 18, the client 24', () => {
+      expect([PROPOSAL.PDF_BODY_MIN_PT, PROPOSAL.PDF_LABEL_MIN_PT, PROPOSAL.PDF_PRODUCT_NAME_MIN_PT, PROPOSAL.PDF_PREMIUM_MIN_PT, PROPOSAL.PDF_CLIENT_NAME_MIN_PT])
+        .toEqual([12, 10, 15, 18, 24]);
+      for (const source of [ONE(), FOUR(), worstCase(), input(proposal([HEALTH]), { branding: KPM_LIGHT })]) {
+        const model = pdfModelOf(source);
+        const layout = fitProposal(model, ruler)!;
+        const runs = layout.pages.flatMap((p) => p.runs);
+        for (const run of runs) expect([run.text, run.size >= PDF_ROLE_MIN[run.role]]).toEqual([run.text, true]);
+        // And in the document `pdfmake` draws: no text below the labels' floor.
+        const nodes = (proposalDocument(model, layout, NOW).content as { fontSize?: number }[]).filter((n) => n.fontSize !== undefined);
+        expect(Math.min(...nodes.map((n) => n.fontSize!))).toBeGreaterThanOrEqual(PROPOSAL.PDF_LABEL_MIN_PT);
+      }
+      expect(Math.min(PDF_TYPE.ROW, PDF_TYPE.WHO, PDF_TYPE.DISCLAIMER, PDF_TYPE.FACT, PDF_TYPE.STEP_TEXT)).toBe(12);
     });
 
-    it('P19.7-T3 AC-8 prints readably: nothing runs past the margins, nothing below 11 pt but the 8 pt footer (ADR-0223 §2)', async () => {
-      for (const spec of [{ items: [HEALTH, EDUCATION] }, worstCase()]) {
-        const pdf = await built(spec, spec.items.length > 2 ? { agent: WORST_AGENT, insurer: WORST_INSURER } : {});
-        for (const page of pdf.pages) {
-          for (const f of page.fragments) {
-            expect([f.text, f.x >= 42.5 - 0.5, f.end <= 595.28 - 42.5 + 0.5]).toEqual([f.text, true, true]);
-            if (f.text.trim() === '') continue;
-            // Below 11 pt is the footer's 8 pt and nothing else.
-            if (f.size < PROPOSAL.PDF_BODY_MIN_PT) expect([f.text, f.size, FOOTER.includes(f.text.trim())]).toEqual([f.text, PROPOSAL.PDF_FOOTER_PT, true]);
+    it('P19.14-T3 AC-2 prints the names, premiums and client at their sizes in the file itself', async () => {
+      const pdf = await built(FOUR());
+      const size = (page: number, text: string) => pdf.pages[page].fragments.find((f) => flat(f.text) === text)?.size;
+      expect(size(0, 'Bapak Budi Contoh')).toBeGreaterThanOrEqual(24);
+      expect(size(1, 'Bapak Budi Contoh')).toBeGreaterThanOrEqual(24);
+      expect(size(0, 'PCB88')).toBeGreaterThanOrEqual(15);
+      expect(size(0, 'Rp 1.690.000')).toBeGreaterThanOrEqual(18);
+      expect(size(0, 'Rp 4.518.000')).toBeGreaterThanOrEqual(18);
+      expect(Math.min(...pdf.pages.flatMap((p) => p.fragments.map((f) => f.size)))).toBeGreaterThanOrEqual(10);
+    });
+
+    it('P19.14-T3 AC-2 writes body text and numbers in the spec’s dark #1a1f2b, and every word reads 4.5:1 where it sits', () => {
+      for (const branding of [AGENCYBOOST_PDF_BRANDING, KPM_GREEN, KPM_LIGHT]) {
+        const model = pdfModelOf(input(proposal([HEALTH, CRITICAL]), { branding }));
+        const c = model.colours;
+        expect(c.ink).toBe(PDF_INK);
+        const runs = fitProposal(model, ruler)!.pages.flatMap((p) => p.runs);
+        // The rows' values, the tiles' values: the dark text.
+        expect(runs.find((r) => flat(r.text) === 'Rp 500 juta')?.colour).toBe(PDF_INK);
+        expect(runs.find((r) => r.text === 'Menikah')?.colour).toBe(PDF_INK);
+        // Words on white or a tint, and words on the band, each read.
+        for (const colour of [c.ink, c.muted, c.band, c.secondInk]) expect(contrastRatio(colour, '#ffffff')).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(c.bandOnTint, c.tint)).toBeGreaterThanOrEqual(4.5);
+        for (const colour of [c.onBand, c.onBandSoft]) expect(contrastRatio(colour, c.band)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(c.onBand, c.bandLift)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(c.avatarText, c.avatarFill)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it('P19.14-T3 AC-2 never prints a placeholder — no ●●●, [dari ilustrasi], dari tabel tarif, Sesuai ilustrasi resmi or –', async () => {
+      const gaps = item({
+        snapshot: {
+          name: 'PRUCerah', category: 'education', typeLabel: 'DANA PENDIDIKAN',
+          fields: [
+            field({ key: 'masa_bayar', label: 'Masa bayar', type: 'chips', options: [option(CHECK_ILLUSTRATION)], paymentYears: true }),
+            field({ key: 'target_dana', label: 'Target dana', type: 'money' }),
+          ],
+          pdfDetail: [
+            { block: 'manfaat', rows: [{ label: 'Tahapan dana', note: null, formula: '5% × target_dana', text: null }] },
+            { block: 'masa', rows: [{ label: 'Dana di akhir', note: null, formula: null, text: 'dari tabel tarif' }] },
+          ],
+        },
+        fieldValues: { masa_bayar: CHECK_ILLUSTRATION },
+        premium: null,
+      });
+      for (const source of [input(proposal([gaps])), input(proposal([gaps, HEALTH], { showTotal: true })), FOUR(), worstCase()]) {
+        const all = flat(textOf(await built(source)));
+        expect(all).not.toMatch(/●|\[dari ilustrasi\]|dari tabel tarif|Sesuai ilustrasi resmi|Rp ?–|: –/);
+      }
+      // The row with no value is left out, and so is its label; a premium not typed prints no figure.
+      const one = flat(textOf(await built(input(proposal([gaps])))));
+      expect(one).not.toContain('Tahapan dana');
+      expect(one).not.toContain('Dana di akhir');
+      expect(one).not.toContain('Masa bayar');
+      expect(one).not.toMatch(/Rp \d/);
+    });
+  });
+
+  describe('AC-3: what each page says', () => {
+    it('P19.14-T3 AC-3 heads page 1 with the logo, the name, the tagline and date, DISIAPKAN KHUSUS UNTUK and Bapak/Ibu {Nama}', async () => {
+      const page = flat((await built(FOUR())).pages[0].text);
+      for (const part of ['AgencyBoost', 'Proposal perlindungan keluarga · 11 November 2026', 'DISIAPKAN KHUSUS UNTUK', 'Bapak Budi Contoh']) {
+        expect(page).toContain(part);
+      }
+    });
+
+    it('P19.14-T3 AC-3 addresses the client by gender, never doubling a title the lead carries', () => {
+      expect(addressOf('Budi Contoh', 'male')).toEqual({ title: 'Bapak Budi Contoh', short: 'Bapak Budi' });
+      expect(addressOf('Pak Budi Santoso', 'male')).toEqual({ title: 'Bapak Budi Santoso', short: 'Bapak Budi' });
+      expect(addressOf('Ibu Sari', null)).toEqual({ title: 'Ibu Sari', short: 'Ibu Sari' });
+      expect(addressOf('Sari', null)).toEqual({ title: 'Bapak/Ibu Sari', short: 'Bapak/Ibu Sari' });
+    });
+
+    it('P19.14-T3 AC-3 Tentang prints Usia and Jenis kelamin, and each detail and Yang dibahas only when filled', async () => {
+      const bare = flat((await built(input(proposal([HEALTH], { client: { name: 'Budi Contoh', age: 35, gender: 'male', details: null } })))).pages[0].text);
+      expect(bare).toContain('TENTANG BAPAK BUDI');
+      expect(bare).toContain('Usia 35 tahun');
+      expect(bare).toMatch(/Jenis kelamin.*Laki-laki/);
+      for (const absent of ['Status', 'Tanggungan', 'Pekerjaan', 'Kota', 'Yang dibahas']) expect(bare).not.toContain(absent);
+      const full = flat((await built(FOUR())).pages[0].text);
+      for (const present of ['Menikah', 'Istri, 1 anak (5 th)', 'Karyawan swasta', 'Tangerang Selatan', 'Yang dibahas:', 'Biaya rumah sakit', 'Dana masa depan / pensiun']) {
+        expect(full).toContain(present);
+      }
+    });
+
+    it('P19.14-T3 AC-3 Ringkasan comes with two products or more: the need tiles ✓ terlindungi / ✓ terencana, a discussed need with none grey', async () => {
+      expect(flat((await built(ONE())).pages[0].text)).not.toContain('RINGKASAN');
+      const page = flat((await built(FOUR())).pages[0].text);
+      expect(page).toContain('RINGKASAN');
+      for (const tile of ['Kesehatan ✓ terlindungi', 'Sakit kritis ✓ terlindungi', 'Pendidikan ✓ terencana', 'Masa depan ✓ terencana']) {
+        expect(page).toContain(tile);
+      }
+      const open = pdfModelOf(input(proposal([SYARIAH, DOLLAR]))).summary!.tiles;
+      expect(open.map((t) => [t.label, t.covered, t.state])).toEqual([
+        ['Kesehatan', false, 'belum ada'], ['Sakit kritis', false, 'belum ada'], ['Keluarga', true, '✓ terlindungi'], ['Masa depan', true, '✓ terencana'],
+      ]);
+    });
+
+    it('P19.14-T3 AC-3 totals only with Tampilkan total, only one cara bayar and one currency, never IDR and USD added', async () => {
+      const items = [HEALTH, CRITICAL, EDUCATION, FUTURE];
+      expect(totalOf(items, false)).toBeNull();
+      expect(totalOf(items, true)).toEqual({
+        label: 'Total per bulan',
+        amount: moneyInFull(4_518_000_00, 'IDR'),
+        lines: ['3 produk bayar bulanan.', 'PRUTahapan Cemerlang dibayar per tahun.'],
+      });
+      // One of each: no two share a cara bayar and a currency, so there is no total.
+      expect(totalOf([HEALTH, { ...DOLLAR, payFrequency: 'monthly' }], true)).toBeNull();
+      const usd = { ...DOLLAR, payFrequency: 'monthly' } as PdfItemSource;
+      const mixed = totalOf([HEALTH, CRITICAL, usd, usd, usd], true)!;
+      expect(mixed.amount).toBe(moneyInFull(750_000, 'USD'));
+      expect(mixed.lines).toEqual(['3 produk bayar bulanan.', 'PRUWell Medical, PCB88 dibayar terpisah.']);
+      const off = flat((await built(FOUR({ showTotal: false }))).pages[0].text);
+      expect(off).not.toContain('Total per bulan');
+      expect(flat((await built(FOUR())).pages[0].text)).toContain('Total per bulan Rp 4.518.000');
+    });
+
+    it('P19.14-T3 AC-3 Program yang ditawarkan: a card per product — category, name and plan, who, the premium, the period pill', async () => {
+      const page = flat((await built(FOUR())).pages[0].text);
+      for (const part of ['PROGRAM YANG DITAWARKAN', 'PENYAKIT KRITIS', 'PCB88', 'Untuk: Bapak Budi · UP Rp 500 juta', 'Rp 1.690.000', 'per bulan · 10 tahun',
+        'PRUWell Medical · Silver A', 'Untuk: Raka (anak, 5 th)', 'per tahun · 10 tahun', 'PRUSmart Plan · 6-Pay']) {
+        expect(page).toContain(part);
+      }
+      expect(page).toContain('Halaman 1 dari 2');
+      expect(page).toContain('AgencyBoost · disiapkan oleh Rina Wijaya, 0812 3456 7890');
+    });
+
+    it('P19.14-T3 AC-3 one product: the large card, Perlindungan Anda, Yang perlu diketahui, the steps, the disclaimer and the agent on its one page', async () => {
+      const page = flat((await built(ONE())).pages[0].text);
+      for (const part of ['KESEHATAN', 'PRUWell Medical · Silver A', 'Rp 828.000', 'Premi dari ilustrasi resmi', 'Wilayah', 'Asia kec. JPN, HK, SGP',
+        'PERLINDUNGAN ANDA', 'Limit per tahun', 'Rp4 miliar', 'YANG PERLU DIKETAHUI', 'Masa tunggu 30 hari', 'LANGKAH:', '1 · Diskusikan',
+        'polis dari Prudential.', 'Rina Wijaya', 'Agen · Kode 80008 · 0812 3456 7890', 'Hubungi saya', 'Halaman 1 dari 1']) {
+        expect(page).toContain(part);
+      }
+      expect(page).not.toContain('RINCIAN PROGRAM');
+    });
+
+    it('P19.14-T3 AC-3 page 2: RINCIAN PROGRAM, a box per product with its rows and the school timeline, the steps, the disclaimer naming the insurer, the agent', async () => {
+      const page = flat((await built(FOUR())).pages[1].text);
+      for (const part of ['RINCIAN PROGRAM', 'Bapak Budi Contoh', 'Uang pertanggungan Rp 500 juta', 'Lama bayar 10 tahun', 'Total dibayar Rp 202,8 juta',
+        'Dana cair saat anak masuk:', 'SD', 'Kuliah', '10%', '50%', 'LANGKAH SELANJUTNYA', 'Diskusikan', 'Lengkapi data', 'Polis terbit',
+        'Ringkasan ini bukan ilustrasi resmi dan bukan kontrak.', 'polis dari Prudential.', 'Rina Wijaya', 'Halaman 2 dari 2']) {
+        expect(page).toContain(part);
+      }
+      // The insurer is named in the disclaimer alone.
+      expect(flat(textOf(await built(FOUR()))).split('Prudential')).toHaveLength(2);
+    });
+
+    it('P19.14-T3 AC-3 a syariah product reads Santunan asuransi and Kontribusi; sentences for all say premi/kontribusi when mixed', async () => {
+      const all = flat(textOf(await built(input(proposal([SYARIAH, CRITICAL])))));
+      expect(all).toContain('Santunan asuransi Rp 250 juta');
+      expect(all).toContain('Untuk: Bapak Budi · Santunan Rp 250 juta');
+      expect(all).toContain('Kontribusi dari ilustrasi resmi');
+      expect(all).toContain('premi/kontribusi final mengikuti');
+      const only = flat(textOf(await built(input(proposal([SYARIAH])))));
+      expect(only).toContain('kontribusi final mengikuti');
+      expect(only).not.toMatch(/\bpremi\b/i);
+    });
+
+    it('P19.14-T3 AC-3 a typed premium reads “dari ilustrasi resmi”, a table’s “Tabel tarif berlaku {tanggal}”; USD stays USD, in full', async () => {
+      const table = { ...HEALTH, rateTableVersionId: 'v1', rateTableEffectiveFrom: '2026-11-01' };
+      expect(flat(textOf(await built(input(proposal([table])))))).toContain('Tabel tarif berlaku 1 November 2026');
+      const usd = flat(textOf(await built(input(proposal([DOLLAR, HEALTH])))));
+      expect(usd).toContain('USD 2.500,00');
+      expect([usdInFull(125_000), moneyInWords(500_000_000_00, 'IDR'), moneyInWords(4_000_000_000_00, 'IDR')].map(flat))
+        .toEqual(['USD 1.250,00', 'Rp 500 juta', 'Rp 4 miliar']);
+      expect(flat(moneyInFull(828_000_00, 'IDR'))).toBe('Rp 828.000');
+    });
+  });
+
+  describe('AC-4: the KPM’s branding, and AgencyBoost only without it', () => {
+    it('P19.14-T3 AC-4 without branding: the 3-dot logo, AgencyBoost’s name, a navy band and an orange stripe', async () => {
+      const pdf = await built(FOUR());
+      const svg = pdf.layout.pages[0].svg;
+      expect(svg).toContain(agencyBoostLogo());
+      expect(svg).toContain(`fill="${AGENCYBOOST_COLOURS.secondary}"`);
+      expect(svg).toContain(`fill="${AGENCYBOOST_COLOURS.primary}"`);
+      expect(pdf.pages[0].text.split('\n')[0]).toBe('AgencyBoost');
+      expect(pdf.info).toMatchObject({ Title: 'Proposal untuk Bapak Budi Contoh', Producer: 'AgencyBoost', Creator: 'AgencyBoost' });
+      expect(pdf.bytes.toString('latin1')).not.toMatch(/\/Subtype \/Image/);
+    });
+
+    it('P19.14-T3 AC-4 with branding: the KPM’s name, logo and colours on both pages — and “AgencyBoost” nowhere in the file', async () => {
+      for (const branding of [KPM_GREEN, await withLogo(KPM_GREEN)]) {
+        for (const source of [input(proposal([HEALTH]), { branding }), input(proposal([HEALTH, CRITICAL, EDUCATION, FUTURE]), { branding })]) {
+          const pdf = await built(source);
+          const haystack = everything(pdf.bytes);
+          expect(haystack).not.toMatch(/agencyboost/i);
+          expect(haystack.toUpperCase()).not.toContain(utf16Hex('AgencyBoost'));
+          // A UTF-16 literal string, its null bytes taken out, is searched too.
+          expect(haystack.replace(/\0/g, '')).not.toMatch(/agencyboost/i);
+          const info = Object.fromEntries(Object.entries(pdf.info).map(([k, v]) => [k, infoText(v)]));
+          expect(Object.values(info).join(' ')).not.toMatch(/agencyboost/i);
+          expect(info).toMatchObject({ Producer: 'KPM 0417 · BSD City', Creator: 'KPM 0417 · BSD City', Author: 'BSD City' });
+          for (const page of pdf.pages) expect(flat(page.text)).toContain('KPM 0417 · BSD City');
+          const band = coloursOf(KPM_GREEN.main, KPM_GREEN.second).band;
+          for (const laid of pdf.layout.pages) {
+            expect(laid.svg).toContain(`fill="${band}"`);
+            expect(laid.svg).toContain(`fill="${KPM_GREEN.second.toLowerCase()}"`);
+            expect(laid.svg).not.toContain(agencyBoostLogo());
           }
         }
       }
     });
-  });
 
-  describe('AC-4: page 1, Ringkasan', () => {
-    it('P19.7-T3 AC-4 heads with the wordmark and the date, the title, and one line of age · channel · cara bayar', async () => {
-      const pdf = await built({ items: [HEALTH], payFrequency: 'quarterly' });
-      const lines = pdf.pages[0].text.split('\n');
-      expect(lines.slice(0, 5)).toEqual([
-        'AgencyBoost',
-        '5 Nov 2026',
-        'Proposal untuk Bapak/Ibu Pak Budi Santoso',
-        'Umur 36 (ulang tahun berikutnya) · Konvensional · Kuartalan',
-        'KESEHATAN',
-      ]);
+    it('P19.14-T3 AC-4 the logo is the square one on a white circle; without one, the KPM’s initials; and the only image is the KPM’s', async () => {
+      const logo = await built(input(proposal([HEALTH, CRITICAL]), { branding: await withLogo(KPM_GREEN) }));
+      // One picture: its image and the soft mask its transparency is drawn with.
+      const raw = logo.bytes.toString('latin1');
+      expect((raw.match(/\/Subtype \/Image/g) ?? []).length - (raw.match(/\/SMask \d+ 0 R/g) ?? []).length).toBe(1);
+      const pic = logo.layout.pages[0].pictures[0];
+      expect(pic.w).toBe(pic.h);
+      expect(logo.layout.pages[0].svg).toMatch(/<circle cx="[\d.]+" cy="[\d.]+" r="20" fill="#ffffff"\/>/);
+      const initials = pdfModelOf(input(proposal([HEALTH]), { branding: KPM_GREEN }));
+      expect(initials.brand.mark).toEqual({ kind: 'initials', text: 'BC' });
     });
 
-    it('P19.7-T3 AC-4 writes a row per product like a receipt: type, name and plan, insured, the premium, Total dibayar, the summary values', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION] });
-      const page = pdf.pages[0].text;
-      for (const line of [
-        'KESEHATAN', 'PRUWell Medical · Gold', 'Tertanggung: Klien', 'Premi per bulan', 'Rp 1.250.000',
-        'Plan Gold Masa bayar 10 tahun', 'Uang pertanggungan Rp 1 M',
-        'DANA PENDIDIKAN', 'PRUCerah', 'Tertanggung: Anak Adik Raka, 8 th', 'Target dana Rp 500 Jt',
-      ]) expect(page.split('\n')).toContain(line);
-      // Total dibayar: the premium × 12 × the term's years, in full (§B.34).
-      expect(page.replace(/\n/g, ' ')).toContain('Total dibayar selama 10 tahun: Rp 150.000.000');
-      expect(page.replace(/\n/g, ' ')).toContain('Total dibayar selama 18 tahun: Rp 270.000.000');
-      // Only the showOnSummary figures: Wilayah is page 2's.
-      expect(page).not.toContain('Wilayah');
+    it('P19.14-T3 AC-4 maps the spec’s main colour to Warna kedua and its second to Warna utama, so AgencyBoost’s give navy and orange', () => {
+      expect(AGENCYBOOST_PDF_BRANDING).toMatchObject({ branded: false, name: 'AgencyBoost', main: AGENCYBOOST_COLOURS.secondary, second: AGENCYBOOST_COLOURS.primary });
+      expect(pdfBrandingOf({ name: 'KPM A', branded: true, logo: null, primary: '#5dcaa5', secondary: '#0f6e56' }))
+        .toEqual({ branded: true, name: 'KPM A', logo: null, main: '#0f6e56', second: '#5dcaa5' });
+      // A logo and no colours: the KPM's name and logo, AgencyBoost's colours.
+      expect(pdfBrandingOf({ name: 'KPM A', branded: true, logo: null, primary: null, secondary: null }))
+        .toMatchObject({ branded: true, name: 'KPM A', main: AGENCYBOOST_COLOURS.secondary, second: AGENCYBOOST_COLOURS.primary });
+      expect(pdfBrandingOf({ name: 'KPM A', branded: false, logo: null, primary: null, secondary: null })).toBe(AGENCYBOOST_PDF_BRANDING);
+      const navy = coloursOf(AGENCYBOOST_PDF_BRANDING.main, AGENCYBOOST_PDF_BRANDING.second);
+      expect([navy.band, navy.second]).toEqual([AGENCYBOOST_COLOURS.secondary, AGENCYBOOST_COLOURS.primary]);
     });
 
-    it('P19.7-T3 AC-4 writes Total premi only while the switch is on, one line per currency, never summed', async () => {
-      const off = await built({ items: [HEALTH, DOLLAR] });
-      expect(off.pages[0].text).not.toContain('Total premi');
-      const on = await built({ items: [HEALTH, DOLLAR, PLAIN], showTotal: true });
-      const lines = on.pages[0].text.split('\n');
-      const at = lines.findIndex((l) => l.startsWith('Total premi per bulan'));
-      expect(lines.slice(at, at + 3)).toEqual(['Total premi per bulan', 'Rp 2.500.000', 'USD 1.250,00']);
-    });
-
-    it('P19.7-T3 AC-4 writes the agent as text — name, Kode agen, phone — and leaves out a part the profile lacks', async () => {
-      const full = await built({ items: [PLAIN] });
-      expect(full.pages[0].text).toContain('Rina Wijaya\nKode agen AG-0417-001 · 0812 3456 7890');
-      const noPhone = await built({ items: [PLAIN] }, { agent: { name: 'Rina Wijaya', code: 'AG-0417-001', phone: null } });
-      expect(noPhone.pages[0].text).toContain('Rina Wijaya\nKode agen AG-0417-001\n');
-      const nameOnly = await built({ items: [PLAIN] }, { agent: { name: 'Rina Wijaya', code: null, phone: null } });
-      expect(nameOnly.pages[0].text).not.toContain('Kode agen');
-    });
-
-    it('P19.7-T3 AC-4 writes a premium not yet typed as –, never zero', async () => {
-      const pdf = await built({ items: [{ ...PLAIN, premium: null }] });
-      expect(pdf.pages[0].text).toContain('Premi per bulan\n–');
+    it('P19.14-T3 AC-4 a main colour too light for white words is drawn as its nearest darker shade that reads; tints 7 % and 14 %', () => {
+      const c = coloursOf(KPM_LIGHT.main, KPM_LIGHT.second);
+      expect(c.band).not.toBe(KPM_LIGHT.main.toLowerCase());
+      expect(contrastRatio('#ffffff', c.band)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio('#ffffff', KPM_LIGHT.main)).toBeLessThan(4.5);
+      // A colour that already reads keeps itself.
+      expect(coloursOf('#0F6E56', '#5DCAA5').band).toBe('#0f6e56');
+      expect([PROPOSAL.PDF_TINT_LIGHT, PROPOSAL.PDF_TINT_STRONG]).toEqual([0.07, 0.14]);
     });
   });
 
-  describe('AC-5: page 2, Rincian', () => {
-    it('P19.7-T3 AC-5 lists each product’s values in two columns: Tertanggung and the premium first, then its showOnPdf fields', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      const lines = pdf.pages[1].text.split('\n');
-      expect(lines.slice(0, 5)).toEqual([
-        'Rincian',
-        'PRUWell Medical · Gold',
-        'Tertanggung Klien Premi per bulan Rp 1.250.000',
-        'Plan Gold Masa bayar 10 tahun',
-        'Uang pertanggungan Rp 1 M Wilayah Indonesia',
-      ]);
-    });
-
-    it('P19.7-T3 AC-5 lists up to four benefits from the catalogue', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      const page = pdf.pages[1].text;
-      for (const benefit of HEALTH.benefits!.slice(0, 4)) expect(page).toContain(benefit);
-      expect(page).not.toContain(HEALTH.benefits![4]);
-    });
-
-    it('P19.7-T3 AC-5 works out the pdfDetail amounts from the agent’s values, marks Nilai tunai tidak dijamin, and writes – for what cannot be worked out', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION] });
-      const page = pdf.pages[1].text.split('\n');
-      expect(page).toEqual(expect.arrayContaining([
-        'Manfaat utama', 'Batas tahunan Rp 2 M', 'Kamar per hari Rp 1,5 jt', 'Jadwal', 'Pembayaran premi 10 tahun',
-        'Yang tidak ditanggung', 'Kondisi yang sudah ada 12 bulan', 'Nilai tunai (contoh) — tidak dijamin',
-        'Tahun ke-10 contoh Rp 100 Jt', 'Tahapan dana Rp 25 Jt',
-      ]));
-      const empty = await built({ items: [{ ...HEALTH, values: { plan: 'Gold', masa_bayar: '10 tahun' } }] });
-      expect(empty.pages[1].text.split('\n')).toEqual(expect.arrayContaining(['Batas tahunan –', 'Uang pertanggungan – Wilayah Indonesia']));
-    });
-
-    it('P19.7-T3 AC-5 ends with the disclaimer naming the insurer, Langkah selanjutnya, and the footer on both pages', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      const two = pdf.pages[1].text;
-      expect(two.replace(/\n/g, ' ')).toContain(
-        'Ringkasan ini bukan ilustrasi resmi. Manfaat dan premi mengikuti Ilustrasi Resmi dan polis dari PT Prudential Life Assurance.',
-      );
-      expect(two).toContain('Langkah selanjutnya: Diskusikan → Lengkapi data → Polis terbit');
-      for (const page of pdf.pages) {
-        const footer = page.fragments.filter((f) => f.size === PROPOSAL.PDF_FOOTER_PT).map((f) => f.text).join('').trim();
-        expect(footer).toBe(FOOTER);
+  describe('AC-5: the category illustrations recolour', () => {
+    it('P19.14-T3 AC-5 draws every picture in the KPM’s two colours, their tints and white — nothing else', () => {
+      const c = coloursOf(KPM_GREEN.main, KPM_GREEN.second);
+      const allowed = new Set([c.art.a, c.art.b, c.art.a1, c.art.a2, c.art.b2, '#ffffff', 'none']);
+      for (const kind of ['health', 'critical', 'family', 'education', 'growth'] as ArtKind[]) {
+        const svg = artOf(kind, c.art);
+        const colours = [...svg.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]);
+        expect(colours.length).toBeGreaterThan(3);
+        for (const colour of colours) expect([kind, colour, allowed.has(colour)]).toEqual([kind, colour, true]);
+        expect(svg).not.toMatch(/var\(|#f6c693/i);
       }
     });
 
-    it('P19.7-T3 AC-7 names the insurer only in the disclaimer (decision 5)', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION] }, { insurer: 'PT Asuransi Contoh' });
-      const all = textOf(pdf).replace(/\n/g, ' ');
-      expect(all.split('PT Asuransi Contoh')).toHaveLength(2);
-      expect(all).toContain('polis dari PT Asuransi Contoh.');
+    it('P19.14-T3 AC-5 heads one product with its category’s picture and more with the umbrella; each card and box has its own; an unknown category is the umbrella', () => {
+      const c = coloursOf(KPM_GREEN.main, KPM_GREEN.second);
+      const one = fitProposal(pdfModelOf(input(proposal([HEALTH]), { branding: KPM_GREEN })), ruler)!;
+      expect(one.pages[0].svg).toContain(artOf('health', c.art));
+      const four = fitProposal(pdfModelOf(input(proposal([HEALTH, CRITICAL, EDUCATION, FUTURE]), { branding: KPM_GREEN })), ruler)!;
+      for (const kind of ['family', 'health', 'critical', 'education', 'growth'] as ArtKind[]) expect(four.pages[0].svg).toContain(artOf(kind, c.art));
+      for (const kind of ['health', 'critical', 'education', 'growth'] as ArtKind[]) expect(four.pages[1].svg).toContain(artOf(kind, c.art));
+      expect(artOfItem(item({ snapshot: { category: 'something-new', needTag: null } }))).toBe('family');
+      expect(artOfItem(item({ snapshot: { category: 'something-new', needTag: 'EDUCATION' } }))).toBe('education');
     });
   });
 
-  describe('AC-6: the fitting rule (Acc. 15) — two pages, never more, broken only between products', () => {
-    it('P19.7-T3 AC-6 starts one or two products at level A and three or more at C', () => {
-      expect([1, 2, 3, 4, 5].map(startLevelOf)).toEqual(['A', 'A', 'C', 'C', 'C']);
-      expect(levelsFrom(1)).toEqual(['A', 'B', 'C', 'D']);
-      expect(levelsFrom(4)).toEqual(['C', 'D']);
-    });
-
-    it.each([[1, [HEALTH]], [2, [HEALTH, EDUCATION]]])(
-      'P19.7-T3 AC-6 with %p product(s) both pages fit at level A, everything on page 2', async (_n, items) => {
-        const pdf = await built({ items });
-        expect([pdf.pages.length, pdf.level]).toEqual([2, 'A']);
-        expect(pdf.pages[1].text).toContain('Manfaat\n');
-        expect(pdf.pages[1].text).not.toContain('Rincian lengkap di Ilustrasi Resmi');
-      },
-    );
-
-    it('P19.7-T3 AC-6 Acc. 15 with four products: two pages, the fields and only Manfaat utama, then “Rincian lengkap di Ilustrasi Resmi”', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION, PLAIN, DOLLAR], showTotal: true });
-      expect([pdf.pages.length, pdf.level]).toEqual([2, 'C']);
-      const two = pdf.pages[1].text;
-      // Every product has its block on page 2, the fields of each in it.
-      for (const name of ['PRUWell Medical · Gold', 'PRUCerah', 'PRUlink', 'PRU Prosper']) expect(two.split('\n')).toContain(name);
-      expect(two).toContain('Manfaat utama\nBatas tahunan Rp 2 M');
-      for (const dropped of ['Jadwal', 'Yang tidak ditanggung', 'Nilai tunai', 'Rawat inap sesuai tagihan']) expect(two).not.toContain(dropped);
-      expect(two).toContain('Rincian lengkap di Ilustrasi Resmi');
-      // Page 1 holds all four rows.
-      for (const name of ['PRUWell Medical · Gold', 'PRUCerah', 'PRUlink', 'PRU Prosper']) expect(pdf.pages[0].text.split('\n')).toContain(name);
-    });
-
-    it('P19.7-T3 AC-6 drops Nilai tunai first: a proposal too long at A is laid out at B, its other blocks kept', async () => {
-      // A long Nilai tunai table on each of two products: page 2 runs over at A, and fits once it goes.
-      const long = {
-        ...HEALTH,
-        pdfDetail: HEALTH.pdfDetail!.map((block) => (block.block !== 'nilai_tunai' ? block : {
-          ...block,
-          rows: Array.from({ length: PROPOSAL.PDF_DETAIL_ROWS_MAX }, (_, i) => ({ ...block.rows[0], label: `Tahun ke-${(i + 1) * 5}` })),
-        })),
-      };
-      const a = await at('A', { items: [long, long] });
-      const b = await at('B', { items: [long, long] });
-      expect([a.pages.length, b.pages.length]).toEqual([3, 2]);
-      const pdf = await built({ items: [long, long] });
-      expect(pdf.level).toBe('B');
-      expect(pdf.pages[1].text).not.toContain('Nilai tunai');
-      expect(pdf.pages[1].text).toContain('Jadwal');
-    });
-
-    it('P19.7-T3 AC-6 the worst case — five products, every bound at its maximum, the longest names — is two pages at level D', async () => {
-      for (const branding of [AGENCYBOOST_PDF_BRANDING, await withLogo(KPM_BRANDING)]) {
-        const pdf = await built(worstCase(), { agent: WORST_AGENT, insurer: WORST_INSURER, branding });
-        expect([pdf.pages.length, pdf.level]).toEqual([PROPOSAL.PDF_PAGES, 'D']);
-        // Page 1 holds every row and the agent; page 2 every product's block and the foot.
-        expect(pdf.pages[0].text.match(/Premi per semester/g)).toHaveLength(PROPOSAL.ITEMS_MAX);
-        expect(pdf.pages[0].text).toContain('Total premi per semester');
-        expect(pdf.pages[0].text).toContain('Kode agen AG-0417-0000000001');
-        expect(pdf.pages[1].text.match(/Premi per semester/g)).toHaveLength(PROPOSAL.ITEMS_MAX);
-        expect(pdf.pages[1].text).toContain('Langkah selanjutnya: Diskusikan → Lengkapi data → Polis terbit');
-        // Text that would run past its slot ends in an ellipsis; nothing is drawn past the margin (AC-8's test).
-        expect(pdf.pages[0].text).toContain('…');
+  describe('AC-6: nothing sent, nothing linked', () => {
+    it('P19.14-T3 AC-6 the file carries no link, no action and no WhatsApp address', async () => {
+      for (const source of [ONE(), FOUR()]) {
+        const all = everything((await built(source)).bytes);
+        expect(all).not.toMatch(/\/URI|\/Annots|\/JavaScript|\/OpenAction|wa\.me|whatsapp/i);
       }
     });
-
-    it('P19.7-T3 AC-6 never makes a third page: a level D that did not fit is refused, not printed (ADR-0223 §5)', async () => {
-      class TooLong extends ProposalPdfBuilder {
-        protected override render(_definition: TDocumentDefinitions): Promise<RenderedPdf> {
-          return Promise.resolve({ bytes: Buffer.alloc(0), pages: 3 });
-        }
-      }
-      await expect(new TooLong().build(pdfInput(proposalView({ items: [HEALTH] })), NOW)).rejects.toBeInstanceOf(ProposalPdfTooLong);
-    });
-
-    it('P19.7-T3 AC-6 breaks only between products: each product’s block on page 2 is whole, on one page', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION] });
-      expect(pdf.pages[0].text).not.toContain('Rincian');
-      const two = pdf.pages[1].text;
-      expect(two.indexOf('PRUWell Medical · Gold')).toBeLessThan(two.indexOf('Tahun ke-10 contoh Rp 100 Jt'));
-      expect(two.indexOf('Tahun ke-10 contoh Rp 100 Jt')).toBeLessThan(two.indexOf('PRUCerah'));
-    });
   });
 
-  describe('AC-7: KPM style and colours (Acc. 16)', () => {
-    const colourOf = (pdf: ReadPdf, page: number, text: string) => pdf.pages[page].fragments.find((f) => f.text.trim().startsWith(text))?.colour;
-
-    it('P19.7-T3 AC-7 without branding carries AgencyBoost’s wordmark, navy and orange (as text, its ink)', async () => {
-      const pdf = await built({ items: [HEALTH] });
-      expect(pdf.pages[0].text.split('\n').slice(0, 2)).toEqual(['AgencyBoost', '5 Nov 2026']);
-      expect(colourOf(pdf, 0, 'KESEHATAN')).toBe('#A85E1B');
-      expect(colourOf(pdf, 0, 'Proposal')).toBe('#1B2B4B');
-      expect(colourOf(pdf, 0, 'Rp')).toBe('#1B2B4B');
-    });
-
-    it('P19.7-T3 AC-7 with branding: the KPM’s logo heads it, the secondary ink draws the headings and figures, the primary ink the type labels', async () => {
-      const branding = await withLogo(KPM_BRANDING);
-      const pdf = await built({ items: [HEALTH] }, { branding });
-      expect(pdf.pages[0].text.split('\n')[0]).toBe('5 Nov 2026');
-      expect(pdf.bytes.toString('latin1')).toMatch(/\/Subtype \/Image/);
-      expect(colourOf(pdf, 0, 'KESEHATAN')).toBe(KPM_BRANDING.primaryInk);
-      expect(colourOf(pdf, 0, 'Proposal')).toBe(KPM_BRANDING.secondaryInk);
-      expect(colourOf(pdf, 0, 'Rp')).toBe(KPM_BRANDING.secondaryInk);
-      expect(colourOf(pdf, 1, 'Rincian')).toBe(KPM_BRANDING.secondaryInk);
-      expect(colourOf(pdf, 1, 'Langkah')).toBe(KPM_BRANDING.secondaryInk);
-      // Body text keeps the fixed navy, labels the fixed grey: a KPM's colour is never a body text's.
-      expect(colourOf(pdf, 0, 'Tertanggung')).toBe('#1B2B4B');
-      expect(colourOf(pdf, 0, 'Premi')).toBe('#5F5E5A');
-    });
-
-    it('P19.7-T3 AC-7 reads 4.5:1 on white everywhere it writes, the brand’s own light colour kept for lines', async () => {
-      const pdf = await built({ items: [HEALTH, EDUCATION], showTotal: true }, { branding: KPM_BRANDING });
-      const colours = new Set(pdf.pages.flatMap((p) => p.fragments.filter((f) => f.text.trim()).map((f) => f.colour)));
-      for (const colour of colours) expect([colour, contrastOnWhite(colour) >= 4.5]).toEqual([colour, true]);
-      // The light secondary itself (2.1:1) draws no text — only the rules, as a stroke.
-      expect(colours.has(KPM_BRANDING.secondary)).toBe(false);
-      expect(contrastOnWhite(KPM_BRANDING.secondary)).toBeLessThan(4.5);
-    });
-
-    it('P19.7-T3 AC-7 a download again is rebuilt with the branding the KPM shows now', async () => {
-      const before = await built({ items: [HEALTH] });
-      const after = await built({ items: [HEALTH] }, { branding: KPM_BRANDING });
-      expect(colourOf(before, 0, 'KESEHATAN')).toBe(AGENCYBOOST_PDF_BRANDING.primaryInk.toUpperCase());
-      expect(colourOf(after, 0, 'KESEHATAN')).toBe(KPM_BRANDING.primaryInk);
-    });
-  });
-
-  describe('the words: Syariah, money and the file name', () => {
-    it('P19.7-T2 AC-5 on a Syariah proposal Premi is Kontribusi everywhere, the disclaimer and the labels included (ADR-0221 §9)', async () => {
-      const pdf = await built({ items: [{ ...HEALTH, syariahName: 'PRUWell Medical Syariah' }], channel: 'syariah', showTotal: true });
-      const all = textOf(pdf).replace(/\n/g, ' ');
-      expect(all).toContain('Umur 36 (ulang tahun berikutnya) · Syariah · Bulanan');
-      expect(all).toContain('Kontribusi per bulan');
-      expect(all).toContain('Total kontribusi per bulan');
-      expect(all).toContain('Manfaat dan kontribusi mengikuti Ilustrasi Resmi');
-      expect(all).toContain('PRUWell Medical Syariah · Gold');
-      expect(all).toContain('Santunan asuransi Rp 1 M');
-      expect(all).not.toMatch(/\bPremi\b/);
-    });
-
-    it('P19.7-T3 AC-4 writes a premium and its totals in full, a field’s amount compact, and USD in full with its code (ADR-0223 §8)', () => {
-      expect(moneyInFull(1_250_000_00, 'IDR')).toBe('Rp 1.250.000');
-      expect(moneyCompact(100_000_000_000, 'IDR')).toBe('Rp 1 M');
-      expect(moneyCompact(25_000_000_000, 'IDR')).toBe('Rp 250 Jt');
-      expect(usdInFull(125_000)).toBe('USD 1.250,00');
-      expect(usdInFull(123_456_789)).toBe('USD 1.234.567,89');
-      expect(moneyCompact(125_000, 'USD')).toBe('USD 1.250,00');
-      expect(usdInFull(-5)).toBe('-USD 0,05');
-    });
-
-    it('P19.7-T3 AC-5 works a formula out on the item’s own money values, in its currency; anything else is –', () => {
-      const item = proposalView({ items: [HEALTH] }).items[0];
-      expect(detailValueOf({ label: 'x', note: null, formula: '2 × up', text: null }, item)).toBe('Rp 2 M');
-      expect(detailValueOf({ label: 'x', note: null, formula: 'up / 0', text: null }, item)).toBe('–');
-      expect(detailValueOf({ label: 'x', note: null, formula: '2 × missing', text: null }, item)).toBe('–');
-      expect(detailValueOf({ label: 'x', note: null, formula: null, text: 'Sesuai plan' }, item)).toBe('Sesuai plan');
-      expect(detailValueOf({ label: 'x', note: null, formula: null, text: null }, item)).toBe('–');
-    });
-
+  describe('the words: the file name and the lines', () => {
     it.each([
       ['Ibu Siti Nur’aini', 'Proposal-Ibu-Siti-Nur-aini-2026-11-05.pdf', 'Proposal-Ibu-Siti-Nur-aini-2026-11-05.pdf'],
-      ["Ibu Siti Nur'aini", 'Proposal-Ibu-Siti-Nur-aini-2026-11-05.pdf', 'Proposal-Ibu-Siti-Nur-aini-2026-11-05.pdf'],
       ['Pak Bédi  Ñoviandi', 'Proposal-Pak-Bedi-Noviandi-2026-11-05.pdf', 'Proposal-Pak-Bedi-Noviandi-2026-11-05.pdf'],
       ['  — !!', 'Proposal-Klien-2026-11-05.pdf', 'Proposal-Klien-2026-11-05.pdf'],
       ['王小明', 'Proposal-王小明-2026-11-05.pdf', 'Proposal--2026-11-05.pdf'],
-    ])('P19.7-T3 AC-2 names the file of %p Proposal-{Nama}-{tanggal}.pdf (ADR-0222 §6)', (client, name, ascii) => {
+    ])('P19.14-T3 AC-6 still names the file of %p Proposal-{Nama}-{tanggal}.pdf (ADR-0222 §6)', (client, name, ascii) => {
       expect(proposalFileName(client, '2026-11-05')).toEqual({ name, ascii });
     });
 
-    it(`P19.7-T3 AC-2 keeps at most ${PROPOSAL.FILE_NAME_CLIENT_MAX} characters of the name, and no dash at the cut`, () => {
-      const { name } = proposalFileName(`${'A'.repeat(59)} Budi`, '2026-11-05');
-      expect(name).toBe(`Proposal-${'A'.repeat(59)}-2026-11-05.pdf`);
-      expect(proposalFileName('B'.repeat(80), '2026-11-05').name).toBe(`Proposal-${'B'.repeat(60)}-2026-11-05.pdf`);
-    });
-
-    it('P19.7-T3 AC-2 answers the name as an attachment, ASCII and UTF-8 (RFC 6266)', () => {
+    it(`P19.14-T3 AC-6 keeps at most ${PROPOSAL.FILE_NAME_CLIENT_MAX} characters of the name, answered as an attachment (RFC 6266)`, () => {
+      expect(proposalFileName(`${'A'.repeat(59)} Budi`, '2026-11-05').name).toBe(`Proposal-${'A'.repeat(59)}-2026-11-05.pdf`);
       expect(dispositionOf(proposalFileName('Ibu Siti', '2026-11-05')))
         .toBe('attachment; filename="Proposal-Ibu-Siti-2026-11-05.pdf"; filename*=UTF-8\'\'Proposal-Ibu-Siti-2026-11-05.pdf');
-      expect(dispositionOf(proposalFileName('王', '2026-11-05'))).toContain("filename*=UTF-8''Proposal-%E7%8E%8B-2026-11-05.pdf");
     });
 
-    it('P19.7-T3 AC-6 sets a text in its lines, broken between words, the last ended in … when it runs past them', () => {
-      const ruler = pdfRuler();
-      expect(inLines(ruler, 'PRUWell Medical', 'bold', 13, 300, 2)).toBe('PRUWell Medical');
-      const two = inLines(ruler, 'Kata '.repeat(60), 'regular', 11, 200, 2).split('\n');
+    it('P19.14-T3 AC-2 sets a text in its lines, broken between words, the last ended in … when it runs past them', () => {
+      expect(inLines(ruler, 'PRUWell Medical', 'bold', 15, 300, 2)).toEqual(['PRUWell Medical']);
+      const two = inLines(ruler, 'Kata '.repeat(60), 'regular', 12, 200, 2);
       expect(two).toHaveLength(2);
       expect(two[1].endsWith('…')).toBe(true);
-      for (const line of two) expect(ruler.width(line, 'regular', 11)).toBeLessThanOrEqual(199);
-      // A word longer than the line is cut where it must be; a money figure's no-break space is not a break.
-      expect(inLines(ruler, 'W'.repeat(80), 'regular', 11, 100, 1).endsWith('…')).toBe(true);
-      expect(inLines(ruler, 'Total: Rp 150.000.000', 'regular', 11, 90, 2)).toBe('Total:\nRp 150.000.000');
+      for (const line of two) expect(ruler.width(line, 'regular', 12)).toBeLessThanOrEqual(199);
+      expect(inLines(ruler, 'W'.repeat(80), 'regular', 12, 100, 1)[0].endsWith('…')).toBe(true);
+      expect(inLines(ruler, 'Total: Rp 150.000.000', 'regular', 12, 100, 2)).toEqual(['Total:', 'Rp 150.000.000']);
+    });
+  });
+
+  describe('the rules, one by one (ADR-0256 §4, §6)', () => {
+    it('P19.14-T3 AC-3 names the insured: the client, a spouse, a child, someone else — with or without a name and an age', () => {
+      const who = (insured: PdfItemSource['insured']) => pdfModelOf(input(proposal([{ ...HEALTH, insured }]))).items[0].who;
+      expect(who({ relation: 'client', name: null, age: null })).toBe('Untuk: Bapak Budi');
+      expect(who({ relation: 'spouse', name: 'Sari', age: 33 })).toBe('Untuk: Sari (pasangan, 33 th)');
+      expect(who({ relation: 'child', name: null, age: 5 })).toBe('Untuk: Anak (5 th)');
+      expect(who({ relation: 'other', name: 'Pak Joko', age: null })).toBe('Untuk: Pak Joko');
+      expect(who({ relation: 'other', name: null, age: null })).toBe('Untuk: Tertanggung');
+      expect(addressOf('Ny. Rina', null).title).toBe('Ibu Rina');
+    });
+
+    it('P19.14-T3 AC-3 says the pay term in the pill and the rows: years, an age, a single payment, a field’s, or nothing', () => {
+      const pill = (over: Partial<PdfItemSource>) => pdfModelOf(input(proposal([{ ...CRITICAL, ...over }]))).items[0];
+      expect(pill({ payTerm: 't5' }).pill).toBe('per bulan · 5 tahun');
+      const single = pill({ payTerm: 'single', payFrequency: 'single' });
+      expect([single.pill, single.rows.find((r) => r.label === 'Lama bayar')?.value]).toEqual(['sekali bayar', 'Sekali bayar']);
+      expect(single.rows.some((r) => r.label === 'Total dibayar')).toBe(false);
+      expect(pill({ payTerm: null }).pill).toBe('per bulan');
+      const byField = item({
+        snapshot: { fields: [field({ key: 'masa', label: 'Masa bayar', type: 'fixed', options: [option('Bayar 10 th', 10)], paymentYears: true })] },
+        premium: { amountMinor: 100_000_00, currency: 'IDR' },
+      });
+      const model = pdfModelOf(input(proposal([byField]))).items[0];
+      expect(model.pill).toBe('per bulan · 10 tahun');
+      expect(model.rows.map((r) => [r.label, flat(r.value)])).toEqual([['Masa bayar', 'Bayar 10 th'], ['Total dibayar', 'Rp 12 juta']]);
+      const sentence = item({ snapshot: { payTerms: [{ key: 'k', label: 'Diperbarui tiap tahun', years: null, toAge: null, single: false }] }, payTerm: 'k' });
+      expect(pdfModelOf(input(proposal([sentence]))).items[0].pill).toBe('per bulan');
+    });
+
+    it('P19.14-T3 AC-3 a lone other product is said by its cara bayar, its currency or its single payment', () => {
+      const monthly = (i: PdfItemSource) => ({ ...i, payFrequency: 'monthly' }) as PdfItemSource;
+      expect(totalOf([HEALTH, CRITICAL, { ...FUTURE, payFrequency: 'single' }], true)!.lines[1]).toBe('PRUSmart Plan sekali bayar.');
+      expect(totalOf([HEALTH, CRITICAL, monthly(DOLLAR)], true)!.lines[1]).toBe('PRU Prosper dalam USD.');
+      expect(totalOf([HEALTH, CRITICAL, { ...HEALTH, premium: null }], true)!.lines).toEqual(['2 produk bayar bulanan.', 'PRUWell Medical dibayar per bulan.']);
+      expect(totalOf([HEALTH], true)).toBeNull();
+    });
+
+    it('P19.14-T3 AC-3 prints Lainnya’s own words, a single client’s status, and each tile only with a value', () => {
+      const model = pdfModelOf(input(proposal([HEALTH], {
+        client: { name: 'Sari', age: null, gender: 'female', details: { status: 'single', dependants: '  ', occupation: null, city: null, needs: ['OTHER', 'FAMILY'], needsOther: 'Dana haji' } },
+      })));
+      expect(model.client.tiles).toEqual([{ label: 'Jenis kelamin', value: 'Perempuan' }, { label: 'Status', value: 'Lajang' }]);
+      expect(model.client.needs).toEqual(['Santunan keluarga', 'Dana haji']);
+      const bare = pdfModelOf(input(proposal([HEALTH], { client: { name: 'Sari', age: null, gender: null, details: { needs: ['OTHER'] } } })));
+      expect([bare.client.title, bare.client.tiles, bare.client.needs]).toEqual(['Bapak/Ibu Sari', [], ['Lainnya']]);
+    });
+
+    it('P19.14-T3 AC-2 leaves out what has no value: an exclusion is its label, a formula needs its amount, Nilai tunai says tidak dijamin', () => {
+      const detail = item({
+        snapshot: {
+          fields: [field({ key: 'up', label: 'Uang pertanggungan', type: 'money' })],
+          pdfDetail: [
+            { block: 'pengecualian', rows: [{ label: 'Kondisi yang sudah ada', note: null, formula: null, text: null }] },
+            { block: 'manfaat', rows: [{ label: 'Meninggal', note: null, formula: '100% × up', text: null }, { label: '', note: null, formula: null, text: 'x' }] },
+            { block: 'nilai_tunai', rows: [{ label: 'Tahun ke-5', note: 'contoh', formula: null, text: 'Rp 1 juta' }], notGuaranteed: true },
+          ],
+        },
+      });
+      expect(rowsOfItem(detail, false).map((r) => [r.label, r.value])).toEqual([
+        ['Kondisi yang sudah ada', 'tidak ditanggung'], ['Tahun ke-5 contoh (tidak dijamin)', 'Rp 1 juta'],
+      ]);
+      const filledUp = rowsOfItem({ ...detail, up: { amountMinor: 200_000_000_00, currency: 'IDR' } }, false);
+      expect(filledUp.map((r) => [r.label, flat(r.value)]).slice(0, 2)).toEqual([['Uang pertanggungan', 'Rp 200 juta'], ['Meninggal', 'Rp 200 juta']]);
+    });
+
+    it('P19.14-T3 AC-4 a one-product page with no agent, no details and no premium still fits its page and prints no gap', async () => {
+      const lone = { ...HEALTH, premium: null };
+      const source = input(proposal([lone], { client: { name: 'Budi', age: null, gender: null, details: null } }), { agent: { name: null, code: null, phone: null }, insurer: '' });
+      const model = pdfModelOf(source);
+      expect([model.agent, model.footer.preparedBy]).toEqual([null, null]);
+      expect(model.disclaimer).toContain('polis dari perusahaan asuransi.');
+      const pdf = await built(source);
+      expect(pdf.pages).toHaveLength(1);
+      const text = flat(textOf(pdf));
+      expect(text).not.toContain('TENTANG');
+      expect(text).not.toContain('Hubungi saya');
+      // Code and phone without a name: the line alone, no initials.
+      const coded = pdfModelOf(input(proposal([HEALTH, CRITICAL]), { agent: { name: null, code: '80008', phone: null } }));
+      expect(coded.agent).toEqual({ name: null, initials: '', line: 'Agen · Kode 80008', cta: ['Hubungi saya', 'untuk diskusi'] });
+      expect((await built(input(proposal([HEALTH, CRITICAL]), { agent: { name: null, code: '80008', phone: null } }))).pages).toHaveLength(2);
     });
   });
 
   describe('ADR-0222 §3: at most two renders at once', () => {
-    it(`P19.7-T3 AC-8 builds at most ${PROPOSAL.PDF_CONCURRENCY} files at once in one process; the others wait their turn`, async () => {
+    it(`P19.14-T3 AC-1 builds at most ${PROPOSAL.PDF_CONCURRENCY} files at once in one process; the others wait their turn`, async () => {
       const seen: number[] = [];
       let release!: () => void;
       const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -381,12 +547,12 @@ describe('P19.7-T3 the proposal’s PDF (ADR-0222, ADR-0223)', () => {
         protected override async render(_definition: TDocumentDefinitions): Promise<RenderedPdf> {
           seen.push(this.load.running);
           await gate;
-          return { bytes: Buffer.from('%PDF-'), pages: 2 };
+          return { bytes: Buffer.from('%PDF-'), pages: 1 };
         }
       }
       const slow = new Slow();
-      const input = pdfInput(proposalView({ items: [HEALTH] }));
-      const all = Promise.all([0, 1, 2, 3].map(() => slow.build(input, NOW)));
+      const model = pdfModelOf(input(proposal([HEALTH], { client: BUDI })));
+      const all = Promise.all([0, 1, 2, 3].map(() => slow.build(model, NOW)));
       await new Promise((resolve) => setImmediate(resolve));
       expect(slow.load).toEqual({ running: 2, waiting: 2 });
       release();

@@ -198,6 +198,26 @@ const ACTIONS = {
   'org_level.created': { en: 'Role added', id: 'Peran ditambahkan' },
   'org_level.deleted': { en: 'Role deleted', id: 'Peran dihapus' },
   'org_level.updated': { en: 'Role changed', id: 'Peran diubah' },
+  // P19.15-T4 (ADR-0260 §4): *Kelola data produk* given for ticked insurers, its companies changed, and removed.
+  'product_data_grant.granted': { en: 'Product data access given', id: 'Kelola data produk diberikan' },
+  'product_data_grant.changed': { en: 'Product data access insurers changed', id: 'Perusahaan Kelola data produk diubah' },
+  'product_data_grant.revoked': { en: 'Product data access removed', id: 'Kelola data produk dicabut' },
+  // P19.15-T1 (ADR-0258): a premium table version's life, and *Isian*'s changes to a product's proposal setup.
+  'rate_table.uploaded': { en: 'Premium table uploaded', id: 'Tabel premi diunggah' },
+  'rate_table.updated': { en: 'Premium table draft changed', id: 'Draf tabel premi diubah' },
+  'rate_table.tested': { en: 'Premium table tested with 3 profiles', id: 'Tabel premi diuji 3 contoh' },
+  'rate_table.activated': { en: 'Premium table activated', id: 'Tabel premi diaktifkan' },
+  'rate_table.turned_off': { en: 'Premium table turned off', id: 'Tabel premi dimatikan' },
+  'rate_table.deleted': { en: 'Premium table deleted', id: 'Tabel premi dihapus' },
+  'product_rules.updated': { en: 'Product proposal setup changed', id: 'Isian proposal produk diubah' },
+  // P19.15-T2, T3 (ADR-0259): *Unggah file*'s upload, a question answered, a card applied or rejected; an illustration's life.
+  'intake.uploaded': { en: 'Files uploaded for reading', id: 'File diunggah untuk dibaca' },
+  'intake.answered': { en: 'Upload question answered', id: 'Pertanyaan unggahan dijawab' },
+  'intake.applied': { en: 'Upload card applied', id: 'Kartu unggahan diterapkan' },
+  'intake.rejected': { en: 'Upload card rejected', id: 'Kartu unggahan ditolak' },
+  'illustration.uploaded': { en: 'Illustration uploaded', id: 'Ilustrasi diunggah' },
+  'illustration.edited': { en: 'Illustration blocks edited', id: 'Bagian ilustrasi diubah' },
+  'illustration.published': { en: 'Illustration published to the PDF', id: 'Ilustrasi diterbitkan ke PDF' },
   // P19.12-T2 (ADR-0245 §1): *All members* › *Akun terdaftar*, each read.
   'platform_read.accounts': { en: 'Account list viewed', id: 'Daftar akun dilihat' },
   'platform_read.company_kpms': { en: 'Company’s KPMs & data viewed', id: 'KPM & data perusahaan dilihat' },
@@ -334,6 +354,13 @@ const TARGETS = {
   productionMonths: { en: 'Data month', id: 'Bulan data' },
   surveyRuns: { en: 'Survey', id: 'Survei' },
   products: { en: 'Product', id: 'Produk' },
+  // P19.15-T4 (ADR-0260): one person's *Kelola data produk*.
+  productDataGrants: { en: 'Product data access', id: 'Akses Kelola data produk' },
+  // P19.15-T1 (ADR-0258): a premium table version.
+  rateTables: { en: 'Premium table', id: 'Tabel premi' },
+  uploadIntakes: { en: 'Upload', id: 'Unggahan' },
+  intakeItems: { en: 'Upload card', id: 'Kartu unggahan' },
+  illustrations: { en: 'Illustration', id: 'Ilustrasi' },
   proposals: { en: 'Proposal', id: 'Proposal' },
   kpmBranding: { en: 'KPM branding', id: 'Tampilan KPM' },
   ratioDefinitions: { en: 'Ratio', id: 'Rasio' },

@@ -56,6 +56,9 @@ import { up as advancedAnalyticsV1 } from './0057-advanced-analytics-v1';
 import { up as uploadValuesByKode } from './0058-upload-values-by-kode';
 import { up as trainingTitleSplit } from './0059-training-title-split';
 import { up as activityShortLabels } from './0060-activity-short-labels';
+import { up as groupLeaderIsAMember } from './0061-group-leader-is-a-member';
+import { up as subgroupTargetsByYear } from './0062-subgroup-targets-by-year';
+import { up as proposalItemsCarryCaraBayar } from './0063-proposal-items-carry-cara-bayar';
 
 /*
  * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
@@ -167,4 +170,14 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // singkat* by code where they hold none — the working copy and the newest snapshot, no version moved, an office's own
   // kept. Templates are not written: a type without the key gives the seed's words by code (`shortLabelOf`).
   ['0060-activity-short-labels', activityShortLabels],
+  // P19.13-T3 (ADR-0253 §2): a group's owner is its ★ group leader, a leader who is a member of it — an active leader
+  // owner tagged into the group, anybody else cleared; a leader owning several keeps the first by name. Audited.
+  ['0061-group-leader-is-a-member', groupLeaderIsAMember],
+  // P19.13-T3 (ADR-0253 §4): sub-group targets per leader per year — each row given the current year on its office's
+  // clock; the one-per-leader-and-year index built, the one-per-head index dropped.
+  ['0062-subgroup-targets-by-year', subgroupTargetsByYear],
+  // P19.14-T1, T2 (ADR-0254 §1, ADR-0255 §1, §2): each proposal's `channel` and `payFrequency` moved onto its items, a
+  // Syariah proposal's items syariah under the name they showed; the client given `ageSetOn` and empty `details`; the
+  // removed values kept as `migrated0063` for `down`. No lead is touched.
+  ['0063-proposal-items-carry-cara-bayar', proposalItemsCarryCaraBayar],
 ];

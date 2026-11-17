@@ -106,6 +106,10 @@ import { ProposalSchema } from '@/modules/proposals/proposal.schema';
 import { KpmBrandingSchema } from '@/modules/branding/kpm-branding.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 import { KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
+import { IntakeItemSchema, UploadIntakeSchema } from '@/modules/product-data/upload-intake.schema';
+import { IllustrationSchema } from '@/modules/product-data/illustration.schema';
+import { RateRowSchema, RateTableSchema } from '@/modules/product-data/rate-table.schema';
+import { ProductDataGrantSchema } from '@/modules/product-data/product-data-grant.schema';
 
 /**
  * P2-T8: soft delete everywhere.
@@ -188,6 +192,15 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['kpmRecruitTargets', KpmRecruitTargetSchema],
   // P19.3-T2 (UI-149): an office's setup marks, unique per (office, mark), `kpmId`-led.
   ['kpmSetupMarks', KpmSetupMarkSchema],
+  // P19.15-T2, T3 (ADR-0259): an upload, its cards and an illustration are soft-deleted only; a card is rejected, never removed.
+  ['uploadIntakes', UploadIntakeSchema],
+  ['intakeItems', IntakeItemSchema],
+  ['illustrations', IllustrationSchema],
+  // P19.15-T1 (ADR-0258): a premium table version is turned off or deleted by `deletedAt`, its rows with it.
+  ['rateTables', RateTableSchema],
+  ['rateRows', RateRowSchema],
+  // P19.15-T4 (ADR-0260 §1): a removed grant keeps its row (`revokedAt`); `deletedAt` is erasure's.
+  ['productDataGrants', ProductDataGrantSchema],
   // Phase 18.1. *Delete meeting* writes `deletedAt` (ADR-0130 §5); a link expires or is revoked and stays the record
   // of who shared what (ADR-0131 §4). P20-T1's erasure cascade reaches both.
   ['leaderMeetings', LeaderMeetingSchema],
@@ -569,6 +582,12 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [RecruitmentPitchSlotSchema, 'RecruitmentPitchSlotSchema'],
   [KpmRecruitTargetSchema, 'KpmRecruitTargetSchema'],
   [KpmSetupMarkSchema, 'KpmSetupMarkSchema'],
+  [UploadIntakeSchema, 'UploadIntakeSchema'],
+  [IntakeItemSchema, 'IntakeItemSchema'],
+  [IllustrationSchema, 'IllustrationSchema'],
+  [RateTableSchema, 'RateTableSchema'],
+  [RateRowSchema, 'RateRowSchema'],
+  [ProductDataGrantSchema, 'ProductDataGrantSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
   [LeaderMeetingSchema, 'LeaderMeetingSchema'],
   [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],

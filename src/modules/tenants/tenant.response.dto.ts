@@ -243,6 +243,9 @@ export class PlatformAdminRowDto implements PlatformAdminRow {
   @ApiProperty({ type: String })
   membershipId!: string;
 
+  @ApiProperty({ type: String, description: 'The person: what *Kelola data produk* is given to (ADR-0260 §4).' })
+  userId!: string;
+
   @ApiProperty({ type: String })
   fullName!: string;
 

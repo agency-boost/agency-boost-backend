@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
+import { LEADER_CLASSES } from '@/domain/constants';
+import { placeLeaders } from '@/domain/metrics/leader-groups';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { GroupRepository } from '@/modules/org/org.repositories';
 
@@ -48,6 +50,28 @@ export class OfficeGroups {
     );
     const memberIds = new Set(tagged.map((m) => String(m._id)));
     return { group: { groupId: String(row._id), name: row.name, memberCount: memberIds.size }, memberIds };
+  }
+
+  /**
+   * **The informal groups as Perbaikan sub-group reads them** (P19.13-T3; ADR-0253 §5): the live groups A to Z, each
+   * with its ★ while it holds, and every active leader's one group (`placeLeaders`). Two queries.
+   */
+  async leaderPlacement(ctx: RequestContext): Promise<{
+    groups: { groupId: string; name: string; headMembershipId: string | null }[];
+    groupOf: Map<string, string | null>;
+  }> {
+    const [rows, leaders] = await Promise.all([
+      this.groups.find(ctx, { status: 'active' }, { sort: { name: 1 } }),
+      this.members.find(ctx, { status: 'active', role: { $in: [...LEADER_CLASSES] } }, { projection: { groupIds: 1 } }),
+    ]);
+    const live = rows.map((g) => ({ groupId: String(g._id), name: g.name, ownerMembershipId: g.ownerMembershipId ?? null }));
+    const { groupOf, headOf } = placeLeaders(
+      leaders.map((m) => ({ membershipId: String(m._id), groupIds: m.groupIds ?? [] })), live,
+    );
+    return {
+      groups: live.map((g) => ({ groupId: g.groupId, name: g.name, headMembershipId: headOf.get(g.groupId) ?? null })),
+      groupOf,
+    };
   }
 
   private async countsOf(ctx: RequestContext, groupIds: readonly string[]): Promise<Map<string, number>> {

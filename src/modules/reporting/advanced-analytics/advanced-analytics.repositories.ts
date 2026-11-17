@@ -38,9 +38,9 @@ export class AnalyticsTargetRepository extends TenantScopedRepository<AnalyticsT
     return rows.map((r) => ({ month: r.month as string, row: r.row as string, value: r.value }));
   }
 
-  /** Every head's sub-group targets the KPM has set. */
-  async subgroupAll(ctx: RequestContext): Promise<Map<string, { aaTarget: number; recTarget: number }>> {
-    const rows = await this.find(ctx, { kind: 'subgroup' });
+  /** Every leader's sub-group targets the KPM has set for `year` (ADR-0253 §4). */
+  async subgroupFor(ctx: RequestContext, year: string): Promise<Map<string, { aaTarget: number; recTarget: number }>> {
+    const rows = await this.find(ctx, { kind: 'subgroup', year });
     return new Map(rows.map((r) => [r.headMembershipId as string, { aaTarget: r.aaTarget ?? 0, recTarget: r.recTarget ?? 0 }]));
   }
 
@@ -59,16 +59,16 @@ export class AnalyticsTargetRepository extends TenantScopedRepository<AnalyticsT
     });
   }
 
-  /** **Set a head's targets in one atomic write, and say what they replaced** — `null` when this write created them. */
+  /** **Set a leader's targets for a year in one atomic write, and say what they replaced** — `null` when this created them. */
   async setSubgroup(
-    ctx: RequestContext, headMembershipId: string, aaTarget: number, recTarget: number,
+    ctx: RequestContext, headMembershipId: string, year: string, aaTarget: number, recTarget: number,
   ): Promise<{ id: string; before: { aaTarget: number | null; recTarget: number | null } | null }> {
     return onceMore(async () => {
       const result = await this.model.findOneAndUpdate(
-        this.scope(ctx, 'setSubgroup', { kind: 'subgroup', headMembershipId }),
+        this.scope(ctx, 'setSubgroup', { kind: 'subgroup', headMembershipId, year }),
         {
           $set: { aaTarget, recTarget, updatedBy: ctx.membershipId },
-          $setOnInsert: { kpmId: ctx.kpmId, kind: 'subgroup', deletedAt: null, createdBy: ctx.membershipId },
+          $setOnInsert: { kpmId: ctx.kpmId, kind: 'subgroup', year, deletedAt: null, createdBy: ctx.membershipId },
         },
         { new: false, upsert: true, includeResultMetadata: true, setDefaultsOnInsert: true },
       ).exec();

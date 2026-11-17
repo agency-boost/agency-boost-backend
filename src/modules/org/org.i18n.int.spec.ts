@@ -319,8 +319,9 @@ describe('P18.10-T5 the org module’s words in the reader’s language, over HT
 
   describe('a name the API has none for (AC-4)', () => {
     it('P18.10-T5 AC-4 writes it for the reader: one member, the tree, the role change log and a group’s owner', async () => {
-      await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: agent }).expect(201);
+      // Promoted first: a group's ★ is a leader (P19.13-T3, ADR-0253 §2).
       await http().patch(`/members/${agent}/role`).send({ toRole: 'aab', reason: 'Siap memimpin' }).expect(200);
+      await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: agent }).expect(201);
       await forget(agent);
 
       const one = (await http().get(`/members/${agent}`).set(...IN_INDONESIAN).expect(200)).body;

@@ -257,11 +257,11 @@ export class GroupSummaryDto implements GroupSummary {
   @ApiProperty({ type: String })
   name!: string;
 
-  @ApiProperty({ type: String })
-  ownerMembershipId!: string;
+  @ApiProperty({ type: String, nullable: true, description: 'The ★ group leader (ADR-0253 §2), or `null`: *Belum ada group leader*.' })
+  ownerMembershipId!: string | null;
 
-  @ApiProperty({ type: String })
-  ownerName!: string;
+  @ApiProperty({ type: String, nullable: true })
+  ownerName!: string | null;
 
   @ApiProperty({ type: Boolean, description: 'The owner has been removed from the office. They are still named — they really are the recorded owner, and a blank would look like a fault. But an Owner reading the list needs to know the group has nobody running it, so the flag travels and the screen says both.' })
   ownerHasLeft!: boolean;

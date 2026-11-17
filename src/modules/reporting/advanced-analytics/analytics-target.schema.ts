@@ -12,8 +12,11 @@ export type AnalyticsTargetKind = 'mapa' | 'subgroup';
  *
  * - `kind: 'mapa'`: one per `(kpmId, month, row)`, `value` in the row's unit — IDR minor units for `ape` (invariant §9) —
  *   or `null`, *TBD*.
- * - `kind: 'subgroup'`: one per `(kpmId, headMembershipId)` — the head's membership `_id` (invariant §2) — with
- *   `aaTarget` and `recTarget`; until written the template's `subgroupHeadDefaults` stand.
+ * - `kind: 'subgroup'`: one per `(kpmId, headMembershipId, year)` — a **leader's** membership `_id` (invariant §2), an
+ *   AB or an AAB, and the year `YYYY` of the office's clock — with `aaTarget` and `recTarget`; until written the
+ *   template's `subgroupHeadDefaults` stand. *Changed 2026-11-12 (P19.13-T3; ADR-0253 §4):* one per head of group, no
+ *   year, until then; migration `0062-subgroup-targets-by-year` gave every row the year it was written in. Perbaikan
+ *   sub-group sums a group's leaders' targets (§5).
  */
 @Schema({ ...baseSchemaOptions, collection: 'analyticsTargets' })
 export class AnalyticsTarget {
@@ -35,9 +38,13 @@ export class AnalyticsTarget {
   @Prop({ type: Number, default: null })
   value!: number | null;
 
-  /** A sub-group target's head of group: an AB's membership `_id`. */
+  /** A sub-group target's leader: an AB's or an AAB's membership `_id`. */
   @Prop({ type: String, default: null })
   headMembershipId!: string | null;
+
+  /** A sub-group target's year, `YYYY` on the office's clock; `null` for a MAPA target (ADR-0253 §4). */
+  @Prop({ type: String, default: null })
+  year!: string | null;
 
   @Prop({ type: Number, default: null, min: 0 })
   aaTarget!: number | null;
@@ -62,8 +69,12 @@ AnalyticsTargetSchema.index(
   { kpmId: 1, kind: 1, month: 1, row: 1 },
   { unique: true, partialFilterExpression: { deletedAt: null, kind: 'mapa' } },
 );
-/** One pair of sub-group targets per head of group. */
+/**
+ * One pair of sub-group targets per leader and year (ADR-0253 §4). Named, so `0062-subgroup-targets-by-year` can build it
+ * before it drops `kpmId_1_kind_1_headMembershipId_1`, the one-per-head index it replaces.
+ */
+export const SUBGROUP_TARGET_INDEX = 'one_subgroup_target_per_leader_and_year';
 AnalyticsTargetSchema.index(
-  { kpmId: 1, kind: 1, headMembershipId: 1 },
-  { unique: true, partialFilterExpression: { deletedAt: null, kind: 'subgroup' } },
+  { kpmId: 1, kind: 1, headMembershipId: 1, year: 1 },
+  { unique: true, name: SUBGROUP_TARGET_INDEX, partialFilterExpression: { deletedAt: null, kind: 'subgroup' } },
 );

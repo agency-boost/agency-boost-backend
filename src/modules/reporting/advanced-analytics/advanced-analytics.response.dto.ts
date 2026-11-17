@@ -148,11 +148,11 @@ class SubgroupMaaDto {
 class SubgroupTargetsDto {
   @ApiProperty() aa!: number;
   @ApiProperty() rec!: number;
-  @ApiProperty({ description: 'The template’s defaults, not set for this head yet.' }) isDefault!: boolean;
+  @ApiProperty({ description: 'None of the row’s leaders has targets set for the year: every one on the template’s defaults (ADR-0253 §4).' }) isDefault!: boolean;
 }
 
 class SubgroupAdoptionDto {
-  @ApiProperty() headDays!: number;
+  @ApiProperty({ nullable: true, type: Number, description: 'The ★’s days logged; `null` with no ★.' }) headDays!: number | null;
   @ApiProperty({ nullable: true, type: Number }) downlinePct!: number | null;
 }
 
@@ -169,8 +169,15 @@ class SubgroupAttainmentDto {
   @ApiProperty({ nullable: true, type: Boolean }) recOk!: boolean | null;
 }
 
+class SubgroupGroupDto {
+  @ApiProperty() groupId!: string;
+  @ApiProperty({ example: 'CAHYO' }) name!: string;
+}
+
 class SubgroupRowDto {
-  @ApiProperty({ type: AbOptionDto }) head!: AbOptionDto;
+  @ApiProperty({ type: SubgroupGroupDto, nullable: true, description: 'The informal group (ADR-0253 §5), or `null`: *Tidak ada group*.' })
+  group!: SubgroupGroupDto | null;
+  @ApiProperty({ type: AbOptionDto, nullable: true, description: 'The group’s ★ group leader, or `null`.' }) head!: AbOptionDto | null;
   @ApiProperty() manpower!: number;
   @ApiProperty() leaders!: number;
   @ApiProperty({ type: SubgroupMaaDto }) maa!: SubgroupMaaDto;
@@ -203,7 +210,8 @@ export class MapaTargetDto {
 }
 
 export class SubgroupTargetDto {
-  @ApiProperty() headMembershipId!: string;
+  @ApiProperty({ description: 'The leader, an AB or an AAB (ADR-0253 §4).' }) headMembershipId!: string;
+  @ApiProperty({ example: '2026', description: 'The year on the office’s clock the targets are for.' }) year!: string;
   @ApiProperty() aaTarget!: number;
   @ApiProperty() recTarget!: number;
 }

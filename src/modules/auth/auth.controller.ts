@@ -741,6 +741,13 @@ export class AuthController {
       mustChangePassword: ctx.mustChangePassword,
       permissions,
       /*
+       * **The insurers their *Kelola data produk* ticks** (ADR-0260 §5; P19.15-T4 AC-2): non-empty only for an active KPM
+       * Owner or Admin holding a live grant — the office menu's *Data produk*, in a support session too, where the page
+       * only looks. Resolved with the context on this request, so a grant removed leaves the menu at the next session
+       * read; every route refuses on its own regardless.
+       */
+      productDataCompanyIds: [...ctx.productDataCompanyIds],
+      /*
        * The *New agent* section (P13-T7 AC-5): the reader's own activation — `null` when they have none,
        * `open` false once it is complete or past its six months — and whether they reach anybody's open
        * one. Read once, here, so no page reads them again; every route still refuses on its own.

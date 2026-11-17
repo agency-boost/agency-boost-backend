@@ -301,14 +301,19 @@ export class GroupDto {
   @MaxLength(80)
   name!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
     description:
-      'The membership that owns it. Never a name — the prototype stores `ownerName`, ' +
-      'which breaks the moment anybody is renamed or two people share one.',
+      'The ★ group leader (ADR-0253 §2): a membership, never a name. Absent keeps the ★ (on a rename) or makes the group ' +
+      'with none; `null` clears it (*Belum ditunjuk*); an id appoints them — an active AB or AAB of this office, placed ' +
+      'in the group if they were not (their one group from now), the star moved from whoever held it. An Agent ' +
+      '`422 ORG_GROUP_LEADER_NOT_A_LEADER`; somebody not active in this office `422 ORG_GROUP_OWNER_NOT_IN_KPM`.',
   })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  ownerMembershipId!: string;
+  ownerMembershipId?: string | null;
 }
 
 export class TagMemberDto {

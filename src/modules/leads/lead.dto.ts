@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   Allow, ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsMongoId, IsOptional, IsString, MaxLength, Min,
 } from 'class-validator';
-import { LEAD_AGE, LEAD_GENDERS } from '@/domain/constants';
 import { LEAD_FLAGS, type LeadFlag } from './lead-attention';
 import { LEAD_SORT_KEYS, type LeadSortKey } from './lead-order';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
@@ -67,30 +66,6 @@ export class CreateLeadDto {
   @ApiPropertyOptional({ type: Boolean, description: 'The agent’s own commitment for the month.' })
   @Allow()
   thisMonth?: boolean;
-
-  @ApiPropertyOptional({
-    type: Number,
-    nullable: true,
-    minimum: LEAD_AGE.MIN,
-    maximum: LEAD_AGE.MAX,
-    example: 36,
-    description: '**The client\'s age at the next birthday** (*Umur ulang tahun berikutnya*; ADR-0224 §3): a '
-      + `whole number from ${LEAD_AGE.MIN} to ${LEAD_AGE.MAX}, or \`null\` to clear it. Outside the bounds it is `
-      + '`422 LEAD_AGE_OUT_OF_RANGE` with `details: { min, max }`; not a whole number, `400 VALIDATION_FAILED`. The '
-      + 'server records today as `ageRecordedOn` — **only when the age differs from the one the lead reads today**, so '
-      + 'saving the age shown moves nothing. **No `birthDate`** is taken (minimisation, §6): a body carrying one, or '
-      + '`ageRecordedOn`, is `400 VALIDATION_FAILED` as any unknown field is.',
-  })
-  @Allow()
-  age?: number | null;
-
-  @ApiPropertyOptional({
-    enum: LEAD_GENDERS,
-    nullable: true,
-    description: '*Laki-laki* (`male`) or *Perempuan* (`female`), or `null` to clear it (ADR-0224 §1).',
-  })
-  @Allow()
-  gender?: 'male' | 'female' | null;
 }
 
 /** The same fields, all optional. A patch never carries a status: moving is its own route. */

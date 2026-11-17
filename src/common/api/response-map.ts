@@ -3,6 +3,10 @@ import { SummaryDto } from '@/modules/summary/summary.response.dto';
 import { MemberPerformanceDto } from '@/modules/summary/member-performance.response.dto';
 import { Type } from '@nestjs/common';
 import {
+  BoxPreviewDto, IllustrationListDto, IllustrationViewDto, IntakeDetailDto, IntakeFileLinkDto, IntakeItemViewDto,
+  IntakeListDto, IntakeViewDto,
+} from '@/modules/product-data/intake.response.dto';
+import {
   AdminAdvancedAnalyticsSectionDto, AdvancedAnalyticsShellDto, DemographicsDto, EventsNpsDto, MapaDto, MapaTargetDto,
   QuantDto, SubgroupDto, SubgroupTargetDto,
 } from '@/modules/reporting/advanced-analytics/advanced-analytics.response.dto';
@@ -33,6 +37,7 @@ import {
   UntaggedMemberDto, MemberPhoneDto, MemberSearchResultDto, WaitingRequestCountDto,
 } from '@/modules/org/org.response.dto';
 import { CancelledTransferDto, LeaderMoveChoiceDto, PendingMoveDto } from '@/modules/org/leader-change.response.dto';
+import { CoreLeadersViewDto } from '@/modules/org/core-leaders.dto';
 import { MemberPersonalCompletedDto } from '@/modules/org/member-personal.dto';
 import {
   AccountChoiceDto, CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
@@ -153,6 +158,13 @@ import {
   CoachingSurveyDto, SurveyAnswerSavedDto, SurveyFormDto, SurveyListDto, SurveyPendingDto, SurveyResultsDto, SurveyRunDto,
   SurveySubmittedDto,
 } from '@/modules/surveys/surveys.response.dto';
+
+import {
+  ProductDataChangesPageDto, ProductDataGrantRevokedDto, ProductDataGrantRowDto, ReadableCompaniesDto,
+} from '@/modules/product-data/product-data-grant.response.dto';
+import {
+  ProductDataDetailDto, ProductDataOverviewDto, ProductTryDto, RateTableViewDto,
+} from '@/modules/product-data/product-data.response.dto';
 
 export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P6: what an agent did, day by day.
@@ -599,6 +611,9 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   OrgController_listAdmins: { type: DelegatedAdminDto, isArray: true },
   OrgController_grantAdmin: { type: DelegatedAdminDto, isArray: true },
   OrgController_revokeAdmin: { type: DelegatedAdminDto, isArray: true },
+  OrgController_readCoreLeaders: { type: CoreLeadersViewDto },
+  OrgController_bulkCoreLeaders: { type: CoreLeadersViewDto },
+  OrgController_saveCoreLeader: { type: CoreLeadersViewDto },
   OrgController_listGroups: { type: GroupSummaryDto, isArray: true },
   OrgController_createGroup: { type: GroupSummaryDto, isArray: true },
   OrgController_updateGroup: { type: GroupSummaryDto, isArray: true },
@@ -620,6 +635,43 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
 
   AdminController_overview: { type: PlatformOverviewDto },
   AdminController_tenantAdmins: { type: PlatformAdminRowDto, isArray: true },
+  // P19.15-T4 (ADR-0260): *Kelola data produk*, *Perubahan oleh pengelola*, and *Data produk*'s companies.
+  ProductDataGrantController_list: { type: ProductDataGrantRowDto, isArray: true },
+  ProductDataGrantController_changes: { type: ProductDataChangesPageDto },
+  ProductDataGrantController_set: { type: ProductDataGrantRowDto },
+  ProductDataGrantController_revoke: { type: ProductDataGrantRevokedDto },
+  ProductDataCompaniesController_readable: { type: ReadableCompaniesDto },
+  // P19.15-T2, T3 (ADR-0259): *Unggah file* and *Ilustrasi*.
+  // P19.15-T1, T4 AC-1 (ADR-0258): the Proposal tab — the overview, a product, Isian, the premium tables, Uji coba.
+  ProductDataController_overview: { type: ProductDataOverviewDto },
+  ProductDataController_detail: { type: ProductDataDetailDto },
+  ProductDataController_saveRules: { type: ProductDataDetailDto },
+  ProductDataController_template: { files: [XLSX_MIME_TYPE, 'text/csv'] },
+  ProductDataController_upload: { type: RateTableViewDto },
+  ProductDataController_tryIt: { type: ProductTryDto },
+  ProductDataController_readTable: { type: RateTableViewDto },
+  ProductDataController_updateTable: { type: RateTableViewDto },
+  ProductDataController_tests: { type: RateTableViewDto },
+  ProductDataController_activate: { type: RateTableViewDto },
+  ProductDataController_turnOff: { type: RateTableViewDto },
+  ProductDataController_remove: { type: StatusAckDto },
+  IntakeController_listAll: { type: IntakeListDto },
+  IntakeController_uploadAny: { type: IntakeViewDto },
+  IntakeController_list: { type: IntakeListDto },
+  IntakeController_upload: { type: IntakeViewDto },
+  IntakeController_read: { type: IntakeDetailDto },
+  IntakeController_file: { type: IntakeFileLinkDto },
+  IntakeController_answer: { type: IntakeItemViewDto },
+  IntakeController_confirm: { type: IntakeItemViewDto },
+  IntakeController_reject: { type: IntakeItemViewDto },
+  IllustrationController_list: { type: IllustrationListDto },
+  IllustrationController_upload: { type: IllustrationViewDto },
+  IllustrationController_read: { type: IllustrationViewDto },
+  IllustrationController_update: { type: IllustrationViewDto },
+  IllustrationController_preview: { type: BoxPreviewDto },
+  IllustrationController_previewPdf: { files: ['application/pdf'] },
+  IllustrationController_file: { type: IntakeFileLinkDto },
+  IllustrationController_publish: { type: IllustrationViewDto },
   AdminController_kpmRequests: { type: KpmRequestRowDto, isArray: true },
   AdminController_approveKpmRequest: { type: KpmRequestRowDto, isArray: true },
   AdminController_declineKpmRequest: { type: KpmRequestRowDto, isArray: true },

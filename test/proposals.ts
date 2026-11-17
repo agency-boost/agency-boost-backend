@@ -13,7 +13,9 @@ import { configModule, provisionOffice } from './config-module';
 /**
  * **The proposal's specs' office** (P19.7-T2): two offices of one company and an office of another, a small unit — an AB
  * over an AAB over two Agents — an Owner and an Admin who also stand on a rung (*Akun saya*, ADR-0198 §1), Sales and
- * Recruit leads with and without an age, and a shelf whose products each answer one of ADR-0225 §7's rules.
+ * Recruit leads, and a shelf whose products each answer one of ADR-0225 §7's rules. *Since P19.14 (ADR-0254):* no lead
+ * carries an age or a gender — the client's are each proposal's (`CLIENT`) — and the shelf carries the catalogue's
+ * calculation fields: pay terms with their maximum entry age, *Cara bayar*, a smoker rating, a derived plan (ADR-0255).
  */
 
 /** 10:00 on 5 November 2026 in Jakarta. */
@@ -75,7 +77,14 @@ export const PRODUCT_IDS = {
   OFF: '66f0000000000000000003ac',
   OTHER_CO: '66f0000000000000000003ad',
   LIFE: '66f0000000000000000003ae',
+  /** P19.14-T2: `up_premium`, four pay terms with their maximum entry ages, smoker-rated. */
+  CI: '66f0000000000000000003af',
+  /** P19.14-T2: a plan derived from *Wilayah* and *Kamar*. */
+  DERIVED: '66f0000000000000000003b0',
 } as const;
+
+/** **The client step 1 sends** (P19.14-T1; ADR-0254): an age at the next birthday and a gender, the proposal's own. */
+export const CLIENT = { age: 36, gender: 'male' as const };
 
 const ALL_BANDS = [1, 2, 3, 4, 5];
 
@@ -123,11 +132,38 @@ function products() {
     base(P.WITHDRAWN, 'WITHDRAWN', 'PRUlama', { lifecycle: 'withdrawn' }),
     base(P.CLOSED, 'CLOSED', 'PRUtutup', { lifecycle: 'closed_to_new_business' }),
     base(P.RIDER, 'RIDER', 'PRU Personal Accident', { kind: 'rider', attachesTo: [P.HEALTH], category: 'health' }),
-    base(P.SENIOR, 'SENIOR', 'PRUsenja', { eligibleAgeBands: [5] }),
+    // P19.14-T2: the entry ages decide (ADR-0255 §8), no longer the age bands.
+    base(P.SENIOR, 'SENIOR', 'PRUsenja', { eligibleAgeBands: [5], entryAge: { min: 65, max: 100 } }),
     base(P.DELETED, 'DELETED', 'PRUhilang', { lifecycle: 'withdrawn', deletedAt: new Date('2026-10-01T00:00:00Z') }),
     base(P.OFF, 'OFF', 'PRUmati', { activeByDefault: false }),
     base(P.OTHER_CO, 'OTHER_CO', 'Asing Sehat', { companyId: OTHER_COMPANY }),
     base(P.LIFE, 'LIFE', 'PRUlink', {}),
+    base(P.CI, 'CI', 'PCB88', {
+      category: 'ci', calcType: 'up_premium', smokerRated: true, entryAge: { min: 1, max: 60 },
+      payTerms: [
+        { key: 'y5', label: '5 tahun', years: 5, toAge: null, single: false, maxEntryAge: 60, default: false },
+        { key: 'y10', label: '10 tahun', years: 10, toAge: null, single: false, maxEntryAge: 60, default: true },
+        { key: 'y15', label: '15 tahun', years: 15, toAge: null, single: false, maxEntryAge: 50, default: false },
+        { key: 'single', label: 'Sekali bayar', years: null, toAge: null, single: true, maxEntryAge: 60, default: false },
+      ],
+    }),
+    base(P.DERIVED, 'DERIVED', 'PRUWell Derived', {
+      category: 'health',
+      frequencies: ['monthly', 'annual'],
+      proposalFields: [
+        field({ key: 'wilayah', label: 'Wilayah', type: 'chips', options: [option('Indonesia'), option('Asia')], default: 'Indonesia' }),
+        field({ key: 'kamar', label: 'Kamar', type: 'chips', options: [option('2 tempat tidur'), option('1 tempat tidur')], default: '2 tempat tidur' }),
+        field({ key: 'plan', label: 'Plan', type: 'derived', options: [option('Bronze A'), option('Bronze B'), option('Silver')], plan: true }),
+      ],
+      planRule: {
+        field: 'plan',
+        rules: [
+          { when: { wilayah: 'Indonesia', kamar: '2 tempat tidur' }, value: 'Bronze A' },
+          { when: { wilayah: 'Indonesia', kamar: '1 tempat tidur' }, value: 'Bronze B' },
+          { when: { wilayah: 'Asia' }, value: 'Silver' },
+        ],
+      },
+    }),
   ];
 }
 
@@ -166,11 +202,11 @@ export async function seedProposalOffice(wired: ReturnType<typeof configModule>)
   await Products.create(products());
 
   const make = (ctx: RequestContext, body: Record<string, unknown>) => wired.leadRecords.create(ctx, body);
-  const budi = await make(agent(), { name: 'Pak Budi Santoso', type: 'sales', age: 36, gender: 'male' });
+  const budi = await make(agent(), { name: 'Pak Budi Santoso', type: 'sales' });
   const sari = await make(agent(), { name: 'Ibu Sari', type: 'sales' });
-  const recruit = await make(agent(), { name: 'Mas Calon', type: 'recruitment', age: 25, gender: 'male' });
-  const siblings = await make(sibling(), { name: 'Ibu Rosa', type: 'sales', age: 42, gender: 'female' });
-  const officeB = await make(agentB(), { name: 'Pak Lain', type: 'sales', age: 30, gender: 'male' });
+  const recruit = await make(agent(), { name: 'Mas Calon', type: 'recruitment' });
+  const siblings = await make(sibling(), { name: 'Ibu Rosa', type: 'sales' });
+  const officeB = await make(agentB(), { name: 'Pak Lain', type: 'sales' });
   return { budi: budi.id, sari: sari.id, recruit: recruit.id, siblings: siblings.id, officeB: officeB.id };
 }
 
@@ -178,11 +214,11 @@ export async function seedProposalOffice(wired: ReturnType<typeof configModule>)
 export async function completeProposal(
   wired: ReturnType<typeof configModule>, ctx: RequestContext, leadId: string, productIds: string[] = [PRODUCT_IDS.HEALTH],
 ) {
-  let proposal = await wired.proposals.create(ctx, leadId);
+  let proposal = await wired.proposals.create(ctx, leadId, CLIENT);
   for (const productId of productIds) proposal = await wired.proposals.addItem(ctx, proposal.id, proposal.version, productId);
   for (const item of proposal.items) {
     const patch: Record<string, unknown> = { premium: { amountMinor: 50_000_000 } };
-    if (item.insured.relation !== 'client') patch.insured = { relation: item.insured.relation, name: 'Adik', age: 8 };
+    if (item.insured.relation !== 'client') patch.insured = { relation: item.insured.relation, name: 'Adik', age: 8, gender: 'female' };
     if (item.snapshot.fields.some((f) => f.key === 'up')) patch.fieldValues = { up: 25_000_000_000 };
     proposal = await wired.proposals.updateItem(ctx, proposal.id, item.itemId, proposal.version, patch as never);
   }

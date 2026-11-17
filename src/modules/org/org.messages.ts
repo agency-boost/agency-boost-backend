@@ -228,6 +228,25 @@ export const ORG_REFUSALS = refusals('modules/org', {
       id: `KPM ini sudah memiliki grup bernama “${name}”.`,
     }),
   },
+  /* P19.13-T3 (ADR-0253 §1, §2): *Core leaders & groups*. *Group*, *Group leader* and *Tanpa group* as the page writes them. */
+  ORG_GROUP_ONE_PER_LEADER: {
+    oneGroup: {
+      en: 'A leader can be in one group only. Choose one group, or none.',
+      id: 'Seorang leader hanya bisa masuk satu group. Pilih satu group, atau Tanpa group.',
+    },
+  },
+  ORG_GROUP_LEADER_NOT_A_LEADER: {
+    leadersOnly: {
+      en: 'Only an AB or an AAB can be a group’s Group leader.',
+      id: 'Hanya AB atau AAB yang dapat menjadi Group leader sebuah group.',
+    },
+  },
+  ORG_GROUP_LEADER_NEEDS_GROUP: {
+    chooseGroup: {
+      en: 'Choose a group first: a Group leader leads one group.',
+      id: 'Pilih group dulu: Group leader memimpin satu group.',
+    },
+  },
   CORE_LEADER_NOT_A_LEADER: {
     leadersOnly: {
       en: 'Only a leader can be a Core Leader. Move them to a leader rung first.',
@@ -270,6 +289,11 @@ export const ORG_REFUSALS = refusals('modules/org', {
   },
 
   VALIDATION_FAILED: {
+    /** *Atur group* or *★ Jadikan core* with neither a group nor the tag (P19.13-T3; ADR-0253 §6). */
+    bulkNothing: {
+      en: 'Send a group (or null for no group), the Core leader tag, or both.',
+      id: 'Kirim group (atau null untuk Tanpa group), tag Core leader, atau keduanya.',
+    },
     /** Asking AgencyBoost about a role change the leader limit would not stop (ADR-0157 §1). */
     changeDirectly: {
       en: 'That change does not make a new leader, so it needs nobody’s approval. Make it directly.',

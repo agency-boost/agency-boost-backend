@@ -3,7 +3,7 @@ import type { Model } from 'mongoose';
 import { DEFAULT_TENANT_TIMEZONE, type ProductCurrency } from '@/domain/constants';
 import type { Clock } from '@/common/clock/clock.port';
 import type { ProductDocument } from './product.schema';
-import { checkProposalSettings, type ProposalSettings } from './proposal-fields';
+import { calcSettingsOf, checkProposalSettings, PROPOSAL_CALC_KEYS, type ProposalSettings } from './proposal-fields';
 import type { ProposalImportRow } from './proposal-fields-prudential';
 
 /**
@@ -14,6 +14,8 @@ import type { ProposalImportRow } from './proposal-fields-prudential';
  * - a product whose proposal fields are **empty** is written;
  * - a product whose fields are **still exactly the import's own** — they hash to `proposalFieldsSource.hash` — is
  *   written again only if the draft changed, and is otherwise `unchanged`;
+ * - a product whose fields are **still exactly what an import this one supersedes wrote** (`source.supersedes`;
+ *   P19.14-T2, ADR-0255 §9: the list of 11 November over the draft of 3 November) is written;
  * - a product whose fields **anybody else wrote** — the Super Admin's edit, or another import's — is `skipped`, never
  *   overwritten;
  * - a code with **no product** is `missing`, and nothing is created.
@@ -23,8 +25,12 @@ import type { ProposalImportRow } from './proposal-fields-prudential';
  * Super Admin's save is (`checkProposalSettings`), against the product's own channel and currencies.
  */
 
-/** What the import writes, and the only part of a product it compares. */
-type Imported = Pick<ProposalSettings, 'proposalFields' | 'proposalTypeLabel' | 'defaultInsured'>;
+/**
+ * What the import writes, and the only part of a product it compares: the fields, the type label, the default insured
+ * and — since P19.14-T2 (ADR-0255 §9) — the calculation fields.
+ */
+type Imported = Pick<ProposalSettings, 'proposalFields' | 'proposalTypeLabel' | 'defaultInsured'>
+  & Partial<Pick<ProposalSettings, (typeof PROPOSAL_CALC_KEYS)[number]>>;
 
 /** The audit row the import leaves for each product it writes. */
 export interface ImportAuditEntry {
@@ -54,13 +60,19 @@ function canonical(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-/** The hash `proposalFieldsSource` records: what the import wrote, and nothing else of the product. */
-export function proposalFieldsHash(settings: Imported): string {
-  return createHash('sha256').update(canonical({
+/**
+ * The hash `proposalFieldsSource` records: what the import wrote, and nothing else of the product. **An import that wrote
+ * no calculation fields** (the draft of 3 November) hashed only the first three, so a product is compared with the same
+ * three when the import that wrote it is one being superseded (`legacy`).
+ */
+export function proposalFieldsHash(settings: Imported, legacy = false): string {
+  const base = {
     proposalFields: settings.proposalFields ?? [],
     proposalTypeLabel: settings.proposalTypeLabel ?? null,
     defaultInsured: settings.defaultInsured ?? null,
-  })).digest('hex');
+  };
+  const calc = legacy ? {} : { calc: calcSettingsOf(settings) };
+  return createHash('sha256').update(canonical({ ...base, ...calc })).digest('hex');
 }
 
 export async function importProposalFields(
@@ -71,7 +83,7 @@ export async function importProposalFields(
     audit: (entry: ImportAuditEntry) => Promise<void>;
   },
   companyId: string,
-  source: { name: string; rows: readonly ProposalImportRow[] },
+  source: { name: string; rows: readonly ProposalImportRow[]; supersedes?: readonly string[] },
 ): Promise<ProposalFieldsImportReport> {
   const report: ProposalFieldsImportReport = { written: [], unchanged: [], skipped: [], missing: [] };
   const today = deps.clock.localDateFor(DEFAULT_TENANT_TIMEZONE, deps.clock.now());
@@ -83,7 +95,10 @@ export async function importProposalFields(
 
       const currencies = (product.currencies ?? ['IDR']) as ProductCurrency[];
       const checked = checkProposalSettings(
-        { proposalFields: row.fields(currencies), proposalTypeLabel: row.typeLabel, defaultInsured: row.defaultInsured ?? null },
+        {
+          proposalFields: row.fields(currencies), proposalTypeLabel: row.typeLabel, defaultInsured: row.defaultInsured ?? null,
+          ...row.calc,
+        },
         { proposalFields: [] },
         { channel: product.channel, category: product.category, currencies, today },
       );
@@ -91,19 +106,25 @@ export async function importProposalFields(
         proposalFields: checked.proposalFields,
         proposalTypeLabel: checked.proposalTypeLabel,
         defaultInsured: checked.defaultInsured,
+        ...Object.fromEntries(PROPOSAL_CALC_KEYS.map((key) => [key, checked[key]])),
       };
       const nextHash = proposalFieldsHash(next);
       const now: Imported = {
         proposalFields: product.proposalFields ?? [],
         proposalTypeLabel: product.proposalTypeLabel ?? null,
         defaultInsured: product.defaultInsured ?? null,
+        ...calcSettingsOf(product as unknown as Record<string, unknown>),
       };
       const nowHash = proposalFieldsHash(now);
       const empty = now.proposalFields.length === 0 && now.proposalTypeLabel === null && now.defaultInsured === null;
-      const ours = product.proposalFieldsSource?.import === source.name && product.proposalFieldsSource.hash === nowHash;
+      const from = product.proposalFieldsSource;
+      const ours = (from?.import === source.name && from.hash === nowHash)
+        // An import this one replaces, untouched since: its hash was of the first three only.
+        || (from !== null && from !== undefined && (source.supersedes ?? []).includes(from.import)
+          && from.hash === proposalFieldsHash(now, true));
 
       if (!empty && !ours) { report.skipped.push(code); continue; }
-      if (ours && nowHash === nextHash) { report.unchanged.push(code); continue; }
+      if (ours && from?.import === source.name && nowHash === nextHash) { report.unchanged.push(code); continue; }
 
       const written = await deps.products.findOneAndUpdate(
         { _id: product._id, companyId, deletedAt: null, version: product.version },
@@ -125,7 +146,7 @@ export async function importProposalFields(
         targetId: String(product._id),
         before: { proposalFields: now.proposalFields.length, version: product.version },
         after: {
-          fields: ['proposalFields', 'proposalTypeLabel', 'defaultInsured'],
+          fields: ['proposalFields', 'proposalTypeLabel', 'defaultInsured', ...PROPOSAL_CALC_KEYS],
           reason: 'proposal_fields_import',
           import: source.name,
           code,

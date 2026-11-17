@@ -1,0 +1,19 @@
+# The daily run in each deployed environment's API container (P19.15-T4 AC-4, ADR-0261): the premium
+# table notices. Started by agencyboost-daily.timer; `systemctl start agencyboost-daily` runs one now, and
+# a second run on the same day tells nobody again.
+
+[Unit]
+Description=AgencyBoost daily run: the premium table notices in each environment
+Requires=docker.service
+After=docker.service agencyboost.service
+# A failed run is otherwise silent: nobody was told, and nothing else shows it.
+OnFailure=agencyboost-daily-failed.service
+# Nothing to run before the first deploy has started an API.
+ConditionPathExistsGlob=/opt/agencyboost/state/*/current
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agencyboost/bin/daily.sh
+# Below the APIs in the queue for CPU: the notices are in no hurry, the requests are.
+Nice=10
+TimeoutStartSec=900

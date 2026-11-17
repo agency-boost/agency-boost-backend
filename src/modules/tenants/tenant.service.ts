@@ -232,6 +232,8 @@ export interface AccountChoice {
 /** One person who administers an office, seen from the platform. */
 export interface PlatformAdminRow {
   membershipId: string;
+  /** The person (`users._id`): what *Kelola data produk* is given to (ADR-0260 §4), joined on it by the page. */
+  userId: string;
   fullName: string;
   email: string;
   initials: string;
@@ -1892,6 +1894,7 @@ export class TenantService {
         const fullName = who?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, ctx.reader);
         return {
           membershipId: String(r._id),
+          userId: String(r.userId),
           fullName,
           email: who?.email ?? '',
           initials: initialsOf(fullName),
