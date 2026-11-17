@@ -59,6 +59,7 @@ import { up as activityShortLabels } from './0060-activity-short-labels';
 import { up as groupLeaderIsAMember } from './0061-group-leader-is-a-member';
 import { up as subgroupTargetsByYear } from './0062-subgroup-targets-by-year';
 import { up as proposalItemsCarryCaraBayar } from './0063-proposal-items-carry-cara-bayar';
+import { up as newHireByCompanyYear } from './0064-new-hire-by-company-year';
 
 /*
  * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
@@ -180,4 +181,7 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // Syariah proposal's items syariah under the name they showed; the client given `ageSetOn` and empty `details`; the
   // removed values kept as `migrated0063` for `down`. No lead is touched.
   ['0063-proposal-items-carry-cara-bayar', proposalItemsCarryCaraBayar],
+  // P19.16-T2 (ADR-0264): a new hire who joined the company in an earlier year than the office is an existing agent —
+  // downward only, the value kept as `migrated0064` for `down`; no company month, no change.
+  ['0064-new-hire-by-company-year', newHireByCompanyYear],
 ];

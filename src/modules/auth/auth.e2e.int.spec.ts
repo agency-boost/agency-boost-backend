@@ -2250,7 +2250,8 @@ describe('auth and admin over HTTP', () => {
       expect((await api().get('/api/v1/join/requests').set(auth).expect(200)).body).toHaveLength(1);
       expect((await api().get('/api/v1/join/me').set(asJoiner).expect(200)).body.status).toBe('pending');
 
-      // An existing agent who joined years ago: accepted, and classified once.
+      // An existing agent who joined years ago: accepted, and classified once (their company month, 2021, is not 2009's
+      // year either: ADR-0264).
       await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: '2009-03-01' }).expect(200);
       const member = await api().get(`/api/v1/members/${membershipId}`).set(auth).expect(200);
       expect(member.body).toMatchObject({ status: 'active', joinDate: '2009-03-01' });
@@ -2258,9 +2259,13 @@ describe('auth and admin over HTTP', () => {
         .toMatchObject({ joinDate: '2009-03-01', joinedAs: 'existing_agent' });
     });
 
-    it('P18.8-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire', async () => {
+    it('P18.8-T2 AC-1, P19.16-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire, who joined the company this year', async () => {
       const { kpmId, auth } = await officeWithLeader();
-      const joiner = await makeUser(`dated-${Math.random()}@kpm.test`);
+      const joinerEmail = `dated-${Math.random()}@kpm.test`;
+      const joiner = await makeUser(joinerEmail);
+      // ADR-0264: a new hire joined the company the year they joined the office.
+      await app.get<Connection>(getConnectionToken()).collection('users')
+        .updateOne({ email: joinerEmail }, { $set: { companyJoinMonth: officeToday().slice(0, 7) } });
       await api().post('/api/v1/join/kpm').set({ Authorization: `Bearer ${joiner.accessToken}` }).send({ kpmId }).expect(200);
       const pool = await api().get('/api/v1/join/untagged').set(auth).expect(200);
       const { membershipId } = pool.body[0];

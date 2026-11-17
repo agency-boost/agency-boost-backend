@@ -767,7 +767,8 @@ export class RosterImportService {
   /**
    * **A new person** (ADR-0205 §5, §10): an account and a membership, made together by `createWithAccount` once the
    * upline, the rung and the leader limit have been met with the lease held. An existing agent (ADR-0169 §6: nobody on a
-   * roster is given an activation), joined on *Tanggal bergabung* or the import's day.
+   * roster is given an activation, so nobody on one is a new hire — ADR-0264 §1), joined on *Tanggal bergabung* or the
+   * import's day.
    */
   private async create(
     scoped: RequestContext, kpm: KpmDocument, plan: Plan, idOf: Map<string, string>, unusable: string,
@@ -780,6 +781,8 @@ export class RosterImportService {
       leaderId,
       status: 'active',
       workStatus: row.workStatus,
+      // Always an existing agent (ADR-0169 §6, ADR-0205 §5): an import starts no activation (P13-T1), so it makes no new
+      // hire whatever *Bulan bergabung di perusahaan* says (ADR-0264 §1; OD-357).
       joining: { joinedAs: 'existing_agent', ...(row.joinDate ? { joinDate: row.joinDate } : {}) },
     }, async () => {
       const account = await this.users.create({

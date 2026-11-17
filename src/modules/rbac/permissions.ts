@@ -1218,14 +1218,21 @@ export const PERMISSIONS = {
    * **A leader saves the WhatsApp number of somebody they coach** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22:
    * *a leader may set it for their agents*) — `PUT /members/:membershipId/phone`, the *Isi nomor WhatsApp* sheet on a
    * person's row. The `COACH` reach, as `coaching_profile:update`: an AB their downline, an AAB their own unit's subtree
-   * (`own-downline` is the right token for an AAB too, roles §1 rule 2). **Nobody else**: the Owner and an Admin keep
-   * the office's people at arm's length from their accounts, an Agent sets only their own (`PATCH /auth/me`, which
-   * needs no grant), and a Super Admin is in no office. A personal datum, so refused in every support session
-   * (`@RefuseInSupportSession`).
+   * (`own-downline` is the right token for an AAB too, roles §1 rule 2). A personal datum, so refused in every support
+   * session (`@RefuseInSupportSession`).
+   *
+   * *Widened 2026-11-17 (P19.16-T1; ADR-0263, the client's request of 17 November: "no WhatsApp, a button to add it"):*
+   * **an Agent who leads somebody** (ADR-0234) at `own-downline`, the `COACH` reach `coaching_profile:update` already
+   * gives them, and **the Owner and the Admins** at `own-kpm` — any active member of the office, as their *Lengkapi
+   * data* already fills the same blank (`member:complete_personal`). Still a missing number only (`409
+   * MEMBER_PHONE_ON_FILE`), and still no Super Admin, who is in no office.
    */
   'member:update_phone': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-downline' },
+    { grantee: AGENT, scope: 'own-downline' },
   ],
   /*
    * **The office fills a member's blank personal data** (P19.12-T5 AC-3; ADR-0248 §3, amending ADR-0158 §3; the client's

@@ -72,12 +72,29 @@ export const ACTIVATION_3M = {
 export const JOINED_AS = ['new_hire', 'existing_agent'] as const;
 export type JoinedAs = (typeof JOINED_AS)[number];
 
+/** A company join month as `users.companyJoinMonth` stores it, `YYYY-MM`. */
+const COMPANY_JOIN_MONTH = /^\d{4}-\d{2}$/;
+
 /**
- * **Who a join date makes somebody, on the office's today** (ADR-0169 §3): `new_hire` when it is no more than
- * `JOINING.NEW_HIRE_MAX_DAYS_BACK` days before today, else `existing_agent`. Both are office dates, compared as
- * strings — `YYYY-MM-DD` sorts as the calendar does — so no instant and no zone is involved here.
+ * **Who somebody is when they join an office** (ADR-0169 §3, *amended by ADR-0264*; the client's request of 17 November:
+ * *"New hire if they joined the company this year"*):
+ *
+ * - **with the month they joined the company on file** (`users.companyJoinMonth`): `new_hire` when that month is in the
+ *   **calendar year of the join date** — they joined the insurer the year they joined the office, which on the day they
+ *   join is *this year* — else `existing_agent`, a month in another year either way: an earlier one is a tenured agent,
+ *   and a join date a leader set years before the month is their word that the person has been with them that long;
+ * - **with none**: the 90-day rule — `new_hire` when the join date is no more than `JOINING.NEW_HIRE_MAX_DAYS_BACK` days
+ *   before today.
+ *
+ * A roster import and a KPM's Owner never reach here: they are `existing_agent`, forced (ADR-0169 §6, ADR-0264 §1).
+ *
+ * Office dates and a month compared as strings — `YYYY-MM-DD` and `YYYY-MM` sort as the calendar does — so no instant and
+ * no zone is involved here.
  */
-export function joinedAsFor(joinDate: LocalDate, today: LocalDate): JoinedAs {
+export function joinedAsFor(joinDate: LocalDate, today: LocalDate, companyJoinMonth: string | null = null): JoinedAs {
+  if (companyJoinMonth !== null && COMPANY_JOIN_MONTH.test(companyJoinMonth)) {
+    return companyJoinMonth.slice(0, 4) === joinDate.slice(0, 4) ? 'new_hire' : 'existing_agent';
+  }
   return joinDate >= addDays(today, -JOINING.NEW_HIRE_MAX_DAYS_BACK) ? 'new_hire' : 'existing_agent';
 }
 

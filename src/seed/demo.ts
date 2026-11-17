@@ -67,6 +67,7 @@ import { buildCalendarFixture, CALENDAR_WORDS as CAL, type CalendarFixture } fro
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
 import { seedSubscriptionFixture } from './subscription-fixture';
 import { seedPersonalFor } from './personal-fixture';
+import { seedNewHireMonthsFixture } from './new-hire-months-fixture';
 import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedAnalyticsTemplateFixture } from './analytics-template-fixture';
@@ -4316,6 +4317,11 @@ Sign in at POST /api/v1/auth/login, then send the access token as
     peers: peerOffices.filter((p): p is { code: string; kpmId: string } => p !== null),
   });
   log(advancedAnalytics.guide);
+  // P19.16-T2 (ADR-0264): every seeded new hire joined Prudential the month they joined the office, every existing agent
+  // before — after every placement, and before *Lengkapi data* blanks one month on purpose (`new-hire-months-fixture.ts`).
+  log((await seedNewHireMonthsFixture({
+    kpmIds: (await Kpms.find({ companyId: String(prudential._id) }, { _id: 1 }).lean().exec()).map((k) => String(k._id)),
+  })).guide);
   // P19.12-T5 (ADR-0248 §3, §4): *Diundang* and *Lengkapi data* on 0417's member page, after every sign-in the seed
   // writes (`member-page-fixture.ts`), sparing the people other walks read.
   log((await seedMemberPageFixture({

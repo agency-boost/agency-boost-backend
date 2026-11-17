@@ -1407,6 +1407,33 @@ describe('permission matrix', () => {
   });
 
   /*
+   * **Whoever sees a row with no WhatsApp may fill it** (P19.16-T1; ADR-0263): `member:update_phone`, every leader at
+   * `own-downline` — an Agent who leads somebody included — and the Owner and the Admins at `own-kpm`. Never the Super
+   * Admin, who is in no office; never a view-only support session.
+   */
+  describe('P19.16-T1 — member:update_phone (ADR-0263)', () => {
+    it.each([
+      ['SUPER_ADMIN', ctx({ superAdmin: true, noMembership: true }), null],
+      ['KPM_OWNER', ctx({ owner: true, role: NO_CLASS }), 'own-kpm'],
+      ['KPM_ADMIN', ctx({ admin: true, role: NO_CLASS }), 'own-kpm'],
+      ['AB', ctx({ role: 'ab' }), 'own-downline'],
+      ['AAB', ctx({ role: 'aab' }), 'own-downline'],
+      ['AGENT', ctx({ role: 'agent' }), 'own-downline'],
+      ['the Owner on the AB rung', ctx({ owner: true, role: 'ab' }), 'own-kpm'],
+    ] as const)('P19.16-T1 AC-1, AC-2 member:update_phone for %s: %s', (_, who, scope) => {
+      expect(scopeFor(who, 'member:update_phone')).toBe(scope);
+      expect(can(who, 'member:update_phone')).toBe(scope !== null);
+    });
+
+    it('P19.16-T1 AC-4 a removed or pending Agent holds none of it, and a view-only support session neither', () => {
+      for (const status of ['removed', 'pending'] as const) {
+        expect(can(ctx({ role: 'agent', status }), 'member:update_phone')).toBe(false);
+      }
+      expect(can(ctx({ owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:update_phone')).toBe(false);
+    });
+  });
+
+  /*
    * **The Unit Dashboard's permissions, a positive and a negative per role** (P15-T1 AC-1, P15-T3 AC-4), at
    * the level `can()` decides them. Who is inside a grant — `COACH`, and 404 outside it — is the module's
    * own specs' question (`unit-dashboard.int.spec.ts`, `unit-dashboard.tenancy.spec.ts`).

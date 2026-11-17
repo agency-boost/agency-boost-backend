@@ -756,7 +756,7 @@ export class ApprovalsService {
    */
   private async joiningFor(ctx: RequestContext, member: MembershipDocument, joinDate?: string): Promise<JoiningFields | null> {
     if (member.joinedAs) return null;
-    return this.hierarchy.joining(ctx, { joinDate });
+    return this.hierarchy.joining(ctx, { joinDate }, String(member.userId));
   }
 
   /**

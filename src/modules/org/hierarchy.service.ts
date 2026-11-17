@@ -55,8 +55,13 @@ export interface CreateMembershipInput {
 export interface JoiningInput {
   /** An office date `YYYY-MM-DD`, checked: a real day, not after the office's today, not before 1980. Omitted: today. */
   joinDate?: string;
-  /** Forced, for a roster import and an Owner (ADR-0169 §6, ADR-0103). Omitted: from the date, once. */
+  /** Forced, for a roster import and an Owner (ADR-0169 §6, ADR-0103). Omitted: from the company join month or the date. */
   joinedAs?: JoinedAs;
+  /**
+   * ADR-0264: the month the person joined the company, `YYYY-MM`, which decides when on file (`joinedAsFor`). Omitted:
+   * read from the person's account when there is one; `null`: none on file.
+   */
+  companyJoinMonth?: string | null;
 }
 
 /** The two fields a membership made active is written with (ADR-0169 §1, §3). */
@@ -332,13 +337,14 @@ export class HierarchyService {
    * read through the injected clock (invariant §9). A given date is refused `400 VALIDATION_FAILED` naming
    * `joinDate` when it is not a real day, is after the office's today, or is before 1980; an existing agent may have
    * joined decades ago, so there is no other lower bound. `joinedAs` is the forced one where a path names it, else
-   * `new_hire` when the date is no more than 90 days before today and `existing_agent` otherwise — computed here,
+   * `joinedAsFor` (ADR-0264): `new_hire` when the person joined the company in the join date's year, from the month
+   * given or on their account (`userId`), and with none the 90-day rule — computed here,
    * once, and written beside the date; nothing recomputes it.
    *
    * Asked **before anything is written**, so a refused date leaves the membership, the request and the counter as
    * they were.
    */
-  async joining(ctx: RequestContext, given: JoiningInput = {}): Promise<JoiningFields> {
+  async joining(ctx: RequestContext, given: JoiningInput = {}, userId: string | null = null): Promise<JoiningFields> {
     const today = await this.officeToday(ctx);
     if (given.joinDate !== undefined) {
       // A sentence in both languages (`joining.messages.ts`), refused in the shared envelope (P18.10-T5 AC-3).
@@ -346,7 +352,17 @@ export class HierarchyService {
       if (violation) refuseWith([violation]);
     }
     const joinDate = given.joinDate ?? today;
-    return { joinDate, joinedAs: given.joinedAs ?? joinedAsFor(joinDate, today) };
+    if (given.joinedAs) return { joinDate, joinedAs: given.joinedAs };
+    // ADR-0264: the company join month decides when on file — the one given, else the account's.
+    const month = given.companyJoinMonth !== undefined ? given.companyJoinMonth : await this.companyJoinMonthOf(userId);
+    return { joinDate, joinedAs: joinedAsFor(joinDate, today, month) };
+  }
+
+  /** `users.companyJoinMonth`, a global record (ADR-0002), or `null` with no account or no month on it. */
+  private async companyJoinMonthOf(userId: string | null): Promise<string | null> {
+    if (!userId) return null;
+    const user = await this.users.findOne({ _id: userId }).select('companyJoinMonth').lean<{ companyJoinMonth?: string | null }>().exec();
+    return user?.companyJoinMonth ?? null;
   }
 
   /** The office's today, in its own zone. A row that names none reads the platform's (ADR-0016). */
@@ -477,7 +493,7 @@ export class HierarchyService {
     const status = input.status ?? 'pending';
     // ADR-0169: an active membership is given its join date and classification here, before the increment, so a
     // refused date spends nothing. A pending one waits for whoever lets them in.
-    const joining = status === 'active' ? await this.joining(ctx, input.joining) : null;
+    const joining = status === 'active' ? await this.joining(ctx, input.joining, userId) : null;
     return { leader, companyId, agentCode, level, status, joining };
   }
 
