@@ -1,6 +1,6 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -11,6 +11,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { can } from '@/modules/rbac/permissions';
+import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { displayNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -36,6 +37,11 @@ export interface LeaderLimitRequestRow {
   /** The office, as the console names it: its code and branch. */
   kpmCode: string;
   kpmBranchName: string;
+  /**
+   * **The office's company** (P19.23-T3 AC-2; ADR-0277): *Persetujuan* names a KPM by its name and company, never by its
+   * code alone. `''` where the company cannot be read.
+   */
+  companyName: string;
   subjectMembershipId: string;
   subjectName: string;
   subjectAgentCode: string;
@@ -51,6 +57,11 @@ export interface LeaderLimitRequestRow {
   status: LeaderLimitRequestStatus;
   requestedAt: string;
   decidedAt: string | null;
+  /**
+   * **Who decided it** (P19.23-T3 AC-2): *Sudah diputuskan*'s name — the Super Admin who approved or declined, or the
+   * asker who withdrew it. `null` while it waits.
+   */
+  decidedByName: string | null;
   /** The Super Admin's reason, or that it no longer applied. */
   declineReason: string | null;
   /** The office's limit and *Leaders used* now, so the decision is taken against the count it changes. */
@@ -86,6 +97,11 @@ export class LeaderLimitRequestService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /*
+     * The offices' companies, for *Persetujuan*'s *<KPM> (<company>)* (P19.23-T3 AC-2). Optional so the specs that build
+     * this service by hand need not; the application always gives it, and without it the name is left empty.
+     */
+    @Optional() @InjectModel(Company.name) private readonly companies: Model<CompanyDocument> | null = null,
   ) {}
 
   private requireMember(ctx: RequestContext): string {
@@ -439,8 +455,18 @@ export class LeaderLimitRequestService {
         .flatMap((r) => [r.subjectMembershipId, r.requestedByMembershipId]))];
       for (const m of await this.members.find(scoped, { _id: { $in: ids } })) memberships.set(String(m._id), m);
     }
-    const users = await this.users.find({ _id: { $in: [...new Set([...memberships.values()].map((m) => m.userId))] } }).exec();
+    // The members' accounts, and the deciders' (P19.23-T3 AC-2: who decided, by name).
+    // An id that is no account's id (a fixture's) names nobody: never a cast error.
+    const deciders = found.flatMap((r) => (r.decidedByUserId && isValidObjectId(r.decidedByUserId) ? [r.decidedByUserId] : []));
+    const users = await this.users.find({
+      _id: { $in: [...new Set([...[...memberships.values()].map((m) => m.userId), ...deciders])] },
+    }).exec();
     const userOf = new Map(users.map((u) => [String(u._id), u]));
+    const companyIds = [...new Set(offices.map((k) => k.companyId))];
+    const companies = this.companies && companyIds.length > 0
+      ? await this.companies.find({ _id: { $in: companyIds } }).select('name').lean().exec() as { _id: unknown; name: string }[]
+      : [];
+    const companyName = new Map(companies.map((c) => [String(c._id), c.name]));
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
     const nameOf = (membershipId: string): string => {
       const user = userOf.get(memberships.get(membershipId)?.userId ?? '');
@@ -459,6 +485,7 @@ export class LeaderLimitRequestService {
         kpmId: r.kpmId,
         kpmCode: office?.code ?? '',
         kpmBranchName: office?.branchName ?? '',
+        companyName: office ? companyName.get(office.companyId) ?? '' : '',
         subjectMembershipId: r.subjectMembershipId,
         subjectName: nameOf(r.subjectMembershipId),
         subjectAgentCode: memberships.get(r.subjectMembershipId)?.agentCode ?? '',
@@ -471,6 +498,7 @@ export class LeaderLimitRequestService {
         status: r.status,
         requestedAt: r.get('createdAt')?.toISOString() ?? '',
         decidedAt: r.decidedAt?.toISOString() ?? null,
+        decidedByName: r.decidedByUserId ? (displayNameOf(userOf.get(r.decidedByUserId)) ?? unknown) : null,
         declineReason: r.declineReason,
         maxLeaders: office?.subscription?.maxLeaders ?? null,
         leadersUsed: used.get(r.kpmId) ?? 0,

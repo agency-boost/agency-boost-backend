@@ -17,6 +17,7 @@ import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { RatioDefinitionRepository } from '@/modules/config/activity.repository';
 import { boundCodes, countOf, defaultBinding } from '@/modules/config/activity-binding';
 import { ActivityBindingService } from '@/modules/config/activity-binding.service';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { ProductionMonths } from '@/modules/production/production-months.service';
 import { ProductionReadings, type CampaignMonthFigures, type OfficeMonth } from '@/modules/production/production-readings';
@@ -244,7 +245,8 @@ export class CampaignEvaluation {
     // from each one's join date (ADR-0172 §1).
     const readsUnit = campaigns.some((c) => c.requirements.some((r) => readingOf(r.metricKey)?.subject === 'unit'));
     const unitRows = readsUnit && computed.length > 0 ? await this.memberships.find(
-      ctx, { leaderId: { $in: computed }, role: AGENT_CLASS, status: { $in: ['active', 'removed'] } },
+      // A test account is in nobody's Direct Unit count (ADR-0267 §1; P19.25-T5).
+      ctx, { leaderId: { $in: computed }, role: AGENT_CLASS, status: { $in: ['active', 'removed'] }, ...NOT_A_TEST_ACCOUNT },
       { projection: { ...PERSON_FIELDS, leaderId: 1 } },
     ) : [];
     const unitOf = new Map<string, string[]>();

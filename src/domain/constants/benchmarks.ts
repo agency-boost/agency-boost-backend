@@ -9,9 +9,12 @@
  * prototype's.
  */
 export const RATIO_BENCHMARKS = {
-  /** Submissions ÷ (presentations + follow-ups). Overall.html:5235 (15%). Tenant-configurable. */
+  /**
+   * Submissions ÷ sales presentations — follow-ups not counted since ADR-0267 §6 (the owner's part D, 19 November 2026).
+   * Overall.html:5235 (15%). Tenant-configurable.
+   */
   SELLING_SUCCESS_RATE: 0.3,
-  /** Agent codes ÷ (recruitment presentations + follow-ups). Overall.html:5247 (15%). Tenant-configurable. */
+  /** *Proses NPA* ÷ recruitment presentations — follow-ups not counted since ADR-0267 §6. Overall.html:5247 (15%). Tenant-configurable. */
   RECRUITMENT_SUCCESS_RATE: 0.3,
   /** New prospects ÷ lead-gen activities. Overall.html:5259 (0.30). Tenant-configurable. */
   LEADS_PER_ACTIVITY: 1,

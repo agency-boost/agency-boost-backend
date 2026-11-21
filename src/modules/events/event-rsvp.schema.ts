@@ -15,7 +15,8 @@ export type EventRsvpStatus = (typeof EVENT_RSVP_STATUSES)[number];
  * is a new membership and starts fresh, and the first one's rows stay the office's. Three writers, each owning its
  * fields and writing them with a targeted `$set`, never the whole document:
  *
- * - **the member**: `rsvpStatus`, `rsvpAt`, `cancelledAt` (until the event ends), and `claimedAt` — *"I actually
+ * - **the member**: `rsvpStatus`, `rsvpAt`, `cancelledAt` and `declineReason` (until the event ends; P19.25, the answer
+ *   to the invite — ADR-0281 §2), and `claimedAt` — *"I actually
  *   attended this event"*, from the end. **A claim is never attendance**;
  * - **a confirmer** — the Owner or an Admin, never for their own row: `confirmedAttended` (`true` attended, `false`
  *   marked absent, `null` not yet), `confirmedByMembershipId`, `confirmedAt`.
@@ -43,6 +44,15 @@ export class EventRsvp {
 
   @Prop({ type: Date, default: null })
   cancelledAt!: Date | null;
+
+  /**
+   * ***Tidak ikut*'s reason** (P19.25-T1 AC-3; ADR-0281 §2): what the member typed when they said they will not come —
+   * trimmed, at most `EVENT_DECLINE_REASON_MAX`, `null` when they gave none. Written with the cancellation and cleared by
+   * *Ikut* and by taking the answer back. Free text under UU 27/2022: the audit log records that a reason was given,
+   * never its words; on P20-T1's erasure and export cascade with the row. A row older than the field reads `null`.
+   */
+  @Prop({ type: String, default: null })
+  declineReason!: string | null;
 
   /** The member said they came. Unlocks feedback; never makes `attended`. */
   @Prop({ type: Date, default: null })

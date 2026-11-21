@@ -81,7 +81,8 @@ export function campaignCell(
  *   December campaign left the tree before it could be overridden), every seasonal one not started yet whatever its
  *   year (round 2: members chase it before it starts), and its structural ones running; archived never
  *   (D-window, `inWindow`), through `CampaignStandingsReader.ofOffice` over the tree's members; in the picker's
- *   order. Without an `item`, the first: the prototype opens on its first campaign (`Owner:3497`), a structural one.
+ *   order. *Changed 2026-11-20 (P19.19-T3; ADR-0272 §6):* **without an `item`, every campaign at once** — *Semua
+ *   campaign*, the KPM Overview card's own figure — where it was the first.
  * - **The chip**: of the tree's members eligible for at least one listed campaign, those chasing one they are
  *   eligible for.
  * - **The cells**: the selected campaign's, as `campaignCell` reads them — equal to the evaluation each member's own
@@ -114,7 +115,8 @@ export class CampaignsComplianceCategory implements ComplianceCategory<Campaigns
       code: c.code, title: c.title, kind: c.kind, subtype: c.subtype, phase: c.phase,
       startsAt: c.startsAt, endsAt: c.endsAt, final: c.final,
     }));
-    const item = asked ?? listed[0]?.code ?? null;
+    // *Since P19.19-T3 (ADR-0272 §6):* no item is *Semua campaign* — the card's own figure — never the first campaign.
+    const item = asked ?? null;
 
     const members = new Set(scope.memberIds);
     const eligible = new Set<string>();
@@ -126,7 +128,12 @@ export class CampaignsComplianceCategory implements ComplianceCategory<Campaigns
     }
 
     let cells: Map<string, ComplianceCell> | null = null;
-    if (selection.selected) {
+    if (selection.selected && item === null) {
+      // *Semua campaign*: whoever is eligible for at least one listed campaign, done when they chase one.
+      cells = new Map(scope.memberIds.map((id): [string, ComplianceCell] => [id, eligible.has(id)
+        ? { status: chasing.has(id) ? 'chasing' : 'not_chasing', done: chasing.has(id), on: null, second: null, override: null, overridable: false }
+        : NOT_ELIGIBLE]));
+    } else if (selection.selected) {
       cells = new Map();
       const campaign = listed.find((c) => c.code === item);
       if (campaign) {

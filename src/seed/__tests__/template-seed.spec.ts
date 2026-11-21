@@ -211,10 +211,13 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
       expect(draft).toMatchObject({ status: 'draft', version: 2, publishedVersion: 1 });
       // The default stays as published: one template of each kind for the walk to compare — but *Advanced analytics*,
       // where migration 0057 offers Prudential's §3 seed (`^[0-9]{8}$`) as a draft beside version 1 (P19.5-T1 AC-3).
+      // *Changed 2026-11-20 (P19.23-T4, `company-console-fixture.ts`):* and *Lead statuses*, a draft *Terbitkan ke KPM*
+      // lists as Prudential's unpublished change.
       const prudential = (await wired.namedTemplates.list(prudentialId)).find((t) => t.isDefault)!;
-      const { advanced_analytics: analytics, ...rest } = prudential.sections;
+      const { advanced_analytics: analytics, lead_pipeline: leads, ...rest } = prudential.sections;
       expect(Object.values(rest).some((s) => s.hasDraft)).toBe(false);
       expect(analytics).toEqual({ publishedVersion: 1, hasDraft: true });
+      expect(leads.hasDraft).toBe(true);
     });
 
     it('holds what 0417\u2019s agents read: its published activity types, by code', async () => {

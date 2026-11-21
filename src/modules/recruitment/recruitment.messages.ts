@@ -50,6 +50,13 @@ export const RECRUITMENT_REFUSALS = refusals('modules/recruitment', {
         + 'what it includes.',
       id: `${render(title, readerIn('id'))} belum memiliki file: unggah file dulu sebelum mengonfirmasi isinya.`,
     }),
+    /** P19.21-T3 AC-6 (ADR-0274): a material given as a link is an `https://` address, with no name or password in it. */
+    notALink: ({ max }: { max: number }) => ({
+      en: `A link must be a full https:// address of at most ${formatNumber(max, undefined, 'en')} characters, `
+        + 'with no user name or password in it.',
+      id: `Link harus berupa alamat https:// lengkap, paling banyak ${idNumber(max)} karakter, `
+        + 'tanpa nama pengguna atau kata sandi.',
+    }),
 
     /* ---- a playbook, field by field (`recruitment-playbook-input.ts`): what follows the field's path ---- */
     notAnObject: {

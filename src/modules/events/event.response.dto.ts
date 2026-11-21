@@ -117,6 +117,9 @@ export class MyEventFeedbackDto {
 
 export class MyEventPartDto {
   @ApiProperty({ enum: ['going', 'cancelled'], nullable: true }) rsvp!: string | null;
+  @ApiProperty({
+    type: String, nullable: true, description: '*Tidak ikut*’s reason as the member gave it (ADR-0281 §2); `null` with none or while not cancelled.',
+  }) declineReason!: string | null;
   @ApiProperty({ type: Boolean, description: '*"I actually attended this event"* pressed. Never attendance.' }) claimed!: boolean;
   @ApiProperty({ type: MyEventFeedbackDto, nullable: true }) feedback!: MyEventFeedbackDto | null;
 }

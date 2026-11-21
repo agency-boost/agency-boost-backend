@@ -54,7 +54,8 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
 
   /** A complete Quant run for a peer KPM, every metric `value`. */
   const peerRun = (kpmId: string, periodEnd: string, value: number, complete = true) => ({
-    kpmId, companyId: COMPANY, periodEnd, peers: null, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW,
+    kpmId, companyId: COMPANY, periodEnd, fromMonth: periodEnd.endsWith('-06') ? `${periodEnd.slice(0, 4)}-01` : `${periodEnd.slice(0, 4)}-07`,
+    peers: null, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW,
     frozenAt: REPORTING_NOW, lateWriteAt: null, deletedAt: null,
     values: Object.fromEntries(QUANT_METRICS.map(({ metric }) => [metric, { value, complete, missingMonths: complete ? [] : ['2026-03'], reason: null }])),
   });
@@ -108,18 +109,33 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
   describe('AC-1 the page and who reads it', () => {
     beforeAll(() => clock().set(REPORTING_NOW));
 
-    it('P19.5-T3 AC-1 the Owner sees the template’s sections in its order, then Event; may type targets and upload', async () => {
+    it('P19.22-T1 AC-1 the Owner sees the seven tabs in the fixed order, then Event; may change targets and upload', async () => {
       const shell = await page().shell(as('OWNER'));
       expect(shell.sections.map((s) => s.slug)).toEqual(['demographics', 'mapa', 'nps', 'quant', 'qual', 'subgroup', 'events']);
       expect(shell).toMatchObject({ canWrite: true, canUpload: true, version: 1 });
       expect((await page().shell(as('ADMIN'))).canWrite).toBe(true);
     });
 
-    it('P19.5-T3 AC-1 a Core Leader reads the whole page read-only; an untagged leader is 404; nobody outside a session reads', async () => {
-      expect(await page().shell(coreLeader('AGUS'))).toMatchObject({ canWrite: false, canUpload: false });
+    // *Changed 2026-11-20 (ADR-0268 §1):* a Core Leader holds the Owner's rights here, the targets and the upload included.
+    it('P19.5-T3 AC-1 a Core Leader reads the whole page and writes it; an untagged leader is 404; nobody outside a session reads', async () => {
+      expect(await page().shell(coreLeader('AGUS'))).toMatchObject({ canWrite: true, canUpload: true });
       expect(await refusal(page().shell(as('AGUS')))).toMatchObject({ status: 404, code: 'NOT_FOUND' });
       expect(await refusal(page().demographics(as('SARI'), {}))).toMatchObject({ status: 404 });
       expect(await refusal(page().shell(SUPER))).toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
+    });
+
+    // P19.22-T1 (ADR-0268 §3; OD-377): the Super Admin inside a KPM is its Owner here — reads every section, writes.
+    it('P19.22-T1 AC-1 OD-377 the Super Admin inside the KPM reads and writes the page as its Owner', async () => {
+      const inside = RequestContext.superAdminInKpm(SUPER, KPM_A);
+      expect(await page().shell(inside)).toMatchObject({ canWrite: true });
+      expect((await page().demographics(inside, {})).manpower).toBe((await page().demographics(as('OWNER'), {})).manpower);
+      expect((await page().subgroup(inside, {})).canWrite).toBe(true);
+      // Agents and leaders who are not core leaders: 404 on every read.
+      for (const who of ['INDAH', 'SARI'] as const) {
+        expect(await refusal(page().mapa(as(who), {}))).toMatchObject({ status: 404 });
+        expect(await refusal(page().subgroup(as(who), {}))).toMatchObject({ status: 404 });
+        expect(await refusal(page().subgroupPeople(as(who), { ab: office.id.AGUS, driver: 'maa' }))).toMatchObject({ status: 404 });
+      }
     });
 
     it('ADR-0215 §2 a view-as session reads the page and may write nothing', async () => {
@@ -160,59 +176,277 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
     it('P19.5-T3 AC-13 cross-tenant: KPM B counts its own people only, and cannot filter by KPM A’s AB', async () => {
       const b = await page().demographics(office.ownerOfB(), {});
       expect(b.manpower).toBe(2);
+      expect(b.members.map((m) => m.membershipId).sort()).toEqual([office.id.B_AB, office.id.B_AGENT].sort());
       expect(await refusal(page().demographics(office.ownerOfB(), { ab: office.id.AGUS }))).toMatchObject({ status: 404 });
+    });
+
+    it('P19.22-T2 AC-1 the summary, Kelengkapan data per field Leader vs Agent, and Data anggota the incomplete first', async () => {
+      const d = await page().demographics(as('OWNER'), {});
+      expect(d.summary.manpower).toBe(d.manpower);
+      expect(d.summary.complete + d.summary.incomplete).toBe(d.manpower);
+      // Indah and Agus have all three on file (work status, birth date, join date): the rest do not.
+      expect(d.summary.complete).toBe(2);
+      expect(d.completeness.map((c) => c.field)).toEqual(['workStatus', 'dateOfBirth', 'joinDate']);
+      const work = d.completeness[0];
+      expect(work).toMatchObject({ filled: 2, of: d.manpower });
+      expect(work.leaderPct).not.toBeNull();
+      expect(work.agentPct).not.toBeNull();
+      expect(d.members).toHaveLength(d.manpower);
+      expect(d.members[0].missing.length).toBeGreaterThan(0);
+      expect(d.members[d.members.length - 1].missing).toEqual([]);
+      const indah = d.members.find((m) => m.membershipId === office.id.INDAH)!;
+      // The band, never the birth date.
+      expect(indah).toMatchObject({ role: 'agent', workStatus: 'full_time', ageBand: 'gen_z', missing: [] });
+      expect(JSON.stringify(d)).not.toContain('1999-03-10');
+      expect(d.canUpload).toBe(true);
+      expect(d.asOf).toBe('2026-09-14');
+    });
+
+    it('P19.22-T2 AC-1 Unduh daftar: one row per member, the agent code the key; KPM B lists only its own', async () => {
+      const file = await page().demographicsFile(as('OWNER'));
+      expect(file.filename).toMatch(/-demografi-2026-09-14\.csv$/);
+      const lines = file.file.trim().split('\r\n');
+      expect(lines[0]).toBe('Kode agen,Nama,Peran,Upline,Status kerja,Tanggal lahir,Tanggal bergabung');
+      const indah = lines.find((l) => l.includes('10/03/1999'))!;
+      expect(indah).toContain('Full-time,10/03/1999,01/07/2024');
+      const b = await page().demographicsFile(office.ownerOfB());
+      expect(b.file.trim().split('\r\n')).toHaveLength(3);
+      expect(await refusal(page().demographicsFile(as('SARI')))).toMatchObject({ status: 404 });
+    });
+
+    it('P19.22-T2 AC-1 n berhenti: who left from January to the month’s end — never last year, never after the month', async () => {
+      const fajar = { _id: new mongoose.Types.ObjectId(office.id.LEFT) };
+      const leftOn = (removedAt: string) => db().collection('memberships').updateOne(fajar, { $set: { removedAt: new Date(removedAt) } });
+      const before = (await db().collection('memberships').findOne(fajar))!.removedAt ?? null;
+      try {
+        // Fajar left on 10 May 2026: counted in September's and May's, not in April's.
+        await leftOn('2026-05-10T03:00:00Z');
+        expect((await page().demographics(as('OWNER'), {})).left).toBe(1);
+        expect((await page().demographics(as('OWNER'), { month: '2026-05' })).left).toBe(1);
+        expect((await page().demographics(as('OWNER'), { month: '2026-04' })).left).toBe(0);
+        // Leaving on 20 December 2025 is last year's.
+        await leftOn('2025-12-20T03:00:00Z');
+        expect((await page().demographics(as('OWNER'), {})).left).toBe(0);
+      } finally {
+        await db().collection('memberships').updateOne(fajar, { $set: { removedAt: before } });
+      }
+    });
+
+    it('P19.22-T2 AC-1 a member with no agent code, one whose account is gone and an office with no code still make the list and the file', async () => {
+      const sari = { _id: new mongoose.Types.ObjectId(office.id.SARI) };
+      const dodi = { _id: new mongoose.Types.ObjectId(office.id.DODI) };
+      const kpm = { _id: new mongoose.Types.ObjectId(KPM_A) };
+      const [sariRow, dodiRow, kpmRow] = await Promise.all([
+        db().collection('memberships').findOne(sari), db().collection('memberships').findOne(dodi), db().collection('kpms').findOne(kpm),
+      ]);
+      await db().collection('memberships').updateOne(sari, { $set: { userId: '66f00000000000000000ffff' } });
+      await db().collection('memberships').updateOne(dodi, { $unset: { agentCode: '' } });
+      await db().collection('kpms').updateOne(kpm, { $set: { code: '' } });
+      try {
+        const d = await page().demographics(as('OWNER'), {});
+        expect(d.members.find((m) => m.membershipId === office.id.SARI)).toMatchObject({ name: '' });
+        const file = await page().demographicsFile(as('OWNER'));
+        expect(file.filename).toBe('kpm-demografi-2026-09-14.csv');
+        const lines = file.file.trim().split('\r\n');
+        // Rina's upline is Sari, whose account is gone: an empty cell, and Sari's own row has no name.
+        expect(lines.find((l) => l.includes('Rina Wijaya'))!.split(',')[3]).toBe('');
+        expect(lines.find((l) => l.startsWith(`${sariRow!.agentCode},`))!.split(',')[1]).toBe('');
+        expect(lines.find((l) => l.includes('Dodi'))!.split(',')[0]).toBe('');
+        // The upload still finds Sari by her code, and names nobody for her.
+        const result = await page().uploadDemographics(as('OWNER'), { file: `Kode agen,Status kerja\n${sariRow!.agentCode},Full-time\n` });
+        expect(result.rows[0]).toMatchObject({ name: null, status: 'updated' });
+      } finally {
+        await db().collection('memberships').updateOne(sari, { $set: { userId: sariRow!.userId, workStatus: sariRow!.workStatus ?? null } });
+        await db().collection('memberships').updateOne(dodi, { $set: { agentCode: dodiRow!.agentCode } });
+        await db().collection('kpms').updateOne(kpm, { $set: { code: kpmRow!.code } });
+      }
+    });
+
+    it('P19.22-T2 AC-1 Upload fills what the file holds, leaves an empty cell alone, audits each member; another KPM’s code is not found', async () => {
+      const code = (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.DIMAS) }))!.agentCode as string;
+      const bCode = (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.B_AGENT) }))!.agentCode as string;
+      const csv = [
+        'Kode agen;Status kerja;Tanggal lahir;Tanggal bergabung',
+        `${code};Part-time;02/01/1990;`,
+        `${bCode};Full-time;;`,
+        'NOPE;Full-time;;',
+        `${code};Full-time;;`,
+      ].join('\n');
+      const result = await page().uploadDemographics(as('OWNER'), { file: csv });
+      expect(result).toMatchObject({ updated: 1, skipped: 3 });
+      expect(result.rows.map((r) => r.status)).toEqual(['updated', 'not_found', 'not_found', 'not_found']);
+      expect(result.rows[0].fields.sort()).toEqual(['dateOfBirth', 'workStatus']);
+      const dimas = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.DIMAS) });
+      expect(dimas!.workStatus).toBe('part_time');
+      expect(dimas!.joinDate ?? null).not.toBe('');
+      const audit = await db().collection('auditLog').findOne({ action: 'member.personal_completed', targetMembershipId: office.id.DIMAS });
+      expect(audit!.after).toMatchObject({ workStatus: 'part_time', dateOfBirth: '1990-01-02', via: 'advanced_analytics.demographics_upload' });
+      // KPM B's agent untouched.
+      expect((await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.B_AGENT) }))!.workStatus ?? null).toBeNull();
+      // Again, the same values: nothing changes, nothing audited.
+      const again = await page().uploadDemographics(as('OWNER'), { file: `Kode agen,Status kerja\n${code},Part-time\n` });
+      expect(again).toMatchObject({ updated: 0, unchanged: 1 });
+    });
+
+    it('P19.22-T2 AC-1 a cell that is no date or status is named, and nothing of it is written; a file with no Kode agen is 400', async () => {
+      const code = (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.BUDI) }))!.agentCode as string;
+      const result = await page().uploadDemographics(as('OWNER'), { file: `Kode agen,Status kerja,Tanggal lahir\n${code},sometimes,31/02/1990\n` });
+      expect(result.rows[0]).toMatchObject({ status: 'invalid', problems: [{ field: 'workStatus', value: 'sometimes' }, { field: 'dateOfBirth', value: '31/02/1990' }] });
+      expect(await refusal(page().uploadDemographics(as('OWNER'), { file: 'Nama,Status kerja\nX,Full-time\n' })))
+        .toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+    });
+
+    it('P19.22-T2 AC-1 a join date after today, or none at all, is named and not written; rows with no code are not found', async () => {
+      const budi = (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.BUDI) }))!;
+      const audits = await db().collection('auditLog').countDocuments({ action: 'member.personal_completed', targetMembershipId: office.id.BUDI });
+      // Today is 14 September 2026 in the office's zone: the 15th is tomorrow.
+      for (const joinDate of ['15/09/2026', 'kemarin']) {
+        const result = await page().uploadDemographics(as('OWNER'), { file: `Kode agen,Tanggal bergabung\n${budi.agentCode},${joinDate}\n` });
+        expect(result).toMatchObject({ updated: 0, skipped: 1 });
+        expect(result.rows[0]).toMatchObject({ status: 'invalid', problems: [{ field: 'joinDate', value: joinDate }] });
+      }
+      expect((await db().collection('memberships').findOne({ _id: budi._id }))!.joinDate ?? null).toBe(budi.joinDate ?? null);
+      expect(await db().collection('auditLog').countDocuments({ action: 'member.personal_completed', targetMembershipId: office.id.BUDI }))
+        .toBe(audits);
+      // A filled file whose code column is empty names nobody: every row not found, and no member is read for it.
+      const find = jest.spyOn(wired.memberships, 'find');
+      try {
+        const blank = await page().uploadDemographics(as('OWNER'), { file: 'Kode agen,Status kerja\n,Full-time\n ,Part-time\n' });
+        expect(blank).toMatchObject({ updated: 0, unchanged: 0, skipped: 2 });
+        expect(blank.rows.map((r) => r.status)).toEqual(['not_found', 'not_found']);
+        expect(find.mock.calls.some(([, filter]) => JSON.stringify(filter).includes('agentCode'))).toBe(false);
+      } finally {
+        find.mockRestore();
+      }
+    });
+
+    it('P19.22-T2 AC-1 a file larger than the limit is 400 before any row of it is read', async () => {
+      const big = `Kode agen,Status kerja\n${'X,Full-time\n'.repeat(Math.ceil(90_000 / 12) + 1)}`;
+      expect(Buffer.byteLength(big, 'utf8')).toBeGreaterThan(90_000);
+      expect(await refusal(page().uploadDemographics(as('OWNER'), { file: big })))
+        .toMatchObject({ status: 400, code: 'VALIDATION_FAILED', details: { field: 'file' } });
+    });
+
+    it('P19.22-T2 AC-1 ADR-0268 §1 a core leader fills their own downline only; a member they do not lead is not_yours', async () => {
+      const code = (id: string) => db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(id) }).then((m) => m!.agentCode as string);
+      const csv = `Kode agen,Tanggal bergabung\n${await code(office.id.NINA)},01/02/2020\n${await code(office.id.PEER_AB)},01/02/2020\n`;
+      const result = await page().uploadDemographics(coreLeader('AGUS'), { file: csv });
+      expect(result.rows.map((r) => r.status)).toEqual(['updated', 'not_yours']);
+      expect(await refusal(page().uploadDemographics(as('AGUS'), { file: csv }))).toMatchObject({ status: 404 });
+      expect(await refusal(page().uploadDemographics(viewAs('OWNER'), { file: csv }))).toMatchObject({ status: 403, code: 'IMPERSONATION_READ_ONLY' });
     });
   });
 
   // ------------------------------------------------------------------------------------------------- MAPA
 
-  describe('AC-4 AC-5 MAPA driver', () => {
-    beforeAll(async () => {
-      clock().set(REPORTING_NOW);
-      // D2: September's uploaded recruitment, 3, beside nobody who joined as a new hire in September.
-      await db().collection('monthlyAgentData').updateOne(
-        { membershipId: office.id.AGUS, month: '2026-09' }, { $set: { 'values.RECRUITMENT': imported(3) } },
-      );
-    });
+  describe('P19.22-T3 MAPA driver', () => {
+    beforeAll(() => clock().set(REPORTING_NOW));
 
-    it('P19.5-T3 AC-4 the forum’s nine rows by month, against last year, the months not begun future', async () => {
+    it('P19.22-T3 AC-2 eight rows: APE alone, then M · A · P · A, each with its YTD pair and its month trio', async () => {
       const mapa = await page().mapa(as('OWNER'), {});
-      expect(mapa.year).toBe('2026');
-      expect(mapa.rows.map((r) => r.row)).toEqual([
-        'ape', 'manpower', 'flc', 'producing_agents', 'new_agent_3m', 'avg_monthly_aa', 'case_submission',
-        'cases_per_producing_agent', 'average_case_size',
+      expect(mapa).toMatchObject({ month: '2026-09', currentMonth: '2026-09', earliestMonth: '2025-01' });
+      expect(mapa.rows.map((r) => [r.key, r.group])).toEqual([
+        ['ape', 'ape'], ['manpower', 'manpower'], ['rekrut', 'manpower'], ['active_agent', 'activation'],
+        ['new_agent_3m', 'activation'], ['policies', 'productivity'], ['policies_per_active_agent', 'productivity'],
+        ['average_case_size', 'case_size'],
       ]);
-      const ape = mapa.rows.find((r) => r.row === 'ape')!;
-      expect(ape.months).toHaveLength(12);
-      expect(ape.months.find((m) => m.month === '2026-01')!.value.kind).toBe('figure');
-      expect(ape.months.find((m) => m.month === '2026-12')!.value.kind).toBe('future');
-      expect(ape.targetable).toBe(true);
-      expect(mapa.rows.find((r) => r.row === 'producing_agents')).toMatchObject({ monthly: false, targetable: false });
-      expect(ape.ytd.kind).toBe('figure');
+      const ape = mapa.rows[0];
+      // APE's YTD is the year's total so far — the Overview's year to date; its month the office's file's.
+      expect(ape.ytd).toBeGreaterThan(ape.thisMonth!);
+      expect(ape.ytdChange.kind).toBe('pct');
+      expect(mapa.rows.find((r) => r.key === 'new_agent_3m')!.changeVsSameMonth.kind).toBe('points');
+      expect(mapa.dataThrough).toBe('2026-09');
+      // Every row month by month (the scorecard's `everyMonth`): the ratios the forum's table left *Not tracked*.
+      const size = mapa.rows.find((r) => r.key === 'average_case_size')!;
+      expect(size.thisMonth).not.toBeNull();
+      expect(mapa.rows.find((r) => r.key === 'policies_per_active_agent')!.thisMonth).not.toBeNull();
     });
 
-    it('P19.5-T3 AC-5 AT-6 AA UI-012 with March not uploaded, YTD 2026 reads Belum lengkap and names March', async () => {
+    it('P19.22-T3 AC-2 every other row’s YTD is the average per month: Manpower the mean of the month-end headcounts', async () => {
       const mapa = await page().mapa(as('OWNER'), {});
-      expect(mapa.ytdMissingMonths).toContain('2026-03');
-      expect(mapa.ytdMissingMonths).not.toContain('2026-09');
+      const manpower = mapa.rows.find((r) => r.key === 'manpower')!;
+      const months = await Promise.all(['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09']
+        .map((m) => page().mapa(as('OWNER'), { month: m }).then((v) => v.rows.find((r) => r.key === 'manpower')!.thisMonth)));
+      const mean = Math.round((months.reduce((a, b) => a! + b!, 0)! / months.length) * 10) / 10;
+      expect(manpower.ytd).toBe(mean);
     });
 
-    it('P19.5-T3 AC-4 D2’s ⓘ: September’s uploaded recruitment beside the members who joined as new hires', async () => {
-      const flc = (await page().mapa(as('OWNER'), {})).rows.find((r) => r.row === 'flc')!;
-      const sep = flc.months.find((m) => m.month === '2026-09')!;
-      expect(sep.value).toEqual({ kind: 'figure', value: 3 });
-      expect(sep.joined).toBe(0);
+    it('P19.22-T3 AC-2 Rekrut is the New Hires definition: the members who joined as new hires in the month, test accounts never', async () => {
+      const hires = [office.id.DIMAS, office.id.BUDI];
+      const saved = await db().collection('memberships').find({ _id: { $in: hires.map((id) => new mongoose.Types.ObjectId(id)) } })
+        .project({ joinedAs: 1, joinDate: 1, testAccount: 1 }).toArray();
+      await db().collection('memberships').updateMany(
+        { _id: { $in: hires.map((id) => new mongoose.Types.ObjectId(id)) } }, { $set: { joinedAs: 'new_hire', joinDate: '2026-09-03' } },
+      );
+      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.BUDI) }, { $set: { testAccount: true } });
+      try {
+        const rekrut = (await page().mapa(as('OWNER'), {})).rows.find((r) => r.key === 'rekrut')!;
+        expect(rekrut.thisMonth).toBe(1);
+        expect(rekrut.sameMonthLastYear).toBe(0);
+      } finally {
+        for (const row of saved) {
+          const put = Object.fromEntries(['joinedAs', 'joinDate', 'testAccount'].filter((k) => row[k] !== undefined).map((k) => [k, row[k]]));
+          const unset = Object.fromEntries(['joinedAs', 'joinDate', 'testAccount'].filter((k) => row[k] === undefined).map((k) => [k, '']));
+          await db().collection('memberships').updateOne({ _id: row._id }, { $set: put, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
+        }
+      }
     });
 
-    it('P19.5-T3 AC-4 the Owner types a target: TBD until filled, audited before and after; KPM B never sees it', async () => {
-      expect((await page().mapa(as('OWNER'), {})).rows[0].months[8].target).toBeNull();
-      await page().setMapaTarget(as('OWNER'), { month: '2026-09', row: 'ape', value: 150 * M });
-      await page().setMapaTarget(as('ADMIN'), { month: '2026-09', row: 'ape', value: 160 * M });
-      const ape = (await page().mapa(as('OWNER'), {})).rows[0];
-      expect(ape.months[8].target).toBe(160 * M);
-      const audits = await db().collection('auditLog').find({ action: 'advanced_analytics.target_set' }).sort({ _id: 1 }).toArray();
-      expect(audits.map((a) => [a.before?.value ?? null, a.after.value])).toEqual([[null, 150 * M], [150 * M, 160 * M]]);
-      expect((await page().mapa(office.ownerOfB(), {})).rows[0].months[8].target).toBeNull();
+    /*
+     * **One definition per number** (ADR-0267 §1, §2; invariant §8; the integration review of 20 November 2026): MAPA read 23
+     * for the demo office's October where the Overview's *Performa vs target* read 24 — the scorecard counted the members
+     * on the month's last day, the Overview the office's counted members, and the Admin's join date fell after October.
+     * Both count through `activeAgentsOver` now, over the same people.
+     */
+    it('integration review: Active Agent is the KPM Overview’s for the same month — a member joined since, and a test account, alike', async () => {
+      const activeOf = async (month: string) => [
+        (await page().mapa(as('OWNER'), { month })).rows.find((r) => r.key === 'active_agent')!.thisMonth,
+        (await wired.kpmOverview.performance(as('OWNER'), { month })).total.actual.activeAgents,
+      ];
+      // A producer of August whose join date is after it: a file row kept before they registered (*Belum jadi anggota*).
+      const producer = await db().collection('monthlyAgentData').findOne({ kpmId: KPM_A, month: '2026-08', 'values.APE.value': { $gt: 0 } });
+      const id = new mongoose.Types.ObjectId(producer!.membershipId as string);
+      const saved = (await db().collection('memberships').findOne({ _id: id }))!;
+      await db().collection('memberships').updateOne({ _id: id }, { $set: { joinDate: '2026-09-05' } });
+      try {
+        const [mapa, overview] = await activeOf('2026-08');
+        expect(mapa).not.toBeNull();
+        expect(mapa).toBe(overview);
+        const [september, overviewSeptember] = await activeOf('2026-09');
+        expect(september).toBe(overviewSeptember);
+        // A test account is in neither (ADR-0267 §1): both one fewer.
+        await db().collection('memberships').updateOne({ _id: id }, { $set: { testAccount: true } });
+        expect(await activeOf('2026-08')).toEqual([mapa! - 1, overview! - 1]);
+      } finally {
+        await db().collection('memberships').updateOne(
+          { _id: id }, saved.testAccount === undefined
+            ? { $set: { joinDate: saved.joinDate ?? null }, $unset: { testAccount: '' } }
+            : { $set: { joinDate: saved.joinDate ?? null, testAccount: saved.testAccount } },
+        );
+      }
+    });
+
+    it('P19.22-T3 AC-3 Target bulanan is read-only and consolidated: AA and Rekrut the AB groups’ sums; none set reads null', async () => {
+      const none = await page().mapa(as('OWNER'), {});
+      expect(none.rows.find((r) => r.key === 'active_agent')!.target).toBeNull();
+      expect(none.rows.find((r) => r.key === 'manpower')!.target).toBeNull();
+      await wired.abGroupTargets.set(as('OWNER'), office.id.AGUS, { month: '2026-09', activeAgentTarget: 4, rekrutTarget: 2 });
+      await wired.abGroupTargets.set(as('OWNER'), office.id.PEER_AB, { month: '2026-09', activeAgentTarget: 3, rekrutTarget: 1 });
+      const mapa = await page().mapa(as('OWNER'), {});
+      expect(mapa.rows.find((r) => r.key === 'active_agent')!.target).toBe(7);
+      expect(mapa.rows.find((r) => r.key === 'rekrut')!.target).toBe(3);
+      expect(mapa.headline.activeAgent.target).toBe(7);
+      expect(mapa.headline.activeAgent.tone).not.toBeNull();
+      // KPM B reads none of A's targets.
+      expect((await page().mapa(office.ownerOfB(), {})).rows.find((r) => r.key === 'active_agent')!.target).toBeNull();
+    });
+
+    it('P19.22-T3 AC-3 the month picker moves everything; a month after this one, or before January of last year, is 400', async () => {
+      const aug = await page().mapa(as('OWNER'), { month: '2026-08' });
+      expect(aug.month).toBe('2026-08');
+      expect(aug.rows[0].thisMonth).toBe((await page().mapa(as('OWNER'), {})).rows[0].lastMonth);
+      expect(await refusal(page().mapa(as('OWNER'), { month: '2026-10' }))).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(await refusal(page().mapa(as('OWNER'), { month: '2024-12' }))).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
     });
   });
 
@@ -230,7 +464,9 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       at('2026-07-10');
       const live = await page().quantView(as('OWNER'), {});
       expect(live).toMatchObject({ periodEnd: '2026-06', frozenAt: null, lateWriteAt: null });
-      expect(live.runs).toEqual(['2026-06', '2025-12', '2025-06']);
+      expect(live.runs).toEqual([
+        { periodEnd: '2026-06', fromMonth: '2026-01' }, { periodEnd: '2025-12', fromMonth: '2025-07' }, { periodEnd: '2025-06', fromMonth: '2025-01' },
+      ]);
       const caseSize = () => db().collection('quantRuns').findOne({ kpmId: KPM_A, periodEnd: '2026-06' });
       const before = (await caseSize())!.values.AVERAGE_CASE_SIZE_REALISED.value;
 
@@ -286,7 +522,9 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       const peers = await wired.quantRunRows.peerMediansAcrossTenants(as('OWNER'), '2026-06');
       for (const value of Object.values(peers)) expect(Object.keys(value).sort()).toEqual(['median', 'peers']);
       const wire = JSON.stringify(await page().quantView(as('OWNER'), { periodEnd: '2026-06' }));
-      for (const leak of [PEER(1), PEER(2), PEER(3), '0910', '0920', '0930', 'P1', OTHER_COMPANY, KPM_B, '"9"', ':9,', ':2,']) {
+      // P19.22-T4: the KPM's own leaders' values and counts are on the wire now, so a bare `:2,` may be one of theirs; the
+      // peers' figures are 2, 4 and 9 — 9 is none of 0417's.
+      for (const leak of [PEER(1), PEER(2), PEER(3), '0910', '0920', '0930', 'P1', OTHER_COMPANY, KPM_B, '"9"', ':9,']) {
         expect([leak, wire.includes(leak)]).toEqual([leak, false]);
       }
     });
@@ -312,6 +550,44 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       }
     });
 
+    it('P19.22-T4 ADR-0275 §4 a December run frozen before the half-years held the whole year: from January, and a whole year’s peer only', async () => {
+      at('2026-09-14');
+      // 0417's own December 2025, frozen with no `fromMonth`, as every run was before the half-years.
+      const december = { kpmId: KPM_A, periodEnd: '2025-12' };
+      const stored = await db().collection('quantRuns').findOne(december);
+      const run = {
+        companyId: COMPANY, peers: null, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW, frozenAt: REPORTING_NOW, lateWriteAt: null,
+        deletedAt: null,
+        values: Object.fromEntries(QUANT_METRICS.map(({ metric }) => [metric, { value: 6, complete: true, missingMonths: [], reason: null }])),
+      };
+      await db().collection('quantRuns').updateOne(december, { $set: run, $unset: { fromMonth: '' } }, { upsert: true });
+      try {
+        const view = await page().quantView(as('OWNER'), { periodEnd: '2026-06' });
+        expect(view.runs.find((r) => r.periodEnd === '2025-12')).toEqual({ periodEnd: '2025-12', fromMonth: '2025-01' });
+        // KPM B's peers for December: a run over July to December reads P1 and P2 only; one over the whole year reads 0417's.
+        const halfYear = await wired.quantRunRows.peerMediansAcrossTenants(office.ownerOfB(), '2025-12', '2025-07');
+        for (const value of Object.values(halfYear)) expect(value.peers).toBe(2);
+        const wholeYear = await wired.quantRunRows.peerMediansAcrossTenants(office.ownerOfB(), '2025-12', '2025-01');
+        for (const value of Object.values(wholeYear)) expect(value).toEqual({ median: null, peers: 1 });
+      } finally {
+        await db().collection('quantRuns').deleteOne(december);
+        if (stored) await db().collection('quantRuns').insertOne(stored);
+      }
+    });
+
+    it('P19.5-T3 AC-9 a live run’s write that fails for any reason but a racing insert is not retried, and fails', async () => {
+      at('2026-07-10');
+      const findOne = jest.spyOn(wired.quantRunRows, 'findOne').mockRejectedValueOnce(new Error('the database went away'));
+      try {
+        await expect(wired.quantRunRows.writeLive(as('OWNER'), '2026-06', {
+          companyId: COMPANY, values: {} as never, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW, fromMonth: '2026-01',
+        })).rejects.toThrow('the database went away');
+        expect(findOne).toHaveBeenCalledTimes(1);
+      } finally {
+        findOne.mockRestore();
+      }
+    });
+
     it('P19.5-T3 AC-13 a period that is no run is refused; one older than the history is 404', async () => {
       expect(await refusal(page().quantView(as('OWNER'), { periodEnd: '2026-12' }))).toMatchObject({ status: 400 });
       expect(await refusal(page().quantView(as('OWNER'), { periodEnd: '2024-06' }))).toMatchObject({ status: 404 });
@@ -320,62 +596,178 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
 
   // --------------------------------------------------------------------------------------------- Sub-group
 
-  describe('AC-10 Sub-group', () => {
+  describe('P19.22-T5 Informal group', () => {
     beforeAll(() => clock().set(REPORTING_NOW));
     const activeTotal = async () => (await wired.officePeople.read(as('OWNER'), null, 'Asia/Jakarta')).active.length;
 
-    it('P19.13-T3 AC-6 AC-7 with no group, one row — Tidak ada group, the whole office, no ★ — its targets every leader’s default', async () => {
-      const view = await page().subgroup(as('OWNER'));
-      expect(view.rows).toHaveLength(1);
-      // 0417's eight active leaders: the Owner, the Admin, Agus, Sari, Nina, Dewi, Hendra and Putu — 3 and 6 each.
-      expect(view.rows[0]).toMatchObject({
-        group: null, head: null, manpower: await activeTotal(), leaders: 8,
-        targets: { aa: 24, rec: 48, isDefault: true }, adoption: { headDays: null },
-      });
-      expect(view.thresholds).toEqual({ okPct: 80, powerUserDays: 10, powerUserWindow: 30 });
+    it('P19.22-T5 AC-2 with no group: Total KPM is the whole office; one card, Tanpa group, holding every AB group', async () => {
+      const view = await page().subgroup(as('OWNER'), {});
+      expect(view).toMatchObject({ month: '2026-09', currentMonth: '2026-09', canWrite: true });
+      // No month asked is the office's own.
+      expect((await page().subgroup(as('OWNER'))).month).toBe('2026-09');
+      expect(view.total).toMatchObject({ groups: 0, people: await activeTotal() });
+      expect(view.groups).toHaveLength(1);
+      expect(view.groups[0].group).toBeNull();
+      // 0417's four ABs: the Owner, the Admin, Agus and Hendra — each an AB group.
+      expect(view.groups[0].abGroups.map((r) => r.ab.membershipId).sort())
+        .toEqual([office.id.OWNER, office.id.ADMIN, office.id.AGUS, office.id.PEER_AB].sort());
+      const agus = view.groups[0].abGroups.find((r) => r.ab.membershipId === office.id.AGUS)!;
+      expect(agus).toMatchObject({ ab: { role: 'ab', name: 'Agus Salim' } });
+      expect(agus.people).toBeGreaterThan(agus.leaders);
     });
 
-    it('P19.13-T3 AC-6 ADR-0253 §5 one row per group, A to Z, each with its ★; each person in their nearest leader’s group; the rows sum to the office', async () => {
-      // One group per AB, each AB its ★, and each AAB in their AB's: the rows read as the agencies did (ADR-0215 §7).
+    it('P19.22-T5 AC-2 the four drivers: MAA vs target, Pemakaian downline and leader, 1-on-1 ÷ 4,35 vs 2 × target, Rekrut YTD', async () => {
+      const view = await page().subgroup(as('OWNER'), {});
+      const agus = view.groups[0].abGroups.find((r) => r.ab.membershipId === office.id.AGUS)!.drivers;
+      // Targets set in MAPA's case: Agus 4 Active Agent and Rekrut 2 for September; carried none earlier.
+      expect(agus.maa.target).toBe(4);
+      expect(agus.oneOnOne.target).toBe(8);
+      expect(agus.rekrut.target).toBe(2);
+      expect(agus.maa.value).not.toBeNull();
+      expect(agus.maa.pct).toBe(Math.floor((200 * agus.maa.value! + 4) / 8));
+      expect(['green', 'yellow', 'red']).toContain(agus.maa.tone);
+      expect(agus.usage.downlinePct).not.toBeNull();
+      expect(agus.usage.leaderPct).not.toBeNull();
+      // Total KPM's targets are the sums of its AB groups': Agus 4 + Hendra 3.
+      expect(view.total.drivers.maa.target).toBe(7);
+      expect(view.total.drivers.oneOnOne.target).toBe(14);
+    });
+
+    it('P19.22-T5 AC-3 one card per informal group, A to Z, with its Group Leaders and AB groups; the cards sum to the office', async () => {
       const groups = [['AGUS', 'AGUS'], ['HENDRA', 'PEER_AB'], ['MAYA', 'ADMIN'], ['WILSON', 'OWNER']] as const;
-      const alsoIn: Record<string, readonly Who[]> = { AGUS: ['SARI', 'NINA', 'DEWI'], HENDRA: ['PEER_AAB'] };
       for (const [name, who] of groups) {
         const { insertedId } = await db().collection('groups').insertOne({
-          kpmId: KPM_A, name, ownerMembershipId: office.id[who], status: 'active', archivedAt: null, deletedAt: null,
+          kpmId: KPM_A, name, leaderMembershipIds: [office.id[who]], status: 'active', archivedAt: null, deletedAt: null,
         });
-        await db().collection('memberships').updateMany(
-          { _id: { $in: [who, ...(alsoIn[name] ?? [])].map((w) => new mongoose.Types.ObjectId(office.id[w])) } },
-          { $set: { groupIds: [String(insertedId)] } },
+        await db().collection('memberships').updateOne(
+          { _id: new mongoose.Types.ObjectId(office.id[who]) }, { $set: { groupIds: [String(insertedId)] } },
         );
       }
-      const view = await page().subgroup(as('OWNER'));
-      expect(view.rows.map((r) => [r.group?.name, r.head?.membershipId])).toEqual(
-        groups.map(([name, who]) => [name, office.id[who]]),
+      const view = await page().subgroup(as('OWNER'), {});
+      expect(view.groups.map((g) => [g.group?.name, g.leaders.map((l) => l.membershipId)])).toEqual(
+        groups.map(([name, who]) => [name, [office.id[who]]]),
       );
-      expect(view.rows.reduce((s, r) => s + r.manpower, 0)).toBe(await activeTotal());
-      const agus = view.rows.find((r) => r.group?.name === 'AGUS')!;
-      // Agus, Sari, Nina and Dewi, each on the template's 3 and 6.
-      expect(agus).toMatchObject({ leaders: 4, targets: { aa: 12, rec: 24, isDefault: true }, weeklyActivityTarget: 24 });
-      expect(agus.manpower).toBeGreaterThan(agus.leaders);
-      expect(agus.recruitment.ytd).toBe(3);
+      expect(view.total.groups).toBe(4);
+      expect(view.groups.reduce((sum, g) => sum + g.counts.people, 0)).toBe(await activeTotal());
+      const agus = view.groups.find((g) => g.group?.name === 'AGUS')!;
+      expect(agus.counts).toMatchObject({ abGroups: 1, leaders: 4 });
+      expect(agus.abGroups[0].ab.isGroupLeader).toBe(true);
+      // P19.13-T3 AC-9: 0555 has no group of its own and reads none of 0417's.
+      const b = await page().subgroup(office.ownerOfB(), {});
+      expect(b.groups.map((g) => [g.group, g.counts.people])).toEqual([[null, 2]]);
     });
 
-    it('P19.13-T3 AC-6 ADR-0253 §4 the Owner sets a leader’s targets for the year — an AB’s or an AAB’s — audited; the group sums them; an Agent, or another KPM’s, is 404', async () => {
-      expect(await page().setSubgroupTarget(as('OWNER'), office.id.AGUS, { aaTarget: 4, recTarget: 1 }))
-        .toEqual({ headMembershipId: office.id.AGUS, year: '2026', aaTarget: 4, recTarget: 1 });
-      await page().setSubgroupTarget(as('OWNER'), office.id.SARI, { aaTarget: 2, recTarget: 3 });
-      const agus = (await page().subgroup(as('OWNER'))).rows.find((r) => r.group?.name === 'AGUS')!;
-      // 4 + 2 + Nina's 3 + Dewi's 3; 1 + 3 + 6 + 6.
-      expect(agus.targets).toEqual({ aa: 12, rec: 16, isDefault: false });
-      expect(agus.weeklyActivityTarget).toBe(24);
-      expect(await db().collection('analyticsTargets').findOne({ kpmId: KPM_A, kind: 'subgroup', headMembershipId: office.id.SARI }))
-        .toMatchObject({ year: '2026', aaTarget: 2, recTarget: 3 });
-      expect(await db().collection('auditLog').findOne({ action: 'advanced_analytics.target_set', targetMembershipId: office.id.AGUS }))
-        .toMatchObject({ before: null, after: { kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 1 } });
-      expect(await refusal(page().setSubgroupTarget(as('OWNER'), office.id.INDAH, { aaTarget: 1, recTarget: 1 }))).toMatchObject({ status: 404 });
-      expect(await refusal(page().setSubgroupTarget(office.ownerOfB(), office.id.AGUS, { aaTarget: 1, recTarget: 1 }))).toMatchObject({ status: 404 });
-      // P19.13-T3 AC-9: 0555 has no group of its own and reads none of 0417's: its one row is itself.
-      expect((await page().subgroup(office.ownerOfB())).rows.map((r) => [r.group, r.head, r.manpower])).toEqual([[null, null, 2]]);
+    it('P19.22-T5 AC-1 the month moves everything; a month after this one is 400', async () => {
+      const aug = await page().subgroup(as('OWNER'), { month: '2026-08' });
+      expect(aug.month).toBe('2026-08');
+      // No target for August: September's are not carried backwards.
+      expect(aug.total.drivers.maa.target).toBeNull();
+      expect(await refusal(page().subgroup(as('OWNER'), { month: '2026-10' }))).toMatchObject({ status: 400 });
+    });
+
+    it('P19.22-T5 AC-4 MAA’s sheet: who is active with APE and polis, then who is not yet — everyone of the AB group once', async () => {
+      const people = (await page().subgroup(as('OWNER'), {})).groups.flatMap((g) => g.abGroups)
+        .find((r) => r.ab.membershipId === office.id.AGUS)!.people;
+      const sheet = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'maa' });
+      expect(sheet.ab).toMatchObject({ membershipId: office.id.AGUS, name: 'Agus Salim' });
+      const active = sheet.maa!.active.map((r) => r.person.membershipId);
+      const notYet = sheet.maa!.notYet.map((r) => r.person.membershipId);
+      expect(new Set([...active, ...notYet]).size).toBe(people);
+      expect(active).toContain(office.id.AGUS);
+      expect(sheet.maa!.active.find((r) => r.person.membershipId === office.id.AGUS)!.apeMinor).toBe(30 * M);
+    });
+
+    it('P19.22-T5 AC-4 the Pemakaian, 1-on-1 and Rekrut sheets each list the AB group’s people', async () => {
+      const people = (await page().subgroup(as('OWNER'), {})).groups.flatMap((g) => g.abGroups)
+        .find((r) => r.ab.membershipId === office.id.AGUS)!.people;
+      const usage = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'usage' });
+      expect(usage.usage!.notUsed.length + usage.usage!.used.length).toBe(people);
+      const stars = usage.usage!.used.map((r) => r.powerUser);
+      expect(stars).toEqual([...stars].sort((a, b) => Number(b) - Number(a)));
+      const coaching = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'coaching' });
+      expect(coaching.coaching).toHaveLength(people);
+      const ranks = coaching.coaching!.map((r) => ({ never: 0, lapsed: 1, recent: 2 })[r.status]);
+      expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+      const rekrut = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'rekrut' });
+      expect(rekrut.rekrut).toMatchObject({ potential: expect.any(Number) });
+      for (const r of rekrut.rekrut!.joined) expect(r.joinDate >= '2026-01-01').toBe(true);
+    });
+
+    it('P19.22-T5 AC-4 Rekrut’s sheet: each new hire an AB group’s member brought in this year, their day and who brought them', async () => {
+      const sari = (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.SARI) }))!;
+      const hire = (fullName: string, joinDate: string, registeredBy: string | null) => {
+        const userId = new mongoose.Types.ObjectId();
+        return {
+          user: { _id: userId, email: `${fullName.split(' ')[0].toLowerCase()}@rekrut.test`, passwordHash: 'x', fullName, status: 'active', platformRole: 'none', deletedAt: null },
+          membership: {
+            _id: new mongoose.Types.ObjectId(), kpmId: KPM_A, userId: String(userId), agentCode: `RK-${joinDate}`, agentSeq: 900,
+            leaderCode: `RK${joinDate.slice(5)}`, orgLevelId: 'x', orgLevelCode: 'AGENT', role: 'agent', leaderId: office.id.SARI,
+            ancestorIds: [...(sari.ancestorIds as string[]), office.id.SARI], depth: 3, status: 'active', joinedAs: 'new_hire',
+            joinDate, joinedAt: new Date(`${joinDate}T02:00:00Z`), registeredByMembershipId: registeredBy, testAccount: false, deletedAt: null,
+          },
+        };
+      };
+      // Sari brought Fikri in on 3 September and Gita on 2 March; Hana came by the import, brought in by nobody.
+      const hires = [hire('Fikri Hidayat', '2026-09-03', office.id.SARI), hire('Gita Maharani', '2026-03-02', office.id.SARI), hire('Hana Putri', '2026-09-05', null)];
+      await db().collection('users').insertMany(hires.map((h) => h.user));
+      await db().collection('memberships').insertMany(hires.map((h) => h.membership));
+      try {
+        const sheet = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'rekrut' });
+        // The latest first; Hana is credited to nobody, so to no AB group.
+        expect(sheet.rekrut!.joined.map((r) => [r.person.name, r.joinDate, r.recruiter])).toEqual([
+          ['Fikri Hidayat', '2026-09-03', { membershipId: office.id.SARI, name: 'Sari Puspita' }],
+          ['Gita Maharani', '2026-03-02', { membershipId: office.id.SARI, name: 'Sari Puspita' }],
+        ]);
+        expect(sheet.drivers.rekrut.value).toBe(2);
+        const view = await page().subgroup(as('OWNER'), {});
+        expect(view.groups.flatMap((g) => g.abGroups).find((r) => r.ab.membershipId === office.id.AGUS)!.drivers.rekrut.value).toBe(2);
+        expect(view.total.drivers.rekrut.value).toBe(2);
+      } finally {
+        await db().collection('memberships').deleteMany({ _id: { $in: hires.map((h) => h.membership._id) } });
+        await db().collection('users').deleteMany({ _id: { $in: hires.map((h) => h.user._id) } });
+      }
+    });
+
+    it('P19.22-T5 AC-4 Pemakaian’s sheet: of those who have not used it in 30 days, never first, then the longest since', async () => {
+      // Budi last logged on 20 July and Nina on 10 August: both outside the 30 days ending today, 14 September.
+      const day = (who: Who, localDate: string) => ({
+        kpmId: KPM_A, membershipId: office.id[who], localDate, entries: [], deletedAt: null, createdAt: REPORTING_NOW, updatedAt: REPORTING_NOW,
+      });
+      const { insertedIds } = await db().collection('activityLogs').insertMany([day('BUDI', '2026-07-20'), day('NINA', '2026-08-10')]);
+      try {
+        const { usage } = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'usage' });
+        const since = usage!.notUsed.map((r) => r.daysSince);
+        // Nobody who never logged comes after somebody who did; among those who did, the longest since first.
+        expect(since.findIndex((d) => d !== null)).toBeGreaterThanOrEqual(since.lastIndexOf(null));
+        const seen = usage!.notUsed.filter((r) => r.daysSince !== null);
+        expect(seen.map((r) => [r.person.membershipId, r.lastLoggedOn, r.daysSince]).slice(-2)).toEqual([
+          [office.id.BUDI, '2026-07-20', 56], [office.id.NINA, '2026-08-10', 35],
+        ]);
+      } finally {
+        await db().collection('activityLogs').deleteMany({ _id: { $in: Object.values(insertedIds) } });
+      }
+    });
+
+    it('P19.22-T5 AC-4 MAA’s sheet: who is not yet active this month carries the last month they were', async () => {
+      // Budi, in Agus's AB group, had an active July and nothing since.
+      const { insertedId } = await db().collection('monthlyAgentData').insertOne({
+        kpmId: KPM_A, membershipId: office.id.BUDI, month: '2026-07', agentCode: 'BUDI', deletedAt: null,
+        ...byKode({ apeMonthly: imported(12 * M), policyCountMonthly: imported(1) }),
+      });
+      try {
+        const sheet = await page().subgroupPeople(as('OWNER'), { ab: office.id.AGUS, driver: 'maa' });
+        const budi = sheet.maa!.notYet.find((r) => r.person.membershipId === office.id.BUDI)!;
+        expect(budi).toMatchObject({ lastActiveMonth: '2026-07', potensi: expect.any(Number) });
+        expect(sheet.maa!.notYet.find((r) => r.person.membershipId === office.id.NINA)!.lastActiveMonth).toBeNull();
+      } finally {
+        await db().collection('monthlyAgentData').deleteOne({ _id: insertedId });
+      }
+    });
+
+    it('P19.22-T5 AC-4 an AAB heads no AB group, and another KPM’s AB is not found: 404', async () => {
+      expect(await refusal(page().subgroupPeople(as('OWNER'), { ab: office.id.SARI, driver: 'maa' }))).toMatchObject({ status: 404 });
+      expect(await refusal(page().subgroupPeople(office.ownerOfB(), { ab: office.id.AGUS, driver: 'maa' }))).toMatchObject({ status: 404 });
+      expect(await refusal(page().subgroupPeople(as('OWNER'), { ab: office.id.B_AB, driver: 'maa' }))).toMatchObject({ status: 404 });
     });
   });
 
@@ -396,9 +788,9 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
     it('P19.5-T3 AC-12 A-R9 the survey sections are summaries; the sections answer as the Owner’s', async () => {
       const nps = await wired.adminAdvancedAnalytics.read(SUPER, KPM_A, 'nps', {}) as { audience: string; canWrite: boolean };
       expect(nps).toMatchObject({ audience: 'summary', canWrite: false });
-      const subgroup = await wired.adminAdvancedAnalytics.read(SUPER, KPM_A, 'subgroup', {}) as { rows: unknown[]; canWrite: boolean };
+      const subgroup = await wired.adminAdvancedAnalytics.read(SUPER, KPM_A, 'subgroup', {}) as { groups: unknown[]; canWrite: boolean };
       expect(subgroup.canWrite).toBe(false);
-      expect(subgroup.rows).toHaveLength(4);
+      expect(subgroup.groups).toHaveLength(4);
     });
 
     it('P19.5-T3 AC-12 an unknown KPM or section is 404; a tenant role or a view-as session is refused', async () => {
@@ -422,13 +814,12 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       expect((await page().shell(as('OWNER'))).sections.map((s) => s.slug)).toEqual(['demographics', 'nps', 'qual', 'subgroup', 'events']);
       expect(await refusal(page().quantView(as('OWNER'), {}))).toMatchObject({ status: 404 });
       expect(await refusal(page().mapa(as('OWNER'), {}))).toMatchObject({ status: 404 });
-      expect(await refusal(page().setMapaTarget(as('OWNER'), { month: '2026-09', row: 'ape', value: 1 }))).toMatchObject({ status: 404 });
-      // The template's order is the tabs' order (P19.5-T1 AC-4).
+      // P19.22-T1 AC-1 (ADR-0275 §1): the order is fixed — a template that reorders its sections moves no tab.
       await publish(3, (c) => {
         c.sections = [...c.sections].reverse();
       });
       expect((await page().shell(as('OWNER'))).sections.map((s) => s.slug))
-        .toEqual(['subgroup', 'qual', 'quant', 'nps', 'mapa', 'demographics', 'events']);
+        .toEqual(['demographics', 'mapa', 'nps', 'quant', 'qual', 'subgroup', 'events']);
       const again = await page().quantView(as('OWNER'), { periodEnd: '2026-06' });
       expect(again.metrics).toEqual(before.metrics);
       expect(again.frozenAt).toBe(before.frozenAt);
@@ -449,12 +840,15 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
 
     it('P19.5-T3 AC-12 the Super Admin’s read of a section is the Owner’s read of it, never writable; an unknown section is 404', async () => {
       const platform = RequestContext.platformRead(SUPER, KPM_A);
+      // The same figures; the upload is the Owner's alone (`canUpload`).
       expect(await page().advancedAnalyticsForOffice(platform, 'demographics', { month: '2026-08' }))
-        .toEqual(await page().demographics(as('OWNER'), { month: '2026-08' }));
+        .toEqual({ ...await page().demographics(as('OWNER'), { month: '2026-08' }), canUpload: false });
       expect(await page().advancedAnalyticsForOffice(platform, 'events', {})).toEqual(await page().eventsNps(as('OWNER'), {}));
+      // A platform read reads no steward's targets (ADR-0275 §3): the figures are the Owner's, the targets none.
       const mapa = await page().advancedAnalyticsForOffice(platform, 'mapa', {}) as MapaView;
-      expect(mapa.canWrite).toBe(false);
-      expect({ ...mapa, canWrite: true }).toEqual(await page().mapa(as('OWNER'), {}));
+      const own = await page().mapa(as('OWNER'), {});
+      expect(mapa.rows.map((r) => [r.key, r.thisMonth, r.ytd])).toEqual(own.rows.map((r) => [r.key, r.thisMonth, r.ytd]));
+      expect(mapa.rows.every((r) => r.target === null)).toBe(true);
       expect(await refusal(page().advancedAnalyticsForOffice(platform, 'members', {}))).toMatchObject({ status: 404, code: 'NOT_FOUND' });
       expect(await refusal(wired.adminAdvancedAnalytics.read(SUPER, 'not-an-id', 'shell', {}))).toMatchObject({ status: 404 });
     });
@@ -510,67 +904,11 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       }
     });
 
-    it('P19.5-T3 AC-4 a past year reads all twelve months against its own last year, none future; a year after this one is 400', async () => {
-      const past = await page().mapa(as('OWNER'), { year: '2025' });
-      expect(past).toMatchObject({ year: '2025', through: '2025-12' });
-      for (const row of past.rows) expect([row.row, row.months.some((m) => m.value.kind === 'future')]).toEqual([row.row, false]);
-      expect(await refusal(page().mapa(as('OWNER'), { year: '2027' }))).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
-    });
-
-    it('P19.5-T3 AC-4 D2’s ⓘ counts every member who joined as a new hire in the month', async () => {
-      const hires = [office.id.DIMAS, office.id.BUDI];
-      const saved = await db().collection('memberships').find({ _id: { $in: hires.map(oid) } }).project({ joinedAs: 1, joinDate: 1 }).toArray();
-      await db().collection('memberships').updateMany({ _id: { $in: hires.map(oid) } }, { $set: { joinedAs: 'new_hire', joinDate: '2026-09-03' } });
-      try {
-        const flc = (await page().mapa(as('OWNER'), {})).rows.find((r) => r.row === 'flc')!;
-        expect(flc.months.find((m) => m.month === '2026-09')).toMatchObject({ value: { kind: 'figure', value: 3 }, joined: 2 });
-      } finally {
-        for (const row of saved) {
-          const put = Object.fromEntries(['joinedAs', 'joinDate'].filter((k) => row[k] !== undefined).map((k) => [k, row[k]]));
-          const unset = Object.fromEntries(['joinedAs', 'joinDate'].filter((k) => row[k] === undefined).map((k) => [k, '']));
-          await db().collection('memberships').updateOne({ _id: row._id }, { $set: put, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
-        }
-      }
-    });
-
-    it('P19.5-T3 AC-10 the same targets again write nothing; a change to either is audited with what it replaced', async () => {
-      const entries = () => db().collection('auditLog')
-        .find({ action: 'advanced_analytics.target_set', targetMembershipId: office.id.AGUS }).sort({ _id: 1 }).toArray();
-      const before = (await entries()).length;
-      expect((await wired.analyticsTargets.subgroupFor(as('OWNER'), '2026')).get(office.id.AGUS))
-        .toEqual({ aaTarget: 4, recTarget: 1 });
-      await page().setSubgroupTarget(as('OWNER'), office.id.AGUS, { aaTarget: 4, recTarget: 1 });
-      expect(await entries()).toHaveLength(before);
-      await page().setSubgroupTarget(as('ADMIN'), office.id.AGUS, { aaTarget: 4, recTarget: 2 });
-      await page().setSubgroupTarget(as('ADMIN'), office.id.AGUS, { aaTarget: 5, recTarget: 2 });
-      expect((await entries()).slice(before).map((e) => [e.before, e.after])).toEqual([
-        [{ kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 1 }, { kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 2 }],
-        [{ kind: 'subgroup', year: '2026', aaTarget: 4, recTarget: 2 }, { kind: 'subgroup', year: '2026', aaTarget: 5, recTarget: 2 }],
-      ]);
-      expect(await db().collection('analyticsTargets').countDocuments({ kpmId: KPM_A, kind: 'subgroup', headMembershipId: office.id.AGUS, year: '2026' })).toBe(1);
-    });
-
-    it('P19.5-T3 AC-13 nobody outside a session types a target: TENANT_NO_MEMBERSHIP', async () => {
-      expect(await refusal(page().setMapaTarget(SUPER, { month: '2026-09', row: 'ape', value: 1 })))
+    it('P19.5-T3 AC-13 nobody outside a KPM reads the page or sets a target: TENANT_NO_MEMBERSHIP', async () => {
+      expect(await refusal(page().subgroup(SUPER, {}))).toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
+      expect(await refusal(page().uploadDemographics(SUPER, { file: 'Kode agen\n' }))).toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
+      expect(await refusal(wired.abGroupTargets.set(SUPER, office.id.AGUS, { month: '2026-09', activeAgentTarget: 1, rekrutTarget: 1 })))
         .toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
-      expect(await refusal(page().setSubgroupTarget(SUPER, office.id.AGUS, { aaTarget: 1, recTarget: 1 })))
-        .toMatchObject({ status: 403, code: 'TENANT_NO_MEMBERSHIP' });
-    });
-
-    it('P19.5-T3 AC-10 the MAA baseline is last year’s held months’ average: 1 for Agus’s agency, 0 — never blank — for one with nobody active', async () => {
-      expect((await page().subgroup(as('OWNER'))).rows.map((r) => r.maa.baseline)).toEqual([null, null, null, null]);
-      await db().collection('monthlyAgentData').insertOne({
-        kpmId: KPM_A, membershipId: office.id.AGUS, month: '2025-03', agentCode: 'AGUS', deletedAt: null,
-        ...byKode({ apeMonthly: imported(10 * M), policyCountMonthly: imported(1) }),
-      });
-      try {
-        const rows = (await page().subgroup(as('OWNER'))).rows;
-        expect(rows.map((r) => [r.head!.membershipId, r.maa.baseline]).sort()).toEqual([
-          [office.id.ADMIN, 0], [office.id.AGUS, 1], [office.id.OWNER, 0], [office.id.PEER_AB, 0],
-        ].sort());
-      } finally {
-        await db().collection('monthlyAgentData').deleteOne({ kpmId: KPM_A, membershipId: office.id.AGUS, month: '2025-03' });
-      }
     });
 
     it('P19.5-T3 AC-2 AC-10 an AB whose account is gone is still offered and still a row’s ★ — with no name', async () => {
@@ -579,8 +917,8 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       await db().collection('users').deleteOne({ _id: userId });
       try {
         expect((await page().demographics(as('OWNER'), {})).abs[0]).toEqual({ membershipId: office.id.PEER_AB, name: '' });
-        expect((await page().subgroup(as('OWNER'))).rows.find((r) => r.head?.membershipId === office.id.PEER_AB)!.head)
-          .toEqual({ membershipId: office.id.PEER_AB, name: '' });
+        const card = (await page().subgroup(as('OWNER'), {})).groups.find((g) => g.leaders.some((l) => l.membershipId === office.id.PEER_AB))!;
+        expect(card.leaders).toEqual([{ membershipId: office.id.PEER_AB, name: '', photoUrl: null }]);
       } finally {
         await db().collection('users').insertOne(account!);
       }
@@ -615,28 +953,10 @@ describe('P19.5-T3 the KPM’s Advanced analytics page, on real rows', () => {
       const stored = await wired.quantRunRows.ofPeriod(as('OWNER'), '2026-06');
       expect(stored!.frozenAt).not.toBeNull();
       const write = await wired.quantRunRows.writeLive(as('OWNER'), '2026-06', {
-        companyId: COMPANY, values: {} as never, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW,
+        companyId: COMPANY, values: {} as never, computedAt: REPORTING_NOW, freezesAt: REPORTING_NOW, fromMonth: '2026-01',
       });
       expect(write).toBeNull();
       expect((await wired.quantRunRows.ofPeriod(as('OWNER'), '2026-06'))!.values).toEqual(stored!.values);
-    });
-
-    it('P19.5-T3 AC-4 a target’s write that races another to the unique index is retried once; another failure is not swallowed', async () => {
-      const model = (wired.analyticsTargets as unknown as { model: mongoose.Model<unknown> }).model;
-      const spy = jest.spyOn(model, 'findOneAndUpdate')
-        .mockImplementationOnce((() => ({ exec: async () => { throw Object.assign(new Error('E11000'), { code: 11000 }); } })) as never);
-      try {
-        expect(await page().setMapaTarget(as('OWNER'), { month: '2026-10', row: 'ape', value: 170 * M }))
-          .toEqual({ month: '2026-10', row: 'ape', value: 170 * M });
-        expect(spy).toHaveBeenCalledTimes(2);
-        spy.mockReset();
-        spy.mockImplementationOnce((() => ({ exec: async () => { throw new Error('the database is gone'); } })) as never);
-        await expect(page().setMapaTarget(as('OWNER'), { month: '2026-10', row: 'ape', value: 180 * M })).rejects.toThrow('the database is gone');
-      } finally {
-        spy.mockRestore();
-      }
-      expect(await db().collection('analyticsTargets').findOne({ kpmId: KPM_A, kind: 'mapa', month: '2026-10', row: 'ape' }))
-        .toMatchObject({ value: 170 * M });
     });
 
     it('P19.5-T3 AC-1 ADR-0216 §2 NPS and Qual turned off keep their tabs while a run of theirs is open; one not running goes', async () => {

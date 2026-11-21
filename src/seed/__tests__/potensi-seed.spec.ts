@@ -72,14 +72,17 @@ describe('P19.1 the Potensi seed — a run at 10:00 on 4 November 2026 in Jakart
     expect(named('Yanti').aa.potensi).toBeGreaterThan(0);
     expect(everyone(view).some((p) => p.aa.aa && p.aa.potensi > 0)).toBe(true);
     expect(everyone(view).some((p) => p.aa.aa && p.aa.switched === 0)).toBe(true);
-    expect(named('Budi').aa).toEqual({ potensi: 0, aa: false, switched: 0 });
+    // P19.18-T3 AC-1 (ADR-0267 §2): Active Agent is the upload's — Sari's correction of Budi's month is his APE.
+    expect(named('Budi').aa).toEqual({ potensi: 0, aa: true, switched: 0 });
     expect(view.tiles.aa).toBeGreaterThan(0);
     // Grouped per unit, Agus's own card first (*changed 2026-11-07*, P19.8-T4 AC-4, MOB UI-179: it was last).
     expect(view.units[0]).toMatchObject({ kind: 'direct', leader: { name: 'Agus Prasetyo' } });
   });
 
   it('P19.1-T6 AC-13 Rekrut: a Recruit lead switched on, a rekrut linked to a membership and one not yet added', async () => {
-    expect(view.tiles.rekrut).toBe(2);
+    // P19.18-T3 AC-2 (ADR-0267 §3): the tile counts new hires who joined this month credited to Agus's people — none;
+    // Sinta's and Wahyu's *Berhasil* stay on their sheets, never in the count.
+    expect(view.tiles.rekrut).toBe(0);
     expect(named('Budi').rekrut.potensi).toBe(1);
     const indah = await potensi.person(agus, named('Indah').membershipId);
     expect(indah.kandidat).toContainEqual(expect.objectContaining({ name: 'Sdri. Sinta Rahayu', state: 'rekrut', newHireMembershipId: null }));

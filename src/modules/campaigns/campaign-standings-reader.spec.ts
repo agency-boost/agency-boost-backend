@@ -80,6 +80,18 @@ describe('the standings port (P18.2-T8 AC-8; P18.3-T2 AC-7)', () => {
     expect(read.standings.some((s) => s.membershipId === office.id.LEFT)).toBe(false);
   });
 
+  it('P19.25-T5 never counts a test account among the office’s standings (ADR-0267 §1)', async () => {
+    const memberships = mongoose.connection.db!.collection('memberships');
+    await memberships.updateOne({ _id: new mongoose.Types.ObjectId(office.id.INDAH) }, { $set: { testAccount: true } });
+    try {
+      const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'));
+      expect(read.standings.some((s) => s.membershipId === office.id.INDAH)).toBe(false);
+      expect(read.standings.some((s) => s.membershipId === office.id.RINA)).toBe(true);
+    } finally {
+      await memberships.updateOne({ _id: new mongoose.Types.ObjectId(office.id.INDAH) }, { $unset: { testAccount: '' } });
+    }
+  });
+
   it('P18.2-T8 AC-8 narrows to the codes asked for', async () => {
     const read = await wired.campaignStandingsReader.ofOffice(office.as('OWNER'), { codes: ['SEPT_PUSH'] });
     expect(read.campaigns.map((c) => c.code)).toEqual(['SEPT_PUSH']);
@@ -225,6 +237,8 @@ describe('the standings port (P18.2-T8 AC-8; P18.3-T2 AC-7)', () => {
       'domain/metrics/campaign-window.ts',
       'modules/campaigns/campaign-evaluation.ts',
       'modules/campaigns/campaign.repository.ts',
+      // Who is counted: never a test account (ADR-0267 §1; P19.25-T5) — one clause, no reader of `users`.
+      'modules/org/counted-members.ts',
       'modules/org/membership.repository.ts',
       // The office's zone, which the window's months are read in (M1), read once and handed to the evaluation.
       'modules/tenants/tenant-day.service.ts',

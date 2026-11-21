@@ -214,6 +214,28 @@ export class LeadReadings {
   }
 
   /**
+   * **Each member's open leads' next-action days, for many members at once** (P19.19-T3 AC-2; ADR-0272 §6;
+   * `MANAGED_LEADS_RATE`): the KPM Overview's *Leads Mgmt* card asks whether every open lead a member owns carries a next
+   * action that is not overdue (`leadsManaged`, the two flags `leadFlags` raises). Open is `openOf`'s rule — no outcome,
+   * not deleted. **One read** over the `{kpmId, ownerMembershipId, deletedAt}` index, two fields; every member asked
+   * about gets an entry, empty where they hold none. Days, never a lead.
+   */
+  async openNextActionsOfMany(
+    ctx: RequestContext, membershipIds: readonly string[],
+  ): Promise<Map<string, (string | null)[]>> {
+    const ids = [...new Set(membershipIds)];
+    const out = new Map<string, (string | null)[]>(ids.map((id) => [id, []]));
+    if (ids.length === 0) return out;
+    const rows = await this.leads.find(
+      ctx,
+      { ownerMembershipId: { $in: ids }, outcome: null },
+      { projection: { ownerMembershipId: 1, nextActionDate: 1 } },
+    );
+    for (const row of rows) out.get(row.ownerMembershipId)?.push(row.nextActionDate ?? null);
+    return out;
+  }
+
+  /**
    * **Each member's four lead counts, for many members at once** (Phase 15, D-leads): the Unit Dashboard's
    * *Leads* column — open sales leads, those promised for the office's month, `RECRUITMENT_PIPELINE_NOW`
    * and the recruitment leads promised for the month — by **`LeadService.summary`'s rules** over one owner
@@ -321,6 +343,44 @@ export class LeadReadings {
     }
     for (const list of out.values()) list.sort(byClosedAt);
     return out;
+  }
+
+  /**
+   * **Each member's leads registered within a window, by type** (P19.18-T1 AC-8; ADR-0271 §5): the Unit Dashboard row's
+   * *Leads sales n · Leads rekrut n* and the KPM Owner's person card — **every lead of theirs registered in the period**
+   * (`dateRegistered`, else the moment it was written), whatever became of it since; a lead with no type on neither.
+   * The window is office days, inclusive, turned into instants in the office's zone (invariant §9). One read for the
+   * whole list on the `(kpmId, ownerMembershipId, deletedAt, dateRegistered)` index; counts, never a lead. Every member
+   * asked about gets an entry, zeros where they hold none.
+   */
+  async registeredInMany(
+    ctx: RequestContext, membershipIds: readonly string[], window: { from: string; to: string }, timezone: string,
+  ): Promise<Map<string, { sales: number; recruitment: number }>> {
+    const ids = [...new Set(membershipIds)];
+    const out = new Map(ids.map((id) => [id, { sales: 0, recruitment: 0 }]));
+    if (ids.length === 0) return out;
+    const range = { $gte: this.clock.startOfLocalDay(timezone, window.from), $lt: this.clock.endOfLocalDay(timezone, window.to) };
+    const rows = await this.leads.find(ctx, {
+      ownerMembershipId: { $in: ids },
+      type: { $in: ['sales', 'recruitment'] },
+      $or: [{ dateRegistered: range }, { dateRegistered: null, createdAt: range }],
+    }, { projection: { ownerMembershipId: 1, type: 1 } });
+    for (const row of rows) {
+      const counts = out.get(row.ownerMembershipId)!;
+      if (row.type === 'sales') counts.sales += 1;
+      else counts.recruitment += 1;
+    }
+    return out;
+  }
+
+  /**
+   * `potensiOfMany` for the office's month by its key (P19.18-T1 AC-9): the month's bounds in the office's zone, through
+   * this module's clock, for a caller that holds the office's day and no clock.
+   */
+  async potensiOfManyIn(
+    ctx: RequestContext, membershipIds: readonly string[], day: { month: string; timezone: string },
+  ): Promise<Map<string, PersonPotensi>> {
+    return this.potensiOfMany(ctx, membershipIds, { month: day.month, ...this.clock.monthBounds(day.timezone, day.month) });
   }
 
   /**

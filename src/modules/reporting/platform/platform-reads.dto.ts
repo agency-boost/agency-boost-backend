@@ -3,8 +3,9 @@ import { Transform, Type } from 'class-transformer';
 import { IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 import { field } from '@/common/validation/violations';
 import {
-  KPM_COMPARISON_SORTS, PLATFORM_ACCOUNT_KPM_FILTERS, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES,
-  type PlatformAccountKpmFilter, type PlatformMemberRole, type PlatformMemberStatus,
+  PLATFORM_ACCOUNT_KPM_FILTERS, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES,
+  PLATFORM_MEMBER_TEST_FILTERS,
+  type PlatformAccountKpmFilter, type PlatformMemberRole, type PlatformMemberStatus, type PlatformMemberTestFilter,
 } from '@/domain/constants';
 import { PLATFORM_READS_REFUSALS } from './platform-reads.messages';
 
@@ -55,6 +56,15 @@ export class PlatformMembersQueryDto {
   @IsInt({ message: field(SAY.pageShape) })
   @Min(1, { message: field(SAY.pageShape) })
   page?: number;
+
+  @ApiPropertyOptional({
+    enum: PLATFORM_MEMBER_TEST_FILTERS,
+    description: '*Anggota*\'s *Akun tes* (OD-421): `only` lists the test accounts alone. Absent, test '
+      + 'accounts are in no row and no count (ADR-0267 §1).',
+  })
+  @IsOptional()
+  @IsIn(PLATFORM_MEMBER_TEST_FILTERS, { message: field(SAY.testAccountShape) })
+  testAccount?: PlatformMemberTestFilter;
 }
 
 /**
@@ -88,32 +98,6 @@ export class PlatformAccountsQueryDto {
   page?: number;
 }
 
-/** `GET /admin/analytics/kpms` (ADR-0207 §2, §7): filterable by company, sortable, no benchmark. */
-export class KpmComparisonQueryDto {
-  @ApiPropertyOptional({ description: 'One company’s KPMs.' })
-  @IsOptional()
-  @IsString()
-  @IsMongoId({ message: field(SAY.idShape) })
-  companyId?: string;
-
-  @ApiPropertyOptional({
-    example: '-production',
-    description: `A column — ${KPM_COMPARISON_SORTS.join(', ')} — ascending, or after \`-\` descending. A KPM with no `
-      + 'figure for the column is last either way. `kpm` when absent.',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  sort?: string;
-
-  @ApiPropertyOptional({ minimum: 1, default: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt({ message: field(SAY.pageShape) })
-  @Min(1, { message: field(SAY.pageShape) })
-  page?: number;
-}
-
 /** `GET /admin/companies/:companyId/kpms` (ADR-0207 §2): the month, the latest held when absent. */
 export class CompanyKpmsQueryDto {
   @ApiPropertyOptional({ example: '2026-10', description: 'The month, `YYYY-MM`; the latest any KPM uploaded when absent.' })
@@ -122,6 +106,3 @@ export class CompanyKpmsQueryDto {
   @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: field(SAY.monthShape) })
   month?: string;
 }
-
-/** `GET /admin/tenants/:id/data`: no parameter. */
-export class KpmDataQueryDto {}

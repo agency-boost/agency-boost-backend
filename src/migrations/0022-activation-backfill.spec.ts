@@ -138,20 +138,24 @@ describe('0022 — the activation backfill (OD-119)', () => {
       const emails = (await col('users').find({ _id: { $in: holders.map((m) => new mongoose.Types.ObjectId(m.userId as string)) } }).toArray())
         .map((u) => u.email).sort();
       expect(emails).toEqual([
-        'agent@kpm0555.test', 'budi@kpm0417.test', 'dimas@kpm0417.test', 'indah@kpm0417.test',
+        'agent@kpm0555.test', 'budi@kpm0417.test', 'dimas@kpm0417.test',
+        // P19.18's Hilmy, this month's new hire under Maya (`whole-office-fixture.ts`).
+        'hilmy@kpm0417.test', 'indah@kpm0417.test',
         // P18.8-T6's Lukman (`activation-3m-fixture.ts`); Tari, marked left and so removed, has none here.
         'lukman@kpm0417.test', 'novi@kpm0417.test',
         // Yanti's second membership: her first, removed, has none.
         'removed@kpm0417.test', 'rina@kpm0417.test', 'siti@kpm0417.test', 'wahyu@kpm0417.test',
+        // P19.18's Zahra, the other (`whole-office-fixture.ts`).
+        'zahra@kpm0417.test',
       ]);
       // Sari, Dewi and Arief joined as Agents and were promoted: the backfill reads the current rung.
       expect(holders.every((m) => m.role === 'agent' && m.status === 'active')).toBe(true);
       // P13.2-T6: office 0701 started Empty, so its Agent, a week in — a new hire by her leader's code — has no
       // checklist to be pinned to.
-      expect(first).toMatchObject({ created: 10, alreadyHad: 0, noChecklist: 1 });
+      expect(first).toMatchObject({ created: 12, alreadyHad: 0, noChecklist: 1 });
 
-      expect(await up(db(), NOW)).toMatchObject({ created: 0, alreadyHad: 10 });
-      expect(await col('activationProgress').countDocuments({})).toBe(10);
+      expect(await up(db(), NOW)).toMatchObject({ created: 0, alreadyHad: 12 });
+      expect(await col('activationProgress').countDocuments({})).toBe(12);
     });
   });
 });

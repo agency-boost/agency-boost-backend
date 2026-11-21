@@ -70,17 +70,25 @@ describe('the Unit Dashboard’s UI V1 figures', () => {
       { membershipId: 'tari', leaderId: 'lukas', role: 'agent' },
     ];
 
-    it('UI-001 the Unit is the head and their direct agents who lead nobody, A to Z', () => {
-      expect(rosterScopes('ab', members, (id) => names[id]).unit).toEqual(['ab', 'dimas', 'indah']);
+    it('P19.18-T1 AC-6 the Unit is DIRECT_UNIT: the head, then an AAB with no team, then the direct agents who lead nobody', () => {
+      // ADR-0271 §2: Dewi, an AAB with nobody under her, sits in the head's unit after the head — AB → AAB → agents.
+      expect(rosterScopes('ab', members, (id) => names[id]).unit).toEqual(['ab', 'dewi', 'dimas', 'indah']);
     });
 
-    it('UI-001 the Group is the Unit, then each unit below — its head, its members, the units nested in it — A to Z', () => {
+    it('P19.18-T1 AC-6 the Group is the Unit, then each unit below — its head, its members, the units nested in it — AB → AAB → agents, then A to Z', () => {
       expect(rosterScopes('ab', members, (id) => names[id]).group).toEqual([
-        'ab', 'dimas', 'indah',
-        'dewi',
-        'lukas', 'tari',
+        'ab', 'dewi', 'dimas', 'indah',
+        // Sari, an AAB, before Lukas, an agent who leads (`classRank`), though L comes before S.
         'sari', 'rina', 'nina', 'dodi',
+        'lukas', 'tari',
       ]);
+    });
+
+    it('P19.18-T1 AC-6 an AB directly below the head is always a unit of their own, leading nobody or not', () => {
+      const withAb = [...members, { membershipId: 'maya', leaderId: 'ab', role: 'ab' }];
+      const scopes = rosterScopes('ab', withAb, (id) => names[id] ?? 'Maya');
+      expect(scopes.unit).not.toContain('maya');
+      expect(scopes.group.indexOf('maya')).toBe(4);
     });
 
     it('UI-001 a head who leads nobody is a Unit and a Group of one', () => {

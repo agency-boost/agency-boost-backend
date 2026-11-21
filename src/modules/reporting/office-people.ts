@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { isOfficeSteward } from '@/common/auth/office-steward';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import type { MembershipDocument, MembershipStatus } from '@/modules/org/membership.schema';
@@ -69,8 +71,14 @@ export class OfficePeople {
     return companyId ? this.orgLevels.list(ctx, companyId) : [];
   }
 
-  /** The caller's membership, or `TENANT_NO_MEMBERSHIP`: a Super Admin outside a support session reads no office. */
-  static require(ctx: RequestContext): string {
+  /**
+   * The caller's membership, or `TENANT_NO_MEMBERSHIP`: a Super Admin outside a support session reads no office.
+   *
+   * **A Super Admin inside a KPM reads it as its Owner** (ADR-0268 §3; P19.17 F2) and is nobody in it: answered `null`,
+   * the reader who is no member — what a platform read already passes these reports as `me`.
+   */
+  static require(ctx: RequestContext): string | null {
+    if (ctx.isSuperAdminInKpm) return null;
     if (!ctx.membershipId || !ctx.kpmId) throw new NoMembershipException();
     return ctx.membershipId;
   }
@@ -93,10 +101,14 @@ export class OfficePeople {
     return ctx.kpmId;
   }
 
-  static requireAnalyticsReader(ctx: RequestContext): string {
+  /*
+   * *Since ADR-0268 §1, §3 (P19.17 F2):* **the KPM's stewards** (`office-steward.ts`) — the Super Admin inside the KPM,
+   * the Owner, an Admin, a core leader — one rule with every other page of KPM, so the four cannot drift apart. `me` is
+   * `null` for the Super Admin, who is nobody in the KPM.
+   */
+  static requireAnalyticsReader(ctx: RequestContext): string | null {
     const me = OfficePeople.require(ctx);
-    const office = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;
-    if (!office && !ctx.isCoreLeader) throw new NotFoundException('KPM analytics');
+    if (!isOfficeSteward(ctx)) throw new NotFoundException('KPM analytics');
     return me;
   }
 
@@ -131,9 +143,10 @@ export class OfficePeople {
     const [rows, zone] = await Promise.all([
       this.memberships.find(
         ctx,
-        leaversSince === null
+        // ADR-0267 §1: a test account is never one of the office's people, in any count or list read from here.
+        withoutTestAccounts(leaversSince === null
           ? { status: 'active' }
-          : { $or: [{ status: 'active' }, { status: 'removed', removedAt: { $gte: leaversSince } }] },
+          : { $or: [{ status: 'active' }, { status: 'removed', removedAt: { $gte: leaversSince } }] }),
         {
           projection: {
             orgLevelCode: 1, role: 1, leaderId: 1, ancestorIds: 1, status: 1, joinedAt: 1, joinDate: 1, removedAt: 1, userId: 1,

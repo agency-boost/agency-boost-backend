@@ -13,7 +13,7 @@ import { DomainException, InvalidRequestException } from '@/common/errors/domain
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditReadService } from '@/modules/audit/audit-read.service';
 import { AuditQueryDto } from '@/modules/audit/audit-query.dto';
-import { ImpersonateDto } from '@/modules/auth/auth.dto';
+import { ImpersonateDto, ImpersonationHandoffDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import {
   AccountSearchQueryDto,
@@ -575,22 +575,8 @@ export class AdminController {
     return this.tenants.assignOwner(ctx, id, dto);
   }
 
-  @Post('tenants/:id/owner/invitation')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermission('kpm:assign_owner')
-  @ApiOperation({
-    summary: 'Send the Owner their invitation again',
-    description:
-      '*Kirim ulang undangan* on the Owner\'s card (ADR-0212 §2): a new one-time link to choose a password, emailed to '
-      + 'the Owner (`password_reset`, alive `ROSTER_INVITATION.TTL_DAYS`), every older link revoked, `invitedAt` '
-      + 'stamped, audited `kpm.owner_invited` with `resent: true`. Nothing by WhatsApp or SMS. `409 '
-      + 'TENANT_OWNER_NOT_INVITABLE` — `details.reason` `no_owner`, `no_email` (an Owner named without one) or '
-      + '`signed_in`; `429 AUTH_RATE_LIMITED` past three an hour for the KPM; `404` for an unknown KPM. Nothing is sent '
-      + 'on a refusal. Answers the office as the list reads it.',
-  })
-  async resendOwnerInvitation(@Ctx() ctx: RequestContext, @Param('id') id: string) {
-    return this.tenants.resendOwnerInvitation(ctx, id);
-  }
+  // `POST tenants/:id/owner/invitation`, *Kirim ulang undangan* by email, is retired (P19.23-T2; ADR-0277 §3; OD-420): the
+  // Owner is invited by WhatsApp (`owner-invites.controller.ts`), and the route answers 404 like any that does not exist.
 
   @Patch('tenants/:id/company')
   @RequirePermission('kpm:update_company_tag')
@@ -720,7 +706,7 @@ export class AdminController {
     @Param('id') id: string,
     @Body() dto: RosterImportDto,
   ) {
-    return this.roster.commit(ctx, id, dto.rows, dto.invite ?? true);
+    return this.roster.commit(ctx, id, dto.rows, dto.invite ?? true, dto.fileName ?? null);
   }
 
   /** The file's form, for the two routes that take one. */
@@ -837,6 +823,25 @@ export class AdminController {
     return { status: 'ended' };
   }
 
+  /** Declared before `impersonate/:userId` for the reason `impersonate/end` gives. */
+  @Post('impersonate/handoff')
+  @RequirePermission('impersonation:start')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '*Lihat sebagai*: the new window takes up its session',
+    description:
+      'ADR-0277. `{ code }` — the `handoffCode` a start with `handoff: true` answered — redeemed once, '
+      + 'within `IMPERSONATION_HANDOFF_SECONDS` of the start, by **the Super Admin who started it** (the window restores '
+      + 'their session from the refresh cookie first). Answers `{ accessToken, expiresAt, sessionId, readOnly: true }`, '
+      + 'the token minted now for the rest of the session\'s hour, and records `impersonation.window_opened`. An unknown '
+      + 'code, or another Super Admin\'s, is `404`; one used, expired, or whose session has ended is `410 '
+      + 'IMPERSONATION_HANDOFF_SPENT` (`details.reason` `used` · `expired` · `ended`); a malformed one `400`. Every '
+      + 'tenant role is `403 PERM_DENIED`; from inside a support session `403 IMPERSONATION_READ_ONLY`.',
+  })
+  async redeemImpersonationHandoff(@Ctx() ctx: RequestContext, @Body() dto: ImpersonationHandoffDto) {
+    return this.impersonation.redeemHandoff(ctx, dto.code);
+  }
+
   @Post('impersonate/:userId')
   @RequirePermission('impersonation:start')
   @ApiOperation({
@@ -849,13 +854,19 @@ export class AdminController {
       '`403 IMPERSONATION_READ_ONLY`, but `POST /admin/impersonate/end`. `purpose` is `support` or left ' +
       'out; `setup` is `400 VALIDATION_FAILED` naming `purpose`, with nothing written. The answer is ' +
       '`{ accessToken, expiresAt, sessionId, readOnly: true }`. A second start as the same person within one ' +
-      'second would sign the same token, and is refused (`409 IMPERSONATION_JUST_STARTED`) with nothing written.',
+      'second would sign the same token, and is refused (`409 IMPERSONATION_JUST_STARTED`) with nothing written. ' +
+      '**`handoff: true`** (*Lihat sebagai*\'s *Buka jendela baru*; ADR-0277): the same session, '
+      + 'checked, recorded and announced alike, answered `{ handoffCode, handoffExpiresAt, expiresAt, sessionId, '
+      + 'readOnly: true }` with **no token** — the new window redeems the code at `POST /admin/impersonate/handoff`.',
   })
   async impersonate(
     @Ctx() ctx: RequestContext,
     @Param('userId') userId: string,
     @Body() dto: ImpersonateDto,
   ) {
+    if (dto.handoff === true) {
+      return this.impersonation.startForWindow(ctx, userId, dto.reason, dto.durationMinutes, dto.purpose);
+    }
     return this.impersonation.start(ctx, userId, dto.reason, dto.durationMinutes, dto.purpose);
   }
 

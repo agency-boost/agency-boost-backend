@@ -118,17 +118,27 @@ describe('joining an ended office (P13.2 exit review, S1)', () => {
 
   const kept = { 'subscription.keepActiveAfterEnd': true };
 
-  describe('an office whose end date has passed, not kept active', () => {
+  /*
+   * *Changed 2026-11-20 (P19.23-T5 AC-5; ADR-0279 §5):* an office is refused only once its seven days of grace have
+   * passed — ended on 30 September, it is past them on 8 October; ended on the 7th, it is still in them and works.
+   */
+  describe('an office whose end date and grace have passed, not kept active', () => {
     it('is not offered by the directory search, as a suspended office is not', async () => {
-      await office('0601', '2026-10-07');
+      await office('0601', '2026-09-30');
       await office('0602', '2026-10-07', { status: 'suspended' });
       await office('0603', '2026-10-08');
-      expect((await onboarding.searchKpms()).map((k) => k.code)).toEqual(['0603']);
+      await office('0604', '2026-10-07');
+      expect((await onboarding.searchKpms()).map((k) => k.code)).toEqual(['0603', '0604']);
       expect(await onboarding.searchKpms('0601')).toEqual([]);
     });
 
+    it('P19.23-T5 AC-5 in its seven days of grace it is offered and joined as any other office', async () => {
+      const inGrace = await office('0601', '2026-10-01');
+      await expect(onboarding.registerKpm(await newcomer(), inGrace)).resolves.toMatchObject({ status: 'pending' });
+    });
+
     it('refuses the join, 404, the answer a suspended office gives', async () => {
-      const ended = await office('0601', '2026-10-07');
+      const ended = await office('0601', '2026-09-30');
       const suspended = await office('0602', null, { status: 'suspended' });
       const refusal = await onboarding.registerKpm(await newcomer(), ended).catch((e) => e);
       const suspendedRefusal = await onboarding.registerKpm(await newcomer(), suspended).catch((e) => e);
@@ -141,8 +151,8 @@ describe('joining an ended office (P13.2 exit review, S1)', () => {
       const code = await leaderCodeIn(ended);
       const suspended = await office('0602', null);
       const suspendedCode = await leaderCodeIn(suspended);
-      // Ended from today in Jakarta; suspended the same day.
-      await kpms.updateOne({ _id: ended }, { $set: { 'subscription.endDate': '2026-10-07' } });
+      // Past its grace today in Jakarta; suspended the same day.
+      await kpms.updateOne({ _id: ended }, { $set: { 'subscription.endDate': '2026-09-30' } });
       await kpms.updateOne({ _id: suspended }, { $set: { status: 'suspended' } });
 
       const refusal = await leaderCodes.redeem(await newcomer(), code).catch((e) => e);
@@ -162,19 +172,19 @@ describe('joining an ended office (P13.2 exit review, S1)', () => {
 
   describe('the directory’s fifty (exit review)', () => {
     it('ended offices sorted ahead never hide an active one', async () => {
-      // Sixty ended long ago and two ended yesterday in Jakarta, all sorting before the three that work.
-      for (let i = 0; i < 60; i += 1) await office(`0${100 + i}`, '2026-09-30');
-      await office('0300', '2026-10-07');
-      await office('0301', '2026-10-07');
+      // Sixty ended long ago and two just past their grace in Jakarta, all sorting before the three that work.
+      for (let i = 0; i < 60; i += 1) await office(`0${100 + i}`, '2026-09-01');
+      await office('0300', '2026-09-30');
+      await office('0301', '2026-09-30');
       await office('0900', '2026-10-08');
       await office('0901', null);
-      await office('0902', '2026-09-30', kept);
+      await office('0902', '2026-09-01', kept);
 
       expect((await onboarding.searchKpms()).map((k) => k.code)).toEqual(['0900', '0901', '0902']);
     });
 
     it('still answers fifty, and no more, when more than fifty work', async () => {
-      await office('0000', '2026-09-30');
+      await office('0000', '2026-09-01');
       for (let i = 0; i < 55; i += 1) await office(`0${100 + i}`, null);
       const found = await onboarding.searchKpms();
       expect(found).toHaveLength(50);

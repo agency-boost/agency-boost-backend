@@ -72,13 +72,22 @@ describe('Phase 18.3 the compliance seed — a run at 10:00 on 10 October 2026 i
     for (const who of ['satria', 'oscar', 'pandu', 'raka']) expect(await sales(`${who}@kpm0417.test`)).toEqual({ done: 0, inProgress: 0 });
   });
 
-  it('P18.3-T3 AC-1 the Training chip’s count moves from two to three: Agus, Siti and Arini have done everything offered', async () => {
+  it('P18.3-T3 AC-1 the Training chip’s count moves from two to three: Agus, Siti and Arini have done all of Sales', async () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     const active = await col('memberships').find({ kpmId: kpm0417, status: 'active' }).toArray();
     const views = await wired.trainingReadings.ofMany(owner, active.map((m) => String(m._id)));
     const names = await new MemberNames(wired.memberships, wired.users as never).byMembershipId(owner, [...views.keys()]);
-    const all = [...views].filter(([, v]) => v.allOfferedDone).map(([id]) => names.get(id)).sort();
-    expect(all).toEqual(['Agus Prasetyo', 'Arini Kusuma', 'Siti Rahmawati'].sort());
+    /*
+     * *Amended 2026-11-20 (P19.25-T4, ADR-0282):* the catalog also offers the training tree's modules under *Produk*,
+     * *Recruitment*, *Manajemen tim* and *Soft skills*, some of which nobody has begun (`training-tree-fixture.ts`) — so
+     * nobody has done everything offered, and the three are the ones who have done every Sales module.
+     */
+    expect([...views].filter(([, v]) => v.allOfferedDone).map(([id]) => names.get(id))).toEqual([]);
+    const sales = [...views].filter(([, v]) => {
+      const category = v.categories.find((c) => c.code === 'SALES');
+      return category !== undefined && category.total > 0 && category.done === category.total;
+    }).map(([id]) => names.get(id)).sort();
+    expect(sales).toEqual(['Agus Prasetyo', 'Arini Kusuma', 'Siti Rahmawati'].sort());
   });
 
   it('P18.3-T3 AC-1 D-seed: Budi’s final standing reads Achieved, set by the Owner with the reason — the frozen Not met kept', async () => {

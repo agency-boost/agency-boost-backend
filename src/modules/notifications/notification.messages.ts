@@ -286,6 +286,8 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     en: `${company}. An announcement: nothing to do. New proposals use the new rates.`,
     id: `${company}. Pengumuman, tidak perlu tindakan. Proposal baru memakai tarif ini.`,
   }),
+  // P19.23-T6 AC-4 (ADR-0279): *Pengumuman*'s inbox line; its detail is the message as the Super Admin wrote it.
+  platformAnnouncement: { en: 'Announcement from AgencyBoost', id: 'Pengumuman dari AgencyBoost' },
   somethingHappened: { en: 'Something happened', id: 'Ada sesuatu yang terjadi' },
 });
 

@@ -1,37 +1,34 @@
-import { Body, Controller, Get, Put, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
-import {
-  KpmAnalyticsQueryDto, KpmOverviewQueryDto, NotLoggedQueryDto, PlatformAnalyticsQueryDto, SetRecruitTargetDto,
-} from './reporting.dto';
-import {
-  KpmAnalyticsDto, KpmOverviewDto, NotLoggedDto, PlatformAnalyticsDto, RecruitTargetDto,
-} from './reporting.response.dto';
-import { KpmAnalyticsService } from './kpm-analytics.service';
+import { KpmOverviewQueryDto, OverviewPerformanceQueryDto } from './reporting.dto';
+import { KpmOverviewDto, OverviewPerformanceDto } from './reporting.response.dto';
 import { KpmOverviewService } from './kpm-overview.service';
-import { PlatformAnalyticsService } from './platform-analytics.service';
 
 /** A refusal the derived descriptions cannot know, in the shared envelope. */
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
-/** An empty query DTO derives no 400, so the refusal of a parameter of any name is written here. */
-const NO_PARAMETERS = refusal(
-  400,
-  '`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, and `details` names it.',
+/** Who reads the Overview (ADR-0268 §1): the KPM's stewards. Every other member is refused by the route's grant. */
+const NOT_A_STEWARD = refusal(
+  403,
+  '`TENANT_NO_MEMBERSHIP` — a Super Admin who has not entered a KPM. `PERM_DENIED` — an AB or an AAB who is not a core '
+  + 'leader, or an Agent.',
 );
 
-/** Outside a support session a Super Admin is in no agency, and the agency's reads have none to answer for. */
-const NO_OFFICE = refusal(
-  403,
-  '`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — '
-  + 'a role without the permission: every field role.',
+/** `?group=` names no group of this office. */
+const NO_SUCH_GROUP = refusal(
+  404,
+  '`NOT_FOUND` — `group` is not one of this office’s live informal groups (nor `none`): unknown, archived or another '
+  + 'office’s, indistinguishable.',
 );
 
 /**
- * **The KPM Overview** (`functional/kpm-analytics.md`, the Data contract): the page the Owner and the Admin land
- * on, its not-logged list, and the recruitment target. **Literal paths only**, so none shadows another.
+ * **The KPM Overview, second version** (P19.19; ADR-0272; `functional/kpm-overview.md`, the Data contract): the page the
+ * Owner, the Admins and core leaders land on, and its *Performa vs target*. **Literal paths only**, so none shadows
+ * another; `GET /kpm/overview/compliance` is `ComplianceController`'s. Until P19.19 this also served the first version's
+ * `not-logged` list and `PUT recruit-target`; both are gone (ADR-0272 §2, §7).
  */
 @ApiTags('kpm-reporting')
 @ApiBearerAuth()
@@ -42,130 +39,46 @@ export class KpmOverviewController {
   @Get()
   @RequirePermission('kpm_overview:read')
   @ApiOperation({
-    summary: 'The agency’s overview',
+    summary: 'The KPM’s overview: usage, coaching and production',
     description:
-      'Five sections, every figure computed on the read from the agency’s own records through the function '
-      + 'that already computes it: team composition (the headcount, new this month, one tile per rung of the '
-      + 'company’s ladder); engagement (members who logged an activity this calendar month, beside last month '
-      + 'to the same day, and over the last 7 days); coaching coverage over 7 and 30 days with '
-      + 'each AB’s own coaching, lowest first; the recruitment pipeline as counts, with the month’s target; and '
-      + 'production this year against the sum of the members’ goals, its projection, and every AB agency, '
-      + 'furthest behind first. A figure without data is `null`, never 0. Not paginated. Each leader on the '
-      + 'coaching ranking is recorded as read.',
+      'Over the KPM, or one informal group (`group`, `none` for *Tanpa group*), test accounts never counted: **1** '
+      + '*Pemakaian AgencyBoost* — who logged an activity in the last 30 days, of everyone, the leaders (AB, AAB) and the '
+      + 'agents, and one row per informal group; **2** and **3** — every person in the tree’s order (informal group → AB → '
+      + 'AAB → agents) with their usage and coaching status, photo and WhatsApp number; **6** *Produksi 6 bulan* — the '
+      + 'month’s APE over the people for the six months ending with this one, `null` for a month without a file. And the '
+      + 'filter’s choices, a new KPM’s setup card and what waits on the settings pages. Computed on the read, not '
+      + 'paginated. Each person listed is recorded as read.',
   })
   @ApiResponse({ status: 200, type: KpmOverviewDto })
-  @ApiResponse(NO_PARAMETERS)
-  @ApiResponse(NO_OFFICE)
-  async read(@Ctx() ctx: RequestContext, @Query() _query: KpmOverviewQueryDto) {
-    return this.overview.read(ctx);
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — `group` empty or over-long, or a parameter of any other name.'))
+  @ApiResponse(NOT_A_STEWARD)
+  @ApiResponse(NO_SUCH_GROUP)
+  async read(@Ctx() ctx: RequestContext, @Query() query: KpmOverviewQueryDto) {
+    return this.overview.read(ctx, query);
   }
 
-  @Get('not-logged')
+  @Get('performance')
   @RequirePermission('kpm_overview:read')
   @ApiOperation({
-    summary: 'Who has not logged lately',
+    summary: 'Performa vs target for one month',
     description:
-      'How many members have no day logged in the last 7 days, and the first three of them — never-logged '
-      + 'first, then the longest silent: name, rung, their latest day logged and the days since. Read when *View '
-      + 'who hasn’t logged* is opened; the three listed are recorded as read, the rest counted are not.',
+      'The month’s targets as `GET /kpm/ab-group-targets` reads them — *Total KPM*, each informal group’s total, every AB '
+      + 'group — each with what was achieved: the month’s APE in the upload against everyone’s Goal Setting ÷ 12, *Active '
+      + 'Agent* (APE or a policy in the upload) and *Rekrut* (new hires who joined in the month, credited to whoever '
+      + 'registered them). APE and Active Agent are `null` while the month is not uploaded. *Total KPM* counts every member '
+      + 'and every recruit of the office. `group` keeps one informal group (`none`: *Tanpa group*). Nothing is recorded.',
   })
-  @ApiResponse({ status: 200, type: NotLoggedDto })
-  @ApiResponse(NO_PARAMETERS)
-  @ApiResponse(NO_OFFICE)
-  async notLogged(@Ctx() ctx: RequestContext, @Query() _query: NotLoggedQueryDto) {
-    return this.overview.notLogged(ctx);
-  }
-
-  @Put('recruit-target')
-  @RequirePermission('kpm_overview:set_recruit_target')
-  @ApiOperation({
-    summary: 'Set this month’s recruitment target',
-    description:
-      'The agency’s target for its current month: stored, and read by every later month that sets none. '
-      + 'Audited with the value before and after. Another month is refused. The same target again changes '
-      + 'nothing.',
-  })
-  @ApiResponse({ status: 200, type: RecruitTargetDto })
-  @ApiResponse(refusal(
-    400,
-    '`VALIDATION_FAILED` — `month` is not the agency’s current month (`details.month` names it), or `target` '
-    + 'is not a whole number from 0.',
-  ))
-  async setRecruitTarget(@Ctx() ctx: RequestContext, @Body() body: SetRecruitTargetDto) {
-    return this.overview.setRecruitTarget(ctx, body);
+  @ApiResponse({ status: 200, type: OverviewPerformanceDto })
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — `month` not `YYYY-MM`, `group` empty or over-long, or another parameter.'))
+  @ApiResponse(NOT_A_STEWARD)
+  @ApiResponse(NO_SUCH_GROUP)
+  @ApiResponse(refusal(422, '`AB_GROUP_TARGET_MONTH_CLOSED` — a month before January 2024 or more than a year ahead.'))
+  async performance(@Ctx() ctx: RequestContext, @Query() query: OverviewPerformanceQueryDto) {
+    return this.overview.performance(ctx, query);
   }
 }
 
-/**
- * Who reads KPM analytics (ADR-0159 §2): the Owner, the Admins and the office's **Core Leaders**. A leader who is not
- * one holds the grant and is answered 404, so nothing tells them there is a reading behind it.
+/*
+ * ***Cross-platform analytics*** (`GET /admin/analytics`, `PlatformAnalyticsController`) is retired by P19.23 (ADR-0277 §1):
+ * the console's Dashboard reads adoption per KPM (`GET /admin/dashboard`).
  */
-const ANALYTICS_REFUSALS = [
-  refusal(
-    403,
-    '`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — '
-    + 'a role without the permission: an Agent.',
-  ),
-  refusal(
-    404,
-    '`NOT_FOUND` — an AB or an AAB who is not a Core Leader (tagged, on a leader rung; ADR-0159 §2), read on every '
-    + 'request: the forum’s rule; or a `group` this office does not hold — unknown, archived or another office’s. '
-    + 'Indistinguishable from another office’s.',
-  ),
-] as const;
-
-/** **KPM analytics** (`functional/kpm-analytics.md`, the Data contract): the unit comparison by AB agency. */
-@ApiTags('kpm-reporting')
-@ApiBearerAuth()
-@Controller('kpm/analytics')
-export class KpmAnalyticsController {
-  constructor(private readonly analytics: KpmAnalyticsService) {}
-
-  @Get()
-  @RequirePermission('kpm_analytics:read')
-  @ApiOperation({
-    summary: 'The agency’s unit comparison',
-    description:
-      'One row per AB agency — the AB and everybody below them down to the next AB, so an AB under an AB is '
-      + 'its own row and the rows add up to the agency — each with its *(Direct)* row and a row per AAB unit: '
-      + 'APE this month against the targets fixed when it began, APE this year against the annual goals, '
-      + 'coached in the last 7 days, active agents for the period’s month, total and promised leads, and '
-      + 'manpower by rung. Each AB’s and AAB’s Maintenance of Contract against the company’s carrier rules, '
-      + 'criterion by criterion, a criterion without uploaded input `null` rather than failed; each agency’s '
-      + 'production club. **Every leader** (UI-152): each AB and AAB with APE this month against target, *Active* '
-      + 'with its Unit and AAB halves, coached in 7 days, the Group and Unit sizes, the leader above, the club and MOC, '
-      + 'lowest APE % first. The KPM’s totals — the year to date a leaver’s production included, as the Overview’s — '
-      + 'and the agency’s production for the six months ending with this one. With `group`, every figure and list over '
-      + 'one custom group’s members today. Computed on the read, not paginated; nothing is recorded. Read by the Owner, '
-      + 'an Admin and a Core Leader (ADR-0159 §2), the whole office, read-only.',
-  })
-  @ApiResponse({ status: 200, type: KpmAnalyticsDto })
-  @ApiResponse(ANALYTICS_REFUSALS[0])
-  @ApiResponse(ANALYTICS_REFUSALS[1])
-  async read(@Ctx() ctx: RequestContext, @Query() query: KpmAnalyticsQueryDto) {
-    return this.analytics.read(ctx, query);
-  }
-}
-
-/** ***Cross-platform analytics*** (`functional/kpm-analytics.md`, the Data contract): adoption across offices. */
-@ApiTags('admin')
-@ApiBearerAuth()
-@Controller('admin/analytics')
-export class PlatformAnalyticsController {
-  constructor(private readonly platform: PlatformAnalyticsService) {}
-
-  @Get()
-  @RequirePermission('platform_analytics:read')
-  @ApiOperation({
-    summary: 'Adoption across agencies',
-    description:
-      'Per agency, per company and for the platform: active members by rung, joined and left this calendar '
-      + 'month, and signed in within the last 7 and 30 days. Counts only — no member, lead, activity, coaching '
-      + 'or production figure — read across agencies through named reads. Nothing is recorded.',
-  })
-  @ApiResponse({ status: 200, type: PlatformAnalyticsDto })
-  @ApiResponse(NO_PARAMETERS)
-  async read(@Ctx() ctx: RequestContext, @Query() _query: PlatformAnalyticsQueryDto) {
-    return this.platform.read(ctx);
-  }
-}

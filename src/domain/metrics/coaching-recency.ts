@@ -51,6 +51,10 @@ export function coached30d(daysSince: number | null): boolean {
  * The roster's *overdue*: a 1:1 older than the office's `coachingOverdueDays` (`Overall.html:10622`,
  * `> 7` at the default). A member with no 1:1 is not *overdue* here: the screen draws *No 1:1 yet* in red
  * from the `null` itself, and an overdue flag on nothing would be a date that does not exist.
+ *
+ * **Not `COACHING_STATUS`** (`coaching-status.ts`, ADR-0267 §5): the status tile the Unit Dashboard's rows and the owner's
+ * person card draw is a separate named metric over the same days, green up to 14 and yellow after. This roster flag keeps
+ * the office's `coachingOverdueDays` (7 by default); neither redefines the other.
  */
 export function oneOnOneOverdue(daysSince: number, overdueAfterDays: number): boolean {
   return daysSince > overdueAfterDays;

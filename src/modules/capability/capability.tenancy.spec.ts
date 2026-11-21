@@ -128,11 +128,71 @@ describe('the capability catalog (P5-T8)', () => {
       expect(restored.grids[0].items.find((i) => i.code === 'AFTER_SALES')!.status).toBe('active');
     });
 
-    it('refuses to archive a milestone a stage still requires', async () => {
-      // That stage would become unreachable, silently, for everybody.
+    it('P19.21-T3 AC-4 refuses to archive the only milestone of a stage: everybody would be on it (ADR-0274)', async () => {
+      // Competent Producer requires Sells independently alone; without it the stage requires nothing.
       await expect(wired.capability.setStatus(
         member(KPM_A), 'milestone', 'SELLS_INDEPENDENTLY', 'archived',
-      )).rejects.toThrow(/would make those stages unreachable/);
+      )).rejects.toThrow(/would require no milestone without this one/);
+    });
+
+    it('P19.21-T3 AC-4 archiving a milestone takes it out of every stage that requires it; restoring puts it back (ADR-0274)', async () => {
+      const archived = await wired.capability.setStatus(member(KPM_A), 'milestone', 'SELLS_OUTSIDE_NETWORK', 'archived');
+      expect(archived.milestones.find((m) => m.code === 'SELLS_OUTSIDE_NETWORK')!.status).toBe('archived');
+      expect(archived.stages.filter((st) => st.requiredMilestoneCodes.includes('SELLS_OUTSIDE_NETWORK'))).toEqual([]);
+      // The stage below it is untouched, and every other office's catalog too.
+      expect(archived.stages[0].requiredMilestoneCodes).toEqual(['SELLS_INDEPENDENTLY']);
+      expect((await wired.capability.read(member(KPM_B))).stages[1].requiredMilestoneCodes).toContain('SELLS_OUTSIDE_NETWORK');
+
+      const restored = await wired.capability.setStatus(member(KPM_A), 'milestone', 'SELLS_OUTSIDE_NETWORK', 'active');
+      expect(restored.stages.map((st) => st.requiredMilestoneCodes.includes('SELLS_OUTSIDE_NETWORK')))
+        .toEqual([false, true, true, true]);
+      const audit = await mongoose.connection.db!.collection('auditLog')
+        .find({ action: { $in: ['capability.archived', 'capability.restored'] } }).sort({ _id: 1 }).toArray();
+      expect(audit.map((a) => a.after)).toEqual([
+        expect.objectContaining({ code: 'SELLS_OUTSIDE_NETWORK', detachedFrom: ['INDEPENDENT_PRODUCER', 'PRODUCTIVE_TEAM_BUILDER', 'TRANSFORMATIVE_TEAM_BUILDER'] }),
+        expect.objectContaining({ code: 'SELLS_OUTSIDE_NETWORK', reattachedTo: ['INDEPENDENT_PRODUCER', 'PRODUCTIVE_TEAM_BUILDER', 'TRANSFORMATIVE_TEAM_BUILDER'] }),
+      ]);
+    });
+
+    it('P19.21-T3 AC-4 a milestone added under a tahap is required by it and every stage above; a stage below is untouched', async () => {
+      const added = await wired.capability.add(member(KPM_A), 'milestone', undefined, 'Polis pertama terbit', undefined, {
+        stageCode: 'INDEPENDENT_PRODUCER',
+      });
+      expect(added.milestones.at(-1)).toMatchObject({ code: 'POLIS_PERTAMA_TERBIT', label: 'Polis pertama terbit', status: 'active' });
+      expect(added.stages.map((st) => st.requiredMilestoneCodes.includes('POLIS_PERTAMA_TERBIT'))).toEqual([false, true, true, true]);
+      // The same name again takes the next free code: a code is never reused.
+      const again = await wired.capability.add(member(KPM_A), 'milestone', undefined, 'Polis pertama terbit');
+      expect(again.milestones.at(-1)!.code).toBe('POLIS_PERTAMA_TERBIT_2');
+      expect(again.stages.every((st) => !st.requiredMilestoneCodes.includes('POLIS_PERTAMA_TERBIT_2'))).toBe(true);
+      await expect(wired.capability.add(member(KPM_A), 'milestone', undefined, 'X', undefined, { stageCode: 'NOPE' }))
+        .rejects.toThrow();
+    });
+
+    it('P19.21-T3 AC-4 a new tahap comes with its first milestone and asks everything the top stage did, one rung higher', async () => {
+      await expect(wired.capability.add(member(KPM_A), 'stage', undefined, 'Leader of leaders'))
+        .rejects.toThrow(/needs its first milestone/);
+      const added = await wired.capability.add(member(KPM_A), 'stage', undefined, 'Leader of leaders', undefined, {
+        firstMilestone: 'Membina dua leader',
+      });
+      const top = added.stages.find((st) => st.code === 'LEADER_OF_LEADERS')!;
+      expect(top).toMatchObject({ stageOrder: 5, displayOrder: 5, status: 'active' });
+      expect(top.requiredMilestoneCodes).toEqual([...added.stages[3].requiredMilestoneCodes, 'MEMBINA_DUA_LEADER']);
+      // Somebody with all four stages' milestones is still at the fourth until the new one is ticked.
+      expect((await wired.capability.stageFor(member(KPM_A), added.stages[3].requiredMilestoneCodes))!.code)
+        .toBe('TRANSFORMATIVE_TEAM_BUILDER');
+      expect((await wired.capability.stageFor(member(KPM_A), top.requiredMilestoneCodes))!.code).toBe('LEADER_OF_LEADERS');
+    });
+
+    it('P19.21-T3 AC-4 a kelompok starts empty; its skills are added and reordered by drag', async () => {
+      const grid = await wired.capability.add(member(KPM_A), 'grid', undefined, 'Digital selling');
+      expect(grid.grids.at(-1)).toMatchObject({ code: 'DIGITAL_SELLING', items: [], requiresDownline: false, displayOrder: 5 });
+      await wired.capability.add(member(KPM_A), 'item', undefined, 'Konten media sosial', 'DIGITAL_SELLING');
+      const two = await wired.capability.add(member(KPM_A), 'item', undefined, 'WhatsApp broadcast', 'DIGITAL_SELLING');
+      const codes = two.grids.at(-1)!.items.map((i) => i.code);
+      const flipped = await wired.capability.reorder(member(KPM_A), 'item', [...codes].reverse(), 'DIGITAL_SELLING');
+      expect(flipped.grids.at(-1)!.items.map((i) => i.code)).toEqual([...codes].reverse());
+      await expect(wired.capability.reorder(member(KPM_A), 'item', codes, 'NOPE')).rejects.toThrow();
+      await expect(wired.capability.reorder(member(KPM_A), 'item', codes.slice(1), 'DIGITAL_SELLING')).rejects.toThrow();
     });
 
     it('never reuses a code, archived rows included', async () => {

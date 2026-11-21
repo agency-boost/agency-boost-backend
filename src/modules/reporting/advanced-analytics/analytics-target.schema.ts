@@ -15,8 +15,10 @@ export type AnalyticsTargetKind = 'mapa' | 'subgroup';
  * - `kind: 'subgroup'`: one per `(kpmId, headMembershipId, year)` — a **leader's** membership `_id` (invariant §2), an
  *   AB or an AAB, and the year `YYYY` of the office's clock — with `aaTarget` and `recTarget`; until written the
  *   template's `subgroupHeadDefaults` stand. *Changed 2026-11-12 (P19.13-T3; ADR-0253 §4):* one per head of group, no
- *   year, until then; migration `0062-subgroup-targets-by-year` gave every row the year it was written in. Perbaikan
- *   sub-group sums a group's leaders' targets (§5).
+ *   year, until then; migration `0062-subgroup-targets-by-year` gave every row the year it was written in.
+ *   **Retired 2026-11-20 (P19.17-T4; ADR-0270 §4):** nothing writes or reads them; the targets are per AB group per month
+ *   (`abGroupTargets`), and migration `0069-ab-group-targets-by-month` carried an AB's year into its months. The rows stay
+ *   as the record of what was typed.
  */
 @Schema({ ...baseSchemaOptions, collection: 'analyticsTargets' })
 export class AnalyticsTarget {

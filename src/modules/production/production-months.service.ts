@@ -6,7 +6,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { addDays, editableUntil } from '@/common/time/local-day';
-import { ANALYTICS, DEFAULT_TENANT_TIMEZONE, PRODUCTION } from '@/domain/constants';
+import { DEFAULT_TENANT_TIMEZONE, PRODUCTION } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
@@ -73,13 +73,14 @@ export class ProductionMonths {
     const today = this.clock.localDateFor(timezone);
 
     /*
-     * **The required history** (P19.5-T2 AC-8, R5; ADR-0214 §11, amending ADR-0050): a month from the history's first
-     * month onward that was never written is open until its first write, whatever its date; that write opens a window of
-     * `grace` days from its day, and then the month locks as any month does. The KPM's first month is its row's
-     * `createdAt` in its zone — never later than today, so a clock set back in a test reads the office as new today.
+     * **The required history** (P19.5-T2 AC-8; ADR-0214 §11, amending ADR-0050; **from January 2024 for every KPM since
+     * P19.21-T1 AC-8, ADR-0274 §3**): a month from `PRODUCTION.HISTORY_FROM` onward that was never written is open until
+     * its first write, whatever its date — so the Owner, an Admin, a core leader or a Super Admin inside the KPM can still
+     * upload a missing past month; that write opens a window of `grace` days from its day, and then the month locks as
+     * any month does.
      */
     const firstDay = o?.createdAt ? this.clock.localDateFor(timezone, o.createdAt) : today;
-    const { historyFrom } = historyOf((firstDay < today ? firstDay : today).slice(0, 7), ANALYTICS.HISTORY_MONTHS_BEFORE_JOIN);
+    const { historyFrom } = historyOf((firstDay < today ? firstDay : today).slice(0, 7));
     const scheduledUntil = editableUntil(`${month}-01`, grace);
     const written = row?.firstWrittenOn ?? null;
     // A month with a revision and no first-write day was written before P19.5-T2: it keeps its schedule.

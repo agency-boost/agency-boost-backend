@@ -372,12 +372,14 @@ describe('P19.6-T1 KPM branding (ADR-0218)', () => {
       expect(res.body).toEqual({
         name: 'KPM Bintaro', version: saved.shown.version, palette: expect.objectContaining({ primary: '#0a6e5c' }),
         logo: { width: 480, height: 96 },
+        // P19.21-T4 (ADR-0274): the KPM's *Nama sistem*, none here.
+        systemName: null,
       });
     });
 
     it('P19.6-T1 AC-13 answers everything null for an unknown, malformed or suspended KPM alike', async () => {
       await brandAsOwner();
-      const empty = { name: null, version: null, palette: null, logo: null };
+      const empty = { name: null, version: null, palette: null, logo: null, systemName: null };
       expect((await http().get('/kpm-branding/66f0000000000000000000ee').expect(200)).body).toEqual(empty);
       expect((await http().get('/kpm-branding/0417').expect(200)).body).toEqual(empty);
       await (wired.kpms as unknown as mongoose.Model<never>).updateOne({ _id: FIXTURE_KPM } as never, { status: 'suspended' } as never);

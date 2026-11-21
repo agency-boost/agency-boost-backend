@@ -1,9 +1,9 @@
 import { refusals } from '@/common/i18n/sentence';
 
 /**
- * **The platform reads' refusals, in both languages** (P19.4-T3; ADR-0207): the query of *All members* and of the KPM
- * comparison, and of *Akun terdaftar* (P19.12-T2). A field is named as the API names it (`q`, `sort`, `role`, `status`,
- * `kpm`, `page`, `month`).
+ * **The platform reads' refusals, in both languages** (P19.4-T3; ADR-0207): the query of *All members* (*Anggota* since
+ * P19.23-T3) and of *Akun terdaftar* (P19.12-T2). A field is named as the API names it (`q`, `role`, `status`, `kpm`,
+ * `page`, `month`). The KPM comparison's `sort` went with it (P19.23; ADR-0277).
  */
 export const PLATFORM_READS_REFUSALS = refusals('modules/reporting/platform', {
   VALIDATION_FAILED: {
@@ -20,10 +20,6 @@ export const PLATFORM_READS_REFUSALS = refusals('modules/reporting/platform', {
       en: 'kpm must be none or some',
       id: 'kpm harus none atau some',
     },
-    sortUnknown: ({ sorts }: { sorts: readonly string[] }) => ({
-      en: `sort must be one of ${sorts.join(', ')}, or one of them after a minus sign for descending.`,
-      id: `sort harus salah satu dari ${sorts.join(', ')}, atau salah satunya diawali tanda minus untuk urutan menurun.`,
-    }),
     roleShape: {
       en: 'role must be ab, aab or agent',
       id: 'role harus ab, aab, atau agent',
@@ -31,6 +27,16 @@ export const PLATFORM_READS_REFUSALS = refusals('modules/reporting/platform', {
     statusShape: {
       en: 'status must be active, pending or removed',
       id: 'status harus active, pending, atau removed',
+    },
+    /** P19.23-T3 (OD-421): *Anggota*'s *Akun tes*. */
+    testAccountShape: {
+      en: 'testAccount must be only',
+      id: 'testAccount harus only',
+    },
+    /** P19.23-T3 (ADR-0267 §1): the test-account switch's body. */
+    testAccountValue: {
+      en: 'testAccount must be true or false',
+      id: 'testAccount harus true atau false',
     },
     pageShape: {
       en: 'page must be a whole number from 1',

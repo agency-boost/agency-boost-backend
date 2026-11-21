@@ -52,6 +52,20 @@ export class AuditQueryDto {
   action?: string;
 
   @ApiPropertyOptional({
+    example: 'agus',
+    maxLength: AUDIT_LOG.SEARCH_MAX_LENGTH,
+    description:
+      '*Cari perubahan* (ADR-0279): words a line says, case-insensitive and read as text, never a pattern '
+      + '— the action in the reader’s words or as recorded, who acted (name or email), the KPM (code or branch), the '
+      + 'company, or a value the change names (`name`, `fullName`, `code`, `branchName`, `label`, `reason`, `email`, '
+      + '`message`, before or after). Combines with every other filter; blank narrows nothing.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(AUDIT_LOG.SEARCH_MAX_LENGTH, { message: field(SAY.searchTooLong) })
+  q?: string;
+
+  @ApiPropertyOptional({
     description: 'One actor: the account that acted (the real one; in a support session, the Super Admin).',
   })
   @IsOptional()

@@ -10,7 +10,7 @@
 # on a new one (docs/03-engineering/deployment-gcp.md, The daily run).
 
 [Unit]
-Description=Daily AgencyBoost run (premium table notices)
+Description=Daily AgencyBoost run (premium table notices, subscription lapses)
 
 [Timer]
 OnCalendar=*-*-* 00:10:00 Asia/Jakarta

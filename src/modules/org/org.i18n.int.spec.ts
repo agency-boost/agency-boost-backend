@@ -277,19 +277,19 @@ describe('P18.10-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('groups', () => {
-    it('P18.10-T5 AC-7 refuses a second group of one name, and an owner outside the office, in Indonesian', async () => {
-      await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: aab }).expect(201);
+    it('P18.10-T5 AC-7 P19.17-T4 refuses a second group of one name, and a group on somebody who is no AB, in Indonesian', async () => {
+      await http().post('/members/groups').send({ name: 'Mentoring Circle' }).expect(201);
       const taken = await http().post('/members/groups').set(...IN_INDONESIAN)
-        .send({ name: 'Mentoring Circle', ownerMembershipId: aab }).expect(409);
+        .send({ name: 'Mentoring Circle' }).expect(409);
       expect(taken.body.error).toMatchObject({
         code: 'ORG_GROUP_NAME_TAKEN',
         message: 'KPM ini sudah memiliki grup bernama “Mentoring Circle”.',
         details: { name: 'Mentoring Circle' },
       });
-      const nobody = await http().post('/members/groups').set(...IN_INDONESIAN)
-        .send({ name: 'Task Force', ownerMembershipId: new mongoose.Types.ObjectId().toString() }).expect(422);
-      expect(nobody.body.error).toMatchObject({
-        code: 'ORG_GROUP_OWNER_NOT_IN_KPM', message: 'Pilih pemilik grup dari anggota KPM ini.',
+      const notAb = await http().post('/members/groups').set(...IN_INDONESIAN)
+        .send({ name: 'Task Force', abMembershipId: aab }).expect(422);
+      expect(notAb.body.error).toMatchObject({
+        code: 'ORG_GROUP_AB_ONLY', message: 'Hanya AB yang punya group. AAB dan agent ikut group AB-nya.',
       });
     });
 
@@ -318,10 +318,8 @@ describe('P18.10-T5 the org module’s words in the reader’s language, over HT
   });
 
   describe('a name the API has none for (AC-4)', () => {
-    it('P18.10-T5 AC-4 writes it for the reader: one member, the tree, the role change log and a group’s owner', async () => {
-      // Promoted first: a group's ★ is a leader (P19.13-T3, ADR-0253 §2).
+    it('P18.10-T5 AC-4 writes it for the reader: one member, the tree and the role change log', async () => {
       await http().patch(`/members/${agent}/role`).send({ toRole: 'aab', reason: 'Siap memimpin' }).expect(200);
-      await http().post('/members/groups').send({ name: 'Mentoring Circle', ownerMembershipId: agent }).expect(201);
       await forget(agent);
 
       const one = (await http().get(`/members/${agent}`).set(...IN_INDONESIAN).expect(200)).body;
@@ -330,12 +328,9 @@ describe('P18.10-T5 the org module’s words in the reader’s language, over HT
       expect(tree.nodes.find((n: { membershipId: string }) => n.membershipId === agent).fullName).toBe('Tidak diketahui');
       const log = (await http().get('/members/role-changes').set(...IN_INDONESIAN).expect(200)).body;
       expect(log[0]).toMatchObject({ membershipId: agent, fullName: 'Tidak diketahui', reason: 'Siap memimpin' });
-      const groups = (await http().get('/members/groups').set(...IN_INDONESIAN).expect(200)).body;
-      expect(groups[0].ownerName).toBe('Tidak diketahui');
 
       // An English screen reads the word it always read.
       expect((await http().get(`/members/${agent}`).expect(200)).body.fullName).toBe('Unknown');
-      expect((await http().get('/members/groups').expect(200)).body[0].ownerName).toBe('Unknown');
     });
   });
 });

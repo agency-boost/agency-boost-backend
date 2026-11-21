@@ -174,6 +174,12 @@ export const NotificationTemplate = {
    * per version by the daily run (`rateTables.activationNoticeSentAt`). In-app only (ADR-0261 §4).
    */
   PREMIUM_TABLE_STARTED: 'premium_table.started',
+  /*
+   * ***Pengumuman*** (P19.23-T6 AC-4; ADR-0279): the Super Admin's message to every Owner, every member, or the members of
+   * chosen companies and KPMs — one row per person, `payload.message` as written. In-app only: an announcement asks
+   * nothing urgent, and the bell is the product's authoritative channel (ADR-0010).
+   */
+  PLATFORM_ANNOUNCEMENT: 'platform.announcement',
 } as const;
 
 export type NotificationTemplateId =
@@ -226,6 +232,7 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   // ADR-0261 §4: the bell alone — the expiry has fifteen days of runway, and the announcement asks nothing of anybody.
   [NotificationTemplate.PREMIUM_TABLE_ENDING]: ['in_app'],
   [NotificationTemplate.PREMIUM_TABLE_STARTED]: ['in_app'],
+  [NotificationTemplate.PLATFORM_ANNOUNCEMENT]: ['in_app'],
 };
 
 /**

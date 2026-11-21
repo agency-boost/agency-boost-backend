@@ -6,6 +6,7 @@ import { localDayOf } from '@/common/time/local-day';
 import type { CampaignKind, CampaignSubtype, CampaignWindow } from '@/domain/constants';
 import type { QualificationStatus } from '@/domain/metrics/campaign-qualification';
 import { campaignPhase, lastLocalDay } from '@/domain/metrics/campaign-window';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { CampaignEvaluation, evaluationInput } from './campaign-evaluation';
@@ -87,7 +88,8 @@ export interface OfficeStandings {
  * (`CampaignEvaluation`), so the tree and the dialog cannot disagree. Final standings come from `campaignStandings`
  * as frozen, the override applied there (`fromFrozen`). The first read after a window locks freezes it, once,
  * audited — never in a read-only support session. **A fixed number of queries for any office** (AC-9). The caller
- * owns the permission (`kpm_analytics:read`, whose reach is the office): this reads the context's office and no other.
+ * owns the permission (`kpm_overview:read` since P19.19, ADR-0272 §1 — `kpm_analytics:read` is retired — whose reach is
+ * the office): this reads the context's office and no other.
  */
 @Injectable()
 export class CampaignStandingsReader {
@@ -107,7 +109,8 @@ export class CampaignStandingsReader {
       this.campaigns.find(ctx, filter, { sort: { code: 1 } }),
       opts.memberIds
         ? Promise.resolve(null)
-        : this.memberships.find(ctx, { status: 'active' }, { projection: { _id: 1 } }),
+        // Never a test account (ADR-0267 §1; P19.25-T5): the office's standings are counted, and a test account is not.
+        : this.memberships.find(ctx, { status: 'active', ...NOT_A_TEST_ACCOUNT }, { projection: { _id: 1 } }),
       this.days.office(ctx),
     ]);
     const now = this.clock.now();

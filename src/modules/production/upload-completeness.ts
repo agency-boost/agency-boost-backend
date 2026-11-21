@@ -3,11 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { ANALYTICS, DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
+import { DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES, PRODUCTION } from '@/domain/constants';
 import { memberAt, type CountedMembership } from '@/domain/metrics/office-headcount';
 import type { AdvancedAnalyticsConfig, UploadField } from '@/modules/config/analytics-config';
 import { AnalyticsConfigReader, type PublishedAnalyticsConfig } from '@/modules/config/analytics-config.reader';
 import { platformAnalyticsConfig } from '@/modules/config/analytics-config';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { MonthlyAgentDataRepository, type KodeRow } from './monthly-agent-data.repository';
@@ -43,8 +44,9 @@ export interface FillPerson {
  *
  * - **A column is in force** from its `effectiveFrom` (R2): an earlier month neither asks for it nor loses its status.
  * - **A `rows: 'leaders'` column** counts only for AB and AAB rows.
- * - **A month no row holds a figure in is `missing`**; one uploaded below the share is `incomplete`. Both read *Belum
- *   lengkap* in a year to date.
+ * - **A month no row holds a figure in is `missing`** — a figure in any of the template's columns, in force or not, so a
+ *   month that holds one never is; one uploaded below the share is `incomplete`. Both read *Belum lengkap* in a year to
+ *   date. A month that holds figures and has no column in force asks nothing of anybody: `complete`.
  * - A *Belum terdaftar* row counts in nothing (§8): it is not a member, so it is in neither side of the share.
  *
  * Pure: the configuration, the people, the rows and each month's end in; a status per month out.
@@ -58,7 +60,10 @@ export function monthFill(
 ): MonthFill {
   const columns = columnsInForce(config, month);
   const byMember = new Map(rows.filter((r) => r.month === month).map((r) => [r.membershipId, r]));
-  const uploaded = [...byMember.values()].some((row) => columns.some((c) => row.values[c.kode]?.value != null));
+  // **A month that holds a figure is never `missing`** (found 2026-11-20): a figure in any of the template's columns,
+  // in force that month or not. Asking only the columns in force read a month before every column's `effectiveFrom` as
+  // never uploaded while the Overview summed its figures — the seeded history, red from 2025-01 to 2026-10.
+  const uploaded = [...byMember.values()].some((row) => Object.values(row.values).some((cell) => cell?.value != null));
   const members = people.filter((p) => memberAt(p.counted, endOfMonth));
   const isFilled = (person: FillPerson) => {
     const row = byMember.get(person.membershipId);
@@ -92,14 +97,13 @@ export function shiftMonth(month: string, by: number): string {
 }
 
 /**
- * **The required history** (R5, AA UI-016, AT-9; ADR-0214 §11): the KPM's first month is the month of `kpms.createdAt` in
- * its zone — the month UI-150 uses — and the history runs from `historyMonthsBeforeJoin` (12) months before it to the
- * month before it. Earlier months are optional and never shown as missing.
+ * **The required history** (P19.21-T1 AC-1; ADR-0274 §3, replacing R5 and ADR-0214 §11's "twelve months before the KPM's
+ * first month"): **January 2024 for every KPM** (`PRODUCTION.HISTORY_FROM`), whenever it joined, to the month before
+ * its first. A KPM that joined before 2024 reads `historyTo` before `historyFrom`: no month of history, only its own.
+ * Earlier months are optional and never shown as missing.
  */
-export function historyOf(firstMonth: string, monthsBefore: number = ANALYTICS.HISTORY_MONTHS_BEFORE_JOIN): {
-  firstMonth: string; historyFrom: string; historyTo: string;
-} {
-  return { firstMonth, historyFrom: shiftMonth(firstMonth, -monthsBefore), historyTo: shiftMonth(firstMonth, -1) };
+export function historyOf(firstMonth: string): { firstMonth: string; historyFrom: string; historyTo: string } {
+  return { firstMonth, historyFrom: PRODUCTION.HISTORY_FROM, historyTo: shiftMonth(firstMonth, -1) };
 }
 
 /**
@@ -162,7 +166,7 @@ export class UploadCompleteness {
   ): Promise<OfficeFill> {
     const [config, office] = await Promise.all([given ? Promise.resolve(given) : this.configFor(ctx), this.office(ctx)]);
     const people = await this.people(ctx, office.timezone);
-    const { historyFrom } = historyOf(office.firstMonth, config.config.uploadRules.historyMonthsBeforeJoin);
+    const { historyFrom } = historyOf(office.firstMonth);
     const kodes = config.config.uploadFields.map((f) => f.kode);
     const rows = await this.data.findByKode(ctx, { month: { $gte: range.from, $lte: range.to } }, kodes);
     const fills = new Map<string, MonthFill>();
@@ -176,7 +180,8 @@ export class UploadCompleteness {
 
   /** The office's members as the headcount counts them — every status but pending — and which are leaders. */
   private async people(ctx: RequestContext, timezone: string): Promise<FillPerson[]> {
-    const members = await this.memberships.find(ctx, { status: { $in: ['active', 'removed'] } }, {
+    // P19.21-T1 AC-2 (ADR-0267 §1): a test account is never counted — not in "n dari N anggota", not in the share.
+    const members = await this.memberships.find(ctx, withoutTestAccounts({ status: { $in: ['active', 'removed'] } }), {
       projection: { status: 1, joinedAt: 1, joinDate: 1, removedAt: 1, role: 1 },
     });
     return members.map((m) => {

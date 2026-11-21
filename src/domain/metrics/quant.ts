@@ -95,9 +95,13 @@ export function monthsEndingAt(last: string, count: number): string[] {
   return Array.from({ length: count }, (_, i) => plusMonths(last, i - count + 1));
 }
 
-/** A run's own months: January to its last month. */
+/**
+ * **A run's own months: its half-year** — the `QUANT.SEMESTER_MONTHS` ending at its last month, January to June or July
+ * to December (P19.22-T4; ADR-0275 §4). *Changed 2026-11-20:* it was January to the last month, so a December run held
+ * the whole year; a run frozen before keeps the months it was computed over (`quant-runs.service.ts`, `fromMonth`).
+ */
 export function periodMonths(periodEnd: string): string[] {
-  return monthsEndingAt(periodEnd, Number(periodEnd.slice(5, 7)));
+  return monthsEndingAt(periodEnd, QUANT.SEMESTER_MONTHS);
 }
 
 /** Is `month` the last month of a run's period (June or December)? */
@@ -179,10 +183,11 @@ export function quantValues(input: QuantInput): Record<QuantMetric, QuantValue> 
     .map((m) => active(p.membershipId, m)));
   const a3 = perLeader(producingAgents(flags, heldOwn.length));
 
-  // B1 and B2 — the period's new hires activated in their join month and the 3 (12) months after.
-  const year = input.periodEnd.slice(0, 4);
+  // B1 and B2 — the period's new hires activated in their join month and the 3 (12) months after. P19.22-T4: the hires
+  // who joined in the run's own half-year (ADR-0275 §4).
+  const firstDay = `${own[0]}-01`;
   const lastDay = `${input.periodEnd}-31`;
-  const hires = members.filter((p) => p.newHire && p.joinDate !== null && p.joinDate >= `${year}-01-01` && p.joinDate <= lastDay);
+  const hires = members.filter((p) => p.newHire && p.joinDate !== null && p.joinDate >= firstDay && p.joinDate <= lastDay);
   const windowMonth = (id: string) => (m: string): WindowMonth => ({
     held: month(m)?.policiesHeld === true,
     policies: input.cell(id, m)?.policies ?? null,

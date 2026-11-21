@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { StartFrom } from '@/modules/config/provisioning.service';
@@ -43,6 +43,8 @@ export interface KpmRequestRow {
   status: KpmRequestStatus;
   requestedAt: string;
   decidedAt: string | null;
+  /** **Who decided it** (P19.23-T3 AC-2): the Super Admin who approved or declined, by name; `null` while it waits. */
+  decidedByName: string | null;
   reason: string | null;
   createdKpmId: string | null;
   /** P19-T3 AC-3: what an approved request made — `deleted` once the office has since been deleted. */
@@ -238,7 +240,7 @@ export class KpmRequestService {
   async approve(
     ctx: RequestContext,
     requestId: string,
-    input: { code: string; companyId?: string; startFrom?: StartFrom },
+    input: { code?: string; companyId?: string; startFrom?: StartFrom },
   ): Promise<KpmRequestRow[]> {
     this.require(ctx, 'kpm_request:decide');
     const request = await this.find(requestId);
@@ -263,8 +265,13 @@ export class KpmRequestService {
       ? (await this.tenants.officesByIds([request.createdKpmId])).get(request.createdKpmId)
       : undefined;
     const resume = resumable && !resumable.deleted ? request.createdKpmId : null;
+    /*
+     * **The code, made where none is given** (P19.23-T3 AC-2; ADR-0277): *Setujui* is one press on *Persetujuan*, so the
+     * next free code of the company is taken (`TenantService.autoCode`); one typed in the dialog is checked as before.
+     */
+    const code = input.code?.trim() || (resume ? '' : await this.tenants.autoCode(companyId));
     if (!resume) {
-      const holder = await this.tenants.codeHolder(companyId, input.code);
+      const holder = await this.tenants.codeHolder(companyId, code);
       if (holder) throw this.tenants.codeTaken(holder, company.name);
     }
 
@@ -297,7 +304,7 @@ export class KpmRequestService {
       if (!kpmId) {
         // *Mulai dari* where the card offered it (ADR-0213 §3); absent, the company's default — or the built-in one.
         const kpm = await this.tenants.createKpm(ctx, {
-          companyId, code: input.code, branchName: request.branchName, ...(input.startFrom ? { startFrom: input.startFrom } : {}),
+          companyId, code, branchName: request.branchName, ...(input.startFrom ? { startFrom: input.startFrom } : {}),
         });
         kpmId = kpm._id;
         madeHere = true;
@@ -441,7 +448,15 @@ export class KpmRequestService {
     if (requests.length === 0) return [];
 
     const users = await this.users
-      .find({ _id: { $in: [...new Set(requests.map((r) => r.requestedByUserId))] } }).exec().catch(() => []);
+      .find({
+        _id: {
+          $in: [...new Set([
+            ...requests.map((r) => r.requestedByUserId),
+            // P19.23-T3 AC-2: who decided, by name.
+            ...requests.flatMap((r) => (r.decidedByUserId && isValidObjectId(r.decidedByUserId) ? [r.decidedByUserId] : [])),
+          ])],
+        },
+      }).exec().catch(() => []);
     const byUser = new Map(users.map((u) => [String(u._id), u]));
     const companyIds = [...new Set([
       ...requests.map((r) => r.companyId),
@@ -472,6 +487,7 @@ export class KpmRequestService {
         status: r.status,
         requestedAt: r.get('createdAt')?.toISOString() ?? '',
         decidedAt: r.decidedAt?.toISOString() ?? null,
+        decidedByName: r.decidedByUserId ? (byUser.get(r.decidedByUserId)?.fullName ?? unknown) : null,
         reason: r.reason,
         createdKpmId: r.createdKpmId,
         createdKpm: r.createdKpmId && office

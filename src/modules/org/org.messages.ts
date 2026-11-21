@@ -215,12 +215,6 @@ export const ORG_REFUSALS = refusals('modules/org', {
       id: 'Salah satu grup itu tidak ada di KPM ini, atau sudah dinonaktifkan.',
     },
   },
-  ORG_GROUP_OWNER_NOT_IN_KPM: {
-    ownerInOffice: {
-      en: 'Give the group an owner who is in this office.',
-      id: 'Pilih pemilik grup dari anggota KPM ini.',
-    },
-  },
   ORG_GROUP_NAME_TAKEN: {
     /** The group's name, as the office typed it. */
     taken: ({ name }: { name: string }) => ({
@@ -228,24 +222,25 @@ export const ORG_REFUSALS = refusals('modules/org', {
       id: `KPM ini sudah memiliki grup bernama “${name}”.`,
     }),
   },
-  /* P19.13-T3 (ADR-0253 §1, §2): *Core leaders & groups*. *Group*, *Group leader* and *Tanpa group* as the page writes them. */
+  /* P19.17-T4 (ADR-0270 §1, §2): only an AB carries a group or is a Group Leader. *Group*, *Group Leader*, *Tanpa group* as the pages write them. */
   ORG_GROUP_ONE_PER_LEADER: {
     oneGroup: {
-      en: 'A leader can be in one group only. Choose one group, or none.',
-      id: 'Seorang leader hanya bisa masuk satu group. Pilih satu group, atau Tanpa group.',
+      en: 'An AB can be in one group only. Choose one group, or none.',
+      id: 'Seorang AB hanya bisa masuk satu group. Pilih satu group, atau Tanpa group.',
     },
   },
-  ORG_GROUP_LEADER_NOT_A_LEADER: {
-    leadersOnly: {
-      en: 'Only an AB or an AAB can be a group’s Group leader.',
-      id: 'Hanya AB atau AAB yang dapat menjadi Group leader sebuah group.',
+  ORG_GROUP_AB_ONLY: {
+    abOnly: {
+      en: 'Only an AB carries a group. AABs and agents follow their AB.',
+      id: 'Hanya AB yang punya group. AAB dan agent ikut group AB-nya.',
     },
   },
-  ORG_GROUP_LEADER_NEEDS_GROUP: {
-    chooseGroup: {
-      en: 'Choose a group first: a Group leader leads one group.',
-      id: 'Pilih group dulu: Group leader memimpin satu group.',
-    },
+  ORG_GROUP_LEADER_NOT_IN_GROUP: {
+    /** The group's name, as the office typed it. */
+    inGroup: ({ name }: { name: string }) => ({
+      en: `Only an AB in ${name} can be its Group Leader. Move them into the group first.`,
+      id: `Hanya AB di ${name} yang bisa jadi Group Leader-nya. Pindahkan dulu ke group ini.`,
+    }),
   },
   CORE_LEADER_NOT_A_LEADER: {
     leadersOnly: {

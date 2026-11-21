@@ -34,6 +34,12 @@ export interface CreateMembershipInput {
   leaderId?: string | null;
   status?: 'active' | 'pending';
   recruitedByMembershipId?: string | null;
+  /**
+   * **Who registered them** (ADR-0267 §3): the recruiter `RECRUITS_JOINED` credits — the invitation's sender, the leader
+   * whose code they joined on, the member who imported them. Omitted: nobody (an Owner; a pending person, whose placement
+   * writes it).
+   */
+  registeredByMembershipId?: string | null;
   sourceLeadId?: string | null;
   /**
    * Full-time or part-time in this office (ADR-0158 §1). The roster import names it; every other
@@ -185,10 +191,13 @@ export class HierarchyService {
    * answer waits on the account (`users.registeredWorkStatus`) and is carried onto the membership they
    * are given here — through a leader's code, an office's approval, or being made its Owner alike.
    * `null` for anybody who registered before it was asked.
+   *
+   * **And whether the account is a test account** (ADR-0267 §1), in the same read: every membership of a test account
+   * carries the flag, which is what the reads of a KPM's members leave out (`NOT_A_TEST_ACCOUNT`).
    */
-  private async registeredWorkStatusOf(userId: string): Promise<WorkStatus | null> {
-    const user = await this.users.findOne({ _id: userId }).select('registeredWorkStatus').exec();
-    return user?.registeredWorkStatus ?? null;
+  private async accountOf(userId: string): Promise<{ registeredWorkStatus: WorkStatus | null; testAccount: boolean }> {
+    const user = await this.users.findOne({ _id: userId }).select('registeredWorkStatus testAccount').exec();
+    return { registeredWorkStatus: user?.registeredWorkStatus ?? null, testAccount: user?.testAccount === true };
   }
 
   /**
@@ -513,6 +522,7 @@ export class HierarchyService {
     const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
     const leaderCode = await this.freshLeaderCode();
     const role = classOfRung(level);
+    const account = await this.accountOf(input.userId);
 
     const membership = await this.members.create(ctx, {
       userId: input.userId,
@@ -530,9 +540,13 @@ export class HierarchyService {
       joinDate: joining?.joinDate ?? null,
       joinedAs: joining?.joinedAs ?? null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
+      // ADR-0267 §3: the recruiter, as the path that places them names it.
+      registeredByMembershipId: input.registeredByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
       // ADR-0158 §1: what the caller names (a roster row), else what they said when they registered.
-      workStatus: input.workStatus ?? (await this.registeredWorkStatusOf(input.userId)),
+      workStatus: input.workStatus ?? account.registeredWorkStatus,
+      // ADR-0267 §1: the account's flag, carried by every membership of a test account.
+      testAccount: account.testAccount,
     });
 
     await this.recordJoined(ctx, String(membership._id), {

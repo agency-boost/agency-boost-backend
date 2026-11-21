@@ -67,6 +67,8 @@ const TENANT_SCOPED_MODELS = [
   // P19.5-T3 (ADR-0215 §6, §7): a KPM's MAPA and sub-group targets, and its Quant runs, from the day they exist.
   'AnalyticsTarget',
   'QuantRun',
+  // P19.17-T4 (ADR-0270 §4): an AB group's monthly targets, which supersede `KpmRecruitTarget`, from the day they exist.
+  'AbGroupTarget',
 ];
 
 /**
@@ -112,7 +114,7 @@ const ALLOWED = new Map<string, string>([
   ['capability/capability.repository.ts', 'the repository for that model'],
   ['coaching/coaching-session.repository.ts', 'the repository for that model'],
   ['recruitment/recruitment-pitch.repository.ts', 'the repository for that model'],
-  ['reporting/kpm-recruit-target.repository.ts', 'the repository for that model'],
+  ['reporting/ab-group-targets/ab-group-target.repository.ts', 'the repository for that model'],
   ['leader-meetings/leader-meeting.repository.ts', 'the repository for that model'],
   ['leader-meetings/leader-meeting-share-link.repository.ts', 'the repository for that model'],
   ['training/training-progress.repository.ts', 'the repository for that model'],

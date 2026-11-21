@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Optional, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -7,11 +7,10 @@ import { DirectoryService } from './directory.service';
 import { AdminDelegationService } from './admin-delegation.service';
 import { GroupService } from './group.service';
 import { AddGroupMembersDto } from './group-members.dto';
-import { CoreLeadersBulkDto, SaveCoreLeaderDto } from './core-leaders.dto';
-import { CoreLeadersService } from './core-leaders.service';
+import { CreateGroupDto, RenameGroupDto, SetAbGroupDto } from './informal-groups.dto';
 import { OrgTreeService } from './org-tree.service';
 import {
-  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, GroupDto, MemberSearchQueryDto, OrgTreeQueryDto,
+  ChangeRoleDto, CreateLeaderLimitRequestDto, DirectoryQueryDto, MemberSearchQueryDto, OrgTreeQueryDto,
   RemoveMemberDto, SetCoreLeaderDto, TagMemberDto,
 } from './org.dto';
 import { LeaderLimitRequestService } from './leader-limit-request.service';
@@ -41,13 +40,6 @@ export class OrgController {
     private readonly columns: DirectoryColumns,
     // ADR-0157: a leader past the office's limit, asked about instead of refused.
     private readonly leaderLimit: LeaderLimitRequestService,
-    /*
-     * P19.13-T3 (ADR-0253): *Core leaders & groups*. Its routes sit here, declared before `:membershipId`, so `GET
-     * /members/core-leaders` is never read as somebody's id — routes in one controller register in the order declared,
-     * where two controllers' would depend on the module's list. `@Optional` for the many specs that build this controller
-     * for other routes and never ask for these; the application always provides it.
-     */
-    @Optional() private readonly coreLeaders?: CoreLeadersService,
   ) {}
 
   @Get('my-team')
@@ -80,58 +72,6 @@ export class OrgController {
   })
   async search(@Ctx() ctx: RequestContext, @Query() query: MemberSearchQueryDto) {
     return { members: await this.directory.search(ctx, query) };
-  }
-
-  /*
-   * ***Core leaders & groups*** (P19.13-T3; UI-199; ADR-0253). Declared before `:membershipId`, so `core-leaders` is
-   * never read as somebody's id; `bulk` before `core-leaders/:membershipId` for the same reason.
-   */
-  @Get('core-leaders')
-  @RequirePermission('member:read_tags')
-  @ApiOperation({
-    summary: 'Core leaders & groups: every leader with their group, ★ group leader, Core leader tag and targets',
-    description:
-      'Every active AB and AAB of the office, A to Z, each with **one group or none** (a leader once tagged into several '
-      + 'reads as the group they lead, else the first by name), whether they are its **★ group leader**, the **Core '
-      + 'leader** tag, and this year\u2019s AA and recruitment targets (`null` while *Perbaikan sub-group* is off); the live '
-      + 'groups A to Z with their ★ and leader count; the tiles\u2019 counts. The Owner and an Admin; a view-as session '
-      + 'reads it with `canWrite` false. Agents are not listed. Nothing is recorded as read.',
-  })
-  async readCoreLeaders(@Ctx() ctx: RequestContext) {
-    return this.coreLeaders!.read(ctx);
-  }
-
-  @Put('core-leaders/bulk')
-  @RequirePermission('member:tag_group')
-  @ApiOperation({
-    summary: 'Atur group · ★ Jadikan core: many leaders in one request',
-    description:
-      'Every id an active AB or AAB of this office (1 to 500, `CORE_LEADERS.MAX_PER_BULK`), else `404` and nothing '
-      + 'written. `groupId` a live group (`404` otherwise) or `null` for *Tanpa group*, and/or `isCoreLeader` (asks '
-      + '`member:tag_core_leader`); neither is `400 VALIDATION_FAILED`. A leader moved out of a group they led takes '
-      + 'its ★ off. One `member.tagged` audit entry per leader changed. Answers the page.',
-  })
-  async bulkCoreLeaders(@Ctx() ctx: RequestContext, @Body() dto: CoreLeadersBulkDto) {
-    return this.coreLeaders!.bulk(ctx, dto);
-  }
-
-  @Put('core-leaders/:membershipId')
-  @RequirePermission('member:tag_group')
-  @ApiOperation({
-    summary: 'One leader\u2019s group, ★ group leader and Core leader tag',
-    description:
-      'The leader edit\u2019s *Simpan*: an active AB or AAB of this office (`404` otherwise, another office\u2019s alike); '
-      + '`groupId` a live group (`404`) or `null`; `isGroupLeader` true with no group `400 ORG_GROUP_LEADER_NEEDS_GROUP`; '
-      + 'appointing moves the star; a change to the Core leader tag asks `member:tag_core_leader`. Audited '
-      + '`member.tagged` and `group.updated`. The targets are `PUT /kpm/advanced-analytics/targets/subgroup/:id`. '
-      + 'Answers the page.',
-  })
-  async saveCoreLeader(
-    @Ctx() ctx: RequestContext,
-    @Param('membershipId') membershipId: string,
-    @Body() dto: SaveCoreLeaderDto,
-  ) {
-    return this.coreLeaders!.save(ctx, membershipId, dto);
   }
 
   @Patch(':membershipId/role')
@@ -255,7 +195,8 @@ export class OrgController {
       'outside that or in another office, and `403` for an Agent.',
   })
   async orgTree(@Ctx() ctx: RequestContext, @Query() query: OrgTreeQueryDto) {
-    return this.tree.read(ctx, query.for);
+    // ADR-0268 §1: `view=kpm` is the KPM's Org tree — a core leader's whole KPM, their downline openable.
+    return this.tree.read(ctx, query.for, query.view);
   }
 
   @Get('admins')
@@ -296,13 +237,19 @@ export class OrgController {
     return this.admins.revoke(ctx, membershipId);
   }
 
+  /*
+   * **Informal groups** (P19.17-T4; ADR-0270): only an AB carries one, their AABs and agents follow; a group has any
+   * number of Group Leaders, ABs in it. The Super Admin in the KPM, the Owner, an Admin and a core leader — the route's
+   * permission, and `requireOfficeSteward` in the service. A group is a label, never access: nobody sees more for it.
+   */
   @Get('groups')
-  @RequirePermission('group_informal:create')
+  @RequirePermission('member:read_tags')
   @ApiOperation({
-    summary: 'The office’s informal groups',
+    summary: 'The KPM\u2019s informal groups: each with its Group Leaders, its ABs and its counts, then Tanpa group',
     description:
-      'Tags this office defines for its own organising — a mentoring circle, a task ' +
-      'force. Never hierarchy and never access: nothing in scope resolution reads them.',
+      'The live groups A to Z, each with its Group Leaders (ABs, any number, while they hold), its ABs A to Z — each with '
+      + 'the size of their AB group (*n orang di grupnya*) — and *n leader · n orang · n AB group*; then *Tanpa group*: '
+      + 'the ABs with none. Test accounts are not counted. `canWrite` false in a view-as session.',
   })
   async listGroups(@Ctx() ctx: RequestContext) {
     return this.groups.list(ctx);
@@ -311,52 +258,73 @@ export class OrgController {
   @Post('groups')
   @RequirePermission('group_informal:create')
   @ApiOperation({
-    summary: 'Create a group',
-    description: 'With no ★ (*+ Group baru*), or with one appointed: an active AB or AAB, placed in it (ADR-0253 §2).',
+    summary: 'Group baru: a name only',
+    description:
+      'No Group Leader: they are appointed later. With `abMembershipId` — the AB whose picker made it — that AB and their '
+      + 'team move into it at once (an AAB or an agent `422 ORG_GROUP_AB_ONLY`). A live name taken `409 '
+      + 'ORG_GROUP_NAME_TAKEN`. Audited `group.created`, and `member.tagged` for the AB. Answers the group and the groups.',
   })
-  async createGroup(@Ctx() ctx: RequestContext, @Body() dto: GroupDto) {
+  async createGroup(@Ctx() ctx: RequestContext, @Body() dto: CreateGroupDto) {
     return this.groups.create(ctx, dto);
   }
 
   @Put('groups/:groupId')
   @RequirePermission('group_informal:update')
   @ApiOperation({
-    summary: 'Rename a group, and appoint or clear its ★ group leader',
-    description:
-      'The members follow a rename: they carry the group\u2019s id. `ownerMembershipId` absent keeps the ★, `null` clears '
-      + 'it, an id appoints them — an active AB or AAB of this office, placed in the group if they were not, the star '
-      + 'moved from whoever held it (ADR-0253 §2).',
+    summary: 'Ubah nama: rename a group',
+    description: 'Its ABs carry the group\u2019s id, so they follow. Audited `group.updated`, before and after.',
   })
-  async updateGroup(
-    @Ctx() ctx: RequestContext,
-    @Param('groupId') groupId: string,
-    @Body() dto: GroupDto,
-  ) {
+  async updateGroup(@Ctx() ctx: RequestContext, @Param('groupId') groupId: string, @Body() dto: RenameGroupDto) {
     return this.groups.rename(ctx, groupId, dto);
   }
 
   @Delete('groups/:groupId')
   @RequirePermission('group_informal:archive')
   @ApiOperation({
-    summary: 'Delete (archive) a group',
+    summary: 'Hapus group: archive it, its ABs to Tanpa group',
     description:
-      '*Hapus* (ADR-0253 §3): archived, never deleted, and **every member\u2019s tag on it removed** — they read ' +
-      '*Tanpa group*; their Core leader tag is untouched. One `member.tagged` entry per member, then `group.archived` ' +
-      'with how many it untagged: the audit log keeps the record that the cohort existed.',
+      'Archived, never deleted; its Group Leaders cleared and **every row carrying it untagged**, so its ABs and their '
+      + 'teams read *Tanpa group*. One `member.tagged` entry per row, then `group.archived` with the leaders it had.',
   })
   async archiveGroup(@Ctx() ctx: RequestContext, @Param('groupId') groupId: string) {
     return this.groups.archive(ctx, groupId);
   }
 
+  @Put('groups/:groupId/leaders/:membershipId')
+  @RequirePermission('group_informal:update')
+  @ApiOperation({
+    summary: 'Jadikan group leader: add an AB of the group to its Group Leaders',
+    description:
+      'Adds, never replaces: a group has any number of Group Leaders. An active AB in this group; an AB elsewhere `422 '
+      + 'ORG_GROUP_LEADER_NOT_IN_GROUP`, an AAB or an agent `422 ORG_GROUP_AB_ONLY`, nobody here `404`. Already one writes '
+      + 'nothing. Audited `group.updated` with the leaders before and after.',
+  })
+  async appointGroupLeader(
+    @Ctx() ctx: RequestContext, @Param('groupId') groupId: string, @Param('membershipId') membershipId: string,
+  ) {
+    return this.groups.addLeader(ctx, groupId, membershipId);
+  }
+
+  @Delete('groups/:groupId/leaders/:membershipId')
+  @RequirePermission('group_informal:update')
+  @ApiOperation({
+    summary: 'Hapus sebagai group leader',
+    description: 'The AB stays in the group. Somebody not among its leaders writes nothing. Audited `group.updated`.',
+  })
+  async removeGroupLeader(
+    @Ctx() ctx: RequestContext, @Param('groupId') groupId: string, @Param('membershipId') membershipId: string,
+  ) {
+    return this.groups.removeLeader(ctx, groupId, membershipId);
+  }
+
   @Post('groups/:groupId/members')
   @RequirePermission('member:tag_group')
   @ApiOperation({
-    summary: 'Tag several people into one group at once',
+    summary: '+ Tambah ke grup: move several ABs into one group at once, each with their team',
     description:
-      'The Unit Dashboard’s *Grup informal* sheet, *+ Tambah ke grup*: each membership sent is tagged into this group, '
-      + 'their other groups and Core Leader tag untouched. Every id must be an active member of this agency and the group '
-      + 'a live one of it — otherwise `404` and nothing is tagged. Somebody already in the group is not counted again. '
-      + 'One `member.tagged` audit entry per person tagged. A group is a label, never access: nobody sees more for it.',
+      'The Unit Dashboard\u2019s *Grup informal* sheet. Every id must be an active member of this KPM (`404` otherwise) '
+      + 'and an AB (`422 ORG_GROUP_AB_ONLY`), and the group a live one of it (`404`) — or nothing moves. An AB already in '
+      + 'the group is not counted again. One `member.tagged` audit entry per AB moved.',
   })
   async addGroupMembers(
     @Ctx() ctx: RequestContext,
@@ -366,9 +334,25 @@ export class OrgController {
     return this.groups.addMembers(ctx, groupId, dto.membershipIds);
   }
 
+  @Put(':membershipId/group')
+  @RequirePermission('member:tag_group')
+  @ApiOperation({
+    summary: 'An AB\u2019s informal group: the group chip and the Group dialog',
+    description:
+      'An active AB of this KPM into a live group, or `null` for *Tanpa group*; **the whole team follows** — they are '
+      + 'derived, nothing is copied. An AAB or an agent `422 ORG_GROUP_AB_ONLY` (they follow their AB); nobody here or a '
+      + 'group not live `404`. Leaving a group they led takes them off its leaders. Audited `member.tagged`.',
+  })
+  async setAbGroup(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string, @Body() dto: SetAbGroupDto) {
+    return this.groups.setAbGroup(ctx, membershipId, dto.groupId);
+  }
+
   @Get(':membershipId/tags')
   @RequirePermission('member:tag_group')
-  @ApiOperation({ summary: 'What this person is tagged with' })
+  @ApiOperation({
+    summary: 'What this person is tagged with',
+    description: 'An AB\u2019s group, the Core Leader tag, and — for an AAB or an agent — the group they follow from their AB.',
+  })
   async readTags(@Ctx() ctx: RequestContext, @Param('membershipId') membershipId: string) {
     return this.groups.tagsFor(ctx, membershipId);
   }
@@ -376,13 +360,12 @@ export class OrgController {
   @Put(':membershipId/tags')
   @RequirePermission('member:tag_group')
   @ApiOperation({
-    summary: 'Set this person’s groups and Core Leader flag',
+    summary: 'Set an AB\u2019s group and this person\u2019s Core Leader flag',
     description:
-      'Core Leader (ADR-0159) decides who, besides the Owner and the Admins, opens and writes in the Strategic ' +
-      'Leader Forum’s meetings and reads the office’s KPM analytics — no hierarchy. **A leader’s only**: a change ' +
-      'to it is checked against `member:tag_core_leader`, and setting it on a member whose rung is not a leader ' +
-      'rung is refused `400 CORE_LEADER_NOT_A_LEADER`; an unchanged flag is not asked about. A group is a label, ' +
-      'not a rule.',
+      'An AB\u2019s one group or none (`400 ORG_GROUP_ONE_PER_LEADER` for two); a group on an AAB or an agent `422 ' +
+      'ORG_GROUP_AB_ONLY` (ADR-0270 §1). Core Leader (ADR-0159, ADR-0268) is **a leader\u2019s only**: a change to it is ' +
+      'checked against `member:tag_core_leader`, and setting it on a member whose rung is not a leader rung is refused ' +
+      '`400 CORE_LEADER_NOT_A_LEADER`; an unchanged flag is not asked about. A group is a label, not a rule.',
   })
   async tagMember(
     @Ctx() ctx: RequestContext,

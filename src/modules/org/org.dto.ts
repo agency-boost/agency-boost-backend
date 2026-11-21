@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsArray, IsBoolean, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, Max,
+  IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, Max,
   MaxLength, Min, MinLength, ValidateIf, ValidateNested,
 } from 'class-validator';
 import { field } from '@/common/validation/violations';
@@ -30,6 +30,13 @@ export class DirectoryQueryDto {
   @IsOptional()
   @IsEnum(['active', 'pending', 'removed'])
   status?: 'active' | 'pending' | 'removed';
+
+  /** P19.20-T1 AC-2: *★ Core leader* — `true` lists only the core leaders now (tagged, on a leader rung). */
+  @ApiPropertyOptional({ type: Boolean, description: '`true`: only the core leaders (ADR-0159 §1). Absent or `false`: everybody.' })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  coreLeader?: boolean;
 
   @ApiPropertyOptional({ description: 'The `nextCursor` of the previous page — an agent code.' })
   @IsOptional()
@@ -89,6 +96,17 @@ export class OrgTreeQueryDto {
   @IsString()
   @MaxLength(64)
   for?: string;
+
+  @ApiPropertyOptional({
+    enum: ['kpm'],
+    description:
+      '`kpm`: the KPM\'s **Org tree** (ADR-0268 §1) — for a core leader the whole KPM, each node `openable` only for '
+      + 'themselves and their downline. Omitted, the reader\'s Group Tree: a core leader\'s own team. The same tree for '
+      + 'everybody else.',
+  })
+  @IsOptional()
+  @IsIn(['kpm'])
+  view?: 'kpm';
 }
 
 export class SetMemberPhoneDto {
@@ -291,29 +309,6 @@ export class RemoveMemberDto {
   @ValidateNested()
   @Type(() => SubtreeDispositionDto)
   subtree?: SubtreeDispositionDto;
-}
-
-export class GroupDto {
-  @ApiProperty({ example: 'New Agent Mentoring Circle' })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
-  @MinLength(1)
-  @MaxLength(80)
-  name!: string;
-
-  @ApiPropertyOptional({
-    type: String,
-    nullable: true,
-    description:
-      'The ★ group leader (ADR-0253 §2): a membership, never a name. Absent keeps the ★ (on a rename) or makes the group ' +
-      'with none; `null` clears it (*Belum ditunjuk*); an id appoints them — an active AB or AAB of this office, placed ' +
-      'in the group if they were not (their one group from now), the star moved from whoever held it. An Agent ' +
-      '`422 ORG_GROUP_LEADER_NOT_A_LEADER`; somebody not active in this office `422 ORG_GROUP_OWNER_NOT_IN_KPM`.',
-  })
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  ownerMembershipId?: string | null;
 }
 
 export class TagMemberDto {

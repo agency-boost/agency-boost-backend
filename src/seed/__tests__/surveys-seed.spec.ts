@@ -42,7 +42,9 @@ describe('P19.5-T4 AC-20 the surveys seed — a run at 10:00 on 5 November 2026 
   afterAll(stopMongo);
 
   it('AC-20 the periods: this quarter’s NPS open, last quarter’s closed, June’s qualitative run in both offices', () => {
-    expect(seeded.surveys.periods).toEqual({ npsOpen: '2026-Q4', npsPrevious: '2026-Q3', qual: '2026-06' });
+    expect(seeded.surveys.periods).toEqual({
+      npsOpen: '2026-Q4', npsPrevious: '2026-Q3', npsOlder: ['2026-Q1', '2026-Q2'], qual: '2026-06', qualPrevious: '2025-12',
+    });
   });
 
   it('C-R2, C-R6 Indah: the open NPS, 1 of 6 answered, a dot and a card; the halfway popup she never saw', async () => {
@@ -61,13 +63,13 @@ describe('P19.5-T4 AC-20 the surveys seed — a run at 10:00 on 5 November 2026 
     const dimas = await as('0417', 'dimas@kpm0417.test');
     expect(await wired.surveys.member.pending(dimas)).toMatchObject({ open: [], sentOpen: [{ runId: seeded.surveys.runs.npsOpen }] });
     const agus = await wired.surveys.member.list(await as('0417', 'agus@kpm0417.test'));
-    expect(agus.history.map((h) => h.periodKey)).toEqual(['2026-Q3']);
+    expect(agus.history.map((h) => h.periodKey).sort()).toEqual(['2026-06', '2026-Q3']);
     expect(agus.open.map((o) => o.periodKey)).toEqual(['2026-Q4']);
   });
 
   it('ADR-0216 §3 the anonymous forms hold no person: no membership, no time, no author', async () => {
     const rows = await col('surveyResponses').find({ runId: { $in: [seeded.surveys.runs.npsOpen, seeded.surveys.runs.npsPrevious] } }).toArray();
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(13);
     for (const row of rows) expect(row).toMatchObject({ membershipId: null, submittedAt: null, createdBy: null });
   });
 
@@ -103,12 +105,38 @@ describe('P19.5-T4 AC-20 the surveys seed — a run at 10:00 on 5 November 2026 
     expect(await wired.surveys.coaching.read(owner, linaId)).toMatchObject({ state: 'anonymous', sections: [] });
   });
 
-  it('AC-3 the Owner’s NPS tab: Q4 running with 3 sent, Q3 closed with 5, its open answers with no names', async () => {
+  it('AC-3 the Owner’s NPS tab: Q4 running with 6 sent, three earlier quarters closed, Q3’s open answers with no names', async () => {
     const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     const tab = await wired.surveys.kpm.results(owner, 'nps');
-    expect(tab.runs.map((r) => [r.periodKey, r.state, r.responses.sent])).toEqual([['2026-Q4', 'open', 3], ['2026-Q3', 'closed', 5]]);
+    expect(tab.runs.map((r) => [r.periodKey, r.state, r.responses.sent])).toEqual([
+      ['2026-Q4', 'open', 6], ['2026-Q3', 'closed', 7], ['2026-Q2', 'closed', 6], ['2026-Q1', 'closed', 6],
+    ]);
     const q3 = await wired.surveys.kpm.results(owner, 'nps', seeded.surveys.runs.npsPrevious);
-    expect(q3.selected!.nps!.openAnswers).toHaveLength(3);
+    expect(q3.selected!.nps!.improve).toHaveLength(3);
+  });
+
+  it('P19.22-T6 AC-2 the NPS tab: Keseluruhan KPM over four quarters, reasons on tap, a view per class; Survei baru with who has not answered', async () => {
+    const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
+    const tab = await wired.surveys.kpm.results(owner, 'nps');
+    const nps = tab.selected!.nps!;
+    expect(nps.trendPeriods).toEqual(['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']);
+    expect(nps.headline!.trend.every((x) => x !== null)).toBe(true);
+    expect(nps.questions.find((q) => q.kode === 'P2')!.reasons!.length).toBeGreaterThanOrEqual(3);
+    const leaders = (await wired.surveys.kpm.results(owner, 'nps', undefined, 'leader')).selected!.nps!;
+    expect(leaders).toMatchObject({ whoShown: true, respondents: 3 });
+    expect(tab.send).toMatchObject({ periodKey: '2026-Q4', run: { periodKey: '2026-Q4' } });
+    expect(tab.send.notAnswered!.map((x) => x.name)).toContain('Indah Permatasari');
+  });
+
+  it('P19.22-T7 AC-2, AC-3 Kualitatif: semester lalu against Dec 2025, Suara responden, Per orang with Sari not answered', async () => {
+    const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
+    const qual = (await wired.surveys.kpm.results(owner, 'qual')).selected!.qual!;
+    expect(qual.blocks.find((b) => b.kode === 'SALES')!.rows.some((r) => r.previousPct !== null)).toBe(true);
+    expect(qual.voices!.length).toBeGreaterThanOrEqual(3);
+    const people = await wired.surveys.people.people(owner);
+    expect(people.people!.filter((x) => x.answered)).toHaveLength(7);
+    expect(people.people!.find((x) => x.name.startsWith('Sari'))).toMatchObject({ answered: false, canOpen: false });
+    expect((await wired.surveys.kpm.results(owner, 'qual')).send).toMatchObject({ periodKey: '2026-12', opensOn: '2026-12-01', run: null });
   });
 
   it('a second run writes no survey row', async () => {

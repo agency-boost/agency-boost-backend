@@ -7,7 +7,7 @@ import {
   DomainException, InvalidRequestException, NotFoundException, PermissionDeniedException,
 } from '@/common/errors/domain.exception';
 import type { Reader } from '@/common/i18n/reader';
-import { render, type Sentence } from '@/common/i18n/sentence';
+import { render } from '@/common/i18n/sentence';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
@@ -31,13 +31,14 @@ import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
 import { invitationStateOf, type InvitationState } from '@/modules/org/invitation-state';
 import { INSURERS_ONLY, isTemplateLibrary } from './template-library';
 import {
-  subscriptionStateOf, validateSubscription, type SubscriptionInput, type SubscriptionState,
+  subscriptionStateOf, trialSubscription, validateSubscription, type SubscriptionInput, type SubscriptionState,
 } from './subscription';
 import { TENANTS_MESSAGES, TENANTS_REFUSALS } from './tenants.messages';
 
 export interface CreateKpmInput {
   companyId: string;
-  code: string;
+  /** Absent: made automatically, the company's next free code (`autoCode`; P19.23-T2 AC-3, ADR-0277 §3). */
+  code?: string;
   branchName: string;
   address?: string;
   contactPhone?: string;
@@ -424,16 +425,20 @@ export class TenantService {
       const id = String(kpm._id);
       const user = kpm.ownerUserId ? account.get(kpm.ownerUserId) : undefined;
       const row = kpm.ownerUserId ? ownerRows.find((m) => m.kpmId === id && m.userId === kpm.ownerUserId) : undefined;
-      const invitedAt = row?.invitedAt ?? null;
+      // P19.23-T2 AC-3 (OD-420): a pending Owner sent the WhatsApp claim link reads *Diundang* from when it went.
+      const invitedAt = row?.invitedAt ?? (kpm.ownerUserId ? null : kpm.pendingOwner?.invite?.invitedAt ?? null);
       const ownerState: OwnerState = kpm.ownerUserId
         ? consoleState(invitationStateOf(user?.lastLoginAt, invitedAt))
-        : (kpm.pendingOwner ? 'not_invited' : 'none');
+        : (kpm.pendingOwner ? (invitedAt ? 'invited' : 'not_invited') : 'none');
       const memberCount = live.get(id) ?? 0;
       return [id, {
         ownerState,
         ownerPhone: user?.phone ?? kpm.pendingOwner?.phone ?? null,
-        ownerInvitedAt: invitedAt ? invitedAt.toISOString() : null,
-        pendingOwner: kpm.pendingOwner ?? null,
+        ownerInvitedAt: invitedAt ? new Date(invitedAt).toISOString() : null,
+        // The claim link's hash is machinery, never served (OD-420): who waits, and their number, alone.
+        pendingOwner: kpm.pendingOwner
+          ? { fullName: kpm.pendingOwner.fullName, phone: kpm.pendingOwner.phone, agentCode: kpm.pendingOwner.agentCode }
+          : null,
         memberCount,
         membersBesidesOwner: Math.max(0, memberCount - (row ? 1 : 0)),
       }];
@@ -516,7 +521,14 @@ export class TenantService {
    */
   async createCompany(
     ctx: RequestContext,
-    input: { name: string; slug: string; usesPlatformDefaults?: boolean },
+    input: {
+      name: string; slug: string; usesPlatformDefaults?: boolean;
+      /**
+       * **The company copied** (P19.23-T4 AC-1; ADR-0278 §3, `CompanySetupService`): its ladder and carrier rules, in the
+       * Template library's place — **never its products**, which are an insurer's own. Checked by the caller.
+       */
+      copyOf?: { companyId: string };
+    },
   ): Promise<CompanyDocument> {
     this.require(ctx, 'company:crud');
 
@@ -554,20 +566,24 @@ export class TenantService {
     }
 
     const companyId = String(company._id);
-    if (library) {
+    // ADR-0278 §3: the company named to copy, else the Template library.
+    const source = input.copyOf ?? (library ? { companyId: library.companyId } : null);
+    if (source) {
       /*
        * **A copy of the Template library's company data** (ADR-0164 §4, ADR-0213 §3): its ladder with the leader tiers,
        * its products and its carrier rules. Copies, never links (§6): a later change to the Template reaches no company
        * that already exists. Not its Default template, and no playbook: the Super Admin makes the first template.
+       * **A company named to copy** (ADR-0278 §3) gives its ladder and carrier rules, never its products, and
+       * `CompanySetupService` copies its default template after.
        */
-      await this.orgLevels.copyLadderFrom(library.companyId, companyId);
-      await this.products.copyFromCompany(library.companyId, companyId);
-      await this.campaigns.copyRulesFromCompany(library.companyId, companyId);
-      await this.namedTemplates.copyCompanyKind(ctx, 'campaign_kinds', library.companyId, companyId);
+      await this.orgLevels.copyLadderFrom(source.companyId, companyId);
+      if (!input.copyOf) await this.products.copyFromCompany(source.companyId, companyId);
+      await this.campaigns.copyRulesFromCompany(source.companyId, companyId);
+      await this.namedTemplates.copyCompanyKind(ctx, 'campaign_kinds', source.companyId, companyId);
       await this.recordCompanyCreated(ctx, company, {
         usesPlatformDefaults,
-        startedFrom: 'template_library',
-        source: { companyId: library.companyId },
+        startedFrom: input.copyOf ? 'company' : 'template_library',
+        source,
       });
       return company;
     }
@@ -610,8 +626,11 @@ export class TenantService {
     company: CompanyDocument,
     made: {
       usesPlatformDefaults: boolean;
-      /** The Template library's copy, the AgencyBoost defaults from the code (no library), or nothing. */
-      startedFrom: 'template_library' | 'defaults' | 'empty';
+      /**
+       * The Template library's copy, the AgencyBoost defaults from the code (no library), nothing — or another company's
+       * copy (ADR-0278 §3).
+       */
+      startedFrom: 'template_library' | 'defaults' | 'empty' | 'company';
       /** The Template library it copied from (ADR-0164 §4): its ladder, products and carrier rules. */
       source?: { companyId: string };
     },
@@ -759,7 +778,9 @@ export class TenantService {
       );
     }
 
-    const clash = await this.codeHolder(input.companyId, input.code);
+    // *KPM baru* names no code (P19.23-T2 AC-3; ADR-0277 §3): the company's next free one. A code given still wins.
+    const code = input.code?.trim() || await this.autoCode(input.companyId);
+    const clash = await this.codeHolder(input.companyId, code);
     if (clash) throw this.codeTaken(clash, company.name);
 
     /*
@@ -781,7 +802,7 @@ export class TenantService {
     try {
       kpm = await this.kpms.create({
         companyId: input.companyId,
-        code: input.code,
+        code,
         branchName: input.branchName,
         address: input.address ?? null,
         contactPhone: input.contactPhone ?? null,
@@ -794,13 +815,15 @@ export class TenantService {
         status: 'active',
         ownerUserId: null,
         startedFrom: plan.startedFrom,
+        // P19.23-T5 AC-3 (ADR-0279 §4): every new KPM starts on a 30-day trial, from its own today.
+        subscription: trialSubscription(this.clock.localDateFor(input.timezone ?? company.defaultTimezone)),
         deletedAt: null,
       });
     } catch (err) {
       // Two creations of one code at once both pass the check; only the index stops the second, and it must arrive
       // as the same 409 naming the office, never a 500 (P19-T3 AC-4).
       if ((err as { code?: number }).code !== 11000) throw err;
-      const winner = await this.codeHolder(input.companyId, input.code);
+      const winner = await this.codeHolder(input.companyId, code);
       if (!winner) throw err;
       throw this.codeTaken(winner, company.name);
     }
@@ -1015,34 +1038,6 @@ export class TenantService {
   }
 
   /**
-   * ***Kirim ulang undangan*** (ADR-0212 §2; P19.4-T3 AC-6): `POST /admin/tenants/:id/owner/invitation`. A new one-time
-   * link to the Owner's email, the old revoked, `memberships.invitedAt` stamped again, audited as `kpm.owner_invited`
-   * with `resent: true`. Refused `409 TENANT_OWNER_NOT_INVITABLE` with no Owner (`no_owner`), an Owner named with no
-   * email (`no_email`), or one who has signed in (`signed_in`); past `OWNER_INVITATION_LIMIT` an hour for the KPM, `429
-   * AUTH_RATE_LIMITED`. Nothing is sent on a refusal. Answers the KPM as the list reads it.
-   */
-  async resendOwnerInvitation(ctx: RequestContext, kpmId: string): Promise<KpmAdminView> {
-    this.require(ctx, 'kpm:assign_owner');
-    const kpm = await this.liveKpm(kpmId);
-    const say = TENANTS_REFUSALS.TENANT_OWNER_NOT_INVITABLE;
-    const refusal = (reason: 'no_owner' | 'no_email' | 'signed_in', sentence: Sentence<typeof ErrorCode.TENANT_OWNER_NOT_INVITABLE>) =>
-      new DomainException(ErrorCode.TENANT_OWNER_NOT_INVITABLE, sentence, HttpStatus.CONFLICT, { reason, kpmId });
-    const user = kpm.ownerUserId
-      ? await this.users.findOne({ _id: kpm.ownerUserId, deletedAt: null }).exec().catch(() => null)
-      : null;
-    if (!user) {
-      throw kpm.pendingOwner
-        ? refusal('no_email', say.noEmail({ name: kpm.pendingOwner.fullName }))
-        : refusal('no_owner', say.noOwner);
-    }
-    if (user.lastLoginAt) throw refusal('signed_in', say.signedIn({ name: user.fullName }));
-    if (!this.invitations) throw new Error('Kirim ulang undangan needs OwnerInvitations wired.');
-    this.invitations.limitResend(kpmId);
-    await this.invitations.send(ctx, kpm, user, { resent: true });
-    return this.toAdminView(ctx, kpm);
-  }
-
-  /**
    * A context scoped to an office that is being created.
    *
    * The caller is a Super Admin who is in no tenant, and the tenant-scoped repository fails
@@ -1149,6 +1144,37 @@ export class TenantService {
     }
     await this.inviteIfDue(ctx, kpm, user, sendInvitation);
     return this.toAdminView(ctx, kpm);
+  }
+
+  /**
+   * **The pending Owner who accepted the WhatsApp claim link becomes the Owner** (P19.23-T2 AC-3; ADR-0277; OD-420), as
+   * the person signed in to their own account — asked by `OwnerClaims.accept` once the link is held and `refuseOwner`
+   * has passed. Their membership first, as the KPM's root AB (the leader limit may refuse it, ADR-0113 §2), then
+   * `ownerUserId` — **only while the KPM still has none** — and `pendingOwner` cleared; their WhatsApp number kept on
+   * the account where it has none. Audited in the KPM's log as `kpm.owner_assigned`, the actor the person who claimed.
+   * Answers `false`, writing no Owner, when somebody else became the Owner meanwhile.
+   */
+  async installClaimedOwner(ctx: RequestContext, kpm: KpmDocument, user: UserDocument): Promise<boolean> {
+    const kpmId = String(kpm._id);
+    const userId = String(user._id);
+    // Somebody writing themselves into an office they are joining (`joiningTenant`): never a Super Admin's context.
+    const inKpm = RequestContext.joiningTenant(ctx, kpmId);
+    await this.ensureOwnerMembership(inKpm, kpmId, userId);
+    const written = await this.kpms
+      .updateOne({ _id: kpmId, deletedAt: null, ownerUserId: null }, { $set: { ownerUserId: userId, pendingOwner: null } })
+      .exec();
+    if (written.modifiedCount === 0) return false;
+    if (!user.phone && kpm.pendingOwner?.phone) {
+      await this.users.updateOne({ _id: user._id, phone: null }, { $set: { phone: kpm.pendingOwner.phone } }).exec();
+    }
+    await this.audit.record(inKpm, {
+      action: 'kpm.owner_assigned',
+      targetCollection: 'kpms',
+      targetId: kpmId,
+      before: { ownerUserId: null, pendingOwner: kpm.pendingOwner?.fullName ?? null },
+      after: { ownerUserId: userId, email: user.email, via: 'whatsapp_claim' },
+    });
+    return true;
   }
 
   /**
@@ -1317,6 +1343,25 @@ export class TenantService {
         ? { kpmId: String(holder._id), code: holder.code, branchName: holder.branchName, companyName: company.name }
         : null,
     };
+  }
+
+  /**
+   * **The next free KPM code in a company** (P19.23-T2 AC-3; ADR-0277 §3; the Super Admin spec §5 *"code created
+   * automatically"*): four digits, one more than the highest all-digit code a live office of the company holds — `0001`
+   * for its first — stepping past any code a live office already holds, so *KPM baru* and *Setujui* need nobody to know
+   * what is free. A code typed by hand still wins where one is given; this is the fallback when none is.
+   */
+  async autoCode(companyId: string): Promise<string> {
+    const held = await this.kpms
+      .find({ companyId, deletedAt: null })
+      .select('code')
+      .lean()
+      .exec() as { code: string }[];
+    const taken = new Set(held.map((k) => k.code));
+    const highest = held.reduce((max, k) => (/^\d+$/.test(k.code) ? Math.max(max, Number(k.code)) : max), 0);
+    let next = highest + 1;
+    while (taken.has(String(next).padStart(4, '0'))) next += 1;
+    return String(next).padStart(4, '0');
   }
 
   /**

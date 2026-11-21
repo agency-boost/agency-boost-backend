@@ -1,4 +1,4 @@
-import { ASSET_LIMITS, DOCUMENT_MIME_TYPES } from './assets';
+import { ASSET_LIMITS, PITCH_MATERIAL_MIME_TYPES } from './assets';
 
 /**
  * **Recruitment tools** (Phase 17; `functional/recruitment.md`): the candidate brief's vocabulary, the
@@ -109,10 +109,22 @@ export const RECRUITMENT = {
   LINK_TTL_SECONDS: ASSET_LIMITS.SIGNED_URL_TTL_SECONDS,
   /** The office's own folder the pitch documents land in, fixed by the server (ADR-0032). */
   PITCH_UPLOAD_FOLDER: 'recruitment-pitch',
-  /** A pitch document is a PDF (D-slots), or an HTML page drawn in the sandboxed frame (P19.6-T2, ADR-0217 §1). */
-  PITCH_MIME_TYPES: DOCUMENT_MIME_TYPES,
-  /** At most 25 MB: the one ceiling every upload has (`ASSET_MAX_BYTES`). */
+  /**
+   * A pitch material is **any format** (P19.21-T3 AC-6, ADR-0274): a PDF, an HTML page drawn in the sandboxed frame
+   * (P19.6-T2, ADR-0217 §1), PowerPoint, Word, an image or a video — `PITCH_MATERIAL_MIME_TYPES`. Before P19.21 a PDF
+   * or a page only.
+   */
+  PITCH_MIME_TYPES: PITCH_MATERIAL_MIME_TYPES,
+  /**
+   * At most 25 MB, **for every kind, a video included**: the one ceiling every upload has (`ASSET_MAX_BYTES`, ADR-0032
+   * — *"anything larger is a link, not an upload"*). A longer video is given as a link (`PITCH_LINK_MAX_LENGTH`).
+   */
   PITCH_MAX_BYTES: ASSET_LIMITS.MAX_BYTES,
+  /**
+   * **A material given as a link** (P19.21-T3 AC-6, ADR-0274): an `https://` address of at most 2,000 characters, with
+   * no user name or password in it. Opened in a new tab, never framed and never fetched by the server.
+   */
+  PITCH_LINK_MAX_LENGTH: 2000,
 } as const;
 
 /**
@@ -183,6 +195,12 @@ export interface RecruitmentPitchSummary {
   missing: number;
   /** Required slots with a file and an item still open. */
   unconfirmed: number;
+  /**
+   * **Over all six, with no required/optional split** (P19.21-T3 AC-6, ADR-0274): what *Pengaturan › Recruitment
+   * pitch* writes — *"2/6 materi siap"* — and the hub's *"3 belum ada"*. `ready` is *Siap* (complete, or uploaded with
+   * nothing to confirm), `missing` *Belum ada*, `unconfirmed` *Perlu dicek* (a material with an item still open).
+   */
+  all: { ready: number; total: number; missing: number; unconfirmed: number };
 }
 
 /**
@@ -200,6 +218,12 @@ export function recruitmentPitchSummary(
     total: required.length,
     missing: required.filter((slot) => slot.state === 'missing').length,
     unconfirmed: required.filter((slot) => slot.state === 'partial').length,
+    all: {
+      ready: slots.filter((slot) => recruitmentPitchDone(slot.state)).length,
+      total: slots.length,
+      missing: slots.filter((slot) => slot.state === 'missing').length,
+      unconfirmed: slots.filter((slot) => slot.state === 'partial').length,
+    },
   };
 }
 

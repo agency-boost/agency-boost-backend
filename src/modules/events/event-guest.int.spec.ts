@@ -241,7 +241,7 @@ describe('events, for their audience (P18.2-T5, P18.2-T6)', () => {
     it('P18.2-T5 AC-5 Join event, then Cancel RSVP — idempotent, and audited once each', async () => {
       as('RINA');
       const id = idOf('UPCOMING');
-      expect((await http().post(`/events/${id}/rsvp`).expect(201)).body.me).toEqual({ rsvp: 'going', claimed: false, feedback: null });
+      expect((await http().post(`/events/${id}/rsvp`).expect(201)).body.me).toEqual({ rsvp: 'going', declineReason: null, claimed: false, feedback: null });
       await http().post(`/events/${id}/rsvp`).expect(201);
       expect((await http().post(`/events/${id}/rsvp/cancel`).expect(201)).body.me.rsvp).toBe('cancelled');
       await http().post(`/events/${id}/rsvp/cancel`).expect(201);
@@ -267,7 +267,7 @@ describe('events, for their audience (P18.2-T5, P18.2-T6)', () => {
       as('RINA');
       const id = idOf('UPCOMING');
       await http().post(`/events/${id}/rsvp`).expect(201);
-      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me).toEqual({ rsvp: null, claimed: false, feedback: null });
+      expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me).toEqual({ rsvp: null, declineReason: null, claimed: false, feedback: null });
       await http().post(`/events/${id}/rsvp/withdraw`).expect(201);
       await http().post(`/events/${id}/rsvp/cancel`).expect(201);
       expect((await http().post(`/events/${id}/rsvp/withdraw`).expect(201)).body.me.rsvp).toBeNull();
@@ -311,7 +311,7 @@ describe('events, for their audience (P18.2-T5, P18.2-T6)', () => {
     it('P18.2-T5 AC-6 attendance cannot be self-claimed without a confirming role', async () => {
       as('RINA');
       const claimed = (await http().post(`/events/${idOf('PAST_ALL')}/attendance/claim`).expect(201)).body;
-      expect(claimed.me).toEqual({ rsvp: null, claimed: true, feedback: null });
+      expect(claimed.me).toEqual({ rsvp: null, declineReason: null, claimed: true, feedback: null });
       as('BUDI');
       await http().post(`/events/${idOf('PAST_CHOSEN')}/attendance/claim`).expect(201);
 
@@ -538,7 +538,7 @@ describe('events, for their audience (P18.2-T5, P18.2-T6)', () => {
       const mine = (await listed('RINA')).events.find((e) => e.code === 'PAST_ALL') as unknown as { me: { feedback: unknown } };
       expect(mine.me.feedback).toMatchObject({ score: 9, why: 'Clear', improve: '' });
       const theirs = (await listed('BUDI')).events.find((e) => e.code === 'PAST_ALL') as unknown as { me: unknown };
-      expect(theirs.me).toEqual({ rsvp: null, claimed: false, feedback: null });
+      expect(theirs.me).toEqual({ rsvp: null, declineReason: null, claimed: false, feedback: null });
     });
   });
 

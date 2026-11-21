@@ -1,7 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { UNIT_DASHBOARD, type UnitView } from '@/domain/constants';
+import { COACHING_STATUSES, type CoachingStatus } from '@/domain/constants/coaching-status';
 import { GOAL_PACE_STATUSES, type GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
+import type { ViewsOffered } from '@/domain/metrics/unit-view';
+import { UnitScopesDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
 import type {
-  CoachingRosterView, RosterLastOneOnOne, RosterPerson, RosterRow, RosterUnit,
+  CoachingRosterView, RosterCoachingStatus, RosterLastOneOnOne, RosterPerson, RosterRow, RosterSection, RosterTeam,
 } from './coaching-roster.service';
 import type { CoacheeDownline, CoacheeView } from './coachee.service';
 
@@ -80,17 +84,58 @@ export class RosterRowDto implements RosterRow {
       + '(`POLICY_COUNT_TARGET`) — the Summary’s pace sentence, answered from the 1st (ADR-0109).',
   })
   status!: GoalPaceStatus;
-}
-
-export class RosterUnitDto implements RosterUnit {
-  @ApiProperty({ type: RosterRowDto, description: 'Somebody who answers to the reader directly and leads others.' })
-  head!: RosterRow;
 
   @ApiProperty({
-    type: RosterRowDto, isArray: true,
-    description: 'Their whole subtree in tree order: a nested head is followed by their own members. A to Z within a level.',
+    type: () => RosterCoachingStatusDto,
+    description: 'The coaching status tile (`COACHING_STATUS`): red *Belum pernah coaching*, green *Coaching n hari lalu* '
+      + 'up to 14 days, yellow after — and who led the latest 1:1 (*oleh …*).',
   })
-  members!: RosterRow[];
+  coaching!: RosterCoachingStatus;
+
+  @ApiProperty({
+    type: String, nullable: true, example: '+6281234567890',
+    description: 'The WhatsApp number on their account; `null` without one, on your own row and for a member who left.',
+  })
+  phone!: string | null;
+
+  @ApiProperty({ description: 'Your own row: it opens your own coaching notes.' }) isReader!: boolean;
+
+  @ApiProperty({
+    description: 'The row opens their coaching session: somebody you coach. On the agency-wide list of its owner or an '
+      + 'administrator, somebody outside their own team is listed and does not open.',
+  })
+  opens!: boolean;
+}
+
+export class RosterCoachingStatusDto implements RosterCoachingStatus {
+  @ApiProperty({ enum: COACHING_STATUSES }) status!: CoachingStatus;
+  @ApiProperty({ type: Number, nullable: true, description: '`DAYS_SINCE_LAST_COACHING`; `null` with no 1:1 ever.' }) days!: number | null;
+  @ApiProperty({ type: RosterPersonDto, nullable: true, description: 'Who led the latest 1:1.' }) coach!: RosterPerson | null;
+}
+
+class RosterLeaderDto extends RosterPersonDto {
+  @ApiProperty({ type: String, nullable: true, description: 'A signed link to their photo.' }) photoUrl!: string | null;
+}
+
+export class RosterTeamDto implements RosterTeam {
+  @ApiProperty({ description: 'The team leader’s membership.' }) key!: string;
+  @ApiProperty({ type: RosterLeaderDto }) leader!: RosterPerson & { photoUrl: string | null };
+  @ApiProperty({ description: '*n orang*: the team leader and their people in the view.' }) count!: number;
+  @ApiProperty({ type: RosterRowDto, isArray: true, description: 'The team leader first, then AB → AAB → agents, A to Z.' })
+  rows!: RosterRow[];
+}
+
+export class RosterSectionDto implements RosterSection {
+  @ApiProperty({ description: '`own`, the unit leader’s membership, or `unled`.' }) key!: string;
+  @ApiProperty({
+    enum: ['own', 'unit', 'unled'],
+    description: '`own`: *Unit Anda* — you and your direct reports who lead nobody and are no AB; `unit`: a unit below you '
+      + '(an AB’s, never called AAB); `unled`: *Belum punya leader*, last, on the agency-wide list.',
+  }) kind!: 'own' | 'unit' | 'unled';
+  @ApiProperty({ type: RosterLeaderDto, nullable: true }) leader!: (RosterPerson & { photoUrl: string | null }) | null;
+  @ApiProperty({ description: '*n orang*: everybody in it, its teams included.' }) count!: number;
+  @ApiProperty({ type: RosterRowDto, isArray: true, description: 'Its leader first, then AB → AAB → agents, A to Z.' }) rows!: RosterRow[];
+  @ApiProperty({ type: RosterTeamDto, isArray: true, description: 'Each team inside it, at any depth, in tree order.' }) teams!: RosterTeam[];
 }
 
 export class CoachingRosterDto implements CoachingRosterView {
@@ -100,17 +145,18 @@ export class CoachingRosterDto implements CoachingRosterView {
   @ApiProperty({ example: 7, description: 'How many days a last 1:1 may be before it reads overdue, as set for your agency.' })
   overdueAfterDays!: number;
 
-  @ApiProperty({
-    type: RosterRowDto, isArray: true,
-    description: 'The agents who answer to you directly, A to Z.',
-  })
-  directAgents!: RosterRow[];
+  @ApiProperty({ enum: UNIT_DASHBOARD.VIEWS, description: 'The view answered.' }) scope!: UnitView;
 
   @ApiProperty({
-    type: RosterUnitDto, isArray: true,
-    description: 'Each leader who answers to you directly, A to Z, with everybody below them.',
+    type: UnitScopesDto,
+    description: 'The views offered, as the Unit Dashboard’s; `default` is everybody you coach (`downline` where offered).',
   })
-  units!: RosterUnit[];
+  scopes!: ViewsOffered;
+
+  @ApiProperty({ example: 30, description: '*Semua orang · n*: everybody on the roster, you included.' }) total!: number;
+
+  @ApiProperty({ type: RosterSectionDto, isArray: true, description: '*Unit Anda* first, then each unit below you, then *Belum punya leader*.' })
+  sections!: RosterSection[];
 }
 
 export class CoacheeDownlineDto implements CoacheeDownline {

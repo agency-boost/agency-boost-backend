@@ -270,6 +270,9 @@ export function describeNotification(
         })),
         detail: say(SAY.premiumTableStartedDetail({ company: name(payload, 'companyName', '') })),
       };
+    // P19.23-T6 AC-4 (ADR-0279): the Super Admin's announcement, its words as written.
+    case NotificationTemplate.PLATFORM_ANNOUNCEMENT:
+      return { title: say(SAY.platformAnnouncement), detail: name(payload, 'message', '') || null };
     case NotificationTemplate.EVENT_REMINDER:
       return {
         title: say(SAY.eventComingUp({ title: name(payload, 'title', say(SAY.anEvent)) })),

@@ -152,9 +152,9 @@ export class InvitesService {
      * P19.5-T2 (ADR-0214 §7): the KPM's template's agent-code format, read live. Optional, so the specs built before it
      * keep their constructor; without it the global `AGENT_CODE_PATTERN` stands.
      */
-    @Optional() private readonly analytics: AnalyticsConfigReader | null = null,
+    @Optional() @Inject(AnalyticsConfigReader) private readonly analytics: AnalyticsConfigReader | null = null,
     /** P19.6-T1 AC-13 (ADR-0218 §9): the KPM's logo and colours on the invitation's pages. Optional, as above. */
-    @Optional() private readonly branding: BrandingReader | null = null,
+    @Optional() @Inject(BrandingReader) private readonly branding: BrandingReader | null = null,
   ) {}
 
   /**
@@ -508,6 +508,8 @@ export class InvitesService {
         leaderId: String(leader._id),
         status: 'active',
         recruitedByMembershipId: String(leader._id),
+        // ADR-0267 §3: the recruiter is whoever sent the invitation — the leader, or the office adding someone for them.
+        registeredByMembershipId: row.invitedByMembershipId ?? String(leader._id),
         joining: { joinDate: row.joinDate },
       });
     } catch (err) {

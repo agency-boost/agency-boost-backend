@@ -18,8 +18,8 @@ class PotensiAaCellDto implements PotensiAaCell {
   @ApiProperty({ example: 2, description: '*n potensi*: sales leads switched on for the month and still open at its end.' })
   potensi!: number;
   @ApiProperty({
-    description: '`AA_THIS_MONTH` (ADR-0193 §2): a sales lead marked *Berhasil* in the month, or the month’s production '
-      + 'row shows policies > 0 — whether or not the switch was used. Never MAA.',
+    description: '*Active Agent* in the month (`MONTHLY_ACTIVE_AGENT`, ADR-0267 §2): the uploaded production shows APE above '
+      + '0 or a policy that month — the green ✓. Never a lead.',
   })
   aa!: boolean;
   @ApiProperty({ example: 2, description: 'Sales leads switched on for the month, whatever became of them.' })
@@ -29,7 +29,10 @@ class PotensiAaCellDto implements PotensiAaCell {
 class PotensiRekrutCellDto implements PotensiRekrutCell {
   @ApiProperty({ example: 1, description: '*n potensi*: recruitment leads switched on and still open at the month’s end.' })
   potensi!: number;
-  @ApiProperty({ example: 1, description: '*n rekrut ✓*, `REKRUT_THIS_MONTH`: recruitment leads marked *Berhasil* in the month.' })
+  @ApiProperty({
+    example: 1,
+    description: 'The green number (`RECRUITS_JOINED`, ADR-0267 §3): the new hires they registered who joined in the month.',
+  })
   rekrut!: number;
   @ApiProperty({ example: 2, description: 'Recruitment leads switched on for the month, whatever became of them.' })
   switched!: number;
@@ -52,16 +55,18 @@ class PotensiPersonDto implements PotensiPerson {
 }
 
 class PotensiAaTotalsDto {
-  @ApiProperty({ description: 'The rows’ *n potensi* summed: the header’s *n potensi*.' }) potensi!: number;
-  @ApiProperty({ description: 'The rows who are AA: the header’s *n AA*.' }) aa!: number;
+  @ApiProperty({
+    description: 'The header’s *n potensi*: **the people** with a sales potensi — who can become Active Agent — never the sum.',
+  }) potensi!: number;
+  @ApiProperty({ description: 'The rows who are Active Agent in the month: the ✓ counted.' }) aa!: number;
   @ApiProperty({ description: 'The rows with a sales lead switched on for the month: an earlier month’s *y*.' })
   switchedPeople!: number;
   @ApiProperty({ description: 'Of those, the ones who are AA: an earlier month’s *x*.' }) switchedPeopleAa!: number;
 }
 
 class PotensiRekrutTotalsDto {
-  @ApiProperty({ description: 'The rows’ *n potensi* summed: the header’s *n potensi*.' }) potensi!: number;
-  @ApiProperty({ description: 'The rows’ *n rekrut ✓* summed: the header’s *n rekrut*.' }) rekrut!: number;
+  @ApiProperty({ description: 'The rows’ *n potensi* summed: the header’s *potensi m*.' }) potensi!: number;
+  @ApiProperty({ description: 'The rows’ green numbers summed: the header’s *n rekrut*.' }) rekrut!: number;
   @ApiProperty({ description: 'The rows with a recruitment lead switched on for the month: an earlier month’s *y*.' })
   switchedPeople!: number;
   @ApiProperty({ description: 'Of those, the ones with a rekrut in the month: an earlier month’s *x*.' })
@@ -82,8 +87,8 @@ class PotensiLeaderDto {
 class PotensiUnitDto implements PotensiUnit {
   @ApiProperty({
     enum: ['unit', 'direct', 'unled'],
-    description: '`direct`: the head and the agents who answer to them directly (*Unit Anda*), **first** (ADR-0229 '
-      + '§4); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order; `unled`: *Belum punya leader*, '
+    description: '`direct`: the head and their direct reports who lead nobody and are no AB (*Unit Anda*), **first** (ADR-0229 '
+      + '§4; an AAB with no team sits there, ADR-0271 §2); `unit`: a unit below the head (*Unit Sari Puspita*), in the roster’s order; `unled`: *Belum punya leader*, '
       + 'last — in the owner’s or an administrator’s own *Semua downline*, the people with no leader there who lead nobody.',
   })
   kind!: 'unit' | 'direct' | 'unled';
@@ -101,18 +106,18 @@ class PotensiHeadDto {
 }
 
 class PotensiTilesPotensiDto {
-  @ApiProperty({ example: 9, description: 'The people of the unit with a Sales lead switched on for the month, whatever became of it.' })
+  @ApiProperty({ example: 2, description: '*potensi n* under *Active Agent*: the people who can become Active Agent — the headers summed.' })
   aa!: number;
-  @ApiProperty({ example: 2, description: 'The people of the unit with a Recruit lead switched on for the month, whatever became of it.' })
+  @ApiProperty({ example: 3, description: '*potensi m* under *Rekrut*: the kandidat switched on and still open, summed.' })
   rekrut!: number;
 }
 
 class PotensiTilesDto {
-  @ApiProperty({ example: 3, description: 'The people of the unit who are AA in the month, its leaders included.' }) aa!: number;
-  @ApiProperty({ example: 1, description: 'The kandidat of the unit who became rekrut in the month.' }) rekrut!: number;
+  @ApiProperty({ example: 3, description: 'The people of the unit who are Active Agent in the month, from the upload.' }) aa!: number;
+  @ApiProperty({ example: 3, description: 'The new hires who joined in the month, credited to the people of the unit.' }) rekrut!: number;
   @ApiProperty({
     type: PotensiTilesPotensiDto,
-    description: 'ADR-0229 §8: each tile’s *potensi x* — people, the cards’ `switchedPeople` summed.',
+    description: 'ADR-0271 §8: *Active Agent · potensi n* counts people; *Rekrut n · potensi m* sums the kandidat.',
   })
   potensi!: PotensiTilesPotensiDto;
 }

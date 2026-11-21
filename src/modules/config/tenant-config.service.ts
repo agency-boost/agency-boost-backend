@@ -18,6 +18,9 @@ import { EventService } from '@/modules/events/event.service';
 import {
   CapabilityService, type CapabilityCatalogView,
 } from '@/modules/capability/capability.service';
+import {
+  highestVersion, mergeForPublish, PUBLISHED_SETTINGS, type PublishedSetting, settingChanged, settingVersionsOf,
+} from './publish-settings';
 
 /**
  * An event type as the snapshot carries it (P5-T9 AC-1).
@@ -36,6 +39,18 @@ export interface SnapshotEventTypeView {
   version: number;
 }
 
+/**
+ * **One setting's state** (P19.21-T2 AC-3; ADR-0274 §5): the version agents are on — *"Agent masih memakai versi n"* —
+ * whether it has changes they do not see yet, and when it was last published with changes.
+ */
+export interface SettingPublishState {
+  setting: PublishedSetting;
+  /** `0` when it was never published. For `activation_checklist`, the version new hires are given. */
+  version: number;
+  hasUnpublishedChanges: boolean;
+  publishedAt: string | null;
+}
+
 export interface PublishState {
   /** The published version agents are on, or 0 when nothing has been published. */
   publishedVersion: number;
@@ -47,6 +62,8 @@ export interface PublishState {
   workingVersion: number;
   hasUnpublishedChanges: boolean;
   publishedAt: string | null;
+  /** Each of the six settings with a draft, in `PUBLISHED_SETTINGS` order (P19.21-T2). */
+  settings: SettingPublishState[];
 }
 
 export interface TenantConfigView {
@@ -159,38 +176,26 @@ export class TenantConfigService {
   async readPublished(ctx: RequestContext): Promise<TenantConfigView> {
     const snapshot = await this.newestSnapshot(ctx);
     if (!snapshot) return this.read(ctx);
-    const published = snapshot.payload as unknown as TenantConfigView;
-    /*
-     * A snapshot published before the phase that added a field carries none of it. Its agents are
-     * offered nothing there — said as an empty list or a `null`, so every reader sees one shape
-     * and no screen has to know which phase its office was provisioned in.
-     */
-    return {
-      ...published,
-      /*
-       * A section published before ADR-0064 has no summary tile fields. `null` on both is what
-       * it means — a tile of its own, under its own label — said so every reader meets one shape.
-       * Migration 0021 writes them into the snapshot agents read; this is the read that does not
-       * depend on it having run.
-       */
-      activity: published.activity.map((category) => ({
-        ...category,
-        summaryGroupCode: category.summaryGroupCode ?? null,
-        summaryGroupLabel: category.summaryGroupLabel ?? null,
-      })),
-      training: published.training ?? [],
-      activationChecklist: published.activationChecklist ?? null,
-      eventTypes: published.eventTypes ?? [],
-      capability: published.capability ?? null,
-      activityBinding: published.activityBinding ?? null,
-    };
+    return normalisedPayload(snapshot.payload);
   }
 
   /**
-   * Publish the working copy.
+   * **Publish** (P4-T6; per setting since P19.21-T2, ADR-0274 §5).
    *
    * Renders the live rows into one document rather than flipping a flag: what agents read
    * then cannot drift from what was published, whatever happens to the rows afterwards.
+   *
+   * - **`settings` absent or empty** — *Terbitkan semua*, and every caller before P19.21 (a template push, a sync, a
+   *   migration): the whole working copy is rendered, as it always was. Only a setting whose rows changed moves to its
+   *   next version.
+   * - **`settings` named** — *Terbitkan* on one setting, or the hub's bar: those settings' sections come from the
+   *   working copy, every other setting's stays as agents read it now (`mergeForPublish`), and each named setting with
+   *   changes moves to its next version.
+   *
+   * **The activation checklist's draft is the activation module's** (`ActivationService`): publishing
+   * `activation_checklist` — named, or by *Terbitkan semua* — first publishes that draft as the checklist's next
+   * version when it differs from the one new hires are given. Only the office's own *Terbitkan* does that; a template
+   * push or a sync never publishes an Owner's draft for them.
    */
   async publish(
     ctx: RequestContext,
@@ -198,131 +203,115 @@ export class TenantConfigService {
      * What made the version (ADR-0208 §5): the office's own *Publish* unless a template push says otherwise.
      */
     origin: ConfigSnapshotOrigin = { source: 'kpm' },
+    settings?: readonly PublishedSetting[],
   ): Promise<PublishState> {
+    const named = settings && settings.length > 0 ? PUBLISHED_SETTINGS.filter((s) => settings.includes(s)) : null;
+    const publishing: readonly PublishedSetting[] = named ?? PUBLISHED_SETTINGS;
+
+    if (origin.source === 'kpm' && publishing.includes('activation_checklist')
+      && await this.activationDraftWaiting(ctx)) {
+      await this.activation.publish(ctx);
+    }
+
     const working = await this.read(ctx);
     const previous = await this.newestSnapshot(ctx);
+    const before = previous ? normalisedPayload(previous.payload) : null;
+    const payload = named && before ? mergeForPublish(before, working, named) : working;
+    const changed = publishing.filter((setting) => settingChanged(setting, before, working));
+
+    const versions = settingVersionsOf(previous);
+    const stamped = { ...(previous?.settingPublished ?? {}) } as Record<string, { at: Date; by: string | null }>;
+    const now = this.clock.now();
+    for (const setting of changed) {
+      versions[setting] = previous ? versions[setting] + 1 : 1;
+      stamped[setting] = { at: now, by: ctx.membershipId };
+    }
+    // The checklist's number is the activation module's own: what a hire's activation pins.
+    versions.activation_checklist = payload.activationChecklist?.version ?? 0;
+    const version = (previous?.version ?? 0) + 1;
 
     await this.snapshots.create(ctx, {
-      version: (previous?.version ?? 0) + 1,
+      version,
       sourceVersion: working.version,
-      payload: working as unknown as Record<string, unknown>,
-      publishedAt: this.clock.now(),
+      payload: { ...payload, version: highestVersion(payload) } as unknown as Record<string, unknown>,
+      publishedAt: now,
       publishedBy: ctx.membershipId,
       origin,
+      settingVersions: versions,
+      settingPublished: stamped,
+      publishedSettings: named ? [...named] : [],
     } as Partial<ConfigSnapshotDocument>);
 
     await this.audit.record(ctx, {
       action: 'tenant_config.published',
       targetCollection: 'configSnapshots',
       targetId: ctx.kpmId ?? '',
-      after: { version: (previous?.version ?? 0) + 1, sourceVersion: working.version, origin: origin.source },
+      after: {
+        version, sourceVersion: working.version, origin: origin.source,
+        settings: named ? [...named] : 'all', changed, settingVersions: versions,
+      },
     });
 
     return this.state(ctx);
   }
 
-  /** Whether there is anything to publish, and what agents are on meanwhile. */
+  /**
+   * Whether there is anything to publish, and what agents are on meanwhile — **for the office and for each setting**
+   * (P19.21-T2 AC-3).
+   *
+   * `hasUnpublishedChanges` keeps its meaning since P5-T11 — the working copy's rows differ from the snapshot's, any
+   * setting — which a template push and a sync read to decide whether the KPM has something of its own waiting. A
+   * setting's own adds, for `activation_checklist`, a saved draft that differs from the version new hires are given.
+   */
   async state(ctx: RequestContext): Promise<PublishState> {
-    const [snapshot, working] = await Promise.all([
+    const [snapshot, working, draftWaiting] = await Promise.all([
       this.newestSnapshot(ctx),
       this.read(ctx),
+      this.activationDraftWaiting(ctx),
     ]);
+    const published = snapshot ? normalisedPayload(snapshot.payload) : null;
+    const versions = settingVersionsOf(snapshot);
+    const stamped = snapshot?.settingPublished ?? {};
+    const rowsChanged = (setting: PublishedSetting) => settingChanged(setting, published, working);
+
+    const settings = PUBLISHED_SETTINGS.map((setting): SettingPublishState => {
+      const at = stamped[setting]?.at ?? snapshot?.publishedAt ?? null;
+      if (setting === 'activation_checklist') {
+        const checklist = working.activationChecklist;
+        return {
+          setting,
+          version: checklist?.version ?? 0,
+          hasUnpublishedChanges: draftWaiting || (snapshot !== null && rowsChanged(setting)),
+          publishedAt: checklist ? (checklist.publishedAt ?? null) : null,
+        };
+      }
+      return {
+        setting,
+        version: versions[setting],
+        hasUnpublishedChanges: rowsChanged(setting),
+        publishedAt: snapshot && at ? new Date(at).toISOString() : null,
+      };
+    });
 
     return {
       publishedVersion: snapshot?.version ?? 0,
       workingVersion: working.version,
-      hasUnpublishedChanges: !snapshot
-        || this.changedSince(snapshot.payload as unknown as TenantConfigView, working),
+      hasUnpublishedChanges: !snapshot || PUBLISHED_SETTINGS.some(rowsChanged),
       publishedAt: snapshot ? snapshot.publishedAt.toISOString() : null,
+      settings,
     };
   }
 
   /**
-   * Whether the working copy differs from what was published, by **which rows are present at
-   * which version** (P5-T11).
-   *
-   * **This replaced `working.version > snapshot.sourceVersion`, which was wrong in the
-   * ordinary case.** The highest active version does not move when a row is created (it
-   * starts at 1), when a row below the maximum is edited, or when a row is archived (it
-   * leaves the active rows). So once any row in an office had reached version 2 and been
-   * published, those three changes left the publish bar silent and agents on the old copy
-   * — and the one test asserted an edit from a fresh office, the single case the old
-   * comparison could see.
-   *
-   * Comparing the set of `(kind, id, version)` covers every write without asking any of
-   * them to remember a counter: a create brings a new id, an edit a new version, an archive
-   * or a restore changes which ids are there. **A reorder changes none of them**, because a
-   * reorder bumps no version — so the rule that a reorder is not an unpublished change holds
-   * by construction rather than by exception.
-   *
-   * No migration: every snapshot, including the ones provisioning and the demo seed wrote,
-   * already carries its rows with their ids and versions.
+   * **A saved checklist draft that would publish as a new version** — the activation module's draft, differing from the
+   * version new hires are given by an aspect or an item's code, label, order or link (its own `sameChecklist` rule, read
+   * through the views). The unsaved starting point an office with neither is shown (`id: ''`) is not one.
    */
-  private changedSince(published: TenantConfigView, working: TenantConfigView): boolean {
-    const before = this.fingerprint(published);
-    const now = this.fingerprint(working);
-    if (before.size !== now.size) return true;
-    for (const key of now) if (!before.has(key)) return true;
-    return false;
+  private async activationDraftWaiting(ctx: RequestContext): Promise<boolean> {
+    const { draft, published } = await this.activation.read(ctx);
+    if (!draft || !draft.id) return false;
+    return !published || checklistShape(draft.aspects) !== checklistShape(published.aspects);
   }
-
-  /**
-   * Every active row as `kind:id:version`. Order is presentation and deliberately absent.
-   *
-   * Read as a full `TenantConfigView`, the way `readPublished` already reads it: every writer
-   * of a snapshot — `publish`, provisioning and the demo seed — renders the three Phase 4 lists,
-   * so a fallback for a missing one would defend a shape nothing produces.
-   *
-   * **Training is the exception, and a real one.** Every snapshot published before P5-T1 lacks
-   * it, and those snapshots exist. Read as empty, an office whose training was seeded after its
-   * last publish shows unpublished changes — which is true: its agents are offered none yet.
-   *
-   * A draft module is not in the view, so editing one never makes the publish bar speak: agents
-   * cannot see it, so nothing they read has changed.
-   */
-  private fingerprint(view: TenantConfigView): Set<string> {
-    const keys = new Set<string>();
-    for (const category of view.activity) {
-      keys.add(`category:${category.id}:${category.version}`);
-      /*
-       * The summary tile, by value as well as by version (ADR-0064). Regrouping bumps the version
-       * already; this is the second lock, so a write that forgot to could not leave agents on the
-       * old strip with a silent publish bar. Absent reads as `null`, so a snapshot published before
-       * the field existed agrees with a working copy that holds none.
-       */
-      keys.add(
-        `category_tile:${category.id}:${category.summaryGroupCode ?? ''}:${category.summaryGroupLabel ?? ''}`,
-      );
-      for (const type of category.types) keys.add(`type:${type.id}:${type.version}`);
-    }
-    for (const ratio of view.ratios) keys.add(`ratio:${ratio.id}:${ratio.version}`);
-    for (const pipeline of view.leadPipelines) {
-      for (const status of pipeline.statuses) keys.add(`lead_status:${status.id}:${status.version}`);
-    }
-    for (const category of view.training ?? []) {
-      keys.add(`training_category:${category.id}:${category.version}`);
-      for (const skill of category.skills) {
-        keys.add(`training_skill:${skill.id}:${skill.version}`);
-        for (const module of skill.modules) keys.add(`training_module:${module.id}:${module.version}`);
-      }
-    }
-    /*
-     * The three catalogs P5-T9 added to the snapshot.
-     *
-     * Without them the publish bar would stay silent while an Owner archived an event type or
-     * republished the checklist — agents would go on reading the old snapshot and nothing on the
-     * screen would say why. Each is keyed the same way as every row above: which is present, at
-     * which version.
-     */
-    if (view.activationChecklist) {
-      const checklist = view.activationChecklist;
-      keys.add(`activation:${checklist.id}:${checklist.version}`);
-    }
-    for (const type of view.eventTypes ?? []) keys.add(`event_type:${type.id}:${type.version}`);
-    if (view.capability) keys.add(`capability:${view.capability.version}`);
-    return keys;
-  }
-
   private async newestSnapshot(ctx: RequestContext): Promise<ConfigSnapshotDocument | null> {
     const rows = await this.snapshots.find(ctx, {}, { sort: { version: -1 }, limit: 1 });
     return rows[0] ?? null;
@@ -425,4 +414,39 @@ export class TenantConfigService {
     const digest = createHash('sha256').update(JSON.stringify(config)).digest('base64url');
     return `"${digest.slice(0, 32)}"`;
   }
+}
+
+/**
+ * **A snapshot's payload as every reader meets it.** A snapshot published before the phase that added a field carries
+ * none of it; its agents are offered nothing there — said as an empty list or a `null`, so every reader sees one shape
+ * and no screen has to know which phase its office was provisioned in. A section published before ADR-0064 has no
+ * summary tile fields: `null` on both is what it means (migration 0021 writes them; this read does not depend on it).
+ */
+function normalisedPayload(payload: Record<string, unknown>): TenantConfigView {
+  const published = payload as unknown as TenantConfigView;
+  return {
+    ...published,
+    activity: (published.activity ?? []).map((category) => ({
+      ...category,
+      summaryGroupCode: category.summaryGroupCode ?? null,
+      summaryGroupLabel: category.summaryGroupLabel ?? null,
+    })),
+    training: published.training ?? [],
+    activationChecklist: published.activationChecklist ?? null,
+    eventTypes: published.eventTypes ?? [],
+    capability: published.capability ?? null,
+    activityBinding: published.activityBinding ?? null,
+  };
+}
+
+/** A checklist version's substance — aspects and items by code, label, order and link — as `sameChecklist` reads it. */
+function checklistShape(aspects: ActivationVersionView['aspects']): string {
+  return JSON.stringify(aspects.map((aspect) => ({
+    code: aspect.code,
+    label: aspect.label,
+    displayOrder: aspect.displayOrder,
+    items: aspect.items.map((item) => ({
+      code: item.code, label: item.label, displayOrder: item.displayOrder, autoLink: item.autoLink ?? null,
+    })),
+  })));
 }

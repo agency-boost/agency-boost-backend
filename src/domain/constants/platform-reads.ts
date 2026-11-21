@@ -22,6 +22,10 @@ export const PLATFORM_READ = {
   /** The audit actions, one per read (ADR-0207 §5). */
   ACTION: {
     members: 'platform_read.members',
+    /*
+     * Three reads retired, kept so the log still names the entries they wrote: the KPM comparison and *Data bulanan*
+     * (P19.23; ADR-0277), and *Lihat sebagai KPM*'s analytics (P19.19-T4).
+     */
     kpmComparison: 'platform_read.kpm_comparison',
     kpmAnalytics: 'platform_read.kpm_analytics',
     kpmData: 'platform_read.kpm_data',
@@ -30,12 +34,21 @@ export const PLATFORM_READ = {
     kpmAdvancedAnalytics: 'platform_read.kpm_advanced_analytics',
     /** P19.12-T2 (ADR-0245 §1): *All members* › *Akun terdaftar*, each read. */
     accounts: 'platform_read.accounts',
+    /** P19.23-T3 (ADR-0277): *Anggota*'s detail — the one read that returns a member's phone and email — each read. */
+    memberDetail: 'platform_read.member_detail',
   },
 } as const;
 
 /** *All members*' role filter: a class of the ladder, as every company's rungs are classed (ADR-0156). */
 export const PLATFORM_MEMBER_ROLES = ['ab', 'aab', 'agent'] as const;
 export type PlatformMemberRole = (typeof PLATFORM_MEMBER_ROLES)[number];
+
+/**
+ * *Anggota*'s test-account filter (P19.23-T3 AC-1; OD-421): `only`, *Akun tes* under *Semua status* — the test accounts
+ * alone. Absent, they are left out of every row and count (ADR-0267 §1).
+ */
+export const PLATFORM_MEMBER_TEST_FILTERS = ['only'] as const;
+export type PlatformMemberTestFilter = (typeof PLATFORM_MEMBER_TEST_FILTERS)[number];
 
 /** *All members*' status filter (SA R1): a membership's own status. */
 export const PLATFORM_MEMBER_STATUSES = ['active', 'pending', 'removed'] as const;
@@ -48,8 +61,3 @@ export type PlatformMemberStatus = (typeof PLATFORM_MEMBER_STATUSES)[number];
 export const PLATFORM_ACCOUNT_KPM_FILTERS = ['none', 'some'] as const;
 export type PlatformAccountKpmFilter = (typeof PLATFORM_ACCOUNT_KPM_FILTERS)[number];
 
-/** The KPM comparison's sortable columns (ADR-0207 §7): a column, ascending; `-` before it, descending. */
-export const KPM_COMPARISON_SORTS = [
-  'kpm', 'company', 'members', 'activeThisMonth', 'activeUsers', 'coached7d', 'coached30d', 'production', 'recruitment',
-] as const;
-export type KpmComparisonSort = (typeof KPM_COMPARISON_SORTS)[number];

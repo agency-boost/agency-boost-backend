@@ -12,6 +12,7 @@ import { eventAttendanceRateShown } from '@/domain/metrics/event-attendance';
 import type { NpsBucket } from '@/domain/metrics/event-nps';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { can, scopeFor } from '@/modules/rbac/permissions';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -114,8 +115,9 @@ export class EventRollCallService {
   /** `GET /kpm/settings/events/invitees` — every active member, for *Chosen people* and *Chosen leaders*. */
   async invitees(ctx: RequestContext): Promise<{ people: EventInvitee[] }> {
     this.member(ctx);
+    // A list of the office's people: never a test account (ADR-0267 §1; P19.25, ADR-0281 §1).
     const rows = await this.memberships.find(
-      ctx, { status: 'active' }, { projection: { orgLevelCode: 1, leaderId: 1 }, sort: { agentSeq: 1 } },
+      ctx, { status: 'active', ...NOT_A_TEST_ACCOUNT }, { projection: { orgLevelCode: 1, leaderId: 1 }, sort: { agentSeq: 1 } },
     );
     const ids = rows.map((row) => String(row._id));
     const leading = new Set(rows.map((row) => row.leaderId).filter((id): id is string => Boolean(id)));
@@ -188,7 +190,7 @@ export class EventRollCallService {
     const reading = await this.readings.attendance(ctx, eventId);
     if (!reading) throw new NotFoundException('Event');
     const entries = checkRollCall(body);
-    if (entries.some((entry) => entry.membershipId === me)) {
+    if (me !== null && entries.some((entry) => entry.membershipId === me)) {
       throw new DomainException(
         ErrorCode.EVENT_ATTENDANCE_SELF,
         EVENTS_REFUSALS.EVENT_ATTENDANCE_SELF.ownAttendance,
@@ -272,8 +274,14 @@ export class EventRollCallService {
 
   // -------------------------------------------------------------------- internals
 
-  private member(ctx: RequestContext): string {
-    if (!ctx.membershipId || !ctx.kpmId) throw new NoMembershipException();
+  /**
+   * The caller's membership — **`null` for the Super Admin inside the KPM** (ADR-0268 §1: the Owner in every KPM, with no
+   * membership of their own, so there is no row of theirs to keep them from); anybody in no KPM `TENANT_NO_MEMBERSHIP`.
+   */
+  private member(ctx: RequestContext): string | null {
+    if (!ctx.kpmId) throw new NoMembershipException();
+    if (ctx.isSuperAdminInKpm) return null;
+    if (!ctx.membershipId) throw new NoMembershipException();
     return ctx.membershipId;
   }
 

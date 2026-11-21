@@ -112,6 +112,19 @@ export class SaveEventDto {
 /** No body: an RSVP, its cancellation and a claim carry nothing but the event in the address. */
 export class NoEventBodyDto {}
 
+/**
+ * *Tidak ikut* (P19.25-T1 AC-3; ADR-0281 §2): the member's reason, optional. Declared for OpenAPI; the rules are
+ * `checkDeclineReason`'s (`event-guest.service.ts`).
+ */
+export class DeclineEventDto {
+  @ApiPropertyOptional({
+    type: String, nullable: true, example: 'Ada janji nasabah',
+    description: 'Why they will not come — trimmed, at most `EVENT_DECLINE_REASON_MAX` (200) characters; blank or `null` is none.',
+  })
+  @Allow()
+  reason?: string | null;
+}
+
 /** No query: `GET /events` and the settings reads of Phase 18.2 take no parameter, and refuse one they do not know. */
 export class NoEventQueryDto {}
 

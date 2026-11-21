@@ -21,9 +21,12 @@ export interface SurveyPerson {
 }
 
 export interface SurveysFixture {
-  runs: { npsOpen: string; npsPrevious: string; qualJune: string; qualAnonymous0555: string };
+  runs: {
+    npsOpen: string; npsPrevious: string; npsOlder: [string, string]; qualJune: string; qualPrevious: string;
+    qualAnonymous0555: string;
+  };
   /** The periods, so a test reads them as the run's today made them. */
-  periods: { npsOpen: string; npsPrevious: string; qual: string };
+  periods: { npsOpen: string; npsPrevious: string; npsOlder: [string, string]; qual: string; qualPrevious: string };
   guide: string;
 }
 
@@ -68,11 +71,19 @@ export async function seedSurveysFixture(deps: {
   const [y, m] = today.split('-').map(Number);
   const quarter = `${y}-Q${Math.ceil(m / 3)}`;
   const q = periodBounds(quarter);
-  const prevQuarter = m <= 3 ? `${y - 1}-Q4` : `${y}-Q${Math.ceil(m / 3) - 1}`;
+  const quarterBefore = (key: string) => {
+    const [ky, kq] = [Number(key.slice(0, 4)), Number(key.slice(6))];
+    return kq === 1 ? `${ky - 1}-Q4` : `${ky}-Q${kq - 1}`;
+  };
+  const prevQuarter = quarterBefore(quarter);
   const pq = periodBounds(prevQuarter);
-  // The latest June or December that has closed.
+  // P19.22-T6 AC-2: two quarters before that, so *Keseluruhan KPM*'s four-quarter trend has four bars.
+  const olderQuarters: [string, string] = [quarterBefore(quarterBefore(prevQuarter)), quarterBefore(prevQuarter)];
+  // The latest June or December that has closed, and the one before it (P19.22-T7 AC-2, *semester lalu*).
   const qualKey = m >= 7 ? `${y}-06` : `${y - 1}-12`;
   const qb = periodBounds(qualKey);
+  const prevQualKey = qualKey.endsWith('-06') ? `${Number(qualKey.slice(0, 4)) - 1}-12` : `${qualKey.slice(0, 4)}-06`;
+  const pqb = periodBounds(prevQualKey);
   const opensNps = [addDays(today, -9), q.first].sort()[1];
   const closesNps = [addDays(today, 4), q.last].sort()[0];
 
@@ -83,7 +94,10 @@ export async function seedSurveysFixture(deps: {
     const users = await db.collection('users')
       .find({ _id: { $in: members.map((x) => new mongoose.Types.ObjectId(String(x.userId))) } }).toArray();
     const dob = new Map(users.map((u) => [String(u._id), (u.dateOfBirth as string | null) ?? null]));
-    return new Map(members.map((x) => [String(x._id), { joinDate: (x.joinDate as string | null) ?? null, dob: dob.get(String(x.userId)) ?? null }]));
+    return new Map(members.map((x) => [String(x._id), {
+      joinDate: (x.joinDate as string | null) ?? null, dob: dob.get(String(x.userId)) ?? null,
+      workStatus: (x.workStatus as 'full_time' | 'part_time' | null | undefined) ?? null,
+    }]));
   };
 
   async function run(spec: {
@@ -143,6 +157,8 @@ export async function seedSurveysFixture(deps: {
         roleClass: a.who.roleClass,
         tenureBand: fact?.joinDate ? tenureBandOf(wholeYears(fact.joinDate, reference), snapshot.cutoffs.tenureBands) : null,
         ageBand: fact?.dob ? bandOf(wholeYears(fact.dob, reference), snapshot.cutoffs.ageBandUpper) : null,
+        // P19.22-T7 (ADR-0276 §4): *Status kerja* from the profile, as the product stores it with the form.
+        workStatus: fact?.workStatus ?? null,
       };
       await db.collection('surveyResponses').insertOne(spec.anonymous
         ? {
@@ -163,16 +179,36 @@ export async function seedSurveysFixture(deps: {
     ...(open ? { OPEN: { text: open } } : {}),
   });
 
+  // P19.22-T6: two older quarters, closed — three leaders and three agents each, so every view has its trend.
+  const npsOlder: string[] = [];
+  for (const [i, key] of olderQuarters.entries()) {
+    const b = periodBounds(key);
+    npsOlder.push(await run({
+      slot: `nps-${key}`, kpmId: deps.office0417.kpmId, kind: 'nps', periodKey: key,
+      opensOn: addDays(b.first, 31), closesOn: addDays(b.first, 50), anonymous: true, perPerson: false, remindHalfway: true,
+      invited: deps.office0417.everyone, createdBy: p.owner.membershipId,
+      answers: [
+        { who: p.sari, values: nps([8 - i, 6, 7, 6, 8]) },
+        { who: p.yosef, values: nps([7, 5 + i, 6, 5, 7]) },
+        { who: p.winda, values: nps([9, 7, 8, 6, 9]) },
+        { who: p.rina, values: nps([9, 7, 9, 8, 10]) },
+        { who: p.dimas, values: nps([6 + i, 6, 8, 7, 8]) },
+        { who: p.siti, values: nps([8, 5, 7, 9, 9]) },
+      ],
+    }));
+  }
   const npsPrevious = await run({
     slot: `nps-${prevQuarter}`, kpmId: deps.office0417.kpmId, kind: 'nps', periodKey: prevQuarter,
     opensOn: addDays(pq.first, 31), closesOn: addDays(pq.first, 50), anonymous: true, perPerson: false, remindHalfway: true,
     invited: deps.office0417.everyone, createdBy: p.owner.membershipId,
     answers: [
-      { who: p.agus, values: nps([9, 8, 9, 9, 10], 'Lebih banyak sesi joint field work.') },
+      { who: p.agus, values: nps([9, 8, 9, 9, 10], 'Lebih banyak sesi joint field work.', { 1: 'Visi dibahas di setiap forum.' }) },
       { who: p.sari, values: nps([8, 7, 8, 9, 8]) },
       { who: p.rina, values: nps([10, 9, 9, 10, 9], 'Jadwal training diumumkan lebih awal.') },
       { who: p.yosef, values: nps([6, 7, 6, 8, 7], 'Target unit perlu dibahas bersama.') },
       { who: p.winda, values: nps([9, 9, 10, 9, 9]) },
+      { who: p.dimas, values: nps([9, 6, 8, 7, 9], '', { 1: 'Visi belum diturunkan ke unit.' }) },
+      { who: p.siti, values: nps([8, 6, 7, 8, 8]) },
     ],
   });
   const npsOpen = await run({
@@ -181,9 +217,17 @@ export async function seedSurveysFixture(deps: {
     invited: deps.office0417.everyone, createdBy: p.owner.membershipId,
     answers: [
       { who: p.indah, draftOnly: true, values: { P1: { score: 8, why: 'Timnya solid.' } } },
-      { who: p.dimas, values: nps([9, 9, 8, 9, 9], 'Ruang meeting lebih sering tersedia.') },
-      { who: p.siti, values: nps([7, 8, 6, 8, 9]) },
-      { who: p.rina, values: nps([10, 10, 9, 9, 10], 'Pertahankan coaching mingguan.') },
+      { who: p.dimas, values: nps([9, 6, 8, 9, 9], 'Ruang meeting lebih sering tersedia.', {
+        1: 'Visi hanya slogan, belum diturunkan oleh leader.', 3: 'Tim saling membantu saat closing.',
+      }) },
+      { who: p.siti, values: nps([7, 5, 6, 8, 9], '', { 1: 'Visi dan misi terlalu umum.', 2: 'Acara KPM jarang diadakan.' }) },
+      { who: p.rina, values: nps([10, 8, 9, 9, 10], 'Pertahankan coaching mingguan.', { 4: 'Pelatihan produk sangat membantu.' }) },
+      // P19.22-T6 AC-1: three leaders beside the three agents, so *Leader* and *Agent* each have a view.
+      { who: p.sari, values: nps([9, 6, 7, 5, 8], 'Forum leader lebih rutin.', {
+        1: 'Kami belum punya rencana bulanan yang turun dari visi.', 3: 'Antar unit masih jalan sendiri-sendiri.',
+      }) },
+      { who: p.yosef, values: nps([8, 7, 6, 6, 9], '', { 2: 'Komunitas aktif di awal tahun saja.' }) },
+      { who: p.winda, values: nps([10, 9, 8, 7, 9], '', { 3: 'Kekompakan perlu acara bersama.' }) },
     ],
   });
 
@@ -196,11 +240,25 @@ export async function seedSurveysFixture(deps: {
   const K = 'consistent';
   const TK = 'inconsistent';
   const TD = 'not_done';
+  // P19.22-T7 AC-2: the run before, for *semester lalu* — the same people, a little worse in Penjualan and Rekrutmen.
+  const qualPrevious = await run({
+    slot: `qual-${prevQualKey}`, kpmId: deps.office0417.kpmId, kind: 'qual', periodKey: prevQualKey,
+    opensOn: pqb.first, closesOn: pqb.last, anonymous: false, perPerson: true, remindHalfway: true,
+    invited: [p.arief, p.yosef, p.siti, p.rina, p.winda], createdBy: p.owner.membershipId,
+    downline: new Set([p.yosef.membershipId]),
+    answers: [
+      { who: p.arief, values: { Q4: { chosen: ['TEAM'] }, Q5: scale(SALES, [3, 3, 2, 3, 4, 3, 4]), Q6: scale(RECRUIT, [2, 2, 2, 3, 3, 3, 2, 3]), Q7: scale(ACTIVATION, [K, TK, K, TK, TK, TD, TK]), Q8: scale(UNIT, [TK, TK, TK, K, K, TD, TD, K]), Q9: scale(UNIT, [3, 3, 2, 4, 3, 2, 3, 4]), Q12: { score: 6 } } },
+      { who: p.yosef, values: { Q4: { chosen: ['TOP'] }, Q5: scale(SALES, [2, 3, 2, 2, 3, 2, 2]), Q6: scale(RECRUIT, [2, 2, 1, 3, 2, 2, 2, 3]), Q7: scale(ACTIVATION, [TK, TK, K, TK, TK, TK, TD]), Q8: scale(UNIT, [TK, TK, TK, K, TD, TD, TK, K]), Q9: scale(UNIT, [3, 4, 3, 3, 4, 2, 2, 4]), Q10: { answer: 'yes' }, Q11: { leaders: [{ membershipId: p.winda.membershipId, areas: ['SALES', 'ACTIVATION', 'UNIT', 'RECRUIT'] }] }, Q12: { score: 8 } } },
+      { who: p.winda, values: { Q4: { chosen: ['TEAM'] }, Q5: scale(SALES, [3, 3, 3, 4, 4, 3, 4]), Q6: scale(RECRUIT, [3, 2, 3, 3, 3, 4, 3, 3]), Q7: scale(ACTIVATION, [K, K, TK, K, TK, K, TK]), Q8: scale(UNIT, [K, TK, K, K, TK, K, TK, K]), Q9: scale(UNIT, [4, 3, 4, 4, 3, 4, 3, 5]), Q12: { score: 7 } } },
+      { who: p.siti, values: { Q4: { chosen: ['FLOW'] }, Q5: scale(SALES, [2, 3, 3, 2, 3, 4, 3]), Q12: { score: 7 } } },
+      { who: p.rina, values: { Q4: { chosen: ['TOP'] }, Q5: scale(SALES, [3, 4, 3, 3, 4, 4, 4]), Q12: { score: 9 } } },
+    ],
+  });
   const qualJune = await run({
     slot: `qual-${qualKey}`, kpmId: deps.office0417.kpmId, kind: 'qual', periodKey: qualKey,
     opensOn: qb.first, closesOn: qb.last, anonymous: false, perPerson: true, remindHalfway: true,
-    invited: [p.indah, p.arief, p.sari, p.yosef], createdBy: p.owner.membershipId,
-    downline: new Set([p.yosef.membershipId]),
+    invited: [p.indah, p.arief, p.sari, p.yosef, p.siti, p.rina, p.agus, p.winda], createdBy: p.owner.membershipId,
+    downline: new Set([p.yosef.membershipId, p.agus.membershipId]),
     answers: [
       { who: p.indah, values: {
         Q4: { chosen: ['TOP'], note: 'Target saya MDRT dalam 2 tahun, tapi butuh bimbingan closing.' },
@@ -227,6 +285,37 @@ export async function seedSurveysFixture(deps: {
         Q11: { leaders: [{ membershipId: p.winda.membershipId, areas: ['SALES', 'ACTIVATION', 'UNIT'] }] },
         Q12: { score: 9 },
       } },
+      // P19.22-T7: two more agents and two more leaders, with the reasons *Suara responden* lists from three.
+      { who: p.siti, values: {
+        Q4: { chosen: ['FLOW'], note: 'Saya ingin pelan-pelan dulu sambil belajar produk.' },
+        Q5: scale(SALES, [2, 3, 3, 2, 4, 4, 3]),
+        Q12: { score: 5, reason: 'Tidak ada pertemuan, jadi akhirnya jalan masing-masing.' },
+      } },
+      { who: p.rina, values: {
+        Q4: { chosen: ['TOP'] },
+        Q5: scale(SALES, [4, 4, 3, 3, 4, 5, 4]),
+        Q12: { score: 9, reason: 'Leader saya selalu siap dihubungi.' },
+      } },
+      { who: p.agus, values: {
+        Q4: { chosen: ['TEAM'], note: 'Ingin membangun tim mandiri dan melahirkan leader baru.' },
+        Q5: scale(SALES, [4, 3, 4, 3, 4, 4, 5]),
+        Q6: scale(RECRUIT, [3, 2, 3, 4, 3, 3, 3, 4]),
+        Q7: scale(ACTIVATION, [K, K, TK, K, TK, K, TK]),
+        Q8: scale(UNIT, [K, TK, K, K, TK, K, TD, K]),
+        Q9: scale(UNIT, [4, 3, 4, 4, 2, 4, 3, 5]),
+        Q10: { answer: 'yes' },
+        Q11: { leaders: [{ membershipId: p.sari.membershipId, areas: ['RECRUIT'] }, { membershipId: p.arief.membershipId, areas: [] }] },
+        Q12: { score: 7, reason: 'Support terasa biasa saja, lebih banyak hanya menanyakan produksi.' },
+      } },
+      { who: p.winda, values: {
+        Q4: { chosen: ['TEAM', 'TOP'] },
+        Q5: scale(SALES, [3, 3, 2, 4, 3, 4, 4]),
+        Q6: scale(RECRUIT, [2, 3, 2, 3, 3, 4, 3, 3]),
+        Q7: scale(ACTIVATION, [K, K, TK, K, TK, K, K]),
+        Q8: scale(UNIT, [K, TK, K, K, TK, K, TK, K]),
+        Q9: scale(UNIT, [4, 3, 4, 4, 3, 4, 3, 5]),
+        Q12: { score: 8, reason: 'Tidak ada panduan atau sistem yang jelas untuk berkembang.' },
+      } },
     ],
   });
   const qualAnonymous0555 = await run({
@@ -242,15 +331,18 @@ export async function seedSurveysFixture(deps: {
                                  and "Perlu diisi" card, Lanjutkan opens question 2; Home's popup on ${halfway}
                                  (halfway) and ${addDays(closesNps, -1)} (Berakhir besok)
     dimas@, siti@, rina@kpm0417  Sent it: "Terima kasih, survei sudah diisi"; Riwayat lists it
-    owner@kpm0417.test           Advanced analytics → NPS: ${quarter} running (3 sent), ${prevQuarter} closed (5);
-                                 Kualitatif: ${qualKey}. Coaching → Yosef → Survei: answered, with Winda's areas
+    owner@kpm0417.test           Advanced analytics → NPS: ${quarter} running (6 sent: 3 leader, 3 agent), its
+                                 reasons on tap, the trend ${olderQuarters[0]} → ${quarter}; Survei baru: who has not
+                                 answered + Ingatkan. Kualitatif: ${qualKey} against ${prevQualKey} (semester lalu),
+                                 Per orang: 7 answered, Sari belum menjawab; Survei baru for the next June/December.
+                                 Coaching → Yosef → Survei: answered, with Winda's areas
     agus@kpm0417.test            Coaching → Indah → Survei: "Penjualan 4"; Arief: the four sections; Sari: not answered
     owner@kpm0555.test           Coaching → Lina → Survei: the run was anonymous, nothing shown
                                  (from src/seed/surveys-fixture.ts)
 `;
   return {
-    runs: { npsOpen, npsPrevious, qualJune, qualAnonymous0555 },
-    periods: { npsOpen: quarter, npsPrevious: prevQuarter, qual: qualKey },
+    runs: { npsOpen, npsPrevious, npsOlder: [npsOlder[0], npsOlder[1]], qualJune, qualPrevious, qualAnonymous0555 },
+    periods: { npsOpen: quarter, npsPrevious: prevQuarter, npsOlder: olderQuarters, qual: qualKey, qualPrevious: prevQualKey },
     guide,
   };
 }

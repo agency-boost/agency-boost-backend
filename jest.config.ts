@@ -259,8 +259,13 @@ const config: Config = {
     './src/modules/reporting/agency-partition.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/domain/metrics/office-headcount.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     // Tenancy-bearing: the target's one atomic write and its carry-forward, and the membership repository that holds
-    // the two named `…AcrossTenants` reads the platform's adoption makes (invariant §1: tenancy at 100% branch).
-    './src/modules/reporting/kpm-recruit-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
+    // the named `…AcrossTenants` reads (invariant §1: tenancy at 100% branch).
+    //
+    // *Changed 2026-11-20:* the office's recruitment target went with its route (P19.19, ADR-0272 §7), and its repository
+    // with it — a path that names no file fails the run (*"Coverage data … was not found"*). The pin moves to what
+    // replaced it, the AB groups' monthly targets' one atomic write and its race (ADR-0270 §4), held where it was. The
+    // platform's three adoption reads went with `/admin/analytics` (P19.23-T1, ADR-0277), unread since.
+    './src/modules/reporting/ab-group-targets/ab-group-target.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     './src/modules/org/membership.repository.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
     /*
      * Phase 18.3: the Owner's compliance tree — who is listed where, every category's status and chip, and what a read

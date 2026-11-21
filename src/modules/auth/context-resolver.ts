@@ -1,11 +1,11 @@
 import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, TenantMembership, isEffectiveCoreLeader } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { readerOf } from '@/common/i18n/reader';
+import { readerOf, type Reader } from '@/common/i18n/reader';
 import { isLanguage, type Language } from '@/domain/constants/language';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
@@ -60,6 +60,15 @@ export class ContextResolver {
      * written there (ADR-0179 §2), so the support person's screen's language, or nobody's.
      */
     headerLanguage: Language | null = null,
+    /**
+     * **The KPM a Super Admin works inside** (ADR-0268 §3; P19.17 F2): the request's `X-Kpm-Id`, read by the guard, or
+     * `null`. Honoured **only for a `platformRole: 'super_admin'` account acting as themselves** — the context is then
+     * that KPM's Owner's (`RequestContext.superAdminInKpm`, `can()`), whatever membership the account holds elsewhere.
+     * **Ignored for everybody else**, a support session included (its user is the member, never a Super Admin), so a
+     * stale header left in a browser after a sign-in as somebody else changes nothing. A KPM that does not exist, or has
+     * been deleted, is `404 NOT_FOUND`; a suspended or archived one is entered — the Super Admin is who mends it.
+     */
+    enteredKpmId: string | null = null,
   ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
@@ -78,6 +87,13 @@ export class ContextResolver {
         AUTH_REFUSALS.AUTH_ACCOUNT_DEACTIVATED.deactivated,
         HttpStatus.FORBIDDEN,
       ).writtenFor(reader);
+    }
+
+    if (enteredKpmId !== null && user.platformRole === 'super_admin' && impersonatorUserId === null) {
+      return RequestContext.superAdminInKpm(
+        new RequestContext(userId, 'super_admin', null, null, null, user.mustChangePassword === true, false, reader),
+        await this.enteredKpm(enteredKpmId, reader),
+      );
     }
 
     const membership = await this.resolveMembership(userId);
@@ -142,6 +158,18 @@ export class ContextResolver {
       reader,
       await this.productDataCompaniesOf(userId, membership),
     );
+  }
+
+  /**
+   * **The KPM named by `X-Kpm-Id`, or `404`** (ADR-0268 §3): an id that is not an ObjectId is refused before it reaches
+   * the query, so a malformed header is a `404`, never a cast error's `500`. The id is read back from the row.
+   */
+  private async enteredKpm(kpmId: string, reader: Reader): Promise<string> {
+    const kpm = isValidObjectId(kpmId)
+      ? await this.kpms.findOne({ _id: kpmId, deletedAt: null }).select('_id').exec()
+      : null;
+    if (!kpm) throw new NotFoundException('KPM').writtenFor(reader);
+    return String(kpm._id);
   }
 
   /**

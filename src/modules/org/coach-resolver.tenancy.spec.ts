@@ -474,10 +474,11 @@ describe('COACH(actor, subject) — P11-T3', () => {
       try {
         await coach.reach(as(m.AB, 'AB'), 'lead:read');
         expect(find).toHaveBeenCalledTimes(1);
+        // P19.17-T1 (ADR-0267 §1): and whether each is a test account, which no list reaches.
         expect(find).toHaveBeenCalledWith(
           expect.anything(),
           { ancestorIds: m.AB, status: 'active' },
-          expect.objectContaining({ projection: { _id: 1, ancestorIds: 1 } }),
+          expect.objectContaining({ projection: { _id: 1, ancestorIds: 1, testAccount: 1 } }),
         );
         // The roster's list reads the whole membership, which is what it hands back.
         find.mockClear();

@@ -31,9 +31,11 @@ const ROUTES: Record<string, string> = {
   reopen: 'coaching_session:reopen',
 };
 
-type Row = { membershipId: string; name: string };
-type Body = { directAgents: Row[]; units: { head: Row; members: Row[] }[] };
-const everybody = (body: Body) => [...body.directAgents, ...body.units.flatMap((u) => [u.head, ...u.members])];
+type Row = { membershipId: string; name: string; isReader: boolean };
+type Body = { sections: { rows: Row[]; teams: { rows: Row[] }[] }[] };
+/** Every row of the roster (P19.18-T5): each section's, then its team lines'; `coached` without the reader's own. */
+const everybody = (body: Body) => body.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]);
+const coached = (body: Body) => everybody(body).filter((r) => !r.isReader);
 
 /**
  * **`GET /coaching/coachees` over HTTP, per role** (P11-T6; `functional/coaching.md`, the Data contract).
@@ -88,15 +90,17 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
       const res = await get().expect(200);
 
       expect(res.body).toMatchObject({ today: ROSTER_TODAY, overdueAfterDays: 7 });
-      expect(res.body.directAgents.map((r: Row) => r.name)).toEqual(['Dimas Pratama', 'Indah Permatasari']);
-      expect(everybody(res.body)).toHaveLength(10);
+      // P19.18-T5 AC-2: *Unit Anda* — Agus, Dewi (an AAB with no team), his agents — and everybody, him included.
+      expect(res.body.sections[0].rows.map((r: Row) => r.name)).toEqual(['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']);
+      expect(everybody(res.body)).toHaveLength(11);
+      expect(coached(res.body)).toHaveLength(10);
     });
 
     it('P11-T6 AC-2 an AAB is answered their subtree, a nested unit included', async () => {
       as('SARI');
       const res = await get().expect(200);
 
-      expect(everybody(res.body).map((r) => r.name).sort())
+      expect(coached(res.body).map((r) => r.name).sort())
         .toEqual(['Budi Santoso', 'Dodi Kurniawan', 'Nina Lestari', 'Rina Wijaya']);
     });
 
@@ -104,39 +108,50 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
       // The matrix grants an Agent `own` on `coaching_session:read` (ADR-0078): the guard lets them through,
       // and `COACH` reaches nobody.
       as('INDAH');
-      expect((await get().expect(200)).body).toEqual({
-        today: ROSTER_TODAY, overdueAfterDays: 7, directAgents: [], units: [],
-      });
+      expect((await get().expect(200)).body).toMatchObject({ today: ROSTER_TODAY, overdueAfterDays: 7, total: 0, sections: [] });
     });
 
     it('P11-T6 AC-2 an AAB who leads nobody is answered an empty roster too', async () => {
       as('DEWI');
-      expect((await get().expect(200)).body).toMatchObject({ directAgents: [], units: [] });
+      expect((await get().expect(200)).body).toMatchObject({ total: 0, sections: [] });
     });
 
     it('P11-T6 AC-2 the Owner, standing at the root as the office’s AB, is answered the whole office', async () => {
       as('OWNER');
       const res = await get().expect(200);
-      // Seventeen people in the office: everybody but the Owner and the member who left.
-      expect(everybody(res.body)).toHaveLength(15);
+      // Sixteen active people in the office, the Owner on his own row; never the member who left (P19.18-T5 AC-1).
+      expect(everybody(res.body)).toHaveLength(16);
+      expect(res.body).toMatchObject({ scope: 'downline', total: 16 });
     });
 
-    it('P11-T6 AC-2 the Admin, who stands above nobody, is answered an empty roster', async () => {
+    it('P19.18-T5 AC-1 the Admin, who stands above nobody, is answered the whole office — which of it opens is hers alone', async () => {
       as('ADMIN');
-      expect((await get().expect(200)).body).toMatchObject({ directAgents: [], units: [] });
+      const body = (await get().expect(200)).body;
+      expect(body.total).toBe(16);
+      expect((everybody(body) as (Row & { opens: boolean })[]).filter((r) => r.opens)).toHaveLength(1);
     });
 
-    it('P11-T6 AC-2 an Owner or an Admin who leads nobody holds own-kpm and coaches nobody by it', async () => {
+    it('P19.18-T5 AC-1 an Owner or an Admin who leads nobody reads the whole office by own-kpm — and coaches nobody, so nothing opens', async () => {
       for (const who of [OWNER, ADMIN]) {
         session.current = who;
-        expect((await get().expect(200)).body).toMatchObject({ directAgents: [], units: [] });
+        const body = (await get().expect(200)).body;
+        // The sixteen of office A beside the reader's own row.
+        expect(body).toMatchObject({ scope: 'downline', total: 17 });
+        expect((coached(body) as (Row & { opens: boolean })[]).some((r) => r.opens)).toBe(false);
       }
     });
 
     it('P11-T6 AC-2 a read-only support session reads the roster it would read as that leader', async () => {
       const agus = office.as('AGUS');
       session.current = new RequestContext(agus.userId, 'none', agus.membership, 'u-support', null, false, true);
-      expect(everybody((await get().expect(200)).body)).toHaveLength(10);
+      expect(coached((await get().expect(200)).body)).toHaveLength(10);
+    });
+
+    it('P19.18-T5 AC-1 a view is named by `scope`: Direct Unit narrows it, one not offered falls back to everybody coached', async () => {
+      as('AGUS');
+      expect(everybody((await get().query({ scope: 'unit' }).expect(200)).body)).toHaveLength(4);
+      as('SARI');
+      expect((await get().query({ scope: 'downline' }).expect(200)).body.total).toBe(5);
     });
   });
 
@@ -162,7 +177,14 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
       expect((await get().expect(403)).body.error.code).toBe('PERM_DENIED');
     });
 
-    it('P11-T6 asks nothing of the caller: a query parameter is refused by name, somebody’s id included', async () => {
+    it('P19.18-T5 AC-1 a view it does not know is 400 VALIDATION_FAILED, named in details', async () => {
+      as('AGUS');
+      const res = await get().query({ scope: 'everybody' }).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(res.body.error.details)).toContain('scope');
+    });
+
+    it('P11-T6 asks nothing more of the caller: any other query parameter is refused by name, somebody’s id included', async () => {
       as('AGUS');
       const res = await get().query({ membershipId: office.id.RINA }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
@@ -174,7 +196,7 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
     it('P11-T6 an AB of another office is answered their own people, and nothing of this office leaks', async () => {
       as('B_AB');
       const res = await get().expect(200);
-      expect(everybody(res.body).map((r) => r.name)).toEqual(['Bayu Saputra']);
+      expect(coached(res.body).map((r) => r.name)).toEqual(['Bayu Saputra']);
       expect(JSON.stringify(res.body)).not.toContain(office.id.RINA);
     });
 
@@ -182,7 +204,7 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
       as('SARI');
       expect(JSON.stringify((await get().expect(200)).body)).not.toContain(office.id.PEER_AGENT);
       as('PEER_AAB');
-      expect(everybody((await get().expect(200)).body).map((r) => r.membershipId)).toEqual([office.id.PEER_AGENT]);
+      expect(coached((await get().expect(200)).body).map((r) => r.membershipId)).toEqual([office.id.PEER_AGENT]);
     });
   });
 
@@ -190,8 +212,12 @@ describe('the coaching roster over HTTP (P11-T6)', () => {
     as('AGUS');
     const res = await get().expect(200);
     const rina = everybody(res.body).find((r) => r.membershipId === office.id.RINA);
-    expect(Object.keys(rina!).sort()).toEqual(['depth', 'lastOneOnOne', 'membershipId', 'name', 'photoUrl', 'rung', 'status']);
-    // Rina logged 53 recruiting follow-ups a day for a fortnight: not one of those numbers is in the answer.
-    expect(JSON.stringify(res.body)).not.toMatch(/"(count|logged|total|totalCount|entries|compliant\w*)"/);
+    expect(Object.keys(rina!).sort()).toEqual([
+      'coaching', 'depth', 'isReader', 'lastOneOnOne', 'membershipId', 'name', 'opens', 'phone', 'photoUrl', 'rung', 'status',
+    ]);
+    // Rina logged 53 recruiting follow-ups a day for a fortnight: not one of those numbers is in the answer. A section's
+    // *n orang* (`count`) and *Semua orang · n* (`total`) are headcounts of the roster itself (P19.18-T5).
+    expect(JSON.stringify(res.body)).not.toMatch(/"(logged|totalCount|entries|compliant\w*)"/);
+    expect(res.body.total).toBe(everybody(res.body).length);
   });
 });

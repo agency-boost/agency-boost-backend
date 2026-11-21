@@ -80,8 +80,9 @@ describe('P19.4-T3 AC-5 no Super Admin route returns a survey answer per person 
   it('P19.4-T3 AC-5 walks the route inventory at all, so a silent zero cannot pass', () => {
     expect(all.length).toBeGreaterThan(300);
     expect(all.map(key)).toEqual(expect.arrayContaining([
-      'GET /admin/members', 'GET /admin/analytics/kpms', 'GET /admin/tenants/:id/analytics',
-      'GET /admin/tenants/:id/analytics/compliance', 'GET /admin/tenants/:id/data', 'GET /admin/companies/:companyId/kpms',
+      // `GET /admin/tenants/:id/analytics` and `…/analytics/compliance` went with KPM Analytics (P19.19-T4; ADR-0272 §8),
+      // `GET /admin/analytics/kpms` and `GET /admin/tenants/:id/data` with the console's rebuild (P19.23; ADR-0277).
+      'GET /admin/members', 'GET /admin/companies/:companyId/kpms', 'GET /admin/dashboard',
       // P19.12-T2 AC-1 (ADR-0245 §1): *Akun terdaftar*.
       'GET /admin/users',
     ]));
@@ -103,8 +104,9 @@ describe('P19.4-T3 AC-5 no Super Admin route returns a survey answer per person 
 
   it('P19.4-T3 AC-5 the platform reads name no survey, and each is a read', () => {
     const platform = all.filter((r) => r.file === 'reporting/platform/platform-reads.controller.ts');
-    // Six since P19.4-T3, and *Akun terdaftar* since P19.12-T2 (ADR-0245 §1).
-    expect(platform).toHaveLength(7);
+    // Six since P19.4-T3, and *Akun terdaftar* since P19.12-T2 (ADR-0245 §1); five since P19.19, the two copies of KPM
+    // Analytics removed with it (ADR-0272 §8); three since P19.23, the comparison and *Data bulanan* retired (ADR-0277).
+    expect(platform).toHaveLength(3);
     for (const route of platform) {
       expect(route.verb).toBe('GET');
       expect(SURVEY.test(route.path)).toBe(false);

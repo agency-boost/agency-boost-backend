@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
+import { powerUserWindow, usageOf, type UsageReading } from '@/domain/metrics/usage';
 import { ActivityCategoryRepository, ActivityTypeRepository } from '@/modules/config/activity.repository';
 import { ActivityLogRepository } from './activity-log.repository';
 
@@ -158,6 +159,53 @@ export class ActivityReadings {
     ]);
     for (const row of rows) out.set(String(row._id), row.last as LocalDate);
     return out;
+  }
+
+  /**
+   * **Each person's use of AgencyBoost** (P19.17-T1 AC-4; ADR-0267 §4; `metrics-and-definitions.md` §A.20): *Pakai* in
+   * `period` when one is given, *Pernah pakai*, *Pakai 14 hari terakhir*, the days saved in the last 30 and *Power user
+   * ★*, and the bucket a page draws (`never` · `lapsed` · `recent`) — `usageOf` over three facts, the family's own: **a
+   * saved day, an all-zero one included** (ADR-0042), as *Pengguna aktif* and `POWER_USER_COUNT` read it.
+   *
+   * - **`today` is the office's** (`TenantDay.office`, `kpms.timezone`, invariant §9), and so is every day compared with
+   *   it; `period` is a range of office days, inclusive.
+   * - **Two reads for the whole list** — the latest day ever (`lastLoggedOnMany`, the directory's own) and the days of the
+   *   power-user window, one row per person per day — **and a third** when a period reaches outside that window. Within
+   *   the office (the repository adds `kpmId`); a deleted day is never read.
+   * - **Every id asked about gets an entry**, *Belum pernah* where nothing was ever saved. Test accounts are the
+   *   caller's to leave out of `membershipIds` (`NOT_A_TEST_ACCOUNT`, ADR-0267 §1), as every list of members is.
+   */
+  async usageOf(
+    ctx: RequestContext,
+    membershipIds: readonly string[],
+    today: LocalDate,
+    period?: { from: LocalDate; to: LocalDate },
+  ): Promise<Map<string, UsageReading>> {
+    const ids = [...new Set(membershipIds)];
+    if (ids.length === 0) return new Map();
+    const window = powerUserWindow(today);
+    const inWindow = period !== undefined && period.from >= window.from && period.to <= window.to;
+    const [last, days, inPeriod] = await Promise.all([
+      this.lastLoggedOnMany(ctx, ids, { to: today }),
+      this.logs.find(
+        ctx,
+        { membershipId: { $in: ids }, localDate: { $gte: window.from, $lte: window.to } },
+        { projection: { membershipId: 1, localDate: 1 } },
+      ),
+      period === undefined || inWindow ? Promise.resolve(null) : this.lastLoggedOnMany(ctx, ids, period),
+    ]);
+    const saved = new Map<string, LocalDate[]>();
+    for (const row of days) saved.set(row.membershipId, [...(saved.get(row.membershipId) ?? []), row.localDate]);
+    const loggedIn = (id: string): boolean | null => {
+      if (period === undefined) return null;
+      if (inPeriod !== null) return inPeriod.has(id);
+      return (saved.get(id) ?? []).some((d) => d >= period.from && d <= period.to);
+    };
+    return new Map(ids.map((id) => [id, usageOf({
+      lastLoggedOn: last.get(id) ?? null,
+      daysLoggedLast30: new Set(saved.get(id) ?? []).size,
+      loggedInPeriod: loggedIn(id),
+    }, today)]));
   }
 
   /**

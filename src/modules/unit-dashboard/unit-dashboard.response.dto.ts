@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UNIT_DASHBOARD, type UnitDashboardPeriod, type UnitView } from '@/domain/constants';
+import { COACHING_STATUSES, type CoachingStatus } from '@/domain/constants/coaching-status';
 import { GOAL_PACE_STATUSES, type GoalPaceStatus } from '@/domain/metrics/goal-pace-status';
 import type { CountAgainst, LeadCountsRow, PairedGoal } from '@/domain/metrics/unit-rollup';
 import type { FollowUp } from '@/modules/coaching/follow-up';
@@ -8,8 +9,8 @@ import type { MonthState } from '@/modules/production/production-months.service'
 import { MonthStateDto } from '@/modules/production/production.response.dto';
 import { FigureSourceDto } from '@/modules/summary/figure-source.dto';
 import type {
-  GoalCell, ProductionCell, ProductionUpdated, UnitDashboardView, UnitGroup, UnitLastOneOnOne, UnitPerson,
-  UnitRow, UnitTotal,
+  GoalCell, ProductionCell, ProductionUpdated, UnitActiveAgent, UnitActiveAgentTile, UnitCoachingStatus, UnitDashboardView,
+  UnitGroup, UnitLastOneOnOne, UnitPerson, UnitRecruit, UnitRecruitmentTile, UnitRow, UnitTotal,
 } from './unit-dashboard.service';
 
 /** Declared for OpenAPI. The wire shapes live on `UnitDashboardService`'s view types. */
@@ -26,16 +27,17 @@ export class UnitPersonDto implements UnitPerson {
 export class UnitScopesDto {
   @ApiProperty({
     enum: UNIT_DASHBOARD.VIEWS, isArray: true,
-    description: 'In the order drawn. *Grup langsung* while the head leads somebody; *Grup informal* while they own a live '
-      + 'group or have an AB below them; *Semua downline* while an AB is below them, and always for the owner or an '
-      + 'administrator on their own dashboard. The picker is hidden with one view or none.',
+    description: 'In the order drawn. *Direct Unit* while the head leads somebody; *Grup langsung* while it holds more than '
+      + '*Direct Unit*, and for the owner or an administrator on their own dashboard who leads somebody; *Grup informal* '
+      + 'while they own a live group or have an AB below them; *Semua downline* while an AB is below them, and always for '
+      + 'the owner or an administrator on their own dashboard. The picker is hidden with one view or none.',
   })
   offered!: UnitView[];
 
   @ApiProperty({
     enum: UNIT_DASHBOARD.VIEWS,
-    description: 'What a read without `scope` answers: the owner’s own dashboard `downline`; an administrator’s `direct` '
-      + 'while they lead somebody, else `downline`; every leader’s, and every view of another leader’s unit, `direct`.',
+    description: 'What a read without `scope` answers: the owner’s or an administrator’s own dashboard `downline`; every '
+      + 'leader’s, and every view of another leader’s unit, `direct` while it holds more than *Direct Unit*, else `unit`.',
   })
   default!: UnitView;
 }
@@ -155,6 +157,21 @@ class UnitChasedCampaignDto {
   @ApiProperty() title!: string;
 }
 
+/** `COACHING_STATUS` on a row (ADR-0267 §5). */
+class UnitCoachingStatusDto implements UnitCoachingStatus {
+  @ApiProperty({
+    enum: COACHING_STATUSES,
+    description: '`never` *Belum pernah coaching* (red); `recent` *Coaching n hari lalu* up to 14 days (green); `lapsed` after (yellow).',
+  }) status!: CoachingStatus;
+  @ApiProperty({ type: Number, nullable: true, description: '`DAYS_SINCE_LAST_COACHING`; `null` with no 1-on-1 ever.' }) days!: number | null;
+  @ApiProperty({ type: UnitPersonDto, nullable: true, description: 'Who led the latest 1-on-1.' }) coach!: UnitPerson | null;
+}
+
+class UnitLeadsByTypeDto {
+  @ApiProperty() sales!: number;
+  @ApiProperty() recruitment!: number;
+}
+
 export class UnitRowDto implements UnitRow {
   @ApiProperty() membershipId!: string;
   @ApiProperty({ example: 'Rina Wijaya' }) name!: string;
@@ -199,6 +216,28 @@ export class UnitRowDto implements UnitRow {
     description: 'The coaching roster’s; `null` on the reader’s own row and before a first finalized session.',
   })
   lastOneOnOne!: UnitLastOneOnOne | null;
+
+  @ApiProperty({
+    type: UnitCoachingStatusDto,
+    description: 'The coaching status tile (`COACHING_STATUS`), the reader’s own row included.',
+  })
+  coaching!: UnitCoachingStatus;
+
+  @ApiProperty({
+    type: UnitLeadsByTypeDto,
+    description: '*Leads sales n · Leads rekrut n*: their leads registered within `window`, by type, whatever became of them.',
+  })
+  periodLeads!: { sales: number; recruitment: number };
+
+  @ApiProperty({
+    type: UnitLeadsByTypeDto,
+    description: 'The person card’s *n potensi* (`LEAD_POTENSI_THIS_MONTH`): their leads of each type switched on for the '
+      + 'agency’s month and still open.',
+  })
+  potensi!: { sales: number; recruitment: number };
+
+  @ApiProperty({ description: 'The person card’s *Aktivitas · 7 hari terakhir*: every activity logged in the last 7 days.' })
+  activity7d!: number;
 
   @ApiProperty({ enum: GOAL_PACE_STATUSES, description: '`GOAL_PACE_STATUS` for the calendar month, whatever the period.' })
   status!: GoalPaceStatus;
@@ -261,20 +300,49 @@ class PotentialActiveDto {
   }) of!: number;
 }
 
-class ActiveAgentTileDto extends PotentialActiveDto {
+class UnitActiveAgentUnitDto extends UnitPersonDto {
+  @ApiProperty({ description: 'The reader’s own unit: *Unit Anda*.' }) isReader!: boolean;
+}
+
+class UnitActiveAgentDto implements UnitActiveAgent {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: 'Agus Prasetyo' }) name!: string;
+  @ApiProperty({ type: String, nullable: true, description: 'A signed link to their photo; initials without one.' }) photoUrl!: string | null;
   @ApiProperty({
-    type: PotentialActiveDto,
-    description: '*Unit*: the head and their direct agents — the rows of `yourUnit` (UI-013, D-16).',
-  }) unit!: { count: number; of: number };
+    type: UnitActiveAgentUnitDto, nullable: true,
+    description: 'The roster’s unit they sit in, by its leader; `null` under *Belum punya leader*.',
+  }) unit!: (UnitPerson & { isReader: boolean }) | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'The month’s APE as the agency holds it, in IDR minor units.' }) apeMinor!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: 'The month’s policy count as held.' }) policies!: number | null;
+}
+
+class UnitActiveAgentTileDto implements UnitActiveAgentTile {
+  @ApiProperty({ example: '2026-11', description: 'The agency’s current month.' }) month!: string;
+  @ApiProperty({ description: 'The agency holds a production file for the month.' }) held!: boolean;
   @ApiProperty({
-    type: PotentialActiveDto,
-    description: '*AAB*: the rest of the head’s direct group — every AAB unit below the head, its head included.',
-  }) aab!: { count: number; of: number };
+    type: Number, nullable: true,
+    description: '`MAA_COUNT_IN_UNIT` over every row: APE above 0 or a policy in the uploaded production that month. `null` '
+      + 'while the month is not uploaded — *Belum diunggah*, never 0.',
+  }) count!: number | null;
+  @ApiProperty({ type: [UnitActiveAgentDto], description: 'The people behind the number, APE first, then policies.' })
+  people!: UnitActiveAgent[];
+}
+
+class UnitRecruitDto implements UnitRecruit {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: 'Hilmy' }) name!: string;
+  @ApiProperty({ type: String, nullable: true }) photoUrl!: string | null;
+  @ApiProperty({ type: UnitPersonDto, nullable: true, description: '*Direkrut oleh*: who registered them.' }) recruitedBy!: UnitPerson | null;
+  @ApiProperty({ example: '2026-11-03', description: '*Tanggal bergabung*, an agency date.' }) joinDate!: string;
+}
+
+class UnitRecruitmentTileDto implements UnitRecruitmentTile {
+  @ApiProperty({ example: '2026-11' }) month!: string;
   @ApiProperty({
-    type: PotentialActiveDto,
-    description: '*AB*: everybody on the roster outside the head’s direct group — an AB below the head and their people; none '
-      + 'in *Grup langsung*. `unit`, `aab` and `ab` add up to the total; an AB is never counted as an AAB.',
-  }) ab!: { count: number; of: number };
+    description: '`RECRUITS_JOINED`: the new hires who joined in the month, credited to somebody on the roster — who '
+      + 'registered them. Never a candidate.',
+  }) count!: number;
+  @ApiProperty({ type: [UnitRecruitDto], description: 'Oldest join date first.' }) people!: UnitRecruit[];
 }
 
 export class UnitTotalDto implements UnitTotal {
@@ -292,8 +360,8 @@ export class UnitTotalDto implements UnitTotal {
 
 export class UnitGroupDto implements UnitGroup {
   @ApiProperty({ type: UnitRowDto }) head!: UnitRow;
-  @ApiProperty({ type: [UnitRowDto], description: 'The head’s direct reports who lead nobody, A to Z.' }) members!: UnitRow[];
-  @ApiProperty({ type: () => [UnitGroupDto], description: 'The head’s direct reports who lead somebody, A to Z, each with their own.' })
+  @ApiProperty({ type: [UnitRowDto], description: 'The head’s direct reports who lead nobody: ABs, then AABs, then agents, each A to Z.' }) members!: UnitRow[];
+  @ApiProperty({ type: () => [UnitGroupDto], description: 'The head’s direct reports who lead somebody, ABs then AABs, A to Z, each with their own.' })
   units!: UnitGroup[];
   @ApiProperty({ type: UnitTotalDto, description: 'The head and everybody below them.' }) total!: UnitTotal;
 }
@@ -320,24 +388,24 @@ class GroupProductionTileDto extends PairedGoalDto {
   @ApiProperty({ enum: ['month', 'year'] }) period!: 'month' | 'year';
 }
 
-class PotentialRecruitsTileDto {
-  @ApiProperty({ description: 'Recruitment leads promised this month across *Your Unit*.' }) yourUnit!: number;
-  @ApiProperty({ description: 'The same across the rest of the head’s direct group.' }) aabs!: number;
-  @ApiProperty({ description: 'The same across the rows outside the head’s direct group; 0 in *Grup langsung*.' }) abs!: number;
-}
-
 class UnitTilesDto {
   @ApiProperty({ type: TeamTileDto }) team!: UnitDashboardView['tiles']['team'];
   @ApiProperty({ type: GroupProductionTileDto }) directGroupProduction!: UnitDashboardView['tiles']['directGroupProduction'];
   @ApiProperty({
-    type: ActiveAgentTileDto,
-    description: '*Active Agent* (UI-013): pacing of manpower, with its *Unit* and *AAB* split.',
-  }) potentialActive!: UnitDashboardView['tiles']['potentialActive'];
-  @ApiProperty({ type: PotentialRecruitsTileDto }) potentialRecruits!: { yourUnit: number; aabs: number; abs: number };
+    type: UnitActiveAgentTileDto,
+    description: '*Active Agent · {month}* (ADR-0267 §2): from the uploaded production, with the people behind it.',
+  }) activeAgent!: UnitActiveAgentTile;
+  @ApiProperty({
+    type: UnitRecruitmentTileDto,
+    description: '*Recruitment · {month}* (ADR-0267 §3): the new hires who joined this month, with who registered them.',
+  }) recruitment!: UnitRecruitmentTile;
 }
 
 class YourUnitDto {
-  @ApiProperty({ type: [UnitRowDto], description: 'The head first, then their direct reports on the agent rung who lead nobody, A to Z.' })
+  @ApiProperty({
+    type: [UnitRowDto],
+    description: 'The head first, then their direct reports who lead nobody and are no AB (*Direct Unit*): AABs, then agents, each A to Z.',
+  })
   rows!: UnitRow[];
 
   @ApiProperty({ type: UnitTotalDto }) total!: UnitTotal;
@@ -379,6 +447,11 @@ export class UnitDashboardDto implements UnitDashboardView {
       + 'control, and a save naming it is refused (UI-152).',
   })
   readOnly!: boolean;
+  @ApiProperty({
+    description: 'The reader runs the whole agency — its owner or an administrator: tapping a person opens their card '
+      + 'first. Anybody else goes straight to the Personal Summary.',
+  })
+  personCard!: boolean;
   @ApiProperty({ type: UnitTilesDto }) tiles!: UnitDashboardView['tiles'];
   @ApiProperty({ type: YourUnitDto }) yourUnit!: { rows: UnitRow[]; total: UnitTotal };
   @ApiProperty({ type: [UnitGroupDto] }) units!: UnitGroup[];

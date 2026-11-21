@@ -137,8 +137,8 @@ describe('P19.12-T2 Akun terdaftar — every registered account, with or without
     const reads = new PlatformReads(
       kpms as never, companies as never, users as never, new MembershipRepository(memberships as never),
       // What *Akun terdaftar* never reads: the per-KPM figures.
-      null as never, null as never, null as never, null as never, null as never, null as never, null as never,
-      null as never, null as never, audit, new FixedClock(NOW),
+      null as never, null as never, null as never, null as never,
+      audit, new FixedClock(NOW),
     );
     const moduleRef = await Test.createTestingModule({
       controllers: [PlatformReadsController],

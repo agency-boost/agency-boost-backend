@@ -39,8 +39,9 @@ import type { Who } from './coaching-office';
  * |---|---|---|
  * | OWNER (Wilson Tanoto) | the Owner, an AB | every meeting, every write, make, move, delete |
  * | ADMIN (Maya Kusuma) | an Admin, an AB | the same |
- * | AGUS | an AB, tagged | read, edit, share — no make, move or delete |
+ * | AGUS | an AB, tagged | every forum, every write, make, move, delete (ADR-0268) |
  * | SARI | an AAB, tagged | the same |
+ * | `superAdminIn()` | the Super Admin inside 0417 | the same, as its Owner (ADR-0268 §3) |
  * | RINA, DEWI, PEER_AB | an Agent, an AAB, an AB, not tagged | 404, the list included; a link opens read-only |
  * | B_AB, B_AGENT | 0555's Owner (`ownerOfB()`) and its Agent | their own office's meetings only |
  */
@@ -57,12 +58,14 @@ export function scorecardServiceOf(wired: ReturnType<typeof configModule>, clock
   );
 }
 
-/** The forum's repositories and services, wired the way the app wires them, over the real scorecard. */
+/**
+ * The forum's repositories and services, wired the way the app wires them. Since P19.22 (ADR-0276) the forum reads no
+ * scorecard: `scorecardServiceOf` stays for the specs of Advanced analytics' MAPA and of the goals that read it.
+ */
 export interface ForumServices {
   meetings: LeaderMeetingRepository;
   links: LeaderMeetingShareLinkRepository;
   people: LeaderMeetingPeople;
-  scorecards: LeaderScorecardService;
   forum: LeaderMeetingsService;
   minutes: LeaderMeetingMinutes;
   sharing: LeaderMeetingSharing;
@@ -76,11 +79,10 @@ export async function buildForumServices(wired: ReturnType<typeof configModule>)
   const people = new LeaderMeetingPeople(
     wired.memberships, new MemberNames(wired.memberships, wired.users as never, wired.avatarLinks), wired.orgLevels, wired.kpms as never,
   );
-  const scorecards = scorecardServiceOf(wired);
-  const forum = new LeaderMeetingsService(meetings, people, scorecards, wired.audit, wired.clock);
-  const minutes = new LeaderMeetingMinutes(meetings, people, wired.audit, wired.clock, scorecards);
+  const forum = new LeaderMeetingsService(meetings, people, wired.audit, wired.clock);
+  const minutes = new LeaderMeetingMinutes(meetings, people, wired.audit, wired.clock);
   const sharing = new LeaderMeetingSharing(links, meetings, forum, people, wired.audit, wired.clock);
-  return { meetings, links, people, scorecards, forum, minutes, sharing };
+  return { meetings, links, people, forum, minutes, sharing };
 }
 
 export interface ForumOffice extends ReportingOffice, ForumServices {
@@ -88,6 +90,13 @@ export interface ForumOffice extends ReportingOffice, ForumServices {
   tag(who: Who, tagged: boolean): Promise<void>;
   /** A support session as this member, read-only unless `readOnly` is false. */
   supported(who: Who, readOnly?: boolean): RequestContext;
+  /** The Super Admin working inside this office (or `kpmId`), as its Owner (ADR-0268 §3; P19.22-T8). */
+  superAdminIn(kpmId?: string): RequestContext;
+  /**
+   * This member signed in **with their *Core leader* tag on the context**, as `ContextResolver` reads it from the
+   * membership on every request — what the `core_leader` grants (`leader_meeting:create`, …) are held by (ADR-0268 §1).
+   */
+  coreLeader(who: Who): RequestContext;
 }
 
 export async function buildForumOffice(wired: ReturnType<typeof configModule>): Promise<ForumOffice> {
@@ -113,6 +122,11 @@ export async function buildForumOffice(wired: ReturnType<typeof configModule>): 
     supported: (who, readOnly = true) => {
       const member = office.as(who);
       return new RequestContext(member.userId, 'none', member.membership, 'u-support', null, false, readOnly);
+    },
+    superAdminIn: (kpmId = KPM_A) => RequestContext.superAdminInKpm(RequestContext.platform('u-root'), kpmId),
+    coreLeader: (who) => {
+      const member = office.as(who);
+      return new RequestContext(member.userId, 'none', { ...member.membership!, isCoreLeader: true });
     },
   };
 }

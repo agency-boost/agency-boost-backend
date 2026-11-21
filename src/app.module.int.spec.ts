@@ -27,6 +27,25 @@ import { MemberDeparture, MemberDepartures } from './modules/org/member-departur
 import { CampaignChaseDeparture } from './modules/campaigns/campaign-departure';
 import { RemovalService } from './modules/org/removal.service';
 import { InvitesService } from './modules/org/invites.service';
+import { ModulesContainer } from '@nestjs/core';
+import { OPTIONAL_DEPS_METADATA, PARAMTYPES_METADATA, SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
+import { DirectoryService } from './modules/org/directory.service';
+import { PeopleService } from './modules/org/people.service';
+import { AdminDelegationService } from './modules/org/admin-delegation.service';
+import { RoleChangeService } from './modules/org/role-change.service';
+import { TransfersService } from './modules/org/transfers.service';
+import { OrgLevelService } from './modules/tenants/org-level.service';
+import { RosterImportRecordRepository } from './modules/tenants/roster-import-record.schema';
+import { AvatarLinks } from './modules/users/avatar.service';
+import { OfficeGroups } from './modules/reporting/office-groups';
+import { AnalyticsConfigReader } from './modules/config/analytics-config.reader';
+import { BrandingReader } from './modules/branding/branding-reader';
+import { ProductionImportService } from './modules/production/production-import.service';
+import { ProductionCorrections } from './modules/production/production-correction.service';
+import { UnregisteredAgentDataRepository } from './modules/production/unregistered-agent-data.repository';
+import { DataUploadBatchRepository } from './modules/production/data-upload-batch.repository';
+import { DataUploadRowRepository } from './modules/production/data-upload-row.repository';
+import { CampaignService } from './modules/campaigns/campaign.service';
 
 /**
  * Boots the real AppModule.
@@ -91,6 +110,65 @@ describe('AppModule boots', () => {
     // P18.8-T3 AC-4: registration on an invite's link reaches the invites, by token.
     expect(port(AuthController, 'invites') === app.get(InvitesService, { strict: false })).toBe(true);
     expect(port(InvitesService, 'activations')).toBe(activation);
+  });
+
+  /*
+   * **The same defect, found again 2026-11-20 by a walk in a real browser**, in fourteen parameters written
+   * `@Optional() private readonly x: X | null = null` with no `@Inject(X)`. Every one stayed null in the running app
+   * while its specs, building the service by hand, passed: *All members* had no Group and no photos, a member's role
+   * choices came from the default ladder rather than the company's, a correction could not go back to the file's
+   * figure, and an upload never wrote its *Belum terdaftar* rows. Each consumer's field is read off the real graph and
+   * must be the one instance the container holds — compared with `===`, because a failing `toBe` prints the graph.
+   */
+  it('wires the fourteen optional dependencies the 2026-11-20 walk found null, each to its real instance', () => {
+    const wiring: [consumer: unknown, field: string, token: unknown][] = [
+      [DirectoryService, 'orgLevels', OrgLevelService],
+      [DirectoryService, 'avatarLinks', AvatarLinks],
+      [DirectoryService, 'officeGroups', OfficeGroups],
+      [PeopleService, 'records', RosterImportRecordRepository],
+      [PeopleService, 'avatarLinks', AvatarLinks],
+      [AdminDelegationService, 'avatarLinks', AvatarLinks],
+      [RoleChangeService, 'transfers', TransfersService],
+      [InvitesService, 'analytics', AnalyticsConfigReader],
+      [InvitesService, 'branding', BrandingReader],
+      [ProductionImportService, 'unregistered', UnregisteredAgentDataRepository],
+      [ProductionCorrections, 'analytics', AnalyticsConfigReader],
+      [ProductionCorrections, 'batches', DataUploadBatchRepository],
+      [ProductionCorrections, 'batchRows', DataUploadRowRepository],
+      [CampaignService, 'orgLevels', OrgLevelService],
+    ];
+    const wrong = wiring
+      .map(([consumer, field, token]) => {
+        const held = (app.get(consumer as never, { strict: false }) as Record<string, unknown>)[field];
+        const real = app.get(token as never, { strict: false });
+        return { at: `${(consumer as { name: string }).name}.${field}`, ok: held != null && held === real };
+      })
+      .filter((row) => !row.ok)
+      .map((row) => row.at);
+    expect(wrong).toEqual([]);
+  });
+
+  /*
+   * **And the class of defect, not only its fourteen instances.** Every provider and controller in the real graph is
+   * read for the parameters it marks `@Optional()`: one whose design type reached the container as `Object` (a union
+   * with `null` or `undefined`, or an interface) and that names no token with `@Inject` resolves to nothing, silently,
+   * forever. A required one fails the boot on its own; an optional one has only this test.
+   */
+  it('names a token for every @Optional() constructor parameter whose design type is not a class', () => {
+    const untyped: string[] = [];
+    for (const module of app.get(ModulesContainer).values()) {
+      for (const wrapper of [...module.providers.values(), ...module.controllers.values()]) {
+        const type = wrapper.metatype as (abstract new (...args: never[]) => unknown) | null;
+        if (typeof type !== 'function' || !type.prototype) continue;
+        const optional: number[] = Reflect.getMetadata(OPTIONAL_DEPS_METADATA, type) ?? [];
+        const design: unknown[] = Reflect.getMetadata(PARAMTYPES_METADATA, type) ?? [];
+        const named = new Set(((Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, type) ?? []) as { index: number }[]).map((d) => d.index));
+        for (const index of optional) {
+          if (!named.has(index) && (design[index] === Object || design[index] === undefined)) untyped.push(`${type.name} parameter ${index}`);
+        }
+      }
+    }
+    expect([...new Set(untyped)]).toEqual([]);
   });
 
   /*
@@ -184,11 +262,14 @@ describe('AppModule boots', () => {
     expect(res.body.error.code).toBeDefined();
   });
 
-  it('P19.6-T5 AC-4 answers the Super Admin’s guide 401 to a request with no session, and nothing of it', async () => {
+  it('P19.17-T3 (ADR-0269) serves neither the Super Admin’s guide nor the linked-login routes: no route, 404', async () => {
     for (const path of ['/api/v1/admin/panduan', '/api/v1/admin/panduan/pdf']) {
-      const res = await request(app.getHttpServer()).get(path).expect(401);
-      expect([path, res.body.error.code]).toEqual([path, 'AUTH_TOKEN_INVALID']);
-      expect(res.text).not.toMatch(/Panduan Super Admin|%PDF-/);
+      const res = await request(app.getHttpServer()).get(path).expect(404);
+      expect([path, res.body.error.code]).toEqual([path, 'NOT_FOUND']);
+    }
+    for (const path of ['/api/v1/auth/links', '/api/v1/auth/links/confirm', '/api/v1/auth/links/switch']) {
+      const res = await request(app.getHttpServer()).post(path).send({}).expect(404);
+      expect([path, res.body.error.code]).toEqual([path, 'NOT_FOUND']);
     }
   });
 });

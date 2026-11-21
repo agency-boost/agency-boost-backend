@@ -3,6 +3,7 @@ import { isValidObjectId } from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import type { ResourceName } from '@/common/errors/resources';
+import { isTestAccount } from '@/domain/constants/test-accounts';
 import { isReadLike, scopeFor, type Permission, type Scope } from '@/modules/rbac/permissions';
 import { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
@@ -275,10 +276,15 @@ export class CoachResolver {
     const below = await this.memberships.find(
       ctx,
       { ancestorIds: actorMembershipId, status: 'active' },
-      fields ? { sort: COACHED_ORDER, projection: fields } : { sort: COACHED_ORDER },
+      fields ? { sort: COACHED_ORDER, projection: { ...fields, testAccount: 1 } } : { sort: COACHED_ORDER },
     );
     const live = new Set(below.map((m) => String(m._id)));
-    return below.filter((m) => linksBetween(actorMembershipId, m).every((id) => live.has(id)));
+    /*
+     * **A test account is never listed** (ADR-0267 §1): left out of the roster and of a list's reach, after the links
+     * are tested — a real person below a test account is still reached through it. `coachee`, one member by id, is
+     * unchanged: the flag is about lists and figures, not about who may open what.
+     */
+    return below.filter((m) => !isTestAccount(m) && linksBetween(actorMembershipId, m).every((id) => live.has(id)));
   }
 
   private async isActive(ctx: RequestContext, membershipId: string): Promise<boolean> {

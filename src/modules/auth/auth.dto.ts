@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
+  IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsMongoId, IsOptional, IsString, Matches, Max, MaxLength, Min,
   MinLength, ValidateIf,
 } from 'class-validator';
 import {
@@ -196,46 +196,6 @@ export class ChangeEmailDto {
   currentPassword!: string;
 }
 
-/** *Tambah akun* (UI-169 item 5; ADR-0199 §2): the other login's address, and the caller's own password again. */
-export class StartLinkDto {
-  @ApiProperty({ example: 'wilson@agencyboost.test', description: 'The address of the other login to link.' })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsEmail()
-  @MaxLength(254)
-  email!: string;
-
-  @ApiProperty({ description: 'The password the caller signs in with now.' })
-  @IsString()
-  currentPassword!: string;
-}
-
-/** The link's page (`/link-account/[token]`, ADR-0199 §2): the token from the email, and the other login's password. */
-export class ConfirmLinkDto {
-  @ApiProperty({ description: 'The token from the link sent to the other login\'s address.' })
-  @IsString()
-  @MaxLength(256)
-  token!: string;
-
-  @ApiProperty({ description: 'The password of the login the link was sent to.' })
-  @IsString()
-  password!: string;
-}
-
-/** A switch to the other login (ADR-0199 §4): which login, and its password where this browser holds no session of it. */
-export class SwitchLinkDto {
-  @ApiProperty({ description: 'The linked login to switch to: `linkedLogin.userId` on `GET /auth/me`.' })
-  @IsMongoId()
-  userId!: string;
-
-  @ApiPropertyOptional({
-    description: 'That login\'s password — only after `409 AUTH_LINK_SIGN_IN_REQUIRED`, when this browser holds no live '
-      + 'session of it.',
-  })
-  @IsOptional()
-  @IsString()
-  password?: string;
-}
-
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Rina Wijaya' })
   @IsOptional()
@@ -351,6 +311,26 @@ export class ImpersonateDto {
   // The shape a row may hold; `setup` passes here so the service refuses it naming the field (P19.4-T2 AC-1).
   @IsIn(IMPERSONATION_PURPOSES)
   purpose?: ImpersonationPurpose;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      '***Lihat sebagai*** **in a new window** (ADR-0277): `true` answers `{ handoffCode, '
+      + 'handoffExpiresAt, expiresAt, sessionId, readOnly }` **with no access token** — the window redeems the code '
+      + 'once, within `IMPERSONATION_HANDOFF_SECONDS`, at `POST /admin/impersonate/handoff`, and the token is minted '
+      + 'there. Left out or `false`: the token in the answer, as before.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  handoff?: boolean;
+}
+
+/** ***Lihat sebagai*'s window redeeming its one-time code** (P19.23-T2 AC-7; ADR-0277). */
+export class ImpersonationHandoffDto {
+  @ApiProperty({ description: 'The `handoffCode` the start answered: 43 base64url characters.' })
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{20,128}$/)
+  code!: string;
 }
 
 

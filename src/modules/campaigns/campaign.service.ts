@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -87,7 +87,7 @@ export class CampaignService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     /** P18.2-T7: the company's ladder, which a campaign's rungs are checked against. */
-    @Optional() private readonly orgLevels: OrgLevelService | null = null,
+    @Optional() @Inject(OrgLevelService) private readonly orgLevels: OrgLevelService | null = null,
   ) {}
 
   async list(ctx: RequestContext, includeArchived = false): Promise<CampaignView[]> {

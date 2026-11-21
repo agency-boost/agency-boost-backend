@@ -63,6 +63,9 @@ describe('P18.10-T5 every code’s refusal, in both languages', () => {
     'modules/notifications: emails:subject',
     // *TBD*, the forum's own placeholder, kept English in both (the glossary's §A.4).
     'modules/leader-meetings:tbd',
+    // A new forum's second agenda line, *Update action items*: the 19 November SLF mockups' own Indonesian, verbatim
+    // (`slf-tablet` frame 6; ADR-0276), an action item being an *action item* in both languages.
+    'modules/leader-meetings:updateActionItems',
     // *FAQ*, the recruitment pitch's third slot: the loanword Indonesian already uses (the glossary's §B.0 rule 5).
     'modules/recruitment:faqTitle',
     // The other five pitch slots' titles: each material's English name in both languages (UI V1, UI-107: *one row per

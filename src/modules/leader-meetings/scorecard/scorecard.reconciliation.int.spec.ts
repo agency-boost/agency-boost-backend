@@ -1,9 +1,8 @@
 import mongoose from 'mongoose';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
-import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
+import { officeHeadcount } from '@/domain/metrics/office-headcount';
 import { TEMPLATE_HEADER_V1 } from '@/modules/production/production-template';
 import { byKode } from '@/modules/production/upload-columns';
-import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
 import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo';
 import { configModule } from '../../../../test/config-module';
 import { KPM_A, ROSTER_NOW, type Who } from '../../../../test/coaching-office';
@@ -145,9 +144,8 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       const got = c(key, column);
       return got.kind === 'figure' ? got.value : got.kind;
     };
-    const overview = await wired.kpmOverview.read(owner());
-    const now = await wired.kpmAnalytics.read(owner(), { period: 'this_month' }) as KpmAnalyticsView;
-    const then = await wired.kpmAnalytics.read(owner(), { period: 'previous_month' }) as KpmAnalyticsView;
+    // P19.22 (ADR-0275 §3): KPM Analytics is gone (P19.19) and the Overview no longer serves a composition, so each figure is
+    // held against the memberships and the month table themselves — the same functions the surfaces used.
     const memberships = (await db().collection('memberships').find({ kpmId: KPM_A, deletedAt: null }).toArray())
       .map((m): MembershipRow => ({ _id: m._id, status: m.status, joinedAt: m.joinedAt ?? null, removedAt: m.removedAt ?? null, orgLevelCode: m.orgLevelCode }));
     const files = new Map<string, FileRow[]>();
@@ -157,12 +155,13 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
 
     // ---- The headcount and the chips: the Overview's, today. *# of units* is the AB and AAB who lead an active member
     // (P19.3-T1 AC-15; ADR-0203 §1), counted here from the memberships themselves.
-    const rung = (code: string) => overview.composition.rungs.find((r) => r.code === code)?.count ?? 0;
     const live = (await db().collection('memberships').find({ kpmId: KPM_A, deletedAt: null, status: 'active' }).toArray());
+    const rung = (code: string) => live.filter((m) => m.orgLevelCode === code).length;
+    const total = officeHeadcount(memberships, endOfDay('2026-09-14'));
     const leading = new Set(live.map((m) => m.leaderId).filter((l): l is string => typeof l === 'string'));
     const units = live.filter((m) => (m.role === 'ab' || m.role === 'aab') && leading.has(String(m._id))).length;
     expect([at('chips'), card.chips]).toEqual([at('chips'), {
-      manpower: overview.composition.total,
+      manpower: total,
       agents: rung('AGENT'),
       ab: rung('AB'),
       units,
@@ -171,16 +170,16 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     // 0417 has leaders who lead nobody: fewer units than ABs and AABs.
     expect([at('units below AB + AAB'), units < rung('AB') + rung('AAB')]).toEqual([at('units below AB + AAB'), true]);
     expect([at('manpower'), value('manpower', 'thisMonth'), value('manpower', 'ytd')])
-      .toEqual([at('manpower'), overview.composition.total, overview.composition.total]);
+      .toEqual([at('manpower'), total, total]);
     // An earlier period's last day: OFFICE_HEADCOUNT on the office's memberships, the Overview's function.
     for (const [column, day] of [['fy', '2025-12-31'], ['ytdLastYear', '2025-09-30'], ['thisMonthLastYear', '2025-09-30'], ['lastMonth', '2026-08-31']] as const) {
       expect([at(`manpower ${column}`), value('manpower', column)]).toEqual([at(`manpower ${column}`), officeHeadcount(memberships, endOfDay(day))]);
     }
 
     // ---- APE: the Overview's year to date; a month the office's file — the chart's, and the table's with its leavers.
-    expect([at('APE YTD'), value('ape', 'ytd')]).toEqual([at('APE YTD'), overview.production.ytd.achievedMinor ?? 'pending']);
-    expect([at('APE last month = the chart'), value('ape', 'lastMonth')])
-      .toEqual([at('APE last month = the chart'), now.monthly.find((m) => m.month === '2026-08')?.apeMinor ?? 'pending']);
+    const thisYtd = new Map<string, number>();
+    for (const month of THIS_YEAR) for (const r of files.get(month)!) if (r.ytd !== null) thisYtd.set(r.membershipId, r.ytd);
+    expect([at('APE YTD'), value('ape', 'ytd')]).toEqual([at('APE YTD'), sum([...thisYtd.values()]) ?? 'pending']);
     for (const [column, month] of [['thisMonth', '2026-09'], ['lastMonth', '2026-08'], ['thisMonthLastYear', '2025-09']] as const) {
       expect([at(`APE ${month}`), value('ape', column)]).toEqual([at(`APE ${month}`), sum(files.get(month)!.map((r) => r.ape)) ?? 'pending']);
     }
@@ -192,15 +191,16 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
       expect([at(`APE ${column}`), value('ape', column)]).toEqual([at(`APE ${column}`), sum([...latestYtd.values()]) ?? 'pending']);
     }
 
-    // ---- Avg. Monthly AA: the analytics' total row's *Active this month* and *last month*, and their mean.
-    expect([at('MAA this month'), value('avg_monthly_aa', 'thisMonth')]).toEqual([at('MAA this month'), now.total.activeAgents ?? 'pending']);
-    expect([at('MAA last month'), value('avg_monthly_aa', 'lastMonth')]).toEqual([at('MAA last month'), then.total.activeAgents ?? 'pending']);
-    // Each held month's count, from the table: its members on its last day (today, for this one) showing ✓.
-    const maaIn = (month: string, end: Date) => files.get(month)!.filter((r) => r.maa === true
-      && memberships.some((m) => String(m._id) === r.membershipId && memberAt(m, end))).length;
+    // ---- Avg. Monthly AA: each held month's count, from the table — the office's counted members showing ✓, as the KPM
+    // Overview's *Active Agent* counts them (`activeAgentsIn`; ADR-0267 §1, §2) — and their mean. *Changed 2026-11-20 (the
+    // integration review):* the members on the month's last day until then (P18.1-T1 AC-4), so a leaver counted in the
+    // months before they left; today a member who has left is in no month's *Active Agent*, on MAPA as on the Overview.
+    const maaIn = (month: string) => files.get(month)!.filter((r) => r.maa === true
+      && memberships.some((m) => String(m._id) === r.membershipId && m.status === 'active')).length;
     const endOf = (month: string) => (month === '2026-09' ? endOfDay('2026-09-14') : endOfMonthOf(month));
-    // This year's held months: August and September the analytics' own counts, any other the table's.
-    const countOf = (m: string) => (m === '2026-09' ? now.total.activeAgents! : m === '2026-08' ? then.total.activeAgents! : maaIn(m, endOf(m)));
+    expect([at('MAA this month'), value('avg_monthly_aa', 'thisMonth')]).toEqual([at('MAA this month'), maaIn('2026-09')]);
+    expect([at('MAA last month'), value('avg_monthly_aa', 'lastMonth')]).toEqual([at('MAA last month'), maaIn('2026-08')]);
+    const countOf = (m: string) => maaIn(m);
     const thisYearHeld = THIS_YEAR.filter(held);
     expect(thisYearHeld).toEqual(expect.arrayContaining(['2026-08', '2026-09']));
     expect([at('MAA YTD = the analytics’ months'), value('avg_monthly_aa', 'ytd')])
@@ -208,11 +208,9 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
     for (const [column, months] of [['fy', LAST_YEAR], ['ytdLastYear', LAST_YEAR_TO_DATE]] as const) {
       const lastYearHeld = months.filter(held);
       expect([at(`MAA ${column}`), value('avg_monthly_aa', column)]).toEqual([
-        at(`MAA ${column}`), lastYearHeld.reduce((n, m) => n + maaIn(m, endOf(m)), 0) / lastYearHeld.length,
+        at(`MAA ${column}`), lastYearHeld.reduce((n, m) => n + maaIn(m), 0) / lastYearHeld.length,
       ]);
     }
-    expect([at('MAA months agree'), maaIn('2026-09', endOf('2026-09')), maaIn('2026-08', endOf('2026-08'))])
-      .toEqual([at('MAA months agree'), now.total.activeAgents, then.total.activeAgents]);
 
     // ---- Case submission: the table's policies, with its leavers. (*New AA* is drawn nowhere since P18.9-T1 AC-6.)
     const perMonth = (pick: (r: FileRow) => number | null) => (month: string) => sum(files.get(month)!.map(pick));
@@ -241,7 +239,7 @@ describe('the forum’s scorecard reconciles with Phase 18’s figures (P18.1-T2
         .toEqual([at(`producing ${column}`), months.some(held) ? producing.size : 'pending']);
       // Cases/producing agents, per active agent per month (P19.3-T1 AC-15; ADR-0203 §5): the months held with a policy
       // count, their policies over their monthly active agents — each month's count the *Avg. monthly AA* row reads.
-      const maaOf = (m: string) => (m.startsWith('2026') ? countOf(m) : maaIn(m, endOf(m)));
+      const maaOf = (m: string) => (m.startsWith('2026') ? countOf(m) : maaIn(m));
       const paired = months.filter((m) => held(m) && policies(m) !== null);
       const active = paired.reduce((n, m) => n + maaOf(m), 0);
       const pairedPolicies = paired.reduce((n, m) => n + policies(m)!, 0);

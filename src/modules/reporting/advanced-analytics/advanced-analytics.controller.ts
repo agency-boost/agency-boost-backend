@@ -1,41 +1,46 @@
-import { Body, Controller, Get, Param, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { PLATFORM_READ } from '@/domain/constants';
 import {
-  AdminAdvancedAnalyticsQueryDto, AdvancedAnalyticsShellQueryDto, DemographicsQueryDto, EventsQueryDto, MapaQueryDto,
-  QuantQueryDto, SetMapaTargetDto, SetSubgroupTargetDto, SubgroupQueryDto,
+  AdminAdvancedAnalyticsQueryDto, AdvancedAnalyticsShellQueryDto, DemographicsQueryDto, DemographicsUploadDto, EventsQueryDto,
+  MapaQueryDto, QuantQueryDto, SubgroupPeopleQueryDto, SubgroupQueryDto,
 } from './advanced-analytics.dto';
 import {
-  AdminAdvancedAnalyticsSectionDto, AdvancedAnalyticsShellDto, DemographicsDto, EventsNpsDto, MapaDto, MapaTargetDto,
-  QuantDto, SubgroupDto, SubgroupTargetDto,
+  AdminAdvancedAnalyticsSectionDto, AdvancedAnalyticsShellDto, DemographicsDto, DemographicsFileDto,
+  DemographicsUploadDto as DemographicsUploadResultDto, EventsNpsDto, MapaDto, QuantDto, SubgroupDto, SubgroupSheetDto,
 } from './advanced-analytics.response.dto';
 import { AdvancedAnalyticsService } from './advanced-analytics.service';
 import { AdminAdvancedAnalytics } from './admin-advanced-analytics.service';
 
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
-/** Who reads the page (ADR-0215 §2): the Owner, the Admins and a Core Leader; any other leader is 404. */
+/**
+ * Who reads the page (ADR-0215 §2 as ADR-0268 §1 and ADR-0275 §1 amend it): the KPM's stewards — the Super Admin inside
+ * the KPM, the Owner, the Admins and a core leader; any other leader is 404.
+ */
 const READ_403 = refusal(
   403,
-  '`TENANT_NO_MEMBERSHIP` — a Super Admin outside a support session belongs to no agency. `PERM_DENIED` — a role '
-  + 'without the permission: an Agent.',
+  '`TENANT_NO_MEMBERSHIP` — a Super Admin who has not entered a KPM (`X-Kpm-Id`). `PERM_DENIED` — a role without the '
+  + 'permission: an Agent.',
 );
 const READ_404 = refusal(
   404,
-  '`NOT_FOUND` — an AB or an AAB who is not a Core Leader (roles §3.9 ¶); a section the template has switched off; an '
+  '`NOT_FOUND` — an AB or an AAB who is not a core leader (roles §3.9 ¶); a section the template has switched off; an '
   + '`ab` this office does not hold. Indistinguishable from another office’s.',
 );
 const WRITE_403 = refusal(
   403,
-  '`PERM_DENIED` — every role but the Owner and the Admins. `IMPERSONATION_READ_ONLY` — a view-as session.',
+  '`PERM_DENIED` — every role but the KPM’s stewards. `IMPERSONATION_READ_ONLY` — a view-as session.',
 );
 
 /**
- * **The KPM's *Advanced analytics* page** (P19.5-T3; ADR-0215; `functional/advanced-analytics.md`, the Data contract):
- * the shell and five sections. *NPS KPM* and *Analitik kualitatif* are `SurveyRunsController`'s, on the same prefix.
+ * **The KPM's *Advanced analytics* page** (P19.5-T3, P19.22; ADR-0215, ADR-0275; `functional/advanced-analytics.md`, the
+ * Data contract): the shell, *Demografi* with its list and upload, *MAPA driver*, *Analisa kuantitatif*, *Informal group*
+ * with its sheets, and *Event*. *NPS* and *Analisa kualitatif* are `SurveyRunsController`'s, on the same prefix. The typed
+ * MAPA targets (`PUT targets/mapa`) are gone: the targets are the AB groups' (ADR-0275 §3).
  */
 @ApiTags('kpm-reporting')
 @ApiBearerAuth()
@@ -61,10 +66,12 @@ export class AdvancedAnalyticsController {
   @Get('demographics')
   @RequirePermission('advanced_analytics:read')
   @ApiOperation({
-    summary: '*Demografi KPM*',
-    description: '`MANPOWER_BY_DIMENSION`: manpower on the month’s last day by role (the company’s ladder), work status, '
-      + 'gender, age band and tenure band, each summing to manpower, a missing field under *Belum diisi*. With `ab`, '
-      + 'over that AB’s Group.',
+    summary: '*Demografi*',
+    description: 'ADR-0275 §2: the summary — *Total manpower*, *Data lengkap* (*Status kerja*, *Tanggal lahir* '
+      + 'and *Tanggal bergabung* on file), *Perlu melengkapi* — `MANPOWER_BY_DIMENSION` on the month’s last day by role, '
+      + 'work status, gender, age band and tenure band, a missing field under *Belum diisi*; *Kelengkapan data* per field, '
+      + 'Leader vs Agent; and *Data anggota*, the incomplete first, with each one’s WhatsApp number for *Kirim pengingat*. '
+      + 'With `ab`, over that AB’s Group. Test accounts are never counted or listed.',
   })
   @ApiResponse({ status: 200, type: DemographicsDto })
   @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `month` that is no month or is later than this one.'))
@@ -74,17 +81,53 @@ export class AdvancedAnalyticsController {
     return this.analytics.demographics(ctx, query);
   }
 
+  @Get('demographics/file')
+  @RequirePermission('advanced_analytics:write')
+  @ApiOperation({
+    summary: '*Unduh daftar (CSV)*',
+    description: 'One row per active member — *Kode agen, Nama, Peran, Upline, Status kerja, Tanggal lahir, '
+      + 'Tanggal bergabung* — with what is on file, as `{ filename, file }`. A name that starts like a formula is written as '
+      + 'text. The KPM’s stewards.',
+  })
+  @ApiResponse({ status: 200, type: DemographicsFileDto })
+  @ApiResponse(WRITE_403)
+  @ApiResponse(READ_404)
+  demographicsFile(@Ctx() ctx: RequestContext) {
+    return this.analytics.demographicsFile(ctx);
+  }
+
+  @Post('demographics/upload')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('advanced_analytics:write')
+  @ApiOperation({
+    summary: '*Upload* — the filled list',
+    description: 'ADR-0275 §2; OD-413: each row is the member with its *Kode agen* in this KPM; a filled cell '
+      + 'writes its field (*Status kerja* Full-time / Part-time; *Tanggal lahir*, *Tanggal bergabung* `dd/mm/yyyy`), an '
+      + 'empty one changes nothing. Checked as the profile checks them; a core leader changes their own downline only. '
+      + 'Each member changed is audited `member.personal_completed`, before and after. Answers each row’s outcome.',
+  })
+  @ApiResponse({ status: 200, type: DemographicsUploadResultDto })
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — no `file`, one over 90,000 bytes, or one whose header has no *Kode agen*.'))
+  @ApiResponse(refusal(422, '`UPLOAD_MALFORMED_CSV` — a quote opened and never closed.'))
+  @ApiResponse(WRITE_403)
+  @ApiResponse(READ_404)
+  uploadDemographics(@Ctx() ctx: RequestContext, @Body() body: DemographicsUploadDto) {
+    return this.analytics.uploadDemographics(ctx, body);
+  }
+
   @Get('mapa')
   @RequirePermission('advanced_analytics:read')
   @ApiOperation({
     summary: '*MAPA driver*',
-    description: 'The forum’s nine rows month by month for a year, through the forum’s own scorecard: each month '
-      + 'beside the same month last year and the KPM’s typed target (*TBD* while none), and the year columns with '
-      + 'the months not complete (*Belum lengkap*). The recruitment row names the members who joined as new hires '
-      + 'where they differ from the upload (D2).',
+    description: 'ADR-0275 §3: *Bulan ini vs target* (APE, Active Agent, Rekrut), then eight rows — APE, '
+      + '**M** Manpower and Rekrut, **A** Active Agent and *% agent baru aktif dalam 3 bulan*, **P** Polis terbit and Polis '
+      + 'per Active Agent, **A** Nilai rata-rata polis — each with YTD last year · YTD this year (APE’s the total, every '
+      + 'other the average per month) and the same month last year · last month · this month, each change in % (points for '
+      + 'a percentage), and the read-only monthly target: Active Agent and Rekrut the sums of the AB groups’ targets, APE '
+      + 'the members’ Goal Setting ÷ 12. Rekrut is `RECRUITS_JOINED`.',
   })
   @ApiResponse({ status: 200, type: MapaDto })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `year` that is no year or is later than this one.'))
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `month` that is no month, later than this one, or before January of last year.'))
   @ApiResponse(READ_403)
   @ApiResponse(READ_404)
   mapa(@Ctx() ctx: RequestContext, @Query() query: MapaQueryDto) {
@@ -94,11 +137,12 @@ export class AdvancedAnalyticsController {
   @Get('quant')
   @RequirePermission('advanced_analytics:read')
   @ApiOperation({
-    summary: '*Analitik kuantitatif*',
-    description: 'The ten metrics A1 to D1 of a semi-annual run, each with the KPM’s value, whether it is complete, the '
-      + 'median of the company’s other KPMs with complete data (three needed) and the peer status. A median and a count '
-      + 'only: never another KPM’s figure, name or id. The run recalculates until the 15th of the month after its period '
-      + 'and is then frozen.',
+    summary: '*Analisa kuantitatif*',
+    description: 'ADR-0275 §4: the ten metrics A1 to D1 of a half-year, each with the KPM’s value, whether it '
+      + 'is complete, the median of the company’s other KPMs with complete data over the same months (three needed), the '
+      + 'peer status, *Semester lalu*, and **its distribution per leader** — each leader’s value over their own unit, high '
+      + 'to low, named and pictured, their median and how many stand at or above it. A peer median and a count only: never '
+      + 'another KPM’s figure, name or id. The run recalculates until the 15th of the month after it, then is frozen.',
   })
   @ApiResponse({ status: 200, type: QuantDto })
   @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `periodEnd` that is no June or December, or has not ended.'))
@@ -111,19 +155,37 @@ export class AdvancedAnalyticsController {
   @Get('subgroup')
   @RequirePermission('advanced_analytics:read')
   @ApiOperation({
-    summary: '*Perbaikan sub-group*',
-    description: 'One row per informal group, A to Z, each with its ★ group leader, then *Tidak ada group* ('
-      + 'ADR-0253 §5): each person in the row of their nearest leader (themselves, or the nearest above) — that '
-      + 'leader\u2019s group, or *Tidak ada group*. Manpower and leaders, MAA as a baseline, last month and this month as of its upload, the AA and '
-      + 'recruitment targets — the sum of the row’s leaders’ targets for the year — adoption, power users, one-on-ones '
-      + 'a week, the weekly activity target, and recruitment as a baseline and this year.',
+    summary: '*Informal group*',
+    description: 'ADR-0275 §5: for `month`, *Total KPM*, then one card per informal group A to Z and *Tanpa '
+      + 'group*, each with its AB groups — every scope with four drivers coloured by progress (green ≥100%, yellow ≥67%, '
+      + 'red below): Monthly Active Agent MTD vs target, Pemakaian AgencyBoost (downline %, leader %), 1-on-1 per minggu '
+      + '(sessions in 30 days ÷ 4,35 vs 2 × the Active Agent target) and Rekrut YTD vs target. The targets are the AB '
+      + 'groups’ own, summed — the same as KPM Overview › *Performa vs target*. Test accounts are never counted.',
   })
   @ApiResponse({ status: 200, type: SubgroupDto })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a query parameter of any name.'))
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `month` that is no month or is later than this one.'))
   @ApiResponse(READ_403)
   @ApiResponse(READ_404)
-  subgroup(@Ctx() ctx: RequestContext, @Query() _query: SubgroupQueryDto) {
-    return this.analytics.subgroup(ctx);
+  subgroup(@Ctx() ctx: RequestContext, @Query() query: SubgroupQueryDto) {
+    return this.analytics.subgroup(ctx, query);
+  }
+
+  @Get('subgroup/people')
+  @RequirePermission('advanced_analytics:read')
+  @ApiOperation({
+    summary: '*Informal group* — the people behind one number of an AB group',
+    description: '`maa` who is active (APE, polis) and who is not yet, nearest first; `usage` who has not '
+      + 'used the app in 30 days, then who has, power users ★ first; `coaching` never, more than 14 days, within 14 days; '
+      + '`rekrut` who joined this year and who recruited them, and the recruit potential in Leads. With the AB’s WhatsApp '
+      + 'number for *WhatsApp {AB} · kirim daftar ini*.',
+  })
+  @ApiResponse({ status: 200, type: SubgroupSheetDto })
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — no `ab`, a `driver` of another name, a bad `month`.'))
+  @ApiResponse(READ_403)
+  @ApiResponse(refusal(404, '`NOT_FOUND` — an `ab` that heads no AB group of this office; an AB or an AAB who is not a '
+    + 'core leader (roles §3.9 ¶); a section the template has switched off. Indistinguishable from another office’s.'))
+  subgroupPeople(@Ctx() ctx: RequestContext, @Query() query: SubgroupPeopleQueryDto) {
+    return this.analytics.subgroupPeople(ctx, query);
   }
 
   @Get('events')
@@ -140,38 +202,6 @@ export class AdvancedAnalyticsController {
   @ApiResponse(READ_404)
   events(@Ctx() ctx: RequestContext, @Query() query: EventsQueryDto) {
     return this.analytics.eventsNps(ctx, query);
-  }
-
-  @Put('targets/mapa')
-  @RequirePermission('advanced_analytics:write')
-  @ApiOperation({
-    summary: 'Type a MAPA target',
-    description: 'A month’s target for one of the forum’s five rows, or `null` — *TBD*. Audited with before and after.',
-  })
-  @ApiResponse({ status: 200, type: MapaTargetDto })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a `month` that is no month, a `row` that takes no target, a `value` that is no whole number from 0.'))
-  @ApiResponse(WRITE_403)
-  @ApiResponse(refusal(404, '`NOT_FOUND` — *MAPA driver* is off in the template: as another office’s would be.'))
-  setMapaTarget(@Ctx() ctx: RequestContext, @Body() body: SetMapaTargetDto) {
-    return this.analytics.setMapaTarget(ctx, body);
-  }
-
-  @Put('targets/subgroup/:headMembershipId')
-  @RequirePermission('advanced_analytics:write')
-  @ApiOperation({
-    summary: 'Set a leader’s targets for this year',
-    description: 'The AA and recruitment targets of one leader — an AB or an AAB — for the year on the office’s clock, '
-      + 'whole numbers from 0 (ADR-0253 §4). Written from *Core leaders & groups*’ leader edit; Perbaikan '
-      + 'sub-group sums a group’s leaders’ targets. Audited with before and after.',
-  })
-  @ApiResponse({ status: 200, type: SubgroupTargetDto })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a target that is no whole number from 0 to 1000.'))
-  @ApiResponse(WRITE_403)
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no active AB or AAB of this office with this id, or *Perbaikan sub-group* is off. Indistinguishable from another office’s.'))
-  setSubgroupTarget(
-    @Ctx() ctx: RequestContext, @Param('headMembershipId') headMembershipId: string, @Body() body: SetSubgroupTargetDto,
-  ) {
-    return this.analytics.setSubgroupTarget(ctx, headMembershipId, body);
   }
 }
 

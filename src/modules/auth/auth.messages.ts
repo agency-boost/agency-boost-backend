@@ -17,11 +17,6 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'Your current password is not correct.',
       id: 'Kata sandi Anda saat ini salah.',
     },
-    /* UI-169 item 5 (ADR-0199 §2, §4): the other login's password, on the link's page or in the switcher's sheet. */
-    wrongLinkedPassword: {
-      en: 'That is not the password of that login.',
-      id: 'Itu bukan kata sandi akun tersebut.',
-    },
   },
   AUTH_ACCOUNT_DEACTIVATED: {
     contactOwner: {
@@ -39,11 +34,6 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
    * Owner (`refuseUnverifiedAddress`, `verified-address.ts`).
    */
   AUTH_EMAIL_NOT_VERIFIED: {
-    /* UI-169 item 5 (ADR-0199 §1): starting a link needs the starting login's own address proven (ADR-0190 §4). */
-    linkNeedsVerifiedAddress: {
-      en: 'Verify your own email address before you link another login. Use Send again on the banner.',
-      id: 'Verifikasi dulu alamat email Anda sendiri sebelum menautkan akun lain. Gunakan Kirim ulang pada banner.',
-    },
     notVerifiedYet: ({ email }: { email: string }) => ({
       en: `${email} has not been verified yet. They verify it from the link in their email, or with Send again on `
         + 'the banner once they sign in, and can then be made the Owner.',
@@ -90,24 +80,6 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       id: 'Alamat itu sekarang dipakai akun lain, jadi email Anda tidak berubah. Minta lagi dengan alamat lain.',
     },
   },
-  /* UI-169 item 5 (ADR-0199 §1, §2): a login has one link, a pair, in v1. */
-  AUTH_LINK_EXISTS: {
-    youAreLinked: {
-      en: 'Your login is already linked to another. Remove that link on My profile first.',
-      id: 'Akun Anda sudah tertaut ke akun lain. Hapus dulu tautan itu di Profil saya.',
-    },
-    linkedSince: {
-      en: 'One of these two logins was linked to another since this link was sent, so nothing was linked.',
-      id: 'Salah satu dari kedua akun ini sudah tertaut ke akun lain sejak tautan ini dikirim, jadi tidak ada yang ditautkan.',
-    },
-  },
-  /* UI-169 item 5 (ADR-0199 §4): the other login holds no session on this browser; its password is asked once. */
-  AUTH_LINK_SIGN_IN_REQUIRED: {
-    signInFirst: {
-      en: 'That login is not signed in on this browser. Enter its password to switch to it.',
-      id: 'Akun itu belum masuk di browser ini. Masukkan kata sandinya untuk beralih ke akun itu.',
-    },
-  },
   AUTH_SESSION_ENDED: {
     ended: {
       en: 'Your session ended. Sign in again.',
@@ -147,11 +119,6 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
     sameEmail: {
       en: 'That is already your email address.',
       id: 'Itu sudah alamat email Anda.',
-    },
-    /* UI-169 item 5 (ADR-0199 §1): `POST /auth/links` with the caller's own address — a login is never linked to itself. */
-    linkOwnAddress: {
-      en: 'That is your own address. Enter the email of your other login.',
-      id: 'Itu alamat Anda sendiri. Masukkan email akun Anda yang lain.',
     },
     impersonationReason: {
       en: 'A reason is required to impersonate a user.',
@@ -236,15 +203,11 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
       en: 'Impersonating an office\'s Owner or Admin needs its own grant.',
       id: 'Bertindak sebagai Owner atau Admin KPM memerlukan izin tersendiri.',
     },
-    /* UI-169 item 5 (ADR-0199 §1, §2): both logins of a link are an Owner's, an Admin's or a Super Admin's. */
-    linkRolesOnly: {
-      en: 'Only the logins of a KPM Owner, a KPM Admin or a Super Admin can be linked.',
-      id: 'Hanya akun KPM Owner, KPM Admin, atau Super Admin yang dapat ditautkan.',
-    },
     /* ADR-0199 §7: a Super Admin who holds the other login switches to it; they are that person, never a support case. */
+    // P19.17-T3 (ADR-0269 §7): the link is kept, the switch is gone — sign in to that login, as anybody does.
     linkedToYou: {
-      en: 'That login is linked to yours. Switch to it from your avatar menu instead.',
-      id: 'Akun itu tertaut ke akun Anda. Beralihlah ke akun itu lewat menu avatar Anda.',
+      en: 'That login is linked to yours. Sign in to it instead.',
+      id: 'Akun itu tertaut ke akun Anda. Masuklah dengan akun itu.',
     },
   },
   IMPERSONATION_OFFICE_UNAVAILABLE: {
@@ -258,6 +221,21 @@ export const AUTH_REFUSALS = refusals('modules/auth', {
     aMomentAgo: {
       en: 'A session as this person started a moment ago. Use that one, or wait a second and start again.',
       id: 'Sesi sebagai orang ini baru saja dimulai. Gunakan sesi itu, atau tunggu sebentar lalu mulai lagi.',
+    },
+  },
+  // P19.23-T2 AC-7 (ADR-0277): *Lihat sebagai*'s window opened on a code that opens nothing any more.
+  IMPERSONATION_HANDOFF_SPENT: {
+    used: {
+      en: 'This window was already opened once. Close it and press Buka jendela baru again on the KPM page.',
+      id: 'Jendela ini sudah pernah dibuka. Tutup, lalu tekan Buka jendela baru lagi di halaman KPM.',
+    },
+    expired: {
+      en: 'This window took too long to open. Close it and press Buka jendela baru again on the KPM page.',
+      id: 'Jendela ini terlalu lama dibuka. Tutup, lalu tekan Buka jendela baru lagi di halaman KPM.',
+    },
+    ended: {
+      en: 'This view-as session has already ended. Close the window and start a new one from the KPM page.',
+      id: 'Sesi lihat sebagai ini sudah berakhir. Tutup jendela, lalu mulai lagi dari halaman KPM.',
     },
   },
 });

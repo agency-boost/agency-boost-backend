@@ -75,6 +75,15 @@ export class SaveBrandingDto {
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsObject()
   mascot?: { default: string; poses?: Record<string, string> } | null;
 
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274). Absent: kept as it is. `null`: cleared, the KPM is called AgencyBoost
+   * again. A string: trimmed, 1 to 40 characters, no control characters — else `400 VALIDATION_FAILED`, `field:
+   * 'systemName'`. The type and an outer bound here; the rule itself is `checkSystemName`'s.
+   */
+  @ApiPropertyOptional({ nullable: true, example: 'Dynamic Smart System', maxLength: 40 })
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @IsString() @MaxLength(400)
+  systemName?: string | null;
+
   @ApiProperty({ example: 0, description: 'The version `GET` answered (0 with no own branding). A stale one is `409 VERSION_CONFLICT`.' })
   @IsInt() @Min(0)
   expectedVersion!: number;

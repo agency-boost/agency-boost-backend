@@ -70,6 +70,14 @@ export class KpmBranding {
   @Prop({ type: Object, default: null })
   mascot!: BrandingMascot | null;
 
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274): the KPM's own name for the app, written in place of *AgencyBoost* on
+   * its members' screens and emails; trimmed, 1 to 40 characters. `null` — and a row saved before the field — is the
+   * default, *AgencyBoost*. The KPM's alone: a template's *Tampilan* has no name.
+   */
+  @Prop({ type: String, default: null })
+  systemName!: string | null;
+
   @Prop({ type: Number, required: true, default: 1 })
   version!: number;
 

@@ -41,11 +41,18 @@ const row = (over: Record<string, unknown> = {}) => ({
 const at = (minutesAgo: number, over: Record<string, unknown> = {}) =>
   row({ createdAt: new Date(T0 - minutesAgo * MINUTE), ...over });
 
-/** A model double whose `find({_id:{$in}})` answers from a fixed list. */
+/**
+ * A model double whose `find({_id:{$in}})` answers from a fixed list — and `find({platformRole})` the accounts holding
+ * it (P19.23-T6 AC-1's *Semua KPM*). Any other filter answers nothing: a search's name lookups are the int spec's.
+ */
 const model = (rows: Record<string, unknown>[]) => ({
-  find: (filter: { _id: { $in: string[] } }) => ({
+  find: (filter: { _id?: { $in: string[] }; platformRole?: string }) => ({
     lean: () => ({
-      exec: async () => rows.filter((r) => filter._id.$in.includes(String(r._id))),
+      exec: async () => {
+        if (filter._id) return rows.filter((r) => filter._id!.$in.includes(String(r._id)));
+        if (filter.platformRole) return rows.filter((r) => r.platformRole === filter.platformRole);
+        return [];
+      },
     }),
   }),
 });
@@ -58,7 +65,7 @@ const model = (rows: Record<string, unknown>[]) => ({
 function logOf(rows: ReturnType<typeof row>[]) {
   const ordered = [...rows].sort((a, b) =>
     b.createdAt.getTime() - a.createdAt.getTime() || (b._id < a._id ? -1 : b._id > a._id ? 1 : 0));
-  return {
+  const reads = {
     findNewestFirst: jest.fn(async (_kpmId: string | null, _filter: unknown, after: { at: Date; id: string } | null, limit: number) => {
       const past = after
         ? ordered.filter((r) => r.createdAt < after.at || (r.createdAt.getTime() === after.at.getTime() && r._id < after.id))
@@ -67,6 +74,14 @@ function logOf(rows: ReturnType<typeof row>[]) {
     }),
     distinctWithin: jest.fn(async (_kpmId: string | null, key: 'action' | 'actorUserId') =>
       [...new Set(ordered.map((r) => String(r[key])))]),
+  };
+  // *Semua KPM* (P19.23-T6 AC-1): the same log read across offices; the reach is the database's to apply, as the filter is.
+  return {
+    ...reads,
+    findNewestFirstAcrossOffices: jest.fn(async (_reach: unknown, filter: unknown, after: { at: Date; id: string } | null, limit: number) =>
+      reads.findNewestFirst(null, filter, after, limit)),
+    distinctAcrossOffices: jest.fn(async (_reach: unknown, key: 'action' | 'actorUserId' | 'targetId') =>
+      (key === 'targetId' ? [] : reads.distinctWithin(null, key))),
   };
 }
 
@@ -104,7 +119,7 @@ function make(rows: ReturnType<typeof row>[], memberships: unknown[] = [], named
   const service = new AuditReadService(
     audit as never,
     model([
-      { _id: ROOT, fullName: 'Root Operator' },
+      { _id: ROOT, fullName: 'Root Operator', platformRole: 'super_admin' },
       { _id: OWNER, fullName: 'Rangga Wibisono' },
     ]) as never,
     members as never,
@@ -578,5 +593,105 @@ describe('AuditReadService — pages (P19.2-T2 AC-6; §B.32)', () => {
       const refused = await service.page(platform(), filters).catch((e: unknown) => e);
       expect((refused as DomainException).code).toBe('VALIDATION_FAILED');
     }
+  });
+});
+
+/**
+ * **P19.23-T6 AC-1 (ADR-0279): the platform console's audit log.** *Semua KPM* reads the platform's log and every Super
+ * Admin change inside a KPM; each line says what changed before → after, and the KPM and company it belongs to; *Cari
+ * perubahan* narrows it by the words a line says.
+ */
+describe('AuditReadService — P19.23-T6 AC-1 the platform console', () => {
+  it('P19.23-T6 AC-1 Semua KPM reads the platform’s log and a Super Admin’s rows in any KPM, mirrored copies left out', async () => {
+    const { service, audit } = make([row()]);
+
+    await service.page(platform(), {});
+
+    const [reach] = audit.findNewestFirstAcrossOffices.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(reach).toEqual({
+      $or: [
+        { kpmId: null },
+        {
+          kpmId: { $ne: null },
+          actorUserId: { $in: [ROOT] },
+          $nor: [{ action: /^platform_read\./ }, { action: 'billing.quote_sent' }],
+        },
+      ],
+    });
+    // Whoever a super_admin.* row names has been one: asked of the platform's log, by target.
+    expect(audit.distinctAcrossOffices).toHaveBeenCalledWith(
+      { kpmId: null, action: { $in: ['super_admin.granted', 'super_admin.revoked'] } }, 'targetId',
+    );
+  });
+
+  it('P19.23-T6 AC-1 one KPM reads that KPM’s whole log, as before', async () => {
+    const { service, audit } = make([row()]);
+
+    await service.page({ kpmId: KPM, readerUserId: READER }, {});
+
+    expect(audit.findNewestFirst).toHaveBeenCalledWith(KPM, {}, null, expect.any(Number));
+    expect(audit.findNewestFirstAcrossOffices).not.toHaveBeenCalled();
+  });
+
+  it('P19.23-T6 AC-1 says what changed, before → after: one field as its two values, money in rupiah', async () => {
+    // Each about its own target, so none folds into another's group.
+    const { service } = make([
+      at(0, { targetId: 't-1', before: { target: 6 }, after: { target: 8 } }),
+      at(1, { targetId: 't-2', before: { apeMinor: 0 }, after: { apeMinor: 120_000_000 } }),
+      at(2, { targetId: 't-3', before: { status: 'active', reason: null, kpmId: 'x' }, after: { status: 'suspended', reason: 'Belum bayar', kpmId: 'y' } }),
+      at(3, { targetId: 't-4', before: null, after: { name: 'Baru' } }),
+      at(4, { targetId: 't-5', before: { kept: true }, after: { kept: false } }),
+    ]);
+
+    const { items } = await service.page(platform(), {});
+    const said = Object.fromEntries(items.map((g) => [JSON.stringify(g.after), g.change]));
+
+    expect(said[JSON.stringify({ target: 8 })]).toBe('6 → 8');
+    expect(said[JSON.stringify({ apeMinor: 120_000_000 })]).toBe('Rp 0 → Rp 1.200.000');
+    // Several fields by name; an id is no change anybody reads.
+    expect(said[JSON.stringify({ status: 'suspended', reason: 'Belum bayar', kpmId: 'y' })])
+      .toBe('status: active → suspended · reason: — → Belum bayar');
+    // A creation records no pair.
+    expect(said[JSON.stringify({ name: 'Baru' })]).toBeNull();
+    expect(said[JSON.stringify({ kept: false })]).toBe('ya → tidak');
+  });
+
+  it('P19.23-T6 AC-1 names the KPM and the company each line belongs to', async () => {
+    const { service } = make([
+      at(0),
+      at(1, { targetCollection: 'companies', targetId: CO, kpmId: null }),
+      at(2, { targetCollection: 'products', targetId: 'p-1', after: { companyId: CO } }),
+      at(3, { targetCollection: 'goals', targetId: 'g-1', kpmId: null }),
+    ]);
+
+    const { items } = await service.page(platform(), {});
+
+    expect(items[0]).toMatchObject({ kpm: { id: KPM, code: '0417', branch: 'Surabaya Branch' }, company: { id: CO, name: 'Prudential' } });
+    expect(items[1]).toMatchObject({ kpm: null, company: { id: CO, name: 'Prudential' } });
+    expect(items[2]).toMatchObject({ kpm: null, company: { id: CO, name: 'Prudential' } });
+    expect(items[3]).toMatchObject({ kpm: null, company: null });
+  });
+
+  it('P19.23-T6 AC-1 Cari perubahan asks for the actions whose words say it, as text and never as a pattern', async () => {
+    const { service, audit } = make([at(0), at(1, { action: 'company.created' })]);
+
+    await service.page(platform(), { q: ' ditangguhkan ' });
+    const [, filter] = audit.findNewestFirstAcrossOffices.mock.calls[0] as unknown as [unknown, { $and: { $or: Record<string, unknown>[] }[] }];
+    const search = filter.$and[0].$or;
+    expect(search[0]).toEqual({ action: { $in: ['kpm.suspended'] } });
+    // The change's named values, before and after, by a literal pattern.
+    expect(search).toContainEqual({ 'after.reason': /ditangguhkan/i });
+
+    await service.page(platform(), { q: 'a.b(' });
+    const [, dotted] = audit.findNewestFirstAcrossOffices.mock.calls[1] as unknown as [unknown, { $and: { $or: Record<string, RegExp>[] }[] }];
+    expect(dotted.$and[0].$or).toContainEqual({ 'after.name': /a\.b\(/i });
+  });
+
+  it('P19.23-T6 AC-1 a blank search narrows nothing', async () => {
+    const { service, audit } = make([at(0)]);
+
+    await service.page(platform(), { q: '   ' });
+
+    expect(audit.findNewestFirstAcrossOffices.mock.calls[0][1]).toEqual({});
   });
 });

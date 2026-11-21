@@ -61,8 +61,8 @@ export interface RegistrationInput {
 const ACCESS_TTL_SECONDS = 15 * 60;
 const REFRESH_TTL_DAYS = 30;
 /**
- * How long a single-use emailed link lasts: verifying an address, an email change's link (ADR-0181) and a linked login's
- * (ADR-0199 §2, which reuses it rather than restating it).
+ * How long a single-use emailed link lasts: verifying an address and an email change's link (ADR-0181). A linked login's
+ * reused it (ADR-0199 §2) until the linked login was retired (ADR-0269).
  */
 export const VERIFICATION_TTL_HOURS = 24;
 const RESET_TTL_MINUTES = 30;
@@ -464,8 +464,8 @@ export class AuthService {
   /**
    * **The address proven** — by its verification link, or by a password reset (P19-T1 AC-3): `emailVerifiedAt` set where
    * it was not, and an account still `invited` made `active`. Never a `deactivated` one, which the unconditional write
-   * this replaced would have brought back. *Public since 2026-11-05 (P19.2-T1 AC-8):* a linked login's confirm proves the
-   * other login's mailbox the same way (ADR-0199 §2).
+   * this replaced would have brought back. *Public since 2026-11-05 (P19.2-T1 AC-8)* for a linked login's confirm
+   * (ADR-0199 §2), which was retired with the linked login (ADR-0269).
    */
   async markVerified(userId: string): Promise<void> {
     await this.users
@@ -562,8 +562,6 @@ export class AuthService {
     // existing session dies with it — and any email change asked for with it (ADR-0181 §4).
     await this.logoutAll(record.userId, 'password reset');
     await this.cancelEmailChange(record.userId, 'password reset');
-    // And a link this login started and nobody confirmed yet (ADR-0199 §2): its notice says *change your password*.
-    await this.cancelPendingLink(record.userId, 'password reset');
     await this.tellPasswordChanged(record.userId, reader);
   }
 
@@ -606,8 +604,6 @@ export class AuthService {
     await this.logoutAll(userId, 'password changed');
     // What the old address's notice tells somebody to do when the change was not theirs (ADR-0181 §4).
     await this.cancelEmailChange(userId, 'password changed');
-    // The same for a link this login started (ADR-0199 §2): the notice to its address says *change your password now*.
-    await this.cancelPendingLink(userId, 'password changed');
     await this.tellPasswordChanged(userId, reader);
   }
 
@@ -755,58 +751,11 @@ export class AuthService {
       .exec();
   }
 
-  /**
-   * **A link this login started, not yet confirmed, stops working** (UI-169 item 5; ADR-0199 §2): a newer start replaces
-   * it, and a password change or reset cancels it — what the notice to the starting address tells somebody to do.
-   */
-  async cancelPendingLink(userId: string, reason: string): Promise<void> {
-    await this.tokens
-      .updateMany(
-        { userId, kind: 'account_link', usedAt: null, revokedAt: null },
-        { $set: { revokedAt: this.clock.now(), revokedReason: reason } },
-      )
-      .exec();
-  }
-
-  // ------------------------------------------------------------ linked logins' sessions
+  // --------------------------------------------------------------- proven sign-in
 
   /**
-   * **This login's own live session, from a refresh token the browser presented** (ADR-0199 §2, §4): the row, when the
-   * token is a refresh token of `userId` that is neither spent, revoked nor expired — or `null`. **It changes nothing**:
-   * a link's confirm reads whether the browser holds the starting login's session, and a switch whether the cookie it
-   * parks is the active login's own, and neither may rotate a token the browser still holds.
-   */
-  async liveSessionOf(rawToken: string | null | undefined, userId: string): Promise<AuthTokenDocument | null> {
-    if (!rawToken) return null;
-    const record = await this.tokens
-      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
-      .exec();
-    if (!record || record.userId !== userId || record.usedAt || record.revokedAt) return null;
-    return record.expiresAt.getTime() > this.clock.now().getTime() ? record : null;
-  }
-
-  /**
-   * **Rotate the other login's parked session, if it is one** (ADR-0199 §4): `refresh`, for a token that belongs to
-   * `userId`, answering `null` where `refresh` would refuse. A token of another login is left alone and answers `null`;
-   * a spent one still revokes its family, as every reuse does.
-   */
-  async refreshOwnedBy(rawToken: string | null | undefined, userId: string, meta: Meta = {}): Promise<TokenPair | null> {
-    if (!rawToken) return null;
-    const record = await this.tokens
-      .findOne({ tokenHash: this.passwords.hashToken(rawToken), kind: 'refresh' })
-      .exec();
-    if (!record || record.userId !== userId) return null;
-    try {
-      return await this.refresh(rawToken, meta);
-    } catch (err) {
-      if (err instanceof DomainException && err.code === ErrorCode.AUTH_SESSION_ENDED) return null;
-      throw err;
-    }
-  }
-
-  /**
-   * **A new session for a login whose password was just given** (ADR-0199 §2, §4): a linked login's confirm, and a
-   * switch that had to ask. A sign-in in every respect but the form — `lastLoginAt`, a new token family.
+   * **A new session for an account whose owner was just proven** (ADR-0245 §3): `POST /auth/register`, which signs in the
+   * account it has just made. A sign-in in every respect but the form — `lastLoginAt`, a new token family.
    */
   async signInProven(userId: string, meta: Meta = {}): Promise<TokenPair> {
     await this.users.updateOne({ _id: userId }, { $set: { lastLoginAt: this.clock.now() } }).exec();

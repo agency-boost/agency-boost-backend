@@ -44,6 +44,11 @@ export interface BatchView {
   asOf: string | null;
   /** *Belum terdaftar* rows it held apart (ADR-0214 §8). */
   heldRowCount: number;
+  /**
+   * P19.21-T1 AC-7: the file's rows that went to members — *"n ke anggota"* beside *"n belum jadi anggota"*. A batch from
+   * before it reads its written rows less its held ones.
+   */
+  memberRowCount: number;
   rowCount: number;
   writtenRowCount: number;
   cellCount: number;
@@ -54,9 +59,9 @@ export interface BatchView {
   revertedBy: string | null;
   restoredCellCount: number;
   keptCellCount: number;
-  /** Corrections by hand the file would have changed, left as they were (ADR-0053). */
+  /** Corrections by hand the file would have changed, left as they were (ADR-0053) — always 0 since ADR-0274 §1. */
   keptCorrectionCount: number;
-  /** Corrections by hand the importer chose to replace with the file's figure. */
+  /** Corrections by hand the file replaced with its own figure — every one it changed since ADR-0274 §1. */
   replacedCorrectionCount: number;
   /** Standing, and the month's latest standing import — the only one revert will take. */
   canRevert: boolean;
@@ -77,9 +82,8 @@ const keyOf = (c: Pick<PreviewCell, 'kode' | 'ytd'>) => cellKey(c.kode, c.ytd);
 
 const writes = (c: PreviewCell) => c.status === 'new' || c.status === 'changed';
 
-/** How a ticked correction is named in the commit: the member — or the held code — and the cell's key. */
-const ownerOf = (r: PreviewRow) => (r.status === 'held' ? `held:${heldCodeOf(r.agentCode)}` : r.membershipId);
-const correctionKey = (r: PreviewRow, c: PreviewCell) => `${ownerOf(r)}:${keyOf(c)}`;
+/** At most this many problems are named in a refused commit's `details` (the preview lists every one). */
+const PROBLEMS_NAMED = 50;
 
 const EMPTY_CELL: NonNullable<PreviousValue> = {
   value: null, provenance: null, sourceBatchId: null, correctedBy: null, correctedAt: null, reason: null,
@@ -117,7 +121,7 @@ export class ProductionImportService {
     // P18.8-T4 AC-1: a policy in the file may be a member's first sale. A port activation answers; failing open.
     @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
     // P19.5-T2 (ADR-0214 §8): *Belum terdaftar* rows; without it a held row is never written (a spec built by hand).
-    @Optional() private readonly unregistered: UnregisteredAgentDataRepository | null = null,
+    @Optional() @Inject(UnregisteredAgentDataRepository) private readonly unregistered: UnregisteredAgentDataRepository | null = null,
     // D8: the office's zone, for the current month and its *as of* day.
     @Optional() @InjectModel(Kpm.name) private readonly kpms: Model<Kpm> | null = null,
     // P19.5-T3 AC-9 (ADR-0215 §6): the Quant runs freeze before a write past their 15th, and recalculate after one.
@@ -125,22 +129,27 @@ export class ProductionImportService {
   ) {}
 
   /**
-   * **Confirm import.** The file is read again, against what is stored now, rather than trusting the
-   * browser's copy of the preview — and refused if the month has moved since the preview was taken.
+   * **Confirm import** — *Simpan semua* since P19.21-T1. The file is read again, against what is stored now, rather than
+   * trusting the browser's copy of the preview — and refused if the month has moved since the preview was taken.
    *
    * Writes only `new` and `changed` figures, each as `imported` with this batch as its source (AC-6).
    * A blank is not provided and is not written (ADR-0051); a figure already as stored is left as it is.
    *
-   * **A figure corrected by hand is written only if it is named in `replace`** (ADR-0053) — the
-   * preview listed it with who corrected it and why, and whoever imports ticked it. Unticked, it
-   * stays; a revert of this import brings back one it replaced.
+   * **Nothing in the file is skipped** (P19.21-T1 AC-5; ADR-0274 §2): every row with an agent code is saved, a member's
+   * to the member and any other code as *Belum jadi anggota*. **A file with a problem is refused whole** — a row with no
+   * code, more cells than the header, a code listed twice, a cell that is not a number in its unit, outside its limits,
+   * a leaders' figure on an agent's row, a year to date that does not add up — `400 VALIDATION_FAILED`, naming each
+   * problem in `details.problems`, and nothing is written.
+   *
+   * **The file replaces earlier corrections by hand** (ADR-0274 §1, superseding ADR-0053's choice): a corrected figure
+   * the file changes is written over, counted in `replacedCorrectionCount`; a revert of this upload brings the
+   * correction back, as it brings back every figure the upload wrote over.
    */
   async commit(
     ctx: RequestContext,
     month: string,
     revision: string | undefined,
     upload: FileUpload | undefined,
-    replace?: string,
     asOfGiven?: string,
   ): Promise<ImportResult> {
     requireOffice(ctx);
@@ -171,23 +180,21 @@ export class ProductionImportService {
 
     this.months.refuseIfLocked(await this.months.state(ctx, month));
 
-    // The corrections to replace, by name. One the file would not change at this revision is refused
-    // rather than ignored: it means the screen and the server are not looking at the same preview.
-    const conflicts = new Set(a.rows.flatMap((r) => r.cells.filter((c) => writes(c) && c.correction)
-      .map((c) => correctionKey(r, c))));
-    const ticked = new Set((replace ?? '').split(',').map((k) => k.trim()).filter(Boolean));
-    for (const key of ticked) {
-      if (!conflicts.has(key)) {
-        throw new DomainException(
-          ErrorCode.VALIDATION_FAILED,
-          SAY.VALIDATION_FAILED.correctionNotInFile,
-          HttpStatus.BAD_REQUEST,
-          { field: 'replace', key },
-        );
-      }
+    // ADR-0274 §2: saved whole or not at all — every refused row and cell is named, and nothing is written.
+    const problems = a.rows.flatMap((r) => r.issues.map((i) => ({
+      line: r.line, agentCode: r.agentCode, code: i.code, message: i.message, kode: i.kode, ytd: i.ytd,
+    })));
+    if (a.rows.some((r) => r.status === 'refused' || r.cells.some((c) => c.status === 'refused'))) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED,
+        SAY.VALIDATION_FAILED.fileHasProblems({ count: problems.length }),
+        HttpStatus.BAD_REQUEST,
+        { field: 'file', month, problemCount: problems.length, problems: problems.slice(0, PROBLEMS_NAMED) },
+      );
     }
-    const writesHere = (r: PreviewRow) => (c: PreviewCell) =>
-      writes(c) && (!c.correction || ticked.has(correctionKey(r, c)));
+    // ADR-0274 §1: every corrected figure the file changes is replaced by the file's.
+    const replaced = a.rows.reduce((n, r) => n + r.cells.filter((c) => writes(c) && c.correction).length, 0);
+    const writesHere = (_r: PreviewRow) => writes;
     // P19.5-T3 AC-9: a Quant run past its freeze is frozen as it stands, before this file changes a figure.
     await signalBeforeWrite(this.writes, ctx, month);
 
@@ -215,6 +222,7 @@ export class ProductionImportService {
       analyticsConfig: { templateId: a.config.templateId, version: a.config.version },
       asOf,
       heldRowCount: heldRows.length,
+      memberRowCount: a.summary.ready,
       format: a.read.format,
       encoding: a.read.encoding,
       delimiter: a.read.delimiter,
@@ -224,8 +232,8 @@ export class ProductionImportService {
       writtenRowCount: writable.length,
       cellCount: writable.reduce((n, r) => n + r.cells.filter(writesHere(r)).length, 0),
       issueCount: a.rows.reduce((n, r) => n + r.issues.length, 0),
-      keptCorrectionCount: conflicts.size - ticked.size,
-      replacedCorrectionCount: ticked.size,
+      keptCorrectionCount: 0,
+      replacedCorrectionCount: replaced,
       startedAt: this.clock.now(),
     });
     const batchId = String(batch._id);
@@ -281,7 +289,7 @@ export class ProductionImportService {
       targetId: batchId,
       after: {
         month, filename: upload!.originalname, writtenRowCount: writable.length, heldRowCount: heldRows.length,
-        keptCorrectionCount: conflicts.size - ticked.size, replacedCorrectionCount: ticked.size,
+        keptCorrectionCount: 0, replacedCorrectionCount: replaced, memberRowCount: a.summary.ready,
         analyticsConfig: { templateId: a.config.templateId, version: a.config.version }, asOf,
       },
     });
@@ -482,6 +490,7 @@ export class ProductionImportService {
       templateVersion: b.analyticsConfig?.version ?? 1,
       asOf: b.asOf ?? null,
       heldRowCount: b.heldRowCount ?? 0,
+      memberRowCount: b.memberRowCount ?? Math.max(0, (b.writtenRowCount ?? 0) - (b.heldRowCount ?? 0)),
       rowCount: b.rowCount,
       writtenRowCount: b.writtenRowCount,
       cellCount: b.cellCount,

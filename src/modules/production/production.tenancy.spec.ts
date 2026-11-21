@@ -515,8 +515,8 @@ describe('the office’s production, month by month (P9-T1)', () => {
         ['PRU-900', 'Hendra Wijaya', { 'ape.monthly': '1' }],
         ['PRU-001', 'Rina Wijaya', { 'ape.monthly': '1' }],
       ));
-      // No member of A holds it — and since P19.5-T2 it is not in the format of A's codes either (ADR-0214 §5, §7).
-      expect(p.rows[0]).toMatchObject({ status: 'refused', membershipId: null, issues: [{ code: expect.stringMatching(/^UPLOAD_(UNKNOWN_AGENT_CODE|AGENT_CODE_PATTERN)$/) }] });
+      // No member of A holds it: kept in A as *Belum jadi anggota* (P19.21-T1 AC-5), never matched to B's member.
+      expect(p.rows[0]).toMatchObject({ status: 'held', membershipId: null, issues: [] });
       expect(p.rows[1]).toMatchObject({ status: 'ready', membershipId: A1 });
     });
 
@@ -527,9 +527,9 @@ describe('the office’s production, month by month (P9-T1)', () => {
       expect(p.rows[0].cells[0]).toMatchObject({ status: 'new', before: null });
     });
 
-    it('does not match somebody who is only pending', async () => {
+    it('does not match somebody who is only pending: their row is kept until they are in (P19.21-T1 AC-5)', async () => {
       const p = await wired.production.preview(owner(KPM_A), '2026-09', file(['PRU-003', 'Calon Baru', { 'ape.monthly': '1' }]));
-      expect(p.rows[0]).toMatchObject({ status: 'refused', issues: [{ code: expect.stringMatching(/^UPLOAD_(UNKNOWN_AGENT_CODE|AGENT_CODE_PATTERN)$/) }] });
+      expect(p.rows[0]).toMatchObject({ status: 'held', membershipId: null });
     });
 
     it('AC-6: matches on the code when the name in the file is somebody else’s', async () => {

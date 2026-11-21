@@ -98,7 +98,8 @@ export const REPORTING_CAST: readonly ReportingCastMember[] = [
   { key: 'kemal', email: 'kemal@kpm0417.test', fullName: 'Kemal Rasyid', role: 'agent', leader: 'winda', agentCode: '87010', joinedDaysAgo: 280, apeMillions: 0, persistency: 80, annualTargetMillions: 180, loggedDaysBack: [8, 11, 15, 20] },
   { key: 'satria', email: 'satria@kpm0417.test', fullName: 'Satria Nugraha', role: 'ab', leader: 'owner', agentCode: '87011', joinedDaysAgo: 330, apeMillions: 6, persistency: 70, annualTargetMillions: 300, loggedDaysBack: [1, 3] },
   { key: 'oscar', email: 'oscar@kpm0417.test', fullName: 'Oscar Lumbantobing', role: 'agent', leader: 'satria', agentCode: '87012', joinedDaysAgo: 310, apeMillions: 4, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [9, 15] },
-  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: '87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [12] },
+  // P19.19 (the KPM Overview's *Pakai > 14 hari lalu*): Pandu last logged 20 days ago — inside the 30 days, past the 14.
+  { key: 'pandu', email: 'pandu@kpm0417.test', fullName: 'Pandu Wirawan', role: 'agent', leader: 'satria', agentCode: '87013', joinedDaysAgo: 250, apeMillions: 5, persistency: 72, annualTargetMillions: 300, loggedDaysBack: [20] },
   // Joined long ago and has never logged: *Never logged* on the Overview, *Never* in the directory.
   { key: 'raka', email: 'raka@kpm0417.test', fullName: 'Raka Aditama', role: 'agent', leader: 'satria', agentCode: '87014', joinedDaysAgo: 220, apeMillions: null, persistency: 0, annualTargetMillions: 300, loggedDaysBack: [] },
   // Yosef's agent until last month: on every file this year to three months ago, removed since (OD-74). Placed
@@ -106,8 +107,11 @@ export const REPORTING_CAST: readonly ReportingCastMember[] = [
   { key: 'gilang', email: 'gilang@kpm0417.test', fullName: 'Gilang Saputra', role: 'agent', leader: 'yosef', agentCode: '87015', joinedDaysAgo: 400, apeMillions: 14, persistency: 81, annualTargetMillions: 180, loggedDaysBack: [], removedLastMonth: true },
 ];
 
-/** This month's recruitment target, set by the Owner (D-recruit). */
-export const REPORTING_RECRUIT_TARGET = 15;
+/*
+ * `REPORTING_RECRUIT_TARGET` (15) was here: the office's recruitment target for the month, written to `kpmRecruitTargets`.
+ * Retired 2026-11-20 (P19.19-T4 AC-2; ADR-0272 §7): the targets are the AB groups' monthly ones, seeded by
+ * `informal-groups-fixture.ts`. A database seeded before keeps its row, unread.
+ */
 
 const byKey = new Map(REPORTING_CAST.map((p) => [p.key, p]));
 
@@ -402,22 +406,6 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
   await leadStage('cahya', 'Sdri. Anjani Putri', ['MEETING_SCHEDULED', 'AAJI_LICENSED', 'NEW_ACTIVE_AGENT'], midLastMonth);
   await leadStage('damar', 'Sdr. Rizal Fadillah', ['MEETING_SCHEDULED', 'JOINT_FIELD_WORK_PLANNED', 'NEW_ACTIVE_AGENT'], addDays(midLastMonth, 5));
 
-  // ---- This month's recruitment target, set by the Owner and audited as the write audits it.
-  if (!(await db.collection('kpmRecruitTargets').findOne({ kpmId, month: thisMonth, deletedAt: null }))) {
-    const id = seedObjectId('reporting-fixture', 'target', kpmId, thisMonth);
-    const setAt = at(`${thisMonth}-01`, 3);
-    await db.collection('kpmRecruitTargets').insertOne({
-      _id: oid(id), kpmId, month: thisMonth, target: REPORTING_RECRUIT_TARGET, deletedAt: null,
-      createdBy: deps.owner.membershipId, updatedBy: deps.owner.membershipId, createdAt: setAt, updatedAt: setAt,
-    });
-    await db.collection('auditLog').insertOne({
-      kpmId, actorUserId: deps.owner.userId, effectiveUserId: deps.owner.userId, actorMembershipId: deps.owner.membershipId,
-      action: 'kpm_overview.recruit_target_set', targetCollection: 'kpmRecruitTargets', targetId: id,
-      before: null, after: { month: thisMonth, target: REPORTING_RECRUIT_TARGET }, createdAt: setAt,
-    });
-    written += 2;
-  }
-
   // ---- 0555's own: two months' files, a 1:1 and a fortnight's logging.
   const b = deps.office0555;
   for (const month of [lastMonth, thisMonth]) {
@@ -479,22 +467,14 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
   for (const [i, userId] of (await officeUsers('0701')).entries()) await signIn(userId, i === 0 ? 1 : null);
 
   const guide = `
-  REPORTING at /kpm/overview, /kpm/analytics and /admin/analytics  (from src/seed/reporting-fixture.ts)
-    owner@kpm0417.test           KPM Overview: five AB agencies — the Owner's, Maya's, Agus's, and two new
-    admin@kpm0417.test           ones under the Owner: Yosef Tambunan's (large: five agents and Winda
-                                 Anggraeni's unit of three) and Satria Nugraha's (small, furthest behind
-                                 target). "Showing 4 of 5 ABs"; the leaderboard ranks the four ABs who lead
-                                 somebody, Satria at 0% (coached by nobody this week). Who hasn't logged:
-                                 Agus Prasetyo and Raka Aditama never; the Owner and Maya 11 to 19 days ago.
-                                 Recruitment target ${REPORTING_RECRUIT_TARGET}, set by the Owner this month; three
-                                 candidates at late stages and two closed won last month. Files from January
-                                 last year — every month of it, Yosef and Winda here since the year before — to
-                                 three months ago; the month before last is empty. Gilang Saputra left
-                                 Yosef's agency last month: on the Removed tab, their production this year
-                                 still the office's
-                                 KPM Analytics: Yosef's agency at Star Club and meeting MOC (three-criteria
-                                 path); Winda's unit "—" (her persistency not on this month's file); Satria's
-                                 agency failing MOC with its gaps. Monthly production: five bars, one gap
+  REPORTING at /kpm/overview and /admin/analytics  (from src/seed/reporting-fixture.ts)
+    owner@kpm0417.test           KPM Overview (P19.19): five AB groups — the Owner's, Maya's, Agus's, Yosef
+    admin@kpm0417.test           Tambunan's (five agents and Winda Anggraeni's AAB team of three) and Satria
+                                 Nugraha's. Pemakaian: Agus Prasetyo and Raka Aditama "Belum pernah pakai";
+                                 the Owner and Maya "Pakai > 14 hari lalu" or near it; most "≤ 14 hari".
+                                 Coaching: Satria's team never coached, Yosef's coached this week. Files from
+                                 January last year to three months ago; the month before last is empty — a
+                                 grey stub on Produksi 6 bulan. Gilang Saputra left Yosef's group last month
                                  People › All members: Last activity and Last coached on every row
     yosef@kpm0417.test           tagged Core Leader, beside Agus and Sari
     owner@kpm0555.test           0555's own figures only: two months' files, a 1:1, a fortnight's logging;
@@ -503,7 +483,7 @@ export async function seedReportingFixture(deps: ReportingFixtureDeps): Promise<
     superadmin@agencyboost.test  Cross-platform analytics: sign-ins — most of 0417 within the week, some
                                  within the month, some never; none of 0601's within thirty days.
                                  A read-only support session into 0417's Owner reads the Overview and
-                                 cannot set the target
+                                 cannot set a target
 `;
 
   return { written, guide };

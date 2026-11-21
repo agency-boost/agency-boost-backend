@@ -8,6 +8,7 @@ import { addDays, editableUntil, type LocalDate } from '@/common/time/local-day'
 import { DEFAULT_TENANT_TIMEZONE, PRODUCTION } from '@/domain/constants';
 import { ActivationTemplateRepository } from '@/modules/activation/activation.repository';
 import { AuditService } from '@/modules/audit/audit.service';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
@@ -19,8 +20,9 @@ import { shiftMonth } from './office-figures';
 
 /**
  * **The seven steps of *Siapkan KPM*, in the card's order** (P19.3-T2 AC-4; UI-149, Overview R2): the four settings pages
- * first — *"the owner must set up the KPM, not only watch it"* — then *Impor anggota*, *Unggah produksi* and *Atur target
- * rekrutmen*.
+ * first — *"the owner must set up the KPM, not only watch it"* — then *Impor anggota*, *Unggah produksi* and the targets.
+ * *Changed 2026-11-20 (P19.19-T4 AC-2; ADR-0272 §7):* the last step is **the monthly targets per AB group** (ADR-0270)
+ * where it was the office's one recruitment target, retired; its key stays `recruit-target`, a stable code.
  */
 export const SETUP_STEPS = [...REVIEWED_PAGES, 'import', 'upload', 'recruit-target'] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
@@ -42,7 +44,7 @@ export interface SetupView {
   members: number;
   /** Step 6: the month to upload — the earliest still open and not uploaded — with its closing day; `null` with none. */
   openMonth: OpenMonth | null;
-  /** Step 7's meta: the target that stands for this month, or `null` (*"Target belum diatur"*). */
+  /** Step 7's meta: how many AB groups have a monthly target standing this month, or `null` with none (ADR-0272 §7). */
   target: number | null;
 }
 
@@ -62,7 +64,7 @@ export interface SetupFacts {
   timezone: string;
   /** Today's headcount (`OFFICE_HEADCOUNT`). */
   headcount: number;
-  /** The recruitment target standing for this month, or `null`. */
+  /** How many AB groups have a monthly target standing this month (`AbGroupTargetsService.forAbs`), or `null` with none. */
   target: number | null;
   /** This year's months the office's file holds, sorted. */
   held: readonly string[];
@@ -104,8 +106,9 @@ export function monthsFrom(from: string, to: string): string[] {
  * - **Steps 1 to 4 are marks** (`kpmSetupMarks`): set when the Owner or an Admin saves that page
  *   (`SetupStepSavedInterceptor`) or taps *Sudah sesuai* on it (`markReviewed`). The tap changes nothing else: the
  *   checklist keeps its version.
- * - **Steps 5 to 7 are derived** from data that already exists, and nothing stores them: a member besides the Owner, any
- *   committed production upload (or a month the file holds), a recruitment target standing.
+ * - **Steps 5 to 7 are derived** from data that already exists, and nothing stores them: a member besides the Owner — a
+ *   test account never counts (ADR-0267 §1) — any committed production upload (or a month the file holds), and since
+ *   P19.19 an AB group's monthly target standing (ADR-0272 §7).
  * - **All seven done is stored once** (`setup-complete`), so the card never comes back.
  * - **"This year" starts with the KPM** (Overview R3): months before its first are never missing, and only months still
  *   open for upload are named — what Data upload offers.
@@ -195,7 +198,8 @@ export class KpmSetup {
         ),
       this.products.count(ctx, { reviewState: 'pending' }),
       this.checklists.findOne(ctx, { status: 'draft' }),
-      this.memberships.count(ctx, { status: 'active', ...(ownerUserId ? { userId: { $ne: ownerUserId } } : {}) }),
+      // ADR-0267 §1 (P19.19): a test account is nobody besides the Owner.
+      this.memberships.count(ctx, withoutTestAccounts({ status: 'active', ...(ownerUserId ? { userId: { $ne: ownerUserId } } : {}) })),
       facts.held.length > 0 ? Promise.resolve(true) : this.batches.exists(ctx, { status: 'committed' }),
     ]);
 

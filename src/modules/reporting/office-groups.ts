@@ -1,27 +1,67 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContext } from '@/common/context/request-context';
-import { NotFoundException } from '@/common/errors/domain.exception';
-import { LEADER_CLASSES } from '@/domain/constants';
-import { placeLeaders } from '@/domain/metrics/leader-groups';
+import {
+  AB_ROLE, abGroupOf, byGroupName, placeInformalGroups, type InformalPlacement, type LiveGroup,
+} from '@/domain/metrics/leader-groups';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { GroupRepository } from '@/modules/org/org.repositories';
 
-/** One of the office's custom groups as the analytics' *Lihat untuk* offers it: *Core Leader · Grup · 3 orang*. */
-export interface OfficeGroup {
-  groupId: string;
-  name: string;
-  /** The group's members today: tagged with it, status *Aktif*. A member who left is in no group's figures. */
-  memberCount: number;
+/** An active member as the partition reads them. */
+export interface PartitionMember {
+  membershipId: string;
+  userId: string | null;
+  agentCode: string | null;
+  role: string;
+  leaderId: string | null;
+  ancestorIds: string[];
+  isCoreLeader: boolean;
+}
+
+/** One AB group: the AB first, then their AABs and agents, in the order the office's rows were read. */
+export interface PartitionAbGroup {
+  abMembershipId: string;
+  memberIds: string[];
 }
 
 /**
- * **The office's custom groups, for KPM Analytics' group filter** (UI-152 phase 2, Overview R5, OD-258;
- * [ADR-0204](../../../../docs/04-adr/0204-the-owner-reads-one-production-total-and-one-team-size-on-every-page.md) §4).
+ * **The KPM partitioned: informal group → AB group → members** (P19.17-T4; ADR-0270 §1; `DATA-DEFINITIONS.md`, *Who is
+ * counted*). Every active member, test accounts left out, is in exactly one AB group or in `unplacedIds`, and every AB
+ * group in exactly one informal group or *Tanpa group* — so every total is the sum of its parts.
+ */
+export interface InformalPartition {
+  /** The live groups A to Z: each with its Group Leaders while they hold and its ABs (in the order the rows were read). */
+  groups: { groupId: string; name: string; leaderIds: string[]; abIds: string[] }[];
+  /** *Tanpa group*: the active ABs with no live group. */
+  ungroupedAbIds: string[];
+  /** Every active AB → their AB group. */
+  abGroups: Map<string, PartitionAbGroup>;
+  /** Active members under no active AB: counted in the KPM, in no AB group and no group. */
+  unplacedIds: string[];
+  /** Every active member read, by membership id. */
+  members: Map<string, PartitionMember>;
+  placement: InformalPlacement;
+}
+
+/** Where one person stands: their AB group's AB, and that AB's informal group. */
+export interface InformalGroupOf {
+  abMembershipId: string | null;
+  group: { groupId: string; name: string } | null;
+}
+
+/**
+ * **The office's informal groups, read once for everybody who reads them** (P19.17-T4; ADR-0270 §1): the partition the
+ * KPM Overview, All members, Compliance, the console and Advanced analytics' *Informal group* read, and where one person
+ * stands (`informalGroupOf`). *Changed 2026-11-20:* `list`, `membersOf` and `leaderPlacement` — the group filter of KPM
+ * analytics and Compliance and the old *Sub-group* rows — went once every reader took the partition; nothing called them.
  *
- * The groups are *All members → Groups* (`groups`, `memberships.groupIds`), read here through the two tenant-scoped
- * repositories, so another office's group is never found. **A group grants nothing** (P3-T9 AC-1): this answers which
- * people a reader who already reads the whole office (`kpm_analytics:read`, ADR-0159 §2) wants the figures over, and
- * widens nobody's reach. Archived groups are not offered and not found (§4: *"An archived group is not offered"*).
+ * **Only an AB carries a group**; their AABs and agents follow them (`placeInformalGroups`). Everything through the two
+ * tenant repositories, so another office's group or member is never found. **A group grants nothing** (P3-T9 AC-1):
+ * this answers which people a reader who already reads the whole office wants the figures over, and widens nobody's
+ * reach. Archived groups are not offered and not found.
+ *
+ * **Test accounts are never counted** (`DATA-DEFINITIONS.md`, *Who is counted*; ADR-0267 §1): a membership carrying the
+ * test-account flag (`NOT_A_TEST_ACCOUNT`) is left out of the partition, the counts and every group's people.
  */
 @Injectable()
 export class OfficeGroups {
@@ -30,59 +70,77 @@ export class OfficeGroups {
     private readonly members: MembershipRepository,
   ) {}
 
-  /** The office's active groups A to Z, each with its members today. Two queries, whatever the number of groups. */
-  async list(ctx: RequestContext): Promise<OfficeGroup[]> {
-    const rows = await this.groups.find(ctx, { status: 'active' }, { sort: { name: 1 } });
-    if (rows.length === 0) return [];
-    const counts = await this.countsOf(ctx, rows.map((g) => String(g._id)));
-    return rows.map((g) => ({ groupId: String(g._id), name: g.name, memberCount: counts.get(String(g._id)) ?? 0 }));
-  }
-
-  /**
-   * **One group and its members today**, or `404 NOT_FOUND` — an unknown or malformed id, an archived group and
-   * another office's are indistinguishable, as every 404 is.
-   */
-  async membersOf(ctx: RequestContext, groupId: string): Promise<{ group: OfficeGroup; memberIds: Set<string> }> {
-    const row = await this.groups.findOne(ctx, { _id: groupId, status: 'active' });
-    if (!row) throw new NotFoundException('Group');
-    const tagged = await this.members.find(
-      ctx, { groupIds: groupId, status: 'active' }, { projection: { _id: 1 } },
-    );
-    const memberIds = new Set(tagged.map((m) => String(m._id)));
-    return { group: { groupId: String(row._id), name: row.name, memberCount: memberIds.size }, memberIds };
-  }
-
-  /**
-   * **The informal groups as Perbaikan sub-group reads them** (P19.13-T3; ADR-0253 §5): the live groups A to Z, each
-   * with its ★ while it holds, and every active leader's one group (`placeLeaders`). Two queries.
-   */
-  async leaderPlacement(ctx: RequestContext): Promise<{
-    groups: { groupId: string; name: string; headMembershipId: string | null }[];
-    groupOf: Map<string, string | null>;
-  }> {
-    const [rows, leaders] = await Promise.all([
+  /** **The partition** — two reads of the office, whatever its size. */
+  async partition(ctx: RequestContext): Promise<InformalPartition> {
+    const [groupRows, rows] = await Promise.all([
       this.groups.find(ctx, { status: 'active' }, { sort: { name: 1 } }),
-      this.members.find(ctx, { status: 'active', role: { $in: [...LEADER_CLASSES] } }, { projection: { groupIds: 1 } }),
+      this.members.find(
+        ctx, { status: 'active', ...NOT_A_TEST_ACCOUNT },
+        {
+          projection: { userId: 1, agentCode: 1, role: 1, leaderId: 1, ancestorIds: 1, groupIds: 1, isCoreLeader: 1 },
+          sort: { depth: 1, agentSeq: 1 },
+        },
+      ),
     ]);
-    const live = rows.map((g) => ({ groupId: String(g._id), name: g.name, ownerMembershipId: g.ownerMembershipId ?? null }));
-    const { groupOf, headOf } = placeLeaders(
-      leaders.map((m) => ({ membershipId: String(m._id), groupIds: m.groupIds ?? [] })), live,
-    );
+    const counted = rows;
+    const live: LiveGroup[] = groupRows
+      .map((g) => ({ groupId: String(g._id), name: g.name, leaderMembershipIds: g.leaderMembershipIds ?? [] }))
+      .sort(byGroupName);
+    const placement = placeInformalGroups(counted.map((m) => ({
+      membershipId: String(m._id), role: m.role, ancestorIds: (m.ancestorIds ?? []).map(String), groupIds: m.groupIds ?? [],
+    })), live);
+
+    const members = new Map<string, PartitionMember>(counted.map((m) => [String(m._id), {
+      membershipId: String(m._id),
+      userId: m.userId ? String(m.userId) : null,
+      agentCode: m.agentCode ?? null,
+      role: m.role,
+      leaderId: m.leaderId ?? null,
+      ancestorIds: (m.ancestorIds ?? []).map(String),
+      isCoreLeader: m.isCoreLeader ?? false,
+    }]));
+    const abGroups = new Map<string, PartitionAbGroup>();
+    for (const ab of placement.groupOfAb.keys()) abGroups.set(ab, { abMembershipId: ab, memberIds: [ab] });
+    const unplacedIds: string[] = [];
+    for (const [id, ab] of placement.abOf) {
+      if (ab === null) unplacedIds.push(id);
+      else if (ab !== id) abGroups.get(ab)!.memberIds.push(id);
+    }
+    const abIdsOf = (groupId: string | null) => [...placement.groupOfAb].filter(([, g]) => g === groupId).map(([ab]) => ab);
     return {
-      groups: live.map((g) => ({ groupId: g.groupId, name: g.name, headMembershipId: headOf.get(g.groupId) ?? null })),
-      groupOf,
+      groups: live.map((g) => ({
+        groupId: g.groupId, name: g.name, leaderIds: placement.leadersOf.get(g.groupId) ?? [], abIds: abIdsOf(g.groupId),
+      })),
+      ungroupedAbIds: abIdsOf(null),
+      abGroups,
+      unplacedIds,
+      members,
+      placement,
     };
   }
 
-  private async countsOf(ctx: RequestContext, groupIds: readonly string[]): Promise<Map<string, number>> {
-    const tagged = await this.members.find(
-      ctx, { groupIds: { $in: [...groupIds] }, status: 'active' }, { projection: { groupIds: 1 } },
+  /**
+   * **`INFORMAL_GROUP_OF(m)`** — one person's AB group's AB and that AB's live group, or `null`s: somebody under no active
+   * AB, an AB with no group (*Tanpa group*), or a membership this office does not hold. Two reads: the person and the
+   * line above them, then the AB's group.
+   */
+  async informalGroupOf(ctx: RequestContext, membershipId: string): Promise<InformalGroupOf> {
+    const person = await this.members.findById(ctx, membershipId);
+    if (!person) return { abMembershipId: null, group: null };
+    const line = [String(person._id), ...(person.ancestorIds ?? []).map(String)];
+    const abs = await this.members.find(
+      ctx, { _id: { $in: line }, status: 'active', role: AB_ROLE }, { projection: { groupIds: 1 } },
     );
-    const counts = new Map<string, number>();
-    const offered = new Set(groupIds);
-    for (const member of tagged) {
-      for (const id of member.groupIds ?? []) if (offered.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-    return counts;
+    const ab = abGroupOf({ membershipId: String(person._id), ancestorIds: (person.ancestorIds ?? []).map(String) }, new Set(abs.map((m) => String(m._id))));
+    if (ab === null) return { abMembershipId: null, group: null };
+    const tags = abs.find((m) => String(m._id) === ab)!.groupIds ?? [];
+    const live = tags.length === 0 ? [] : await this.groups.find(ctx, { _id: { $in: tags }, status: 'active' });
+    const first = live.map((g) => ({ groupId: String(g._id), name: g.name })).sort(byGroupName)[0] ?? null;
+    return { abMembershipId: ab, group: first };
+  }
+
+  /** The people of the AB groups given, each AB first. */
+  peopleOf(partition: InformalPartition, abIds: readonly string[]): string[] {
+    return abIds.flatMap((ab) => partition.abGroups.get(ab)?.memberIds ?? []);
   }
 }

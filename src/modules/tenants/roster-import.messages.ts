@@ -106,6 +106,19 @@ export const ROSTER_ROW_WORDS = messages('modules/tenants roster rows', {
     en: 'They own this KPM, so an import does not change their role.',
     id: 'Dia pemilik KPM ini, jadi perannya tidak diubah lewat impor.',
   },
+  /**
+   * A core leader's row about somebody not strictly below them — a peer, an upline, themselves (ADR-0268 §1; P19.20-T5
+   * AC-4). Names nobody: the row's own code is the reader's.
+   */
+  notInYourDownline: {
+    en: 'You can change only the people below you in your downline. Ask the KPM Owner to change this row.',
+    id: 'Anda hanya dapat mengubah anggota di bawah Anda dalam downline Anda. Minta KPM Owner untuk mengubah baris ini.',
+  },
+  /** A core leader's row placing somebody under a leader who is neither them nor in their downline, or under nobody. */
+  uplineNotInYourDownline: {
+    en: 'The upline must be you or somebody in your downline.',
+    id: 'Upline harus Anda sendiri atau anggota di downline Anda.',
+  },
   /** A row moving somebody who still leads people onto a rung that leads nobody. */
   stillLeads: ({ count }: { count: number }) => ({
     en: `${count} ${count === 1 ? 'person reports' : 'people report'} to them. Move them to another leader first.`,

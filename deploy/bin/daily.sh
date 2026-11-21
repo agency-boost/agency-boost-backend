@@ -2,7 +2,8 @@
 #
 # The daily run (P19.15-T4 AC-4, ADR-0261): the premium table notices, in each deployed environment —
 # fifteen days before a premium table ends with nothing scheduled, to the Super Admins; and a version that
-# came into force, to its company's KPM Owners. agencyboost-daily.timer runs it at 00:10 in Jakarta; it is
+# came into force, to its company's KPM Owners. Then (P19.23-T5 AC-5, ADR-0279 §5) the subscription lapses:
+# every active KPM whose period ended more than seven days ago without a renewal is suspended. agencyboost-daily.timer runs it at 00:10 in Jakarta; it is
 # also safe by hand, and a second run on the same day tells nobody again:
 #
 #   sudo /opt/agencyboost/bin/daily.sh            # every deployed environment
@@ -47,7 +48,12 @@ run_one() {
     return 1
   fi
   log "daily run for $_env"
-  dc exec -T "$_service" node dist/cli/daily-notices.js
+  local _rc=0
+  dc exec -T "$_service" node dist/cli/daily-notices.js || _rc=1
+  # P19.23-T5 AC-5 (ADR-0279 §5): suspend the KPMs past their seven days of grace — whatever the notices did, and
+  # safe to repeat. Either failing fails this environment's run.
+  dc exec -T "$_service" node dist/cli/subscription-lapses.js || _rc=1
+  return $_rc
 }
 
 failed=""

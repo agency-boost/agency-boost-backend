@@ -377,65 +377,11 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
     });
   });
 
-  describe('Kirim ulang undangan (AC-6; ADR-0212 §2)', () => {
-    async function invitedKpm(code = '0602', email = 'wulan.kartika@example.test', agentCode = '70045001') {
-      const res = await api().post('/api/admin/tenants')
-        .send(newKpm({ code, owner: wulan({ email, agentCode }) })).expect(201);
-      return { kpmId: res.body._id as string, userId: res.body.ownerUserId as string };
-    }
-
-    it('P19.4-T3 AC-6 sends a new link, revokes the old, stamps invitedAt again and audits it as resent', async () => {
-      const { kpmId, userId } = await invitedKpm();
-      const first = sent[0].payload.token as string;
-      clock.set(new Date(NOW.getTime() + DAY));
-      const res = await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(200);
-      expect(res.body).toMatchObject({ ownerState: 'invited', ownerInvitedAt: new Date(NOW.getTime() + DAY).toISOString() });
-      expect(sent).toHaveLength(2);
-      const old = await tokens().findOne({ tokenHash: new PasswordService().hashToken(first) }).lean<{ revokedAt: Date | null }>();
-      expect(old!.revokedAt).not.toBeNull();
-      expect(await tokens().countDocuments({ userId, revokedAt: null })).toBe(1);
-      const audit = await col('auditLog').find({ action: 'kpm.owner_invited' }).sort({ createdAt: 1 }).toArray();
-      expect(audit.map((a) => a.after.resent)).toEqual([false, true]);
-      expect(audit[1]).toMatchObject({ targetId: kpmId, kpmId: null, actorUserId: 'root' });
-    });
-
-    it('P19.4-T3 AC-6 is limited as a reset is: three an hour for a KPM, then 429 and nothing sent', async () => {
-      const { kpmId } = await invitedKpm();
-      for (let i = 0; i < 3; i += 1) await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(200);
-      const refused = await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(429);
-      expect(refused.body.error.code).toBe('AUTH_RATE_LIMITED');
-      expect(sent).toHaveLength(4);
-    });
-
-    it('P19.4-T3 AC-6 refuses with nobody to invite: no Owner, an Owner with no email, one who has signed in', async () => {
-      const none = (await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201)).body._id;
-      const pending = (await api().post('/api/admin/tenants').send(newKpm({ code: '0603', owner: wulan({ email: undefined }) })).expect(201)).body._id;
-      const { kpmId: signed, userId } = await invitedKpm('0604', 'rina@bandung.test', '70045002');
-      await col('users').updateOne({ _id: new mongoose.Types.ObjectId(userId) }, { $set: { lastLoginAt: NOW } });
-      sent.length = 0;
-      for (const [kpmId, reason] of [[none, 'no_owner'], [pending, 'no_email'], [signed, 'signed_in']]) {
-        const res = await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(409);
-        expect(res.body.error).toMatchObject({ code: 'TENANT_OWNER_NOT_INVITABLE', details: { reason } });
-      }
-      await api().post(`/api/admin/tenants/${'0'.repeat(24)}/owner/invitation`).expect(404);
-      expect(sent).toEqual([]);
-      // In the reader's language.
-      const id = await api().post(`/api/admin/tenants/${pending}/owner/invitation`).set('Accept-Language', 'id').expect(409);
-      expect(id.body.error.message).toBe('Wulan Kartika belum punya email, dan undangan dikirim lewat email. Isi emailnya lewat "Ganti pemilik".');
-    });
-
-    it('P19.4-T3 AC-6 a resend for KPM B touches nothing of KPM A: its Owner, link and stamp', async () => {
-      const a = await invitedKpm('0602', 'a@kpm.test', '70045001');
-      const b = await invitedKpm('0603', 'b@kpm.test', '70045002');
-      sent.length = 0;
-      clock.set(new Date(NOW.getTime() + DAY));
-      await api().post(`/api/admin/tenants/${b.kpmId}/owner/invitation`).expect(200);
-      expect(sent.map((m) => m.userId)).toEqual([b.userId]);
-      expect(await tokens().countDocuments({ userId: a.userId, revokedAt: null })).toBe(1);
-      expect((await col('memberships').findOne({ kpmId: a.kpmId }))!.invitedAt).toEqual(NOW);
-      expect((await col('memberships').findOne({ kpmId: b.kpmId }))!.invitedAt).toEqual(new Date(NOW.getTime() + DAY));
-    });
-  });
+  /*
+   * *Kirim ulang undangan* by email (`POST /admin/tenants/:id/owner/invitation`) is retired by P19.23-T2 (ADR-0277 §3;
+   * OD-420): the Owner is invited by WhatsApp — a claim link for an Owner who waits, the password link for an account
+   * never signed in (`owner-claims.int.spec.ts`) — and the email invitation goes once, when an Owner is named with one.
+   */
 
   describe('the KPM code (AC-7; A5-2)', () => {
     it('P19.4-T3 AC-7 code 0417 refuses with “Kode 0417 sudah dipakai KPM lain di Prudential.”, naming the KPM, writing nothing', async () => {
@@ -479,7 +425,6 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
     const routes = (kpmId: string) => [
       ['POST /admin/tenants with an owner', () => api().post('/api/admin/tenants').send(newKpm({ code: '0999' }))],
       ['PATCH …/owner with an owner', () => api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'x@kpm.test' }) })],
-      ['POST …/owner/invitation', () => api().post(`/api/admin/tenants/${kpmId}/owner/invitation`)],
     ] as const;
 
     it.each(EVERY_MEMBER)('P19.4-T3 AC-6 refuses %s every route, writing and sending nothing', async (_who, role) => {
@@ -506,7 +451,8 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
     it('P19.4-T3 AC-6 the Super Admin holds every route', async () => {
       const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201)).body._id as string;
       await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'w@kpm.test' }) }).expect(200);
-      await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(200);
+      // P19.23-T2 (ADR-0277 §3): the email resend is retired, and its address answers 404 like any that does not exist.
+      await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(404);
     });
   });
 });

@@ -27,6 +27,14 @@ describe('P18.1-T3 AC-1 a shared link’s token is redacted from every logged UR
     expect(serializeRequest({ url: '/x' })).toEqual({ url: '/x' });
   });
 
+  it('P19.23-T2 AC-3 a KPM Owner’s claim link (OD-420) is redacted too, its banner and its accept', () => {
+    expect(redactUrl(`/api/v1/owner-invites/${TOKEN}`)).toBe(`/api/v1/owner-invites/${REDACTED}`);
+    expect(redactUrl(`/api/v1/owner-invites/${TOKEN}/accept`)).toBe(`/api/v1/owner-invites/${REDACTED}/accept`);
+    // The Super Admin's route names a KPM's id, which is no secret.
+    expect(redactUrl('/api/v1/admin/tenants/66f0000000000000000000a1/owner/whatsapp-invitation'))
+      .toBe('/api/v1/admin/tenants/66f0000000000000000000a1/owner/whatsapp-invitation');
+  });
+
   it('P18.1-T3 AC-1 the request logger’s line for an opening carries no token', async () => {
     const lines: string[] = [];
     const log = pinoHttp({ serializers: { req: serializeRequest } }, { write: (line: string) => { lines.push(line); } } as never);

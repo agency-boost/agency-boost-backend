@@ -17,16 +17,16 @@ const LINKS = 'leaderMeetingShareLinks';
 export const tokenHashOf = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 /**
- * **A meeting's shared links** (OD-146, ADR-0131, D-share; `functional/leader-forum.md`, *Sharing*).
+ * **A forum's shared links** (OD-146, ADR-0131, D-share; P19.22-T8 AC-2, ADR-0276; `functional/leader-forum.md`,
+ * *Sharing*).
  *
- * - ***Share* makes a fresh link each time** — a random token of `LEADER_MEETING_SHARE_TOKEN_BYTES`, base64url —
- *   because only its hash is kept, so a link once made cannot be shown again (*Noted* 1). It opens for
- *   `LEADER_MEETING_SHARE_DAYS`; ***Stop sharing* revokes every live link to the meeting**, since a link that cannot
- *   be shown cannot be picked out.
- * - **Opening one** is for every signed-in member of the office, any rung, tagged or not: the meeting **read-only**,
- *   and every opening one audit row, failing open. An unknown, expired or revoked link, a deleted meeting and
- *   another office's link are **one answer**, 404, looked up inside the reader's own office. An opening after the
- *   meeting's date can be the read that freezes it (ADR-0129 §7).
+ * - ***Bagikan* makes a fresh link each time** — a random token of `LEADER_MEETING_SHARE_TOKEN_BYTES`, base64url — which
+ *   the screen puts in a WhatsApp message with the forum's agenda and action items (`wa.me`, OD-359). Only its hash is
+ *   kept, so a link once made cannot be shown again. It opens for `LEADER_MEETING_SHARE_DAYS`. *Stop sharing* went with
+ *   the share dialog (ADR-0276): a link stops on its own.
+ * - **Opening one** is for every signed-in member of the office, any rung, tagged or not, and for the Super Admin inside
+ *   it: the forum **read-only**, and every opening one audit row. An unknown, expired or revoked link, a deleted forum
+ *   and another office's link are **one answer**, 404, looked up inside the reader's own office.
  * - No write route takes a token: whoever arrives by a link edits nothing through it.
  */
 @Injectable()
@@ -40,7 +40,7 @@ export class LeaderMeetingSharing {
     private readonly clock: Clock,
   ) {}
 
-  /** `POST /leader-meetings/:meetingId/share-links`: a fresh link, its token in this answer and nowhere else. */
+  /** `POST /leader-meetings/:meetingId/share-links` — *Bagikan*: a fresh link, its token in this answer and nowhere else. */
   async create(ctx: RequestContext, meetingId: string): Promise<ShareLink> {
     await this.people.editor(ctx);
     if (!(await this.meetings.findById(ctx, meetingId))) throw meetingNotFound();
@@ -56,27 +56,9 @@ export class LeaderMeetingSharing {
     return { token, expiresAt: expiresAt.toISOString() };
   }
 
-  /** `DELETE /leader-meetings/:meetingId/share-links` — *Stop sharing*: every live link to the meeting, one audit row each. */
-  async revokeAll(ctx: RequestContext, meetingId: string): Promise<{ revoked: number }> {
-    await this.people.editor(ctx);
-    if (!(await this.meetings.findById(ctx, meetingId))) throw meetingNotFound();
-    const now = this.clock.now();
-    let revoked = 0;
-    for (const link of await this.links.liveFor(ctx, meetingId, now)) {
-      // Revoked by somebody else a moment ago: theirs to record, not this one's.
-      if (!(await this.links.revoke(ctx, String(link._id), now))) continue;
-      revoked += 1;
-      await this.audit.record(ctx, {
-        action: 'leader_meeting_share_link.revoked', targetCollection: LINKS, targetId: String(link._id),
-        before: { meetingId, expiresAt: link.expiresAt.toISOString() }, after: { revokedAt: now.toISOString() },
-      });
-    }
-    return { revoked };
-  }
-
   /**
-   * `GET /leader-meetings/shared/:token`: the meeting read-only, by a live link of the reader's own office, or 404
-   * — one answer for every failure. Each opening is one audit row: the reader, the meeting, the link.
+   * `GET /leader-meetings/shared/:token`: the forum read-only, by a live link of the reader's own office, or 404 — one
+   * answer for every failure. Each opening is one audit row: the reader, the forum, the link.
    */
   async open(ctx: RequestContext, token: string): Promise<MeetingView> {
     await this.people.reader(ctx);

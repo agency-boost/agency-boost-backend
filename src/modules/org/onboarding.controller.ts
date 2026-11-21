@@ -218,10 +218,12 @@ export class OnboardingController {
     summary: 'Requests waiting on you',
     description:
       'Includes anything routed to you by somebody above — an AB may send an agent into ' +
-      'one of their AABs\' units, and that AAB is then the one who decides.',
+      'one of their AABs\' units, and that AAB is then the one who decides. The Owner and an Admin read the office\'s ' +
+      'whole queue; with `scope=mine`, only the requests to join their own unit (User Management\'s *Pending Requests*).',
   })
-  async inbox(@Ctx() ctx: RequestContext) {
-    return this.approvals.inbox(ctx);
+  async inbox(@Ctx() ctx: RequestContext, @Query('scope') scope?: string) {
+    // P19.20-T6 AC-1 (ADR-0273 §7): `scope=mine` — User Management's *Pending Requests*, the reader's own unit's.
+    return this.approvals.inbox(ctx, scope === 'mine' ? 'mine' : 'office');
   }
 
   @Get('requests/count')
@@ -232,8 +234,8 @@ export class OnboardingController {
       'UI V1 (UI-085): the count on the Pending Requests tab, shown on every User Management screen. The same requests ' +
       '`GET /join/requests` lists, counted without reading their names.',
   })
-  async waitingCount(@Ctx() ctx: RequestContext) {
-    return this.approvals.waitingCount(ctx);
+  async waitingCount(@Ctx() ctx: RequestContext, @Query('scope') scope?: string) {
+    return this.approvals.waitingCount(ctx, scope === 'mine' ? 'mine' : 'office');
   }
 
   @Get('requests/routing')

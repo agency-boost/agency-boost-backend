@@ -13,19 +13,23 @@ export const UNIT_DASHBOARD_CORRECTION_REASON = 'Updated on the Unit Dashboard f
 export const UNIT_DASHBOARD = {
   /** *Last 7 days · This month · This year* (`Overall.html:3895-3897`), in the order drawn. */
   PERIODS: ['7d', 'month', 'year'] as const,
-  /** *This month* is first selected (`:3896`). */
-  DEFAULT_PERIOD: 'month' as const,
+  /**
+   * ***Tahun ini* is first selected** (P19.18-T1 AC-1; ADR-0271 §1; the brief of 19 November 2026, part A). It was *This
+   * month* (`Overall.html:3896`).
+   */
+  DEFAULT_PERIOD: 'year' as const,
   /**
    * The most rows one *Save all* may carry: the 500-member ceiling an office is measured at
    * (`performance-and-scale.md`), so a leader's whole roster always fits one save.
    */
   MAX_ROWS_PER_SAVE: 500,
   /**
-   * **The three views** (the client's message of 11 November 2026, item 7; ADR-0249; `metrics-and-definitions.md`, *The
-   * views*), in the order the picker draws them: *Grup langsung* (`DIRECT_GROUP`), *Grup informal* (`INFORMAL_GROUP`),
-   * *Semua downline* (`DOWNLINE`). Defined in `domain/metrics/unit-view.ts`.
+   * **The four views** (the client's message of 11 November 2026, item 7; ADR-0249; P19.18-T1 AC-2, ADR-0271 §2;
+   * `metrics-and-definitions.md`, *The views*), in the order the picker draws them: ***Direct Unit*** (`DIRECT_UNIT`, the
+   * head and the direct reports who lead nobody and are no AB), *Grup langsung* (`DIRECT_GROUP`), *Grup informal*
+   * (`INFORMAL_GROUP`), *Semua downline* (`DOWNLINE`). Defined in `domain/metrics/unit-view.ts`.
    */
-  VIEWS: ['direct', 'informal', 'downline'] as const,
+  VIEWS: ['unit', 'direct', 'informal', 'downline'] as const,
   /**
    * The most members one *+ Tambah ke grup* may tag at once (`POST /members/groups/:groupId/members`): the 500-member
    * ceiling an office is measured at, so every AB below a leader always fits one request.
@@ -34,5 +38,5 @@ export const UNIT_DASHBOARD = {
 } as const;
 
 export type UnitDashboardPeriod = (typeof UNIT_DASHBOARD.PERIODS)[number];
-/** A view of the Unit Dashboard (ADR-0249): `direct`, `informal` or `downline`. */
+/** A view of the Unit Dashboard (ADR-0249, ADR-0271 §2): `unit`, `direct`, `informal` or `downline`. */
 export type UnitView = (typeof UNIT_DASHBOARD.VIEWS)[number];

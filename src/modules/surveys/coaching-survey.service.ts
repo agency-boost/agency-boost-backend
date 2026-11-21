@@ -5,7 +5,7 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import { localDayOf, type LocalDate } from '@/common/time/local-day';
-import type { SurveyRoleClass, SurveyState } from '@/domain/constants';
+import type { SurveyRoleClass } from '@/domain/constants';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import type { LabelPair } from '@/modules/config/analytics-config';
 import { CoachResolver } from '@/modules/org/coach-resolver';
@@ -15,24 +15,15 @@ import { scopeFor } from '@/modules/rbac/permissions';
 import { User, type UserDocument } from '@/modules/users/user.schema';
 import type { SurveyResponseDocument } from './survey-response.schema';
 import type { SnapshotQualBlock, SurveyRunDocument } from './survey-run.schema';
-import { SurveyOffice, filled } from './survey-office';
+import { SurveyOffice } from './survey-office';
+import { downlineIdsOf, issuesIn, personAspiration, personSections, type PersonSection } from './survey-person';
 import { SurveyOpening } from './survey-opening';
-import { bandOf, isIssue, isLeaderClass, runState, wholeYears } from './survey-rules';
+import { bandOf, isLeaderClass, runState, wholeYears } from './survey-rules';
 import { SurveyParticipationRepository, SurveyResponseRepository, SurveyRunRepository } from './survey.repositories';
 import { SURVEY_REFUSALS } from './surveys.messages';
 
-/** One section card of the tab, as the mockup draws it (B2). */
-export type CoachingSection =
-  | { kode: string; kind: 'scale'; title: LabelPair; questionKodes: string[]; items: { kode: string; label: LabelPair; rating: number | null }[] }
-  | { kode: string; kind: 'state'; title: LabelPair; questionKodes: string[]; items: { kode: string; label: LabelPair; state: SurveyState | null }[] }
-  | {
-    kode: string; kind: 'unit'; title: LabelPair; questionKodes: string[];
-    items: { kode: string; label: LabelPair; state: SurveyState | null; rating: number | null }[];
-  }
-  | {
-    kode: string; kind: 'downline'; title: LabelPair; questionKodes: string[]; stillCoaching: boolean | null;
-    leaders: { membershipId: string | null; name: string; areas: { kode: string; label: LabelPair }[] }[];
-  };
+/** One section card of the tab, as the mockup draws it (B2) — `survey-person.ts`', shared with *Per orang*. */
+export type CoachingSection = PersonSection;
 
 export interface CoachingSurveyView {
   /** `answered` · `not_answered` · `anonymous` · `none` (ADR-0216 §7). */
@@ -138,7 +129,7 @@ export class CoachingSurveyService {
       },
       issueMaxRating: max,
       issueCounts: sections.filter((s) => s.kind !== 'downline').map((s) => ({ kode: s.kode, title: s.title, count: issuesIn(s, max) })),
-      aspiration: this.aspiration(blocks, response, office),
+      aspiration: personAspiration(blocks, response, office),
       sections,
     };
   }
@@ -159,96 +150,18 @@ export class CoachingSurveyService {
     return withPart.find((x) => x.submittedAt || runState(x.run, today) === 'closed') ?? withPart[0] ?? null;
   }
 
-  private aspiration(blocks: readonly SnapshotQualBlock[], response: SurveyResponseDocument, office: { company: string; kpm: string }) {
-    const q = blocks.flatMap((b) => b.questions).find((x) => x.type === 'aspiration');
-    if (!q) return null;
-    const value = answerOf(response, q.kode);
-    const chosen = Array.isArray(value?.chosen) ? (value!.chosen as string[]) : [];
-    return {
-      kode: q.kode,
-      options: q.items.map((it) => ({ kode: it.kode, label: filled(it.label, office), chosen: chosen.includes(it.kode) })),
-      note: typeof value?.note === 'string' ? value.note : null,
-    };
-  }
-
-  /** The cards, one per block, by what its questions ask — never `support` (Q12) and never a `choice`. */
+  /** The cards, one per block (`personSections`), Q11's downline leaders named in one read. */
   private async sections(
     ctx: RequestContext, blocks: readonly SnapshotQualBlock[], response: SurveyResponseDocument,
     office: { company: string; kpm: string },
   ): Promise<CoachingSection[]> {
-    const out: CoachingSection[] = [];
-    for (const b of blocks) {
-      const qs = b.questions;
-      const title = filled(b.title, office);
-      const questionKodes = qs.map((q) => q.kode);
-      const unit = qs.find((q) => q.type === 'unit_items');
-      const scale = qs.find((q) => q.type === 'scale_items');
-      const state = qs.find((q) => q.type === 'state_items');
-      const downline = qs.filter((q) => q.type === 'downline_coaching');
-      if (unit) {
-        const comfort = answerOf(response, unit.kode) ?? {};
-        const states = state ? answerOf(response, state.kode) ?? {} : {};
-        out.push({
-          kode: b.kode, kind: 'unit', title, questionKodes,
-          items: unit.items.map((it) => ({
-            kode: it.kode, label: it.label,
-            state: (states[it.kode] as SurveyState | undefined) ?? null,
-            rating: typeof comfort[it.kode] === 'number' ? (comfort[it.kode] as number) : null,
-          })),
-        });
-      } else if (scale) {
-        const v = answerOf(response, scale.kode) ?? {};
-        out.push({
-          kode: b.kode, kind: 'scale', title, questionKodes,
-          items: scale.items.map((it) => ({ kode: it.kode, label: it.label, rating: typeof v[it.kode] === 'number' ? (v[it.kode] as number) : null })),
-        });
-      } else if (state) {
-        const v = answerOf(response, state.kode) ?? {};
-        out.push({
-          kode: b.kode, kind: 'state', title, questionKodes,
-          items: state.items.map((it) => ({ kode: it.kode, label: it.label, state: (v[it.kode] as SurveyState | undefined) ?? null })),
-        });
-      } else if (downline.length > 0) {
-        const yesNo = downline.find((q) => q.items.length === 0);
-        const areasQ = downline.find((q) => q.items.length > 0);
-        const answer = yesNo ? answerOf(response, yesNo.kode)?.answer : undefined;
-        const rows = areasQ ? ((answerOf(response, areasQ.kode)?.leaders as { membershipId?: string; areas: string[] }[] | undefined) ?? []) : [];
-        // Not asked — a leader with no leader below them (Ika in the mockup) — so no card.
-        if (answer === undefined && rows.length === 0) continue;
-        const names = await this.names.byMembershipId(ctx, rows.map((l) => l.membershipId).filter((id): id is string => !!id));
-        out.push({
-          kode: b.kode, kind: 'downline', title, questionKodes,
-          stillCoaching: answer === 'yes' ? true : answer === 'no' ? false : null,
-          leaders: rows.map((l) => ({
-            membershipId: l.membershipId ?? null,
-            name: (l.membershipId && names.get(l.membershipId)) || '',
-            areas: l.areas.map((kode) => ({ kode, label: areasQ!.items.find((i) => i.kode === kode)?.label ?? { id: kode, en: kode } })),
-          })),
-        });
-      }
-    }
-    return out;
+    const names = await this.names.byMembershipId(ctx, downlineIdsOf(blocks, response));
+    return personSections(blocks, response, office, names);
   }
 }
 
-function answerOf(response: SurveyResponseDocument, kode: string): Record<string, unknown> | undefined {
-  return response.answers.find((a) => a.questionKode === kode)?.value as Record<string, unknown> | undefined;
-}
-
-/** `QUAL_PERSON_ISSUE_COUNT`: the section's answers with an issue; a unit item's consistency and comfort each count. */
-export function issuesIn(section: CoachingSection, max: number): number {
-  switch (section.kind) {
-    case 'scale':
-      return section.items.filter((i) => i.rating !== null && isIssue('rating', i.rating, max)).length;
-    case 'state':
-      return section.items.filter((i) => i.state !== null && isIssue('state', i.state, max)).length;
-    case 'unit':
-      return section.items.filter((i) => i.state !== null && isIssue('state', i.state, max)).length
-        + section.items.filter((i) => i.rating !== null && isIssue('rating', i.rating, max)).length;
-    default:
-      return 0;
-  }
-}
+/** `QUAL_PERSON_ISSUE_COUNT` (`survey-person.ts`), re-exported for this module's importers. */
+export { issuesIn } from './survey-person';
 
 function hidden(reason: 'session'): DomainException {
   return new DomainException(

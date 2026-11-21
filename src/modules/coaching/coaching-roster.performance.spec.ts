@@ -144,11 +144,12 @@ describe('the coaching roster, measured (P11-T6 AC-9)', () => {
     return times[Math.ceil(0.95 * times.length) - 1];
   };
 
-  it('P11-T6 AC-9 lists all five hundred, grouped: ten units of forty-nine', async () => {
+  it('P11-T6 AC-9 lists all five hundred, grouped: the reader’s own row, then ten units of fifty (P19.18-T5)', async () => {
     const { view } = await counted(ctxFor(ab, 'AB'));
-    expect(view.directAgents).toEqual([]);
-    expect(view.units).toHaveLength(UNITS);
-    expect(view.units.map((u) => u.members.length)).toEqual(Array(UNITS).fill(PER_UNIT));
+    expect(view.sections[0]).toMatchObject({ kind: 'own', count: 1 });
+    const units = view.sections.slice(1);
+    expect(units).toHaveLength(UNITS);
+    expect(units.map((u) => u.count)).toEqual(Array(UNITS).fill(PER_UNIT + 1));
   });
 
   it('P11-T6 AC-9 sends the same queries for forty-nine people as for five hundred: none per person', async () => {
@@ -158,7 +159,10 @@ describe('the coaching roster, measured (P11-T6 AC-9)', () => {
     expect(large.queries.sort()).toEqual(small.queries.sort());
     // eslint-disable-next-line no-console
     console.log(`  coaching roster: ${large.queries.length} queries per read — ${large.queries.join(', ')}`);
-    expect(large.queries.length).toBeLessThanOrEqual(12);
+    // 15 since P19.18-T5 (ADR-0271 §9): the views the Unit Dashboard offers, the coaching status tile with its coach
+    // (`CoachingReadings.statusOf`) and the WhatsApp numbers (`MemberNames.pictured`, `phones`) — each once, whatever the
+    // roster (the equality above). Measured by the integration review of 20 November 2026; it was 12.
+    expect(large.queries.length).toBeLessThanOrEqual(15);
   });
 
   it('P11-T6 AC-9 finds each coachee’s latest 1:1 by index, never by scanning the sessions', async () => {

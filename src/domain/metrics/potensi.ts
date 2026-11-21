@@ -1,16 +1,15 @@
 /**
- * **The *Potensi* tab's three figures** (P19.1-T6; ADR-0193; UI-155; `metrics-and-definitions.md`, §A.10): each defined
+ * **The *Potensi* tab's lead figures** (P19.1-T6; ADR-0193; UI-155; `metrics-and-definitions.md`, §A.10): each defined
  * once, here, over what the leads and the office's production row for the month say. Pure, so each rule is a unit test.
  *
  * - **`LEAD_POTENSI_THIS_MONTH`** — a lead is *potensi* for month M when it holds a `commitments[]` entry for M: the
  *   switch *Potensi closing bulan ini* / *Potensi rekrut bulan ini* (UI-153), the commitment P7-T5 built, renamed on
  *   screen. A person's ***n potensi*** counts those of a type that are **still open** at the month's end — open now for
  *   the office's current month, open at the month's last office day for an earlier one.
- * - **`AA_THIS_MONTH`** — a member is *AA* in M when one of their sales leads was marked *Berhasil* in M (`outcome =
- *   won`, `outcomeAt` inside M on the office's calendar), **or** the office's production row for M shows policies > 0.
- *   Never `MONTHLY_ACTIVE_AGENT` (it reads a lead), never `FIRST_SALE_DATE` (any month's case counts).
- * - **`REKRUT_THIS_MONTH`** — a recruitment lead marked *Berhasil* in M, switched on or not. *Berhasil* is possible only
- *   at the office's terminal Recruit stage (ADR-0194 §4).
+ * - `AA_THIS_MONTH` and `REKRUT_THIS_MONTH` were here: **retired by ADR-0271 §8** (P19.18-T3; ADR-0267 §2–3). The tab's
+ *   ✓ is *Active Agent* from the uploaded production (`MONTHLY_ACTIVE_AGENT`, `activeAgentsIn`) and its green number the
+ *   new hires a person registered who joined in the month (`RECRUITS_JOINED`, `recruitsJoined`) — one definition each,
+ *   where the tab had its own. A lead's *Berhasil* (`won`) is still counted here, for a person's sheet.
  *
  * **M's bounds are the office's** — `Clock.monthBounds(timezone, month)`, Asia/Jakarta (invariant §9, ADR-0016). An
  * instant is in M when `start <= at < endExclusive`; 00:00 WIB on the 1st is the next month's.
@@ -86,17 +85,4 @@ export function personPotensi(leads: readonly PotensiLead[], m: PotensiMonth): P
     if (won) view.won += 1;
   }
   return out;
-}
-
-/**
- * `AA_THIS_MONTH`: a sales lead marked *Berhasil* in M, **or** M's production row shows policies above zero. `null`
- * policies is a month the office holds no figure for, which is not zero and is not a case either.
- */
-export function aaThisMonth(salesWonInMonth: number, policiesInMonth: number | null): boolean {
-  return salesWonInMonth > 0 || (policiesInMonth !== null && policiesInMonth > 0);
-}
-
-/** `REKRUT_THIS_MONTH` over a person: their recruitment leads marked *Berhasil* in M. */
-export function rekrutThisMonth(person: PersonPotensi): number {
-  return person.recruitment.won;
 }

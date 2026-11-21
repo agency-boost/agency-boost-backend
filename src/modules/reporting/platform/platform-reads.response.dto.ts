@@ -1,8 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MoneyDto, RateDto } from '../reporting.response.dto';
 import type {
-  CompanyKpmRow, CompanyKpmsView, CompanyRef, KpmComparisonPage, KpmComparisonRow, KpmDataMonth, KpmDataUpload,
-  KpmDataView, PlatformAccountRow, PlatformAccountsPage, PlatformMemberRow, PlatformMembersPage,
+  CompanyKpmRow, CompanyKpmsView, CompanyRef, PlatformAccountRow, PlatformAccountsPage, PlatformMemberDetail,
+  PlatformMemberRow, PlatformMembersPage,
 } from './platform-reads.service';
 
 /*
@@ -24,6 +23,11 @@ class MemberKpmDto {
 class MemberRoleDto {
   @ApiProperty({ example: 'AB', description: 'The rung’s code on the company’s ladder.' }) code!: string;
   @ApiProperty({ example: 'Agency Builder', description: 'The rung’s label; the code where the rung is gone.' }) label!: string;
+  @ApiProperty({
+    enum: ['ab', 'aab', 'agent'],
+    description: 'The rung’s class (ADR-0156): `ab` and `aab` draw *Anggota*’s orange label, `agent` none.',
+  })
+  class!: 'ab' | 'aab' | 'agent';
   @ApiProperty({ description: 'The KPM’s Owner: the *Owner* badge.' }) isOwner!: boolean;
   @ApiProperty({ description: 'A delegated KPM Admin: the *Admin* badge.' }) isAdmin!: boolean;
 }
@@ -32,9 +36,33 @@ class MemberLeaderDto {
   @ApiProperty() fullName!: string;
 }
 
+/** *Terakhir pakai* as the server reads it (P19.23-T3 AC-1; ADR-0267 §4). */
+class MemberLastActiveDto {
+  @ApiProperty({ type: Number, nullable: true, example: 3, description: 'Whole days to the KPM’s today; `null`, never.' })
+  days!: number | null;
+  @ApiProperty({
+    enum: ['recent', 'lapsed', 'never'],
+    description: '`recent` within `USAGE.RECENT_MAX_DAYS` (14), `lapsed` past it, `never` — the pill’s colour.',
+  })
+  status!: 'recent' | 'lapsed' | 'never';
+}
+
 export class PlatformMemberRowDto implements PlatformMemberRow {
-  @ApiProperty({ description: 'The row’s key. Used by no other Super Admin route.' }) membershipId!: string;
+  @ApiProperty({ description: 'The row’s key: `GET /admin/members/:membershipId` reads its detail.' })
+  membershipId!: string;
+  @ApiProperty({ description: 'The person: what `PATCH /admin/users/:userId/test-account` writes.' })
+  userId!: string;
   @ApiProperty() fullName!: string;
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Their photo as a signed link; `null`, the initials are drawn.',
+  })
+  avatarUrl!: string | null;
+  @ApiProperty({
+    description: '`users.testAccount` (ADR-0267 §1): `true` only on a `testAccount=only` page — test accounts are in no '
+      + 'other row or count (OD-421).',
+  })
+  testAccount!: boolean;
   @ApiProperty({ example: '70045001' }) agentCode!: string;
   @ApiProperty({ type: CompanyRefDto }) company!: CompanyRefDto;
   @ApiProperty({ type: MemberKpmDto }) kpm!: MemberKpmDto;
@@ -54,6 +82,8 @@ export class PlatformMemberRowDto implements PlatformMemberRow {
     description: 'The last day the member logged an activity (the Overview’s `lastLoggedOn`); `null`, *"Belum pernah"*.',
   })
   lastActiveOn!: string | null;
+  @ApiProperty({ type: MemberLastActiveDto, description: '*Terakhir pakai*: the days and the bucket.' })
+  lastActive!: MemberLastActiveDto;
 }
 
 export class PlatformMembersPageDto implements PlatformMembersPage {
@@ -61,6 +91,23 @@ export class PlatformMembersPageDto implements PlatformMembersPage {
   @ApiProperty({ example: 1 }) page!: number;
   @ApiProperty({ example: 50 }) pageSize!: number;
   @ApiProperty({ description: 'Every row the filters match, across the pages.' }) total!: number;
+  @ApiProperty({ example: 8, description: 'The KPMs those rows are in: *"n anggota di m KPM"*.' })
+  kpmCount!: number;
+}
+
+/** *Anggota*'s detail (P19.23-T3 AC-1; ADR-0277): the row, and the person's WhatsApp number and email. */
+export class PlatformMemberDetailDto extends PlatformMemberRowDto implements PlatformMemberDetail {
+  @ApiProperty({ type: String, nullable: true, example: '+6281234567890', description: '`users.phone`; `null` with none.' })
+  phone!: string | null;
+  @ApiProperty({ example: 'wilson@example.com', description: 'The address the account signs in with.' })
+  email!: string;
+}
+
+/** What the test-account switch answers (P19.23-T3 AC-1; ADR-0267 §1). */
+export class TestAccountSetDto {
+  @ApiProperty() userId!: string;
+  @ApiProperty() testAccount!: boolean;
+  @ApiProperty({ description: 'The person’s memberships the copy was written on, in every KPM.' }) memberships!: number;
 }
 
 export class PlatformAccountRowDto implements PlatformAccountRow {
@@ -94,83 +141,6 @@ export class PlatformAccountsPageDto implements PlatformAccountsPage {
   @ApiProperty({ example: 1 }) page!: number;
   @ApiProperty({ example: 50 }) pageSize!: number;
   @ApiProperty({ description: 'Every account the filters match, across the pages.' }) total!: number;
-}
-
-class ComparisonActiveDto {
-  @ApiProperty({ type: Number, nullable: true, description: '`null` while the month is not uploaded.' }) count!: number | null;
-  @ApiProperty() of!: number;
-  @ApiProperty({ type: Number, nullable: true }) pct!: number | null;
-  @ApiProperty({ example: '2026-11' }) month!: string;
-}
-
-class ComparisonUsersDto {
-  @ApiProperty() logged!: number;
-  @ApiProperty() notLogged!: number;
-  @ApiProperty({ type: Number, nullable: true }) pct!: number | null;
-}
-
-class ComparisonCoachedDto {
-  @ApiProperty({ type: RateDto }) d7!: RateDto;
-  @ApiProperty({ type: RateDto }) d30!: RateDto;
-}
-
-class ComparisonRecruitmentDto {
-  @ApiProperty({ description: 'The pipeline now: candidates by stage, counted.' }) pipeline!: number;
-  @ApiProperty({ type: Number, nullable: true, description: 'The month’s target, `null` with none set.' })
-  target!: number | null;
-}
-
-export class KpmComparisonRowDto implements KpmComparisonRow {
-  @ApiProperty() kpmId!: string;
-  @ApiProperty({ example: '0417' }) code!: string;
-  @ApiProperty({ example: 'Bandung' }) branch!: string;
-  @ApiProperty({ type: CompanyRefDto }) company!: CompanyRefDto;
-  @ApiProperty({ description: '*Total members*: the Overview’s `composition.total`.' }) members!: number;
-  @ApiProperty({ type: ComparisonActiveDto, description: '*Aktif bulan ini*: the Overview’s `engagement.activeThisMonth`.' })
-  activeThisMonth!: ComparisonActiveDto;
-  @ApiProperty({ type: ComparisonUsersDto, description: '*Pengguna aktif*: the Overview’s `engagement.loggedThisWeek`.' })
-  activeUsers!: ComparisonUsersDto;
-  @ApiProperty({ type: ComparisonCoachedDto, description: '*Coached 7 hari · 30 hari*: the Overview’s coverage.' })
-  coached!: ComparisonCoachedDto;
-  @ApiProperty({ type: MoneyDto, description: '*Production this year* against target: the Overview’s `production.ytd`.' })
-  production!: MoneyDto;
-  @ApiProperty({ type: ComparisonRecruitmentDto }) recruitment!: ComparisonRecruitmentDto;
-}
-
-export class KpmComparisonPageDto implements KpmComparisonPage {
-  @ApiProperty({ type: [KpmComparisonRowDto] }) rows!: KpmComparisonRowDto[];
-  @ApiProperty() page!: number;
-  @ApiProperty() pageSize!: number;
-  @ApiProperty() total!: number;
-  @ApiProperty({ example: '-production', description: 'The order read: a column, `-` before it descending.' }) sort!: string;
-}
-
-class KpmDataMonthDto implements KpmDataMonth {
-  @ApiProperty({ example: '2026-10' }) month!: string;
-  @ApiProperty({ enum: ['complete', 'missing', 'none'], description: '*Lengkap · Belum · —* (before the KPM).' })
-  status!: 'complete' | 'missing' | 'none';
-}
-
-class KpmDataNoteDto {
-  @ApiProperty({ enum: ['committed', 'reverting', 'reverted'] }) status!: 'committed' | 'reverting' | 'reverted';
-  @ApiProperty({ type: String, nullable: true, description: 'The day a running month’s upload named (*per <tanggal>*).' })
-  asOf!: string | null;
-}
-
-class KpmDataUploadDto implements KpmDataUpload {
-  @ApiProperty({ example: '2026-10' }) month!: string;
-  @ApiProperty({ type: String, nullable: true, description: 'Who uploaded it, by name.' }) by!: string | null;
-  @ApiProperty({ type: String, nullable: true }) at!: string | null;
-  @ApiProperty({ description: 'The agents’ rows it wrote.' }) agents!: number;
-  @ApiProperty({ type: KpmDataNoteDto }) note!: KpmDataNoteDto;
-}
-
-export class KpmDataDto implements KpmDataView {
-  @ApiProperty() kpmId!: string;
-  @ApiProperty({ type: [KpmDataMonthDto], description: 'Twelve months, ending with the KPM’s current month.' })
-  months!: KpmDataMonthDto[];
-  @ApiProperty({ type: [KpmDataUploadDto], description: 'The uploads of those months, newest first.' })
-  uploads!: KpmDataUploadDto[];
 }
 
 class CompanyKpmPeersDto {

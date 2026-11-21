@@ -61,7 +61,8 @@ export function eventOrder(a: Pick<EventFacts, 'phase' | 'startsAt' | 'id'>, b: 
  * - **The catalog**: the office's events starting this year in its zone **and every one not started yet, whatever
  *   its year** (the exit review, round 2: members RSVP before an event starts, so the Owner sees it from then) —
  *   archived ones never (D-window) — in the picker's order; the screen groups them *Upcoming* (a running one among
- *   them) and *Past*. Without an `item`, the first one: the prototype opens on its first event (`Owner:3497`).
+ *   them) and *Past*. *Changed 2026-11-20 (P19.19-T3; ADR-0272 §6):* **without an `item`, every event at once** —
+ *   *Semua event*, the KPM Overview card's own *"x dari y yang diundang"* — where it was the first event.
  * - **The chip**: of the tree's members in at least one listed event's audience as at its start, those who
  *   attended (confirmed) one that has ended, or are registered for one that has not.
  * - **The cells**: the selected event's, through `EventReadings.attendanceOfMany` — the roll call's own computation.
@@ -92,7 +93,8 @@ export class EventsComplianceCategory implements ComplianceCategory<EventsCompli
     if (selection.item !== null && !listed.some((event) => event.id === selection.item)) {
       throw new NotFoundException('Event');
     }
-    const item = selection.item ?? listed[0]?.id ?? null;
+    // *Since P19.19-T3 (ADR-0272 §6):* no item is *Semua event* — the card's own figure — never the first event.
+    const item = selection.item;
     if (listed.length === 0) {
       return { catalog, chip: { count: 0, of: 0 }, item, cells: selection.selected ? new Map() : null };
     }
@@ -114,7 +116,12 @@ export class EventsComplianceCategory implements ComplianceCategory<EventsCompli
     }
 
     let cells: Map<string, ComplianceCell> | null = null;
-    if (selection.selected) {
+    if (selection.selected && item === null) {
+      // *Semua event*: whoever was in at least one listed event's audience, done when they attended or registered for one.
+      cells = new Map(scope.memberIds.map((id): [string, ComplianceCell] => [
+        id, inAudience.has(id) ? { status: done.has(id) ? 'done' : 'not_done', done: done.has(id), on: null, second: null } : OUTSIDE,
+      ]));
+    } else if (selection.selected) {
       const reading = attendance.get(item!);
       const rows = new Map((reading?.rows ?? []).map((row) => [row.membershipId, row]));
       cells = new Map(scope.memberIds.map((id) => [id, reading ? eventCell(rows.get(id), reading.event) : OUTSIDE]));

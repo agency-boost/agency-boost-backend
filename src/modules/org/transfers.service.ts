@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { officeStewardKind } from '@/common/auth/office-steward';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -297,10 +298,23 @@ export class TransfersService {
     return views.map((view, i) => requested(view, rows[i]));
   }
 
-  /** **The office's queue**, oldest first: every transfer waiting on the Owner and the Admins. */
+  /**
+   * **The office's queue**, oldest first: every transfer waiting on the Owner and the Admins. *Since ADR-0268 §1:* **a core
+   * leader's is the requests about somebody below them**, which they decide as the office would; the rest are not theirs.
+   */
   async queue(ctx: RequestContext): Promise<TransferView[]> {
     const rows = await this.transfers.find(ctx, { status: 'pending' }, { sort: { createdAt: 1 } });
-    return this.views(ctx, rows);
+    return this.views(ctx, await this.decidable(ctx, rows));
+  }
+
+  /** The rows this reader decides: all of them, or — for a core leader — those about somebody strictly below them. */
+  private async decidable(ctx: RequestContext, rows: TransferRequestDocument[]): Promise<TransferRequestDocument[]> {
+    if (officeStewardKind(ctx) !== 'core_leader' || rows.length === 0) return rows;
+    const below = await this.members.find(
+      ctx, { _id: { $in: rows.map((r) => r.membershipId) }, ancestorIds: ctx.membershipId }, { projection: { _id: 1 } },
+    );
+    const ids = new Set(below.map((m) => String(m._id)));
+    return rows.filter((r) => ids.has(r.membershipId));
   }
 
   /**
@@ -429,7 +443,8 @@ export class TransfersService {
   /** A pending request of this office, or 404 — and 409 naming the decision for one already decided. */
   private async openRequest(ctx: RequestContext, transferId: string): Promise<TransferRequestDocument> {
     const row = await this.transfers.findById(ctx, transferId);
-    if (!row) throw new NotFoundException('Transfer request');
+    // A core leader's request is one about somebody below them (ADR-0268 §1); any other is not confirmed to exist.
+    if (!row || (await this.decidable(ctx, [row])).length === 0) throw new NotFoundException('Transfer request');
     if (row.status !== 'pending') throw alreadyDecided(row);
     return row;
   }

@@ -70,9 +70,25 @@ export const PRODUCTION_REFUSALS = refusals('modules/production', {
       en: 'Send the `revision` the preview was taken against.',
       id: 'Kirim `revision` yang menjadi dasar pratinjau.',
     },
-    correctionNotInFile: {
-      en: 'A correction named to be replaced is not one this file would change. Upload the file again.',
-      id: 'Koreksi yang dipilih untuk diganti bukan koreksi yang akan diubah oleh file ini. Unggah file ini lagi.',
+    /**
+     * P19.21-T1 AC-5 (ADR-0274 §2): a file is saved whole or not at all — never partly. Each problem rides in `details`,
+     * named by its line and column, as the preview lists them.
+     */
+    fileHasProblems: ({ count }: { count: number }) => ({
+      en: `This file has ${count} problem${count === 1 ? '' : 's'} to fix before it can be saved, and nothing has been saved. `
+        + 'Fix them in the file and upload it again.',
+      id: `File ini punya ${n(count)} masalah yang perlu diperbaiki sebelum bisa disimpan, dan belum ada yang disimpan. `
+        + 'Perbaiki di file, lalu unggah lagi.',
+    }),
+    /** P19.21-T1 AC-4: *Kembalikan ke angka dari file* on a figure nobody corrected. */
+    notCorrected: {
+      en: 'This figure was not corrected by hand, so there is nothing to go back from.',
+      id: 'Angka ini tidak dikoreksi manual, jadi tidak ada yang perlu dikembalikan.',
+    },
+    /** P19.21-T1 AC-4: a correction no standing upload of the month stands behind. */
+    noFileFigure: {
+      en: 'No upload of this month gave this figure, so there is no number from the file to go back to.',
+      id: 'Belum ada unggahan bulan ini yang mengisi angka ini, jadi tidak ada angka dari file untuk dikembalikan.',
     },
     changesNothing: {
       en: 'This file would change nothing: every figure in it is blank, already stored, or not taken.',

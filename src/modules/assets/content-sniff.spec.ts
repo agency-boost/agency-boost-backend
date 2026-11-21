@@ -2,6 +2,10 @@ import { ASSET_LIMITS } from '@/domain/constants';
 import { OCTET_STREAM, SNIFF_SAMPLE_BYTES, SNIFFED_TYPES, sniffedContentType } from './content-sniff';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PPT = 'application/vnd.ms-powerpoint';
+const DOC = 'application/msword';
 const bytes = (...values: number[]) => Buffer.from(values);
 const text = (value: string) => Buffer.from(value, 'latin1');
 
@@ -16,9 +20,21 @@ const SAMPLES: Record<string, Buffer> = {
   [XLSX]: Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00), text('[Content_Types].xml')]),
   // One of the owner's lessons opens so (`revisions/2026-11-03/files/training-modules/`, P19.6-T2).
   'text/html': text('<!DOCTYPE html>\n<html lang="id">\n<head><meta charset="utf-8">'),
+  // P19.21-T3 AC-6 (ADR-0274): a pitch material's office formats and its other videos.
+  [PPTX]: Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00), text('[Content_Types].xml')]),
+  [DOCX]: Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00), text('[Content_Types].xml')]),
+  [PPT]: bytes(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00, 0x00),
+  [DOC]: bytes(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00, 0x00),
+  'video/webm': bytes(0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01),
+  'video/quicktime': Buffer.concat([bytes(0x00, 0x00, 0x00, 0x14), text('ftypqt  '), bytes(0x00, 0x00, 0x02, 0x00)]),
 };
-/** Every type bytes alone identify: all of them but CSV and HTML, which only a claim can name. */
-const BINARY = Object.keys(SAMPLES).filter((t) => t !== 'text/csv' && t !== 'text/html');
+/**
+ * Named by the claim: a zip, an OLE2 file and an `ftyp` box are each several types, so the claim says which (ADR-0274).
+ * Under any other claim their bytes read as the type they always did — an xlsx, an MP4 — or as nothing.
+ */
+const CLAIM_NAMED = [PPTX, DOCX, PPT, DOC, 'video/quicktime'];
+/** Every type bytes alone identify: all of them but CSV and HTML, which only a claim can name, and the claim-named. */
+const BINARY = Object.keys(SAMPLES).filter((t) => t !== 'text/csv' && t !== 'text/html' && !CLAIM_NAMED.includes(t));
 
 /** A Windows executable's first bytes — the file a renamed `.pdf` is in the live suite's case. */
 const EXE = Buffer.concat([text('MZ'), bytes(0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00)]);
@@ -50,7 +66,8 @@ describe('P18.4-T2 content sniffing — the accepted type a file’s first bytes
     });
 
     it.each(BINARY.flatMap((type) => [...ASSET_LIMITS.ALLOWED_MIME_TYPES, '', 'application/x-unknown']
-      .filter((claim) => claim !== type).map((claim) => [type, claim])))(
+      // A claim that names the same container another way wins it (ADR-0274): an MP4 claimed QuickTime is QuickTime.
+      .filter((claim) => claim !== type && !CLAIM_NAMED.includes(claim)).map((claim) => [type, claim])))(
       'P18.4-T2 identifies %s from its bytes under the claim %j',
       (type, claim) => {
         expect(sniffedContentType(claim, SAMPLES[type])).toBe(type);
@@ -133,6 +150,33 @@ describe('P18.4-T2 content sniffing — the accepted type a file’s first bytes
       const docx = Buffer.concat([bytes(0x50, 0x4b, 0x03, 0x04, 0x14, 0x00), text('word/document.xml')]);
       expect(sniffedContentType(XLSX, docx)).toBe(XLSX);
       expect(sniffedContentType(XLSX, bytes(0x50, 0x4b, 0x05, 0x06))).toBe(OCTET_STREAM);
+    });
+  });
+
+  describe('P19.21-T3 AC-6 a pitch material’s office formats and videos (ADR-0274)', () => {
+    it('P19.21-T3 AC-6 a zip is the PowerPoint or Word file it claims to be, and an xlsx under any other claim', () => {
+      expect(sniffedContentType(PPTX, SAMPLES[PPTX])).toBe(PPTX);
+      expect(sniffedContentType(DOCX, SAMPLES[DOCX])).toBe(DOCX);
+      expect(sniffedContentType('application/pdf', SAMPLES[PPTX])).toBe(XLSX);
+      expect(sniffedContentType(DOCX, bytes(0x50, 0x4b, 0x05, 0x06))).toBe(OCTET_STREAM);
+    });
+
+    it('P19.21-T3 AC-6 an OLE2 file is a .ppt or .doc only when claimed so — an .xls or an installer claimed otherwise is nothing', () => {
+      expect(sniffedContentType(PPT, SAMPLES[PPT])).toBe(PPT);
+      expect(sniffedContentType(DOC, SAMPLES[DOC])).toBe(DOC);
+      for (const claim of ['application/vnd.ms-excel', 'application/x-msi', XLSX, 'application/pdf', '']) {
+        expect([claim, sniffedContentType(claim, SAMPLES[DOC])]).toEqual([claim, OCTET_STREAM]);
+      }
+      expect(sniffedContentType(DOC, EXE)).toBe(OCTET_STREAM);
+      expect(sniffedContentType(PPT, SAMPLES[PPTX])).toBe(XLSX);
+    });
+
+    it('P19.21-T3 AC-6 a WebM by its EBML header; a QuickTime by its claim, else the MP4 its ftyp box always read as', () => {
+      expect(sniffedContentType('video/mp4', SAMPLES['video/webm'])).toBe('video/webm');
+      expect(sniffedContentType('video/quicktime', SAMPLES['video/quicktime'])).toBe('video/quicktime');
+      expect(sniffedContentType('video/quicktime', SAMPLES['video/mp4'])).toBe('video/quicktime');
+      expect(sniffedContentType('video/mp4', SAMPLES['video/quicktime'])).toBe('video/mp4');
+      expect(sniffedContentType('video/webm', bytes(0x1a, 0x45, 0xdf))).toBe(OCTET_STREAM);
     });
   });
 

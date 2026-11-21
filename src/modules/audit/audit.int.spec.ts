@@ -425,4 +425,70 @@ describe('GET /admin/audit — paged, filtered and grouped on the server (P19.2-
         .toEqual(['member.role_changed×1', 'leader_note.read×1', 'member.role_changed×1']);
     });
   });
+
+  /**
+   * **P19.23-T6 AC-1 (ADR-0279): the platform console's audit log** — *Semua KPM* is the platform's log and every Super
+   * Admin change inside a KPM; *Cari perubahan* narrows it by the words a line says; each line names its change, its KPM
+   * and its company.
+   */
+  describe('P19.23-T6 AC-1 the platform console', () => {
+    const SA_TWO = '66f0000000000000000000e9';
+    beforeEach(async () => {
+      const db = mongoose.connection.db!;
+      // ROOT is a Super Admin now; SA_TWO was one (granted, then revoked); OTHER never was.
+      await db.collection('users').updateOne({ _id: new mongoose.Types.ObjectId(ROOT_ID) }, { $set: { platformRole: 'super_admin' } });
+      await db.collection('users').insertOne({
+        _id: new mongoose.Types.ObjectId(SA_TWO), email: 'dina@agencyboost.test', fullName: 'Dina Kusuma', platformRole: 'none',
+      });
+    });
+
+    it('P19.23-T6 AC-1 Semua KPM: the platform’s rows and every Super Admin change in a KPM, a mirrored read once', async () => {
+      await write(0, { action: 'super_admin.revoked', targetCollection: 'users', targetId: SA_TWO });
+      await write(1, { kpmId: FIXTURE_KPM, actorUserId: ROOT_ID, action: 'ab_group_target.set', targetCollection: 'groups', targetId: 'g-1',
+        before: { target: 6 }, after: { target: 8 } });
+      await write(2, { kpmId: KPM_B, actorUserId: SA_TWO, action: 'member.role_changed', targetCollection: 'memberships', targetId: 'm-2' });
+      // The KPM's own Owner: their office's log only.
+      await write(3, { kpmId: FIXTURE_KPM, actorUserId: OTHER_ID, action: 'member.leader_changed', targetCollection: 'memberships', targetId: 'm-3' });
+      // A platform read is written in both logs: the platform's copy is the line.
+      await write(4, { kpmId: null, action: 'platform_read.kpm_data', targetCollection: 'kpms', targetId: FIXTURE_KPM });
+      await write(4, { kpmId: FIXTURE_KPM, action: 'platform_read.kpm_data', targetCollection: 'kpms', targetId: FIXTURE_KPM });
+
+      const body = (await read().expect(200)).body;
+      expect(shape(body)).toEqual(['super_admin.revoked×1', 'ab_group_target.set×1', 'member.role_changed×1', 'platform_read.kpm_data×1']);
+      expect(body.items[1]).toMatchObject({
+        change: '6 → 8',
+        kpm: { id: FIXTURE_KPM, code: '0417', branch: 'Surabaya' },
+        company: { id: PRU, name: 'Prudential' },
+        actorName: 'Superadmin',
+      });
+      // One KPM: its whole log, the Owner's change included.
+      expect(shape((await read(`?kpmId=${FIXTURE_KPM}`).expect(200)).body))
+        .toEqual(['ab_group_target.set×1', 'member.leader_changed×1', 'platform_read.kpm_data×1']);
+    });
+
+    it('P19.23-T6 AC-1 Cari perubahan: by who, by KPM, by company, by the action’s words and by a value the change names', async () => {
+      await write(1, { action: 'company.updated', targetId: MANU, after: { name: 'Manulife Baru' }, before: { name: 'Manulife' } });
+      await write(2, { kpmId: FIXTURE_KPM, action: 'kpm.suspended', targetCollection: 'kpms', targetId: FIXTURE_KPM,
+        after: { status: 'suspended', reason: 'langganan tidak dibayar' } });
+      await write(3, { action: 'company.created', actorUserId: OTHER_ID, targetId: PRU });
+
+      const q = async (text: string) => shape((await read(`?q=${encodeURIComponent(text)}`).expect(200)).body);
+      expect(await q('operator dua')).toEqual(['company.created×1']);
+      expect(await q('surabaya')).toEqual(['kpm.suspended×1']);
+      expect(await q('PRUDENTIAL')).toEqual(['kpm.suspended×1', 'company.created×1']);
+      expect(await q('ditangguhkan')).toEqual(['kpm.suspended×1']);
+      expect(await q('tidak dibayar')).toEqual(['kpm.suspended×1']);
+      expect(await q('manulife baru')).toEqual(['company.updated×1']);
+      // Read as text: a pattern's characters match nothing they do not spell.
+      expect(await q('.*')).toEqual([]);
+      // And with the other filters.
+      expect(shape((await read(`?q=prudential&action=company.created`).expect(200)).body)).toEqual(['company.created×1']);
+    });
+
+    it('P19.23-T6 AC-1 refuses a search longer than 100 characters, 400 naming q', async () => {
+      const refused = (await read(`?q=${'a'.repeat(101)}`).expect(400)).body;
+      expect(refused.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(refused.error.details)).toContain('q');
+    });
+  });
 });

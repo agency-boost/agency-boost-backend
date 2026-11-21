@@ -57,6 +57,15 @@ export const BRANDING = Object.freeze({
   FILE_UNVERSIONED_MAX_AGE_SECONDS: 300,
   /** The version's length: the first 12 hex digits of a SHA-1 over what the KPM shows. */
   VERSION_LENGTH: 12,
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274): what a KPM calls the app, in place of the word `DEFAULT_SYSTEM_NAME`
+   * on every screen and email its members read — trimmed, 1 to 40 characters, no control characters.
+   */
+  SYSTEM_NAME_MAX_LENGTH: 40,
+  /** The app's own name, and every KPM's system name until it sets one (`glossary.md`, *AgencyBoost*). */
+  DEFAULT_SYSTEM_NAME: 'AgencyBoost',
+  /** How long an email's read of a KPM's system name is kept, so a batch of invitations reads it once (ADR-0274). */
+  SYSTEM_NAME_CACHE_SECONDS: 60,
 });
 
 export type BrandingUploadKind = (typeof BRANDING.UPLOAD_KINDS)[number];

@@ -309,7 +309,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       expect(view.slots[0].checklist).toEqual(RECRUITMENT_PITCH_SLOTS[0].checklist.map((i) => ({ ...i, ticked: false })));
       expect(view.slots.slice(1).map((s) => s.checklist)).toEqual([[], [], [], [], []]);
       // The banner counts the four required: the two optional ones are not counted missing (ADR-0177 §3).
-      expect(view.summary).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+      expect(view.summary).toMatchObject({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
     });
 
     it('P17-T4 AC-5 a file’s name, its size as storage reported it, and its day in the office’s calendar', async () => {
@@ -327,6 +327,19 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
       const view = JSON.stringify(await read(KPM_A));
       expect(view).not.toContain(`mem-OWNER-${KPM_A}`);
       expect(view).not.toContain('byMembershipId');
+    });
+
+    it('P17-T4 AC-5 a file whose row holds no name, size or type still reads as the slot’s file, never as nothing', async () => {
+      // A row whose file fields are empty but its key is set: the attach always writes all four, so this is a row
+      // restored by hand, or one written before a field existed. The slot holds a file, and says so.
+      await db().collection('kpmRecruitmentPitchDocuments').insertOne({
+        kpmId: KPM_A, slot: 'proof', storageKey: `kpm/${KPM_A}/recruitment-pitch/proof.pdf`, fileName: null, mimeType: null,
+        bytes: null, linkUrl: null, uploadedAt: NOW, uploadedByMembershipId: null, confirmations: [], version: 1, deletedAt: null,
+      });
+      expect(await slotOf(KPM_A, 'proof')).toMatchObject({
+        state: 'uploaded', version: 1, link: null,
+        file: { name: '', bytes: 0, mimeType: '', uploadedOn: TODAY_IN_JAKARTA },
+      });
     });
 
     it('P17-T4 AC-5 a file uploaded with no name of its own reads as its slot’s title', async () => {
@@ -401,8 +414,9 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
 
     it.each([
-      ['an image', { mimeType: 'image/png' }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+      // An image became a pitch format on 2026-11-20 (P19.21-T3 AC-6, ADR-0274); a spreadsheet never was one.
       ['a spreadsheet', { mimeType: 'text/csv' }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+      ['a workbook', { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
       ['a type nobody accepts', { mimeType: 'application/zip' }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
       ['a PDF over 25 MB', { bytes: 25 * 1024 * 1024 + 1 }, 413, 'ASSET_TOO_LARGE'],
     ])('P17-T4 AC-2 refuses %s before anything is signed', async (_n, over, status, code) => {
@@ -435,7 +449,9 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
 
     it.each([
-      ['not a PDF', { storageKey: '', mimeType: 'image/png', bytes: 1024 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+      // P19.21-T3 AC-6: an image is a pitch format now; bytes that are no accepted type at all still are not.
+      ['no accepted type', { storageKey: '', mimeType: 'application/octet-stream', bytes: 1024 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+      ['a spreadsheet', { storageKey: '', mimeType: 'text/csv', bytes: 1024 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
       ['larger than 25 MB', { storageKey: '', mimeType: 'application/pdf', bytes: 26 * 1024 * 1024 }, 413, 'ASSET_TOO_LARGE'],
     ])('P17-T4 AC-2 refuses a file storage reports as %s — nothing attached', async (_n, stored, status, code) => {
       const key = await uploadTo(KPM_A, 'disguised.pdf');
@@ -494,7 +510,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
         // None ticked, "0/4 confirmed", the version moved, the banner's count with it.
         expect([ticked, replaced.state, replaced.checklist.filter((i) => i.ticked)]).toEqual([ticked, 'partial', []]);
         expect(replaced.version).toBe(held.version + 1);
-        expect((await read(KPM_A)).summary).toEqual({ done: 0, total: 4, missing: 3, unconfirmed: 1 });
+        expect((await read(KPM_A)).summary).toMatchObject({ done: 0, total: 4, missing: 3, unconfirmed: 1 });
         expect((await pitchRows())[0].confirmations).toEqual([]);
         // One audit entry, naming the slot, the file and the items it cleared.
         const entry = await db().collection('auditLog').find({ action: 'recruitment_pitch.attached' }).sort({ _id: -1 }).limit(1).next();
@@ -523,7 +539,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
         const entry = await db().collection('auditLog').findOne({ action: 'recruitment_pitch.attached', 'after.fileName': 'second.pdf' });
         expect(entry!.after).toMatchObject({ slot: code, clearedItems: [], version: 2 });
         expect((await asset(oldKey))!.refCount).toBe(0);
-        expect((await read(KPM_A)).summary).toEqual({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
+        expect((await read(KPM_A)).summary).toMatchObject({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
       },
     );
 
@@ -579,6 +595,36 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
         expect((await asset(key))!.refCount).toBe(0);
       });
 
+      it('P19.21-T3 AC-6 two first links to an empty slot: the second meets the unique index, is retried as an update and replaces the first', async () => {
+        const FIRST = 'https://example.com/first-video';
+        const SECOND = 'https://example.com/second-video';
+        // The second's write starts after both found the slot empty; the first's lands in between.
+        jest.spyOn(model(), 'findOneAndUpdate').mockImplementationOnce((() => ({
+          exec: async () => {
+            await wired.recruitmentPitch.setLink(owner(KPM_A), 'faq', FIRST);
+            throw duplicate();
+          },
+        })) as never);
+
+        const slot = await wired.recruitmentPitch.setLink(owner(KPM_A), 'faq', SECOND);
+
+        expect(slot).toMatchObject({ version: 2, file: null, link: { url: SECOND } });
+        expect(await pitchRows()).toMatchObject([{ slot: 'faq', linkUrl: SECOND, version: 2 }]);
+        const entries = await db().collection('auditLog').find({ action: 'recruitment_pitch.linked' }).sort({ _id: 1 }).toArray();
+        expect(entries.map((e) => [e.after.linkUrl, e.after.version, e.before?.linkUrl ?? null]))
+          .toEqual([[FIRST, 1, null], [SECOND, 2, FIRST]]);
+      });
+
+      it('P19.21-T3 AC-6 lets any other failure of a link’s write through, nothing written', async () => {
+        jest.spyOn(model(), 'findOneAndUpdate').mockImplementationOnce((() => ({
+          exec: async () => { throw new Error('the database went away'); },
+        })) as never);
+        await expect(wired.recruitmentPitch.setLink(owner(KPM_A), 'faq', 'https://example.com/deck'))
+          .rejects.toThrow('the database went away');
+        expect(await pitchRows()).toEqual([]);
+        expect(await db().collection('auditLog').countDocuments({ action: 'recruitment_pitch.linked' })).toBe(0);
+      });
+
       it('references a file once per slot that holds it: replacing and attaching back moves the counts by one each', async () => {
         const a = await uploadTo(KPM_A, 'a.pdf');
         const b = await uploadTo(KPM_A, 'b.pdf');
@@ -628,7 +674,7 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     it('P17-T4 AC-4 all four ticked is complete, and the banner counts it done', async () => {
       const slot = await attachTo(KPM_A, 'opportunity', 'o.pdf');
       for (const item of ['career-path', 'income', 'support', 'commitment']) await tick(KPM_A, 'opportunity', item, true, slot.version);
-      expect((await read(KPM_A)).summary).toEqual({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
+      expect((await read(KPM_A)).summary).toMatchObject({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
       expect((await slotOf(KPM_A, 'opportunity')).state).toBe('complete');
     });
 
@@ -816,20 +862,24 @@ describe('recruitment tools across offices and companies (Phase 17)', () => {
     });
 
     it('P18.9-T5 AC-3 uploading and replacing an optional document moves nothing on the banner, at 0 of 4 or at 4 of 4', async () => {
-      const before = (await read(KPM_A)).summary;
+      // The four's counts (ADR-0177 §3); `all`, over six, does move — P19.21-T3 AC-6's *n/6 materi siap* (ADR-0274).
+      const fourOf = ({ done, total, missing, unconfirmed }: { done: number; total: number; missing: number; unconfirmed: number }) =>
+        ({ done, total, missing, unconfirmed });
+      const before = fourOf((await read(KPM_A)).summary);
       expect(before).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
       for (const code of OPTIONAL) {
         await attachTo(KPM_A, code, `${code}.pdf`);
-        expect([code, (await read(KPM_A)).summary]).toEqual([code, before]);
+        expect([code, fourOf((await read(KPM_A)).summary)]).toEqual([code, before]);
       }
       await attachTo(KPM_A, 'company', 'company-v2.pdf');
-      expect((await read(KPM_A)).summary).toEqual(before);
+      expect(fourOf((await read(KPM_A)).summary)).toEqual(before);
+      expect((await read(KPM_A)).summary.all).toEqual({ ready: 2, total: 6, missing: 4, unconfirmed: 0 });
 
       // An office with its four done is complete with neither optional document, and still with both.
       await fourDone(KPM_B);
-      expect((await read(KPM_B)).summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+      expect((await read(KPM_B)).summary).toMatchObject({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
       for (const code of OPTIONAL) await attachTo(KPM_B, code, `${code}.pdf`);
-      expect((await read(KPM_B)).summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+      expect((await read(KPM_B)).summary).toMatchObject({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
     });
 
     it('P18.9-T5 AC-2 another office’s optional document is 404 — its link and an attach naming its file — with nothing written', async () => {

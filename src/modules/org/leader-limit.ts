@@ -10,6 +10,7 @@ import { can } from '@/modules/rbac/permissions';
 import type { KpmDocument } from '@/modules/tenants/kpm.schema';
 import type { MembershipRepository } from './membership.repository';
 import type { MembershipDocument } from './membership.schema';
+import { NOT_A_TEST_ACCOUNT } from './counted-members';
 import { LEADER_LIMIT_REFUSALS, type StaleReason } from './leader-limit.messages';
 
 /**
@@ -28,9 +29,12 @@ import { LEADER_LIMIT_REFUSALS, type StaleReason } from './leader-limit.messages
  * Both build their query from {@link leadersUsedFilter}, so they cannot count differently.
  */
 
-/** The filter that is the metric. Soft-deleted rows are excluded by whoever applies it. */
+/**
+ * The filter that is the metric. Soft-deleted rows are excluded by whoever applies it. **A test account is never a
+ * leader used** (P19.23-T5 AC-4; ADR-0267 §1, `counted-members.ts`): the limit a KPM pays for counts real people only.
+ */
 export function leadersUsedFilter(): FilterQuery<MembershipDocument> {
-  return { status: 'active', role: { $in: [...LEADER_CLASSES] } };
+  return { status: 'active', role: { $in: [...LEADER_CLASSES] }, ...NOT_A_TEST_ACCOUNT };
 }
 
 /** *Leaders used* in the caller's own office, through the tenant-scoped repository. */

@@ -605,4 +605,33 @@ describe('P18.5-T2 — a leader past the limit waits for AgencyBoost', () => {
       expect(await members.findById(office(KPM_B), other)).toBeNull();
     });
   });
+
+  describe('P19.23-T3 Persetujuan names the KPM with its company, and who decided (ADR-0277)', () => {
+    it('P19.23-T3 AC-2 the queue carries the company, and a decided row the Super Admin who decided it', async () => {
+      const withCompanies = new LeaderLimitRequestService(
+        new LeaderLimitRequestRepository(rows as never), members, hierarchy, roles, approvals, users as never,
+        kpms as never, new AuditService(audits as never), { send: async () => undefined } as never, new FixedClock(NOW),
+        mongoose.model(Company.name) as never,
+      );
+      const root = await users.create({
+        email: 'dina@agencyboost.test', passwordHash: 'x', fullName: 'Dina Kusuma', status: 'active',
+        platformRole: 'super_admin',
+      });
+      const asked = await withCompanies.create(await asOwner(), other, promote);
+      expect((await withCompanies.queue(SA))[0]).toMatchObject({
+        requestId: asked.requestId, companyName: 'Prudential', kpmBranchName: 'Branch 0602', decidedByName: null,
+      });
+      await withCompanies.decline(
+        RequestContext.platform(String(root._id)).withReader(SOURCE_READER), asked.requestId, { reason: 'Naikkan paket.' },
+      );
+      expect((await withCompanies.queue(SA))[0]).toMatchObject({
+        status: 'declined', decidedByName: 'Dina Kusuma', decidedAt: NOW.toISOString(), companyName: 'Prudential',
+      });
+    });
+
+    it('P19.23-T3 AC-2 built without the companies (a spec by hand), the company is empty, never a failure', async () => {
+      await service.create(await asOwner(), other, promote);
+      expect((await service.queue(SA))[0]).toMatchObject({ companyName: '' });
+    });
+  });
 });

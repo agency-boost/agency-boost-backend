@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -9,7 +9,9 @@ import { render } from '@/common/i18n/sentence';
 import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import { AvatarLinks } from '@/modules/users/avatar.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { NOT_A_TEST_ACCOUNT } from './counted-members';
 import { initialsOf } from './directory.service';
 import { MembershipHistoryRepository } from './org.repositories';
 import { MembershipRepository } from './membership.repository';
@@ -29,6 +31,8 @@ export interface DelegatedAdmin {
   grantedByName: string | null;
   /** Whether the reader may take it away. False for the Owner's own row. */
   canRevoke: boolean;
+  /** **Their photo, signed** (P19.20-T4 AC-2; `DESIGN-RULES.md`, *Names*), or `null` — the row draws initials. */
+  photoUrl: string | null;
 }
 
 /**
@@ -56,6 +60,8 @@ export class AdminDelegationService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly clock: Clock,
+    /** Each admin's photo as a signed link (P19.20-T4 AC-2). Optional: without it every row draws initials. */
+    @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
   ) {}
 
   private requireOffice(ctx: RequestContext): string {
@@ -74,7 +80,8 @@ export class AdminDelegationService {
 
     const rows = await this.members.find(
       ctx,
-      { 'adminAccess.isKpmAdmin': true, status: { $ne: 'removed' } },
+      // Never a test account (P19.20-T4; ADR-0267 §1): not listed.
+      { 'adminAccess.isKpmAdmin': true, status: { $ne: 'removed' }, ...NOT_A_TEST_ACCOUNT },
       { sort: { agentSeq: 1 } },
     );
     if (rows.length === 0) return [];
@@ -83,7 +90,9 @@ export class AdminDelegationService {
       ...rows.map((r) => r.userId),
       ...rows.map((r) => r.adminAccess?.grantedByUserId).filter((u): u is string => !!u),
     ]);
-    const isOwner = Boolean(ctx.membership?.isKpmOwner);
+    const photos = await this.photosFor(rows.map((r) => r.userId));
+    // The Owner revokes — and the Super Admin inside the KPM, as its Owner (ADR-0268 §3), who is on no list of it.
+    const isOwner = Boolean(ctx.membership?.isKpmOwner) || ctx.isSuperAdminInKpm;
     // A person whose account is gone is still named — in the reader's language (P18.10-T5 AC-4).
     const unknown = render(ORG_MESSAGES.unknownName, ctx.reader);
 
@@ -100,6 +109,7 @@ export class AdminDelegationService {
         // Null for the seeded Owner, who was never granted it by anybody.
         grantedByName: grantedBy ? (named.get(grantedBy) ?? unknown) : null,
         canRevoke: isOwner && String(row._id) !== ctx.membershipId,
+        photoUrl: photos.get(row.userId) ?? null,
       };
     });
   }
@@ -256,5 +266,18 @@ export class AdminDelegationService {
   private async namesFor(userIds: string[]): Promise<Map<string, string>> {
     const found = await this.users.find({ _id: { $in: [...new Set(userIds)] } }).exec();
     return new Map(found.map((u) => [String(u._id), u.fullName]));
+  }
+
+  /** Each account's photo as a signed link, by user id (P19.20-T4 AC-2); none without `AvatarLinks`. */
+  private async photosFor(userIds: string[]): Promise<Map<string, string>> {
+    if (!this.avatarLinks) return new Map();
+    const found = await this.users.find({ _id: { $in: [...new Set(userIds)] } }).select('avatarUrl').exec();
+    const links = await this.avatarLinks.linksFor(found.map((u) => u.avatarUrl));
+    const out = new Map<string, string>();
+    for (const u of found) {
+      const link = u.avatarUrl ? links.get(u.avatarUrl) : undefined;
+      if (link) out.set(String(u._id), link);
+    }
+    return out;
   }
 }

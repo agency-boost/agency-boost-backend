@@ -151,6 +151,11 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'ACTIVATION_COMPLETION_PCT', name: 'Activation completion', unit: 'percentage', phase: '13' },
   { key: 'ACTIVATION_DAY_INDEX', name: 'Activation day', unit: 'days', phase: '13' },
   { key: 'TRAINING_COMPLETION_PCT', name: 'Training completion', unit: 'percentage', phase: '18.2' },
+  /*
+   * P19.25-T4 AC-2 (ADR-0282 §2): Pengaturan › Training's *"n dari 30 selesai"* — about one module across the KPM, so
+   * nobody could qualify by it: `requirable: false`, as the headcount is.
+   */
+  { key: 'TRAINING_MODULE_DONE_COUNT', name: 'Members who finished a module', unit: 'count', phase: '19.25', requirable: false },
   { key: 'EVENT_ATTENDANCE_STATUS', name: 'Event attendance status', unit: 'enum', phase: '18.2' },
   /*
    * *Moved 2026-10-09 (P18-T0, D-registry): 18 → 18.2.* Every reader of theirs is the compliance, events and
@@ -159,6 +164,12 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    */
   { key: 'EVENT_ATTENDANCE_RATE', name: 'Event attendance rate', unit: 'percentage', phase: '18.2' },
   { key: 'EVENT_NPS', name: 'Event NPS', unit: 'score', phase: '18.2' },
+  /*
+   * P19.25-T1, T2 (ADR-0281 §1, §3, §5): Advanced analytics › *Event*'s reading of attendance — `EVENT_ATTENDANCE_STATUS =
+   * attended` read as *hadir* or *tidak hadir* over the people expected, a share over the period's recorded events. About
+   * an event or a group over a period, so nobody could qualify by it: `requirable: false`, as `EVENT_NPS_FOR_PERIOD` is.
+   */
+  { key: 'EVENT_KEHADIRAN', name: 'Kehadiran — hadir or tidak hadir', unit: 'percentage', phase: '19.25', requirable: false },
   { key: 'CAMPAIGN_QUALIFICATION_STATUS', name: 'Campaign qualification', unit: 'enum', phase: '18.2' },
   { key: 'MOC_STATUS', name: 'Maintenance of Contract', unit: 'boolean', phase: '18' },
   { key: 'PRODUCTION_CLUB_TIER', name: 'Production club tier', unit: 'enum', phase: '18' },
@@ -281,8 +292,8 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    * switch, a tab's mark and a kandidat are nothing a campaign requirement names. No key holds `ACTIVE_AGENT`.
    */
   { key: 'LEAD_POTENSI_THIS_MONTH', name: 'Potensi', unit: 'boolean', phase: '19.1', requirable: false },
-  { key: 'AA_THIS_MONTH', name: 'AA (the Potensi tab’s)', unit: 'boolean', phase: '19.1', requirable: false },
-  { key: 'REKRUT_THIS_MONTH', name: 'Rekrut', unit: 'boolean', phase: '19.1', requirable: false },
+  // `AA_THIS_MONTH` (*AA*, the Potensi tab's) and `REKRUT_THIS_MONTH` (*Rekrut*), 19.1, were here: retired by ADR-0271 §8
+  // (P19.18-T3) — the tab reads `MONTHLY_ACTIVE_AGENT` and `RECRUITS_JOINED` (ADR-0267 §2–3), one definition each.
   /*
    * Phase 19.3 (P19.3-T1; ADR-0201 to ADR-0203, the owner's data sources of 3 November): four named metrics.
    *
@@ -308,6 +319,12 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
   { key: 'QUAL_PERSON_ISSUE_COUNT', name: 'Items with an issue, per person', unit: 'count', phase: '19.5', requirable: false },
   { key: 'QUAL_LEADER_SUPPORT', name: 'Leader support', unit: 'percentage', phase: '19.5', requirable: false },
   { key: 'QUAL_COACHING_DOWNLINE_PCT', name: 'Coaching downline', unit: 'percentage', phase: '19.5', requirable: false },
+  /*
+   * Phase 19.22 (P19.22-T6, T7; ADR-0276 §1, §5; `modules/surveys/survey-results.ts`, `survey-person.ts`): NPS's headline,
+   * the run's first question, and *Per orang*'s *n item* — items with an issue, a unit item counted once.
+   */
+  { key: 'NPS_KPM_OVERALL', name: 'Survey NPS, whole KPM', unit: 'score', phase: '19.22', requirable: false },
+  { key: 'QUAL_PERSON_ISSUE_ITEMS', name: 'Problem items, per person', unit: 'count', phase: '19.22', requirable: false },
   /*
    * Phase 19.5 (P19.5-T2; ADR-0214 §10, §11): **the Data upload's month and its calculated year to date**
    * (`modules/production/upload-completeness.ts`, `production-readings.ts`'s `sumHeld`). Neither is requirable: a state of an
@@ -358,6 +375,26 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    * owns (`domain/metrics/unit-view.ts`). Not requirable: a count about a leader's tags, nobody's achievement.
    */
   { key: 'ABS_NOT_IN_INFORMAL_GROUP', name: 'ABs not in your group', unit: 'count', phase: '19.12', requirable: false },
+  /*
+   * Phase 19.17 (P19.17-T1; ADR-0267 §3 to §5; `revisions/2026-11-19/DATA-DEFINITIONS.md`): **one definition per number
+   * the 19 November pages show** — *Recruitment* / *Rekrut* (new hires who joined in the period, credited to whoever
+   * registered them, `modules/org/recruits.ts`), the usage of the app per person (`domain/metrics/usage.ts`) and the
+   * coaching status tile (`domain/metrics/coaching-status.ts`). None is requirable: figures and states about people on the
+   * owner's and the leaders' pages, registered after campaign evaluation. None names `ACTIVE_AGENT`: *Active Agent* is
+   * `MONTHLY_ACTIVE_AGENT`, unchanged (ADR-0267 §2).
+   */
+  { key: 'RECRUITS_JOINED', name: 'Recruitment', unit: 'count', phase: '19.17', requirable: false },
+  { key: 'APP_USE_IN_PERIOD', name: 'Pakai', unit: 'boolean', phase: '19.17', requirable: false },
+  { key: 'APP_EVER_USED', name: 'Pernah pakai', unit: 'boolean', phase: '19.17', requirable: false },
+  { key: 'APP_USED_LAST_14D', name: 'Pakai 14 hari terakhir', unit: 'boolean', phase: '19.17', requirable: false },
+  { key: 'POWER_USER', name: 'Power user', unit: 'boolean', phase: '19.17', requirable: false },
+  { key: 'COACHING_STATUS', name: 'Coaching status', unit: 'enum', phase: '19.17', requirable: false },
+  /*
+   * Phase 19.19 (P19.19-T3 AC-2; ADR-0272 §6; OD-395): the KPM Overview's new *Leads Mgmt* compliance card — of the
+   * members in scope, those whose every open lead carries a next action that is not overdue (`leads-managed.ts`). Not
+   * requirable: a share of a set of members, like the other compliance rates.
+   */
+  { key: 'MANAGED_LEADS_RATE', name: 'Leads managed', unit: 'percentage', phase: '19.19', requirable: false },
 ];
 
 /**

@@ -30,6 +30,15 @@ export const ASSET_LIMITS = {
     'video/mp4',
     'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/html',
+    // P19.21-T3 AC-6 (ADR-0274): a recruitment pitch material is any format — PowerPoint, Word, WebM and QuickTime
+    // video join the vocabulary. Only `PITCH_MATERIAL_MIME_TYPES` and, since P19.25-T4 (ADR-0282 §3), a training
+    // module's `TRAINING_FILE_MIME_TYPES` name them; no other route accepts one.
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'video/webm',
+    'video/quicktime',
   ] as const,
   /** 300 seconds. Nothing in storage is publicly readable, so every read is a signed, expiring URL. */
   SIGNED_URL_TTL_SECONDS: 300,
@@ -54,6 +63,12 @@ export const DOCUMENT_MIME_TYPES = ['application/pdf', HTML_MIME_TYPE] as const;
  * **A training module's material** (P5-T2, ADR-0032; P19.6-T2, ADR-0217 §1): the route that signs a module's *File*
  * — the office's, `POST /kpm/settings/training/uploads`, and the template's (ADR-0208 §1) — takes the list it always
  * took, the images, a PDF, a CSV, a workbook and the *Video* slot's MP4, **and an HTML lesson**.
+ *
+ * *Widened 2026-11-20 (P19.25-T4 AC-2, ADR-0282 §3; the brief's "Unggah materi (any format)"):* **and the pitch's other
+ * formats** (`PITCH_MATERIAL_MIME_TYPES`, ADR-0274) — PowerPoint and Word, new and old, and WebM and QuickTime video. An
+ * office document is confirmed by its container and always served as an attachment (`gcs.adapter.ts`); HTML stays
+ * drawn only in the sandboxed frame (ADR-0217). Listed here, not spread from `OFFICE_DOCUMENT_MIME_TYPES`, which is
+ * declared below it.
  */
 export const TRAINING_FILE_MIME_TYPES = [
   'image/jpeg', 'image/png', 'image/webp',
@@ -61,14 +76,52 @@ export const TRAINING_FILE_MIME_TYPES = [
   'video/mp4',
   'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   HTML_MIME_TYPE,
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'video/webm',
+  'video/quicktime',
 ] as const;
 
 /**
  * **What a route that names no list of its own accepts: the vocabulary without HTML** (ADR-0217 §1). HTML runs a
  * script, so it is accepted only where a route says so — the four of ADR-0217's table — and never by default.
  */
-export const DEFAULT_UPLOAD_MIME_TYPES: readonly string[] = ASSET_LIMITS.ALLOWED_MIME_TYPES
-  .filter((type) => type !== HTML_MIME_TYPE);
+export const DEFAULT_UPLOAD_MIME_TYPES: readonly string[] = [
+  'image/jpeg', 'image/png', 'image/webp',
+  'application/pdf',
+  'video/mp4',
+  'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+
+/**
+ * **The office formats a pitch material may be** (P19.21-T3 AC-6, ADR-0274): PowerPoint and Word, new and old. Their
+ * bytes cannot tell one from another — a `.pptx` and a `.docx` are both zips, a `.ppt` and a `.doc` both OLE2 compound
+ * files — so `content-sniff.ts` names them by the claim and checks the container, and storage serves every one as an
+ * attachment named with its own extension (`gcs.adapter.ts`), never inline.
+ */
+export const OFFICE_DOCUMENT_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+] as const;
+
+/**
+ * **A recruitment pitch material: any format the owner named** (P19.21-T3 AC-6, ADR-0274 — *"PDF, PowerPoint, Word,
+ * gambar, video, atau link"*): a PDF, an HTML page (still drawn only in the sandboxed frame, ADR-0217), PowerPoint and
+ * Word, an image, and a video (MP4, WebM, QuickTime). A link is not a file and is not here. **No malware scan in v1**
+ * (ADR-0040): the type is checked by the bytes (`content-sniff.ts`), and every office document downloads as an
+ * attachment; PDFs, images and videos open inline, as they always did.
+ */
+export const PITCH_MATERIAL_MIME_TYPES = [
+  'application/pdf',
+  HTML_MIME_TYPE,
+  ...OFFICE_DOCUMENT_MIME_TYPES,
+  'image/jpeg', 'image/png', 'image/webp',
+  'video/mp4', 'video/webm', 'video/quicktime',
+] as const;
 
 /**
  * **A person's profile photo** (UI V1, UI-111; `metrics-and-definitions.md` §B.9): the square the screen crops it to

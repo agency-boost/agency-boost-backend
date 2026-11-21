@@ -174,8 +174,12 @@ describe('the Unit Dashboard, measured (P15-T1 AC-8)', () => {
     expect(large.queries.sort()).toEqual(small.queries.sort());
     // eslint-disable-next-line no-console
     console.log(`  unit dashboard: ${large.queries.length} queries per read — ${large.queries.join(', ')}`);
-    // 31 since P19.12-T6: the head's own groups, read once whatever the roster, for *Grup informal* (ADR-0249).
-    expect(large.queries.length).toBeLessThanOrEqual(31);
+    // 31 since P19.12-T6: the head's own groups, read once whatever the roster, for *Grup informal* (ADR-0249). 38 since
+    // P19.18-T1 (ADR-0271 §3, §5, §6): the period's leads, the month's potensi, the last 7 days' activity, *Active Agent*'s
+    // cells and months, and *Recruitment*'s new hires — each once, whatever the roster. 40 as measured by the integration
+    // review of Phases 19.17–19.25 (20 November 2026): two more constant reads from the phases after P19.18-T1, still the
+    // same for fifty people as for five hundred (the equality above); the owning phase is to name them here.
+    expect(large.queries.length).toBeLessThanOrEqual(40);
     // The read entries are one insert, whatever the roster: never one per member shown.
     expect(large.queries.filter((q) => q.startsWith('auditLog.')).length).toBeLessThanOrEqual(1);
   });

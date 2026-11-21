@@ -1,4 +1,6 @@
 import { ACTIVATION, ACTIVATION_3M, PERFORMANCE, RATIO_BENCHMARKS, TIME } from '@/domain/constants';
+import { COACHING_STATUS } from '@/domain/constants/coaching-status';
+import { USAGE } from '@/domain/constants/usage';
 import { METRIC_REGISTRY as SERVED, type MetricUnit, type Phase } from '@/domain/constants/metrics';
 
 /**
@@ -222,6 +224,8 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   ACTIVATION_COMPLETION_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
   ACTIVATION_DAY_INDEX: { period: 'PROGRAMME_WINDOW', threshold: ACTIVATION.WINDOW_DAYS },
   TRAINING_COMPLETION_PCT: { period: 'POINT_IN_TIME', threshold: null },
+  // P19.25-T4 AC-2 (ADR-0282 §2): counted members done on one module, now — `TrainingModuleFacts` its one reader.
+  TRAINING_MODULE_DONE_COUNT: { period: 'POINT_IN_TIME', threshold: null },
   /*
    * P18.2-T5, T6 — **per event, never per member**, so none of the three is campaign-evaluable (D-evaluable). Each is
    * computed in one place: the status (with D-status's `unconfirmed`; only a confirmation makes `attended`, OD-31) and
@@ -231,6 +235,9 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   EVENT_ATTENDANCE_STATUS: { period: 'POINT_IN_TIME', threshold: null },
   EVENT_ATTENDANCE_RATE: { period: 'POINT_IN_TIME', threshold: null },
   EVENT_NPS: { period: 'POINT_IN_TIME', threshold: null },
+  // P19.25-T1, T2 (ADR-0281): the year to date or one calendar month, as `EVENT_NPS_FOR_PERIOD`; `event-kehadiran.ts` computes it,
+  // `EventAnalytics` its one reader. Its colours are `EVENT_KEHADIRAN`'s bands, not a threshold a member is judged against.
+  EVENT_KEHADIRAN: { period: 'CALENDAR_YEAR', threshold: null },
   /*
    * **The campaign's own window** (§A.6's definition; D-period, carry #3): it read `CALENDAR_MONTH` until P18.2-T8, the
    * first task to compute it, against its own definition. A campaign's window is its dates, a calendar year, or the
@@ -359,8 +366,7 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- The Unit Dashboard's *Potensi* tab (Phase 19.1, P19.1-T6; ADR-0193; `potensi.ts`) ----
   // Each over the office's calendar month, Asia/Jakarta: a new month reads off at 00:00 WIB on the 1st, nothing having run.
   LEAD_POTENSI_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
-  AA_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
-  REKRUT_THIS_MONTH: { period: 'CALENDAR_MONTH', threshold: null },
+  // `AA_THIS_MONTH` and `REKRUT_THIS_MONTH` retired (ADR-0271 §8, P19.18-T3): `MONTHLY_ACTIVE_AGENT`, `RECRUITS_JOINED`.
 
   // ---- The owner's data sources of 3 November (Phase 19.3, P19.3-T1; ADR-0201 to ADR-0203) ----
   // `NET_APE`'s definition under its own name: the calendar year to date, through the latest month held (`moc-inputs.ts`).
@@ -404,6 +410,9 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   QUAL_PERSON_ISSUE_COUNT: { period: 'PROGRAMME_WINDOW', threshold: null },
   QUAL_LEADER_SUPPORT: { period: 'PROGRAMME_WINDOW', threshold: null },
   QUAL_COACHING_DOWNLINE_PCT: { period: 'PROGRAMME_WINDOW', threshold: null },
+  // P19.22-T6, T7 (ADR-0276 §1, §5): NPS's headline and *Per orang*'s *n item*, each over the run.
+  NPS_KPM_OVERALL: { period: 'PROGRAMME_WINDOW', threshold: null },
+  QUAL_PERSON_ISSUE_ITEMS: { period: 'PROGRAMME_WINDOW', threshold: null },
 
   // ---- The proposal (Phase 19.7, P19.7-T2; ADR-0221 §7; `proposals-made.ts`) ----
   // Over the Unit Dashboard's window (`7d`, `month`, `year`), the office's calendar; its default period is the month.
@@ -416,6 +425,21 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- The Unit Dashboard's views (Phase 19.12, P19.12-T6; ADR-0249 §4; `unit-view.ts`) ----
   // The tags as they stand now: the ABs below a head in no live group of theirs.
   ABS_NOT_IN_INFORMAL_GROUP: { period: 'POINT_IN_TIME', threshold: null },
+
+  // ---- One definition per number (Phase 19.17, P19.17-T1; ADR-0267 §3 to §5) ----
+  // Over the period a page picks, the month by default, its join dates office dates (`recruits.ts`).
+  RECRUITS_JOINED: { period: 'CALENDAR_MONTH', threshold: null },
+  // *Pakai* over the page's period; *Pernah pakai* ever; *Pakai 14 hari terakhir* and the status tile as of the office's
+  // today, each against its own fixed days (`usage.ts`, `coaching-status.ts`); *Power user* over the last 30 days.
+  APP_USE_IN_PERIOD: { period: 'CALENDAR_MONTH', threshold: null },
+  APP_EVER_USED: { period: 'POINT_IN_TIME', threshold: null },
+  APP_USED_LAST_14D: { period: 'POINT_IN_TIME', threshold: USAGE.RECENT_MAX_DAYS },
+  POWER_USER: { period: 'ROLLING_30D', threshold: USAGE.POWER_USER_MIN_DAYS },
+  COACHING_STATUS: { period: 'POINT_IN_TIME', threshold: COACHING_STATUS.RECENT_MAX_DAYS },
+
+  // ---- The KPM Overview's second version (Phase 19.19, P19.19-T3; ADR-0272 §6) ----
+  // As of the office's today: each open lead's next action set and not before it (`leads-managed.ts`).
+  MANAGED_LEADS_RATE: { period: 'POINT_IN_TIME', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

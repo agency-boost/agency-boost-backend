@@ -8,6 +8,7 @@ import { field } from '@/common/validation/violations';
 import { SURVEY_ROLE_CLASSES, type SurveyRoleClass } from '@/domain/constants';
 import type { ReminderMoment } from './survey-participation.schema';
 import type { SurveyKind } from './survey-run.schema';
+import { SURVEY_WHO, type SurveyWho } from './survey-results';
 import { SURVEY_REFUSALS } from './surveys.messages';
 
 const SAY = SURVEY_REFUSALS.VALIDATION_FAILED;
@@ -99,6 +100,20 @@ export class UpdateSurveyRunDto {
 /** The results' run: absent, the newest that has opened. */
 export class SurveyResultsQueryDto {
   @ApiPropertyOptional({ description: 'A run of this KPM’s, by id.' })
+  @IsOptional()
+  @IsMongoId()
+  runId?: string;
+
+  /** P19.22-T6 AC-1, T7 AC-1 (ADR-0276 §3): *Semua | Leader | Agent*. */
+  @ApiPropertyOptional({ enum: SURVEY_WHO, description: '*Semua · Leader · Agent* — the leaders are the ABs and AABs. Default `all`.' })
+  @IsOptional()
+  @IsIn([...SURVEY_WHO])
+  who?: SurveyWho;
+}
+
+/** *Per orang*'s reads (P19.22-T7 AC-3): a run of this KPM's, else the newest that opened. */
+export class SurveyPeopleQueryDto {
+  @ApiPropertyOptional({ description: 'A qualitative run of this KPM’s, by id.' })
   @IsOptional()
   @IsMongoId()
   runId?: string;

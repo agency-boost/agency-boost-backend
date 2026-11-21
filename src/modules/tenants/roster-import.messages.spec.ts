@@ -22,6 +22,9 @@ const CASES: [entry: keyof typeof W, sentence: Message, id: string][] = [
   ['noEmail', W.noEmail, 'Tanpa email: belum bisa diundang, jadi baris ini dilewati.'],
   ['ownerRole', W.ownerRole, 'Dia pemilik KPM ini, jadi perannya tidak diubah lewat impor.'],
   ['stillLeads', W.stillLeads({ count: 3 }), '3 orang melapor kepadanya. Pindahkan mereka ke leader lain terlebih dahulu.'],
+  // P19.20-T5 AC-4 (ADR-0268 §1): a core leader's import reaches their own downline only.
+  ['notInYourDownline', W.notInYourDownline, 'Anda hanya dapat mengubah anggota di bawah Anda dalam downline Anda. Minta KPM Owner untuk mengubah baris ini.'],
+  ['uplineNotInYourDownline', W.uplineNotInYourDownline, 'Upline harus Anda sendiri atau anggota di downline Anda.'],
   ['cell', W.cell({ column: 'Tanggal lahir', problem: 'x' }), 'Tanggal lahir: x'],
   ['notAPhone', W.notAPhone({ value: '12ab' }), '"12ab" bukan nomor WhatsApp.'],
   ['notAJoinDate', W.notAJoinDate({ value: '31/02/2020' }), '"31/02/2020" bukan tanggal. Tulis dengan format DD/MM/YYYY atau YYYY-MM-DD.'],

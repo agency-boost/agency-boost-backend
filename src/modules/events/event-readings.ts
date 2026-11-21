@@ -149,7 +149,8 @@ export class EventReadings {
     for (const { facts: event, question } of events) {
       const byMember = rowsOf.get(event.id)!;
       const answered = answeredOf.get(event.id)!;
-      const attendanceRows = audience.audienceOf(question).map((membershipId): AttendanceRow => {
+      // The audience as the office counts it: test accounts in no roll call, rate or tree (ADR-0267 §1; ADR-0281 §1).
+      const attendanceRows = audience.countedAudienceOf(question).map((membershipId): AttendanceRow => {
         const row = byMember.get(membershipId);
         const facts = this.rowFacts(row);
         return {
@@ -182,7 +183,8 @@ export class EventReadings {
     const loaded = await this.load(ctx, eventId);
     if (!loaded) return null;
     const { event, question, audience, rows, answers } = loaded;
-    const inAudience = new Set(audience.audienceOf(question));
+    // A test account's answer is counted nowhere (ADR-0267 §1; ADR-0281 §1).
+    const inAudience = new Set(audience.countedAudienceOf(question));
     const byMember = new Map(rows.map((row) => [row.membershipId, row]));
     const readingRows = answers
       .filter((answer) => inAudience.has(answer.membershipId))

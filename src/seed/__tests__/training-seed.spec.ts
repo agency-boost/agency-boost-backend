@@ -10,6 +10,7 @@ import { StubStorage } from '../../../test/stub-storage';
 import { seedDemo, type SeedResult } from '../demo';
 import { SNIFF_SAMPLE_BYTES, sniffedContentType } from '@/modules/assets/content-sniff';
 import { demonstrationLesson, TRAINING_SEED_LESSON, TRAINING_SEED_LINK } from '../training-fixture';
+import { TRAINING_TREE_PROGRESS } from '../training-tree-fixture';
 
 /** A seeded module's title, as the seed gives it — in Bahasa Indonesia since P18.10-T7 (OD-238). */
 const titleOf = (code: string) => SEED_TRAINING_MODULES.find((m) => m.code === code)!.title;
@@ -75,11 +76,14 @@ describe('Phase 18.2 the training seed — a run at 10:00 on 10 October 2026 in 
     // *Amended 2026-10-10 (P18.3-T3 AC-1):* the compliance fixture adds twenty-five rows for Phase 18's cast in 0417
     // (`compliance-seed.spec.ts`), beside this fixture's forty-nine for the coaching cast.
     const compliance = 25;
-    expect(await col('trainingProgress').countDocuments({ kpmId: kpm0417 })).toBe(49 + compliance);
+    // *Amended 2026-11-20 (P19.25-T4, ADR-0282):* the training tree's progress on the four other categories' modules —
+    // Agus's, Siti's, Rina's and Dewi's (`training-tree-fixture.ts`) — in 0417 too.
+    const tree = Object.values(TRAINING_TREE_PROGRESS).reduce((n, p) => n + p.done.length + p.inProgress.length, 0);
+    expect(await col('trainingProgress').countDocuments({ kpmId: kpm0417 })).toBe(49 + compliance + tree);
     expect(await col('trainingProgress').countDocuments({ kpmId: kpm0555 })).toBe(3);
-    expect(await col('trainingProgress').countDocuments({})).toBe(52 + compliance);
+    expect(await col('trainingProgress').countDocuments({})).toBe(52 + compliance + tree);
     expect(seeded.training.files).toBe('skipped: storage is not configured');
-    expect(seeded.written.trainingProgress).toBe(52 + compliance);
+    expect(seeded.written.trainingProgress).toBe(52 + compliance + tree);
     expect(seeded.compliance.written - 1).toBe(compliance);
   });
 
@@ -162,7 +166,10 @@ describe('Phase 18.2 the training seed — a run at 10:00 on 10 October 2026 in 
     const checklist = await wired.activation.read(owner);
     const links = checklist.published!.aspects.flatMap((a) => a.items).map((i) => i.autoLink).filter((l) => l?.startsWith('training:'));
     expect(links).toEqual([]);
-    expect((await wired.config.state(owner)).hasUnpublishedChanges).toBe(false);
+    // *Amended 2026-11-20 (P19.21-T2; ADR-0274 §8):* each setting publishes on its own, and the Pengaturan hub's seed
+    // leaves *Activity types* changed after its publish (`settings-hub-fixture.ts`). Training's bar, and every other, is silent.
+    expect((await wired.config.state(owner)).settings.filter((s) => s.hasUnpublishedChanges).map((s) => s.setting))
+      .toEqual(['activity_types']);
   });
 
   it('P19.4-T1 AC-3 Prudential\u2019s template carries the company\u2019s material: a KPM made from it shows it with nothing uploaded', async () => {

@@ -186,12 +186,10 @@ describe('the Owner’s reporting, measured at 500 members (P18-T7)', () => {
   });
 
   const READS: Record<string, (ctx: RequestContext) => Promise<unknown>> = {
+    // P19.19 (ADR-0272): the Overview's second version and its *Performa vs target*; KPM analytics is gone.
     overview: (ctx) => wired.kpmOverview.read(ctx),
-    'not-logged': (ctx) => wired.kpmOverview.notLogged(ctx),
-    'analytics (this month)': (ctx) => wired.kpmAnalytics.read(ctx, { period: 'this_month' }),
-    'analytics (previous month)': (ctx) => wired.kpmAnalytics.read(ctx, { period: 'previous_month' }),
+    'performa vs target': (ctx) => wired.kpmOverview.performance(ctx),
     'directory page of 50': async (ctx) => wired.directoryColumns.decorate(ctx, await directory.list(ctx, { limit: 50 })),
-    'platform analytics': () => wired.platformAnalytics.read(RequestContext.platform('root')),
   };
 
   /** A read, with every query it sends recorded. */
@@ -253,13 +251,12 @@ describe('the Owner’s reporting, measured at 500 members (P18-T7)', () => {
     expect(scans).toEqual([]);
   }, 120_000);
 
-  it('P18-T7 AC-2 the budgets: Open KPM Overview and Open KPM analytics under 3 s at the ceiling; every p95 recorded', async () => {
+  it('P18-T7 AC-2, P19.19 the budgets: Open KPM Overview and its Performa vs target under 3 s at the ceiling; every p95 recorded', async () => {
     const results: Record<string, number> = {};
     for (const [name, read] of Object.entries(READS)) results[name] = await p95(() => read(owners.A));
     // eslint-disable-next-line no-console
     console.log(`  p95 of 20 at 500 members: ${Object.entries(results).map(([n, ms]) => `${n} ${ms.toFixed(1)} ms`).join('; ')}`);
     expect(results.overview).toBeLessThan(3000);
-    expect(results['analytics (this month)']).toBeLessThan(3000);
-    expect(results['analytics (previous month)']).toBeLessThan(3000);
+    expect(results['performa vs target']).toBeLessThan(3000);
   }, 300_000);
 });

@@ -5,7 +5,9 @@ import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { RequestDocumentUploadDto } from '@/modules/assets/asset.dto';
 import { SignedUploadDto } from '@/modules/assets/asset.response.dto';
-import { AttachPitchDocumentDto, RecruitmentBriefQueryDto, SetPitchConfirmationDto } from './recruitment.dto';
+import {
+  AttachPitchDocumentDto, RecruitmentBriefQueryDto, SetPitchConfirmationDto, SetPitchLinkDto,
+} from './recruitment.dto';
 import {
   PitchDocumentUrlDto, PitchMaterialsDto, PitchSlotDto, RecruitmentAttackPlanDto,
 } from './recruitment.response.dto';
@@ -103,12 +105,13 @@ export class RecruitmentPitchController {
   @ApiOperation({
     summary: 'A signed upload for a pitch document',
     description:
-      'A PDF of at most 25 MB, into the office’s own `recruitment-pitch` folder — refused before anything is '
-      + 'signed otherwise. The bytes go from the browser straight to storage; attach the key to a slot next.',
+      'Any material of at most 25 MB (ADR-0274): a PDF, an HTML page, PowerPoint, Word, an image or a '
+      + 'video, into the office’s own `recruitment-pitch` folder — refused before anything is signed otherwise. The bytes '
+      + 'go from the browser straight to storage; attach the key to a slot next. A longer video is a link (`PUT :slot/link`).',
   })
   @ApiResponse({ status: 201, type: SignedUploadDto })
   @ApiResponse(refusal(413, '`ASSET_TOO_LARGE` — larger than 25 MB.'))
-  @ApiResponse(refusal(415, '`ASSET_TYPE_NOT_ALLOWED` — not a PDF.'))
+  @ApiResponse(refusal(415, '`ASSET_TYPE_NOT_ALLOWED` — none of the pitch formats.'))
   async requestUpload(@Ctx() ctx: RequestContext, @Body() dto: RequestDocumentUploadDto) {
     return this.pitch.requestUpload(ctx, dto);
   }
@@ -135,6 +138,24 @@ export class RecruitmentPitchController {
   @ApiResponse(refusal(415, '`ASSET_TYPE_NOT_ALLOWED` — storage holds something other than a PDF. Nothing is attached.'))
   async attach(@Ctx() ctx: RequestContext, @Param('slot') slot: string, @Body() dto: AttachPitchDocumentDto) {
     return this.pitch.attach(ctx, slot, dto.storageKey);
+  }
+
+  @Put(':slot/link')
+  @RequirePermission('tenant_config:write')
+  @ApiOperation({
+    summary: 'Give a slot a link in place of a file',
+    description:
+      'An `https://` address of at most 2,000 characters with no user name or password — a video too long to upload, a '
+      + 'shared folder. As an attach does: in one write it replaces what the slot held, **clears every confirmation**, '
+      + 'moves `version` by one and releases a file it held. Audited (`recruitment_pitch.linked`). The link the slot '
+      + 'already holds changes nothing. Never fetched by the server; agents open it in a new tab.',
+  })
+  @ApiResponse({ status: 200, type: PitchSlotDto })
+  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — not an https:// address, too long, or carrying a user name or password.'))
+  @ApiResponse(refusal(404, '`NOT_FOUND` — no such slot. Indistinguishable from one in another office, which an office '
+    + 'never reaches.'))
+  async setLink(@Ctx() ctx: RequestContext, @Param('slot') slot: string, @Body() dto: SetPitchLinkDto) {
+    return this.pitch.setLink(ctx, slot, dto.url);
   }
 
   @Put(':slot/confirmations/:item')

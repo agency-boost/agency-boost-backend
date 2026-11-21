@@ -43,6 +43,8 @@ export interface ShownBranding {
   palette: BrandingPalette | null;
   mascot: BrandingMascot | null;
   source: { logos: BrandingSource; colours: BrandingSource; mascot: BrandingSource };
+  /** ***Nama sistem*** (P19.21-T4; ADR-0274): the KPM's own, never a template's; `null` is *AgencyBoost*. */
+  systemName: string | null;
 }
 
 /** **What the session carries** (§8): enough to paint before anything else is asked, and to build every image's address. */
@@ -57,6 +59,11 @@ export interface SessionBranding {
   mascotPoses: MascotPose[];
   /** A lesson's colours (ADR-0217 §5): `null` when the KPM shows no colours of its own or its template's. */
   lesson: LessonColours | null;
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274): what the app is called for this KPM's members, written in place of the
+   * word *AgencyBoost*; `null` is the default, *AgencyBoost*.
+   */
+  systemName: string | null;
 }
 
 /**
@@ -114,10 +121,15 @@ export class BrandingReader {
   ) {}
 
   /** The KPM's own live row, as fields; `null` when it has none. */
-  async ownOf(kpmId: string): Promise<{ fields: BrandingFields; version: number; id: string } | null> {
+  async ownOf(kpmId: string): Promise<{ fields: BrandingFields; version: number; id: string; systemName: string | null } | null> {
     const row = await this.rows.live(RequestContext.tenantRead(kpmId, 'kpm-branding'));
     if (!row) return null;
-    return { fields: fieldsOf(row as unknown as KpmBranding), version: row.version, id: String(row._id) };
+    return {
+      fields: fieldsOf(row as unknown as KpmBranding),
+      version: row.version,
+      id: String(row._id),
+      systemName: typeof row.systemName === 'string' && row.systemName.trim() ? row.systemName : null,
+    };
   }
 
   /** The KPM's template's published *Tampilan*: its fields and version, and the company that owns its images. */
@@ -137,7 +149,7 @@ export class BrandingReader {
     const kpm = await this.kpmOf(kpmId);
     if (!kpm || (liveOnly && kpm.status !== 'active')) return null;
     const [own, template] = await Promise.all([this.ownOf(kpmId), this.templateOf(kpm)]);
-    return resolve(kpmId, kpm.branchName ?? '', own?.fields ?? EMPTY, template?.fields ?? EMPTY);
+    return resolve(kpmId, kpm.branchName ?? '', own?.fields ?? EMPTY, template?.fields ?? EMPTY, own?.systemName ?? null);
   }
 
   /** The KPM's register row, the fields this reads; `null` for an id that names no KPM. */
@@ -184,7 +196,9 @@ export class BrandingReader {
 }
 
 /** **The resolution by group** (§3): own, else the template's, else AgencyBoost's. */
-export function resolve(kpmId: string, name: string, own: BrandingFields, template: BrandingFields): ShownBranding {
+export function resolve(
+  kpmId: string, name: string, own: BrandingFields, template: BrandingFields, systemName: string | null = null,
+): ShownBranding {
   const logos: BrandingSource = own.logo ? 'own' : template.logo ? 'template' : null;
   const colours: BrandingSource = own.primary ? 'own' : template.primary ? 'template' : null;
   const mascotSource: BrandingSource = own.mascot ? 'own' : template.mascot ? 'template' : null;
@@ -205,7 +219,9 @@ export function resolve(kpmId: string, name: string, own: BrandingFields, templa
   const version = createHash('sha1')
     .update(JSON.stringify({ l: shown.logo, s: shown.logoSquare, p: shown.primary, q: shown.secondary, m: shown.mascot }))
     .digest('hex').slice(0, BRANDING.VERSION_LENGTH);
-  return { kpmId, name, version, ...shown, source: { logos, colours: palette ? colours : null, mascot: mascotSource } };
+  return {
+    kpmId, name, version, ...shown, source: { logos, colours: palette ? colours : null, mascot: mascotSource }, systemName,
+  };
 }
 
 /** The session's shape of what a KPM shows. */
@@ -222,5 +238,6 @@ export function sessionOf(shown: ShownBranding): SessionBranding {
     icons: Boolean(shown.iconsKey),
     mascotPoses: poses,
     lesson: lessonColoursOf(shown.palette),
+    systemName: shown.systemName,
   };
 }

@@ -103,6 +103,9 @@ const EXEMPT: Record<string, string> = {
     + 'in no office at all, and ending every session an operator has open is keyed by the '
     + 'person, not by a tenant. An Owner\'s read is narrowed in the service, which refuses '
     + 'another office as a 404.',
+  PlatformSettings:
+    'platform-global (P19.23-T6, ADR-0279): the platform\'s one settings document, keyed `platform`, which no KPM owns. '
+    + 'Written by the Super Admin alone, filtered by that key, every change audited.',
   AuditLog: 'written through AuditService, which stamps the tenant itself.',
   NotificationPreferences: 'per-user, for the same reason as Notification below.',
   Notification:

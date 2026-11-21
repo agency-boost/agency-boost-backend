@@ -6,6 +6,7 @@ import { DomainException, NotFoundException } from '@/common/errors/domain.excep
 import { ErrorCode } from '@/common/errors/error-codes';
 import { render, type Sentence } from '@/common/i18n/sentence';
 import { AuditService, type AuditEntry } from '@/modules/audit/audit.service';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { SalesEvents, signalSales } from '@/modules/activation/sales-events.port';
 import { ProductionWrites, signalAfterWrite, signalBeforeWrite } from './production-writes.port';
@@ -18,6 +19,9 @@ import { requireMonth, requireOffice } from './production.service';
 import { PRODUCTION_REFUSALS } from './production.messages';
 import { labelIn } from './production-template';
 import { cellKey, cellPath, inForce, refusalForField } from './upload-columns';
+import { DataUploadBatchRepository } from './data-upload-batch.repository';
+import { DataUploadRowRepository } from './data-upload-row.repository';
+import { fileFigureKey, fileFigures } from './uploaded-figures';
 
 const SAY = PRODUCTION_REFUSALS;
 
@@ -33,6 +37,15 @@ export interface CorrectionInput {
   /** The month's revision the reader saw. */
   revision: number;
   reason: string;
+}
+
+/** *Kembalikan ke angka dari file* (P19.21-T1 AC-4): one corrected cell, and the month's revision the reader saw. */
+export interface RestoreInput {
+  month: string;
+  membershipId: string;
+  kode: string;
+  ytd: boolean;
+  revision: number;
 }
 
 export interface CorrectionResult {
@@ -116,9 +129,12 @@ export class ProductionCorrections {
     // P18.8-T4 AC-1: a month's policies corrected above zero may be the member's first sale. Failing open.
     @Optional() @Inject(SalesEvents) private readonly sales: SalesEvents | null = null,
     // P19.5-T2 (ADR-0214 §3): the KPM's template, read live — the column a kode names, and its limits.
-    @Optional() private readonly analytics: AnalyticsConfigReader | null = null,
+    @Optional() @Inject(AnalyticsConfigReader) private readonly analytics: AnalyticsConfigReader | null = null,
     // P19.5-T3 AC-9 (ADR-0215 §6): the Quant runs freeze before a write past their 15th, and recalculate after one.
     @Optional() @Inject(ProductionWrites) private readonly writes: ProductionWrites | null = null,
+    // P19.21-T1 AC-4: the standing uploads' figures, which a correction goes back to. Absent, nothing can go back.
+    @Optional() @Inject(DataUploadBatchRepository) private readonly batches: DataUploadBatchRepository | null = null,
+    @Optional() @Inject(DataUploadRowRepository) private readonly batchRows: DataUploadRowRepository | null = null,
   ) {}
 
   /** The configuration the KPM reads now; the platform's where this was built without the reader. */
@@ -164,7 +180,8 @@ export class ProductionCorrections {
       );
     }
 
-    const member = await this.memberships.findOne(ctx, { _id: membershipId, status: 'active' });
+    // A test account is nobody's figure here (P19.21-T1 AC-3; ADR-0267 §1): not listed, so not corrected — 404.
+    const member = await this.memberships.findOne(ctx, withoutTestAccounts({ _id: membershipId, status: 'active' }));
     if (!member) throw new NotFoundException('Member');
     const { config, templateId, version } = await this.config(ctx);
     const column = this.columnFor(config, kode, ytd, month, ctx.reader.language);
@@ -211,6 +228,78 @@ export class ProductionCorrections {
   }
 
   /**
+   * **Back to the file's number** (P19.21-T1 AC-4: *"Bisa dikembalikan ke angka dari file"*). A figure corrected by hand
+   * goes back to what the month's standing uploads wrote into the cell (`fileFigures`) — as `imported`, that upload its
+   * source, so a revert of the upload treats it as the upload's again — with one `upload.cell_restored` entry carrying
+   * the correction it undoes. The same lock, revision and member rules as a correction.
+   *
+   * `400 VALIDATION_FAILED` for a figure nobody corrected, or one no standing upload wrote; `404` for somebody who is not
+   * an active member of the office (a test account, another KPM's).
+   */
+  async restore(ctx: RequestContext, input: RestoreInput): Promise<CorrectionResult> {
+    requireOffice(ctx);
+    requireMonth(input.month);
+    const { month, membershipId, kode, ytd } = input;
+    const member = isValidObjectId(membershipId)
+      ? await this.memberships.findOne(ctx, withoutTestAccounts({ _id: membershipId, status: 'active' }))
+      : null;
+    if (!member) throw new NotFoundException('Member');
+    const { config } = await this.config(ctx);
+    this.columnFor(config, kode, ytd, month, ctx.reader.language);
+
+    const state = await this.months.state(ctx, month);
+    this.months.refuseIfLocked(state);
+
+    const row = await this.data.findOne(ctx, { membershipId, month });
+    const held = cellAsHydrated(((ytd ? row?.ytdValues : row?.values)?.[kode] ?? undefined) as Partial<MetricValue> | undefined);
+    if (held?.provenance !== 'corrected') {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED, SAY.VALIDATION_FAILED.notCorrected, HttpStatus.BAD_REQUEST, { field: 'kode', kode, ytd },
+      );
+    }
+    const figures = this.batches && this.batchRows
+      ? await fileFigures(ctx, this.batches, this.batchRows, month)
+      : new Map();
+    const file = figures.get(fileFigureKey(membershipId, kode, ytd));
+    if (!file) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED, SAY.VALIDATION_FAILED.noFileFigure, HttpStatus.BAD_REQUEST, { field: 'kode', kode, ytd },
+      );
+    }
+
+    await signalBeforeWrite(this.writes, ctx, month);
+    await this.months.claim(ctx, month, input.revision);
+    const written = await this.data.upsertOne(ctx, { membershipId, month }, {
+      $set: {
+        [cellPath(kode, ytd)]: {
+          value: file.value, provenance: 'imported', sourceBatchId: file.batchId,
+          correctedBy: null, correctedAt: null, reason: null, replacedValue: null,
+        },
+      },
+    });
+    await this.audit.record(ctx, {
+      action: 'upload.cell_restored',
+      targetCollection: 'monthlyAgentData',
+      targetId: String(written._id),
+      targetMembershipId: membershipId,
+      before: {
+        month, field: cellKey(kode, ytd), value: held.value, provenance: 'corrected', reason: held.reason,
+        correctedBy: held.correctedBy,
+      },
+      after: { month, field: cellKey(kode, ytd), value: file.value, provenance: 'imported', sourceBatchId: file.batchId },
+    });
+    await this.months.markWritten(ctx, month);
+    if (kode === 'POLICY_COUNT' && !ytd) await signalSales(this.sales, ctx, [membershipId]);
+    await signalAfterWrite(this.writes, ctx, month);
+    const before = { value: held.value, provenance: held.provenance };
+    return {
+      membershipId, kode, ytd, changed: true, before,
+      after: { value: file.value, provenance: 'imported' },
+      state: await this.months.state(ctx, month),
+    };
+  }
+
+  /**
    * **A leader's *Update production*: many members' APE, one save** (Phase 15, P15-T3; OD-137 option 2,
    * ADR-0121) — each changed cell a correction of the office's figure, **written by the function `correct`
    * writes one with**, so the month table, the next import's preview (ADR-0053), the Summary and coaching
@@ -236,7 +325,7 @@ export class ProductionCorrections {
     const ids = input.rows.map((row) => row.membershipId);
 
     const members = ids.every((id) => isValidObjectId(id))
-      ? await this.memberships.find(ctx, { _id: { $in: ids }, status: 'active' })
+      ? await this.memberships.find(ctx, withoutTestAccounts({ _id: { $in: ids }, status: 'active' }))
       : [];
     const codeOf = new Map(members.map((m) => [String(m._id), (m as { agentCode?: string }).agentCode ?? '']));
     if (ids.some((id) => !codeOf.has(id))) throw new NotFoundException('Member');

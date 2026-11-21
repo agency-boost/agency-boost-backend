@@ -32,7 +32,10 @@ describe('P18.3-T1 AC-12 the compliance tree reaches exactly the readers it call
     expect(code.map((f) => f.slice(FOLDER.length + 1)).sort()).toEqual([
       'activation.category.ts', 'activity.category.ts', 'campaigns.category.ts', 'compliance-category.ts',
       'compliance.controller.ts', 'compliance.dto.ts', 'compliance.response.dto.ts', 'compliance.service.ts',
-      'events.category.ts', 'goals.category.ts', 'training.category.ts',
+      'events.category.ts', 'goals.category.ts',
+      // P19.19-T3 (ADR-0272 §6): *Leads Mgmt*.
+      'leads.category.ts',
+      'training.category.ts',
     ]);
   });
 
@@ -49,16 +52,15 @@ describe('P18.3-T1 AC-12 the compliance tree reaches exactly the readers it call
       'modules/campaigns/campaign-words.ts',
       'modules/events/event-readings.ts',
       'modules/goals/goal.service.ts',
+      // P19.19-T3: *Leads Mgmt*'s reader.
+      'modules/leads/lead-readings.ts',
       'modules/org/member-names.service.ts',
       'modules/rbac/permissions.ts',
-      // Phase 18's own: the agencies, the names' order, and the office's people — and the module's sentences (P18.10-T5).
-      'modules/reporting/agency-partition.ts',
-      'modules/reporting/office-figures.ts',
-      // P19.3-T3 (OD-258): the office's custom groups for *Lihat untuk*, and the one group shape the two reads declare.
+      // *Since P19.19 (ADR-0272 §6)* the KPM Overview's scope: the informal groups' partition and its tree; the module's
+      // sentences (P18.10-T5). The agencies, the office's people and the shared DTOs are no longer read here.
       'modules/reporting/office-groups.ts',
-      'modules/reporting/office-people.ts',
+      'modules/reporting/overview-tree.ts',
       'modules/reporting/reporting.messages.ts',
-      'modules/reporting/reporting.response.dto.ts',
       'modules/tenants/tenant-day.service.ts',
       'modules/training/offered-training.ts',
       'modules/training/training-progress-readings.ts',
@@ -79,5 +81,6 @@ describe('P18.3-T1 AC-12 the compliance tree reaches exactly the readers it call
     expect(own('goals.category.ts')).toEqual(['modules/goals/goal.service.ts']);
     expect(own('activity.category.ts')).toEqual(['modules/activity/activity-readings.ts']);
     expect(own('activation.category.ts')).toEqual(['modules/activation/activation-readings.ts']);
+    expect(own('leads.category.ts')).toEqual(['modules/leads/lead-readings.ts']);
   });
 });

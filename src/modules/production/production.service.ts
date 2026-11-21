@@ -7,13 +7,14 @@ import {
   DomainException, NotFoundException,
 } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { ANALYTICS_MAA_INPUTS, DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
+import { ANALYTICS_MAA_INPUTS, DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES, PRODUCTION } from '@/domain/constants';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { AnalyticsConfigReader, type PublishedAnalyticsConfig } from '@/modules/config/analytics-config.reader';
-import { agentCodePattern, platformAnalyticsConfig, type UploadField } from '@/modules/config/analytics-config';
+import { platformAnalyticsConfig, type UploadField } from '@/modules/config/analytics-config';
 import { MonthlyAgentDataRepository } from './monthly-agent-data.repository';
 import { cellAsHydrated, type MetricValue, type MonthlyAgentDataDocument, type Provenance } from './monthly-agent-data.schema';
 import {
@@ -34,6 +35,9 @@ import {
   missingMonthsOf, monthsBetween, shiftMonth, UploadCompleteness, type MonthFill, type MonthFillStatus,
 } from './upload-completeness';
 import { UnregisteredAgentDataRepository } from './unregistered-agent-data.repository';
+import { DataUploadBatchRepository } from './data-upload-batch.repository';
+import { DataUploadRowRepository } from './data-upload-row.repository';
+import { fileFigures, fileFigureKey, type FileFigure } from './uploaded-figures';
 import type { UnregisteredAgentDataDocument } from './unregistered-agent-data.schema';
 
 export { requireMonth, requireOffice };
@@ -47,7 +51,17 @@ export interface MetricCell {
    * `null` for every other cell. A figure somebody **emptied** by hand keeps this and `corrected`,
    * with a `null` value — nothing is held, and the table can say who decided that.
    */
-  correction: { by: string | null; at: string | null; reason: string | null } | null;
+  correction: {
+    by: string | null;
+    at: string | null;
+    reason: string | null;
+    /**
+     * **The file's number** (P19.21-T1 AC-4): what the month's standing uploads wrote into this cell — *"dari file: Rp
+     * 1.412.000"*, and what *Kembalikan ke angka dari file* restores (`POST /kpm/data-upload/cell/restore`). `null` when
+     * no standing upload wrote it: the correction then has no file's number to go back to.
+     */
+    fileValue: number | null;
+  } | null;
   /**
    * **A stored value outside its column's current limits** (P19.5-T2 AC-11; AA UI-025; ADR-0214 §12): the version since
    * which it has been — *"Di luar batas sejak v<n>"*. Flagged, never changed; `null` within them.
@@ -76,6 +90,11 @@ export interface MonthRow {
   ytd: Record<string, YtdCell>;
   /** A member of a leader class (`ab`, `aab`; ADR-0156): the rows a `rows: 'leaders'` column is filled on (P19.3-T1). */
   leader: boolean;
+  /** Their class — `ab`, `aab`, `agent` — and rung: the orange *AB* / *AAB* before the name (P19.21-T1 AC-3; D-rules). */
+  role: string | null;
+  orgLevelCode: string | null;
+  /** Their profile photo, a signed link; `null` draws initials (P19.21-T1 AC-3). */
+  photoUrl: string | null;
   /**
    * `MONTHLY_ACTIVE_AGENT` for the month (ADR-0054; ADR-0214 §6): `APE` or `POLICY_COUNT` above zero. **`null` is not
    * `false`** — it is *not reported*, and the table draws a dash for it.
@@ -121,7 +140,7 @@ export interface MonthConfig {
   version: number;
   /** The template's current columns, in the file's order. */
   columns: MonthColumn[];
-  /** The required history's first month (R5): twelve months before the KPM's first. The month grid starts here. */
+  /** The required history's first month: **January 2024 for every KPM** (P19.21-T1 AC-1; ADR-0274 §3). The grid starts here. */
   historyFrom: string;
   /** The KPM's first month on AgencyBoost: the month of its creation, in its zone (UI-150). */
   firstMonth: string;
@@ -215,6 +234,9 @@ interface RosterEntry {
   name: string;
   /** Of a leader class, `ab` or `aab` (ADR-0156): who a leaders' column is filled for (P19.3-T1). */
   leader: boolean;
+  role: string | null;
+  orgLevelCode: string | null;
+  photoUrl: string | null;
 }
 
 /**
@@ -250,6 +272,9 @@ export class ProductionService {
     @Optional() private readonly completeness?: UploadCompleteness,
     @Optional() private readonly unregistered?: UnregisteredAgentDataRepository,
     @Optional() private readonly clock?: Clock,
+    // P19.21-T1 AC-4: the standing uploads' figures — a corrected cell's *dari file*. Absent, none is known.
+    @Optional() private readonly batches?: DataUploadBatchRepository,
+    @Optional() private readonly batchRows?: DataUploadRowRepository,
   ) {}
 
   /** The configuration the KPM reads now: its template's published version, or the platform's. */
@@ -276,14 +301,11 @@ export class ProductionService {
 
     // The month grid, this month's status, and each column's missing months: one read of the office's months.
     const today = await this.officeMonth(ctx);
-    const office = this.completeness ? await this.completeness.office(ctx) : null;
-    const firstMonth = office ? (office.firstMonth < today ? office.firstMonth : today) : today;
+    // P19.21-T1 AC-1 (ADR-0274 §3): every KPM's grid starts in January 2024, whenever it joined.
     const fill = this.completeness
-      ? await this.completeness.forRange(
-        ctx, rangeOf(month, today, shiftMonth(firstMonth, -config.config.uploadRules.historyMonthsBeforeJoin)), config,
-      )
+      ? await this.completeness.forRange(ctx, rangeOf(month, today, PRODUCTION.HISTORY_FROM), config)
       : null;
-    const historyFrom = fill?.historyFrom ?? shiftMonth(today, -12);
+    const historyFrom = fill?.historyFrom ?? PRODUCTION.HISTORY_FROM;
     const fills = fill?.fills ?? new Map<string, MonthFill>();
 
     // Who corrected what, by name — resolved once for the month, so every cell can say it.
@@ -293,14 +315,24 @@ export class ProductionService {
     ]).filter((x): x is string => !!x))];
     const names = correctors.length ? await this.names.byMembershipId(ctx, correctors) : new Map<string, string>();
     const history = this.analytics ? await this.analytics.uploadFieldsHistoryFor(ctx) : [{ version: config.version, uploadFields: fields }];
+    // The file's number behind each corrected cell of the month (AC-4), from the standing uploads.
+    const files = this.batches && this.batchRows
+      ? await fileFigures(ctx, this.batches, this.batchRows, month)
+      : new Map<string, FileFigure>();
 
-    const cellsOf = (rows: readonly { month: string; values?: Record<string, unknown>; ytdValues?: Record<string, unknown> }[]) => {
+    const cellsOf = (
+      rows: readonly { month: string; values?: Record<string, unknown>; ytdValues?: Record<string, unknown> }[],
+      owner: string | null = null,
+    ) => {
       const own = rows.find((r) => r.month === month);
       const values: Record<string, MetricCell> = {};
       const ytd: Record<string, YtdCell> = {};
+      const fileOf = (kode: string, isYtd: boolean) => (owner ? files.get(fileFigureKey(owner, kode, isYtd))?.value ?? null : null);
       for (const field of fields) {
         const stored = cellAsHydrated((own?.values?.[field.kode] ?? undefined) as Partial<MetricValue> | undefined);
-        values[field.kode] = inForce(field, month) ? withBounds(cellOf(stored, names), stored, field.kode, history) : EMPTY;
+        values[field.kode] = inForce(field, month)
+          ? withBounds(cellOf(stored, names, fileOf(field.kode, false)), stored, field.kode, history)
+          : EMPTY;
         if (field.ytd === 'sum') {
           // `COLUMN_YEAR_TO_DATE`: every month held, January to this one — the same sum every reader of it reads.
           const months = rows.filter((r) => r.month <= month).map((r) => ({
@@ -309,14 +341,14 @@ export class ProductionService {
           ytd[field.kode] = { ...cellOf(asMetric(sumCell(months)), names), calculated: true };
         } else if (field.ytd === 'upload') {
           const up = cellAsHydrated((own?.ytdValues?.[field.kode] ?? undefined) as Partial<MetricValue> | undefined);
-          ytd[field.kode] = { ...cellOf(inForce(field, month) ? up : null, names), calculated: false };
+          ytd[field.kode] = { ...cellOf(inForce(field, month) ? up : null, names, fileOf(field.kode, true)), calculated: false };
         }
       }
       return { values, ytd };
     };
 
     const view = roster.map((r): MonthRow => {
-      const { values, ytd } = cellsOf(byMember.get(r.membershipId) ?? []);
+      const { values, ytd } = cellsOf(byMember.get(r.membershipId) ?? [], r.membershipId);
       const [apeKode, policyKode] = ANALYTICS_MAA_INPUTS;
       return {
         ...r,
@@ -507,7 +539,6 @@ export class ProductionService {
       last: { ytdValues?: Record<string, unknown> } | undefined,
     ): StoredFigures => ({ values: numbers(row?.values), ytdValues: numbers(row?.ytdValues), previousYtd: numbers(last?.ytdValues) });
 
-    const compiled = agentCodePattern(config.config.uploadRules.agentCodePattern);
     // Each issue in the reader's words: a preview answers them, and a commit keeps its issues in them (P18.10-T5).
     const preview = buildPreview({
       records: read.records,
@@ -518,12 +549,8 @@ export class ProductionService {
       roster,
       stored: (membershipId) => figuresOf(stored.get(membershipId), before.get(membershipId)),
       heldStored: (code) => figuresOf(held.get(code), heldBefore.get(code)),
-      rules: {
-        pattern: 'pattern' in compiled ? compiled.pattern : null,
-        example: config.config.uploadRules.agentCodeExample,
-        unknownAgent: config.config.uploadRules.unknownAgent,
-        ytdTolerancePct: config.config.uploadRules.ytdTolerancePct,
-      },
+      // ADR-0274 §2: every code is kept — the template's `unknownAgent` and code format refuse nothing any more.
+      rules: { ytdTolerancePct: config.config.uploadRules.ytdTolerancePct },
     }, ctx.reader);
 
     // Which of the figures the file would change were corrected by hand (ADR-0053). `buildPreview`
@@ -572,13 +599,18 @@ export class ProductionService {
    * their agents, then the AB's own agents. It reads each member's **current edge** — the membership's
    * `leaderId`, which the org module writes with the open history row (`validTo: null`) and which the
    * org tree reads too.
+   *
+   * **Never a test account** (P19.21-T1 AC-3; ADR-0267 §1): not a row, not a line of the template, not counted.
    */
   private async roster(ctx: RequestContext): Promise<RosterEntry[]> {
     const members = await this.memberships.find(
-      ctx, { status: 'active' }, { sort: { agentSeq: 1 } },
+      ctx, withoutTestAccounts({ status: 'active' }), { sort: { agentSeq: 1 } },
     );
     const ids = members.map((m) => String(m._id));
-    const names = await this.names.byMembershipId(ctx, ids);
+    // Each row's photo (P19.21-T1 AC-3), signed once per photo; `pictured` names them in the same read.
+    const people = await this.names.pictured(ctx, ids);
+    const names = new Map([...people].map(([id, p]) => [id, p.name]));
+    const levels = new Map(members.map((m) => [String(m._id), (m as { orgLevelCode?: string | null }).orgLevelCode ?? null]));
     const placed = orgTreeOrder(members.map((m) => {
       const id = String(m._id);
       return {
@@ -594,6 +626,7 @@ export class ProductionService {
     // is filled for (P19.3-T1, ADR-0201 §2).
     return placed.map(({ membershipId, agentCode, name, role }) => ({
       membershipId, agentCode, name, leader: (LEADER_CLASSES as readonly string[]).includes(role ?? ''),
+      role: role ?? null, orgLevelCode: levels.get(membershipId) ?? null, photoUrl: people.get(membershipId)?.photoUrl ?? null,
     }));
   }
 }
@@ -630,8 +663,8 @@ function withBounds(
   return since === null ? cell : { ...cell, outOfBounds: { sinceVersion: since } };
 }
 
-/** A stored cell on the wire. `names` resolves who corrected it. */
-function cellOf(stored: MetricValue | null | undefined, names: ReadonlyMap<string, string>): MetricCell {
+/** A stored cell on the wire. `names` resolves who corrected it; `fileValue` is the file's number behind a correction. */
+function cellOf(stored: MetricValue | null | undefined, names: ReadonlyMap<string, string>, fileValue: number | null = null): MetricCell {
   // Nothing held, and nobody decided it: empty. A figure emptied **by hand** is not this case (`readCell`).
   const cell = readCell(stored);
   if (cell.value === null && cell.provenance !== 'corrected') return EMPTY;
@@ -643,6 +676,7 @@ function cellOf(stored: MetricValue | null | undefined, names: ReadonlyMap<strin
         by: cell.correctedBy ? names.get(cell.correctedBy) || null : null,
         at: cell.correctedAt ? new Date(cell.correctedAt).toISOString() : null,
         reason: cell.reason,
+        fileValue,
       }
       : null,
     outOfBounds: null,

@@ -13,6 +13,8 @@
  * Each is held once, here, pinned by `advanced-analytics.spec.ts`, and served to the editor by the API — the frontend
  * never re-declares one (invariant §7). The NPS cut-off defaults add no constant: they are `NPS` (§B.4).
  */
+import { USAGE } from './usage';
+
 export const ANALYTICS = {
   /** % of the KPM's members filled in every column in force for a month to be complete (`UPLOAD_MONTH_COMPLETE`). */
   COMPLETE_PCT_DEFAULT: 90,
@@ -129,7 +131,50 @@ export const QUANT = {
   ROLLING_MONTHS: 12,
   /** B2: the calendar months after the join month a first policy still activates a new agent. Fixed. */
   ACTIVATION_MONTHS_AFTER_JOIN: 12,
+  /**
+   * *Written by P19.22-T4 (ADR-0275 §4; the brief of 19 November, *half-year period picker*, *Semester lalu*):* **a run's
+   * own months are its half-year** — the six months ending at its last month, January to June or July to December. It
+   * was January to the last month, so a December run held the whole year. Fixed.
+   */
+  SEMESTER_MONTHS: 6,
 } as const;
+
+/**
+ * **Progress colours** (P19.22-T3, T5; ADR-0275 §3, §5; the brief of 19 November, *Informal group*: *"green ≥100%,
+ * yellow ≥67%, red below"*): a figure against its target — *Bulan ini vs target* on *MAPA driver*, the four drivers of
+ * *Informal group* — is green from `GREEN_PCT` % of it, yellow from `YELLOW_PCT` %, red below. Colour only, never a
+ * figure. Pinned by `advanced-analytics.spec.ts`.
+ */
+export const PROGRESS_TONE = {
+  GREEN_PCT: 100,
+  YELLOW_PCT: 67,
+} as const;
+
+/**
+ * ***Informal group*'s drivers** (P19.22-T5; ADR-0275 §5; `DATA-DEFINITIONS.md`, *Coaching*): *1-on-1 per minggu* is the
+ * 1-on-1 sessions of the last `WINDOW_DAYS` days ÷ `WEEKS_IN_WINDOW`, against `ONE_ON_ONE_PER_ACTIVE_AGENT` × the Active
+ * Agent target. **4,35 is the client's divisor for this one figure**; `TIME.WEEKS_PER_MONTH` (4.33) stays every other
+ * page's (invariant §7: a second named constant, not a second value of one). *Pemakaian* and *1-on-1* read the same
+ * 30 days.
+ */
+export const INFORMAL_GROUP = {
+  WINDOW_DAYS: 30,
+  WEEKS_IN_WINDOW: 4.35,
+  ONE_ON_ONE_PER_ACTIVE_AGENT: 2,
+} as const;
+
+/**
+ * ***Demografi*'s data** (P19.22-T2; ADR-0275 §2): **a member's data is complete** — *Data lengkap* — when the three
+ * fields the upload fills are on file: *Status kerja*, *Tanggal lahir* and *Tanggal bergabung*. Gender is drawn but
+ * not required (the mockup's *Kelengkapan data* lists the three). The upload's file: one CSV of at most `FILE_MAX_BYTES`
+ * — under the API's 100 kB JSON body, which carries it as text — and `FILE_MAX_ROWS` rows.
+ */
+export const DEMOGRAPHIC_DATA = {
+  REQUIRED_FIELDS: ['workStatus', 'dateOfBirth', 'joinDate'] as readonly ['workStatus', 'dateOfBirth', 'joinDate'],
+  FILE_MAX_BYTES: 90_000,
+  FILE_MAX_ROWS: 2_000,
+} as const;
+export type DemographicField = (typeof DEMOGRAPHIC_DATA.REQUIRED_FIELDS)[number];
 
 /** *Written by P19.5-T3 (ADR-0215 §6):* the ten Quant metrics, A1 to D1, in the data sources' order. */
 export const QUANT_METRICS = [
@@ -193,10 +238,10 @@ export const QUAL = {
 export const SUBGROUP = {
   /** % of a target met: green. Colour only. */
   OK_PCT_DEFAULT: 80,
-  /** Days logged in the window: a power user. */
-  POWER_USER_DAYS_DEFAULT: 10,
-  /** The window, in days. */
-  POWER_USER_WINDOW_DAYS_DEFAULT: 30,
+  /** Days logged in the window: a power user. *Power user ★*'s own number (`USAGE`, ADR-0267 §4), which a template may change. */
+  POWER_USER_DAYS_DEFAULT: USAGE.POWER_USER_MIN_DAYS,
+  /** The window, in days: `USAGE`'s. */
+  POWER_USER_WINDOW_DAYS_DEFAULT: USAGE.POWER_USER_WINDOW_DAYS,
   /** × the AA target: the weekly activity target. */
   WEEK_MULTIPLIER_DEFAULT: 2,
   /** A head of group's AA target until the KPM sets one. */

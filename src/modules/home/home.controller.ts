@@ -1,8 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
+import { HomeQueryDto } from './home.dto';
 import { HOME_ACTION_DTOS, HomeDto } from './home.response.dto';
 import { HomeService, type HomeView } from './home.service';
 
@@ -42,7 +43,7 @@ export class HomeController {
     description: '`PERM_DENIED` — the caller holds no `personal_summary:read`; `NO_MEMBERSHIP` — they belong to no office.',
     type: ApiErrorEnvelope,
   })
-  async read(@Ctx() ctx: RequestContext): Promise<HomeView> {
-    return this.home.read(ctx);
+  async read(@Ctx() ctx: RequestContext, @Query() query: HomeQueryDto): Promise<HomeView> {
+    return this.home.read(ctx, query);
   }
 }

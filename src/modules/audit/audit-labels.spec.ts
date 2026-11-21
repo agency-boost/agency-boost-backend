@@ -36,6 +36,11 @@ const NOT_ACTIONS = new Map<string, string>([
   ['logo.png', 'a branding image’s file name (`branding/branding.service.ts`, P19.6-T1)'],
   ['mascot.default', 'a branding field path a refusal names (`branding/branding.service.ts`, P19.6-T1)'],
   ['ilustrasi.pdf', 'an illustration’s default file name (`product-data/illustration.service.ts`, P19.15-T2)'],
+  ['bulk.percent', 'a price offer’s field a refusal names (`billing/price-offer.ts`, ADR-0279 §2)'],
+  [
+    'advanced_analytics.demographics_upload',
+    'the `via` a *Demografi* upload writes in `member.personal_completed`’s before and after (P19.22-T2), not an action',
+  ],
 ]);
 
 /** Actions written by a template literal, which a literal search cannot see: `kpm.${status}` over `SetStatusDto`'s values. */

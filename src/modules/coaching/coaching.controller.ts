@@ -40,27 +40,24 @@ export class CoachingController {
   @ApiOperation({
     summary: 'Everyone you coach',
     description:
-      'The coaching roster: everybody below you on the current leader edges, at any depth, and nobody '
-      + 'else — the agents who answer to you directly, then each leader who does, with their whole team '
-      + 'beneath them. Each person’s last 1:1 and who led it, and their status for the calendar month. '
-      + '**Verdicts and dates only**: no count of any activity is in the answer. Somebody who coaches '
-      + 'nobody gets an empty roster, not an error. Not paginated.',
+      'The coaching roster: everybody below you on the current leader edges, at any depth — for the agency’s owner or an '
+      + 'administrator the whole agency, test accounts left out — in the Unit Dashboard’s views (`scope`). Grouped as the '
+      + 'Unit Dashboard’s roster: *Unit Anda* (you and your direct reports who lead nobody and are no AB), then one '
+      + 'section per unit below you, each team inside it a team line, AB → AAB → agents. Each person’s coaching status '
+      + '(*Belum pernah coaching*, or days since the last 1:1 — green to 14, yellow after) and who led it, their status for '
+      + 'the calendar month, and their WhatsApp number. **Verdicts and dates only**: no count of any activity is in the '
+      + 'answer. Somebody who coaches nobody gets an empty roster, not an error. Not paginated.',
   })
   @ApiResponse({ status: 200, type: CoachingRosterDto })
-  /*
-   * The query is validated, and empty: anything sent is refused by name (`CoachingRosterQueryDto`).
-   * `openapi.ts` derives a 400 from a documented body or query parameter, and an empty DTO documents
-   * neither, so the refusal is written here, in the shared envelope like every other failure.
-   */
+  /* The query is validated: `scope` alone, a view the Unit Dashboard knows; anything else is refused by name. */
   @ApiResponse({
     status: 400,
     description:
-      '`VALIDATION_FAILED` — this read takes no query parameter. One sent, of any name, is refused, '
-      + 'and `details` names it.',
+      '`VALIDATION_FAILED` — `scope` is not one of the views, or a parameter of another name was sent; `details` names it.',
     type: ApiErrorEnvelope,
   })
-  async coachees(@Ctx() ctx: RequestContext, @Query() _query: CoachingRosterQueryDto) {
-    return this.roster.read(ctx);
+  async coachees(@Ctx() ctx: RequestContext, @Query() query: CoachingRosterQueryDto) {
+    return this.roster.read(ctx, query);
   }
 
   @Get('coachees/:membershipId')

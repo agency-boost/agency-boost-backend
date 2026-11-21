@@ -1,4 +1,5 @@
 import type { FilterQuery } from 'mongoose';
+import { officeStewardKind } from '@/common/auth/office-steward';
 import type { RequestContext } from '@/common/context/request-context';
 import { scopeFor, type Permission, type Scope } from '@/modules/rbac/permissions';
 import type { MembershipDocument } from './membership.schema';
@@ -100,7 +101,20 @@ export function withinReach(
   ctx: RequestContext,
   filter: FilterQuery<MembershipDocument>,
 ): FilterQuery<MembershipDocument> {
-  return { $and: [filter, visibleTo(ctx, DIRECTORY_READ)] };
+  return { $and: [filter, openableTo(ctx)] };
+}
+
+/**
+ * **Whom this reader may open** — one member's read, their reports, a tree read *for* them (ADR-0268 §1; P19.17 F2): what
+ * they see (`visibleTo`), **except a core leader**, who sees the whole KPM in *All members* and the Org tree and opens only
+ * themselves and their own downline. Outside it is `404`, as anything out of reach is.
+ */
+export function openableTo(
+  ctx: RequestContext,
+  permission: Permission = DIRECTORY_READ,
+): FilterQuery<MembershipDocument> {
+  if (officeStewardKind(ctx) === 'core_leader') return scopeFilter('own-downline', ctx.membershipId as string);
+  return visibleTo(ctx, permission);
 }
 
 /**
@@ -113,5 +127,6 @@ export function siblingsWithinReach(
   ctx: RequestContext,
   userIds: readonly string[],
 ): FilterQuery<MembershipDocument> {
-  return withinReach(ctx, { userId: { $in: [...new Set(userIds)] } });
+  // What the page shows, not what opens (ADR-0268 §1): a core leader's roster is the KPM, so is who came back on it.
+  return { $and: [{ userId: { $in: [...new Set(userIds)] } }, visibleTo(ctx, DIRECTORY_READ)] };
 }

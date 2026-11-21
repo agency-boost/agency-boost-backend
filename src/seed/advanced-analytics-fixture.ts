@@ -1,25 +1,28 @@
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { DEFAULT_TENANT_TIMEZONE, QUANT, QUANT_METRICS, type QuantMetric } from '@/domain/constants';
-import { latestRunPeriodEnd, plusMonths } from '@/domain/metrics/quant';
+import { latestRunPeriodEnd, periodMonths, plusMonths } from '@/domain/metrics/quant';
 import { seedObjectId } from './coaching-fixture';
 
 /**
- * **P19.5-T3 — the KPM's *Advanced analytics* page, seeded** (ADR-0215; `functional/advanced-analytics.md`), so every
- * section of 0417's page shows something a reviewer can check, each with its test (`advanced-analytics-seed.spec.ts`).
+ * **The KPM's *Advanced analytics* page, seeded** (P19.5-T3; P19.22, ADR-0275; `functional/advanced-analytics.md`), so every
+ * tab of 0417's page shows something a reviewer can check, each with its test (`advanced-analytics-seed.spec.ts`).
  *
  * | What | Where | What a reviewer sees |
  * |---|---|---|
- * | MAPA targets for this year's months so far: *APE* and *FLC* | `analyticsTargets` (`mapa`) | *MAPA driver*'s target cells filled; later months *TBD* |
- * | This year's targets of Agus (4, 8), Sari (2, 4) and Dewi (1, 3) | `analyticsTargets` (`subgroup`, with `year`) | *Core leaders & groups*' *Target 2026*; *Perbaikan sub-group* sums each group's leaders', every other leader the template's 3 and 6 (P19.13-T3) |
- * | The company's other KPMs' runs for the latest period, frozen: 0555, 0601 and 0602 complete, 0603 incomplete | `quantRuns` | *Analitik kuantitatif*'s latest run: a median from three peers on every metric; 0603 left out |
- * | 0417's run for the period before, frozen, complete, its medians stored — A2 on two peers | `quantRuns` | Picking the earlier run: every chip — above, in line, below — and *"Belum cukup KPM pembanding (2 dari 3)"* on A2 |
+ * | The company's other KPMs' runs for the latest half-year **and the one before**, frozen: 0555, 0601 and 0602 complete, 0603 incomplete | `quantRuns` | *Analisa kuantitatif*: a peer median from three peers on every metric, in both half-years; 0603 left out |
+ * | 0417's run for the half-year before, frozen, complete, its medians stored — A2 on two peers | `quantRuns` | The latest half-year's *Semester lalu* ▲/▼; picking the earlier one: every chip — above, in line, below — and *"Belum cukup KPM pembanding (2 dari 3)"* on A2 |
  *
- * **0417's latest run is not seeded**: the page computes it from 0417's own file on its first read — the seeded file
- * leaves months below `completePct`, so its values read *Belum lengkap* and take no chip (AT-6). **The peers' runs and
- * 0417's earlier run are demonstration figures**, written frozen because no seeded office holds a complete file for
- * those months; a frozen run is never recomputed, so they stand as written. Demographics, *Event* and the survey tabs
- * read what the other fixtures already seed (the personal data of ADR-0158, the events' feedback, the survey runs).
+ * **0417's latest run is not seeded**: the page computes it, and its distribution per leader, from 0417's own file on its
+ * first read. **The peers' runs and 0417's earlier run are demonstration figures**, written frozen because no seeded office
+ * holds a complete file for those months; a frozen run is never recomputed, so they stand as written. Each carries the
+ * first month of its half-year (`fromMonth`): a December run is July to December (ADR-0275 §4).
+ *
+ * The other tabs read what the other fixtures seed: *Demografi* the personal data of ADR-0158 and the join dates — a join
+ * date is on file for the new hires only, so *Perlu melengkapi* has people in it; *MAPA driver* the production file from
+ * January of last year (`data-upload-fixture.ts`, `production-figures.ts`), the new hires and the AB groups' targets;
+ * *Informal group* the groups and targets of `informal-groups-fixture.ts`. *Changed 2026-11-20 (P19.22):* the typed MAPA
+ * targets and the leaders' yearly sub-group targets are no longer seeded — nothing reads them (ADR-0270, ADR-0275 §3).
  *
  * Idempotent: every row has a fixed `_id` from `seedObjectId`, and a row already there is left as it is.
  */
@@ -73,40 +76,17 @@ export async function seedAdvancedAnalyticsFixture(deps: {
   const oid = (...parts: string[]) => new mongoose.Types.ObjectId(seedObjectId('advanced-analytics-fixture', ...parts));
   const stamp = { deletedAt: null, createdBy: deps.office0417.owner, updatedBy: deps.office0417.owner, createdAt: now, updatedAt: now };
 
-  // ---- MAPA targets: APE and FLC for this year's months so far.
-  for (let m = `${thisMonth.slice(0, 4)}-01`; m <= thisMonth; m = plusMonths(m, 1)) {
-    await once('analyticsTargets', {
-      _id: oid(kpm0417, 'mapa', m, 'ape'), kpmId: kpm0417, kind: 'mapa', month: m, row: 'ape', value: 150 * M,
-      headMembershipId: null, aaTarget: null, recTarget: null, ...stamp,
-    });
-    await once('analyticsTargets', {
-      _id: oid(kpm0417, 'mapa', m, 'flc'), kpmId: kpm0417, kind: 'mapa', month: m, row: 'flc', value: 2,
-      headMembershipId: null, aaTarget: null, recTarget: null, ...stamp,
-    });
-  }
-  // ---- This year's targets of three leaders (P19.13-T3; ADR-0253 §4): Agus's, Sari's and Dewi's — every other leader on
-  // the template's 3 and 6. The ids carry no year, so a database seeded before (Agus's row, given its year by migration
-  // 0062) gets no second row for the same leader and year.
-  const year = thisMonth.slice(0, 4);
-  const leaderTargets: [string | undefined, number, number][] = [
-    [deps.office0417.agus, 4, 8], [deps.office0417.sari, 2, 4], [deps.office0417.dewi, 1, 3],
-  ];
-  for (const [head, aaTarget, recTarget] of leaderTargets) {
-    if (!head) continue;
-    await once('analyticsTargets', {
-      _id: oid(kpm0417, 'subgroup', head), kpmId: kpm0417, kind: 'subgroup', month: null, row: null, value: null,
-      headMembershipId: head, year, aaTarget, recTarget, ...stamp,
-    });
-  }
-
-  // ---- The peers' latest runs, frozen: three complete, the last incomplete (left out of 0417's median).
-  for (const [i, peer] of deps.peers.entries()) {
-    const complete = i < 3;
-    await once('quantRuns', {
-      _id: oid(peer.kpmId, 'quant', latest), kpmId: peer.kpmId, companyId, periodEnd: latest,
-      values: values(latest, (metric) => peerFigure(metric, i), complete), peers: null,
-      computedAt: freezesAt(latest), freezesAt: freezesAt(latest), frozenAt: freezesAt(latest), lateWriteAt: null, ...stamp,
-    });
+  // ---- The peers' runs for the latest half-year and the one before, frozen: three complete, the last incomplete (left out
+  // of 0417's median). Each over its own half-year (`fromMonth`, ADR-0275 §4).
+  for (const period of [latest, previous]) {
+    for (const [i, peer] of deps.peers.entries()) {
+      const complete = i < 3;
+      await once('quantRuns', {
+        _id: oid(peer.kpmId, 'quant', period), kpmId: peer.kpmId, companyId, periodEnd: period, fromMonth: periodMonths(period)[0],
+        values: values(period, (metric) => peerFigure(metric, i), complete), peers: null,
+        computedAt: freezesAt(period), freezesAt: freezesAt(period), frozenAt: freezesAt(period), lateWriteAt: null, ...stamp,
+      });
+    }
   }
 
   // ---- 0417's previous run, frozen and complete, with the medians it stood against — A2 on two peers only.
@@ -120,7 +100,7 @@ export async function seedAdvancedAnalyticsFixture(deps: {
     ? { median: null, peers: 2 }
     : { median: peerFigure(metric, 1), peers: 3 }]));
   await once('quantRuns', {
-    _id: oid(kpm0417, 'quant', previous), kpmId: kpm0417, companyId, periodEnd: previous,
+    _id: oid(kpm0417, 'quant', previous), kpmId: kpm0417, companyId, periodEnd: previous, fromMonth: periodMonths(previous)[0],
     values: values(previous, (metric) => own[metric] ?? null), peers: medians,
     computedAt: freezesAt(previous), freezesAt: freezesAt(previous), frozenAt: freezesAt(previous), lateWriteAt: null, ...stamp,
   });
@@ -128,14 +108,15 @@ export async function seedAdvancedAnalyticsFixture(deps: {
   return {
     periods: { latest, previous },
     guide: `
-Advanced analytics (P19.5-T3; sign in as the 0417 owner, KPM → Advanced analytics):
-  MAPA driver          APE and FLC targets typed for ${thisMonth.slice(0, 4)} so far; later months TBD
-  Analitik kuantitatif ${latest}: 0417 computed live (Belum lengkap, no chip), medians from ${deps.peers.slice(0, 3).map((p) => p.code).join(', ')}
-                       ${previous}: 0417's frozen demonstration run — every chip; A2 "Belum cukup KPM pembanding (2 dari 3)"
-  Perbaikan sub-group  one row per informal group with its ★ (Top Producers 2026 ★ Wilson, Mentoring Agen Baru ★ Sari,
-                       LEADER MUDA no ★), then Tidak ada group; each row's targets the sum of its leaders' ${thisMonth.slice(0, 4)}
-                       targets — Agus 4 · 8, Sari 2 · 4, Dewi 1 · 3, every other leader the template's 3 · 6.
-                       Grouping and Ubah target open People › Core leaders & groups (/people/core-leaders)
+Advanced analytics (P19.22; sign in as the 0417 owner, KPM → Advanced analytics):
+  Demografi            the members' personal data (ADR-0158); join dates on file for the new hires only, so Perlu
+                       melengkapi lists people — Unduh daftar (CSV), fill Tanggal bergabung, Upload
+  MAPA driver          the production file from January of last year; Rekrut = new hires; Target bulanan from the AB
+                       groups' targets (Informal group) and Goal Setting ÷ 12
+  Analisa kuantitatif  ${latest}: 0417 computed live with its distribution per leader, medians from ${deps.peers.slice(0, 3).map((p) => p.code).join(', ')};
+                       Semester lalu from ${previous}, 0417's frozen demonstration run — every chip; A2 short of peers (2 dari 3)
+  Informal group       Top Producers 2026, Mentoring Agen Baru, LEADER MUDA (empty) and Tanpa group, each AB group's
+                       four drivers; tap a pill for the people behind it
   The peers' runs and 0417's ${previous} run are demonstration figures, frozen (from src/seed/advanced-analytics-fixture.ts)
 `,
   };

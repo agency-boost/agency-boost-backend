@@ -3,7 +3,7 @@
 # a second run on the same day tells nobody again.
 
 [Unit]
-Description=AgencyBoost daily run: the premium table notices in each environment
+Description=AgencyBoost daily run: the premium table notices and the subscription lapses in each environment
 Requires=docker.service
 After=docker.service agencyboost.service
 # A failed run is otherwise silent: nobody was told, and nothing else shows it.

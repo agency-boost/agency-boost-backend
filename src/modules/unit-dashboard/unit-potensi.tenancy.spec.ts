@@ -7,6 +7,7 @@ import { configModule } from '../../../test/config-module';
 import {
   buildCoachingOffice, COMPANY, KPM_A, KPM_B, ROSTER_NOW, ROSTER_TODAY, type CoachingOffice, type Who,
 } from '../../../test/coaching-office';
+import { activeAgentsIn } from '@/modules/production/active-agents';
 import { UnitPotensiService, type PotensiPerson, type UnitPotensiView } from './unit-potensi.service';
 
 const at = (iso: string) => new Date(iso);
@@ -76,6 +77,30 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
       { membershipId: office.id.INDAH, month: '2026-09' },
       { $set: { 'values.POLICY_COUNT': { value: 2, provenance: 'imported', sourceBatchId: null } } },
     );
+    /*
+     * P19.18-T3 AC-2 (ADR-0267 §3): the green number's new hires — credited to who registered them, placed under Hendra
+     * (outside Agus's tree) so the roster above is unchanged. Rina registered one who joined on 1 September and one test
+     * account; Budi one who joined in August; office B's Bayu one in September, who has left since.
+     */
+    let seq = 0;
+    const hire = (by: Who, joinDate: string, over: Record<string, unknown> = {}, kpmId = KPM_A) => {
+      seq += 1;
+      return {
+        _id: new mongoose.Types.ObjectId(), kpmId, userId: String(new mongoose.Types.ObjectId()), agentCode: `NH-${seq}`,
+        agentSeq: 800 + seq, leaderCode: `NH${seq}`, orgLevelId: 'x', orgLevelCode: 'AGENT', role: 'agent',
+        leaderId: kpmId === KPM_A ? office.id.PEER_AB : office.id.B_AB,
+        ancestorIds: kpmId === KPM_A ? [office.id.OWNER, office.id.PEER_AB] : [office.id.B_AB], depth: 2, status: 'active',
+        joinedAt: at(`${joinDate}T02:00:00Z`), joinDate, joinedAs: 'new_hire', registeredByMembershipId: office.id[by],
+        testAccount: false, deletedAt: null, groupIds: [], ...over,
+      };
+    };
+    await db().collection('memberships').insertMany([
+      hire('RINA', '2026-09-01'),
+      hire('RINA', '2026-09-09', { testAccount: true }),
+      hire('BUDI', '2026-08-31'),
+      // Bayu's has left since — still recruited (ADR-0267 §3), and on nobody's roster in office B.
+      hire('B_AGENT', '2026-09-03', { status: 'removed' }, KPM_B),
+    ]);
     // Rina's WhatsApp number, for *Chat Agent Rina*.
     const rina = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.RINA) });
     await db().collection('users').updateOne({ _id: new mongoose.Types.ObjectId(String(rina!.userId)) }, { $set: { phone: '+6281211002201' } });
@@ -87,19 +112,24 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
   const person = (view: UnitPotensiView, who: Who) => everyone(view).find((p) => p.membershipId === office.id[who])!;
   const cardOf = (view: UnitPotensiView, who: Who) => view.units.find((u) => u.leader?.membershipId === office.id[who])!;
 
+  /** *Active Agent* from the upload over Agus's eleven for a month: `activeAgentsIn`, the one definition (ADR-0267 §2). */
+  const activeIn = async (month: string) => {
+    const ids = everyone(await read('AGUS', { month })).map((p) => p.membershipId);
+    const reading = await activeAgentsIn(wired.productionReadings, office.as('AGUS'), ids, month);
+    return new Set(reading.people.map((p) => p.membershipId));
+  };
+
   describe('AC-2, AC-3 the tiles, and the list grouped per unit', () => {
-    // *Changed 2026-11-07 (P19.8-T4 AC-4, MOB UI-179; ADR-0229 §4):* the head's own card first, where it was last.
-    it('P19.8-T4 AC-4 MOB UI-179 Unit Anda first, then one card per unit below the AB in the Overview’s order — each leader first', async () => {
+    it('P19.18-T3 AC-3 Unit Anda first — Agus, Dewi (an AAB with no team), his agents — then one card per unit, AB → AAB → agents, each leader first', async () => {
       const view = await read('AGUS');
       expect(view.units.map((u) => [u.kind, u.leader?.name, u.people.map((p) => p.name)])).toEqual([
-        ['direct', 'Agus Salim', ['Agus Salim', 'Dimas Pratama', 'Indah Permatasari']],
-        ['unit', 'Dewi Lestari', ['Dewi Lestari']],
-        ['unit', 'Lukas Hartono', ['Lukas Hartono', 'Tari Anggraini']],
+        ['direct', 'Agus Salim', ['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']],
         ['unit', 'Sari Puspita', ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya']],
         ['unit', 'Nina Lestari', ['Nina Lestari', 'Dodi Kurniawan']],
+        ['unit', 'Lukas Hartono', ['Lukas Hartono', 'Tari Anggraini']],
       ]);
       expect(view.units.every((u) => u.people[0].isLeader && u.people.slice(1).every((p) => !p.isLeader))).toBe(true);
-      // Everybody in the unit, once; the leaders counted like everyone else.
+      // Everybody in the unit, once; the leaders counted like everyone else — Rina's new hire, under Hendra, is not.
       expect(everyone(view)).toHaveLength(11);
     });
 
@@ -112,76 +142,89 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
 
     it('P19.1-T6 AC-3 an AAB is answered their agents in their own card, a nested unit in its own', async () => {
       const view = await read('SARI');
-      // The AAB's own card first (P19.8-T4 AC-4).
       expect(view.units.map((u) => [u.kind, u.people.map((p) => p.name)])).toEqual([
         ['direct', ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya']],
         ['unit', ['Nina Lestari', 'Dodi Kurniawan']],
       ]);
     });
 
-    it('P19.1-T6 AC-2 tile AA counts the people who are AA this month; tile Rekrut the kandidat who became rekrut', async () => {
+    it('P19.18-T3 AC-1 tile Active Agent counts the people active in the month’s upload — `activeAgentsIn`, never a lead; Indah’s two policies count', async () => {
       const view = await read('AGUS');
-      expect(view).toMatchObject({ month: '2026-09', currentMonth: '2026-09', today: ROSTER_TODAY, tiles: { aa: 3, rekrut: 1 } });
-      expect(everyone(view).filter((p) => p.aa.aa).map((p) => p.name).sort())
-        .toEqual(['Budi Santoso', 'Dodi Kurniawan', 'Indah Permatasari']);
+      const active = await activeIn('2026-09');
+      expect(view).toMatchObject({ month: '2026-09', currentMonth: '2026-09', today: ROSTER_TODAY });
+      expect(view.tiles.aa).toBe(active.size);
+      expect(everyone(view).filter((p) => p.aa.aa).map((p) => p.membershipId).sort()).toEqual([...active].sort());
+      expect(active.has(office.id.INDAH)).toBe(true);
     });
 
-    it('P19.8-T4 AC-9 MOB UI-186 each tile’s potensi x counts people with a lead switched on, whatever became of it — never leads', async () => {
+    it('P19.18-T3 AC-2 tile Rekrut counts the new hires who joined in the month, credited to who registered them — never a kandidat marked Berhasil, never a test account', async () => {
       const view = await read('AGUS');
-      // Sales: Rina (two switched on) and Budi (one won, one open) — 2 people, though 4 leads; Indah's AA needs no switch.
-      // Recruit: Rina (Tia open, Maya won) — 1 person; Dimas's kandidat was never switched on.
+      // Rina's hire of 1 September; her test account and Budi's August hire are not September's, nor Maya's won lead.
+      expect(view.tiles.rekrut).toBe(1);
+      expect(everyone(view).filter((p) => p.rekrut.rekrut > 0).map((p) => [p.name, p.rekrut.rekrut])).toEqual([['Rina Wijaya', 1]]);
+      // August: Budi's hire of the 31st.
+      expect(person(await read('AGUS', { month: '2026-08' }), 'BUDI').rekrut.rekrut).toBe(1);
+    });
+
+    it('P19.18-T3 AC-1, AC-2 potensi n counts the people who can become Active Agent; the Rekrut tile’s potensi m sums the kandidat', async () => {
+      const view = await read('AGUS');
+      // Sales: Rina (2 open) and Budi (1 open) — 2 people, though 3 leads. Recruit: Rina's Tia — 1.
       expect(view.tiles.potensi).toEqual({ aa: 2, rekrut: 1 });
-      // The cards' *y* summed, one figure for both.
-      expect(view.tiles.potensi.aa).toBe(view.units.reduce((sum, u) => sum + u.totals.aa.switchedPeople, 0));
-      expect(view.tiles.potensi.rekrut).toBe(view.units.reduce((sum, u) => sum + u.totals.rekrut.switchedPeople, 0));
-      // August: Sari's and Nina's switches, one person each.
-      expect((await read('AGUS', { month: '2026-08' })).tiles).toEqual({ aa: 1, rekrut: 0, potensi: { aa: 2, rekrut: 0 } });
+      expect(view.tiles.potensi.aa).toBe(view.units.reduce((sum, u) => sum + u.totals.aa.potensi, 0));
+      expect(view.tiles.potensi.rekrut).toBe(view.units.reduce((sum, u) => sum + u.totals.rekrut.potensi, 0));
+      // August: Nina's lead, open at the month's end — one person; Sari's became her case.
+      expect((await read('AGUS', { month: '2026-08' })).tiles.potensi).toEqual({ aa: 1, rekrut: 0 });
     });
   });
 
-  describe('AC-5, AC-7 the people’s pills', () => {
-    it('P19.1-T6 AC-12 AA by each path of OD-249: a sales lead marked Berhasil (Budi), the month’s file (Indah)', async () => {
+  describe('AC-1, AC-2 the people’s marks', () => {
+    it('P19.18-T3 AC-1 the ✓ is the upload’s Active Agent: a won sales lead alone makes nobody active; the file’s policies do', async () => {
       const view = await read('AGUS');
-      expect(person(view, 'BUDI').aa).toEqual({ potensi: 1, aa: true, switched: 2 });
-      // AA without the switch.
+      const active = await activeIn('2026-09');
+      expect(person(view, 'BUDI').aa).toEqual({ potensi: 1, aa: active.has(office.id.BUDI), switched: 2 });
       expect(person(view, 'INDAH').aa).toEqual({ potensi: 0, aa: true, switched: 0 });
-      // APE on the month's row without a policy is not a case.
-      expect(person(view, 'RINA').aa).toEqual({ potensi: 2, aa: false, switched: 2 });
+      expect(person(view, 'RINA').aa).toMatchObject({ potensi: 2, switched: 2 });
     });
 
-    it('P19.1-T6 AC-5 a person already AA keeps n potensi while other leads stay switched on', async () => {
-      expect(person(await read('AGUS'), 'BUDI').aa).toMatchObject({ potensi: 1, aa: true });
+    it('P19.1-T6 AC-5 a person keeps n potensi while other leads stay switched on', async () => {
+      expect(person(await read('AGUS'), 'BUDI').aa).toMatchObject({ potensi: 1 });
     });
 
-    it('P19.1-T6 AC-7 only switched-on Recruit leads are potensi; a rekrut counts; one not switched on is left out', async () => {
+    it('P19.18-T3 AC-2 the orange number is the switched-on kandidat still open; the green number the new hires registered', async () => {
       const view = await read('AGUS');
       expect(person(view, 'RINA').rekrut).toEqual({ potensi: 1, rekrut: 1, switched: 2 });
       expect(person(view, 'DIMAS').rekrut).toEqual({ potensi: 0, rekrut: 0, switched: 0 });
     });
 
-    it('P19.1-T6 AC-4 a card’s header: n potensi · n AA, and n potensi · n rekrut', async () => {
-      expect(cardOf(await read('AGUS'), 'SARI').totals).toEqual({
-        aa: { potensi: 3, aa: 1, switchedPeople: 2, switchedPeopleAa: 1 },
+    it('P19.18-T3 AC-1, AC-2 a card’s header: n potensi counts people; n rekrut · potensi m are sums', async () => {
+      const active = await activeIn('2026-09');
+      const sari = cardOf(await read('AGUS'), 'SARI');
+      const aa = [office.id.SARI, office.id.BUDI, office.id.RINA].filter((id) => active.has(id)).length;
+      expect(sari.totals).toEqual({
+        aa: {
+          potensi: 2, aa, switchedPeople: 2,
+          switchedPeopleAa: [office.id.BUDI, office.id.RINA].filter((id) => active.has(id)).length,
+        },
         rekrut: { potensi: 1, rekrut: 1, switchedPeople: 1, switchedPeopleRekrut: 1 },
       });
     });
   });
 
   describe('AC-9, AC-12 the month: Asia/Jakarta, and an earlier month’s result', () => {
-    it('P19.1-T6 AC-12 a case at 00:30 WIB on 1 September is September’s, though August’s in UTC', async () => {
-      expect(person(await read('AGUS'), 'DODI').aa.aa).toBe(true);
-      expect(person(await read('AGUS', { month: '2026-08' }), 'DODI').aa.aa).toBe(false);
+    it('P19.18-T3 AC-2 a join date is an office date: 1 September is September’s, 31 August August’s', async () => {
+      expect(person(await read('AGUS'), 'RINA').rekrut.rekrut).toBe(1);
+      expect(person(await read('AGUS', { month: '2026-08' }), 'RINA').rekrut.rekrut).toBe(0);
+      expect(person(await read('AGUS'), 'BUDI').rekrut.rekrut).toBe(0);
     });
 
-    it('P19.1-T6 AC-9 August still reads what became of its switches: potensi 1/1 · 1 AA for Sari, 0/1 for Nina', async () => {
+    it('P19.1-T6 AC-9 August still reads what became of its switches: Sari’s became her case, Nina’s stayed open', async () => {
       const august = await read('AGUS', { month: '2026-08' });
-      expect(august).toMatchObject({ month: '2026-08', currentMonth: '2026-09', tiles: { aa: 1, rekrut: 0 } });
-      // Sari's switched-on lead became her case: no longer a potensi, and the ✓.
-      expect(cardOf(august, 'SARI').totals.aa).toEqual({ potensi: 0, aa: 1, switchedPeople: 1, switchedPeopleAa: 1 });
-      // Nina's lead was open at August's end, and is still: a potensi that did not become a case.
-      expect(cardOf(august, 'NINA').totals.aa).toEqual({ potensi: 1, aa: 0, switchedPeople: 1, switchedPeopleAa: 0 });
+      const active = await activeIn('2026-08');
+      expect(august).toMatchObject({ month: '2026-08', currentMonth: '2026-09', tiles: { aa: active.size, rekrut: 1 } });
+      expect(cardOf(august, 'SARI').totals.aa).toMatchObject({ potensi: 0, switchedPeople: 1 });
+      expect(cardOf(august, 'NINA').totals.aa).toMatchObject({ potensi: 1, switchedPeople: 1 });
       // September's switches are not August's.
-      expect(person(august, 'RINA').aa).toEqual({ potensi: 0, aa: false, switched: 0 });
+      expect(person(august, 'RINA').aa).toMatchObject({ potensi: 0, switched: 0 });
     });
 
     it('P19.8-T4 AC-10 MOB UI-182 an earlier month lists the whole team under each card, as this month does', async () => {
@@ -191,8 +234,10 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
       const july = await read('AGUS', { month: '2026-07' });
       expect(names(july)).toEqual(names(september));
       expect(everyone(july)).toHaveLength(11);
-      expect(everyone(july).every((p) => p.aa.potensi === 0 && !p.aa.aa && p.rekrut.potensi === 0 && p.rekrut.rekrut === 0)).toBe(true);
-      expect(july.tiles).toEqual({ aa: 0, rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
+      const active = await activeIn('2026-07');
+      expect(everyone(july).every((p) => p.aa.potensi === 0 && p.aa.aa === active.has(p.membershipId) && p.rekrut.potensi === 0
+        && p.rekrut.rekrut === 0)).toBe(true);
+      expect(july.tiles).toEqual({ aa: active.size, rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
     });
 
     it('P19.1-T6 AC-12 a month after this one, or one that is not a month, is 400 VALIDATION_FAILED', async () => {
@@ -204,7 +249,7 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
   describe('AC-10 a leader with nobody below them', () => {
     it('P19.1-T6 AC-10 is answered their own card alone and the tiles at 0 — never an error (UI-159 item 4)', async () => {
       const view = await read('DEWI');
-      expect(view.tiles).toEqual({ aa: 0, rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
+      expect(view.tiles).toMatchObject({ rekrut: 0, potensi: { aa: 0, rekrut: 0 } });
       expect(view.units).toHaveLength(1);
       expect(view.units[0]).toMatchObject({ kind: 'direct', people: [{ name: 'Dewi Lestari', isLeader: true, isReader: true }] });
     });
@@ -219,8 +264,10 @@ describe('P19.1-T6 the Potensi tab (UI-155)', () => {
     });
 
     it('P19.1-T6 AC-12 cross-tenant: office B’s case is in office B’s figures and nowhere in office A’s', async () => {
-      expect((await read('B_AB')).tiles).toEqual({ aa: 1, rekrut: 0, potensi: { aa: 1, rekrut: 0 } });
+      // P19.18-T3: Bayu's September hire is office B's green number, and office A's tiles never hold it.
+      expect((await read('B_AB')).tiles).toMatchObject({ rekrut: 1, potensi: { aa: 0, rekrut: 0 } });
       expect(JSON.stringify(await read('OWNER'))).not.toContain(office.id.B_AGENT);
+      expect(everyone(await read('OWNER')).reduce((sum, p) => sum + p.rekrut.rekrut, 0)).toBe(1);
     });
 
     it('P19.1-T6 AC-1 the Owner and an Admin read any leader’s unit; a row opens only where lead:read reaches (§3.7)', async () => {

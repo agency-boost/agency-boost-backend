@@ -1,8 +1,7 @@
-import { DateTime } from 'luxon';
 import mongoose from 'mongoose';
-import { ANALYTICS, DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import { ANALYTICS } from '@/domain/constants';
 import {
-  analyticsConfigV1, KODE_OF_CELL, prudentialSeedDraft, V1_PATTERN_CANDIDATES,
+  analyticsConfigV1, KODE_OF_CELL, PLATFORM_DEFAULT_EFFECTIVE_FROM, prudentialSeedDraft, V1_PATTERN_CANDIDATES,
 } from '@/modules/config/analytics-config';
 import { compileLinearPattern } from '@/modules/config/linear-pattern';
 
@@ -53,8 +52,15 @@ const LEGACY_CELLS: Record<string, string> = {
  *   unregistered code; every section on; the spec's surveys and thresholds;
  * - its **agent-code pattern**: the first of `^\d{3,32}$`, `^[A-Za-z0-9-]{1,32}$` and `^.{1,64}$` that **every code
  *   registered** on the template's KPMs already matches (`V1_PATTERN_CANDIDATES`);
- * - its columns' **`effectiveFrom`**: the earliest month any of those KPMs holds a figure for, or this month where none
- *   holds one.
+ * - its columns' **`effectiveFrom`**: the earliest month any of those KPMs holds a figure for — in the legacy cells or by
+ *   kode — and **never later than `PLATFORM_DEFAULT_EFFECTIVE_FROM`**, January 2024, where none holds one too.
+ *
+ *   *Changed 2026-11-20:* it read "or this month where none holds one", and only the legacy cells. Every KPM's data is
+ *   required from January 2024 (`PRODUCTION.HISTORY_FROM`, ADR-0274 §3), and a month before a column's `effectiveFrom`
+ *   can be asked for but never answered (its figures read *—*). On a fresh database the migration ran before any KPM
+ *   existed and the seed then wrote its history by kode, which the legacy read missed: every column started the month
+ *   of the deploy, and the seeded history read as never uploaded. A database this has already run on keeps what it
+ *   wrote (the run is idempotent).
  *
  * **The Prudential template** — the default template of the company named *Prudential* — is also offered the spec's §3
  * seed as a **draft** beside it: `^[0-9]{8}$`, `unknownAgent: 'flag'` and the mockup's required flags. A Super Admin
@@ -74,7 +80,6 @@ export async function up(db: mongoose.mongo.Db, now: Date): Promise<AdvancedAnal
   const memberships = db.collection('memberships');
   const months = db.collection('monthlyAgentData');
   const result: AdvancedAnalyticsV1Result = { written: 0, current: 0, drafts: 0, reports: [] };
-  const thisMonth = DateTime.fromJSDate(now, { zone: 'utc' }).setZone(DEFAULT_TENANT_TIMEZONE).toFormat('yyyy-MM');
 
   const templates = await named.find({ deletedAt: null }).sort({ _id: 1 }).toArray();
   for (const template of templates) {
@@ -95,7 +100,8 @@ export async function up(db: mongoose.mongo.Db, now: Date): Promise<AdvancedAnal
       return { ...c, test: compiled.ok ? compiled.pattern.test : () => false };
     });
     const chosen = candidates.find((c) => codes.every((code) => c.test(code))) ?? candidates[candidates.length - 1];
-    const effectiveFrom = (await earliestHeld(months, offices)) ?? thisMonth;
+    const held = await earliestHeld(months, offices);
+    const effectiveFrom = held !== null && held < PLATFORM_DEFAULT_EFFECTIVE_FROM ? held : PLATFORM_DEFAULT_EFFECTIVE_FROM;
     // An example from the KPMs' own codes, where one is registered: what the field shows as *Contoh yang cocok*.
     const payload = analyticsConfigV1({
       effectiveFrom, agentCodePattern: chosen.pattern, agentCodeExample: codes.find((c) => chosen.test(c)) ?? chosen.example,
@@ -166,10 +172,18 @@ async function officesReading(
   }).map((office) => String(office._id));
 }
 
-/** The earliest month any of the offices holds a figure in, or `null`. */
+/**
+ * The earliest month any of the offices holds a figure in, or `null`: in a legacy cell (`apeMonthly`), which a row
+ * written before migration 0058 holds, or by kode (`values.APE`), which every row written since holds — the seed's among
+ * them, which run this after writing their history.
+ */
 async function earliestHeld(months: mongoose.mongo.Collection, offices: string[]): Promise<string | null> {
   if (offices.length === 0) return null;
-  const held = Object.keys(LEGACY_CELLS).map((cell) => ({ [`${cell}.value`]: { $ne: null } }));
+  const kodes = [...new Set(Object.values(LEGACY_CELLS))];
+  const held = [
+    ...Object.keys(LEGACY_CELLS).map((cell) => ({ [`${cell}.value`]: { $ne: null } })),
+    ...kodes.map((kode) => ({ [`values.${kode}.value`]: { $ne: null } })),
+  ];
   const row = await months
     .find({ kpmId: { $in: offices }, deletedAt: null, $or: held }, { projection: { month: 1 } })
     .sort({ month: 1 })

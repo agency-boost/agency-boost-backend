@@ -54,8 +54,9 @@ describe('the Unit Dashboard, UI V1 (Phase 18.11 T4)', () => {
   }, 120_000);
   afterAll(stopMongo);
 
+  // *Bulan ini* unless named: these cases pin the month's figures (the default is *Tahun ini* since P19.18-T1 AC-1).
   const read = (who: Who, query: Parameters<typeof wired.unitDashboard.read>[1] = {}) =>
-    wired.unitDashboard.read(office.as(who), query);
+    wired.unitDashboard.read(office.as(who), { period: 'month', ...query });
   const activities = (who: Who, query: Parameters<typeof wired.unitActivities.read>[1] = {}) =>
     wired.unitActivities.read(office.as(who), query);
   const closingsOf = (view: UnitDashboardView) =>

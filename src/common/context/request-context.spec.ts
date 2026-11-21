@@ -202,3 +202,46 @@ describe('P18.10-T5 the context’s reader', () => {
     expect(RequestContext.joiningTenant(asked, 'k1').reader).toEqual({ language: 'id', figures: 'id' });
   });
 });
+
+/*
+ * **A Super Admin inside a KPM** (ADR-0268 §3; P19.17 F2): the KPM named, no membership, writable, nobody impersonated —
+ * and nothing else is one: not the Super Admin in no KPM, not a platform read, not a support session, not a member.
+ */
+describe('ADR-0268 §3 isSuperAdminInKpm', () => {
+  const reader = { language: 'id', figures: 'id' } as const;
+
+  it('superAdminInKpm names the KPM, keeps the reader and the password state, and is writable', () => {
+    const own = new RequestContext('sa-1', 'super_admin', null, null, null, true, false, reader);
+    const inside = RequestContext.superAdminInKpm(own, 'kpm-a');
+    expect(inside).toMatchObject({ userId: 'sa-1', kpmId: 'kpm-a', membership: null, mustChangePassword: true, reader });
+    expect(inside.isSuperAdminInKpm).toBe(true);
+    expect(inside.impersonationReadOnly).toBe(false);
+    expect(inside.isPlatformRead).toBe(false);
+    expect(inside.auditActors).toEqual({ actorUserId: 'sa-1', effectiveUserId: 'sa-1' });
+    expect(Object.isFrozen(inside)).toBe(true);
+  });
+
+  it('is false for every other context', () => {
+    const member = {
+      membershipId: 'm1', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab' as const, status: 'active' as const,
+      isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+    };
+    for (const ctx of [
+      RequestContext.platform('sa-1'),
+      RequestContext.platformRead(RequestContext.platform('sa-1'), 'kpm-a'),
+      new RequestContext('u1', 'super_admin', member),
+      new RequestContext('u1', 'none', member, 'sa-1', null, false, true),
+      new RequestContext('sa-2', 'super_admin', null, 'sa-1', 'kpm-a'),
+      new RequestContext('u1', 'none', null, null, 'kpm-a'),
+    ]) {
+      expect(ctx.isSuperAdminInKpm).toBe(false);
+    }
+  });
+});
+
+describe('ADR-0207 §4 isPlatformRead, against the contexts beside it', () => {
+  it('is no platform read inside a session, and none writable', () => {
+    expect(new RequestContext('sa-2', 'super_admin', null, 'sa-1', 'kpm-a', false, true).isPlatformRead).toBe(false);
+    expect(RequestContext.superAdminInKpm(RequestContext.platform('sa-1'), 'kpm-a').isPlatformRead).toBe(false);
+  });
+});

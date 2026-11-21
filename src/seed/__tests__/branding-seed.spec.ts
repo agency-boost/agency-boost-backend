@@ -60,10 +60,21 @@ describe('the branding seed (P19.6-T1)', () => {
     expect(shown.mascot).toEqual({ default: `dev/${KPM_0555}/${BRANDED_DEMO.mascotFolder}`, poses: {} });
     expect(storage.puts).toContain(`dev/${KPM_0555}/${BRANDED_DEMO.logoFolder}/icon-512.png`);
     expect((await reader.shownFor(KPM_0417))!.palette).toBeNull();
+    // P19.21-T4 AC-1 (ADR-0274): 0555 calls the app Dynamic Smart System; 0417 keeps AgencyBoost.
+    expect(shown.systemName).toBe('Dynamic Smart System');
+    expect((await reader.shownFor(KPM_0417))!.systemName).toBeNull();
 
     const sent = storage.puts.length;
     expect(await seedBrandingFixture({ clock, storage, kpmId: KPM_0555 })).toMatchObject({ written: 0 });
     expect(storage.puts.length).toBe(sent);
+
+    // A row seeded before the name existed takes it on the next run; a name set since stays.
+    await mongoose.models[KpmBranding.name]!.updateOne({ kpmId: KPM_0555 }, { $unset: { systemName: 1 } });
+    await seedBrandingFixture({ clock, storage, kpmId: KPM_0555 });
+    expect((await reader.shownFor(KPM_0555))!.systemName).toBe('Dynamic Smart System');
+    await mongoose.models[KpmBranding.name]!.updateOne({ kpmId: KPM_0555 }, { $set: { systemName: 'Gading Smart' } });
+    await seedBrandingFixture({ clock, storage, kpmId: KPM_0555 });
+    expect((await reader.shownFor(KPM_0555))!.systemName).toBe('Gading Smart');
   });
 
   it('P19.6-T1 without storage, seeds the colours alone', async () => {

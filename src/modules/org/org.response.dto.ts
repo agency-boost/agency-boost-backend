@@ -1,9 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { DirectoryMember, DirectoryPage, MemberPersonal, MemberSearchHit } from './directory.service';
+import type {
+  DirectoryGroupPlace, DirectoryMember, DirectoryPage, MemberPersonal, MemberSearchHit,
+} from './directory.service';
 import type { MemberPhone } from './member-phone.service';
 import type { InvitationState } from './invitation-state';
 import type { Gender, WorkStatus } from '@/domain/constants';
-import type { GroupSummary, MemberTags } from './group.service';
+import type { MemberTags } from './group.service';
 import type { KpmDirectoryEntry, LeaderChoice, JoinState } from './onboarding.service';
 import type { PendingRequest, RoutingChoice, UntaggedMember } from './approvals.service';
 import type { DelegatedAdmin } from './admin-delegation.service';
@@ -81,6 +83,18 @@ export class MemberPersonalDto implements MemberPersonal {
   companyName!: string | null;
 }
 
+/** P19.20-T1 AC-2: where a roster row stands among the informal groups (ADR-0270 §1). */
+export class DirectoryGroupPlaceDto implements DirectoryGroupPlace {
+  @ApiProperty({ type: () => MemberGroupRefDto, nullable: true, description: 'The live group; `null` is *Tanpa group*.' })
+  group!: { groupId: string; name: string } | null;
+
+  @ApiProperty({ type: () => MemberAbRefDto, nullable: true, description: 'The AB whose AB group they are in — themselves for an AB.' })
+  ab!: { membershipId: string; name: string } | null;
+
+  @ApiProperty({ type: Boolean, description: 'An AB who is one of their group’s Group Leaders.' })
+  isGroupLeader!: boolean;
+}
+
 export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({ type: String })
   membershipId!: string;
@@ -154,6 +168,15 @@ export class DirectoryMemberDto implements DirectoryMember {
   })
   canTagCoreLeader!: boolean;
 
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'ADR-0268 §1: **this viewer may open this member** — their detail sheet and profile. Always, but for a core leader, '
+      + 'who sees the whole KPM and opens only themselves and their downline: the rest are shown muted, with no chevron, '
+      + 'and `GET /members/:id` answers them `404`.',
+  })
+  openable!: boolean;
+
   @ApiProperty({ type: String, nullable: true, description: 'The system’s stamp: the instant the membership was made active.' })
   joinedAt!: string | null;
 
@@ -167,6 +190,12 @@ export class DirectoryMemberDto implements DirectoryMember {
 
   @ApiProperty({ type: String, nullable: true })
   removedAt!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true, format: 'date-time',
+    description: 'When the membership was made — the day they registered here: *Sudah daftar … · daftar 4 hari lalu*.',
+  })
+  registeredAt!: string | null;
 
   @ApiProperty({
     type: String, enum: ['signed_in', 'invited', 'not_invited'],
@@ -210,6 +239,32 @@ export class DirectoryMemberDto implements DirectoryMember {
   })
   lastCoachedDays?: number | null;
 
+  /* P19.20-T1 AC-2 (ADR-0267 §4, §5; ADR-0273 §2): the two pills' colours, the server's buckets — never a frontend copy. */
+  @ApiProperty({
+    type: String, required: false, enum: ['never', 'lapsed', 'recent'],
+    description: 'On the roster’s active rows only: *Aktivitas terakhir*’s bucket (`USAGE`): red `never`, yellow `lapsed` (> 14 days), green `recent`.',
+  })
+  lastActivityStatus?: 'never' | 'lapsed' | 'recent';
+
+  @ApiProperty({
+    type: String, required: false, enum: ['never', 'lapsed', 'recent'],
+    description: 'On the roster’s active rows only: *Coaching terakhir*’s `COACHING_STATUS`: red `never`, yellow `lapsed` (> 14 days), green `recent`.',
+  })
+  lastCoachedStatus?: 'never' | 'lapsed' | 'recent';
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Their profile photo as a signed link, or `null` — the row draws their initials.',
+  })
+  photoUrl!: string | null;
+
+  @ApiProperty({
+    type: () => DirectoryGroupPlaceDto, required: false,
+    description: 'ADR-0270 §1: on an active row, for a steward of the KPM only — their informal group (an AAB’s '
+      + 'or an agent’s their AB’s), the AB they follow, and whether an AB is one of its Group Leaders.',
+  })
+  groupPlace?: DirectoryGroupPlace;
+
   @ApiProperty({ type: Boolean, description: 'May **this viewer** change this person’s rung at all: `roleChoices` holds more than their own. Decides what is offered, never what is allowed — the API refuses regardless.' })
   canChangeRole!: boolean;
 
@@ -228,6 +283,14 @@ export class DirectoryMemberDto implements DirectoryMember {
 
   @ApiProperty({ type: Boolean, description: 'May they remove this person. False for yourself, for the office root, and for anybody already removed.' })
   canRemove!: boolean;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'ADR-0273 §3: may this viewer change their details in the member sheet — the Owner, an Admin and the Super '
+      + 'Admin inside the KPM anybody who has not left, a core leader somebody strictly below them. An offer; '
+      + '`PATCH /members/:id/personal` refuses regardless.',
+  })
+  canEditDetails!: boolean;
 
   @ApiProperty({
     type: () => MemberPersonalDto, required: false,
@@ -250,25 +313,14 @@ export class DirectoryPageDto implements DirectoryPage {
 
 }
 
-export class GroupSummaryDto implements GroupSummary {
-  @ApiProperty({ type: String })
-  groupId!: string;
+class MemberGroupRefDto {
+  @ApiProperty() groupId!: string;
+  @ApiProperty() name!: string;
+}
 
-  @ApiProperty({ type: String })
-  name!: string;
-
-  @ApiProperty({ type: String, nullable: true, description: 'The ★ group leader (ADR-0253 §2), or `null`: *Belum ada group leader*.' })
-  ownerMembershipId!: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  ownerName!: string | null;
-
-  @ApiProperty({ type: Boolean, description: 'The owner has been removed from the office. They are still named — they really are the recorded owner, and a blank would look like a fault. But an Owner reading the list needs to know the group has nobody running it, so the flag travels and the screen says both.' })
-  ownerHasLeft!: boolean;
-
-  @ApiProperty({ type: Number })
-  memberCount!: number;
-
+class MemberAbRefDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty() name!: string;
 }
 
 export class MemberTagsDto implements MemberTags {
@@ -278,7 +330,10 @@ export class MemberTagsDto implements MemberTags {
   @ApiProperty({ type: String })
   fullName!: string;
 
-  @ApiProperty({ type: String, isArray: true })
+  @ApiProperty({
+    type: String, isArray: true,
+    description: 'An AB\u2019s one group, `[]` for none; always `[]` for an AAB or an agent, who follow their AB (ADR-0270 §1).',
+  })
   groupIds!: string[];
 
   @ApiProperty({ type: Boolean, description: 'The tag as stored. It has effect only while `canBeCoreLeader` (ADR-0159 §1).' })
@@ -292,6 +347,17 @@ export class MemberTagsDto implements MemberTags {
   })
   canBeCoreLeader!: boolean;
 
+  @ApiProperty({ type: Boolean, description: 'They are an active AB: only an AB carries a group (ADR-0270 §1).' })
+  canCarryGroup!: boolean;
+
+  @ApiProperty({
+    type: MemberGroupRefDto, nullable: true,
+    description: 'Their informal group — an AAB\u2019s or an agent\u2019s their AB\u2019s (*Group · ikut AB*) — or `null`.',
+  })
+  group!: MemberGroupRefDto | null;
+
+  @ApiProperty({ type: MemberAbRefDto, nullable: true, description: 'The AB whose AB group they are in — themselves for an AB.' })
+  ab!: MemberAbRefDto | null;
 }
 
 export class KpmDirectoryEntryDto implements KpmDirectoryEntry {
@@ -457,6 +523,8 @@ export class DelegatedAdminDto implements DelegatedAdmin {
   @ApiProperty({ type: Boolean })
   canRevoke!: boolean;
 
+  @ApiProperty({ type: String, nullable: true, description: 'Their profile photo as a signed link, or `null`.' })
+  photoUrl!: string | null;
 }
 
 export class TeamMemberDto implements TeamMember {
@@ -608,6 +676,8 @@ export class OrgTreeNodeDto implements OrgTreeNode {
   @ApiProperty({ type: String, nullable: true, description: 'UI V1 (UI-059): their profile photo, when they have one (`users.avatarUrl`); the row draws initials otherwise.' })
   photoUrl!: string | null;
 
+  @ApiProperty({ type: Boolean, description: 'ADR-0268 §1: this reader may open them — always, but for a core leader on `view=kpm`, who opens only themselves and their downline; the rest are drawn muted and do not open.' })
+  openable!: boolean;
 }
 
 export class OrgTreeLeaderDto implements OrgTreeLeader {
@@ -658,6 +728,12 @@ export class LeaderLimitRequestRowDto implements LeaderLimitRequestRow {
   @ApiProperty({ type: String, example: 'Cempaka Putih' })
   kpmBranchName!: string;
 
+  @ApiProperty({
+    type: String, example: 'Prudential',
+    description: 'The office’s company: *Persetujuan* names a KPM by name and company. `\'\'` when unreadable.',
+  })
+  companyName!: string;
+
   @ApiProperty({ type: String })
   subjectMembershipId!: string;
 
@@ -693,6 +769,13 @@ export class LeaderLimitRequestRowDto implements LeaderLimitRequestRow {
 
   @ApiProperty({ type: String, nullable: true })
   decidedAt!: string | null;
+
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Who decided it: the Super Admin who approved or declined, or the asker who withdrew it. '
+      + '`null` while it waits.',
+  })
+  decidedByName!: string | null;
 
   @ApiProperty({ type: String, nullable: true, description: 'AgencyBoost\u2019s reason, or that it no longer applied.' })
   declineReason!: string | null;

@@ -1,162 +1,165 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { BillingTier } from '@/domain/constants';
 
-/** One tier of the price table, as `GET /admin/billing/prices` serves it. */
+/** One tier of the price list, as `GET /admin/billing/prices` serves it (ADR-0279 §1). */
 export class BillingTierDto implements BillingTier {
-  @ApiProperty({
-    type: String,
-    example: 'TIER_1_10',
-    description: 'The tier’s stable code. A tier is named by it, never by its position.',
-  })
+  @ApiProperty({ type: String, example: 'TIER_1_10', description: 'The tier’s stable code, never its position.' })
   code!: string;
 
   @ApiProperty({ type: Number, example: 1, description: 'The smallest leader count the tier prices, inclusive.' })
   minLeaders!: number;
 
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    example: 10,
-    description: 'The largest leader count the tier prices, inclusive; `null` for the open last tier.',
-  })
+  @ApiProperty({ type: Number, nullable: true, example: 10, description: 'The largest, inclusive; `null` for 101+.' })
   maxLeaders!: number | null;
 
   @ApiProperty({
-    type: Number,
-    example: 50_000_000,
-    description: 'The standard rate per leader per month, in IDR minor units (sen). Shown struck through.',
+    type: Number, nullable: true, example: 50_000_000,
+    description: '*Harga standar* per leader per month, IDR minor units (sen); `null` on *Harga khusus*.',
   })
-  standardMinor!: number;
+  standardMinor!: number | null;
 
   @ApiProperty({
-    type: Number,
-    example: 40_000_000,
-    description: 'The six-month rate per leader per month, in IDR minor units (sen).',
+    type: Number, nullable: true, example: 40_000_000,
+    description: '*Harga penawaran* per leader per month, IDR minor units; `null` on *Harga khusus*.',
   })
-  sixMonthMinor!: number;
+  offerMinor!: number | null;
 
-  @ApiProperty({
-    type: Number,
-    example: 38_000_000,
-    description:
-      'The annual rate per leader per month, in IDR minor units (sen): the six-month rate less ' +
-      '`annualDiscountPct` percent, exactly.',
-  })
-  annualMinor!: number;
-
-  @ApiProperty({
-    type: Boolean,
-    description: 'Shown publicly as “Custom pricing”: its card draws no rate.',
-  })
+  @ApiProperty({ type: Boolean, description: '*Harga khusus · diatur per KPM*: the tier draws no price.' })
   customPricing!: boolean;
 }
 
-/** The whole table: `GET /admin/billing/prices`. */
+/** *Balik modal*'s parts: one policy's APE and the three percentages, and what they make. */
+export class BillingBreakEvenDto {
+  @ApiProperty({ example: 2_000_000_000 }) policyApeMinor!: number;
+  @ApiProperty({ example: 20 }) commissionPct!: number;
+  @ApiProperty({ example: 10, description: 'A placeholder the owner accepted for now (§13.2).' }) overridingPct!: number;
+  @ApiProperty({ example: 10, description: 'A placeholder the owner accepted for now (§13.2).' }) bonusPct!: number;
+  @ApiProperty({ example: 800_000_000, description: 'APE × (komisi + overriding + bonus).' }) incomePerPolicyMinor!: number;
+}
+
+/** The whole list and the calculator's numbers: `GET /admin/billing/prices`. */
 export class BillingPricesDto {
-  @ApiProperty({ enum: ['IDR'], description: 'The currency of every rate.' })
+  @ApiProperty({ enum: ['IDR'], description: 'The currency of every price.' })
   currency!: 'IDR';
 
-  @ApiProperty({
-    type: [BillingTierDto],
-    description: 'Smallest leader count first. Together they cover every count from 1 up, without a gap.',
-  })
+  @ApiProperty({ type: [BillingTierDto], description: 'Smallest leader count first, every count from 1 up covered.' })
   tiers!: BillingTierDto[];
 
-  @ApiProperty({
-    type: Number,
-    example: 5,
-    description: 'The annual rate’s discount off the six-month rate, in percent.',
-  })
+  @ApiProperty({ example: 5, description: '*Tahunan*: the percent off the period’s total.' })
   annualDiscountPct!: number;
+
+  @ApiProperty({ example: 30, description: 'A new KPM’s trial, in days.' })
+  trialDays!: number;
+
+  @ApiProperty({ example: 7, description: 'The days after the end before the KPM is suspended.' })
+  graceDays!: number;
+
+  @ApiProperty({ example: 30, description: '*Berakhir ≤ 30 hari*.' })
+  endingSoonDays!: number;
+
+  @ApiProperty({ example: 30, description: 'The days a month counts for the per-day figures.' })
+  daysPerMonth!: number;
+
+  @ApiProperty({ example: 10_000, description: 'The per-day figures round half up to this, in sen (Rp 100).' })
+  perDayRoundingMinor!: number;
+
+  @ApiProperty({ example: 100 }) bulkPercentMax!: number;
+  @ApiProperty({ example: 500 }) noteMax!: number;
+  @ApiProperty({ example: 120 }) kpmNameMax!: number;
+  @ApiProperty({ example: 10_000, description: 'The largest *Jumlah leader* or *Jumlah agent*.' }) countMax!: number;
+  @ApiProperty({ example: 10_000_000_000, description: 'The largest price per leader per month, in sen.' }) rateMaxMinor!: number;
+
+  @ApiProperty({ type: BillingBreakEvenDto })
+  breakEven!: BillingBreakEvenDto;
 }
 
-/** A tier as a row of the list names it: its code and its bounds. */
+/** A tier as a row names it: *paket 1–10 leader*. */
 export class BillingKpmTierDto {
-  @ApiProperty({ example: 'TIER_1_10' })
-  code!: string;
-
-  @ApiProperty({ example: 1 })
-  minLeaders!: number;
-
-  @ApiProperty({ type: Number, nullable: true, example: 10, description: '`null` for the open last tier.' })
-  maxLeaders!: number | null;
+  @ApiProperty({ example: 'TIER_1_10' }) code!: string;
+  @ApiProperty({ example: 1 }) minLeaders!: number;
+  @ApiProperty({ type: Number, nullable: true, example: 10 }) maxLeaders!: number | null;
 }
 
-/** A KPM's company, by id and name. */
+/** A KPM's company. */
 export class BillingKpmCompanyDto {
-  @ApiProperty()
-  id!: string;
-
-  @ApiProperty({ example: 'Prudential' })
-  name!: string;
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: 'Prudential' }) name!: string;
 }
 
-/** One KPM on `/admin/billing` (ADR-0211 §3): counts and codes, no member named. */
+/** The Owner, or the Owner named and waiting: *Kirim penawaran* opens WhatsApp to this number. */
+export class BillingKpmOwnerDto {
+  @ApiProperty({ example: 'Budi Hartono' }) fullName!: string;
+  @ApiProperty({ type: String, nullable: true, example: '+6281234567890' }) phone!: string | null;
+}
+
+/** *Diskon bulk order* as confirmed. */
+export class BillingBulkDiscountDto {
+  @ApiProperty({ enum: ['percent', 'amount'] }) type!: 'percent' | 'amount';
+  @ApiProperty({ required: false, example: 10 }) percent?: number;
+  @ApiProperty({ required: false, example: 100_000_000 }) amountMinor?: number;
+}
+
+/** One KPM on *Langganan per KPM* (P19.23-T5 AC-4; ADR-0279 §6). */
 export class BillingKpmRowDto {
-  @ApiProperty()
-  kpmId!: string;
-
-  @ApiProperty({ example: '0417' })
-  code!: string;
-
-  @ApiProperty({ example: 'Jakarta Selatan' })
-  branch!: string;
-
-  @ApiProperty({ type: BillingKpmCompanyDto })
-  company!: BillingKpmCompanyDto;
-
-  @ApiProperty({ example: 8, description: '*Leader*: the active members on a leader rung, the Owner included (ADR-0113).' })
+  @ApiProperty() kpmId!: string;
+  @ApiProperty({ example: '0417' }) code!: string;
+  @ApiProperty({ example: 'BSD City Branch' }) branch!: string;
+  @ApiProperty({ type: BillingKpmCompanyDto }) company!: BillingKpmCompanyDto;
+  @ApiProperty({ enum: ['active', 'suspended'] }) kpmStatus!: 'active' | 'suspended';
+  @ApiProperty({ type: BillingKpmOwnerDto, nullable: true }) owner!: BillingKpmOwnerDto | null;
+  @ApiProperty({ example: 9, description: '*Leader dipakai*: active ABs and AABs, test accounts never counted.' })
   leadersUsed!: number;
-
-  @ApiProperty({ type: BillingKpmTierDto, description: '*Tingkat*: the tier those leaders fall in; under one, the first.' })
-  tier!: BillingKpmTierDto;
-
-  @ApiProperty({ type: String, nullable: true, enum: ['six_months', 'annual'], description: '*Paket*; `null`, none.' })
-  plan!: 'six_months' | 'annual' | null;
-
+  @ApiProperty({ type: Number, nullable: true, example: 10, description: 'The leaders the package prices; `null`, none.' })
+  maxLeaders!: number | null;
+  @ApiProperty({ type: BillingKpmTierDto }) tier!: BillingKpmTierDto;
+  @ApiProperty({ type: Number, nullable: true, description: '*Harga / leader*, before the annual discount.' })
+  rateMinor!: number | null;
+  @ApiProperty({ description: '*harga khusus*: other than the tier’s offer price.' }) customPrice!: boolean;
+  @ApiProperty({ type: String, nullable: true, enum: ['six_months', 'annual'] }) plan!: 'six_months' | 'annual' | null;
+  @ApiProperty({ description: 'A new KPM’s 30-day trial.' }) trial!: boolean;
+  @ApiProperty({ type: String, nullable: true, example: '2026-11-20' }) startDate!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: '2027-11-19', description: '*Berlaku hingga*.' })
+  endDate!: string | null;
+  @ApiProperty({ type: Number, nullable: true, description: '*Per bulan*: the period’s total ÷ its months.' })
+  perMonthMinor!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: '*Tagihan per periode*.' }) periodTotalMinor!: number | null;
+  @ApiProperty({ type: String, nullable: true, description: 'The grace’s last day, once ended and not kept active.' })
+  graceEndsOn!: string | null;
   @ApiProperty({
-    type: String, nullable: true, example: '2027-04-30',
-    description: '*Perpanjangan*: the subscription’s end date, the last day the office is served; `null`, none.',
+    type: String, nullable: true, enum: ['suspended', 'ended', 'over', 'trial', 'ending_soon'],
+    description: 'The one pill: *Ditangguhkan*, *Berakhir*, *Melewati batas*, *Trial*, *Berakhir ≤ 30 hari*.',
   })
-  renewalDate!: string | null;
-
-  @ApiProperty({
-    enum: ['active', 'ended', 'ended_kept_active', 'none'],
-    description: '*Aktif*, *Berakhir*, *Berakhir — tetap aktif*, or *Belum ada langganan* (no end date).',
-  })
-  status!: 'active' | 'ended' | 'ended_kept_active' | 'none';
+  attention!: 'suspended' | 'ended' | 'over' | 'trial' | 'ending_soon' | null;
+  @ApiProperty({ description: '*Perlu tindakan*: ended, over the limit, a trial, or ending within 30 days.' })
+  needsAction!: boolean;
+  @ApiProperty({ type: Number, nullable: true }) agents!: number | null;
+  @ApiProperty({ type: BillingBulkDiscountDto, nullable: true }) bulkDiscount!: BillingBulkDiscountDto | null;
+  @ApiProperty({ type: String, nullable: true }) note!: string | null;
 }
 
-/** The server's figures for a sent quote, in IDR minor units. */
-export class QuotePricingDto {
-  @ApiProperty({ example: 8 }) leaders!: number;
-  @ApiProperty({ example: 'TIER_1_10' }) tierCode!: string;
-  @ApiProperty({ enum: ['six_months', 'annual'] }) plan!: 'six_months' | 'annual';
-  @ApiProperty({ enum: [6, 12] }) months!: 6 | 12;
-  @ApiProperty() standardMinor!: number;
-  @ApiProperty({ description: 'The six-month rate, on either plan.' }) offerMinor!: number;
-  @ApiProperty({ description: 'The plan’s rate before the manual discount.' }) baseMinor!: number;
-  @ApiProperty() annualDiscountMinor!: number;
-  @ApiProperty() manualDiscountMinor!: number;
-  @ApiProperty({ description: 'The rate per leader per month, after every discount.' }) finalMinor!: number;
-  @ApiProperty() monthlyTotalMinor!: number;
-  @ApiProperty() periodTotalMinor!: number;
+/** The navy summary: every KPM, whatever the filter. */
+export class BillingSummaryDto {
+  @ApiProperty({ description: '*Pendapatan per bulan*.' }) monthlyRevenueMinor!: number;
+  @ApiProperty({ description: '*dari n KPM berbayar*.' }) payingKpms!: number;
+  @ApiProperty({ description: '*Leader ditagih*.' }) leadersBilled!: number;
+  @ApiProperty({ description: '*Berakhir ≤ 30 hari*: trials and periods ending within 30 days.' }) endingSoon!: number;
+  @ApiProperty({ description: '*Perlu tindakan*.' }) needsAction!: number;
+  @ApiProperty({ description: '*Semua n*.' }) kpms!: number;
 }
 
-/** Who received the quote. */
-export class QuoteRecipientDto {
-  @ApiProperty({ example: 'Wulan Kartika' })
-  fullName!: string;
+/** The *Total* row over the rows shown. */
+export class BillingTotalDto {
+  @ApiProperty() kpms!: number;
+  @ApiProperty() leadersUsed!: number;
+  @ApiProperty({ type: Number, nullable: true, description: '*rata-rata tertimbang*.' }) weightedRateMinor!: number | null;
+  @ApiProperty() perMonthMinor!: number;
+  @ApiProperty({ description: '*semua periode berjalan*.' }) periodTotalMinor!: number;
+  @ApiProperty() needsAction!: number;
 }
 
-/** `POST /admin/tenants/:kpmId/quote`: sent, to whom, and the figures the server sent. */
-export class QuoteSentDto {
-  @ApiProperty()
-  kpmId!: string;
-
-  @ApiProperty({ type: QuoteRecipientDto })
-  recipient!: QuoteRecipientDto;
-
-  @ApiProperty({ type: QuotePricingDto })
-  pricing!: QuotePricingDto;
+/** `GET /admin/billing/kpms`. */
+export class BillingKpmListDto {
+  @ApiProperty({ type: BillingSummaryDto }) summary!: BillingSummaryDto;
+  @ApiProperty({ type: BillingTotalDto }) total!: BillingTotalDto;
+  @ApiProperty({ type: [BillingKpmRowDto] }) rows!: BillingKpmRowDto[];
 }

@@ -51,7 +51,8 @@ export class BatchViewDto implements BatchView {
   @ApiProperty({ enum: BATCH_STATUSES, description: 'The history lists `committed`, `reverting` and `reverted`.' }) status!: BatchStatus;
   @ApiProperty({ type: Number, description: 'The template’s version the file was read against (R6): the history’s *v<n>*. 1 for a batch from before the template’s columns.' }) templateVersion!: number;
   @ApiProperty({ type: String, nullable: true, description: 'D8: the office day a running month’s upload stood at; `null` for a final one.' }) asOf!: string | null;
-  @ApiProperty({ type: Number, description: '*Belum terdaftar* rows it held apart (ADR-0214 §8).' }) heldRowCount!: number;
+  @ApiProperty({ type: Number, description: '*Belum jadi anggota* rows it kept (ADR-0214 §8; ADR-0274 §2): the history’s *n belum jadi anggota*.' }) heldRowCount!: number;
+  @ApiProperty({ type: Number, description: 'The file’s rows that went to members — the history’s *n ke anggota*.' }) memberRowCount!: number;
   @ApiProperty({ type: Number, description: 'Data rows in the file.' }) rowCount!: number;
   @ApiProperty({ type: Number, description: 'Rows with at least one figure written.' }) writtenRowCount!: number;
   @ApiProperty({ type: Number, description: 'Figures written.' }) cellCount!: number;
@@ -62,8 +63,8 @@ export class BatchViewDto implements BatchView {
   @ApiProperty({ type: String, nullable: true, description: 'By name.' }) revertedBy!: string | null;
   @ApiProperty({ type: Number, description: 'Figures a revert put back.' }) restoredCellCount!: number;
   @ApiProperty({ type: Number, description: 'Figures a revert kept, because something else wrote them since.' }) keptCellCount!: number;
-  @ApiProperty({ type: Number, description: 'Corrections by hand the file would have changed, left as they were (ADR-0053).' }) keptCorrectionCount!: number;
-  @ApiProperty({ type: Number, description: 'Corrections by hand replaced with the file’s figure, because the importer ticked them.' }) replacedCorrectionCount!: number;
+  @ApiProperty({ type: Number, description: 'Corrections by hand the file left as they were (ADR-0053) — 0 since ADR-0274 §1, which has the file replace them.' }) keptCorrectionCount!: number;
+  @ApiProperty({ type: Number, description: 'Corrections by hand replaced with the file’s figure — every one it changed (ADR-0274 §1).' }) replacedCorrectionCount!: number;
 
   @ApiProperty({ type: Boolean, description: 'Standing, and the month’s latest standing import — the only one revert takes.' })
   canRevert!: boolean;
@@ -98,6 +99,11 @@ export class CellCorrectionDto {
   @ApiProperty({ type: String, nullable: true, description: 'Who corrected it, by name.' }) by!: string | null;
   @ApiProperty({ type: String, nullable: true }) at!: string | null;
   @ApiProperty({ type: String, nullable: true }) reason!: string | null;
+  @ApiProperty({
+    type: Number, nullable: true,
+    description: 'The file’s number — what the month’s standing uploads wrote into this cell, in the cell’s unit (money in sen): *dari file*, and what `POST /kpm/data-upload/cell/restore` writes back. `null` when no standing upload wrote it.',
+  })
+  fileValue!: number | null;
 }
 
 export class MetricCellDto implements Omit<MetricCell, 'outOfBounds'> {
@@ -198,6 +204,15 @@ export class MonthRowDto implements MonthRow {
   @ApiProperty({ type: Boolean, description: 'A member of a leader class, `ab` or `aab` (ADR-0156): the rows a `rows: leaders` column is filled on.' })
   leader!: boolean;
 
+  @ApiProperty({ type: String, nullable: true, example: 'ab', description: 'Their class — `ab`, `aab`, `agent` — for the orange *AB* / *AAB* before the name.' })
+  role!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'AB', description: 'Their rung’s code, which the label is drawn from.' })
+  orgLevelCode!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Their profile photo, a signed link; `null` draws initials.' })
+  photoUrl!: string | null;
+
   @ApiProperty({
     type: Boolean, nullable: true,
     description: '`MONTHLY_ACTIVE_AGENT` for the month (ADR-0054): `APE` or `POLICY_COUNT` above zero this month. '
@@ -240,7 +255,7 @@ export class MonthConfigDto implements MonthConfig {
   @ApiProperty({ type: [MonthColumnDto], description: 'The template’s current columns, in the file’s order.' })
   columns!: MonthColumnDto[];
 
-  @ApiProperty({ type: String, example: '2025-11', description: 'The required history’s first month (R5): twelve before the KPM’s first.' })
+  @ApiProperty({ type: String, example: '2024-01', description: 'The required history’s first month: January 2024 for every KPM (ADR-0274 §3).' })
   historyFrom!: string;
 
   @ApiProperty({ type: String, example: '2026-11', description: 'The KPM’s first month on AgencyBoost (UI-150).' })

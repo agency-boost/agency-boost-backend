@@ -12,6 +12,7 @@ import {
 import { ErrorCode } from '@/common/errors/error-codes';
 import { can } from '@/modules/rbac/permissions';
 import { checkFields, type CheckedFields } from '@/domain/branding/branding-fields';
+import { checkSystemName } from '@/domain/branding/system-name';
 import { derivePalette, type BrandingPalette, type FilledColour } from '@/domain/branding/palette';
 import {
   BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE, type BrandingUploadKind, type MascotPose,
@@ -141,9 +142,14 @@ export class BrandingService {
    * **`PUT /kpm/settings/branding`** (*Simpan*): the three groups, each whole, at `expectedVersion`. A group sent as
    * `null` is cleared, and the KPM shows its template's or AgencyBoost's for it. Audited old → new (AC-15).
    */
-  async save(ctx: RequestContext, input: Partial<BrandingFields> & { expectedVersion: number }): Promise<BrandingSettings> {
+  async save(
+    ctx: RequestContext, input: Partial<BrandingFields> & { systemName?: string | null; expectedVersion: number },
+  ): Promise<BrandingSettings> {
     const kpmId = ctx.kpmId!;
     const fields = this.checked(input, { kind: 'kpm', kpmId });
+    // *Nama sistem* (P19.21-T4 AC-1; ADR-0274): absent is kept, `null` clears it, a string is checked.
+    const named = input.systemName === undefined ? null : checkSystemName(input.systemName);
+    if (named && !named.ok) throw new InvalidRequestException(BRANDING_REFUSALS.VALIDATION_FAILED[named.problem], { field: 'systemName' });
     // The wide logo's size is the stored PNG's, never the client's word; and every folder must hold what it names.
     if (fields.logo) fields.logo = { key: fields.logo.key, ...(await this.storedSize(`${fields.logo.key}/logo.png`, 'logo')) };
     if (fields.logoSquare) await this.storedSize(`${fields.logoSquare.key}/logo-square.png`, 'logoSquare');
@@ -159,9 +165,10 @@ export class BrandingService {
         secondary: { side: colours.secondary.contrast, ratio: colours.secondary.ratio, fill: colours.secondary.fill },
       }
       : null;
-    const set = { ...fields, contrast };
-
     const current = await this.rows.live(ctx);
+    const systemName = named ? named.value : (current?.systemName ?? null);
+    const set = { ...fields, contrast, systemName };
+
     const actual = current?.version ?? 0;
     if (input.expectedVersion !== actual) throw new VersionConflictException(input.expectedVersion, actual);
     const before = current ? auditFields(fieldsOf(current as unknown as KpmBranding), current as unknown as KpmBranding) : null;
@@ -177,7 +184,7 @@ export class BrandingService {
       targetCollection: 'kpmBranding',
       targetId: String(written._id),
       before,
-      after: auditFields(fields, { contrast } as KpmBranding),
+      after: auditFields(fields, { contrast, systemName } as KpmBranding),
     });
     return this.settings(ctx);
   }
@@ -294,10 +301,21 @@ export class BrandingService {
    * **`GET /kpm-branding/:kpmId`** (§9): a live KPM's name, version, palette and logo size; the same answer with
    * everything `null` for any other id, so nothing tells an unknown KPM from a suspended one.
    */
-  async publicRead(kpmId: string): Promise<{ name: string | null; version: string | null; palette: BrandingPalette | null; logo: { width: number; height: number } | null }> {
+  async publicRead(kpmId: string): Promise<{
+    name: string | null; version: string | null; palette: BrandingPalette | null; logo: { width: number; height: number } | null;
+    systemName: string | null;
+  }> {
     const shown = await this.reader.shownFor(kpmId, true);
-    if (!shown) return { name: null, version: null, palette: null, logo: null };
-    return { name: shown.name, version: shown.version, palette: shown.palette, logo: shown.logo ? { width: shown.logo.width, height: shown.logo.height } : null };
+    if (!shown) return { name: null, version: null, palette: null, logo: null, systemName: null };
+    return {
+      name: shown.name,
+      version: shown.version,
+      palette: shown.palette,
+      logo: shown.logo ? { width: shown.logo.width, height: shown.logo.height } : null,
+      // P19.21-T4 (ADR-0274): a KPM's link names the app as its members read it — the sign-in, registration and
+      // invitation pages that carry it. A display name the office chose, as public as `name`.
+      systemName: shown.systemName,
+    };
   }
 
   /**
@@ -404,8 +422,9 @@ function refuseType(kind: BrandingUploadKind, mimeType: string): void {
 }
 
 /** **The audit's old → new** (AC-15): each colour with its contrast and fill, and each image by its folder and size. */
-function auditFields(fields: BrandingFields, row: Pick<KpmBranding, 'contrast'>): Record<string, unknown> {
+function auditFields(fields: BrandingFields, row: Pick<KpmBranding, 'contrast'> & { systemName?: string | null }): Record<string, unknown> {
   return {
+    systemName: row.systemName ?? null,
     logo: fields.logo ? { key: fields.logo.key, width: fields.logo.width, height: fields.logo.height } : null,
     logoSquare: fields.logoSquare?.key ?? null,
     primary: fields.primary ? { hex: fields.primary, contrast: row.contrast?.primary ?? null } : null,

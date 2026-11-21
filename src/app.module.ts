@@ -103,10 +103,17 @@ import {
   TenantConfigController, TenantConfigReadController,
 } from '@/modules/config/config.controller';
 import { TenantConfigService } from '@/modules/config/tenant-config.service';
+// P19.21-T2 (ADR-0274 §6): the Pengaturan hub's one read.
+import { SettingsOverviewController } from '@/modules/config/settings-overview.controller';
+import { SettingsOverviewService } from '@/modules/config/settings-overview.service';
 import { TemplateService } from '@/modules/config/template.service';
 import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
 import { NamedTemplateService } from '@/modules/config/named-template.service';
 import { NamedTemplateController } from '@/modules/config/named-template.controller';
+import { CompanyPublicationController } from '@/modules/config/company-publication.controller';
+import { CompanyPublicationService } from '@/modules/config/company-publication.service';
+import { CompanySetupController } from '@/modules/tenants/company-setup.controller';
+import { CompanySetupService } from '@/modules/tenants/company-setup.service';
 import { AnalyticsTemplateController } from '@/modules/config/analytics-template.controller';
 import { AnalyticsTemplateService } from '@/modules/config/analytics-template.service';
 import { AnalyticsConfigReader } from '@/modules/config/analytics-config.reader';
@@ -123,6 +130,7 @@ import { SurveyOpening } from '@/modules/surveys/survey-opening';
 import { SurveysService } from '@/modules/surveys/surveys.service';
 import { SurveyRunsService } from '@/modules/surveys/survey-runs.service';
 import { CoachingSurveyService } from '@/modules/surveys/coaching-survey.service';
+import { SurveyPeopleService } from '@/modules/surveys/survey-people.service';
 import { SurveyOpenRuns } from '@/modules/surveys/survey-open-runs';
 import { SurveysController } from '@/modules/surveys/surveys.controller';
 import { SurveyRunsController } from '@/modules/surveys/survey-runs.controller';
@@ -139,6 +147,10 @@ import {
 } from '@/modules/reporting/advanced-analytics/advanced-analytics.repositories';
 import { AnalyticsTarget, AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
 import { QuantRun, QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { AbGroupTarget, AbGroupTargetSchema } from '@/modules/reporting/ab-group-targets/ab-group-target.schema';
+import { AbGroupTargetRepository } from '@/modules/reporting/ab-group-targets/ab-group-target.repository';
+import { AbGroupTargetsController } from '@/modules/reporting/ab-group-targets/ab-group-targets.controller';
+import { AbGroupTargetsService } from '@/modules/reporting/ab-group-targets/ab-group-targets.service';
 import { ProductionWrites } from '@/modules/production/production-writes.port';
 // P19.7-T2 (ADR-0221): the simple proposal — the record, its routes, and what the leads and the Unit Dashboard read of it.
 import { Proposal, ProposalSchema } from '@/modules/proposals/proposal.schema';
@@ -152,13 +164,13 @@ import { KpmBranding, KpmBrandingSchema } from '@/modules/branding/kpm-branding.
 import { KpmBrandingRepository } from '@/modules/branding/kpm-branding.repository';
 import { BrandingReader } from '@/modules/branding/branding-reader';
 import { BrandingService } from '@/modules/branding/branding.service';
+import { SystemNames } from '@/modules/branding/system-name.port';
+import { BrandingSystemNames } from '@/modules/branding/system-names';
 import {
   BrandingSettingsController, PublicBrandingController, TemplateBrandingController,
 } from '@/modules/branding/branding.controller';
 import { ProposalPdfBuilder } from '@/modules/proposals/proposal-pdf.builder';
 import { ProposalPdfService } from '@/modules/proposals/proposal-pdf.service';
-import { PlatformGuideController } from '@/modules/guides/platform-guide.controller';
-import { SuperAdminGuide } from '@/modules/guides/super-admin-guide';
 import { OfficeTemplateController } from '@/modules/config/office-template.controller';
 import { OfficeSettingsSource } from '@/modules/config/office-settings.source';
 import { TemplateCopyService } from '@/modules/config/template-copy.service';
@@ -181,6 +193,7 @@ import { TrainingProgress, TrainingProgressSchema } from '@/modules/training/tra
 import { TrainingProgressRepository } from '@/modules/training/training-progress.repository';
 import { OfferedTraining } from '@/modules/training/offered-training';
 import { TrainingProgressReadings } from '@/modules/training/training-progress-readings';
+import { TrainingModuleFacts } from '@/modules/training/training-module-facts';
 import { TrainingProgressService } from '@/modules/training/training-progress.service';
 import { TrainingProgressController } from '@/modules/training/training-progress.controller';
 import {
@@ -201,6 +214,15 @@ import { NewHiresController } from '@/modules/activation/new-hires.controller';
 import { BillingController } from '@/modules/billing/billing.controller';
 import { BillingService } from '@/modules/billing/billing.service';
 import { KpmBillingController } from '@/modules/billing/kpm-billing.controller';
+// P19.23-T6 (ADR-0279): the console's *Platform* — *Tim Super Admin*, *Pengaturan platform*, *Pengumuman*.
+import { PlatformTeamController } from '@/modules/platform-team/platform-team.controller';
+import { PlatformTeamService } from '@/modules/platform-team/platform-team.service';
+import { PlatformSettingsController } from '@/modules/platform-settings/platform-settings.controller';
+import { PlatformSettingsService } from '@/modules/platform-settings/platform-settings.service';
+import { PlatformSettings, PlatformSettingsSchema } from '@/modules/platform-settings/platform-settings.schema';
+import { AnnouncementsController } from '@/modules/announcements/announcements.controller';
+import { AnnouncementsService } from '@/modules/announcements/announcements.service';
+import { Announcement, AnnouncementSchema } from '@/modules/announcements/announcement.schema';
 import { ActivationEvents } from '@/modules/activation/activation-events.port';
 import { ActivationItemRecords } from '@/modules/activation/activation-records.service';
 import { FirstSaleService } from '@/modules/activation/first-sale.service';
@@ -211,6 +233,8 @@ import { ActivationStarter } from '@/modules/org/activation-starter.port';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
 import { ProductService } from '@/modules/products/product.service';
 import { ProductController } from '@/modules/products/product.controller';
+import { ProductDraftController } from '@/modules/products/product-draft.controller';
+import { ProductDraftService } from '@/modules/products/product-draft.service';
 import {
   KpmProductConfig, KpmProductConfigSchema,
 } from '@/modules/products/kpm-product-config.schema';
@@ -235,6 +259,8 @@ import { EventReadings } from '@/modules/events/event-readings';
 import { EventGuestService } from '@/modules/events/event-guest.service';
 import { EventRollCallService } from '@/modules/events/event-roll-call.service';
 import { EventGuestController } from '@/modules/events/event-guest.controller';
+import { EventAnalyticsController } from '@/modules/events/event-analytics.controller';
+import { EventAnalytics } from '@/modules/events/event-analytics.service';
 import { ActivityLog, ActivityLogSchema } from '@/modules/activity/activity-log.schema';
 import { ActivityLogRepository } from '@/modules/activity/activity-log.repository';
 import { ActivityService } from '@/modules/activity/activity.service';
@@ -278,8 +304,6 @@ import {
 import { AuthService } from '@/modules/auth/auth.service';
 import { AuthController } from '@/modules/auth/auth.controller';
 import { AccountLink, AccountLinkSchema } from '@/modules/auth/account-link.schema';
-import { AccountLinksController } from '@/modules/auth/account-links.controller';
-import { AccountLinksService } from '@/modules/auth/account-links.service';
 import { ProfileController } from '@/modules/users/profile.controller';
 import { ProfileService } from '@/modules/users/profile.service';
 import { AvatarLinks, AvatarService } from '@/modules/users/avatar.service';
@@ -320,6 +344,8 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { OwnerInvitations } from '@/modules/tenants/owner-invitations';
+import { OwnerClaims } from '@/modules/tenants/owner-claims.service';
+import { OwnerInvitesController, OwnerWhatsAppInvitationController } from '@/modules/tenants/owner-invites.controller';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -357,6 +383,11 @@ import { LeaderChangeService } from '@/modules/org/leader-change.service';
 import { MemberPhoneService } from '@/modules/org/member-phone.service';
 import { MemberPersonalController } from '@/modules/org/member-personal.controller';
 import { MemberPersonalService } from '@/modules/org/member-personal.service';
+import { PeopleController } from '@/modules/org/people.controller';
+import { PeopleService } from '@/modules/org/people.service';
+import {
+  RosterImportRecord, RosterImportRecordRepository, RosterImportRecordSchema,
+} from '@/modules/tenants/roster-import-record.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { LeaderLimitRequestAdminController } from '@/modules/org/leader-limit-request.controller';
@@ -369,7 +400,6 @@ import { ApprovalsService } from '@/modules/org/approvals.service';
 import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
-import { CoreLeadersService } from '@/modules/org/core-leaders.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { CoachingSession, CoachingSessionSchema } from '@/modules/coaching/coaching-session.schema';
@@ -425,11 +455,8 @@ import { RecruitmentPitchRepository } from '@/modules/recruitment/recruitment-pi
 import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-playbook.service';
 import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
 import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
-import {
-  KpmAnalyticsController, KpmOverviewController, PlatformAnalyticsController,
-} from '@/modules/reporting/reporting.controller';
+import { KpmOverviewController } from '@/modules/reporting/reporting.controller';
 import { KpmRecruitTarget, KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
-import { KpmRecruitTargetRepository } from '@/modules/reporting/kpm-recruit-target.repository';
 import { OfficeGroups } from '@/modules/reporting/office-groups';
 import { OfficePeople } from '@/modules/reporting/office-people';
 import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
@@ -437,12 +464,14 @@ import { KpmSetupMark, KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-
 import { KpmSetupMarkRepository } from '@/modules/reporting/kpm-setup-mark.repository';
 import { KpmSetup } from '@/modules/reporting/kpm-setup.service';
 import { KpmSetupController } from '@/modules/reporting/kpm-setup.controller';
-import { OfficePhones } from '@/modules/reporting/office-phones';
 import { SetupStepSavedInterceptor } from '@/modules/reporting/setup-step-saved.interceptor';
-import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
-import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
 import { PlatformReadsController } from '@/modules/reporting/platform/platform-reads.controller';
 import { PlatformReads } from '@/modules/reporting/platform/platform-reads.service';
+import { PlatformPeopleController } from '@/modules/reporting/platform/platform-people.controller';
+import { TestAccounts } from '@/modules/reporting/platform/test-accounts.service';
+// P19.23-T1, T2 (ADR-0277): the console's Dashboard and a KPM page's people.
+import { PlatformConsoleController } from '@/modules/reporting/platform/platform-console.controller';
+import { PlatformConsole } from '@/modules/reporting/platform/platform-console.service';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 import { ComplianceController } from '@/modules/reporting/compliance/compliance.controller';
 import { ComplianceService } from '@/modules/reporting/compliance/compliance.service';
@@ -452,6 +481,7 @@ import { ActivityComplianceCategory } from '@/modules/reporting/compliance/activ
 import { ActivationComplianceCategory } from '@/modules/reporting/compliance/activation.category';
 import { EventsComplianceCategory } from '@/modules/reporting/compliance/events.category';
 import { CampaignsComplianceCategory } from '@/modules/reporting/compliance/campaigns.category';
+import { LeadsComplianceCategory } from '@/modules/reporting/compliance/leads.category';
 import { ActivationReadings } from '@/modules/activation/activation-readings';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
 import { LeaderMeeting, LeaderMeetingSchema } from '@/modules/leader-meetings/leader-meeting.schema';
@@ -466,6 +496,11 @@ import { LeaderMeetingMinutes } from '@/modules/leader-meetings/leader-meeting-m
 import { LeaderMeetingSharing } from '@/modules/leader-meetings/leader-meeting-sharing.service';
 import { LeaderMeetingsController } from '@/modules/leader-meetings/leader-meetings.controller';
 import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/scorecard.module';
+// P19.24 (ADR-0280): *Laporan KPM* — the PDF, *Kirim ke owner*'s link, and the link opened.
+import { AdminKpmReportController, KpmReportLinkController } from '@/modules/kpm-report/kpm-report.controller';
+import { KpmReportBuilder } from '@/modules/kpm-report/kpm-report.builder';
+import { KpmReportReadings } from '@/modules/kpm-report/kpm-report.readings';
+import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
 
 @Module({
   imports: [
@@ -497,6 +532,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       { name: User.name, schema: UserSchema },
       { name: AuthToken.name, schema: AuthTokenSchema },
       // UI-169 item 5 (ADR-0199): two logins of one person, linked — global, as logins are.
+      // Retired (ADR-0269): kept, read only by impersonation's linked-login refusal, written by nothing.
       { name: AccountLink.name, schema: AccountLinkSchema },
       { name: ImpersonationSession.name, schema: ImpersonationSessionSchema },
       { name: Company.name, schema: CompanySchema },
@@ -520,6 +556,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       // P18.8-T3 (ADR-0170): a leader's invites, and the requests to move a member to another leader.
       { name: MemberInvite.name, schema: MemberInviteSchema },
       { name: TransferRequest.name, schema: TransferRequestSchema },
+      // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
+      { name: RosterImportRecord.name, schema: RosterImportRecordSchema },
       { name: Group.name, schema: GroupSchema },
       { name: ActivityCategory.name, schema: ActivityCategorySchema },
       { name: ActivityType.name, schema: ActivityTypeSchema },
@@ -576,11 +614,16 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
       // P19.5-T3 (ADR-0215 §6, §7): the KPM's MAPA and sub-group targets, and its frozen Quant runs.
       { name: AnalyticsTarget.name, schema: AnalyticsTargetSchema },
       { name: QuantRun.name, schema: QuantRunSchema },
+      // P19.17-T4 (ADR-0270 §4): the monthly Active Agent and Rekrut targets per AB group.
+      { name: AbGroupTarget.name, schema: AbGroupTargetSchema },
       // P19.7-T2: the proposals, one document each, items inside.
       { name: Proposal.name, schema: ProposalSchema },
       { name: KpmBranding.name, schema: KpmBrandingSchema },
       // P19.15-T4 (ADR-0260): *Kelola data produk*, one live grant per person, for the insurers ticked.
       { name: ProductDataGrant.name, schema: ProductDataGrantSchema },
+      // P19.23-T6 (ADR-0279): the platform's one settings document, and the announcements sent.
+      { name: PlatformSettings.name, schema: PlatformSettingsSchema },
+      { name: Announcement.name, schema: AnnouncementSchema },
       // P19.15-T1 (ADR-0258): a product's premium table versions and their rows, company data like `products`.
       { name: RateTable.name, schema: RateTableSchema },
       { name: RateRow.name, schema: RateRowSchema },
@@ -599,13 +642,17 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ProductionController,
     HealthController,
     AuthController,
-    // UI-169 item 5 (ADR-0199): *Tambah akun*, the link's page, the switch and *Hapus tautan*.
-    AccountLinksController,
     // UI V1 (UI-111): *Profil saya*'s photo and read-only facts, under `/auth/me`.
     ProfileController,
     AdminController,
+    // P19.23-T2 AC-3 (OD-420): the KPM Owner's invitation by WhatsApp, and the claim link they open.
+    OwnerWhatsAppInvitationController,
+    OwnerInvitesController,
     // P13.2-T6: a company's named templates (ADR-0115).
     NamedTemplateController,
+    // P19.23-T4 (ADR-0278): *Terbitkan ke KPM*, and *Perusahaan baru* from the Default template or a copy.
+    CompanyPublicationController,
+    CompanySetupController,
     // P19.5-T1 (ADR-0214 §1): the *Advanced analytics* editor's code check and open runs.
     AnalyticsTemplateController,
     // P13.2-T7: *Save as template*, an office's published settings into a company's template.
@@ -618,6 +665,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     LeaderChangeController,
     // ADR-0248 §3: the Owner and the Admins fill a member's blank personal data.
     MemberPersonalController,
+    // P19.20 (ADR-0273): People's Riwayat, KPM admins' tiles, Pilih leader, Riwayat unggah.
+    PeopleController,
     // ADR-0157: the Super Admin's queue of leaders past an office's limit.
     LeaderLimitRequestAdminController,
     OnboardingController,
@@ -626,6 +675,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TransferRequestsController,
     NotificationController,
     TenantConfigController,
+    SettingsOverviewController,
     TenantConfigReadController,
     // ADR-0163: an office's activity binding — the Super Admin's per office, the Owner's and Admin's read.
     ActivityBindingAdminController,
@@ -637,12 +687,16 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TrainingProgressController,
     ActivationController,
     ProductController,
+    // P19.23-T4 (ADR-0278 §4): a product's draft, and a new product no KPM has yet.
+    ProductDraftController,
     KpmProductController,
     // Phase 14: the field reads of the office's shelf — the Product Catalog and the Sales Attack Plan.
     ProductCatalogController,
     AttackPlanController,
     EventController,
     EventGuestController,
+    // P19.25-T1, T2 (ADR-0281): Advanced analytics › Event — Kehadiran and Feedback.
+    EventAnalyticsController,
     ActivityController,
     CampaignController,
     MetricRegistryController,
@@ -669,6 +723,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     BillingController,
     // P19.4-T3 (ADR-0211): the list of KPMs with their plans, and a KPM's quote sent to its Owner.
     KpmBillingController,
+    PlatformTeamController,
+    PlatformSettingsController,
+    AnnouncementsController,
     // Phase 15: a leader's unit, and *Update production*.
     UnitDashboardController,
     // UI V1 (Phase 18.11 T4, UI-001): the Unit Dashboard's Activities tab.
@@ -684,10 +741,11 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // Phase 18: the Owner's reporting — the KPM Overview, KPM analytics, and the platform's adoption.
     KpmOverviewController,
     KpmSetupController,
-    KpmAnalyticsController,
-    PlatformAnalyticsController,
     // P19.4-T3 (ADR-0207): the Super Admin's reads across KPMs.
     PlatformReadsController,
+    // P19.23-T3 (ADR-0277): *Anggota*'s detail and its *Akun tes* switch.
+    PlatformPeopleController,
+    PlatformConsoleController,
     // Phase 18.3: the Owner's compliance tree, the analytics' third tab.
     ComplianceController,
     // Phase 18.1: the Strategic Leader Forum — the meetings, their minutes, and their shared links.
@@ -699,13 +757,13 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // P19.5-T3: the KPM's *Advanced analytics* page, and the Super Admin's tab on it.
     AdvancedAnalyticsController,
     AdminAdvancedAnalyticsController,
+    // P19.17-T4 (ADR-0270 §4): the monthly targets per AB group.
+    AbGroupTargetsController,
     // P19.7-T2: the simple proposal.
     ProposalController,
     BrandingSettingsController,
     TemplateBrandingController,
     PublicBrandingController,
-    // P19.6-T5 (ADR-0219 §4): the Super Admin's guide, INTERNAL — `platform_guide:read`.
-    PlatformGuideController,
     // P19.15-T4 (ADR-0260): *Kelola data produk* — the Super Admin's grants and *Perubahan oleh pengelola*, and the
     // companies *Data produk* opens.
     ProductDataGrantController,
@@ -715,6 +773,9 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // P19.15-T2, T3 (ADR-0259): *Unggah file* and the *Ilustrasi* tab.
     IntakeController,
     IllustrationController,
+    // P19.24 (ADR-0280): *Laporan KPM*.
+    AdminKpmReportController,
+    KpmReportLinkController,
   ],
   providers: [
     { provide: Clock, useClass: SystemClock },
@@ -728,6 +789,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     { provide: RecipientAddressBook, useClass: UserAddressBook },
     // P18.10-T5 AC-5: whose language an email is written in — the recipient's `users.locale`.
     { provide: RecipientLanguages, useClass: UserLanguages },
+    // P19.21-T4 (ADR-0274): a KPM's *Nama sistem*, for the emails its members read.
+    { provide: SystemNames, useClass: BrandingSystemNames },
     InAppChannelAdapter,
     LogEmailAdapter,
     SmtpChannelAdapter,
@@ -789,6 +852,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     TrainingProgressRepository,
     OfferedTraining,
     TrainingProgressReadings,
+    // P19.25-T4 AC-2 (ADR-0282 §2): each module's *"n dari 30 selesai"* on Pengaturan › Training.
+    TrainingModuleFacts,
     TrainingProgressService,
     ActivationTemplateRepository,
     ActivationService,
@@ -805,6 +870,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     EventReadings,
     EventGuestService,
     EventRollCallService,
+    EventAnalytics,
     ActivityLogRepository,
     ActivityService,
     ActivityReadings,
@@ -843,6 +909,7 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     STORAGE_PROVIDER,
     ConfigSnapshotRepository,
     TenantConfigService,
+    SettingsOverviewService,
     TemplateService,
     NamedTemplateService,
     // P19.5-T1 (ADR-0214): the template's *Advanced analytics* section, its rules, and the one reader every KPM reads it by.
@@ -856,6 +923,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // ADR-0208: a template's Training material, and its push to the KPMs made from it.
     TemplateMaterialService,
     TemplatePushService,
+    // P19.23-T4 (ADR-0278): products' drafts and release, *Terbitkan ke KPM*, *Perusahaan baru*.
+    ProductDraftService,
+    CompanyPublicationService,
+    CompanySetupService,
     TemplateSyncService,
     { provide: OfficeCounter, useClass: KpmOfficeCounter },
     ProvisioningService,
@@ -897,14 +968,18 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     PasswordService,
     RateLimiter,
     AuthService,
-    AccountLinksService,
     ContextResolver,
     ImpersonationService,
     TenantService,
     // P19.4-T3 (ADR-0212 §2): the Owner's invitation by email — the one-time link, its limit, `invitedAt`.
     OwnerInvitations,
-    // P19.4-T3 (ADR-0211): billing per KPM — the list and the quote.
+    // P19.23-T2 AC-3 (OD-420): the Owner invited by WhatsApp — the claim link and the password link handed over.
+    OwnerClaims,
+    // P19.4-T3 (ADR-0211), P19.23-T5 (ADR-0279): Langganan per KPM, Konfirmasi paket and the offer's PDF.
     BillingService,
+    PlatformTeamService,
+    PlatformSettingsService,
+    AnnouncementsService,
     KpmRequestService,
     OrgLevelService,
     // P19.4-T5 (ADR-0213 §2): what names a rung, asked before one is deleted — behind its port, so the ladder's readers
@@ -931,6 +1006,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     LeaderChangeService,
     MemberPhoneService,
     MemberPersonalService,
+    PeopleService,
+    RosterImportRecordRepository,
     // UI V1 (UI-111): the profile photo, its signed links, and the profile's read-only facts.
     AvatarService,
     AvatarLinks,
@@ -1001,8 +1078,6 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     // P18.8-T6 (ADR-0171 §2, ADR-0173 §3): each new hire's 3M activation, kept once decided, and *Mark left*.
     Activation3MService,
     GroupService,
-    // P19.13-T3 (ADR-0253): *Core leaders & groups*.
-    CoreLeadersService,
     // P18.5-T6: the groups and the office on the sidebar's profile line, read with `/auth/me` (ADR-0159 §5).
     ProfileLineReader,
     AdminDelegationService,
@@ -1027,18 +1102,16 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
      * the recruitment target's tenant repository, the campaigns module's one named reader of the carrier rules,
      * and the directory's two columns.
      */
-    KpmRecruitTargetRepository,
     KpmSetupMarkRepository,
     KpmSetup,
-    OfficePhones,
     OfficePeople,
     // P19.3-T3 (OD-258): the office's custom groups, for KPM Analytics' *Lihat untuk*.
     OfficeGroups,
     CarrierRules,
     KpmOverviewService,
-    KpmAnalyticsService,
-    PlatformAnalyticsService,
     PlatformReads,
+    TestAccounts,
+    PlatformConsole,
     DirectoryColumns,
     /*
      * Phase 18.3: the Owner's compliance tree — the read, its six categories (each through the module that owns its
@@ -1051,6 +1124,8 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     ActivationComplianceCategory,
     EventsComplianceCategory,
     CampaignsComplianceCategory,
+    // P19.19-T3 (ADR-0272 §6): the KPM Overview's *Leads Mgmt* card.
+    LeadsComplianceCategory,
     ComplianceService,
     /*
      * Phase 18.1: the Strategic Leader Forum — the meetings' and the links' tenant repositories, who reads and edits
@@ -1072,10 +1147,15 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     SurveyOpening,
     SurveysService,
     SurveyRunsService,
+    // P19.22-T7 (ADR-0276 §5): *Analisa kualitatif › Per orang*.
+    SurveyPeopleService,
     CoachingSurveyService,
     // P19.5-T3 (ADR-0215): the page's sections, its Quant runs — told of every production write — and the Super Admin's tab.
     AnalyticsTargetRepository,
     QuantRunRepository,
+    // P19.17-T4 (ADR-0270 §4): the monthly targets per AB group.
+    AbGroupTargetRepository,
+    AbGroupTargetsService,
     QuantRuns,
     { provide: ProductionWrites, useExisting: QuantRuns },
     AdvancedAnalyticsService,
@@ -1091,8 +1171,6 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     BrandingService,
     ProposalPdfBuilder,
     ProposalPdfService,
-    // P19.6-T5 (ADR-0219 §4): the guide's two files, read once from `assets/panduan/`.
-    SuperAdminGuide,
     // P19.15-T4 (ADR-0260): *Kelola data produk* given and removed, and the companies *Data produk* opens.
     ProductDataGrantService,
     ProductDataCompaniesService,
@@ -1113,6 +1191,10 @@ import { LEADER_SCORECARD_PROVIDERS } from '@/modules/leader-meetings/scorecard/
     IntakeService,
     { provide: IntakeTargets, useClass: RateTableIntakeTargets },
     IllustrationService,
+    // P19.24 (ADR-0280): *Laporan KPM* — the pages' readings, the builder, the routes' service.
+    KpmReportReadings,
+    KpmReportBuilder,
+    KpmReportService,
   ],
   exports: [Clock, AuditService],
 })

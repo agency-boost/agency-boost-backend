@@ -30,4 +30,11 @@ export const PRODUCTION = {
    * here would make this module and the index import each other.
    */
   LOCK_GRACE_DAYS: 7,
+  /**
+   * **The first month every KPM's production is required from** (P19.21-T1 AC-1, AC-8; ADR-0274 §3;
+   * `revisions/2026-11-19/DATA-DEFINITIONS.md`, *Data upload month status*: "data required from Jan 2024"). The same
+   * month for every KPM, whenever it joined — it replaced "twelve months before the KPM's first month" (ADR-0214 §11,
+   * R5). The month grid starts here; a month from here on that was never written stays open until its first upload.
+   */
+  HISTORY_FROM: '2024-01',
 } as const;

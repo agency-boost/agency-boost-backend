@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import mongoose from 'mongoose';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import type { DomainException } from '@/common/errors/domain.exception';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
@@ -19,6 +20,7 @@ import { CampaignStandingOverrides } from './campaign-standing-overrides';
 import { MetricRegistryController } from './metric-registry.controller';
 import { listenOnLoopback } from '../../../test/listen';
 import { IN_INDONESIAN } from '../../../test/i18n';
+import { RequestContext } from '@/common/context/request-context';
 
 const NOW = new Date('2026-09-18T02:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -26,7 +28,6 @@ const PRUDENTIAL = '66f0000000000000000000c1';
 /** Every route, and the permission it must declare. */
 const ROUTES: Record<string, string> = {
   // P18.2-T7 (leak 15): the settings reads are the Owner's and the Admins', as training's and events' are.
-  listRules: 'campaign_settings:read',
   list: 'campaign_settings:read',
   create: 'tenant_config:write',
   update: 'tenant_config:write',
@@ -104,6 +105,50 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
     });
   });
 
+  /*
+   * P19.25-T5 AC-1 (ADR-0282 §5): a campaign is tagged *Struktural* or *Musiman* and nothing else — the form sends no
+   * subtype, so a structural campaign is taken without one, by every steward of the KPM, and a stored one keeps its own.
+   */
+  describe('P19.25-T5 Struktural or Musiman', () => {
+    const steward = (over: Record<string, unknown>) => new RequestContext('u-x', 'none', {
+      membershipId: 'mem-x', kpmId: FIXTURE_KPM, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+      isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
+    } as never);
+    const STEWARDS: [string, RequestContext][] = [
+      ['the Owner', OWNER], ['an Admin', ADMIN], ['a core leader', steward({ isCoreLeader: true })],
+      ['the Super Admin inside the KPM', RequestContext.superAdminInKpm(SUPER_ADMIN, FIXTURE_KPM)],
+    ];
+    const struktural = (code: string) => aCampaign({
+      code, title: 'MDRT Qualification', kind: 'structural', subtype: null, window: 'calendar_year', endsAt: null,
+      startsAt: '2025-12-31T17:00:00Z',
+    });
+
+    it.each(STEWARDS)('P19.25-T5 AC-1 lets %s add a Struktural campaign with no subtype, and lists it', async (_who, who) => {
+      session.current = who;
+      const created = await request(app.getHttpServer()).post(url).send(struktural('MDRT_2027')).expect(201);
+      expect(created.body).toMatchObject({ kind: 'structural', subtype: null, window: 'calendar_year', endsAt: null });
+      const listed = await request(app.getHttpServer()).get(url).expect(200);
+      expect(listed.body.map((c: { code: string }) => c.code)).toContain('MDRT_2027');
+    });
+
+    it('P19.25-T5 AC-1 still refuses a Musiman campaign without its end date', async () => {
+      const res = await request(app.getHttpServer()).post(url).send(aCampaign({ endsAt: null })).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    });
+
+    it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])('P19.25-T5 AC-1 refuses %s a Struktural campaign', async (_who, who) => {
+      session.current = who;
+      await request(app.getHttpServer()).post(url).send(struktural('MDRT_2027')).expect(403);
+    });
+
+    it('P19.25-T5 AC-1 cross-tenant: another KPM’s Owner cannot edit or archive this KPM’s campaign — 404, not 403', async () => {
+      const created = await request(app.getHttpServer()).post(url).send(struktural('MDRT_2027')).expect(201);
+      session.current = steward({ kpmId: '66f0000000000000000000b2', membershipId: 'mem-b', isKpmOwner: true });
+      await request(app.getHttpServer()).patch(`${url}/${created.body.id}`).send({ title: 'X' }).expect(404);
+      await request(app.getHttpServer()).post(`${url}/${created.body.id}/archive`).send({}).expect(404);
+    });
+  });
+
   describe('the campaigns an office runs', () => {
     it.each([['the Owner', OWNER], ['the Admin', ADMIN]])(
       'lets %s create one, and the unit comes from the registry', async (_name, who) => {
@@ -129,13 +174,20 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
       await request(server).post(`${url}/whatever/restore`).send({}).expect(403);
     });
 
-    it.each([['the Owner', OWNER], ['the Admin', ADMIN]])('P18.2-T7 shows %s the campaigns and the carrier rules', async (_name, who) => {
+    it.each([['the Owner', OWNER], ['the Admin', ADMIN]])('P18.2-T7 shows %s the campaigns', async (_name, who) => {
       session.current = who;
 
       await request(app.getHttpServer()).get(url).expect(200);
-      const rules = await request(app.getHttpServer()).get(`${url}/rules`).expect(200);
+    });
 
-      expect(rules.body.length).toBeGreaterThan(0);
+    /*
+     * P19.25-T5 AC-1 (ADR-0282 §6): the carrier rules' read served the *Production club tiers* tab — the tiers and MOC —
+     * which the owner took off every screen. No route answers there now; the rules stay stored.
+     */
+    it('P19.25-T5 AC-1 retires the carrier rules’ read with the tab that showed them: no route, the rules kept', async () => {
+      session.current = OWNER;
+      await request(app.getHttpServer()).get(`${url}/rules`).expect(404);
+      expect(await mongoose.connection.db!.collection('qualificationRules').countDocuments({})).toBeGreaterThan(0);
     });
 
     /*
@@ -145,29 +197,19 @@ describe('campaigns and the metric registry over HTTP (P5-T7, P5-T9)', () => {
      */
     it('P18.2-T8 review item 20 refuses a Super Admin outside a support session both settings reads: no office', async () => {
       session.current = SUPER_ADMIN;
-      for (const path of [url, `${url}/rules`]) {
-        expect((await request(app.getHttpServer()).get(path).expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
-      }
+      expect((await request(app.getHttpServer()).get(url).expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
     });
 
     it.each([['an AB', AB], ['an AAB', AAB], ['an agent', AGENT]])(
       'P18.2-T7 refuses %s the campaigns settings and the carrier rules (leak 15)', async (_name, who) => {
         session.current = who;
 
-        for (const path of [url, `${url}?includeArchived=true`, `${url}/rules`]) {
+        for (const path of [url, `${url}?includeArchived=true`]) {
           const res = await request(app.getHttpServer()).get(path).expect(403);
           expect(res.body.error.code).toBe('PERM_DENIED');
         }
       },
     );
-
-    it('keeps `rules` a literal rather than a campaign id', async () => {
-      await request(app.getHttpServer()).post(url).send(aCampaign({ code: 'RULES' })).expect(201);
-
-      const rules = await request(app.getHttpServer()).get(`${url}/rules`).expect(200);
-
-      expect(rules.body.every((r: { kind?: string }) => r.kind !== undefined)).toBe(true);
-    });
 
     it('refuses a metric the product does not measure, naming it', async () => {
       const res = await request(app.getHttpServer()).post(url).send(aCampaign({

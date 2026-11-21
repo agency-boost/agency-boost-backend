@@ -1,41 +1,29 @@
 /**
- * The Owner's reporting (Phase 18; `functional/kpm-analytics.md`): the KPM Overview, KPM analytics and the
- * platform's adoption read. Every number here is **Fixed** (`metrics-and-definitions.md` §B), pinned by
- * `reporting.spec.ts`; the thresholds a figure is judged against are the company's carrier rules, read live,
- * never a constant (ADR-0026).
+ * The Owner's reporting: the KPM Overview (`functional/kpm-overview.md`) and the platform's adoption read. Every number
+ * here is **Fixed** (`metrics-and-definitions.md` §B), pinned by `reporting.spec.ts`; the thresholds a figure is judged
+ * against are the company's carrier rules, read live, never a constant (ADR-0026).
+ *
+ * *Changed 2026-11-20 (P19.19; ADR-0272):* KPM Analytics is removed (`/kpm/analytics`, its two periods and its 70% row
+ * split), and with it the Overview's first version (*Belum mencatat*'s five, the recruitment target). What stays: the six
+ * months of *Produksi 6 bulan*, and the compliance cards' two splits, which moved from 50 / 80 to **34 / 67**
+ * (`revisions/2026-11-19/BRIEF-ADJUSTMENTS-2026-11-19.md`, §6 Compliance: *"red < 34%, yellow < 67%, green from 67%"*).
  */
 export const KPM_REPORTING = {
-  /** *This month* · *Previous month* (`KPM_Owner.html:1240-1245`), in the order drawn (D-period). */
-  ANALYTICS_PERIODS: ['this_month', 'previous_month'] as const,
-  /** *This month* is first selected (`:1242`). */
-  ANALYTICS_DEFAULT_PERIOD: 'this_month' as const,
-  /** *Monthly production*: the six months before this one (`:3429-3445`, T2 AC-6). */
+  /** *Produksi 6 bulan* (section 6): the six months ending with the office's current one (UI-091, ADR-0272 §5). */
   MONTHLY_CHART_MONTHS: 6,
   /*
    * `MONTHLY2_MONTHS` (2) was here: `MONTHLY2_AA` read the last two months held (OD-22 → option 1). Retired by
    * P19.3-T1 (ADR-0201 §4, Q6): *Monthly2 AA* is the average over the year's months held, which has no window to fix.
-   */
-  /**
-   * The attainment split the prototype colours a unit's or a leader's row by: at or above it *success*, below
-   * it *alert* (`KPM_Owner.html:3150`, `:3220`). Served on both reads as `thresholds.statusSplitPct`, so no
-   * screen re-declares it (invariant §7).
-   */
-  STATUS_SPLIT_PCT: 70,
-  /**
-   * **The compliance tiles' and rows' bars on a phone** (UI V1, UI-109; `kpm-mobile` 3): red below 50% done, green
-   * from 80%, the accent between. Served on the compliance read as `thresholds`, so no screen re-declares them.
-   */
-  COMPLIANCE_LOW_BELOW_PCT: 50,
-  COMPLIANCE_HIGH_FROM_PCT: 80,
-  /**
-   * *View who hasn't logged →* listed the first three and counted the rest (`KPM_Owner.html:988-1001`: three
-   * rows, then *"+ 66 more — full list on the People screen"*). `GET /kpm/overview/not-logged` serves those and the
-   * total, and records a §3.5 entry for each one it discloses — never for the rest.
    *
-   * *Changed 2026-11-05 (P19.3-T2 AC-2; UI-148, `kpm-overview-mobile-2026-11-03` 3):* **five**, the rows the
-   * *Belum mencatat · 7 hari* sheet draws before *"Semua n ›"*; the desktop card draws the first three of them.
+   * `ANALYTICS_PERIODS`, `ANALYTICS_DEFAULT_PERIOD`, `STATUS_SPLIT_PCT` (70) and `NOT_LOGGED_SHOWN` (5) were here until
+   * P19.19 (ADR-0272 §1, §2): KPM Analytics' two periods and its row colour, and the first Overview's *Belum mencatat*
+   * list. Nothing reads them since both pages were replaced.
    */
-  NOT_LOGGED_SHOWN: 5,
+  /**
+   * **The compliance cards' colour** (P19.19-T3 AC-2; the brief's §6): a card's % pill and its bar are **red below 34%**
+   * done, **yellow below 67%**, **green from 67%**. Served on the compliance read as `thresholds`, so no screen re-declares
+   * them (invariant §7). They were 50 and 80 (UI-109) until 2026-11-20.
+   */
+  COMPLIANCE_LOW_BELOW_PCT: 34,
+  COMPLIANCE_HIGH_FROM_PCT: 67,
 } as const;
-
-export type KpmAnalyticsPeriod = (typeof KPM_REPORTING.ANALYTICS_PERIODS)[number];

@@ -16,6 +16,7 @@ import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
 import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
+import { RosterImportRecordSchema } from '@/modules/tenants/roster-import-record.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from './registered-schemas';
@@ -93,7 +94,7 @@ import {
 import { RecruitmentPlaybookSchema } from '@/modules/recruitment/recruitment-playbook.schema';
 import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/recruitment/recruitment-pitch.schema';
 import {
-  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
+  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingSchema,
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
@@ -102,8 +103,11 @@ import { SurveyParticipationSchema } from '@/modules/surveys/survey-participatio
 import { SurveyResponseSchema } from '@/modules/surveys/survey-response.schema';
 import { AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
 import { QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { AbGroupTargetSchema } from '@/modules/reporting/ab-group-targets/ab-group-target.schema';
 import { ProposalSchema } from '@/modules/proposals/proposal.schema';
 import { KpmBrandingSchema } from '@/modules/branding/kpm-branding.schema';
+import { AnnouncementSchema } from '@/modules/announcements/announcement.schema';
+import { PlatformSettingsSchema } from '@/modules/platform-settings/platform-settings.schema';
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 import { KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
 import { IntakeItemSchema, UploadIntakeSchema } from '@/modules/product-data/upload-intake.schema';
@@ -138,6 +142,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   // P18.8-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
   ['memberInvites', MemberInviteSchema],
   ['transferRequests', TransferRequestSchema],
+  // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
+  ['rosterImports', RosterImportRecordSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
@@ -214,10 +220,15 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   // P19.5-T3 (ADR-0215 §6, §7): a target is cleared to `null`, a run frozen; neither is hard-deleted.
   ['analyticsTargets', AnalyticsTargetSchema],
   ['quantRuns', QuantRunSchema],
+  // P19.17-T4 (ADR-0270 §4): an AB group's monthly targets; a row is superseded by the next month's, never hard-deleted.
+  ['abGroupTargets', AbGroupTargetSchema],
   // P19.7-T2 (ADR-0221 §1): an agent's proposals, items inside; every index `kpmId`-led; deleted by `deletedAt`.
   ['proposals', ProposalSchema],
   // P19.6-T1 (ADR-0218 §1, §12): a KPM's own branding, one live row; `kpmId`-led; *Kembalikan ke default* soft-deletes it.
   ['kpmBranding', KpmBrandingSchema],
+  // P19.23-T6 (ADR-0279): the platform's settings document and the announcements sent; neither is hard-deleted.
+  ['platformSettings', PlatformSettingsSchema],
+  ['announcements', AnnouncementSchema],
 ];
 
 /**
@@ -463,11 +474,6 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
       + 'belongs to, which is soft-deleted whole',
   ],
   [
-    'leaderMeetingAgenda (subdocument)',
-    LeaderMeetingAgendaSchema,
-    'a meeting\'s three agenda sections, inside the meeting, which is soft-deleted whole',
-  ],
-  [
     'leaderMeetingAgendaItem (subdocument)',
     LeaderMeetingAgendaItemSchema,
     'an agenda item is removed by emptying its text, as the prototype has no remove (D-forum-model): the audit '
@@ -476,8 +482,8 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
   [
     'leaderMeetingActionItem (subdocument)',
     LeaderMeetingActionItemSchema,
-    'a tracker row is removed by its × as drawn (`KPM_Owner.html:2867`): the audit row keeps what it was, and '
-      + 'the meeting holding it is soft-deleted whole',
+    'an action item is removed by its trash after *Hapus action item?* (P19.22-T8 AC-4), with its copies in later '
+      + 'forums: the audit row keeps what it was, and the forum holding it is soft-deleted whole',
   ],
 ];
 
@@ -556,6 +562,7 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [MemberInviteSchema, 'MemberInviteSchema'],
   [TransferRequestSchema, 'TransferRequestSchema'],
+  [RosterImportRecordSchema, 'RosterImportRecordSchema'],
   [GroupSchema, 'GroupSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
@@ -590,7 +597,6 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [ProductDataGrantSchema, 'ProductDataGrantSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
   [LeaderMeetingSchema, 'LeaderMeetingSchema'],
-  [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
   [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
@@ -600,8 +606,11 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [SurveyResponseSchema, 'SurveyResponseSchema'],
   [AnalyticsTargetSchema, 'AnalyticsTargetSchema'],
   [QuantRunSchema, 'QuantRunSchema'],
+  [AbGroupTargetSchema, 'AbGroupTargetSchema'],
   [ProposalSchema, 'ProposalSchema'],
   [KpmBrandingSchema, 'KpmBrandingSchema'],
+  [PlatformSettingsSchema, 'PlatformSettingsSchema'],
+  [AnnouncementSchema, 'AnnouncementSchema'],
 ]);
 
 describe('soft delete', () => {

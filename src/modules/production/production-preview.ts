@@ -6,7 +6,6 @@ import { render, type Sentence } from '@/common/i18n/sentence';
 import { readXlsx } from '@/common/spreadsheet/read-xlsx';
 import { looksLikeZip } from '@/common/spreadsheet/zip-guard';
 import type { AdvancedAnalyticsConfig, UploadField } from '@/modules/config/analytics-config';
-import type { LinearPattern } from '@/modules/config/linear-pattern';
 import {
   type CsvRecord, decodeUpload, delimiterOf, parseCsv, type UploadDelimiter, type UploadEncoding,
 } from './production-csv';
@@ -94,7 +93,7 @@ export interface PreviewSummary {
   rows: number;
   ready: number;
   refused: number;
-  /** Rows of a code no member holds, kept apart as *Belum terdaftar* under `unknownAgent: 'flag'` (ADR-0214 §8). */
+  /** Rows of a code no member holds, kept as *Belum jadi anggota* (ADR-0214 §8; every one since ADR-0274 §2). */
   held: number;
   newCells: number;
   changedCells: number;
@@ -537,34 +536,29 @@ const nameKey = (name: string) => name.replace(/^'/, '').replace(/\s+/g, ' ').tr
 
 /** The template's rules a row is checked by (ADR-0214 §5). */
 export interface RowRules {
-  /** The template's `agentCodePattern`, compiled; `null` checks no format. */
-  pattern: LinearPattern | null;
-  /** The template's `agentCodeExample`, which the refusal names. */
-  example: string;
-  unknownAgent: 'flag' | 'reject';
   ytdTolerancePct: number;
 }
 
 /**
- * Every data row of the file against the roster, the template and what is stored (ADR-0214 §5), **in this order**:
+ * Every data row of the file against the roster, the template and what is stored (ADR-0214 §5) — **nothing in the file
+ * is skipped** since P19.21-T1 AC-5 (ADR-0274 §2) — **in this order**:
  *
  * 1. **the code** is matched to a member as ADR-0052 matches it;
- * 2. **a code no member holds that is not in the template's format** refuses the row (`UPLOAD_AGENT_CODE_PATTERN`,
- *    naming the template's example) — *as built*: a code that matches a member is the member's, and publishing
- *    proved every registered code is in the format (§7), so a recovered code stripped of its zeros is not refused;
- * 3. **an unregistered code** follows `unknownAgent`: `reject` refuses it (`UPLOAD_UNKNOWN_AGENT_CODE`), `flag` holds
- *    it apart as *Belum terdaftar* — a code a spreadsheet rewrote (scientific, date-like) or several members fit is
- *    refused either way;
- * 4. **a blank in a required column the file carries**, from its `effectiveFrom` on, skips the row:
- *    `UPLOAD_REQUIRED_BLANK`, *"<label> wajib diisi"* (R2) — a leaders' column only on a leader's row;
- * 5. **a value outside the column's limits** refuses that cell (`UPLOAD_VALUE_OUT_OF_RANGE`), and the row's other cells
- *    import;
- * 6. **a value in a leaders' column on an agent's row** is refused for that cell (`UPLOAD_LEADER_ONLY_VALUE`);
- * 7. **a `ytd: 'upload'` column's YTD** must be last month's held YTD plus this month's figure, within
+ * 2. **a code no member holds is kept as *Belum jadi anggota*** (`held`), whatever its form — not registered yet, not in
+ *    the template's format, rewritten by a spreadsheet (scientific, date-like) or fitting several members — under the
+ *    code as written (`heldCodeOf`), until somebody registers with it. The template's `unknownAgent` is no longer read:
+ *    *flag* is the only behaviour (it was *reject* by default, ADR-0214 §8);
+ * 3. **a blank** is *not reported* (ADR-0051), in a required column too: it no longer skips the row (R2's
+ *    `UPLOAD_REQUIRED_BLANK` is retired);
+ * 4. **a value outside the column's limits** refuses that cell (`UPLOAD_VALUE_OUT_OF_RANGE`);
+ * 5. **a value in a leaders' column on an agent's row** refuses that cell (`UPLOAD_LEADER_ONLY_VALUE`);
+ * 6. **a `ytd: 'upload'` column's YTD** must be last month's held YTD plus this month's figure, within
  *    `ytdTolerancePct` % of the YTD — January's equals its month; with no earlier month held it is not checked.
- *    Otherwise that YTD cell is refused (`UPLOAD_YTD_MISMATCH`), and the month's figure still imports.
+ *    Otherwise that YTD cell is refused (`UPLOAD_YTD_MISMATCH`).
  *
- * Also refused as before: an agent listed twice (both rows), and a row with more cells than the header.
+ * Also refused: a row with no agent code, an agent listed twice (both rows), and a row with more cells than the header.
+ * **A refused row or cell is a problem, never a skip**: the commit saves the file whole or refuses it whole, naming
+ * every problem (`ProductionImportService.commit`), so the preview lists them for the dialog to show.
  *
  * **Each issue is written for `reader`** (P18.10-T5): the preview is answered to them, and a commit keeps its issues
  * with the batch. Its code is the same in both languages.
@@ -631,11 +625,9 @@ export function buildPreview(
 
     let held = false;
     if (!member) {
-      const spreadsheetMade = match.miss === 'no_code' || match.miss === 'ambiguous' || match.miss === 'scientific' || match.miss === 'date_like';
-      if (!spreadsheetMade && rules.pattern && !rules.pattern.test(code)) {
-        return refuse(issue(ErrorCode.UPLOAD_AGENT_CODE_PATTERN, SAY.UPLOAD_AGENT_CODE_PATTERN.notTheFormat({ example: rules.example })));
-      }
-      if (spreadsheetMade || rules.unknownAgent === 'reject') return refuse(issue(ErrorCode.UPLOAD_UNKNOWN_AGENT_CODE, match.reason!));
+      // A row with no code is nobody's and cannot be kept: the one identity refusal left (ADR-0274 §2).
+      if (match.miss === 'no_code') return refuse(issue(ErrorCode.UPLOAD_UNKNOWN_AGENT_CODE, match.reason!));
+      // Every other code is kept as *Belum jadi anggota*, as written — nothing in the file is skipped (P19.21-T1 AC-5).
       held = true;
     }
 
@@ -651,18 +643,6 @@ export function buildPreview(
     const leaderRow = member?.leader === true;
     const stored = member ? input.stored(member.membershipId) : (input.heldStored?.(heldCodeOf(code)) ?? NOTHING_STORED);
 
-    // Step 4: a required column the file carries, blank on a row it applies to.
-    for (const col of layout.columns) {
-      if (col.ytd || !col.field.required) continue;
-      if (col.field.rows === 'leaders' && !leaderRow) continue;
-      if ((record.cells[col.index] ?? '').trim() === '') {
-        return refuse(issue(
-          ErrorCode.UPLOAD_REQUIRED_BLANK, SAY.UPLOAD_REQUIRED_BLANK.required({ label: labelIn(col.field, reader.language) }),
-          col.field.kode, false,
-        ));
-      }
-    }
-
     const issues: PreviewIssue[] = [];
     const cells = layout.columns.map(({ field, ytd, index }): PreviewCell => {
       const raw = (record.cells[index] ?? '').trim();
@@ -671,7 +651,7 @@ export function buildPreview(
         { kode: field.kode, ytd, status, before, after, raw: status === 'not_provided' ? null : raw, correction: null }
       );
       if (raw === '') return cell('not_provided');
-      // Step 6: a leaders' figure on an agent's row (ADR-0201 §2) — refused, whatever it says. A held code is nobody's
+      // Step 5: a leaders' figure on an agent's row (ADR-0201 §2) — refused, whatever it says. A held code is nobody's
       // row yet, so it is not refused for it.
       if (field.rows === 'leaders' && !leaderRow && !held) {
         issues.push(issue(
@@ -692,7 +672,7 @@ export function buildPreview(
       return cell(before === null ? 'new' : before === read.value ? 'unchanged' : 'changed', read.value);
     });
 
-    // Step 7: an uploaded year to date adds up to last month's and this month's.
+    // Step 6: an uploaded year to date adds up to last month's and this month's.
     for (const ytdCell of cells.filter((c) => c.ytd && (c.status === 'new' || c.status === 'changed' || c.status === 'unchanged'))) {
       const field = layout.columns.find((c) => c.field.kode === ytdCell.kode && c.ytd)!.field;
       const monthCell = cells.find((c) => c.kode === ytdCell.kode && !c.ytd);

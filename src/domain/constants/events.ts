@@ -91,3 +91,36 @@ export const NPS = {
  * is refused `400`, never cut. Served as `limits.feedbackTextMax`.
  */
 export const EVENT_FEEDBACK_TEXT_MAX = 1000;
+
+/**
+ * ***Kehadiran*** **— the office's attendance, hadir or tidak hadir** (P19.25-T1; ADR-0281 §1, §3; `metrics-and-definitions.md`,
+ * `EVENT_KEHADIRAN`; `revisions/2026-11-19/DATA-DEFINITIONS.md`, *Events*). Fixed: the platform's, not an office's. Served
+ * with every reading as its tone, never re-declared on a screen (invariant §7).
+ *
+ * - `GREEN_FROM_PCT` / `YELLOW_FROM_PCT` — a share hadir is green from 80%, yellow from 50% to 79%, red below 50%
+ *   (the navy card's tiles, *Per event*'s rows, *Per group*'s tiles and pills, *Per orang*'s bar);
+ * - `RECENT_EVENTS` — *Per group*'s average and *Per orang*'s strip read the last 15 recorded events of the period;
+ * - `STALE_AFTER_EVENTS` — *Terakhir hadir* is red when more than three events the member was expected at have passed
+ *   since the last one they attended (or they attended none);
+ * - `WHATSAPP_UNDER_PCT` — *Per orang* offers WhatsApp to a member who came to under half the events they were expected at.
+ */
+export const EVENT_KEHADIRAN = {
+  GREEN_FROM_PCT: 80,
+  YELLOW_FROM_PCT: 50,
+  RECENT_EVENTS: 15,
+  STALE_AFTER_EVENTS: 3,
+  WHATSAPP_UNDER_PCT: 50,
+} as const;
+
+/**
+ * ***Feedback*** **— an event's NPS, coloured** (P19.25-T2 AC-2; ADR-0281 §5): green from +30, yellow from 0 to +29, red
+ * below 0; and *sedikit jawaban* under three answers (`FEW_UNDER`).
+ */
+export const EVENT_FEEDBACK_BANDS = {
+  GREEN_FROM: 30,
+  YELLOW_FROM: 0,
+  FEW_UNDER: 3,
+} as const;
+
+/** The longest *Tidak ikut* reason, in characters after trimming (P19.25-T1 AC-3; ADR-0281 §2). Beyond it `400`, never cut. */
+export const EVENT_DECLINE_REASON_MAX = 200;

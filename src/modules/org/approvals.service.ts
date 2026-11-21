@@ -91,6 +91,9 @@ function initialsOf(name: string): string {
  * take somebody out of another leader's unit; that is a re-parent, and it belongs to
  * P3-T6.
  */
+/** Whose requests: the office's whole queue for its Owner and Admins, or the reader's own unit's (P19.20-T6). */
+export type InboxScope = 'office' | 'mine';
+
 @Injectable()
 export class ApprovalsService {
   constructor(
@@ -121,8 +124,17 @@ export class ApprovalsService {
     return ctx.membershipId;
   }
 
+  /**
+   * **Who decides, and as whom** (P19.23; ADR-0268 §3, ADR-0277 §3; OD-377): a leader's own membership, or `null` for a
+   * Super Admin inside the KPM — its Owner there, nobody's member, so the office's whole queue and no unit of their own.
+   * Anybody else with no membership is refused as before.
+   */
+  private actor(ctx: RequestContext): string | null {
+    return ctx.isSuperAdminInKpm ? null : this.requireLeader(ctx);
+  }
+
   private isTenantAdmin(ctx: RequestContext): boolean {
-    return Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    return Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin) || ctx.isSuperAdminInKpm;
   }
 
   private async named(userIds: string[]): Promise<Map<string, UserDocument>> {
@@ -136,13 +148,20 @@ export class ApprovalsService {
    * office's whole queue for the Owner or an Admin — and, as the inbox drops a request whose member is gone, only
    * requests whose member is still in the office. Two narrow reads, ids only, never the names the inbox reads.
    */
-  async waitingCount(ctx: RequestContext): Promise<{ count: number }> {
-    const me = this.requireLeader(ctx);
+  /**
+   * `scope` (P19.20-T6 AC-1; ADR-0273 §7): `'mine'` is User Management's *Pending Requests* — the people asking to join the
+   * reader's **own** unit, the Owner's and an Admin's too; `'office'` (the default) is the office's whole queue for its
+   * Owner and Admins, *All members › Menunggu*'s. A leader's is theirs either way.
+   */
+  async waitingCount(ctx: RequestContext, scope: InboxScope = 'office'): Promise<{ count: number }> {
+    const me = this.actor(ctx);
+    // A Super Admin inside the KPM has no unit of their own: *mine* is nobody's.
+    if (me === null && scope === 'mine') return { count: 0 };
     const rows = await this.requests.find(
       ctx,
       {
         status: 'pending',
-        ...(this.isTenantAdmin(ctx) ? {} : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
+        ...(this.isTenantAdmin(ctx) && scope === 'office' ? {} : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
       },
       { projection: { membershipId: 1 } },
     );
@@ -161,8 +180,9 @@ export class ApprovalsService {
    * Includes requests routed *to* them by somebody above: an AB may send an agent into
    * one of their AABs' units, and that AAB is then the one who decides.
    */
-  async inbox(ctx: RequestContext): Promise<PendingRequest[]> {
-    const me = this.requireLeader(ctx);
+  async inbox(ctx: RequestContext, scope: InboxScope = 'office'): Promise<PendingRequest[]> {
+    const me = this.actor(ctx);
+    if (me === null && scope === 'mine') return [];
 
     // A leader sees what was addressed to them. The Owner and an Admin see the office's
     // whole queue — `leader_request:approve` grants them `own-kpm`, and a request nobody
@@ -172,7 +192,7 @@ export class ApprovalsService {
         ctx,
         {
           status: 'pending',
-          ...(this.isTenantAdmin(ctx)
+          ...(this.isTenantAdmin(ctx) && scope === 'office'
             ? {}
             : { $or: [{ leaderMembershipId: me }, { routedToMembershipId: me }] }),
         },
@@ -251,7 +271,7 @@ export class ApprovalsService {
    * Built per **requested leader**, not per actor: see `forLeaderMembershipId`.
    */
   async routingChoices(ctx: RequestContext): Promise<RoutingChoice[]> {
-    const me = this.requireLeader(ctx);
+    const me = this.actor(ctx);
     if (!can(ctx, 'leader_request:route_to_sub_unit')) return [];
 
     // Whose requests this reader is deciding — the same narrowing `inbox()` applies, so
@@ -288,15 +308,15 @@ export class ApprovalsService {
   private async openRequest(
     ctx: RequestContext,
     requestId: string,
-    me: string,
+    me: string | null,
   ): Promise<JoinRequestDocument> {
     // A malformed id is "not here", not a 500 — the repository answers `null` for an id
     // that cannot match anything, so the `catch` this used to carry went with it.
     const request = await this.requests.findOne(ctx, { _id: requestId });
     // Somebody else's request reads the same as one that does not exist — unless you
     // administer the office, in which case every request in it is yours to decide.
-    const addressedToMe =
-      request?.leaderMembershipId === me || request?.routedToMembershipId === me;
+    const addressedToMe = me !== null
+      && (request?.leaderMembershipId === me || request?.routedToMembershipId === me);
     if (!request || !(addressedToMe || this.isTenantAdmin(ctx))) {
       throw new NotFoundException('Join request');
     }
@@ -327,7 +347,7 @@ export class ApprovalsService {
     routeToMembershipId?: string,
     joinDate?: string,
   ): Promise<PendingRequest[]> {
-    const me = this.requireLeader(ctx);
+    const me = this.actor(ctx);
     const request = await this.openRequest(ctx, requestId, me);
 
     const joiner = await this.members.findById(ctx, request.membershipId);
@@ -375,10 +395,11 @@ export class ApprovalsService {
 
     // ADR-0169: the join date and who it makes them, refused before anything is written.
     const joining = await this.joiningFor(ctx, joiner, joinDate);
+    // ADR-0267 §3: a person who registered themselves and asked for a leader is that leader's recruit, as a code is.
     await this.attach(ctx, joiner, leaderId, {
       action: 'leader_request.approved',
       requestId,
-    }, { requestable: true }, joining);
+    }, { requestable: true }, joining, requested);
 
     // `openRequest` has already proved this row is in `ctx.kpmId`, so the tenant clause
     // changes no outcome today. It is here because a write addressed by `_id` alone is
@@ -404,7 +425,7 @@ export class ApprovalsService {
   }
 
   async decline(ctx: RequestContext, requestId: string, reason?: string): Promise<PendingRequest[]> {
-    const me = this.requireLeader(ctx);
+    const me = this.actor(ctx);
     const request = await this.openRequest(ctx, requestId, me);
 
     await this.requests.updateById(ctx, requestId, {
@@ -447,7 +468,7 @@ export class ApprovalsService {
    * cannot be found by looking down anybody's tree.
    */
   async untagged(ctx: RequestContext, q?: string): Promise<UntaggedMember[]> {
-    this.requireLeader(ctx);
+    this.actor(ctx);
 
     const rows = await this.members.find(
       ctx,
@@ -503,13 +524,17 @@ export class ApprovalsService {
     joinDate?: string,
     via: 'tagged' | 'add_agent' = 'tagged',
   ): Promise<MembershipDocument> {
-    this.requireLeader(ctx);
+    // A Super Admin inside the KPM places as its Owner (OD-377; ADR-0277 §3): the office's move, the leader the recruiter.
+    this.actor(ctx);
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
     await this.assertTaggable(ctx, target, leaderId);
 
     const joining = await this.joiningFor(ctx, target, joinDate);
-    await this.attach(ctx, target, leaderId, { action: 'member.tagged_by_leader', via }, { requestable: true }, joining);
+    // ADR-0267 §3: the member who tagged or added them — the leader, or the office placing them under one.
+    await this.attach(
+      ctx, target, leaderId, { action: 'member.tagged_by_leader', via }, { requestable: true }, joining, ctx.membershipId ?? leaderId,
+    );
 
     // Any request they had open is moot — they are in somebody's unit now.
     await this.requests.updateMany(
@@ -554,7 +579,8 @@ export class ApprovalsService {
     }
 
     const joining = await this.joiningFor(ctx, target);
-    await this.attach(ctx, target, leaderId, { action: 'leader_code.redeemed', via: 'leader_code', code }, {}, joining);
+    // ADR-0267 §3: the code's leader, as a newcomer on the same code is theirs.
+    await this.attach(ctx, target, leaderId, { action: 'leader_code.redeemed', via: 'leader_code', code }, {}, joining, leaderId);
 
     // Any request they had open is moot — they are in, and by another door.
     await this.requests.updateMany(
@@ -641,10 +667,11 @@ export class ApprovalsService {
       if (!joinRequest) {
         throw leaderLimitRequestStale(request.requestId, STALE_REASONS.joinRequestDecided);
       }
+      // ADR-0267 §3: the leader they asked for, as `approve` credits.
       await this.attach(ctx, member, request.leaderMembershipId, {
         action: 'leader_request.approved',
         requestId: request.joinRequestId,
-      }, { pastLimit }, await this.joiningFor(ctx, member));
+      }, { pastLimit }, await this.joiningFor(ctx, member), request.leaderMembershipId);
       await this.requests.updateById(ctx, request.joinRequestId, {
         $set: {
           status: 'approved',
@@ -666,7 +693,11 @@ export class ApprovalsService {
     if (member.leaderId) {
       throw leaderLimitRequestStale(request.requestId, STALE_REASONS.placedSince);
     }
-    await this.attach(ctx, member, request.leaderMembershipId, { action: 'member.tagged_by_leader' }, { pastLimit }, await this.joiningFor(ctx, member));
+    // ADR-0267 §3: the member who asked to tag them, never the Super Admin carrying it out.
+    await this.attach(
+      ctx, member, request.leaderMembershipId, { action: 'member.tagged_by_leader' }, { pastLimit },
+      await this.joiningFor(ctx, member), request.requestedByMembershipId,
+    );
     await this.requests.updateMany(
       ctx,
       { membershipId: request.subjectMembershipId, status: 'pending' },
@@ -774,6 +805,11 @@ export class ApprovalsService {
     seat: LeaderSeatOptions = {},
     /** ADR-0169: written with the activation, for a member who had no join date yet. */
     joining: JoiningFields | null = null,
+    /**
+     * ADR-0267 §3: **who registered them** — the recruiter `RECRUITS_JOINED` credits. Written once: a member who has one
+     * (an orphan picked up again, a member whose request moves them) keeps it.
+     */
+    registeredBy: string = leaderId,
   ): Promise<void> {
     const leader = await this.members.findById(ctx, leaderId);
     if (!leader) throw new NotFoundException('Membership');
@@ -816,6 +852,7 @@ export class ApprovalsService {
     const fields = {
       joinedAt: member.joinedAt ?? this.clock.now(),
       recruitedByMembershipId: member.recruitedByMembershipId ?? leaderId,
+      registeredByMembershipId: member.registeredByMembershipId ?? registeredBy,
       ...(joining ?? {}),
     };
     if (member.status !== 'active') {

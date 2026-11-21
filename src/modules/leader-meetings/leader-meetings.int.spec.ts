@@ -2,51 +2,51 @@ import { INestApplication } from '@nestjs/common';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { FixedClock } from '@/common/clock/clock.port';
-import { LEADER_MEETING_LIMITS } from '@/domain/constants';
+import { RequestContext } from '@/common/context/request-context';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { declaredPermissions, session, SUPER_ADMIN } from '../../../test/http-permissions';
+import { indonesian, IN_INDONESIAN } from '../../../test/i18n';
 import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_A, type ForumOffice } from '../../../test/forum-office';
-import { IN_INDONESIAN } from '../../../test/i18n';
 import { LeaderMeetingsController } from './leader-meetings.controller';
+import { LEADER_MEETINGS_MESSAGES as SAY } from './leader-meetings.messages';
 
 /**
- * **The forum over HTTP, per role** (P18.1-T2 AC-1, AC-2, AC-3, AC-7, AC-9; P18.1-T3 AC-1), with the real
- * `PermissionsGuard`, the production pipe and the real services over `test/forum-office.ts`: who reads and writes
- * (the tag is the list), the refusals, making, moving and deleting a meeting, and *Upcoming* / *Completed* at the
- * boundary. The minutes' writes are `leader-meeting-minutes.int.spec.ts`'s; the freeze `leader-meetings.freeze.int.spec.ts`;
- * the links `leader-meeting-sharing.int.spec.ts`; isolation `leader-meetings.tenancy.spec.ts`.
+ * **The forum over HTTP, per role** (P19.22-T8 AC-1, AC-2; ADR-0276, ADR-0268), with the real `PermissionsGuard`, the
+ * production pipe and the real services over `test/forum-office.ts`: who reads and writes — the Owner, an Admin, a core
+ * leader and the Super Admin inside the KPM, positive; an AB, an AAB, an Agent and a tagged Agent, negative — the list
+ * with *Forum berikutnya*, making a forum (its number, time, first agenda and the carried action items), moving and
+ * deleting it. The agenda's and action items' writes are `leader-meeting-minutes.int.spec.ts`'s; the links
+ * `leader-meeting-sharing.int.spec.ts`'s; isolation `leader-meetings.tenancy.spec.ts`'s.
  *
  * Today is 10:00 on Monday 14 September 2026 in Jakarta.
  */
-describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
+describe('the Strategic Leader Forum over HTTP (P19.22-T8)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
   let office: ForumOffice;
   const db = () => mongoose.connection.db!;
   const http = () => request(app.getHttpServer());
-  const as = (who: Who) => { session.current = office.as(who); };
   const clock = () => wired.clock as FixedClock;
-  const make = async (title: string, date: string) => office.forum.create(office.as('OWNER'), { title, date });
   const audits = (action: string) => db().collection('auditLog').find({ action }).toArray();
 
-  /** Every editor by the address — the Owner, the Admin, and a tagged AB and AAB. */
-  const EDITORS: Who[] = ['OWNER', 'ADMIN', 'AGUS', 'SARI'];
-  /** The Core Leaders — tagged, on a leader rung (ADR-0159 §1): editors who make, move and delete nothing. */
-  const CORE_LEADERS: Who[] = ['AGUS', 'SARI'];
-  /**
-   * An AB, an AAB and an Agent of the office, none tagged; and INDAH, an Agent **tagged** — a tag written before
-   * ADR-0159 made it a leader's, which stays on her row and makes her no Core Leader (P18.5-T5).
-   */
-  const NOT_TAGGED: Who[] = ['PEER_AB', 'DEWI', 'RINA', 'INDAH'];
+  /** Every steward, by how a request carries them. */
+  const STEWARDS: [string, () => RequestContext][] = [
+    ['the Owner', () => office.as('OWNER')],
+    ['an Admin', () => office.as('ADMIN')],
+    ['a core leader AB', () => office.coreLeader('AGUS')],
+    ['a core leader AAB', () => office.coreLeader('SARI')],
+    ['the Super Admin inside the KPM', () => office.superAdminIn()],
+  ];
+  /** An AB, an AAB and an Agent, none tagged; INDAH, an Agent **tagged** — no core leader off a leader rung (ADR-0159 §1). */
+  const NOT_STEWARDS: Who[] = ['PEER_AB', 'DEWI', 'RINA', 'INDAH'];
 
   beforeAll(async () => {
     await startMongo();
     wired = configModule(ROSTER_NOW);
     await clearCollections();
     office = await buildForumOffice(wired);
-    // An Agent tagged before ADR-0159: the flag stays on her row and does nothing (P18.5-T5 AC-1).
     await office.tag('INDAH', true);
     app = await forumApp(office);
   }, 120_000);
@@ -58,7 +58,7 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
 
   afterEach(() => clock().set(ROSTER_NOW));
 
-  it('P18.1-T2 AC-1 declares a permission on every route, and the right one', () => {
+  it('P19.22-T8 AC-1 declares a permission on every route, and the right one; reorder, targets and stop-sharing are gone', () => {
     expect(declaredPermissions(LeaderMeetingsController)).toEqual({
       list: 'leader_meeting:read',
       create: 'leader_meeting:create',
@@ -69,614 +69,252 @@ describe('the Strategic Leader Forum over HTTP (P18.1-T2)', () => {
       addAgendaItem: 'leader_meeting:edit',
       saveAgendaItem: 'leader_meeting:edit',
       addActionItem: 'leader_meeting:edit',
-      reorderActionItems: 'leader_meeting:edit',
       saveActionItem: 'leader_meeting:edit',
       removeActionItem: 'leader_meeting:edit',
-      saveMonthlyTarget: 'leader_meeting:edit',
       share: 'leader_meeting:share_link',
-      stopSharing: 'leader_meeting:share_link',
     });
   });
 
-  describe('P18.1-T2 AC-1 who reads and writes — a positive and a negative per role, on every route', () => {
+  describe('P19.22-T8 AC-1, AC-2 who reads and writes — a positive and a negative per role, on every route', () => {
     let meetingId: string;
 
     beforeAll(async () => {
-      meetingId = (await make('Strategic Check-in — #1', '2026-09-28')).id;
+      meetingId = (await office.forum.create(office.as('OWNER'), { date: '2026-09-28', time: '14:00' })).id;
     });
 
-    /** Every route an editor reaches by the address, each answered for a reader as `ok` says. */
+    /** Every route a steward reaches by the address, each answered as `ok` says. */
     const routes = (id: string) => [
       { name: 'the list', call: () => http().get('/leader-meetings'), ok: 200 },
-      { name: 'a meeting', call: () => http().get(`/leader-meetings/${id}`), ok: 200 },
-      { name: 'add an agenda item', call: () => http().post(`/leader-meetings/${id}/agenda-items`).send({ section: 'post' }), ok: 201 },
-      { name: 'add an action item', call: () => http().post(`/leader-meetings/${id}/action-items`), ok: 201 },
-      { name: 'a Monthly Target', call: async () => {
-        const cell = (await office.meetings.findById(office.as('OWNER'), id))!.monthlyTargets?.ape;
-        return http().put(`/leader-meetings/${id}/monthly-targets/ape`).send({ rate: 100_000_000 * 100, version: cell?.version ?? 0 });
-      }, ok: 200 },
+      { name: 'a forum', call: () => http().get(`/leader-meetings/${id}`), ok: 200 },
+      { name: 'add an agenda line', call: () => http().post(`/leader-meetings/${id}/agenda-items`).send({ text: 'Strategi rekrut Q4' }), ok: 201 },
+      { name: 'add an action item', call: () => http().post(`/leader-meetings/${id}/action-items`).send({ text: 'Aktifkan 3 agent' }), ok: 201 },
       { name: 'share', call: () => http().post(`/leader-meetings/${id}/share-links`), ok: 201 },
-      { name: 'stop sharing', call: () => http().delete(`/leader-meetings/${id}/share-links`), ok: 200 },
     ];
 
-    it.each(EDITORS)('P18.1-T2 AC-1 positive: %s reads the list and the meeting, and writes every field route', async (who) => {
-      as(who);
+    it.each(STEWARDS)('P19.22-T8 AC-1 positive: %s reads the list and the forum, and writes every field route', async (_, who) => {
+      session.current = who();
       for (const route of routes(meetingId)) {
         const res = await route.call();
         expect([route.name, res.status]).toEqual([route.name, route.ok]);
       }
     });
 
-    it.each(NOT_TAGGED)('P18.1-T2 AC-1, P18.5-T5 AC-1 negative: %s, a field member who is no Core Leader, is answered 404 on every route, the list included', async (who) => {
-      as(who);
+    it.each(STEWARDS)('P19.22-T8 AC-1 positive: %s makes, moves and deletes a forum', async (_, who) => {
+      session.current = who();
+      const made = (await http().post('/leader-meetings').send({ date: '2026-10-05', time: '14:00' }).expect(201)).body;
+      expect(made.time).toBe('14:00');
+      const moved = (await http().patch(`/leader-meetings/${made.id}`).send({ time: '15:30', version: 1 }).expect(200)).body;
+      expect([moved.date, moved.time]).toEqual(['2026-10-05', '15:30']);
+      await http().delete(`/leader-meetings/${made.id}`).query({ version: 2 }).expect(204);
+    });
+
+    it.each(NOT_STEWARDS)('P19.22-T8 AC-1 negative: %s, a field member who is no core leader, is answered 404 on every route and writes nothing', async (who) => {
+      session.current = office.as(who);
       const before = await db().collection('auditLog').countDocuments();
       for (const route of routes(meetingId)) {
         const res = await route.call();
         expect([route.name, res.status, res.body.error?.code]).toEqual([route.name, 404, 'NOT_FOUND']);
       }
-      // And an item's write — an agenda item, a row — a delete of a row, the order: the same answer, nothing written.
-      as('OWNER');
-      const row = (await http().post(`/leader-meetings/${meetingId}/action-items`).expect(201)).body;
-      const [item] = (await http().get(`/leader-meetings/${meetingId}`).expect(200)).body.agenda.during;
-      const countAfterOwnerWrite = await db().collection('auditLog').countDocuments();
-      as(who);
+      const view = await office.forum.read(office.as('OWNER'), meetingId);
+      session.current = office.as(who);
       for (const res of [
-        await http().patch(`/leader-meetings/${meetingId}/agenda-items/${item.id}`).send({ text: 'Mine', version: item.version }),
-        await http().patch(`/leader-meetings/${meetingId}/action-items/${row.id}`).send({ pic: 'Me', version: 1 }),
-        await http().delete(`/leader-meetings/${meetingId}/action-items/${row.id}`).query({ version: 1 }),
-        await http().put(`/leader-meetings/${meetingId}/action-items/order`).send({ itemIds: [] }),
+        await http().patch(`/leader-meetings/${meetingId}/agenda-items/${view.agenda[0].id}`).send({ done: true, version: view.agenda[0].version }),
+        await http().patch(`/leader-meetings/${meetingId}/action-items/${view.actionItems[0].id}`).send({ status: 'done', version: view.actionItems[0].version }),
+        await http().delete(`/leader-meetings/${meetingId}/action-items/${view.actionItems[0].id}`).query({ version: view.actionItems[0].version }),
       ]) {
         expect([res.status, res.body.error.code]).toEqual([404, 'NOT_FOUND']);
       }
-      expect(await db().collection('auditLog').countDocuments()).toBe(countAfterOwnerWrite);
-      expect(countAfterOwnerWrite).toBeGreaterThan(before);
-    });
-
-    it('P18.1-T2 AC-1 the 404 a field member not tagged meets is the one a meeting that is not there gives', async () => {
-      as('RINA');
-      const theirs = (await http().get(`/leader-meetings/${meetingId}`).expect(404)).body.error;
-      as('OWNER');
-      const nothing = (await http().get(`/leader-meetings/${new mongoose.Types.ObjectId()}`).expect(404)).body.error;
-      const malformed = (await http().get('/leader-meetings/not-an-id').expect(404)).body.error;
-      const strip = (e: { requestId?: string }) => ({ ...e, requestId: undefined });
-      expect(strip(theirs)).toEqual(strip(nothing));
-      expect(strip(malformed)).toEqual(strip(nothing));
-    });
-
-    it.each(['OWNER', 'ADMIN'] as Who[])('P18.1-T2 AC-1 positive: %s makes, moves and deletes a meeting', async (who) => {
-      as(who);
-      const made = (await http().post('/leader-meetings').send({ title: 'Made', date: '2026-10-05' }).expect(201)).body;
-      const moved = (await http().patch(`/leader-meetings/${made.id}`).send({ date: '2026-10-06', version: 1 }).expect(200)).body;
-      expect(moved.date).toBe('2026-10-06');
-      await http().delete(`/leader-meetings/${made.id}`).query({ version: 2 }).expect(204);
-    });
-
-    it.each([...CORE_LEADERS, ...NOT_TAGGED])('P18.1-T2 AC-1 negative: %s is refused making, moving and deleting by the guard', async (who) => {
-      as(who);
+      // Making, moving and deleting are refused by the guard: their grant is the stewards' alone.
       for (const [res, permission] of [
-        [await http().post('/leader-meetings').send({ title: 'Mine', date: '2026-10-05' }), 'leader_meeting:create'],
-        [await http().patch(`/leader-meetings/${meetingId}`).send({ title: 'Mine', version: 1 }), 'leader_meeting:reschedule'],
+        [await http().post('/leader-meetings').send({ date: '2026-10-05', time: '14:00' }), 'leader_meeting:create'],
+        [await http().patch(`/leader-meetings/${meetingId}`).send({ time: '09:00', version: 1 }), 'leader_meeting:reschedule'],
         [await http().delete(`/leader-meetings/${meetingId}`).query({ version: 1 }), 'leader_meeting:delete'],
       ] as const) {
         expect([res.status, res.body.error.code, res.body.error.details]).toEqual([403, 'PERM_DENIED', { permission }]);
       }
+      expect(await db().collection('auditLog').countDocuments()).toBe(before);
     });
 
-    it('P18.1-T2 AC-1 a Super Admin outside a support session has no office: the reads TENANT_NO_MEMBERSHIP, the writes not theirs', async () => {
+    it('P19.22-T8 AC-1 the 404 a field member meets is the one a forum that is not there gives', async () => {
+      session.current = office.as('RINA');
+      const theirs = (await http().get(`/leader-meetings/${meetingId}`).expect(404)).body.error;
+      session.current = office.as('OWNER');
+      const nothing = (await http().get(`/leader-meetings/${new mongoose.Types.ObjectId()}`).expect(404)).body.error;
+      const strip = (e: { requestId?: string }) => ({ ...e, requestId: undefined });
+      expect(strip(theirs)).toEqual(strip(nothing));
+    });
+
+    it('P19.22-T8 AC-1 a Super Admin who has entered no KPM has no office: the reads TENANT_NO_MEMBERSHIP, the writes not theirs', async () => {
       session.current = SUPER_ADMIN;
       expect((await http().get('/leader-meetings').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
       expect((await http().get(`/leader-meetings/${meetingId}`).expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
-      expect((await http().get('/leader-meetings/shared/anything').expect(403)).body.error.code).toBe('TENANT_NO_MEMBERSHIP');
-      expect((await http().post(`/leader-meetings/${meetingId}/action-items`).expect(403)).body.error.code).toBe('PERM_DENIED');
-      expect((await http().post('/leader-meetings').send({ title: 'x', date: '2026-10-05' }).expect(403)).body.error.code).toBe('PERM_DENIED');
+      expect((await http().post(`/leader-meetings/${meetingId}/action-items`).send({ text: 'x' }).expect(403)).body.error.code).toBe('PERM_DENIED');
     });
 
-    it('P18.1-T2 AC-1 tagged, then untagged, then tagged again: the tag is read on every request', async () => {
+    it('P19.22-T8 AC-1 the Super Admin inside the KPM writes as its Owner: no membership on the row, the audit names them', async () => {
+      session.current = office.superAdminIn();
+      const made = (await http().post('/leader-meetings').send({ date: '2026-10-12', time: '10:00' }).expect(201)).body;
+      const row = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(made.id) });
+      expect(row!.createdBy).toBeNull();
+      const [audit] = (await audits('leader_meeting.created')).filter((a) => a.targetId === made.id);
+      expect(audit.actorUserId).toBe('u-root');
+      const view = (await http().get(`/leader-meetings/${made.id}`).expect(200)).body;
+      expect(view.can).toEqual({ edit: true, share: true, reschedule: true, delete: true, print: true });
+      await http().delete(`/leader-meetings/${made.id}`).query({ version: 1 }).expect(204);
+    });
+
+    it('P19.22-T8 AC-1 tagged, then untagged: the tag is read from the membership on every request', async () => {
       await office.tag('PEER_AB', true);
-      as('PEER_AB');
-      await http().get('/leader-meetings').expect(200);
+      session.current = office.as('PEER_AB');
       await http().get(`/leader-meetings/${meetingId}`).expect(200);
       await office.tag('PEER_AB', false);
-      expect((await http().get('/leader-meetings').expect(404)).body.error.code).toBe('NOT_FOUND');
-      expect((await http().post(`/leader-meetings/${meetingId}/action-items`).expect(404)).body.error.code).toBe('NOT_FOUND');
-      await office.tag('PEER_AB', true);
-      await http().get(`/leader-meetings/${meetingId}`).expect(200);
-      await office.tag('PEER_AB', false);
+      expect((await http().get(`/leader-meetings/${meetingId}`).expect(404)).body.error.code).toBe('NOT_FOUND');
     });
 
-    it('P18.1-T2 AC-1 an Owner or Admin edits whatever their tag', async () => {
-      const owner = await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.OWNER) });
-      expect(owner!.isCoreLeader ?? false).toBe(false);
-      as('OWNER');
-      await http().post(`/leader-meetings/${meetingId}/agenda-items`).send({ section: 'during' }).expect(201);
-    });
-
-    it('P18.1-T2 AC-1 a read-only support session reads as its member, draws no write, is refused every write and writes nothing', async () => {
-      for (const who of ['OWNER', 'AGUS'] as Who[]) {
-        session.current = office.supported(who);
-        const list = (await http().get('/leader-meetings').expect(200)).body;
-        expect(list.can).toEqual({ create: false });
-        const view = (await http().get(`/leader-meetings/${meetingId}`).expect(200)).body;
-        expect(view.can).toEqual({ edit: false, share: false, reschedule: false, delete: false, manageTags: false, print: true });
-        const before = { audit: await db().collection('auditLog').countDocuments(), meeting: await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(meetingId) }) };
-        for (const res of [
-          await http().post('/leader-meetings').send({ title: 'x', date: '2026-10-05' }),
-          await http().patch(`/leader-meetings/${meetingId}`).send({ title: 'x', version: 1 }),
-          await http().delete(`/leader-meetings/${meetingId}`).query({ version: 1 }),
-          await http().post(`/leader-meetings/${meetingId}/agenda-items`).send({ section: 'post' }),
-          await http().post(`/leader-meetings/${meetingId}/action-items`),
-          await http().put(`/leader-meetings/${meetingId}/monthly-targets/flc`).send({ rate: 1, version: 0 }),
-          await http().put(`/leader-meetings/${meetingId}/action-items/order`).send({ itemIds: [] }),
-          await http().post(`/leader-meetings/${meetingId}/share-links`),
-          await http().delete(`/leader-meetings/${meetingId}/share-links`),
-        ]) {
-          expect([res.status, res.body.error.code]).toEqual([403, 'PERM_DENIED']);
-        }
-        expect(await db().collection('auditLog').countDocuments()).toBe(before.audit);
-        expect(await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(meetingId) })).toEqual(before.meeting);
-      }
-    });
-
-    it('P18.1-T2 AC-1 an elevated support session writes as its member, both actors on the audit row', async () => {
-      session.current = office.supported('OWNER', false);
-      const row = (await http().post(`/leader-meetings/${meetingId}/action-items`).expect(201)).body;
-      const [entry] = (await audits('leader_meeting.action_item_added')).filter((e) => (e.after as { item: { id: string } }).item.id === row.id);
-      expect(entry).toMatchObject({ actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A });
-    });
-
-    it('P18.9-T8 L4 an elevated support session’s Monthly Target write is its member’s, both actors on the audit row', async () => {
-      const version = (await office.meetings.findById(office.as('OWNER'), meetingId))!.monthlyTargets?.case_submission?.version ?? 0;
-      session.current = office.supported('OWNER', false);
-      const saved = (await http().put(`/leader-meetings/${meetingId}/monthly-targets/case_submission`).send({ rate: 2, version }).expect(200)).body;
-      expect(saved).toMatchObject({ rate: 2, typed: null, version: version + 1 });
-      const entries = (await audits('leader_meeting.monthly_target_saved')).filter((e) => e.targetId === meetingId
-        && (e.after as { row: string; version: number }).row === 'case_submission'
-        && (e.after as { row: string; version: number }).version === version + 1);
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).toMatchObject({
-        actorUserId: 'u-support', effectiveUserId: office.as('OWNER').userId, actorMembershipId: office.id.OWNER, kpmId: KPM_A,
-        before: { row: 'case_submission', version }, after: { row: 'case_submission', rate: 2, typed: null, version: version + 1 },
-      });
-    });
-  });
-
-  describe('P18.1-T2 AC-2 the list', () => {
-    it('P18.1-T2 AC-2 newest first by date, each card’s state, editors, open items; whether the reader may make one; the bounds', async () => {
-      const older = await make('Strategic Check-in — older', '2026-09-01');
-      const newer = await make('Strategic Check-in — newer', '2026-09-21');
-      as('OWNER');
+    it('P19.22-T8 AC-1 a read-only support session reads as its member, draws no write, is refused every write', async () => {
+      session.current = office.supported('OWNER');
       const list = (await http().get('/leader-meetings').expect(200)).body;
-      const ids = list.meetings.map((m: { id: string }) => m.id);
-      expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id));
-      const dates = list.meetings.map((m: { date: string }) => m.date);
-      expect(dates).toEqual([...dates].sort().reverse());
-      const card = list.meetings.find((m: { id: string }) => m.id === newer.id);
-      expect(card).toMatchObject({ title: 'Strategic Check-in — newer', date: '2026-09-21', state: 'upcoming', openItems: 0 });
-      expect(list.meetings.find((m: { id: string }) => m.id === older.id).state).toBe('completed');
-      expect(card.editors.owner).toMatchObject({ membershipId: office.id.OWNER, name: 'Wilson Tanoto', isReader: true, rung: { code: 'AB', label: 'AB' } });
-      expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
-      // The Core Leaders: Indah's tag, an Agent's, makes her none (ADR-0159 §1).
-      expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Sari Puspita']);
-      // Every editor tagged but the Owner: the two Core Leaders; the Admin is not tagged.
-      expect(card.editors).toMatchObject({ coreLeaderCount: 2, frozen: false });
-      expect(list.can).toEqual({ create: true });
-      expect(list.limits).toEqual(LEADER_MEETING_LIMITS);
-      as('AGUS');
-      expect((await http().get('/leader-meetings').expect(200)).body.can).toEqual({ create: false });
-    });
-
-    it('P18.1-T2 AC-9 any query parameter is refused 400 by name', async () => {
-      as('OWNER');
-      const res = await http().get('/leader-meetings').query({ filter: 'upcoming' }).expect(400);
-      expect(res.body.error.code).toBe('VALIDATION_FAILED');
-      expect(res.body.error.message).toMatch(/filter/);
-    });
-
-    it('P18.1-T2 AC-2 an Admin who is also tagged is listed once, as an Admin, marked tagged and counted', async () => {
-      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.ADMIN) }, { $set: { isCoreLeader: true } });
-      try {
-        as('OWNER');
-        const [card] = (await http().get('/leader-meetings').expect(200)).body.meetings;
-        expect(card.editors.admins.map((p: { name: string }) => p.name)).toEqual(['Maya Kusuma']);
-        expect(card.editors.coreLeaders.map((p: { name: string }) => p.name)).not.toContain('Maya Kusuma');
-        expect(card.editors.coreLeaderCount).toBe(3);
-        // Each editor says whether they are tagged, so the card draws exactly the three it counts.
-        const drawn = [card.editors.owner, ...card.editors.admins, ...card.editors.coreLeaders];
-        expect(drawn.filter((p: { tagged: boolean }, i: number) => i > 0 && p.tagged)).toHaveLength(card.editors.coreLeaderCount);
-        expect(card.editors.admins[0].tagged).toBe(true);
-        expect(card.editors.owner.tagged).toBe(false);
-      } finally {
-        await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.ADMIN) }, { $set: { isCoreLeader: false } });
-      }
+      expect(list.can).toEqual({ create: false });
+      const view = (await http().get(`/leader-meetings/${meetingId}`).expect(200)).body;
+      expect(view.can).toEqual({ edit: false, share: false, reschedule: false, delete: false, print: true });
+      expect((await http().post(`/leader-meetings/${meetingId}/action-items`).send({ text: 'x' }).expect(403)).body.error.code).toBe('PERM_DENIED');
     });
   });
 
-  describe('P18.1-T2 AC-2, ADR-0130 making a meeting', () => {
-    it('P18.1-T2 AC-9 an empty title, a title that is not text or over its bound, a date that is not a day, an unknown field: 400', async () => {
-      as('OWNER');
-      for (const body of [
-        { title: '   ', date: '2026-10-05' },
-        { title: 42, date: '2026-10-05' },
-        { title: 'x'.repeat(LEADER_MEETING_LIMITS.titleMax + 1), date: '2026-10-05' },
-        { title: 'Fine', date: '2026-02-31' },
-        { title: 'Fine', date: '5 October' },
-        { title: 'Fine' },
-        { title: 'Fine', date: '2026-10-05', attendees: ['x'] },
-      ]) {
-        const res = await http().post('/leader-meetings').send(body);
-        expect([body, res.status, res.body.error.code]).toEqual([body, 400, 'VALIDATION_FAILED']);
-      }
-    });
-
-    it('P18.1-T2 AC-2 the title is trimmed; the answer is the card', async () => {
-      as('ADMIN');
-      const card = (await http().post('/leader-meetings').send({ title: '  Spaced  ', date: '2026-10-07' }).expect(201)).body;
-      expect(card).toMatchObject({ title: 'Spaced', date: '2026-10-07', state: 'upcoming', openItems: 0 });
-      expect(Object.keys(card).sort()).toEqual(['date', 'editors', 'id', 'number', 'openItems', 'state', 'title']);
-    });
-
-    it('P18.1-T2 AC-2 two meetings made at once are numbered apart: the second is refused its number and given the next', async () => {
-      const owner = office.as('OWNER');
-      const made = await Promise.all([1, 2, 3].map((n) => office.forum.create(owner, { title: `At once ${n}`, date: '2026-10-09' })));
-      const numbers = made.map((m) => m.number).sort((a, b) => a - b);
-      expect(new Set(numbers).size).toBe(3);
-      expect(numbers[2] - numbers[0]).toBe(2);
-      for (const m of made) await office.forum.remove(owner, m.id, 1);
-    });
-
-    it('P18.1-T2 AC-2 #15 after #14, and a deleted meeting’s number given again', async () => {
-      const top = await db().collection('leaderMeetings').find({ kpmId: KPM_A, deletedAt: null }).sort({ number: -1 }).limit(1).next();
-      await db().collection('leaderMeetings').insertOne({
-        kpmId: KPM_A, number: (top?.number ?? 0) + 100, title: 'Strategic Check-in — #14', date: '2026-08-01',
-        agenda: { preparation: [], during: [], post: [] }, actionItems: [], monthlyTargets: {}, writtenAt: null,
-        frozenScorecard: null, frozenAt: null, frozenCoeditors: null, version: 1, deletedAt: null,
-      });
-      const fourteen = (top?.number ?? 0) + 100;
-      as('OWNER');
-      const next = (await http().post('/leader-meetings').send({ title: 'Next', date: '2026-10-08' }).expect(201)).body;
-      expect(next.number).toBe(fourteen + 1);
-      await http().delete(`/leader-meetings/${next.id}`).query({ version: 1 }).expect(204);
-      const again = (await http().post('/leader-meetings').send({ title: 'Again', date: '2026-10-08' }).expect(201)).body;
-      expect(again.number).toBe(fourteen + 1);
-      const audit = (await audits('leader_meeting.created')).find((e) => e.targetId === again.id)!;
-      expect(audit).toMatchObject({ before: null, after: { title: 'Again', date: '2026-10-08', number: fourteen + 1 } });
-    });
-  });
-
-  describe('P18.1-T2 AC-7 Upcoming and Completed, from the date in the office’s calendar', () => {
-    it('P18.1-T2 AC-7 a meeting on 20 September is Upcoming at 23:59 that day in Jakarta and Completed at 00:01 the next', async () => {
-      const meeting = await make('Boundary', '2026-09-20');
-      as('OWNER');
-      clock().set(new Date('2026-09-20T16:59:00Z'));
-      expect((await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body.state).toBe('upcoming');
-      clock().set(new Date('2026-09-20T17:01:00Z'));
-      expect((await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body.state).toBe('completed');
-    });
-  });
-
-  describe('P18.1-T2 ADR-0130 moving and deleting a meeting', () => {
-    it('P18.1-T2 AC-7 an upcoming meeting is moved, title and date, audited with before and after; the version moves on', async () => {
-      const meeting = await make('Before', '2026-10-01');
-      as('ADMIN');
-      const moved = (await http().patch(`/leader-meetings/${meeting.id}`).send({ title: 'After', date: '2026-10-02', version: 1 }).expect(200)).body;
-      expect(moved).toMatchObject({ title: 'After', date: '2026-10-02' });
-      const [entry] = (await audits('leader_meeting.rescheduled')).filter((e) => e.targetId === meeting.id);
-      expect(entry).toMatchObject({
-        targetCollection: 'leaderMeetings', before: { title: 'Before', date: '2026-10-01' }, after: { title: 'After', date: '2026-10-02' },
-        actorMembershipId: office.id.ADMIN,
-      });
-      // The version read before the move is spent.
-      const stale = await http().patch(`/leader-meetings/${meeting.id}`).send({ title: 'Again', version: 1 }).expect(409);
-      expect(stale.body.error).toMatchObject({ code: 'VERSION_CONFLICT', details: { expectedVersion: 1, actualVersion: 2 } });
-    });
-
-    it('P18.1-T2 AC-7 a move of a Completed meeting is LEADER_MEETING_COMPLETED, nothing written; neither field is 400', async () => {
-      const meeting = await make('Past', '2026-09-10');
-      as('OWNER');
-      const res = await http().patch(`/leader-meetings/${meeting.id}`).send({ date: '2026-09-30', version: 1 }).expect(409);
-      expect(res.body.error.code).toBe('LEADER_MEETING_COMPLETED');
-      expect((await office.meetings.findById(office.as('OWNER'), meeting.id))!.date).toBe('2026-09-10');
-      const upcoming = await make('Upcoming', '2026-10-10');
-      expect((await http().patch(`/leader-meetings/${upcoming.id}`).send({ version: 1 }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
-      expect((await http().patch(`/leader-meetings/${upcoming.id}`).send({ date: 'soon', version: 1 }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
-    });
-
-    it('P18.1-T2 AC-9 a null date or title is refused 400, never stored: absent leaves a field, null is no value', async () => {
-      const meeting = await make('Not null', '2026-10-11');
-      as('OWNER');
-      for (const body of [{ date: null, version: 1 }, { title: null, version: 1 }, { title: 'Fine', date: null, version: 1 }]) {
-        const res = await http().patch(`/leader-meetings/${meeting.id}`).send(body);
-        expect([body, res.status, res.body.error.code]).toEqual([body, 400, 'VALIDATION_FAILED']);
-      }
-      expect(await office.meetings.findById(office.as('OWNER'), meeting.id)).toMatchObject({ title: 'Not null', date: '2026-10-11', version: 1 });
-      // Behind the DTO, the schema refuses it too: the update runs the validators.
-      await expect(office.meetings.updateHead(office.as('OWNER'), meeting.id, 1, { date: null as never })).rejects.toThrow(/date/);
-      await http().get(`/leader-meetings/${meeting.id}`).expect(200);
-      await http().get('/leader-meetings').expect(200);
-    });
-
-    it('P18.1-T2 AC-7 a delete is served before anybody writes in it — even once it is past — and refused after', async () => {
-      const unwritten = await make('Nobody wrote', '2026-09-02');
-      as('OWNER');
-      await http().delete(`/leader-meetings/${unwritten.id}`).query({ version: 1 }).expect(204);
-      await http().get(`/leader-meetings/${unwritten.id}`).expect(404);
-      const list = (await http().get('/leader-meetings').expect(200)).body.meetings.map((m: { id: string }) => m.id);
-      expect(list).not.toContain(unwritten.id);
-      const [entry] = (await audits('leader_meeting.deleted')).filter((e) => e.targetId === unwritten.id);
-      expect(entry.before).toMatchObject({ title: 'Nobody wrote', date: '2026-09-02' });
-      expect(entry.after.deletedAt).toEqual(expect.any(String));
-
-      const written = await make('Somebody wrote', '2026-10-03');
-      const view = (await http().get(`/leader-meetings/${written.id}`).expect(200)).body;
-      expect([view.writtenIn, view.can.delete]).toEqual([false, true]);
-      // A move or a share is not writing.
-      await http().patch(`/leader-meetings/${written.id}`).send({ title: 'Moved', version: 1 }).expect(200);
-      await http().post(`/leader-meetings/${written.id}/share-links`).expect(201);
-      expect((await http().get(`/leader-meetings/${written.id}`).expect(200)).body.writtenIn).toBe(false);
-      await http().put(`/leader-meetings/${written.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
-      const after = (await http().get(`/leader-meetings/${written.id}`).expect(200)).body;
-      expect([after.writtenIn, after.can.delete]).toEqual([true, false]);
-      const refused = await http().delete(`/leader-meetings/${written.id}`).query({ version: 2 }).expect(409);
-      expect(refused.body.error.code).toBe('LEADER_MEETING_HAS_MINUTES');
-      await http().get(`/leader-meetings/${written.id}`).expect(200);
-    });
-
-    it('P18.1-T2 AC-7 a delete pinned to a version the meeting has moved past is VERSION_CONFLICT; ?version is required', async () => {
-      const meeting = await make('Pinned', '2026-10-04');
-      as('OWNER');
-      await http().patch(`/leader-meetings/${meeting.id}`).send({ title: 'Pinned again', version: 1 }).expect(200);
-      expect((await http().delete(`/leader-meetings/${meeting.id}`).query({ version: 1 }).expect(409)).body.error.code).toBe('VERSION_CONFLICT');
-      expect((await http().delete(`/leader-meetings/${meeting.id}`).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
-      await http().delete(`/leader-meetings/${meeting.id}`).query({ version: 2 }).expect(204);
-      // Gone: a second delete, a move, a write — the meeting's 404.
-      await http().delete(`/leader-meetings/${meeting.id}`).query({ version: 2 }).expect(404);
-      await http().patch(`/leader-meetings/${meeting.id}`).send({ title: 'x', version: 2 }).expect(404);
-      await http().post(`/leader-meetings/${meeting.id}/action-items`).expect(404);
-    });
-  });
-
-  describe('P18.1-T2 AC-3 the head', () => {
-    it('P18.1-T2 AC-3 by the address: the branch, the version, who may edit now, and what the reader may do', async () => {
-      const meeting = await make('Head', '2026-10-09');
-      as('OWNER');
-      const view = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
-      expect(view).toMatchObject({
-        id: meeting.id, title: 'Head', date: '2026-10-09', state: 'upcoming', version: 1, branch: 'BSD City Branch', via: 'address',
-        writtenIn: false, accessNote: { ownerName: 'Wilson Tanoto', adminNames: ['Maya Kusuma'] }, limits: LEADER_MEETING_LIMITS,
-        can: { edit: true, share: true, reschedule: true, delete: true, manageTags: true, print: true },
-      });
-      expect(view.scorecard.frozenAt).toBeNull();
-      // P18.9-T1 AC-4: the reference slide's rows, in its order.
-      expect(view.scorecard.rows.map((r: { key: string }) => r.key)).toEqual([
-        'ape', 'manpower', 'flc', 'producing_agents', 'new_agent_3m', 'avg_monthly_aa', 'case_submission', 'cases_per_producing_agent',
-        'average_case_size',
-      ]);
-      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'producing_agents').monthlyTarget).toBeNull();
-      expect(view.scorecard.rows.find((r: { key: string }) => r.key === 'ape').monthlyTarget).toEqual({ rate: null, value: null, typed: null, version: 0 });
-      as('SARI');
-      const sari = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
-      expect(sari.can).toEqual({ edit: true, share: true, reschedule: false, delete: false, manageTags: false, print: true });
-      expect(sari.editors.coreLeaders.find((p: { name: string }) => p.name === 'Sari Puspita')).toMatchObject({ isReader: true, rung: { code: 'AAB' } });
-    });
-  });
-
-  /*
-   * **A saved photo shows on every avatar of that person** (UI V1, UI-111): the forum's editors, on the list's cards and
-   * the meeting's head. `users.avatarUrl` is a storage key in a private bucket, signed per read (`AvatarLinks`).
-   */
-  describe('UI-111 the editors’ profile photos', () => {
-    const KEY = 'user/66f0000000000000000009b1/avatar/01JBBBBBBBBBBBBBBBBBBBBBBB.jpg';
-    const SIGNED = `https://cdn.test/${KEY}?sig=abc`;
-    const sari = { email: 'sari@coaching.test' };
-    beforeAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: KEY } }); });
-    afterAll(async () => { await db().collection('users').updateOne(sari, { $set: { avatarUrl: null } }); });
-
-    it('UI-111 the list and the head carry an editor’s photo as a signed link, and an editor without one null', async () => {
-      const meeting = await make('Photos', '2026-10-16');
-      as('OWNER');
-      const card = (await http().get('/leader-meetings').expect(200)).body.meetings.find((m: { id: string }) => m.id === meeting.id);
-      const view = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body;
-      for (const editors of [card.editors, view.editors]) {
-        expect(editors.coreLeaders.map((p: { name: string; photoUrl: string | null }) => [p.name, p.photoUrl])).toEqual([
-          ['Agus Salim', null], ['Sari Puspita', SIGNED],
-        ]);
-        expect(editors.owner.photoUrl).toBeNull();
-      }
-      expect(JSON.stringify(view)).not.toContain(`"${KEY}"`);
-    });
-  });
-
-  describe('P18.9-T8 F1 a phone card’s change, as the meeting is served (parity F-256)', () => {
-    it('P18.9-T8 F1 3M new agent % at 60% against 100% is served −40 points; a sum and a count keep a percentage of last year’s', async () => {
-      const meeting = await make('Points', '2026-09-12');
-      const owner = office.as('OWNER');
-      const editors = await office.people.liveEditors(owner, await office.people.office(owner));
-      const f = (value: number) => ({ kind: 'figure', value, leavesOut: [] });
-      // Kept on the meeting in today's shape, last year's YTD and all: the scorecard a read serves, never recomputed.
-      await db().collection('leaderMeetings').updateOne({ _id: new mongoose.Types.ObjectId(meeting.id) }, {
-        $set: {
-          frozenAt: new Date('2026-09-13T02:00:00Z'),
-          frozenCoeditors: editors,
-          frozenScorecard: {
-            chips: { manpower: 28, agents: 19, units: 9, ab: 5, aab: 4 },
-            rows: [
-              { key: 'ape', unit: 'idr_minor', cells: { ytdLastYear: f(10_000_000_000), ytd: f(11_800_000_000) } },
-              { key: 'producing_agents', unit: 'count', cells: { ytdLastYear: f(0), ytd: f(4) } },
-              { key: 'new_agent_3m', unit: 'percentage', cells: { ytdLastYear: f(100), ytd: f(60) } },
-              { key: 'case_submission', unit: 'count', cells: { ytdLastYear: f(100), ytd: f(60) } },
-            ],
-            asOf: '2026-09-10',
-          },
-        },
-      });
-      as('OWNER');
-      const { rows } = (await http().get(`/leader-meetings/${meeting.id}`).expect(200)).body.scorecard;
-      const change = (key: string) => rows.find((r: { key: string }) => r.key === key).ytdChange;
-      expect(change('new_agent_3m')).toEqual({ kind: 'figure', value: -40, unit: 'points' });
-      // The same 60 against 100 on a count: a fall of 40%.
-      expect(change('case_submission')).toEqual({ kind: 'figure', value: -40, unit: 'percent' });
-      expect(change('ape')).toEqual({ kind: 'figure', value: 18, unit: 'percent' });
-      // A count over last year's 0, and a row kept without last year's YTD: —.
-      expect(change('producing_agents')).toEqual({ kind: 'none' });
-      expect(change('manpower')).toEqual({ kind: 'none' });
-    });
-  });
-
-  /**
-   * **P19.3-T1 — the forum's rows follow the owner's data sources of 3 November** (ADR-0202, ADR-0203): by the address and
-   * by a link, the scorecard is the one function's answer, under `data_sources`; *# of units* counts the leaders who lead
-   * somebody; another office is 404 and a member not tagged is 404 by the address, as for every read.
-   */
-  describe('P19.3-T1 AC-7, AC-15 the forum’s rows over HTTP (the data sources’ SLF map)', () => {
-    let meetingId: string;
+  describe('P19.22-T8 AC-1 the list and Forum berikutnya', () => {
     beforeAll(async () => {
-      meetingId = (await make('Data sources', '2026-09-24')).id;
+      await db().collection('leaderMeetings').deleteMany({});
     });
 
-    it('P19.3-T1 AC-15 GET /leader-meetings/:id serves the data sources’ rows: the scorecard function’s answer, definitions and units', async () => {
-      as('OWNER');
-      const served = (await http().get(`/leader-meetings/${meetingId}`).expect(200)).body.scorecard;
-      const computed = await office.scorecards.compute({ kpmId: KPM_A, timezone: 'Asia/Jakarta', meetingDate: '2026-09-24' });
-      expect(served.definitions).toBe('data_sources');
-      expect(served.chips).toEqual(computed.chips);
-      expect(served.rows.map((r: { key: string; cells: unknown }) => [r.key, r.cells])).toEqual(computed.rows.map((r) => [r.key, r.cells]));
-      // *# of units*: the AB and AAB who lead an active member today, counted here from the memberships themselves.
-      const live = await db().collection('memberships').find({ kpmId: KPM_A, deletedAt: null, status: 'active' }).toArray();
-      const leading = new Set(live.map((m) => m.leaderId).filter((l): l is string => typeof l === 'string'));
-      expect(served.chips.units).toBe(live.filter((m) => (m.role === 'ab' || m.role === 'aab') && leading.has(String(m._id))).length);
-      expect(served.chips.units).toBeLessThan(served.chips.ab + served.chips.aab);
-      // The slide's seven columns and nine rows, its labels the screen's.
-      expect(served.rows).toHaveLength(9);
-      expect(Object.keys(served.periods)).toEqual(['fy', 'ytdLastYear', 'ytd', 'thisMonthLastYear', 'lastMonth', 'thisMonth']);
-      // 3M new agent %, Cases/producing agents and Avg. Case Size stay *Not tracked* by the month.
-      for (const key of ['new_agent_3m', 'cases_per_producing_agent', 'average_case_size']) {
-        const row = served.rows.find((r: { key: string }) => r.key === key);
-        expect([key, row.cells.thisMonth.kind, row.monthlyTarget]).toEqual([key, 'blocked', null]);
-      }
+    it('P19.22-T8 AC-1 newest first by date then time; the nearest upcoming is next; days to go in the office calendar', async () => {
+      const owner = office.as('OWNER');
+      const past = await office.forum.create(owner, { date: '2026-08-31', time: '14:00' });
+      const soon = await office.forum.create(owner, { date: '2026-09-22', time: '14:00' });
+      const later = await office.forum.create(owner, { date: '2026-10-06', time: '14:00' });
+      const today = await office.forum.create(owner, { date: '2026-09-14', time: '16:00' });
+      session.current = owner;
+      const list = (await http().get('/leader-meetings').expect(200)).body;
+      expect(list.today).toBe('2026-09-14');
+      expect(list.meetings.map((m: { id: string }) => m.id)).toEqual([later.id, soon.id, today.id, past.id]);
+      expect(list.nextId).toBe(today.id);
+      const byId = Object.fromEntries(list.meetings.map((m: { id: string }) => [m.id, m]));
+      expect(byId[today.id]).toMatchObject({ state: 'upcoming', daysUntil: 0 });
+      expect(byId[soon.id]).toMatchObject({ state: 'upcoming', daysUntil: 8, time: '14:00' });
+      expect(byId[past.id]).toMatchObject({ state: 'completed', daysUntil: -14 });
+      expect(list.coreLeaders.map((p: { firstName: string }) => p.firstName)).toEqual(['Agus', 'Sari']);
+      expect(list.limits).toEqual({ textMax: 500 });
     });
 
-    it('P19.3-T1 AC-15 GET /leader-meetings/shared/:token serves the same rows to a member of the office, an Agent included', async () => {
-      as('OWNER');
-      const byAddress = (await http().get(`/leader-meetings/${meetingId}`).expect(200)).body.scorecard;
-      const { token } = (await http().post(`/leader-meetings/${meetingId}/share-links`).expect(201)).body;
-      as('RINA');
-      const byLink = (await http().get(`/leader-meetings/shared/${encodeURIComponent(token)}`).expect(200)).body.scorecard;
-      expect(byLink).toEqual(byAddress);
-      expect(byLink.definitions).toBe('data_sources');
-    });
-
-    it('P19.3-T1 AC-15 negative: another office’s Owner meets 404 by the address and by the link; a member not tagged 404 by the address', async () => {
-      as('OWNER');
-      const { token } = (await http().post(`/leader-meetings/${meetingId}/share-links`).expect(201)).body;
-      session.current = office.ownerOfB();
-      expect((await http().get(`/leader-meetings/${meetingId}`)).status).toBe(404);
-      expect((await http().get(`/leader-meetings/shared/${encodeURIComponent(token)}`)).status).toBe(404);
-      as('RINA');
-      const res = await http().get(`/leader-meetings/${meetingId}`);
-      expect([res.status, res.body.error?.code, res.body.scorecard]).toEqual([404, 'NOT_FOUND', undefined]);
+    it('P19.22-T8 AC-1 a forum is Akan datang through the whole of its date, Selesai from 00:00 after, in Jakarta', async () => {
+      const owner = office.as('OWNER');
+      const card = await office.forum.create(owner, { date: '2026-09-15', time: '14:00' });
+      clock().set(new Date('2026-09-15T16:59:59Z'));
+      expect((await office.forum.read(owner, card.id)).state).toBe('upcoming');
+      clock().set(new Date('2026-09-15T17:00:00Z'));
+      expect((await office.forum.read(owner, card.id)).state).toBe('completed');
     });
   });
 
-  /**
-   * **A new meeting's words are its maker's, and stored** (P18.10-T5 AC-6; ADR-0179 §7; the glossary's §C9): the first
-   * agenda an Indonesian reader makes is Bahasa Indonesia, *RBDO/BDO* kept; an English reader's is the English byte for
-   * byte; either reads as stored in both languages, and a copy keeps the stored words, re-dating its month in them.
-   * The office's meetings are put out of sight for the test — a new one is its first — and back after it.
-   */
-  describe('P18.10-T5 AC-6 a new meeting’s agenda, in its maker’s language', () => {
-    const oid = (id: string) => new mongoose.Types.ObjectId(id);
-    const stored = async (id: string) => (await db().collection('leaderMeetings').findOne({ _id: oid(id) }))!.agenda as
-      Record<'preparation' | 'during' | 'post', { text: string }[]>;
-    const texts = (agenda: Record<string, { text: string }[]>) =>
-      ['preparation', 'during', 'post'].map((section) => agenda[section].map((i) => i.text));
+  describe('P19.22-T8 AC-1, AC-3, AC-4 + Forum baru: its number, time, agenda and the action items it carries', () => {
+    beforeEach(async () => {
+      await db().collection('leaderMeetings').deleteMany({});
+    });
 
-    it('P18.10-T5 AC-6 an Indonesian reader’s first meeting stores Bahasa Indonesia, an English reader’s the English', async () => {
-      const shown = (await db().collection('leaderMeetings').find({ kpmId: KPM_A, deletedAt: null }).toArray()).map((m) => m._id);
-      await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: new Date() } });
-      const made: string[] = [];
-      const create = async (title: string, date: string, indonesian: boolean) => {
-        const req = http().post('/leader-meetings');
-        const card = (await (indonesian ? req.set(...IN_INDONESIAN) : req).send({ title, date }).expect(201)).body;
-        made.push(card.id);
-        return card.id as string;
-      };
-      try {
-        as('OWNER');
-        const id = await create('Rapat pertama', '2026-10-13', true);
-        const indonesianAgenda = [
-          ['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja Oktober', 'Tinjau scorecard, susun poin pembahasan'],
-          [
-            'Pembaruan proses — tinjau follow-up sebelumnya', 'Tinjauan kinerja terhadap ambang batas utama',
-            'Prioritas strategis (Korporat)', 'Prioritas strategis (Agency)', 'Rangkum langkah berikutnya & tetapkan penanggung jawab',
-          ],
-          ['Catat hasil ke dalam template', 'Catat masukan untuk RBDO/BDO'],
-        ];
-        expect(texts(await stored(id))).toEqual(indonesianAgenda);
-        // Read as stored, in both languages: the office's text now, never translated.
-        expect(texts((await http().get(`/leader-meetings/${id}`).expect(200)).body.agenda)).toEqual(indonesianAgenda);
-        expect(texts((await http().get(`/leader-meetings/${id}`).set(...IN_INDONESIAN).expect(200)).body.agenda)).toEqual(indonesianAgenda);
+    it('P19.22-T8 AC-3 an office’s first forum starts with the three lines, in the maker’s language, Update action items for Semua', async () => {
+      session.current = office.as('OWNER');
+      const made = (await http().post('/leader-meetings').set(...IN_INDONESIAN).send({ date: '2026-09-28', time: '14:00' }).expect(201)).body;
+      expect(made).toMatchObject({ number: 1, date: '2026-09-28', time: '14:00', agendaCount: 3, actionProgress: { done: 0, total: 0 } });
+      const view = (await http().get(`/leader-meetings/${made.id}`).expect(200)).body;
+      expect(view.agenda.map((i: { text: string; picAll: boolean; done: boolean }) => [i.text, i.picAll, i.done])).toEqual([
+        [indonesian(SAY.reviewNumbers), false, false],
+        [indonesian(SAY.updateActionItems), true, false],
+        [indonesian(SAY.agreeNewItems), false, false],
+      ]);
+      const row = await db().collection('leaderMeetings').findOne({ _id: new mongoose.Types.ObjectId(made.id) });
+      expect(row!.title).toBe('');
+    });
 
-        // The next meeting, made by an English reader, copies the stored words — its month item re-dated in them.
-        const next = await create('Next', '2026-11-10', false);
-        expect(texts(await stored(next))[0])
-          .toEqual(['Kumpulkan follow-up & komitmen dari sesi sebelumnya', 'Siapkan data kinerja November', 'Tinjau scorecard, susun poin pembahasan']);
+    it('P19.22-T8 AC-4 the next forum copies the agenda unticked and carries the items not Selesai, dari forum #n, same lineage', async () => {
+      const owner = office.as('OWNER');
+      const first = await office.forum.create(owner, { date: '2026-08-31', time: '14:00' });
+      const view = await office.forum.read(owner, first.id);
+      await office.minutes.saveAgendaItem(owner, first.id, view.agenda[0].id, { done: true, version: 1 });
+      await office.minutes.saveAgendaItem(owner, first.id, view.agenda[0].id, { pic: office.id.AGUS, version: 2 });
+      const open = await office.minutes.addActionItem(owner, first.id, { text: 'Aktifkan 3 agent', pic: office.id.SARI, dueOn: '2026-09-20' });
+      const doing = await office.minutes.addActionItem(owner, first.id, { text: '1 presentasi rekrut per AB' });
+      await office.minutes.saveActionItem(owner, first.id, doing.id, { status: 'doing', version: 1 });
+      const finished = await office.minutes.addActionItem(owner, first.id, { text: 'Closing clinic' });
+      await office.minutes.saveActionItem(owner, first.id, finished.id, { status: 'done', version: 1 });
 
-        // An office's first made by an English reader: the English, byte for byte.
-        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
-        const english = await create('First in English', '2026-10-13', false);
-        expect(texts(await stored(english))).toEqual([
-          ['Compile follow-ups & commitments from prior session', 'Prepare October performance data', 'Review scorecard, draft talking points'],
-          [
-            'Process update — review prior follow-ups', 'Performance review vs. key thresholds', 'Strategic priorities (Corporate)',
-            'Strategic priorities (Agency)', 'Summarize next steps & assign owners',
-          ],
-          ['Document outcomes into template', 'Note feedback for RBDO/BDO'],
-        ]);
-        // + Add item and + Add action item store their words in the adder's language.
-        expect((await http().post(`/leader-meetings/${english}/agenda-items`).set(...IN_INDONESIAN).send({ section: 'post' }).expect(201))
-          .body).toMatchObject({ text: 'Item agenda baru', pic: '' });
-        expect((await http().post(`/leader-meetings/${english}/action-items`).set(...IN_INDONESIAN).expect(201)).body).toMatchObject({
-          initiative: 'Inisiatif baru', metric: 'Ukuran keberhasilan', action: 'Tindakan baru', pic: 'TBD', status: 'not_planned', remarks: 'TBD',
-        });
-        expect(texts(await stored(english))[2]).toEqual(['Document outcomes into template', 'Note feedback for RBDO/BDO', 'Item agenda baru']);
-      } finally {
-        await db().collection('leaderMeetings').updateMany({ _id: { $in: made.map(oid) } }, { $set: { deletedAt: new Date() } });
-        await db().collection('leaderMeetings').updateMany({ _id: { $in: shown } }, { $set: { deletedAt: null } });
-      }
+      session.current = owner;
+      const second = (await http().post('/leader-meetings').send({ date: '2026-09-14', time: '14:00' }).expect(201)).body;
+      expect(second).toMatchObject({ number: 2, agendaCount: 3, actionProgress: { done: 0, total: 2 } });
+      const next = (await http().get(`/leader-meetings/${second.id}`).expect(200)).body;
+      expect(next.agenda[0]).toMatchObject({ text: view.agenda[0].text, picMembershipId: office.id.AGUS, done: false });
+      expect(next.agenda[0].id).not.toBe(view.agenda[0].id);
+      expect(next.actionItems.map((i: Record<string, unknown>) => [i.text, i.status, i.fromNumber, i.picMembershipId, i.dueOn, i.lineageId])).toEqual([
+        ['Aktifkan 3 agent', 'todo', 1, office.id.SARI, '2026-09-20', open.lineageId],
+        ['1 presentasi rekrut per AB', 'doing', 1, null, null, doing.lineageId],
+      ]);
+      expect(next.actionItems[0].id).not.toBe(open.id);
+      // Carried copies are not writing: the new forum can still be deleted.
+      expect(next.writtenIn).toBe(false);
+      // A third forum carries #2's still open, keeping the forum the lineage began in.
+      const third = await office.forum.create(owner, { date: '2026-09-28', time: '14:00' });
+      expect((await office.forum.read(owner, third.id)).actionItems.map((i) => i.fromNumber)).toEqual([1, 1]);
+      const [audit] = (await audits('leader_meeting.created')).filter((a) => a.targetId === second.id);
+      expect(audit.after).toMatchObject({ number: 2, time: '14:00', carriedActionItems: 2 });
+    });
+
+    it.each<[Record<string, unknown>, string]>([
+      [{ date: '2026-09-28' }, 'time missing'],
+      [{ date: '2026-09-28', time: '24:00' }, 'a time that is not one'],
+      [{ date: '2026-09-28', time: '9:00' }, 'a time not HH:MM'],
+      [{ date: '2026-02-31', time: '14:00' }, 'a date that is not a day'],
+      [{ date: '2026-09-28', time: '14:00', title: 'Mine' }, 'a title, which a forum no longer has'],
+    ])('P19.22-T8 AC-1 validation: %j is refused 400 (%s), nothing made', async (body) => {
+      session.current = office.as('OWNER');
+      const res = await http().post('/leader-meetings').send(body).expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(await db().collection('leaderMeetings').countDocuments()).toBe(0);
     });
   });
 
-  /** **Making, moving and removing a meeting, refused in Bahasa Indonesia** (P18.10-T5 AC-7): the codes as in English. */
-  describe('P18.10-T5 AC-7 the forum’s refusals in Indonesian', () => {
-    it('P18.10-T5 AC-7 the DTO’s own sentences, a move with nothing in it, a completed meeting and one with minutes', async () => {
-      as('OWNER');
-      const blank = await http().post('/leader-meetings').set(...IN_INDONESIAN).send({ title: '   ', date: '2026-02-31' }).expect(400);
-      expect(blank.body.error).toMatchObject({
-        code: 'VALIDATION_FAILED',
-        details: { violations: ['title tidak boleh kosong', 'date harus berupa tanggal yang benar, dengan format YYYY-MM-DD'] },
-      });
-      // The English, as the DTO wrote it before.
-      expect((await http().post('/leader-meetings').send({ title: '   ', date: '2026-10-05' }).expect(400)).body.error.details.violations)
-        .toEqual(['title must not be empty']);
-
-      const upcoming = await make('Upcoming in Indonesian', '2026-10-20');
-      const nothing = await http().patch(`/leader-meetings/${upcoming.id}`).set(...IN_INDONESIAN).send({ version: 1 }).expect(400);
-      expect(nothing.body.error).toMatchObject({
-        code: 'VALIDATION_FAILED', message: 'Kirim judul, tanggal, atau keduanya.', details: { violations: ['Kirim judul, tanggal, atau keduanya.'] },
-      });
-      const past = await make('Past in Indonesian', '2026-09-08');
-      const completed = await http().patch(`/leader-meetings/${past.id}`).set(...IN_INDONESIAN).send({ date: '2026-09-30', version: 1 })
-        .expect(409);
-      expect(completed.body.error).toMatchObject({
-        code: 'LEADER_MEETING_COMPLETED', message: 'Rapat ini sudah berlangsung, jadi tanggalnya tetap.', details: { date: '2026-09-08' },
-      });
-      await http().put(`/leader-meetings/${upcoming.id}/monthly-targets/flc`).send({ rate: 1, version: 0 }).expect(200);
-      const written = await http().delete(`/leader-meetings/${upcoming.id}`).query({ version: 1 }).set(...IN_INDONESIAN).expect(409);
-      expect(written.body.error).toMatchObject({
-        code: 'LEADER_MEETING_HAS_MINUTES', message: 'Sudah ada yang ditulis di rapat ini, jadi rapat ini tidak dapat dihapus.',
-      });
-      expect((await http().get('/leader-meetings/66f00000000000000000ffff').set(...IN_INDONESIAN).expect(404)).body.error.message)
-        .toBe('Rapat tidak ditemukan.');
+  describe('P19.22-T8 AC-1 moving and deleting a forum', () => {
+    it('P19.22-T8 AC-1 a move needs a date or a time; a stale version is 409; a past forum keeps its date', async () => {
+      const owner = office.as('OWNER');
+      session.current = owner;
+      const card = await office.forum.create(owner, { date: '2026-09-29', time: '14:00' });
+      expect((await http().patch(`/leader-meetings/${card.id}`).send({ version: 1 }).expect(400)).body.error.code).toBe('VALIDATION_FAILED');
+      await http().patch(`/leader-meetings/${card.id}`).send({ date: '2026-09-30', version: 1 }).expect(200);
+      expect((await http().patch(`/leader-meetings/${card.id}`).send({ time: '08:00', version: 1 }).expect(409)).body.error.code).toBe('VERSION_CONFLICT');
+      const past = await office.forum.create(owner, { date: '2026-09-01', time: '14:00' });
+      expect((await http().patch(`/leader-meetings/${past.id}`).send({ time: '08:00', version: 1 }).expect(409)).body.error.code)
+        .toBe('LEADER_MEETING_COMPLETED');
+      const [audit] = (await audits('leader_meeting.rescheduled')).filter((a) => a.targetId === card.id);
+      expect(audit.before).toEqual({ date: '2026-09-29', time: '14:00' });
     });
+
+    it('P19.22-T8 AC-1 a forum somebody has written in is kept: 409 LEADER_MEETING_HAS_MINUTES', async () => {
+      const owner = office.as('OWNER');
+      session.current = owner;
+      const card = await office.forum.create(owner, { date: '2026-10-20', time: '14:00' });
+      await office.minutes.addAgendaItem(owner, card.id, { text: 'Rencana Closing Clinic Desember' });
+      expect((await http().delete(`/leader-meetings/${card.id}`).query({ version: 1 }).expect(409)).body.error.code)
+        .toBe('LEADER_MEETING_HAS_MINUTES');
+    });
+  });
+
+  it('P19.22-T8 AC-2 an office with no Owner assigned: its core leaders still edit, and the Owner is nobody', async () => {
+    await db().collection('kpms').updateOne({ _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { ownerUserId: null } });
+    try {
+      const card = await office.forum.create(office.coreLeader('AGUS'), { date: '2026-11-02', time: '14:00' });
+      const view = await office.forum.read(office.coreLeader('AGUS'), card.id);
+      expect(view.people.filter((p) => p.pickable).map((p) => p.firstName)).toEqual(['Maya', 'Agus', 'Sari']);
+    } finally {
+      await db().collection('kpms').updateOne(
+        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { ownerUserId: await office.userIdOf('OWNER') } },
+      );
+    }
   });
 });

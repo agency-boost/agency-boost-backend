@@ -118,10 +118,6 @@ export const CAMPAIGNS_REFUSALS = refusals('modules/campaigns', {
       en: 'Only a structural campaign has a subtype.',
       id: 'Hanya campaign struktural yang memiliki subtype.',
     },
-    structuralSubtype: {
-      en: 'A structural campaign is a promotion path or an ongoing incentive: subtype is required.',
-      id: 'Campaign struktural adalah jalur promosi atau insentif berkelanjutan: subtype wajib diisi.',
-    },
     structuralWindow: ({ windows }: { windows: readonly string[] }) => ({
       en: `A structural campaign is read over ${windows.join(' or ')}.`,
       id: `Campaign struktural dinilai berdasarkan ${windows.join(' atau ')}.`,

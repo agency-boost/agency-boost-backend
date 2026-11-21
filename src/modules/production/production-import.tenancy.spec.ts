@@ -101,9 +101,10 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
         ['PRU-999', { 'ape.monthly': '1' }],
       ));
 
+      // P19.21-T1 AC-5, AC-7: nothing skipped — the unknown code is kept as *Belum jadi anggota*.
       expect(batch).toMatchObject({
         month: '2026-09', filename: 'sep.csv', status: 'committed', templateVersion: 1,
-        rowCount: 2, writtenRowCount: 1, cellCount: 1, issueCount: 1,
+        rowCount: 2, writtenRowCount: 2, cellCount: 2, issueCount: 0, memberRowCount: 1, heldRowCount: 1,
         committedBy: 'Rina Wijaya', canRevert: true,
       });
       expect(state).toMatchObject({ revision: 1, locked: false, reason: 'open' });
@@ -126,7 +127,7 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
         .toEqual({ value: 150_000_000, provenance: 'imported', correction: null, outOfBounds: null });
     });
 
-    it('records the file, and every row with what it wrote and what that held before — refused rows too', async () => {
+    it('records the file, and every row with what it wrote and what that held before — held rows too (P19.21-T1 AC-5)', async () => {
       const { batch } = await importFile(A, '2026-09', file('sep.csv',
         ['PRU-001', { 'ape.monthly': '1.5' }], ['PRU-999', { 'ape.monthly': '1' }],
       ));
@@ -143,10 +144,8 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
         // No month row existed, so there was nothing to hold it.
         previousValues: { APE: null },
       });
-      expect(rows[1]).toMatchObject({ line: 3, membershipId: null, status: 'refused', issues: [{ code: expect.stringMatching(/^UPLOAD_(UNKNOWN_AGENT_CODE|AGENT_CODE_PATTERN)$/) }] });
-      expect(stored).toMatchObject({ analyticsConfig: { templateId: null, version: 1 }, asOf: '2026-09-27', heldRowCount: 0 });
-      // Wrote nothing — an empty object, which the store keeps as no field at all.
-      expect(rows[1].values ?? {}).toEqual({});
+      expect(rows[1]).toMatchObject({ line: 3, membershipId: null, status: 'held', heldAgentCode: 'PRU-999', issues: [], values: { APE: 100_000_000 } });
+      expect(stored).toMatchObject({ analyticsConfig: { templateId: null, version: 1 }, asOf: '2026-09-27', heldRowCount: 1, memberRowCount: 1 });
     });
 
     it('leaves a figure already as stored alone — its provenance and its source with it', async () => {
@@ -267,8 +266,27 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
     });
 
     it('refuses a file that would change nothing', async () => {
-      await expect(importFile(A, '2026-09', file('blank.csv', ['PRU-001', {}], ['PRU-999', { 'ape.monthly': '1' }])))
+      await expect(importFile(A, '2026-09', file('blank.csv', ['PRU-001', {}], ['PRU-002', {}])))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('P19.21-T1 AC-5 refuses a file with a problem whole, naming each one, and saves nothing of it', async () => {
+      const err = await importFile(A, '2026-09', file('bad.csv',
+        ['PRU-001', { 'ape.monthly': '1.5' }], ['', { 'ape.monthly': '1' }], ['PRU-002', { 'ape.monthly': 'abc' }],
+      )).catch((e: unknown) => e);
+      expect(err).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: {
+          field: 'file', problemCount: 2,
+          problems: [
+            expect.objectContaining({ line: 3, code: 'UPLOAD_UNKNOWN_AGENT_CODE' }),
+            expect.objectContaining({ line: 4, agentCode: 'PRU-002', code: 'UPLOAD_VALUE_OUT_OF_RANGE', kode: 'APE' }),
+          ],
+        },
+      });
+      expect(await monthRow(A1)).toBeNull();
+      expect(await db().collection('dataUploadBatches').countDocuments()).toBe(0);
+      expect((await wired.productionMonths.state(A, '2026-09')).revision).toBe(0);
     });
   });
 
@@ -440,10 +458,13 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
 
       await expect(wired.productionImport.revert(B, batch.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       expect((await wired.productionImport.history(B, '2026-09')).batches).toEqual([]);
-      // B's file names A's agent: the code is unknown in B, and nothing of A's is touched.
-      await expect(importFile(B, '2026-09', file('b.csv', ['PRU-001', { 'ape.monthly': '9' }])))
-        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      // B's file names A's agent: the code is nobody's in B — kept there as *Belum jadi anggota* (ADR-0274 §2) — and
+      // nothing of A's is touched.
+      const b = await importFile(B, '2026-09', file('b.csv', ['PRU-001', { 'ape.monthly': '9' }]));
+      expect(b.batch).toMatchObject({ memberRowCount: 0, heldRowCount: 1 });
       expect((await monthRow(A1))!.values.APE.value).toBe(100_000_000);
+      expect(await db().collection('unregisteredAgentData').findOne({ agentCode: 'PRU-001' })).toMatchObject({ kpmId: KPM_B });
+      expect((await wired.production.readMonth(A, '2026-09')).unregistered).toEqual([]);
     });
 
     it('locks one office’s month and not another’s', async () => {
@@ -546,13 +567,19 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(A1) }, { $set: { role: 'agent' } });
     });
 
-    it('P19.3-T1 AC-6 writes a leader row’s unit persistency as imported; an agent row’s is an issue, never stored', async () => {
+    it('P19.3-T1 AC-6 writes a leader row’s unit persistency as imported; an agent row’s refuses the file (P19.21-T1 AC-5)', async () => {
+      const bad = file2('sep.csv', ['PRU-001', { 'ape.monthly': '1.5' }, '85'], ['PRU-002', { 'ape.monthly': '2' }, '82.5']);
+      await expect(importFile(A, '2026-09', bad)).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { problems: [expect.objectContaining({ code: 'UPLOAD_LEADER_ONLY_VALUE', kode: 'UNIT_PERSISTENCY' })] },
+      });
+      expect(await monthRow(A1)).toBeNull();
       const { batch } = await importFile(A, '2026-09', file2('sep.csv',
-        ['PRU-001', { 'ape.monthly': '1.5' }, '85'],
+        ['PRU-001', { 'ape.monthly': '1.5' }, ''],
         ['PRU-002', { 'ape.monthly': '2' }, '82.5'],
       ));
       // `templateVersion` is the template's version the file was read against since P19.5-T2 (R6), not the header's.
-      expect(batch).toMatchObject({ templateVersion: 1, writtenRowCount: 2, cellCount: 3, issueCount: 1 });
+      expect(batch).toMatchObject({ templateVersion: 1, writtenRowCount: 2, cellCount: 3, issueCount: 0 });
 
       const budi = await monthRow(A2);
       expect(budi!.values.UNIT_PERSISTENCY).toEqual({
@@ -563,9 +590,7 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
       expect(rina!.values.APE).toMatchObject({ value: 150_000_000, provenance: 'imported' });
       expect(rina!.values.UNIT_PERSISTENCY?.value ?? null).toBeNull();
 
-      // The batch keeps the issue, in the importer's words.
       const rows = await db().collection('dataUploadRows').find({ batchId: batch.id }).sort({ line: 1 }).toArray();
-      expect(rows[0].issues).toEqual([expect.objectContaining({ code: 'UPLOAD_LEADER_ONLY_VALUE', kode: 'UNIT_PERSISTENCY' })]);
       expect(rows[0].values).toEqual({ APE: 150_000_000 });
       expect(rows[1].values).toEqual({ APE: 200_000_000, UNIT_PERSISTENCY: 82.5 });
 
@@ -600,9 +625,9 @@ describe('confirm import, revert and the month lock (P9-T4)', () => {
 
     it('P19.3-T1 AC-6 one office’s file reaches none of another’s leaders (invariant §1)', async () => {
       await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(B1) }, { $set: { role: 'ab' } });
-      // Office B's file naming A's leader: an unknown code there, and A's row untouched.
+      // Office B's file naming A's leader: nobody's code there — kept in B as *Belum jadi anggota* — and A's row untouched.
       const p = await wired.production.preview(B, '2026-09', file2('b.csv', ['PRU-002', {}, '80'], ['PRU-900', {}, '70']));
-      expect(p.rows[0].issues.map((i) => i.code)).toEqual([expect.stringMatching(/^UPLOAD_(UNKNOWN_AGENT_CODE|AGENT_CODE_PATTERN)$/)]);
+      expect(p.rows[0]).toMatchObject({ status: 'held', membershipId: null });
       await wired.productionImport.commit(B, '2026-09', String(p.revision),
         file2('b.csv', ['PRU-002', {}, '80'], ['PRU-900', {}, '70']));
       expect(await monthRow(A2)).toBeNull();

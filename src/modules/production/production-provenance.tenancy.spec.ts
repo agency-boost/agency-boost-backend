@@ -49,9 +49,9 @@ describe('three writers, one visible answer (P9-T6)', () => {
   let wired: ReturnType<typeof configModule>;
   const db = () => mongoose.connection.db!;
 
-  const importFile = async (f: ReturnType<typeof file>, replace?: string, month = '2026-09', ctx = A) => {
+  const importFile = async (f: ReturnType<typeof file>, month = '2026-09', ctx = A) => {
     const p = await wired.production.preview(ctx, month, f);
-    return wired.productionImport.commit(ctx, month, String(p.revision), f, replace);
+    return wired.productionImport.commit(ctx, month, String(p.revision), f);
   };
   const correct = async (over: Record<string, unknown>) => wired.productionCorrections.correct(A, {
     month: '2026-09', membershipId: RINA, kode: 'APE', ytd: false, value: rpM(120),
@@ -90,7 +90,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
    * own YTD column — which a file still carries and the preview notes as no longer used. Each walk below writes months.
    */
   describe('AC-2, AC-3 — the precedence the spec states, walked end to end', () => {
-    it('the agent’s own → the carrier’s → a correction → kept through a re-upload → replaced when ticked → back on revert', async () => {
+    it('P19.21-T1 AC-5 the agent’s own → the carrier’s → a correction → replaced by the next upload → back on revert', async () => {
       // 1. Before any file: the agent's own figure, and it says so.
       await wired.goals.save(A, plan());
       expect((await goal()).achieved).toEqual({ minor: rpM(50), provenance: 'self_reported', month: null });
@@ -106,16 +106,12 @@ describe('three writers, one visible answer (P9-T6)', () => {
       await correct({ value: rpM(120) });
       expect((await goal()).achieved).toEqual({ minor: rpM(120), provenance: 'corrected', month: '2026-09' });
 
-      // 4. The same file again, unticked: the correction stands (ADR-0053).
-      const kept = await importFile(file(['PRU-001', { 'ape.monthly': '100', 'fyp.monthly': '1' }]));
-      expect(kept.batch).toMatchObject({ keptCorrectionCount: 1 });
-      expect((await goal()).achieved).toMatchObject({ minor: rpM(120), provenance: 'corrected' });
-
-      // 5. The carrier restates, and the importer ticks it: the carrier's figure wins.
-      const replaced = await importFile(file(['PRU-001', { 'ape.monthly': '130' }]), `${RINA}:APE`);
+      // 4–5. The carrier restates: the upload replaces the correction (ADR-0274 §1, superseding ADR-0053's choice).
+      const replaced = await importFile(file(['PRU-001', { 'ape.monthly': '130' }]));
+      expect(replaced.batch).toMatchObject({ keptCorrectionCount: 0, replacedCorrectionCount: 1 });
       expect((await goal()).achieved).toEqual({ minor: rpM(130), provenance: 'imported', month: '2026-09' });
 
-      // 6. Reverting that import brings the correction back, whole.
+      // 6. Reverting that upload brings the correction back, whole.
       await wired.productionImport.revert(A, replaced.batch.id);
       expect((await goal()).achieved).toEqual({ minor: rpM(120), provenance: 'corrected', month: '2026-09' });
 
@@ -144,7 +140,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
 
     it('P19.5-T2 AC-7 reads the sum of the months held in the plan’s own year, never a file’s own YTD', async () => {
       await wired.productionMonths.reopen(A, '2026-08');
-      await importFile(file(['PRU-001', { 'ape.monthly': '80', 'ape.ytd': '999' }]), undefined, '2026-08');
+      await importFile(file(['PRU-001', { 'ape.monthly': '80', 'ape.ytd': '999' }]), '2026-08');
       await importFile(file(['PRU-001', { 'ape.monthly': '5' }]));
       expect(await wired.productionReadings.apeYearToDate(A, RINA, '2026')).toEqual({ minor: rpM(85), provenance: 'imported', month: '2026-09', correctedBy: null, correctedAt: null });
       expect(await wired.productionReadings.apeYearToDate(A, RINA, '2025')).toBeNull();
@@ -153,7 +149,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
 
     it('leaves out a month somebody emptied by hand — and says the sum was corrected', async () => {
       await wired.productionMonths.reopen(A, '2026-08');
-      await importFile(file(['PRU-001', { 'ape.monthly': '80' }]), undefined, '2026-08');
+      await importFile(file(['PRU-001', { 'ape.monthly': '80' }]), '2026-08');
       await importFile(file(['PRU-001', { 'ape.monthly': '90' }]));
       await correct({ value: null, reason: 'Belongs to October' });
       const held = await wired.productionReadings.apeYearToDate(A, RINA, '2026');
@@ -161,7 +157,7 @@ describe('three writers, one visible answer (P9-T6)', () => {
     });
 
     it('never reads another office’s production, though both offices have a PRU-001', async () => {
-      await importFile(file(['PRU-001', { 'ape.monthly': '900' }]), undefined, '2026-09', B);
+      await importFile(file(['PRU-001', { 'ape.monthly': '900' }]), '2026-09', B);
       await wired.goals.save(A, plan());
       expect((await goal()).achieved.provenance).toBe('self_reported');
     });
@@ -177,11 +173,12 @@ describe('three writers, one visible answer (P9-T6)', () => {
       const rina = view.rows.find((r) => r.membershipId === RINA)!;
       expect(rina.values.APE).toEqual({
         value: rpM(12), provenance: 'corrected',
-        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Carrier restated it' }, outOfBounds: null,
+        // P19.21-T1 AC-4: the file's number behind the correction rides with it.
+        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Carrier restated it', fileValue: rpM(10) }, outOfBounds: null,
       });
       expect(rina.values.FYP).toEqual({
         value: null, provenance: 'corrected',
-        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Belongs to October' }, outOfBounds: null,
+        correction: { by: 'Rina Wijaya', at: NOW.toISOString(), reason: 'Belongs to October', fileValue: rpM(5) }, outOfBounds: null,
       });
       // The year to date is the month's, corrected — and says who (R4).
       expect(rina.ytd.APE).toMatchObject({ value: rpM(12), provenance: 'corrected', calculated: true, correction: { by: 'Rina Wijaya' } });

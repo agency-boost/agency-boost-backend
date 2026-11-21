@@ -372,6 +372,12 @@ export class KpmRequestRowDto implements KpmRequestRow {
   @ApiProperty({ type: String, nullable: true })
   decidedAt!: string | null;
 
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'Who decided it: the Super Admin who approved or declined, by name. `null` while it waits.',
+  })
+  decidedByName!: string | null;
+
   @ApiProperty({ type: String, nullable: true })
   reason!: string | null;
 
@@ -604,6 +610,19 @@ export class RosterPreviewRowDto {
       + 'its shape, no WhatsApp number, and the details neither the row nor the record holds. Empty for a skipped row.',
   })
   warnings!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: 'The row\'s cells as the file holds them, one per column of `header` — what *Import people* opens to fix or '
+      + 'fill a row before saving, sent back as text.',
+  })
+  cells!: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: 'The header names of the optional cells this row could not read and left empty (*perlu dicek*).',
+  })
+  flagged!: string[];
 
   @ApiPropertyOptional({
     type: RosterInviteDto,

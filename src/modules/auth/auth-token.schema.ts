@@ -29,6 +29,8 @@ export class AuthToken {
    * row is not the credential — it is the **switch that can turn the credential off**.
    * Without it `end()` had nothing to revoke and a support session stayed valid for its
    * whole TTL after the operator pressed stop.
+   *
+   * `account_link` is retired (ADR-0269): kept in the enum because stored rows may carry it, and nothing creates one.
    */
   @Prop({
     type: String,
@@ -42,6 +44,7 @@ export class AuthToken {
    * The pending link is this row: `userId` the login that started it (A), `linkUserId` the other (B), the token's hash and
    * its expiry (`VERIFICATION_TTL_HOURS`). One live row per starting login — a newer start revokes the one before it, and
    * so does a password change or reset of A. Nothing is linked until B's link is pressed and B's password given.
+   * **Retired with `account_link` (ADR-0269)**: kept for the rows that carry it, read and written by nothing.
    */
   @Prop({ type: String, default: null })
   linkUserId!: string | null;

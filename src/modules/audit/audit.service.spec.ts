@@ -63,6 +63,19 @@ describe('AuditService', () => {
     expect(created[0].kpmId).toBeNull();
   });
 
+  it('ADR-0268 §3 records a Super Admin’s change inside a KPM in that KPM’s log, the Super Admin the actor', async () => {
+    const { service, created } = makeService();
+    const inKpm = RequestContext.superAdminInKpm(RequestContext.platform('sa-1'), 'kpm-a');
+    await service.record(inKpm, {
+      action: 'member.leader_changed', targetCollection: 'memberships', targetId: 'mem-agent',
+      targetMembershipId: 'mem-agent', before: { leaderId: 'mem-x' }, after: { leaderId: 'mem-y' },
+    });
+    expect(created[0]).toMatchObject({
+      kpmId: 'kpm-a', actorUserId: 'sa-1', actorMembershipId: null, effectiveUserId: null, onBehalfOf: true,
+      before: { leaderId: 'mem-x' }, after: { leaderId: 'mem-y' },
+    });
+  });
+
   it('never lets an audit failure take down the operation it describes', async () => {
     const failing = jest.fn(async () => { throw new Error('mongo down'); });
     const { service } = makeService(failing);

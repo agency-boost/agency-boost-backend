@@ -34,6 +34,9 @@ export const PitchConfirmationSchema = SchemaFactory.createForClass(PitchConfirm
  * A row exists only once a file is attached — a slot with no row is *missing* — so **no row ever points at
  * a file storage does not hold** (D-seed).
  *
+ * **A row holds a file or a link** (P19.21-T3 AC-6, ADR-0274): the owner's *"format apa saja … atau link"*. Either is
+ * the slot's material, counted, confirmed against and replaced the same way.
+ *
  * **`version` tracks the file** (D-replace): every attach moves it by one and clears every confirmation in
  * the same write; a tick names the version it was made against and does not move it, so a tick sent
  * against a file replaced since is refused (`409 VERSION_CONFLICT`).
@@ -46,22 +49,33 @@ export class RecruitmentPitchSlot {
   @Prop({ type: String, required: true, enum: RECRUITMENT_PITCH_SLOTS.map((s) => s.code) })
   slot!: RecruitmentPitchSlotCode;
 
-  /** The office's asset (`assets.storageKey`) — never a URL, which is minted per read and expires. */
-  @Prop({ type: String, required: true })
-  storageKey!: string;
+  /**
+   * The office's asset (`assets.storageKey`) — never a URL, which is minted per read and expires. `null` on a material
+   * given as a link (P19.21-T3 AC-6, ADR-0274): a row holds a file **or** a link, never both.
+   */
+  @Prop({ type: String, default: null })
+  storageKey!: string | null;
 
-  /** The name the file was uploaded under, shown on the card as text (H-22). */
-  @Prop({ type: String, required: true })
-  fileName!: string;
+  /** The name the file was uploaded under, shown on the card as text (H-22). `null` on a link. */
+  @Prop({ type: String, default: null })
+  fileName!: string | null;
 
-  /** What storage reported, not what the browser claimed (ADR-0040). */
-  @Prop({ type: String, required: true })
-  mimeType!: string;
+  /** What storage reported, not what the browser claimed (ADR-0040). `null` on a link. */
+  @Prop({ type: String, default: null })
+  mimeType!: string | null;
 
-  @Prop({ type: Number, required: true })
-  bytes!: number;
+  @Prop({ type: Number, default: null })
+  bytes!: number | null;
 
-  /** When this file was attached; the card's day is this instant's day in the office's calendar. */
+  /**
+   * **A material given as a link** (P19.21-T3 AC-6, ADR-0274): an `https://` address the office typed, opened in a new
+   * tab, never fetched or framed. `null` on a file. Setting one releases the file the slot held, and attaching a file
+   * clears it — in the same write, as replacing a file always has.
+   */
+  @Prop({ type: String, default: null })
+  linkUrl!: string | null;
+
+  /** When this file (or link) was attached; the card's day is this instant's day in the office's calendar. */
   @Prop({ type: Date, required: true })
   uploadedAt!: Date;
 

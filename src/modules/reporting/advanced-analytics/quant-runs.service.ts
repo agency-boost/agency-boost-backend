@@ -5,9 +5,12 @@ import { InvalidRequestException, NotFoundException } from '@/common/errors/doma
 import { endOfMonth } from '@/common/time/local-day';
 import { QUANT, QUANT_METRICS, type QuantCode, type QuantMetric } from '@/domain/constants';
 import {
-  isRunPeriodEnd, latestRunPeriodEnd, monthsEndingAt, peerStatus, plusMonths, quantValues,
-  type PeerStatus, type QuantCell, type QuantMember, type QuantMonth, type QuantNullReason,
+  isRunPeriodEnd, latestRunPeriodEnd, monthsEndingAt, peerStatus, periodMonths, plusMonths, quantValues,
+  type PeerStatus, type QuantCell, type QuantInput, type QuantMember, type QuantMonth, type QuantNullReason, type QuantValue,
 } from '@/domain/metrics/quant';
+import { leaderDistribution, leaderUnits } from '@/domain/metrics/quant-leaders';
+import { memberAt } from '@/domain/metrics/office-headcount';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import type { AnalyticsThresholds } from '@/modules/config/analytics-config';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
@@ -33,13 +36,44 @@ export interface QuantMetricView {
   peers: number;
   /** `QUANT_PEER_STATUS`, by the template's current bands; `null` draws no chip. */
   status: PeerStatus | null;
+  /**
+   * ***Semester lalu*** (P19.22-T4 AC-1; ADR-0275 §4): the same metric in the run six months before — `null` when there is
+   * none, or when the two runs are not over the same number of months (a December run frozen before the half-years held
+   * the whole year), which no ▲/▼ can be drawn between.
+   */
+  previous: number | null;
+  /** **The distribution per leader** (AC-2): each leader's value over their own unit, high to low, and their median. */
+  distribution: QuantDistributionView;
+}
+
+/** A leader's bar: who, and the metric over their unit. The service names them. */
+export interface QuantLeaderValue {
+  membershipId: string;
+  role: 'ab' | 'aab';
+  value: number;
+}
+
+export interface QuantDistributionView {
+  leaders: QuantLeaderValue[];
+  /** `QUANT_LEADER_MEDIAN` — *Median KPM*. */
+  median: number | null;
+  /** *x dari y leader di atau di atas median*. */
+  atOrAbove: number;
+}
+
+/** A run the picker offers: its last month and its first — January or July; January for a December run of before. */
+export interface QuantRunRef {
+  periodEnd: string;
+  fromMonth: string;
 }
 
 export interface QuantView {
   /** The run shown, `YYYY-06` or `YYYY-12`; `null` before the first run (the empty state). */
   periodEnd: string | null;
-  /** Every run the KPM has, newest first. */
-  runs: string[];
+  /** Its first month: the half-year's (P19.22-T4), or January for a December run frozen before the half-years. */
+  fromMonth: string | null;
+  /** Every run the KPM has, newest first, with the months each covers. */
+  runs: QuantRunRef[];
   freezesAt: string | null;
   frozenAt: string | null;
   /** *"Data diunggah setelah periode dikunci"*. */
@@ -83,22 +117,39 @@ export class QuantRuns implements ProductionWrites {
   async read(ctx: RequestContext, thresholds: AnalyticsThresholds, asked?: string): Promise<QuantView> {
     const office = await this.completeness.office(ctx);
     const currentMonth = this.clock.localDateFor(office.timezone).slice(0, 7);
-    const runs = this.runsOf(office.firstMonth, currentMonth);
+    const ends = this.runsOf(office.firstMonth, currentMonth);
+    const stored = new Map((await this.runs.find(ctx, { periodEnd: { $in: ends } }, { projection: { periodEnd: 1, fromMonth: 1, frozenAt: 1 } }))
+      .map((r) => [r.periodEnd, r]));
+    const fromOf = (p: string) => {
+      const row = stored.get(p);
+      return row?.frozenAt && !row.fromMonth ? `${p.slice(0, 4)}-01` : row?.fromMonth ?? periodMonths(p)[0];
+    };
+    const runs: QuantRunRef[] = ends.map((p) => ({ periodEnd: p, fromMonth: fromOf(p) }));
     const bands = { peerBandPct: thresholds.quantPeerBandPct, diffBand: thresholds.quantDiffBand };
     const empty: QuantView = {
-      periodEnd: null, runs, freezesAt: null, frozenAt: null, lateWriteAt: null, needed: QUANT.MIN_PEERS, bands, metrics: [],
+      periodEnd: null, fromMonth: null, runs, freezesAt: null, frozenAt: null, lateWriteAt: null, needed: QUANT.MIN_PEERS, bands,
+      metrics: [],
     };
     if (asked !== undefined && (!isRunPeriodEnd(asked) || asked >= currentMonth)) {
       throw new InvalidRequestException(SAY.VALIDATION_FAILED.periodEndShape, { field: 'periodEnd' });
     }
-    const periodEnd = asked ?? runs[0];
+    const periodEnd = asked ?? ends[0];
     if (periodEnd === undefined) return empty;
-    if (!runs.includes(periodEnd)) throw new NotFoundException('Advanced analytics', { periodEnd });
+    if (!ends.includes(periodEnd)) throw new NotFoundException('Advanced analytics', { periodEnd });
 
+    const fromMonth = fromOf(periodEnd);
     const run = await this.settle(ctx, periodEnd, office.timezone);
-    const peers = run.peers ?? await this.runs.peerMediansAcrossTenants(ctx, periodEnd);
+    const peers = run.peers ?? await this.runs.peerMediansAcrossTenants(ctx, periodEnd, fromMonth);
+    // *Semester lalu*: the run six months before, when the office has it and it covers as many months as this one.
+    const before = plusMonths(periodEnd, -QUANT.SEMESTER_MONTHS);
+    const halfYear = (p: string) => fromOf(p) === periodMonths(p)[0];
+    const previous = ends.includes(before) && halfYear(before) && halfYear(periodEnd)
+      ? (await this.settle(ctx, before, office.timezone)).values
+      : null;
+    const perLeader = await this.perLeader(ctx, periodEnd, office.timezone);
     return {
       periodEnd,
+      fromMonth,
       runs,
       freezesAt: this.freezesAt(office.timezone, periodEnd).toISOString(),
       frozenAt: run.frozenAt ? run.frozenAt.toISOString() : null,
@@ -114,6 +165,8 @@ export class QuantRuns implements ProductionWrites {
           status: peerStatus(own, peer.median, code === 'A2'
             ? { kind: 'absolute', size: bands.diffBand }
             : { kind: 'pct', size: bands.peerBandPct }),
+          previous: previous?.[metric]?.value ?? null,
+          distribution: this.distributionOf(perLeader, metric),
         };
       }),
     };
@@ -175,9 +228,10 @@ export class QuantRuns implements ProductionWrites {
     const writable = !ctx.impersonationReadOnly && ctx.kpmId !== null;
     if (!writable) return { values, peers: null, frozenAt: null, lateWriteAt: null };
     const companyId = await this.runs.companyOf(ctx);
-    await this.runs.writeLive(ctx, periodEnd, { companyId, values, computedAt: now, freezesAt });
+    const fromMonth = periodMonths(periodEnd)[0];
+    await this.runs.writeLive(ctx, periodEnd, { companyId, values, computedAt: now, freezesAt, fromMonth });
     if (freezesAt > now) return { values, peers: null, frozenAt: null, lateWriteAt: null };
-    const peers = await this.runs.peerMediansAcrossTenants(ctx, periodEnd);
+    const peers = await this.runs.peerMediansAcrossTenants(ctx, periodEnd, fromMonth);
     await this.runs.freeze(ctx, periodEnd, { values, peers, at: now });
     const frozen = await this.runs.ofPeriod(ctx, periodEnd);
     return {
@@ -187,15 +241,82 @@ export class QuantRuns implements ProductionWrites {
 
   /** **The ten metrics for a period**, from one read of the people, the file and its completeness (R1). */
   async compute(ctx: RequestContext, periodEnd: string, timezone: string): Promise<Record<QuantMetric, StoredQuantValue>> {
+    const read = await this.inputs(ctx, periodEnd, timezone);
+    return quantValues({ ...read.input, members: read.people, months: read.months, cell: read.cell }) as Record<QuantMetric, StoredQuantValue>;
+  }
+
+  /**
+   * **Each leader's ten metrics over their own unit** (P19.22-T4 AC-2; ADR-0275 §4): the leader and the people whose
+   * nearest leader they are (`leaderUnits`), each metric by its own definition over them — the unit's months summed from
+   * its members' cells, the office's months held and complete as the office's — the leader its one leader. **The
+   * leaders at the period's end**, from today's lines. **Read live**, never frozen with the run: the KPM's own value is
+   * the run's.
+   */
+  async perLeader(ctx: RequestContext, periodEnd: string, timezone: string): Promise<{
+    leaders: { membershipId: string; role: 'ab' | 'aab' }[];
+    values: Map<string, Record<QuantMetric, QuantValue>>;
+  }> {
+    const read = await this.inputs(ctx, periodEnd, timezone);
+    const units = leaderUnits(read.people.map((p) => ({ membershipId: p.membershipId, role: p.role, leaderId: p.leaderId })));
+    const leaders = read.people
+      .filter((p) => (p.role === 'ab' || p.role === 'aab') && memberAt(p.counted, read.input.endOfPeriod))
+      .map((p) => ({ membershipId: p.membershipId, role: p.role as 'ab' | 'aab' }));
+    const values = new Map<string, Record<QuantMetric, QuantValue>>();
+    for (const leader of leaders) {
+      const ids = new Set(units.get(leader.membershipId) ?? [leader.membershipId]);
+      const members = read.people.filter((p) => ids.has(p.membershipId));
+      const months = new Map<string, QuantMonth>();
+      for (const [m, office] of read.months) {
+        const cells = members.map((p) => read.cell(p.membershipId, m)).filter((c): c is QuantCell => c !== undefined);
+        const sum = (pick: (c: QuantCell) => number | null, held: boolean) => {
+          if (!held) return null;
+          return cells.reduce((total, c) => total + (pick(c) ?? 0), 0);
+        };
+        months.set(m, {
+          ...office,
+          apeMinor: sum((c) => c.apeMinor, office.held),
+          policies: sum((c) => c.policies, office.policiesHeld),
+          recruitment: office.recruitment === null ? null : sum((c) => c.recruitment, true),
+        });
+      }
+      values.set(leader.membershipId, quantValues({ ...read.input, members, months, cell: read.cell }));
+    }
+    return { leaders, values };
+  }
+
+  /** One metric's distribution: the leaders holding a value, high to low, and their median. */
+  private distributionOf(
+    perLeader: Awaited<ReturnType<QuantRuns['perLeader']>>, metric: QuantMetric,
+  ): QuantDistributionView {
+    const role = new Map(perLeader.leaders.map((l) => [l.membershipId, l.role]));
+    const values = perLeader.leaders
+      .map((l) => ({ membershipId: l.membershipId, value: perLeader.values.get(l.membershipId)?.[metric]?.value ?? null }))
+      .filter((l): l is { membershipId: string; value: number } => l.value !== null);
+    const d = leaderDistribution(values);
+    return {
+      leaders: d.leaders.map((l) => ({ membershipId: l.membershipId, role: role.get(l.membershipId)!, value: l.value })),
+      median: d.median,
+      atOrAbove: d.atOrAbove,
+    };
+  }
+
+  /** The reads every computation of a period makes, once: the people, the file and its completeness. */
+  private async inputs(ctx: RequestContext, periodEnd: string, timezone: string): Promise<{
+    input: Pick<QuantInput, 'periodEnd' | 'endOfPeriod' | 'tenuredBefore'>;
+    people: (QuantMember & { leaderId: string | null })[];
+    months: Map<string, QuantMonth>;
+    cell: (id: string, m: string) => QuantCell | undefined;
+  }> {
     const currentMonth = this.clock.localDateFor(timezone).slice(0, 7);
     const from = plusMonths(periodEnd, -(QUANT.GROWTH_MONTHS - 1));
     const lateWindow = plusMonths(periodEnd, QUANT.ACTIVATION_MONTHS_AFTER_JOIN);
     const to = lateWindow < currentMonth ? lateWindow : currentMonth;
     const range = { from, to };
     const [members, rows, office, fill] = await Promise.all([
+      // P19.22-T4 (ADR-0267 §1): never a test account; each member's leader, for the units.
       this.memberships.find(
-        ctx, { status: { $in: ['active', 'removed'] } },
-        { projection: { role: 1, status: 1, joinDate: 1, joinedAt: 1, removedAt: 1, joinedAs: 1 } },
+        ctx, { status: { $in: ['active', 'removed'] }, ...NOT_A_TEST_ACCOUNT },
+        { projection: { role: 1, status: 1, joinDate: 1, joinedAt: 1, removedAt: 1, joinedAs: 1, leaderId: 1 } },
       ),
       this.monthRows.findByKode(ctx, { month: { $gte: from, $lte: to } }, [...SYSTEM]),
       this.production.officeMonths(ctx, range),
@@ -225,14 +346,15 @@ export class QuantRuns implements ProductionWrites {
         apeMinor: file?.apeMonthlyMinor ?? null, policies: p?.held ? p.sum : null, recruitment: file?.recruitmentMonthly ?? null,
       });
     }
-    const people: QuantMember[] = members.map((m) => {
+    const people = members.map((m) => {
       const row = m as unknown as {
         _id: unknown; role: 'ab' | 'aab' | 'agent'; status: 'active' | 'removed'; joinDate?: string | null;
-        joinedAt?: Date | null; removedAt?: Date | null; joinedAs?: string | null;
+        joinedAt?: Date | null; removedAt?: Date | null; joinedAs?: string | null; leaderId?: string | null;
       };
       return {
         membershipId: String(row._id),
         role: row.role,
+        leaderId: row.leaderId ?? null,
         joinDate: row.joinDate ?? null,
         newHire: row.joinedAs === 'new_hire',
         counted: {
@@ -242,15 +364,16 @@ export class QuantRuns implements ProductionWrites {
       };
     });
     const lastDay = endOfMonth(`${periodEnd}-01`);
-    const values = quantValues({
-      periodEnd,
-      endOfPeriod: this.clock.monthBounds(timezone, periodEnd).endExclusive,
-      tenuredBefore: this.clock.startOfLocalDay(timezone, `${Number(lastDay.slice(0, 4)) - 1}${lastDay.slice(4)}`),
-      members: people,
+    return {
+      input: {
+        periodEnd,
+        endOfPeriod: this.clock.monthBounds(timezone, periodEnd).endExclusive,
+        tenuredBefore: this.clock.startOfLocalDay(timezone, `${Number(lastDay.slice(0, 4)) - 1}${lastDay.slice(4)}`),
+      },
+      people,
       months,
       cell: (id, m) => cells.get(`${id}|${m}`),
-    });
-    return values as Record<QuantMetric, StoredQuantValue>;
+    };
   }
 }
 

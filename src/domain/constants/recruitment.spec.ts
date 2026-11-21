@@ -1,5 +1,5 @@
 import {
-  ASSET_LIMITS, DOCUMENT_MIME_TYPES, RECRUITMENT, RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS,
+  ASSET_LIMITS, RECRUITMENT, RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_HESITATIONS,
   RECRUITMENT_MOTIVATIONS, RECRUITMENT_PITCH_SLOTS, RECRUITMENT_PITCH_STATES, SEED_RECRUITMENT_PLAYBOOK,
   recruitmentPitchDone, recruitmentPitchState, recruitmentPitchSummary, type RecruitmentPitchState,
 } from '@/domain/constants';
@@ -197,29 +197,35 @@ describe('the recruitment constants (Phase 17)', () => {
         RECRUITMENT_PITCH_SLOTS.map((s) => ({ required: s.required, state: states[s.code] ?? 'missing' }));
 
       it('P18.9-T5 AC-3 nothing uploaded: 0 of 4, four missing — the two optional ones are not counted missing', () => {
-        expect(recruitmentPitchSummary(six({}))).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+        expect(recruitmentPitchSummary(six({}))).toMatchObject({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
       });
 
       it('P18.9-T5 AC-3 0417’s pitch: 1 of 4, two missing, one needs checking — whatever the optional ones hold', () => {
         const required = { opportunity: 'partial', proof: 'uploaded' } as const;
         const expected = { done: 1, total: 4, missing: 2, unconfirmed: 1 };
         for (const optional of [{}, { company: 'uploaded' }, { agency: 'uploaded' }, { company: 'uploaded', agency: 'uploaded' }] as const) {
-          expect([optional, recruitmentPitchSummary(six({ ...required, ...optional }))]).toEqual([optional, expected]);
+          expect([optional, recruitmentPitchSummary(six({ ...required, ...optional }))]).toMatchObject([optional, expected]);
         }
       });
 
       it('P18.9-T5 AC-3 the four done reads complete, with neither optional document or with both', () => {
         const four = { opportunity: 'complete', proof: 'uploaded', faq: 'uploaded', howtojoin: 'uploaded' } as const;
-        expect(recruitmentPitchSummary(six(four))).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+        expect(recruitmentPitchSummary(six(four))).toMatchObject({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
         expect(recruitmentPitchSummary(six({ ...four, company: 'uploaded', agency: 'uploaded' })))
-          .toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+          .toMatchObject({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
       });
 
       it('P18.9-T5 AC-3 an optional slot counts in no figure, in any state the rule could give it', () => {
         for (const state of RECRUITMENT_PITCH_STATES) {
           expect([state, recruitmentPitchSummary([{ required: false, state }])])
-            .toEqual([state, { done: 0, total: 0, missing: 0, unconfirmed: 0 }]);
+            .toMatchObject([state, { done: 0, total: 0, missing: 0, unconfirmed: 0 }]);
         }
+      });
+
+      it('P19.21-T3 AC-6 the settings page counts all six, no split: the mockup’s 2/6 siap, 3 belum ada, 1 perlu dicek (ADR-0274)', () => {
+        const mockup = { opportunity: 'partial', proof: 'uploaded', company: 'uploaded' } as const;
+        expect(recruitmentPitchSummary(six(mockup)).all).toEqual({ ready: 2, total: 6, missing: 3, unconfirmed: 1 });
+        expect(recruitmentPitchSummary(six({})).all).toEqual({ ready: 0, total: 6, missing: 6, unconfirmed: 0 });
       });
     });
   });
@@ -230,13 +236,18 @@ describe('the recruitment constants (Phase 17)', () => {
       expect(RECRUITMENT.LINK_TTL_SECONDS).toBe(ASSET_LIMITS.SIGNED_URL_TTL_SECONDS);
     });
 
-    it('P17-T4 AC-2 P19.6-T2 AC-1 a pitch document is a PDF or an HTML page of at most 25 MB, in the office’s recruitment-pitch folder', () => {
-      // HTML joined on 2026-11-06 (ADR-0217 §1): a page drawn only in the sandboxed frame.
-      expect(DOCUMENT_MIME_TYPES).toEqual(['application/pdf', 'text/html']);
-      expect(RECRUITMENT.PITCH_MIME_TYPES).toBe(DOCUMENT_MIME_TYPES);
+    it('P17-T4 AC-2 P19.21-T3 AC-6 a pitch material is any format of at most 25 MB, video included, in the office’s recruitment-pitch folder', () => {
+      // HTML joined on 2026-11-06 (ADR-0217 §1); PowerPoint, Word, images and video on 2026-11-20 (ADR-0274).
+      expect(RECRUITMENT.PITCH_MIME_TYPES).toEqual(expect.arrayContaining([
+        'application/pdf', 'text/html', 'application/vnd.ms-powerpoint', 'application/msword', 'image/png', 'video/mp4',
+      ]));
       expect(RECRUITMENT.PITCH_MAX_BYTES).toBe(25 * 1024 * 1024);
       expect(RECRUITMENT.PITCH_MAX_BYTES).toBe(ASSET_LIMITS.MAX_BYTES);
       expect(RECRUITMENT.PITCH_UPLOAD_FOLDER).toBe('recruitment-pitch');
+    });
+
+    it('P19.21-T3 AC-6 a material given as a link is at most 2,000 characters (ADR-0274)', () => {
+      expect(RECRUITMENT.PITCH_LINK_MAX_LENGTH).toBe(2000);
     });
 
     it('P17-T8 AC-2 each authored string is 1 to 600 characters, and a profile has 1 to 6 benefits', () => {

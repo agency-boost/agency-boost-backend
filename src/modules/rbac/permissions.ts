@@ -42,6 +42,16 @@ export type Grantee =
    */
   | { kind: 'grant'; grant: 'product_data' }
   /**
+   * **A core leader** (ADR-0268 §1; P19.17 F2): an AB or AAB tagged *Core leader*, the effective flag
+   * (`RequestContext.isCoreLeader`, read on every request), on an **active** membership. Not a role and not a class: the
+   * tag on top of the person's own AB or AAB rights. It holds **the KPM Owner's rights in KPM and Pengaturan** — the
+   * Overview with its targets and groups, Advanced analytics, the Strategic Leader Forum, Data upload, every setting and
+   * its publishing — and in People the whole KPM to see, with every change **only for their own downline**
+   * (`own-downline`; `office-steward.ts`, `canManageMember`). Never the KPM admins, the core leader tag, or removing a
+   * member from the KPM. The matrix writes it as ★ in the AB and AAB cells (roles §3).
+   */
+  | { kind: 'core_leader' }
+  /**
    * Anyone signed in, membership or not. Exactly one permission uses it, and the
    * documentation says why: the office directory is `all` for every authenticated user
    * *including one with no KPM yet*, because otherwise nobody could ever join one.
@@ -57,6 +67,8 @@ export const AGENT: Grantee = { kind: 'hierarchy', roleClass: 'agent' };
 export const AUTHENTICATED: Grantee = { kind: 'authenticated' };
 /** **A product data manager** (ADR-0260): a KPM Owner or Admin holding a live *Kelola data produk* grant. */
 export const PRODUCT_DATA_MANAGER: Grantee = { kind: 'grant', grant: 'product_data' };
+/** **A core leader** (ADR-0268 §1): an active AB or AAB tagged *Core leader* — the ★ in the matrix's AB and AAB cells. */
+export const CORE_LEADER: Grantee = { kind: 'core_leader' };
 
 export interface Grant {
   readonly grantee: Grantee;
@@ -96,23 +108,23 @@ export const PERMISSIONS = {
   'kpm_request:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm_request:decide': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
-   * The quote tool's price table (ADR-0111 §3, P13.2-T2): `GET /admin/billing/prices`. The Super
-   * Admin's alone, since the 101+ tier's real rates are AgencyBoost's own (`Billing_Subscription.html:500`).
-   * A support session acts as its member, whose context holds no platform grant, so it is refused too.
-   * A read, and the only one: the tool writes nothing (ADR-0111 §2).
+   * *Paket & harga* and the calculator's numbers (ADR-0111 §3, ADR-0279 §1): `GET /admin/billing/prices`, and *Langganan
+   * per KPM*, `GET /admin/billing/kpms`. The Super Admin's alone: AgencyBoost's prices and every KPM's subscription. A
+   * support session acts as its member, whose context holds no platform grant, so it is refused too.
    */
   'billing:read_prices': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
-   * **Sending a KPM's quote to its Owner** (ADR-0211 §5; P19.4-T3 AC-10): `POST /admin/tenants/:kpmId/quote`. The Super
-   * Admin's alone — commercial terms are the platform's with the office — every tenant role `403`, and on
-   * `BLOCKED_WHILE_IMPERSONATING` below, as `kpm:update_subscription` is. `billing:read_prices` also serves the list of
-   * KPMs, `GET /admin/billing/kpms`.
+   * **Making an offer** (ADR-0279 §7; P19.23-T5 AC-2): *Buat PDF*, `POST /admin/billing/offer` — it was the quote sent to
+   * an Owner by email (ADR-0211 §5) until *Kirim penawaran* became a WhatsApp link (OD-359). The Super Admin's alone —
+   * commercial terms are the platform's with the office — every tenant role `403`, and on `BLOCKED_WHILE_IMPERSONATING`
+   * below, as `kpm:update_subscription` (*Konfirmasi paket*, `PUT /admin/billing/kpms/:kpmId/subscription`) is.
    */
   'billing:send_quote': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:read_profile': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /** The company tag is Super Admin's alone — the prototype disables the field. */
   'kpm:update_company_tag': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -130,12 +142,16 @@ export const PERMISSIONS = {
    * `member:search_untagged_pool` plus a leader code already cover a leader's side.
    */
   /*
-   * **Not the Super Admin's** (P19.4-T2; ADR-0206 §2; UI-151): the people are the office's, so the Owner and the Admin
-   * import them, and the routes answer a Super Admin `403 PERM_DENIED`. It held `all` until then.
+   * ~~**Not the Super Admin's** (P19.4-T2; ADR-0206 §2; UI-151): the people are the office's, so the Owner and the Admin
+   * import them, and the routes answer a Super Admin `403 PERM_DENIED`. It held `all` until then.~~
+   * *Reversed 2026-11-20 (ADR-0268 §3, §4):* **the Super Admin imports inside a KPM, as its Owner** (`holds`, the
+   * `tenant` grantee, `X-Kpm-Id`) — people always go into the KPM they are inside; outside one they hold nothing here.
+   * **And a core leader** (★, ADR-0268 §1): *Import people* is theirs, for the KPM they lead in.
    */
   'kpm:import_roster': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * Tenant configuration: the taxonomies an office's agent screens are driven by (P4-T1).
@@ -164,9 +180,11 @@ export const PERMISSIONS = {
    * had its own Owner-only `kpm:update_identity` until the product owner gave the Admin the
    * same write; a page that one day needs a different rule gets its own permission then.
    */
+  /* ADR-0268: **and a core leader's** (★), and the Super Admin's inside a KPM, as its Owner. */
   'tenant_config:write': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * ***Sudah sesuai*** (P19.3-T2 AC-10; UI-149, Overview R2; roles §3.4) — `PUT /kpm/settings/:page/reviewed`: the
@@ -178,6 +196,7 @@ export const PERMISSIONS = {
   'tenant_config:mark_reviewed': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'kpm:activate': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -218,6 +237,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **The Owner's and the Admin's, for their own office** (P19.4-T3; ADR-0206 §1; UI-151, Overview R4): the binding is
@@ -228,6 +248,7 @@ export const PERMISSIONS = {
   'activity_binding:write': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * The company's product catalog (ADR-0033, P5-T4).
@@ -305,6 +326,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * What somebody earns on a product (ADR-0038, closing OD-43; OD-135).
@@ -344,6 +366,7 @@ export const PERMISSIONS = {
   'sales_script:approve': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * The company's role ladder, readable by the offices that stand on it (P4-T9).
@@ -388,6 +411,17 @@ export const PERMISSIONS = {
   ],
   'super_admin:grant': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'super_admin:revoke': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * **The platform console's *Platform* sections** (P19.23-T6; ADR-0279): *Tim Super Admin*'s list (`super_admin:read`;
+   * `grant` and `revoke` above add and remove), *Pengaturan platform* read and saved, and *Pengumuman* — the sent list
+   * read, and one previewed and sent. The Super Admin's alone, `all`; every tenant role `403`, and a support session acts
+   * as its member, who holds no platform grant.
+   */
+  'super_admin:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'platform_settings:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'platform_settings:update': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'announcement:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'announcement:send': [{ grantee: SUPER_ADMIN, scope: 'all' }],
 
   // ---- Impersonation. ----
   'impersonation:start': [{ grantee: SUPER_ADMIN, scope: 'all' }],
@@ -983,6 +1017,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **The settings read of the office's activation checklist** (the Phase 18.2 exit review, permission review B2):
@@ -996,6 +1031,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
 
   /*
@@ -1054,44 +1090,47 @@ export const PERMISSIONS = {
   ],
 
   /*
-   * ---- The Owner's reporting (Phase 18; roles §3.9, `functional/kpm-analytics.md`, *The permissions*). ----
+   * ---- The Owner's reporting (Phase 18; roles §3.9, `functional/kpm-overview.md`, *The permissions*). ----
    *
-   * **The office's console, the Owner's and the Admin's alike** (ADR-0028): the KPM Overview, its not-logged
-   * list and the recruitment target's write, and KPM analytics — every figure over the office, `own-kpm`. No
-   * field role holds the Overview: a leader's own reporting is the Unit Dashboard. KPM analytics is a Core
-   * Leader's as well (below). The Super Admin's `all` on the
-   * two reads is not access on its own: both resolve the office from the caller's membership, so one reads an
-   * office only inside a support session, as its member, and is answered `TENANT_NO_MEMBERSHIP` outside one.
-   * **The target is a write by its verb**: a read-only session reads the Overview and is refused it; an elevated
-   * one writes it as its member, both actors on the audit row. Not the Super Admin's own.
+   * **The KPM Overview, the KPM's stewards' alike** (ADR-0028, ADR-0268 §1; since P19.19 its second version, ADR-0272):
+   * `GET /kpm/overview`, its *Performa vs target* and its compliance cards — every figure over the KPM, `own-kpm`. The
+   * Owner, the Admins and a core leader (★), who sees the whole KPM here; the Super Admin's `all` reaches a KPM only from
+   * inside it (`X-Kpm-Id`), and outside one the service answers `403 TENANT_NO_MEMBERSHIP` (`requireOfficeSteward`). No
+   * other field role: a leader's own reporting is the Unit Dashboard. Its targets are `ab_group_target:write`'s (below).
+   *
+   * *Retired 2026-11-20 (P19.19; ADR-0272 §1, §7):* `kpm_overview:set_recruit_target` (the office's one recruitment
+   * target, for the AB groups' monthly targets) and `kpm_analytics:read` (KPM Analytics, removed for everyone).
    */
   'kpm_overview:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
-  ],
-  'kpm_overview:set_recruit_target': [
-    { grantee: KPM_OWNER, scope: 'own-kpm' },
-    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
-   * **And a Core Leader's** (ADR-0159 §2, P18.5-T5 AC-4): AB and AAB hold it at `own-kpm`, which lets the request
-   * through the guard, and **the reporting services answer `404 NOT_FOUND` to a leader who is not a Core Leader** —
-   * tagged, on a leader rung, read on every request (`OfficePeople.requireAnalyticsReader`) — the forum's rule. A
-   * Core Leader reads the whole office, read-only: no write in this module is granted to a field role. No Agent
-   * holds it, since no Agent can be one.
+   * **The monthly *Active Agent* and *Rekrut* targets of each AB group** (ADR-0268 §5; P19.17; the client's
+   * `PERMISSIONS.md` of 19 November, *Set Active Agent / Rekrut targets per AB group*): read and set on the KPM Overview
+   * and on Advanced analytics › *Informal group*. The KPM's stewards: the Owner and the Admins `own-kpm`, a core leader
+   * `own-kpm` (★), and the Super Admin `all` — which reaches a KPM only from inside it (`X-Kpm-Id`): outside one the
+   * service has no KPM and answers `403 TENANT_NO_MEMBERSHIP` (`requireOfficeSteward`). No other AB, AAB or Agent. The
+   * write is audited, before → after; a support session only reads.
    */
-  'kpm_analytics:read': [
+  'ab_group_target:read': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
-    { grantee: AB, scope: 'own-kpm' },
-    { grantee: AAB, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
+  ],
+  'ab_group_target:write': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **The KPM's *Advanced analytics*** (ADR-0215 §2, ADR-0216 §8; roles §3.9; written by P19.5-T4 for the NPS and
    * *Kualitatif* tabs, which T3's other sections read too). `read`: the Owner and the Admins `own-kpm`; an AB and an AAB
-   * `own-kpm` ¶ — a Core Leader only, any other answered `404` by the service, as `kpm_analytics:read` — whose survey
+   * `own-kpm` ¶ — a Core Leader only, any other answered `404` by the service, as the retired `kpm_analytics:read` was — whose survey
    * results come without *Dukungan leader*. **No Super Admin**: they read a KPM's page through `platform_kpm_figures:read`
    * (ADR-0207). `write`: the Owner and the Admins — the survey runs, and T3's MAPA and sub-group targets — audited.
    */
@@ -1104,18 +1143,17 @@ export const PERMISSIONS = {
   'advanced_analytics:write': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
-   * *Cross-platform analytics* (P18-T8; OD-148 → option 1, D-admin): adoption across offices, inside ADR-0011's
-   * line — composition, joiners, leavers and sign-ins, counted; no member, no business figure. **The Super
-   * Admin's alone.** A support session acts as its member, whose context holds no platform grant, so it is
-   * refused too.
+   * ~~`platform_analytics:read`~~ — *Cross-platform analytics* (P18-T8), `GET /admin/analytics`. *Retired 2026-11-20
+   * (P19.23-T1; ADR-0277; the permission review):* the route went with the console's rebuild and no route declared the
+   * grant any more; adoption across KPMs is the platform console's (`platform_metrics:read`).
    */
-  'platform_analytics:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
    * **The Super Admin's reads across KPMs** (ADR-0207 §1; P19.4-T3): read-only, audited per read in the platform's log
-   * and each KPM's, the listed fields alone. Apart from `platform_analytics:read` (adoption, which names nobody), so a
-   * future platform role can be given adoption without people or figures as a grant, not a refactor. **The Super
+   * and each KPM's, the listed fields alone. Apart from the platform's counts (`platform_metrics:read`), so a future
+   * platform role can be given adoption without people or figures as a grant, not a refactor. **The Super
    * Admin's alone**; a support session acts as its member, whose context holds no platform grant, so both are refused
    * in one too. Giving either to anybody else takes a new ADR.
    *
@@ -1127,11 +1165,23 @@ export const PERMISSIONS = {
   'platform_members:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'platform_kpm_figures:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   /*
-   * **The Super Admin's guide, which is INTERNAL** (P19.6-T5; ADR-0219 §4; §B6 P1): `GET /admin/panduan` and
-   * `GET /admin/panduan/pdf`. **The Super Admin's alone**; a view-as session acts as its member, whose context holds no
-   * platform grant, so it is refused too. The two public guides are static files of the frontend and need no grant.
+   * ***Akun tes*** (P19.23-T3 AC-1; ADR-0267 §1; ADR-0277): `PATCH /admin/users/:userId/test-account` — flagging an account
+   * as a test account, so it is never listed or counted in any KPM, and unflagging it. The Super Admin's alone, as
+   * themselves: every tenant role `403`, and a support session holds no platform grant.
    */
-  'platform_guide:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'test_account:set': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * ***Laporan KPM*** (P19.24; ADR-0280 §5, §6): `kpm_report:read` — the PDF of any KPM for a month (`GET
+   * /admin/tenants/:id/report`) and a *Kirim ke owner* link to it (`POST …/report/link`), the Super Admin's alone, as
+   * themselves; every tenant role `403`, a support session holds no platform grant. `kpm_report:download_link` — opening
+   * such a link (`GET /kpm-report/shared/:token`): the KPM's Owner and its Admins, signed in, in that KPM; not read-like,
+   * so a view-as session is refused it (`ViewOnlySessionGuard`) — it opens the report and cannot take it away.
+   */
+  'kpm_report:read': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  'kpm_report:download_link': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
 
   /*
    * ---- The Strategic Leader Forum (Phase 18.1; roles §3.14, `functional/leader-forum.md`). ----
@@ -1142,7 +1192,8 @@ export const PERMISSIONS = {
    * not tagged *Core Leader*** — on every route, the list included — because the tag is a fact of the membership
    * read on each request, not of the context, and a refusal must never confirm that a meeting exists.
    *
-   * Making, moving and deleting a meeting are the Owner's and the Admins' alone (ADR-0130 §6). A shared link opens
+   * Making, moving and deleting a meeting are the Owner's and the Admins' (ADR-0130 §6) — *and since ADR-0268 §1 a core
+   * leader's* (★ `CORE_LEADER`). A shared link opens
    * for **every** member of the office, any rung, tagged or not (ADR-0131 §5); `read_shared_link` grants nothing
    * without a live link. The Super Admin's `all` on the two reads is not access on its own: every route resolves
    * the office from the caller's membership, so one reads a meeting only inside a support session, as its member,
@@ -1161,14 +1212,17 @@ export const PERMISSIONS = {
   'leader_meeting:create': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'leader_meeting:reschedule': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'leader_meeting:delete': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'leader_meeting:edit': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -1200,6 +1254,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **A member's four tiles** (ADR-0205 §1–§2; OD-256's OQ3, its default; OWN R4) — `GET /members/:membershipId/
@@ -1242,9 +1297,16 @@ export const PERMISSIONS = {
    * leader fills only a missing number (`member:update_phone`) — and no Super Admin, who is in no office. Personal
    * data, so refused in every support session (`@RefuseInSupportSession`); not read-like, so a view-only one too.
    */
+  /*
+   * *Changed 2026-11-20 (P19.20-T2; ADR-0273 §3):* **the member sheet — any field, not only a blank** (`PATCH
+   * /members/:membershipId/personal`): the join date, company join month, work status, agent code, birth date, gender,
+   * WhatsApp number, and the email of somebody who has never signed in (OD-400). The same holders; a core leader strictly
+   * below them; the Super Admin inside the KPM as its Owner. `409 MEMBER_DETAIL_ON_FILE` is retired.
+   */
   'member:complete_personal': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-downline' },
   ],
   // Tags, and only the office's admins set them. A group is not hierarchy and not
   // access, so no leader grant: it is the office's own way of organising, not a unit's.
@@ -1252,6 +1314,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'member:tag_core_leader': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -1264,25 +1327,31 @@ export const PERMISSIONS = {
    * writes, and **read-like**, so the Super Admin's view-as session reads the page while `can()` refuses it every write
    * (`member:tag_group` is a write's verb, which a session never holds — reading the page on it would refuse the view).
    */
+  // *Added 2026-11-20 (P19.17-T4, ADR-0270):* a core leader reads the groups too — they change groups and targets
+  // (ADR-0268), and the Group dialog reads `GET /members/groups` on this permission.
   'member:read_tags': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'group_informal:create': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'group_informal:update': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'group_informal:archive': [
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
 
   // The tree is a read of the same graph the roster reads, and it narrows the same way:
@@ -1302,6 +1371,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own-downline' },
     { grantee: AAB, scope: 'own-unit' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // `own-unit` for an AB, not `own-downline`. These two are the named exceptions to the
   // collapsing rule in roles-and-permissions.md §1: they act on the leader edge the actor
@@ -1313,6 +1383,7 @@ export const PERMISSIONS = {
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
+    { grantee: CORE_LEADER, scope: 'own-downline' },
   ],
   // Owner and Admin only. Gated on `member:read_profile` until 2026-09-06, which every
   // member holds — so an agent whose own roster is one row could read every role change
@@ -1322,6 +1393,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'member:remove_from_team': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
@@ -1379,11 +1451,13 @@ export const PERMISSIONS = {
   /*
    * **Deciding a transfer request** (ADR-0170 §4, P18.8-T3 AC-3): the office's queue, and approving — which moves the
    * member through `HierarchyService.reparent`, with history — or declining. The Owner's and an Admin's alone: no
-   * leader moves a member directly, so the leader who asked never decides their own request.
+   * leader moves a member directly, so the leader who asked never decides their own request. *Since ADR-0268 §1:* **and a
+   * core leader's, `own-downline`** — the requests about somebody below them (`TransfersService.decidable`), no other.
    */
   'member:transfer_approve': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-downline' },
   ],
   /*
    * **Changing who somebody reports to, at once** (P19.12-T4; ADR-0247 §2; the client's message of 11 November 2026,
@@ -1392,13 +1466,16 @@ export const PERMISSIONS = {
    * read as the edge rule (roles §2): a leader closes only an edge they own — and only to a leader **inside their own
    * tree**; elsewhere is `member:transfer_request`. The person always moves with everybody under them, which is why
    * `member:move_subtree` was struck rather than built. **Not an Agent's**, even one who leads (ADR-0234; whether they
-   * should is left open), **not the Super Admin's**, and refused in a support session by its verb.
+   * should is left open), **not the Super Admin's**, and refused in a support session by its verb. *Since ADR-0268:* a
+   * **core leader** moves anybody strictly below them, under any leader of the KPM, at once (`own-downline`, OD-376); the
+   * **Super Admin inside a KPM** moves anybody, as its Owner.
    */
   'member:reassign_leader': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
     { grantee: AB, scope: 'own-unit' },
     { grantee: AAB, scope: 'own-unit' },
+    { grantee: CORE_LEADER, scope: 'own-downline' },
   ],
   /*
    * **A leader asks the office to move one of their people elsewhere** (P19.12-T4; ADR-0247 §3, amending ADR-0170 §4):
@@ -1498,22 +1575,6 @@ export const PERMISSIONS = {
    */
   'profile:read_self': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'profile:update_self': [{ grantee: AUTHENTICATED, scope: 'own' }],
-  /*
-   * **A linked login** (UI-169 item 5; ADR-0199 §1; roles §3.11b). *Tambah akun* — starting a link — is offered to an
-   * Owner, an Admin and a Super Admin, `own`: they are who has another view to link. The AB, the AAB and the Agent are not
-   * offered it. The service checks both logins' roles again when the link is made, so a grant alone links nothing.
-   */
-  'account_link:create': [
-    { grantee: SUPER_ADMIN, scope: 'own' },
-    { grantee: KPM_OWNER, scope: 'own' },
-    { grantee: KPM_ADMIN, scope: 'own' },
-  ],
-  /*
-   * **Switching to the other login, and removing the link**: a party to the link, whoever they are now — a link stays if
-   * a role changes later, and either login may remove it (ADR-0199 §1, §5). `own`: the service answers `404` for a link
-   * the caller is not a party to, so another person's is never usable.
-   */
-  'account_link:manage_self': [{ grantee: AUTHENTICATED, scope: 'own' }],
   // Reading your own inbox, and marking a row read. Granted to everybody signed in and
   // scoped to `own`, like the profile: a notification is addressed to a **person**, and
   // `notifications.kpmId` is nullable because email verification and password reset are
@@ -1530,24 +1591,29 @@ export const PERMISSIONS = {
    * cannot be split without touching every route. The other eight arrive with the tasks that raise
    * them, so a grant never exists in code before a route can use it.
    *
-   * **None of the nine is the Super Admin's** (P19.4-T2; ADR-0206 §2; UI-151): the data upload is the office's, and the
-   * platform reads a KPM's months through its own audited read (ADR-0207). Each held `all` until then.
+   * ~~**None of the nine is the Super Admin's** (P19.4-T2; ADR-0206 §2; UI-151): the data upload is the office's, and the
+   * platform reads a KPM's months through its own audited read (ADR-0207). Each held `all` until then.~~
+   * *Reversed 2026-11-20 (ADR-0268 §3, §4):* **the Super Admin holds all nine inside a KPM, as its Owner** (`holds`), and
+   * **a core leader holds all nine** for their KPM (★, ADR-0268 §1) — *Upload data, correct a number*.
    */
   'data_upload:read': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // P9-T2. The file to fill in. Its own grant rather than `read`'s, as §3.9 has it: an office that
   // one day lets a leader see the table need not let them issue a file in the office's name.
   'data_upload:download_template': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // P9-T3. Reading a filled file and saying what it would change. Writes nothing — committing is
   // `commit_import`, its own grant, which arrives with P9-T4.
   'data_upload:upload_and_preview': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // P9-T4. Confirm import writes the month's figures; revert puts back what one import wrote; the
   // history lists what went through. The Owner and the Admin alike — attribution over a second person
@@ -1555,28 +1621,34 @@ export const PERMISSIONS = {
   'data_upload:commit_import': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'data_upload:revert_batch': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'data_upload:read_history': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // P9-T5. One figure by hand, with a reason, audited — and the only way a figure is cleared.
   'data_upload:correct_cell': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   // ADR-0050. Locking and reopening are acts on the month, each audited.
   'data_upload:lock_month': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'data_upload:reopen_month': [
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **Events: the member's side** (P18.2-T5, P18.2-T6; roles §3.11 as OD-31 and OD-151 answered it).
@@ -1624,6 +1696,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /* The member's answer, once. On `BLOCKED_WHILE_IMPERSONATING`, below: an opinion is the member's own. */
   'event_feedback:submit': [
@@ -1644,6 +1717,7 @@ export const PERMISSIONS = {
     { grantee: AB, scope: 'own' },
     { grantee: AAB, scope: 'own' },
     { grantee: AGENT, scope: 'own' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **The settings reads of the office's events** (P18.2-T5 AC-2, the leak): `GET /kpm/settings/events` and the
@@ -1657,6 +1731,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **Campaigns: the member's side** (P18.2-T7, T8, T9; roles §3.11).
@@ -1711,6 +1786,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   /*
    * **The override of a final standing** (P18.3-T2 AC-5; ADR-0144 §4, roles §3.11; D-override): `PUT` and `DELETE
@@ -1724,6 +1800,7 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+    { grantee: CORE_LEADER, scope: 'own-kpm' },
   ],
   'notification:read_inbox': [{ grantee: AUTHENTICATED, scope: 'own' }],
   'notification:mark_read': [{ grantee: AUTHENTICATED, scope: 'own' }],
@@ -1836,20 +1913,13 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   'kpm:transfer_ownership',
   // ADR-0112 §2: an office's subscription is the platform's, and its end cuts every member off.
   'kpm:update_subscription',
-  // ADR-0211 §5 (P19.4-T3): and its quote, sent to its Owner.
+  // ADR-0211 §5, ADR-0279 §7: and the offer made to it.
   'billing:send_quote',
   'kpm_admin:grant',
   'kpm_admin:revoke',
   // ADR-0260 §4 (P19.15-T4): *Kelola data produk* is given and removed by the Super Admin as themselves, never in a session.
   'product_data_grant:manage',
   'notification_preference:manage',
-  /*
-   * ADR-0199 §7 (UI-169 item 5): **a support session never changes somebody's logins** — linking one, switching to one
-   * or removing a link. Every link route is `@RefuseInSupportSession` as well; listed here so the member's `me` carries
-   * neither grant in a session, and the switcher offers no *Tambah akun* there.
-   */
-  'account_link:create',
-  'account_link:manage_self',
   /*
    * ADR-0073, roles §3.13: a leader's candid note about a person is not support data. A session
    * acts as the user it impersonates, and a note read is refused inside one, read-only or elevated.
@@ -1975,8 +2045,21 @@ function holds(ctx: RequestContext, grant: Grant): boolean {
     case 'platform':
       return ctx.isSuperAdmin;
     case 'tenant':
+      /*
+       * ADR-0268 §3: **a Super Admin inside a KPM is its Owner** — every Owner and Admin grant there, at its scope, with no
+       * approval — **except a grant on their own records** (`own`: a survey to answer, a login to link), since they have
+       * none in a KPM they are not a member of. Inside means the request named the KPM (`X-Kpm-Id`) and is writable: a
+       * support session and a platform read are neither (`isSuperAdminInKpm`).
+       */
+      if (ctx.isSuperAdminInKpm) return grant.scope !== 'own';
       if (!ctx.membership) return false;
       return grantee.role === 'kpm_owner' ? ctx.membership.isKpmOwner : ctx.membership.isKpmAdmin;
+    case 'core_leader':
+      /*
+       * ADR-0268 §1: **the tag, on a leader class, on an active membership** — `isCoreLeader` checks the class again, so a
+       * context carrying the bare tag for an Agent holds nothing; a pending or removed core leader holds nothing either.
+       */
+      return ctx.membership?.status === 'active' && ctx.isCoreLeader;
     case 'hierarchy': {
       // A hierarchy grant applies to an active member unless the grant says otherwise.
       // A removed membership never carries rights, whatever a grant says.

@@ -7,6 +7,8 @@ import {
   CommissionYearDto, DefaultAttackPlanDto, EntryAgeDto, FaqEntryDto, PayTermDto, PdfDetailBlockDto, PlanOptionDto,
   PlanRuleDto, ProposalFieldDto,
 } from './product.dto';
+import type { ProductDraftView, ProductReleaseState } from './product-draft.service';
+import type { ProductDraft } from './product.schema';
 
 /** One product of a company's shelf, as every route here returns it. */
 export class ProductResponseDto {
@@ -144,4 +146,61 @@ export class ProductResponseDto {
 
   @ApiProperty({ type: Number })
   version!: number;
+}
+
+/** *Brosur / file*: the company's brochure for a product, by its label. */
+export class ProductBrochureRefDto {
+  @ApiProperty({ type: String, example: 'Brosur PRUMapan' })
+  label!: string;
+}
+
+/**
+ * **One product's draft and its release** (ADR-0278 §4): what *Produk & proposal* and *Terbitkan ke KPM* read, and what
+ * saving or discarding a draft answers. `implements` the service's view, so the two cannot drift.
+ */
+export class ProductDraftDto implements ProductDraftView {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String, example: 'PRUMAPAN' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'PRUMapan' })
+  name!: string;
+
+  @ApiProperty({
+    enum: ['unpublished', 'draft', 'published'],
+    description: '`unpublished`: a new product no KPM has yet. `draft`: published, with edits waiting. `published`: '
+      + 'nothing waiting.',
+  })
+  state!: ProductReleaseState;
+
+  @ApiProperty({
+    type: Object, nullable: true,
+    description: 'The edits waiting, by field — the product’s own fields and `alsoFits` — or `null` when none. A new '
+      + 'product’s edits are the product itself, so it never has one.',
+  })
+  draft!: ProductDraft | null;
+
+  @ApiProperty({
+    type: [String], nullable: true,
+    description: '`null`: every KPM of the company. A list: the KPMs it was published to; `[]` for a new product '
+      + 'published to none yet.',
+  })
+  releasedTo!: string[] | null;
+
+  @ApiProperty({
+    type: String, format: 'date-time', nullable: true,
+    description: 'When it was first published to a KPM; `null` for a new product, or one made before releases were kept.',
+  })
+  firstPublishedAt!: string | null;
+
+  @ApiProperty({ type: [String], description: '*Juga sesuai*, as published: codes of the company’s other products.' })
+  alsoFits!: string[];
+
+  @ApiProperty({
+    type: () => ProductBrochureRefDto, nullable: true,
+    description: 'The company’s brochure for it, by its label, or `null` where none is stored.',
+  })
+  brochure!: ProductBrochureRefDto | null;
 }

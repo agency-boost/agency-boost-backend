@@ -24,7 +24,7 @@ function placeIn(language: 'en' | 'id', place: CapabilityPlace): string {
 }
 
 /** A list part the reorder names: a stage is a *tahap*; a milestone and a grid keep the screen's words. */
-const PART_ID = { stage: 'tahap', milestone: 'milestone', grid: 'grid' } as const;
+const PART_ID = { stage: 'tahap', milestone: 'milestone', grid: 'grid', item: 'item' } as const;
 
 /**
  * **The capability catalog's refusals, in both languages** (P18.10-T5 AC-2, AC-3): what makes a `capability_ladder`
@@ -86,12 +86,18 @@ export const CAPABILITY_REFUSALS = refusals('modules/capability', {
       en: 'A label cannot be empty.',
       id: 'Label tidak boleh kosong.',
     },
-    milestoneRequired: ({ stages }: { stages: readonly string[] }) => ({
-      en: `${stages.join(', ')} require this milestone, so archiving it would make those stages unreachable. `
-        + 'Take it out of them first.',
-      id: `${stages.join(', ')} mensyaratkan milestone ini, jadi mengarsipkannya akan membuat tahap itu tidak dapat `
-        + 'dicapai. Keluarkan milestone ini dari tahap itu terlebih dahulu.',
+    /** P19.21-T3 AC-4 (ADR-0274): archiving it would leave a stage with no milestone, which everybody is on. */
+    lastMilestoneOf: ({ stages }: { stages: readonly string[] }) => ({
+      en: `${stages.join(', ')} would require no milestone without this one, so everybody would be on it. `
+        + 'Add another milestone to it first.',
+      id: `Tanpa milestone ini, ${stages.join(', ')} tidak mensyaratkan milestone apa pun, jadi semua orang berada di `
+        + 'tahap itu. Tambahkan milestone lain ke tahap itu terlebih dahulu.',
     }),
+    /** P19.21-T3 AC-4: a new *tahap* comes with its first milestone, so it is never a stage everybody is already on. */
+    stageNeedsMilestone: {
+      en: 'A new stage needs its first milestone, or everybody would already be on it.',
+      id: 'Tahap baru memerlukan milestone pertamanya; tanpa itu semua orang sudah berada di tahap tersebut.',
+    },
     itemNeedsCode: {
       en: 'An item needs a code.',
       id: 'Item memerlukan kode.',
@@ -106,7 +112,7 @@ export const CAPABILITY_REFUSALS = refusals('modules/capability', {
       id: `${code} sudah dipakai di katalog ini. Kode tidak pernah dipakai ulang — centang merujuk ke satu kode, `
         + 'jadi kode yang sama dua kali akan menjadi centang yang sama.',
     }),
-    sendEvery: ({ part, count }: { part: 'stage' | 'milestone' | 'grid'; count: number }) => ({
+    sendEvery: ({ part, count }: { part: 'stage' | 'milestone' | 'grid' | 'item'; count: number }) => ({
       en: `Send every ${part} once each — ${count} of them.`,
       id: `Kirim setiap ${PART_ID[part]} masing-masing sekali — semuanya ${idCount(count)}.`,
     }),

@@ -1,27 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { ComplianceCampaignEntry } from './campaigns.category';
 import { COMPLIANCE_CATEGORIES, type ComplianceCategoryKey, type ComplianceOverride } from './compliance-category';
-import type {
-  ComplianceRow, CompliancePerson, ComplianceSection, ComplianceUnit, ComplianceView,
-} from './compliance.service';
+import type { ComplianceCard, ComplianceCellRow, ComplianceView } from './compliance.service';
 import type { ComplianceEventEntry } from './events.category';
 import type { ComplianceTrainingCategory, ComplianceTrainingModule, ComplianceTrainingSkill } from './training.category';
-import type { OfficeGroup } from '../office-groups';
-import { OfficeGroupDto } from '../reporting.response.dto';
 
 /** Declared for OpenAPI. The wire shapes live on the service's and the categories' types (`contract-tree.md`). */
-
-class ComplianceChipDto {
-  @ApiProperty({ enum: COMPLIANCE_CATEGORIES }) category!: ComplianceCategoryKey;
-  @ApiProperty({ example: 12, description: 'Done, among those the category applies to (D-chips).' }) count!: number;
-  @ApiProperty({
-    example: 19,
-    description: 'Those the category applies to: every member listed; for *Activation* those with an activation, for '
-      + '*Events* those in a listed event’s audience, for *Campaigns* those eligible for a listed campaign. **0 draws *—*** '
-      + '— nobody to count, or nothing offered or listed.',
-  })
-  of!: number;
-}
 
 class ComplianceTrainingModuleDto implements ComplianceTrainingModule {
   @ApiProperty({ example: 'PROSPECT_LIST' }) code!: string;
@@ -43,10 +27,6 @@ class ComplianceTrainingCategoryDto implements ComplianceTrainingCategory {
     description: 'The skills holding a published module, in order. Empty: the category has no module yet.',
   })
   skills!: ComplianceTrainingSkillDto[];
-}
-
-class ComplianceGoalsCatalogDto {
-  @ApiProperty({ example: '2026', description: 'The office’s calendar year: *"{year} goals"*.' }) year!: string;
 }
 
 class ComplianceEventEntryDto implements ComplianceEventEntry {
@@ -76,8 +56,6 @@ class ComplianceCatalogDto {
   })
   training!: ComplianceTrainingCategoryDto[];
 
-  @ApiProperty({ type: ComplianceGoalsCatalogDto }) goals!: ComplianceGoalsCatalogDto;
-
   @ApiProperty({
     type: [ComplianceEventEntryDto],
     description: 'This year’s events, archived ones never: not ended first, soonest first, then past, latest first.',
@@ -89,21 +67,6 @@ class ComplianceCatalogDto {
     description: 'This year’s campaigns, archived ones never: structural, then seasonal ongoing, then seasonal past.',
   })
   campaigns!: ComplianceCampaignEntryDto[];
-}
-
-class ComplianceSelectionDto {
-  @ApiProperty({ enum: COMPLIANCE_CATEGORIES }) category!: ComplianceCategoryKey;
-  @ApiProperty({
-    type: String, nullable: true,
-    description: 'The item read: the one asked, or the first listed. `null` for a single-item category, or when nothing is listed.',
-  })
-  item!: string | null;
-}
-
-class CompliancePersonDto implements CompliancePerson {
-  @ApiProperty({ description: 'The membership: the person in this office, never their account.' }) membershipId!: string;
-  @ApiProperty({ example: 'Agus Salim' }) name!: string;
-  @ApiProperty({ description: 'Leads somebody now: the name opens their Unit Dashboard.' }) leads!: boolean;
 }
 
 class ComplianceOverridePersonDto {
@@ -122,8 +85,9 @@ class ComplianceCellDto {
   @ApiProperty({
     type: String, nullable: true,
     description: 'A code, never a word: *training* `done` · `in_progress` · `not_started`; *goals* `set` · `not_set`; '
-      + '*activity* `logged` · `missed`; *activation* `completed` · `in_progress` · `overdue`; *events* `registered` · '
-      + '`not_registered` · `attended` · `no_show` · `unconfirmed`; *campaigns* `chasing` · `not_chasing`. `null` draws '
+      + '*activity* `logged` · `missed`; *leads* `managed` · `needs_next_action` · `no_leads`; *activation* `completed` · '
+      + '`in_progress` · `overdue`; *events* `registered` · `not_registered` · `attended` · `no_show` · `unconfirmed`, and '
+      + 'over *Semua event* `done` · `not_done`; *campaigns* `chasing` · `not_chasing`. `null` draws '
       + '*—*: the item does not apply to them.',
   })
   status!: string | null;
@@ -157,55 +121,65 @@ class ComplianceCellDto {
   overridable?: boolean;
 }
 
-class ComplianceRowDto extends CompliancePersonDto implements ComplianceRow {
-  @ApiProperty({ description: 'The card’s head’s own row: *Personal*, always first.' }) personal!: boolean;
-  @ApiProperty({ type: ComplianceCellDto }) cell!: ComplianceCellDto;
-}
-
-class ComplianceUnitDto implements ComplianceUnit {
-  @ApiProperty({ type: CompliancePersonDto }) head!: CompliancePersonDto;
-  @ApiProperty({ enum: ['AB', 'AAB'], description: '`AB`: the agency’s own card — the AB and those in no AAB’s unit.' })
-  rung!: 'AB' | 'AAB';
-  @ApiProperty({ description: 'Rows done.' }) done!: number;
-  @ApiProperty({ description: 'Rows the item applies to.' }) of!: number;
-  @ApiProperty({ type: [ComplianceRowDto], description: 'The head’s own row first.' }) rows!: ComplianceRowDto[];
-}
-
-class ComplianceSectionDto implements ComplianceSection {
-  @ApiProperty({ type: CompliancePersonDto, description: 'The AB whose agency it is.' }) head!: CompliancePersonDto;
-  @ApiProperty() done!: number;
-  @ApiProperty() of!: number;
-  @ApiProperty({ type: [ComplianceUnitDto], description: 'The AB’s own card, then one per AAB who leads somebody, A to Z.' })
-  units!: ComplianceUnitDto[];
-}
-
 class ComplianceCanDto {
   @ApiProperty({ description: 'May override a final campaign standing: never in a read-only support session.' })
   override!: boolean;
 }
 
 class ComplianceThresholdsDto {
-  @ApiProperty({ example: 50, description: 'UI V1 (UI-109): a bar below this share done is red (`KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT`).' })
+  @ApiProperty({ example: 34, description: 'A card below this share done is red (`KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT`).' })
   lowBelowPct!: number;
-  @ApiProperty({ example: 80, description: 'From this share done it is green (`KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT`).' })
+  @ApiProperty({ example: 67, description: 'Below this it is yellow, from it green (`KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT`).' })
   highFromPct!: number;
 }
 
-export class ComplianceViewDto implements ComplianceView {
-  @ApiProperty({ example: '2026-10-10', description: 'The office’s day.' }) today!: string;
-  @ApiProperty({ description: 'The members listed: the office’s active members, each in an AB agency.' }) people!: number;
-  @ApiProperty({ description: 'The AB agencies: one section each.' }) units!: number;
-  @ApiProperty({ type: [ComplianceChipDto], description: 'Six, in the summary’s order, every one computed on every read.' })
-  summary!: ComplianceChipDto[];
-  @ApiProperty({ type: ComplianceCatalogDto }) catalog!: ComplianceCatalogDto;
-  @ApiProperty({ type: ComplianceSelectionDto }) selected!: ComplianceSelectionDto;
-  @ApiProperty({ type: [ComplianceSectionDto], description: 'One per AB agency, A to Z by the AB’s name.' })
-  tree!: ComplianceSectionDto[];
-  @ApiProperty({ type: ComplianceCanDto }) can!: ComplianceCanDto;
-  @ApiProperty({ type: ComplianceThresholdsDto }) thresholds!: ComplianceThresholdsDto;
-  @ApiProperty({ type: [OfficeGroupDto], description: 'The office’s active custom groups, A to Z: *Lihat untuk*’s choices.' })
-  groups!: OfficeGroup[];
+class ComplianceCardDto implements ComplianceCard {
+  @ApiProperty({ enum: COMPLIANCE_CATEGORIES }) category!: ComplianceCategoryKey;
+  @ApiProperty({ example: 14, description: 'Done, among those the card applies to.' }) count!: number;
+  @ApiProperty({
+    example: 30,
+    description: 'Those the card applies to: *anggota* — the scope’s members; for *Activation* *agent baru*, those with an '
+      + 'activation; for *Events* *yang diundang*, those in a listed event’s audience; for *Campaigns* those eligible for '
+      + 'a listed campaign. **0 draws *—***.',
+  })
+  of!: number;
+  @ApiProperty({ type: Number, nullable: true, example: 47, description: 'Whole, rounded half up; `null` with `of: 0`.' })
+  pct!: number | null;
+}
 
-  @ApiProperty({ type: OfficeGroupDto, nullable: true, description: 'The group the read is over (`?group=`); `null` for the whole KPM.' })
-  group!: OfficeGroup | null;
+class ComplianceCellRowDto extends ComplianceCellDto implements ComplianceCellRow {
+  @ApiProperty({ description: 'The person, by membership: the Overview’s tree (`GET /kpm/overview`’s `people`) draws the row.' })
+  membershipId!: string;
+}
+
+class ComplianceSelectedDto {
+  @ApiProperty({ enum: COMPLIANCE_CATEGORIES }) category!: ComplianceCategoryKey;
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'The item read: Training’s module (the first offered when none is asked), an event’s id, a campaign’s '
+      + 'code; `null` for a single-item card and for *Semua event* / *Semua campaign* — every one at once.',
+  })
+  item!: string | null;
+  @ApiProperty({ example: 14, description: '*"x dari y"*’s x: cells done.' }) done!: number;
+  @ApiProperty({ example: 30, description: '*"x dari y"*’s y: cells the item applies to.' }) of!: number;
+  @ApiProperty({ type: [ComplianceCellRowDto], description: 'Every person of the scope, in the Overview’s tree order.' })
+  cells!: ComplianceCellRowDto[];
+}
+
+class ComplianceGroupRefDto {
+  @ApiProperty({ type: String, nullable: true, description: '`null`: *Tanpa group*.' }) groupId!: string | null;
+  @ApiProperty({ type: String, nullable: true }) name!: string | null;
+}
+
+export class ComplianceViewDto implements ComplianceView {
+  @ApiProperty({ example: '2026-11-20', description: 'The office’s day.' }) today!: string;
+  @ApiProperty({ type: ComplianceThresholdsDto }) thresholds!: ComplianceThresholdsDto;
+  @ApiProperty({ type: ComplianceGroupRefDto, nullable: true, description: 'The informal group read (`?group=`); `null`: the KPM.' })
+  group!: ComplianceGroupRefDto | null;
+  @ApiProperty({ type: [ComplianceCardDto], description: 'Seven, lowest % first, a card that applies to nobody last.' })
+  cards!: ComplianceCardDto[];
+  @ApiProperty({ type: ComplianceCatalogDto }) catalog!: ComplianceCatalogDto;
+  @ApiProperty({ type: ComplianceSelectedDto, nullable: true, description: 'The card asked about (`?category=`), else `null`.' })
+  selected!: ComplianceSelectedDto | null;
+  @ApiProperty({ type: ComplianceCanDto }) can!: ComplianceCanDto;
 }

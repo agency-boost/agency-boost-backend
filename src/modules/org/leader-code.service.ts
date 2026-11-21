@@ -219,6 +219,8 @@ export class LeaderCodeService {
       leaderId: String(leader._id),
       status: 'active',
       recruitedByMembershipId: String(leader._id),
+      // ADR-0267 §3: a self-join on a leader's code or link is that leader's recruit.
+      registeredByMembershipId: String(leader._id),
     });
 
     // Any request they had open is moot — they are in, and by another door.

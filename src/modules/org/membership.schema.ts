@@ -265,9 +265,32 @@ export class Membership {
   @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
   workStatus!: WorkStatus | null;
 
-  /** Who brought them in, and from which recruitment lead. Attribution, set at join. */
+  /**
+   * Who brought them in, and from which recruitment lead. Attribution, set at join. **The leader they were placed
+   * under**, as every path writes it — not who registered them, which is `registeredByMembershipId` (ADR-0267 §3).
+   */
   @Prop({ type: String, default: null })
   recruitedByMembershipId!: string | null;
+
+  /**
+   * **→ `memberships._id`: who registered this person — the recruiter *Recruitment* / *Rekrut* credits**
+   * (`RECRUITS_JOINED`; ADR-0267 §3; P19.17-T1 AC-3). Written once, by the path that places them: the member who sent
+   * the *+ Tambah agent* invitation, the leader whose code or link they joined on, the leader they asked to join, the
+   * member who tagged them in or added them, the member who imported them. `null` for an office's Owner and for a
+   * pending person nobody has placed yet. Kept when the person later moves: a recruit stays their recruiter's.
+   * Migration `0066` gave every membership written before the field the invite's sender, else its placement leader.
+   */
+  @Prop({ type: String, default: null })
+  registeredByMembershipId!: string | null;
+
+  /**
+   * **A copy of `users.testAccount`** (ADR-0267 §1): a test account's memberships are never listed or counted. Here so
+   * every read of a KPM's members leaves them out with one clause on the read it already makes (`NOT_A_TEST_ACCOUNT`),
+   * never a second read of `users`. Written with the account's flag — by `HierarchyService` when the membership is made,
+   * by migration `0065`, and by whatever later sets the flag. A row written before the field reads as a real person.
+   */
+  @Prop({ type: Boolean, default: false })
+  testAccount!: boolean;
 
   @Prop({ type: String, default: null })
   sourceLeadId!: string | null;

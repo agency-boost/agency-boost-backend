@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { ANALYTICS_SECTION_KODES, ANALYTICS_SYSTEM_KODES } from '@/domain/constants';
 import { TEMPLATE_HEADER_V1, TEMPLATE_HEADER_V2 } from '@/modules/production/production-template';
-import { analyticsViolations, type AdvancedAnalyticsConfig } from '@/modules/config/analytics-config';
+import { analyticsViolations, PLATFORM_DEFAULT_EFFECTIVE_FROM, type AdvancedAnalyticsConfig } from '@/modules/config/analytics-config';
 import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { up } from './0057-advanced-analytics-v1';
 
@@ -22,7 +22,8 @@ const KPM_D = '66f0000000000000000000a4'; // Allianz
 /**
  * **`0057-advanced-analytics-v1`** (P19.5-T1 AC-3; ADR-0214 §9): every template — archived ones too — a published
  * version 1 equal to today's seven upload columns, its pattern the first every registered code of its KPMs matches, its
- * columns starting at the earliest month held; Prudential's §3 seed as a draft beside it; idempotent.
+ * columns starting at the earliest month held and never after January 2024; Prudential's §3 seed as a draft beside it;
+ * idempotent.
  */
 describe('0057-advanced-analytics-v1 (ADR-0214 §9)', () => {
   const db = () => mongoose.connection.db!;
@@ -76,6 +77,9 @@ describe('0057-advanced-analytics-v1 (ADR-0214 §9)', () => {
       { kpmId: KPM_A, membershipId: 'm1', agentCode: '80777', month: '2024-11', apeMonthly: cell(null), deletedAt: null },
       { kpmId: KPM_C, membershipId: 'm2', agentCode: '00012', month: '2025-01', policyCountMonthly: cell(2), deletedAt: null },
       { kpmId: KPM_B, membershipId: 'm3', agentCode: '80555', month: '2026-02', unitPersistencyMonthly: cell(90), deletedAt: null },
+      // By kode, as every row written since migration 0058 holds — the seed's history among them — and before the floor.
+      { kpmId: KPM_B, membershipId: 'm3', agentCode: '80555', month: '2023-09', values: { FYP: cell(4_000_00) }, deletedAt: null },
+      { kpmId: KPM_B, membershipId: 'm3', agentCode: '80555', month: '2023-05', values: { APE: cell(null) }, deletedAt: null },
     ]);
   });
 
@@ -97,7 +101,8 @@ describe('0057-advanced-analytics-v1 (ADR-0214 §9)', () => {
       expect(config.uploadFields.filter((f) => f.system).map((f) => f.kode).sort()).toEqual([...ANALYTICS_SYSTEM_KODES].sort());
       expect(config.uploadFields.every((f) => f.required === false)).toBe(true);
       expect(config.uploadFields.find((f) => f.kode === 'UNIT_PERSISTENCY')).toMatchObject({ rows: 'leaders', unit: 'percent' });
-      expect(config.uploadRules).toMatchObject({ unknownAgent: 'reject', completePct: 90, ytdTolerancePct: 1, historyMonthsBeforeJoin: 12 });
+      // `unknownAgent` is `flag` since ADR-0274 §2 (P19.21-T1): every unknown code is kept, and the field is no longer read.
+      expect(config.uploadRules).toMatchObject({ unknownAgent: 'flag', completePct: 90, ytdTolerancePct: 1, historyMonthsBeforeJoin: 12 });
       expect(config.sections).toEqual(ANALYTICS_SECTION_KODES.map((kode) => ({ kode, enabled: true })));
     }
   });
@@ -124,18 +129,27 @@ describe('0057-advanced-analytics-v1 (ADR-0214 §9)', () => {
     expect(await pattern(PRU_ARCHIVED)).toMatchObject({ agentCodePattern: '^\\d{3,32}$', agentCodeExample: '80777' });
     expect(result.reports.find((r) => r.templateId === PRU_DEFAULT)).toEqual({
       companyId: PRUDENTIAL, templateId: PRU_DEFAULT, name: 'Prudential template', kpms: 2, codes: 3,
-      agentCodePattern: '^\\d{3,32}$', effectiveFrom: '2025-01', prudentialDraft: true,
+      agentCodePattern: '^\\d{3,32}$', effectiveFrom: '2024-01', prudentialDraft: true,
     });
   });
 
-  it('P19.5-T1 AC-3 starts each column at the earliest month a KPM on the template holds, else this month', async () => {
+  /*
+   * *Changed 2026-11-20:* "else this month", reading the legacy cells only. Every KPM's data is required from January 2024
+   * (`PRODUCTION.HISTORY_FROM`, ADR-0274 §3), so no column starts after it; and a row written by kode — every row since
+   * migration 0058, the seed's history among them — is held too. On a fresh database the columns started the month of
+   * the deploy, and the seeded history read as never uploaded.
+   */
+  it('P19.5-T1 AC-3 starts each column at the earliest month a KPM on the template holds, never after January 2024', async () => {
     await up(db(), NOW);
     const from = async (id: string) => ((await sectionOf(id))!.payload as AdvancedAnalyticsConfig).uploadFields
       .map((f) => f.effectiveFrom);
-    // 2024-11 holds only an empty cell, so 2025-01 (the library KPM's policies) is the earliest held.
-    expect(new Set(await from(PRU_DEFAULT))).toEqual(new Set(['2025-01']));
-    expect(new Set(await from(PRU_JAKARTA))).toEqual(new Set(['2026-02']));
-    expect(new Set(await from(ALZ_DEFAULT))).toEqual(new Set(['2026-11']));
+    // Held from 2025-01 (2024-11 is only an empty cell): later than the floor, so the floor.
+    expect(new Set(await from(PRU_DEFAULT))).toEqual(new Set([PLATFORM_DEFAULT_EFFECTIVE_FROM]));
+    // Held by kode from 2023-09 (2023-05 is only an empty cell): earlier than the floor, so its own month.
+    expect(new Set(await from(PRU_JAKARTA))).toEqual(new Set(['2023-09']));
+    // Nothing held — and a template no KPM reads: the floor, never the month the migration ran.
+    expect(new Set(await from(ALZ_DEFAULT))).toEqual(new Set(['2024-01']));
+    expect(new Set(await from(LIB_DEFAULT))).toEqual(new Set(['2024-01']));
   });
 
   it('P19.5-T1 AC-3 offers Prudential’s §3 seed as a draft beside version 1: eight digits, flagged, the mockup’s required flags', async () => {

@@ -13,6 +13,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationRepository } from './notification.repository';
 import { NOTIFICATION_REFUSALS } from './notification.messages';
 import { RecipientLanguages } from './recipient-languages';
+import { inSystemName, SystemNames } from '@/modules/branding/system-name.port';
 import {
   Notification, NotificationDocument,
   NotificationPreferences, NotificationPreferencesDocument,
@@ -216,6 +217,8 @@ export class NotificationService {
      * who has chosen nothing, or as the request that caused the email.
      */
     @Optional() private readonly languages?: RecipientLanguages,
+    /** P19.21-T4 (ADR-0274): the KPM's *Nama sistem* in its members' emails. Absent where a spec builds this by hand. */
+    @Optional() private readonly systemNames?: SystemNames,
   ) {
     for (const adapter of adapters) this.adapters.set(adapter.channel, adapter);
   }
@@ -425,7 +428,8 @@ export class NotificationService {
     if (!claimed) return;
 
     const prefs = await this.preferencesOf(claimed.userId);
-    const request: SendRequest = {
+    const request: SendRequest & { kpmId: string } = {
+      kpmId,
       userId: claimed.userId,
       membershipId: claimed.membershipId ?? undefined,
       templateId,
@@ -452,7 +456,9 @@ export class NotificationService {
    */
   private async renderFor(request: SendRequest): Promise<RenderedMessage> {
     const stored = request.userId && this.languages ? await this.languages.languageOf(request.userId) : null;
-    return this.renderer.render(request.templateId, request.payload, recipientReader(stored, request.reader));
+    const message = this.renderer.render(request.templateId, request.payload, recipientReader(stored, request.reader));
+    // P19.21-T4 (ADR-0274): a KPM's member reads its *Nama sistem* where the email says AgencyBoost.
+    return inSystemName(this.systemNames, request as SendRequest & { kpmId?: string | null }, message);
   }
 
   /**

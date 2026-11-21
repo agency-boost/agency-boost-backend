@@ -39,13 +39,17 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
   const db = () => mongoose.connection.db!;
   const oid = (s: string) => new mongoose.Types.ObjectId(s);
 
-  /** A group, written as `GroupService.create` would, in the office given. */
-  const group = async (owner: string, name: string, over: Record<string, unknown> = {}, kpmId = KPM_A) => {
+  /**
+   * A group, written as `GroupService.create` would, in the office given — carried by `carrier`, an AB, when one is named
+   * (ADR-0270 §1: only an AB carries a group; their team follows).
+   */
+  const group = async (carrier: string | null, name: string, over: Record<string, unknown> = {}, kpmId = KPM_A) => {
     const _id = new mongoose.Types.ObjectId();
     await db().collection('groups').insertOne({
-      _id, kpmId, name, ownerMembershipId: owner, status: 'active', archivedAt: null, createdByMembershipId: null,
+      _id, kpmId, name, leaderMembershipIds: [], status: 'active', archivedAt: null, createdByMembershipId: null,
       deletedAt: null, ...over,
     });
+    if (carrier !== null) await tag(carrier, [String(_id)]);
     return String(_id);
   };
   const tag = (membershipId: string, groupIds: string[]) => db().collection('memberships').updateOne(
@@ -98,11 +102,12 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
     it('P19.12-T6 AC-1 Agus’s dashboard opens on Grup langsung: his eleven, never Hadi nor Hadi’s agent', async () => {
       const view = await read(office.as('AGUS'));
       expect(view.scope).toBe('direct');
-      expect(view.scopes).toEqual({ offered: ['direct', 'informal', 'downline'], default: 'direct' });
+      // P19.18-T1 AC-2: Direct Unit leads the picker; his Grup langsung holds more than it, so it is first chosen.
+      expect(view.scopes).toEqual({ offered: ['unit', 'direct', 'informal', 'downline'], default: 'direct' });
       expect(names(view)).not.toEqual(expect.arrayContaining(['Hadi Wibowo']));
       expect(everyRow(view).map((r) => r.membershipId)).not.toContain(id.HANA);
-      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, aab: 8, ab: 0, newHires: 0 });
-      expect(view.tiles.potentialActive.ab).toEqual({ count: 0, of: 0 });
+      // P19.18-T1 AC-6 (ADR-0271 §2): Dewi, an AAB with no team, sits in his unit — four there, two units below.
+      expect(view.tiles.team).toEqual({ total: 11, direct: 4, units: 2, underUnits: 5, aab: 7, ab: 0, newHires: 0 });
       expect(view.informal).toBeNull();
       expect(view.unled).toBeNull();
     });
@@ -112,11 +117,9 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
       expect(view.scope).toBe('downline');
       const hadi = view.units.find((u) => u.head.membershipId === id.HADI)!;
       expect(rowsOf(hadi).map((r) => r.name)).toEqual(['Hadi Wibowo', 'Hana Pertiwi']);
-      expect(view.tiles.team).toMatchObject({ total: 13, direct: 3, aab: 8, ab: 2 });
-      const { team, potentialActive: active } = view.tiles;
+      expect(view.tiles.team).toMatchObject({ total: 13, direct: 4, aab: 7, ab: 2 });
+      const { team } = view.tiles;
       expect(team.direct + team.aab + team.ab).toBe(team.total);
-      expect(active.unit.of + active.aab.of + active.ab.of).toBe(active.of);
-      expect(active.ab.of).toBe(2);
     });
 
     it('P19.12-T6 AC-1 Activities’ and Home’s Group is Grup langsung: Hadi is in neither', async () => {
@@ -137,7 +140,7 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
       expect(view.informal).toEqual({ groups: [], absNotInGroup: 1, abs: null, canTag: false });
     });
 
-    it('P19.12-T6 AC-2 Hadi tagged into Agus’s live group brings Hadi and his agent; the line reads 0', async () => {
+    it('P19.17-T4 AC-1 Hadi, an AB, in the live group Agus carries brings Hadi and his agent; the line reads 0', async () => {
       const mine = await group(office.id.AGUS, 'Agus Circle');
       await tag(id.HADI, [mine]);
       const view = await read(office.as('AGUS'), { scope: 'informal' });
@@ -146,29 +149,40 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
       expect(view.informal).toMatchObject({ groups: [{ groupId: mine, name: 'Agus Circle' }], absNotInGroup: 0 });
     });
 
-    it('P19.12-T6 AC-2 an archived group, or somebody else’s, tags nobody into Agus’s view', async () => {
+    it('P19.17-T4 AC-1 an AB row from before the tags — no groupIds at all — carries no group: nobody tagged into Agus’s view', async () => {
+      await group(office.id.AGUS, 'Agus Circle');
+      await db().collection('memberships').updateOne({ _id: oid(id.HADI) }, { $unset: { groupIds: '' } });
+      const view = await read(office.as('AGUS'), { scope: 'informal' });
+      expect(everyRow(view).map((r) => r.membershipId)).not.toContain(id.HADI);
+      expect(view.informal).toMatchObject({ absNotInGroup: 1 });
+    });
+
+    it('P19.17-T4 AC-1 an archived group, or one Agus does not carry, tags nobody into Agus’s view', async () => {
       const archived = await group(office.id.AGUS, 'Old circle', { status: 'archived', archivedAt: ROSTER_NOW });
-      const saris = await group(office.id.SARI, 'Sari Circle');
-      await tag(id.HADI, [archived, saris]);
+      const other = await group(null, 'Other Circle');
+      await tag(id.HADI, [archived, other]);
       const view = await read(office.as('AGUS'), { scope: 'informal' });
       expect(everyRow(view).map((r) => r.membershipId)).not.toContain(id.HADI);
       expect(view.informal).toMatchObject({ groups: [], absNotInGroup: 1 });
     });
 
-    it('P19.12-T6 AC-2 a tag never widens reach (P3-T9 AC-1): Sari’s group holding a peer AB shows Sari nobody new', async () => {
-      const saris = await group(office.id.SARI, 'Sari Circle');
-      await tag(office.id.PEER_AB, [saris]);
-      await tag(office.id.PEER_AGENT, [saris]);
+    it('P19.12-T6 AC-2 a tag never widens reach (P3-T9 AC-1): Sari’s group — Agus’s, she follows him — holding a peer AB shows Sari nobody new', async () => {
+      const circle = await group(office.id.AGUS, 'Agus Circle');
+      await tag(office.id.PEER_AB, [circle]);
+      await tag(office.id.PEER_AGENT, [circle]);
       const before = await read(office.as('SARI'));
       const view = await read(office.as('SARI'), { scope: 'informal' });
-      expect(view.scope).toBe('informal');
+      // No AB below her: *Grup informal* would be her *Grup langsung*, so it is not offered (ADR-0270 §1) — and asking
+      // for it reads the same people.
+      expect(view.scope).toBe('direct');
       expect(names(view)).toEqual(names(before));
       // And nobody else's reach moves either: Agus still reads his eleven.
       expect(everyRow(await read(office.as('AGUS')))).toHaveLength(11);
     });
 
-    it('P19.12-T6 AC-2 cross-tenant: office B’s group, even naming Agus its owner and tagging Hadi, is never read', async () => {
-      const forged = await group(office.id.AGUS, 'Forged', {}, KPM_B);
+    it('P19.12-T6 AC-2 cross-tenant: office B’s group, even on Agus’s row and Hadi’s, is never read', async () => {
+      const forged = await group(null, 'Forged', {}, KPM_B);
+      await tag(office.id.AGUS, [forged]);
       await tag(id.HADI, [forged]);
       const view = await read(office.as('AGUS'), { scope: 'informal' });
       expect(view.informal).toMatchObject({ groups: [], absNotInGroup: 1 });
@@ -224,7 +238,7 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
     it('P19.12-T6 AC-2 the Owner opens on the whole office, Nora under Belum punya leader', async () => {
       const view = await read(office.as('OWNER'));
       expect(view.scope).toBe('downline');
-      expect(view.scopes).toEqual({ offered: ['direct', 'informal', 'downline'], default: 'downline' });
+      expect(view.scopes).toEqual({ offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' });
       expect(view.unled?.rows.map((r) => r.name)).toEqual(['Nora Siregar']);
       expect(everyRow(view)).toHaveLength(19);
       expect(view.tiles.team.total).toBe(19);
@@ -298,10 +312,11 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
   });
 
   describe('AC-4 + Tambah ke grup: POST /members/groups/:groupId/members', () => {
-    it('P19.12-T6 AC-4 the Owner tags the ABs at once: each once, one audit entry each, and the line reads 0', async () => {
+    it('P19.12-T6 AC-4 the Owner moves the ABs at once: each once, one audit entry each, and the line reads 0', async () => {
       const mine = await group(office.id.AGUS, 'Agus Circle');
       const result = await groups.addMembers(office.as('OWNER'), mine, [id.HADI, id.HADI]);
-      expect(result).toEqual({ groupId: mine, name: 'Agus Circle', added: 1, memberCount: 1 });
+      // Agus's AB group of eleven and Hadi's of two (ADR-0270 §1).
+      expect(result).toEqual({ groupId: mine, name: 'Agus Circle', added: 1, memberCount: 13 });
       // Again: nobody new, nothing written.
       expect((await groups.addMembers(office.as('OWNER'), mine, [id.HADI])).added).toBe(0);
       const entries = await db().collection('auditLog').find({ action: 'member.tagged', targetId: id.HADI }).toArray();
@@ -312,8 +327,8 @@ describe('P19.12-T6 the Unit Dashboard’s views (ADR-0249)', () => {
 
     it('P19.12-T6 AC-4 another office’s group, an archived one or a member outside the office is 404, and nothing is tagged', async () => {
       const mine = await group(office.id.AGUS, 'Agus Circle');
-      const archived = await group(office.id.AGUS, 'Old', { status: 'archived' });
-      const theirs = await group(office.id.B_AB, 'B Circle', {}, KPM_B);
+      const archived = await group(null, 'Old', { status: 'archived' });
+      const theirs = await group(null, 'B Circle', {}, KPM_B);
       const audited = await db().collection('auditLog').countDocuments({ action: 'member.tagged' });
       await expect(groups.addMembers(office.as('OWNER'), theirs, [id.HADI])).rejects.toMatchObject({ status: 404 });
       await expect(groups.addMembers(office.as('OWNER'), archived, [id.HADI])).rejects.toMatchObject({ status: 404 });

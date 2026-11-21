@@ -7,12 +7,13 @@ import { ViewOnlySessionGuard } from '@/common/auth/view-only-session.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import {
-  AAB, AB, ADMIN, AGENT, declaredPermissions, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
+  AAB, AB, ADMIN, AGENT, declaredPermissions, FIXTURE_KPM, OWNER, productionPipe, session, StubAuth, SUPER_ADMIN,
 } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import { CoachingSurveyController } from './coaching-survey.controller';
 import { CoachingSurveyService } from './coaching-survey.service';
 import { SurveyRunsController } from './survey-runs.controller';
+import { SurveyPeopleService } from './survey-people.service';
 import { SurveyRunsService } from './survey-runs.service';
 import { SurveysController } from './surveys.controller';
 import { SurveysService } from './surveys.service';
@@ -23,6 +24,10 @@ const PERSON = '66f0000000000000000000e1';
 /** A view-as session, read-only, as `ContextResolver` builds every one (ADR-0206 §4). */
 const viewAs = (ctx: RequestContext) =>
   new RequestContext(ctx.userId, 'none', ctx.membership, 'u-super', null, false, true);
+
+/** P19.22 (ADR-0268): an AB tagged core leader, and the Super Admin inside the fixture's KPM — both the Owner's in KPM. */
+const CORE_LEADER = new RequestContext('u-cl', 'none', { ...AB.membership!, isCoreLeader: true } as never);
+const SA_IN_KPM = RequestContext.superAdminInKpm(SUPER_ADMIN, FIXTURE_KPM);
 
 /**
  * **The survey routes over HTTP** (P19.5-T4; ADR-0216 §8; roles §3.8, §3.9): who the API lets through, per role, both
@@ -46,6 +51,7 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
     cancel: jest.fn(async () => undefined),
   };
   const coaching = { read: jest.fn(async () => ({ state: 'none' })) };
+  const people = { people: jest.fn(async () => ({ people: [] })), person: jest.fn(async () => ({ membershipId: PERSON })) };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -54,6 +60,7 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
         { provide: SurveysService, useValue: member },
         { provide: SurveyRunsService, useValue: runs },
         { provide: CoachingSurveyService, useValue: coaching },
+        { provide: SurveyPeopleService, useValue: people },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -65,7 +72,7 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
   });
   afterAll(async () => app.close());
   beforeEach(() => {
-    for (const fn of [...Object.values(member), ...Object.values(runs), ...Object.values(coaching)]) fn.mockClear();
+    for (const fn of [...Object.values(member), ...Object.values(runs), ...Object.values(coaching), ...Object.values(people)]) fn.mockClear();
   });
 
   const http = () => request(app.getHttpServer());
@@ -78,6 +85,7 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
     });
     expect(declaredPermissions(SurveyRunsController)).toEqual({
       nps: 'advanced_analytics:read', qual: 'advanced_analytics:read',
+      qualPeople: 'advanced_analytics:read', qualPerson: 'advanced_analytics:read',
       create: 'advanced_analytics:write', update: 'advanced_analytics:write', cancel: 'advanced_analytics:write',
     });
     expect(declaredPermissions(CoachingSurveyController)).toEqual({ read: 'survey_answers:read' });
@@ -170,6 +178,49 @@ describe('P19.5-T4 the survey routes — who may call them', () => {
       await http().post('/kpm/advanced-analytics/surveys/runs').send({ ...RUN_BODY, kind: 'pulse' }).expect(400);
       await http().get('/kpm/advanced-analytics/nps?runId=nope').expect(400);
       expect(runs.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('P19.22 the steward’s survey routes — Per orang, the class views, a core leader and the Super Admin inside a KPM', () => {
+    it.each([['the Owner', OWNER], ['an Admin', ADMIN], ['a core leader', CORE_LEADER], ['the Super Admin inside the KPM', SA_IN_KPM]])(
+      'P19.22-T6 AC-3 ADR-0268 %s sends, moves and cancels a run', async (_who, ctx) => {
+        session.current = ctx;
+        await http().post('/kpm/advanced-analytics/surveys/runs').send(RUN_BODY).expect(201);
+        await http().patch(`/kpm/advanced-analytics/surveys/runs/${RUN}`).send({ closesOn: '2026-11-25' }).expect(200);
+        await http().delete(`/kpm/advanced-analytics/surveys/runs/${RUN}`).expect(204);
+        expect(runs.create).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each([['the Owner', OWNER], ['an Admin', ADMIN], ['a core leader', CORE_LEADER], ['an AB (the service 404s one who is no core leader)', AB],
+      ['an AAB (likewise)', AAB], ['the Super Admin inside the KPM', SA_IN_KPM]])(
+      'P19.22-T7 AC-3 %s passes the guard on Per orang and a person’s answers', async (_who, ctx) => {
+        session.current = ctx;
+        await http().get('/kpm/advanced-analytics/qual/people').expect(200);
+        await http().get(`/kpm/advanced-analytics/qual/people/${PERSON}?runId=${RUN}`).expect(200);
+        await http().get('/kpm/advanced-analytics/nps?who=leader').expect(200);
+        expect(people.person).toHaveBeenCalledWith(expect.anything(), PERSON, RUN);
+        expect(runs.results).toHaveBeenCalledWith(expect.anything(), 'nps', undefined, 'leader');
+      },
+    );
+
+    it.each([['an agent', AGENT], ['a Super Admin outside any KPM', SUPER_ADMIN]])(
+      'P19.22-T7 AC-3 %s is refused Per orang 403 before any read', async (_who, ctx) => {
+        session.current = ctx;
+        await http().get('/kpm/advanced-analytics/qual/people').expect(403);
+        await http().get(`/kpm/advanced-analytics/qual/people/${PERSON}`).expect(403);
+        expect(people.people).not.toHaveBeenCalled();
+        expect(people.person).not.toHaveBeenCalled();
+      },
+    );
+
+    it('P19.22-T6 AC-1 400 for a view that is neither Semua, Leader nor Agent, and a run id that is not one', async () => {
+      session.current = OWNER;
+      await http().get('/kpm/advanced-analytics/qual?who=agents').expect(400);
+      await http().get('/kpm/advanced-analytics/qual/people?runId=nope').expect(400);
+      await http().get(`/kpm/advanced-analytics/qual/people/${PERSON}?runId=nope`).expect(400);
+      expect(runs.results).not.toHaveBeenCalled();
+      expect(people.people).not.toHaveBeenCalled();
     });
   });
 

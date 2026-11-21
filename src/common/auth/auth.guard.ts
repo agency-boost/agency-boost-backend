@@ -10,6 +10,12 @@ import { ALLOWED_WHILE_OFFICE_UNAVAILABLE, ALLOWS_TEMPORARY_PASSWORD, IS_PUBLIC 
 import { AUTH_GUARD_REFUSALS } from './auth.messages';
 
 /**
+ * **The header naming the KPM a Super Admin works inside** (ADR-0268 §3), lower-cased as Node delivers it: `X-Kpm-Id`.
+ * The frontend's `api-client.ts` sends it while `super-admin-kpm.ts` holds an entered KPM.
+ */
+export const KPM_HEADER = 'x-kpm-id';
+
+/**
  * Verifies the access token and attaches the resolved RequestContext.
  *
  * Roles are resolved from the database on every request rather than read from the
@@ -105,7 +111,13 @@ export class AuthGuard implements CanActivate {
       ALLOWED_WHILE_OFFICE_UNAVAILABLE, [execution.getHandler(), execution.getClass()],
     ) === true;
 
-    const context = await this.resolver.resolve(claims.sub, impersonator, leavingSupport, language);
+    /*
+     * **The KPM a Super Admin is working inside** (ADR-0268 §3): `X-Kpm-Id`, which the app sends while a Super Admin has
+     * entered a KPM. The resolver honours it only for a Super Admin acting as themselves and ignores it for everybody
+     * else; an empty header is no header.
+     */
+    const enteredKpmId = request.headers[KPM_HEADER]?.trim() || null;
+    const context = await this.resolver.resolve(claims.sub, impersonator, leavingSupport, language, enteredKpmId);
     // The person read: their saved language, behind the header (AC-1).
     request.reader = context.reader;
 

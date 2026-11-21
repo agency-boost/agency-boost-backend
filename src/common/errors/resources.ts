@@ -35,8 +35,6 @@ export const RESOURCE_NAMES = {
   'KPM request': 'Permintaan KPM',
   Lead: 'Lead',
   'Lead status': 'Status lead',
-  /* UI-169 item 5 (ADR-0199): a linked login, the glossary's *Linked login* — *akun tertaut*. */
-  'Linked login': 'Akun tertaut',
   'Leader-limit request': 'Permintaan batas leader',
   Meeting: 'Rapat',
   Member: 'Anggota',

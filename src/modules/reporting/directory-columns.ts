@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
+import type { CoachingStatus } from '@/domain/constants/coaching-status';
+import type { UsageStatus } from '@/domain/constants/usage';
+import { coachingStatus } from '@/domain/metrics/coaching-status';
+import { usageStatus } from '@/domain/metrics/usage';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
@@ -16,6 +20,13 @@ export interface DirectoryActivityColumns {
   lastActivityDays: number | null;
   /** `DAYS_SINCE_LAST_COACHING`, as the coaching roster serves it; `null` is *Never*, a member with no 1:1. */
   lastCoachedDays: number | null;
+  /**
+   * **The *Aktivitas terakhir* pill's colour** (P19.20-T1 AC-2; ADR-0267 §4): `usageStatus` over the days above — red
+   * `never`, yellow `lapsed` (> `USAGE.RECENT_MAX_DAYS`), green `recent`. The server's bucket, so no page re-declares 14.
+   */
+  lastActivityStatus: UsageStatus;
+  /** **The *Coaching terakhir* pill's colour** (ADR-0267 §5): `COACHING_STATUS` over `lastCoachedDays`. */
+  lastCoachedStatus: CoachingStatus;
 }
 
 /** A row of the roster: an active member's carries the two columns; a pending or removed one's does not. */
@@ -59,11 +70,15 @@ export class DirectoryColumns {
     const members = page.members.map((member): DirectoryRow => {
       if (member.status !== 'active') return member;
       const last = latest.get(member.membershipId) ?? null;
+      const days = last === null ? null : this.clock.daysBetween(day.timezone, last, day.today);
+      const coached = recency.get(member.membershipId)!.daysSinceLastCoaching;
       return {
         ...member,
         lastActivityOn: last,
-        lastActivityDays: last === null ? null : this.clock.daysBetween(day.timezone, last, day.today),
-        lastCoachedDays: recency.get(member.membershipId)!.daysSinceLastCoaching,
+        lastActivityDays: days,
+        lastCoachedDays: coached,
+        lastActivityStatus: usageStatus(days),
+        lastCoachedStatus: coachingStatus(coached),
       };
     });
     await this.subjectReads.recordMany(ctx, active, 'directory', { from: null, to: day.today });

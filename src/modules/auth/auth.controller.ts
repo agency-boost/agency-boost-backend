@@ -33,7 +33,6 @@ import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { BrandingReader } from '@/modules/branding/branding-reader';
 import { AuthService } from './auth.service';
-import { AccountLinksService } from './account-links.service';
 import { RateLimiter } from './rate-limiter';
 import {
   ChangeEmailDto, ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
@@ -151,11 +150,6 @@ export class AuthController {
      * a spec that builds this controller for something else reads no photo, `null`, and the initials are drawn.
      */
     @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
-    /*
-     * **The linked login** (UI-169 item 5; ADR-0199 §3): `GET /auth/me`'s `linkedLogin`. Optional, as the readers above
-     * are: a harness that builds this controller for something else answers `null`, no link.
-     */
-    @Optional() @Inject(AccountLinksService) private readonly accountLinks: AccountLinksService | null = null,
     /*
      * **The KPM's branding** (P19.6-T1 AC-12; ADR-0218 §8): `GET /auth/me`'s `branding`, so the colours arrive with the
      * session and no second call is made. Optional, as the readers above: a harness without it answers `null`.
@@ -754,11 +748,6 @@ export class AuthController {
        */
       activation: nav.activation,
       newHires: nav.newHires,
-      /*
-       * **The caller's other login** (UI-169 item 5; ADR-0199 §3): its address, its name and its views, for the account
-       * menu's switcher — `null` with no link, and always in a support session (§7).
-       */
-      linkedLogin: this.accountLinks ? await this.accountLinks.linkedLoginFor(ctx) : null,
       /*
        * **What the session's KPM shows** (P19.6-T1 AC-12; ADR-0218 §8): its version, its palette (`null`: AgencyBoost's
        * colours), the logo's size, which images and poses it has, and a lesson's colours (ADR-0217 §5) — for the KPM the

@@ -65,9 +65,11 @@ describe('Phase 18.2 the events seed — a run at 10:00 on 10 October 2026 in Ja
     expect(Object.keys(seeded.events.events).sort()).toEqual([
       'KICKOFF', 'LEADERS_HUDDLE', 'NEW_AGENT_BOOTCAMP', 'PRODUCT_REFRESH', 'PRULINK_BRIEFING', 'SALES_CLINIC', 'TOWN_HALL',
     ]);
-    expect(await col('events').countDocuments({ kpmId: kpm0417 })).toBe(7);
-    expect(await col('eventRsvps').countDocuments({ kpmId: kpm0417 })).toBe(18);
-    expect(await col('eventFeedback').countDocuments({ kpmId: kpm0417 })).toBe(12);
+    // This fixture's own: P19.25's year of events (`event-analytics-fixture.ts`, codes `EA_…`) is counted by its own spec.
+    const own = Object.values(seeded.events.events);
+    expect(await col('events').countDocuments({ kpmId: kpm0417, code: { $not: /^EA_/ } })).toBe(7);
+    expect(await col('eventRsvps').countDocuments({ kpmId: kpm0417, eventId: { $in: own } })).toBe(18);
+    expect(await col('eventFeedback').countDocuments({ kpmId: kpm0417, eventId: { $in: own } })).toBe(12);
     expect(await col('eventRsvps').countDocuments({ kpmId: { $ne: kpm0417 } })).toBe(0);
     expect(await col('eventFeedback').countDocuments({ kpmId: { $ne: kpm0417 } })).toBe(0);
     expect(seeded.events.written).toBe(4 + 18 + 12);
@@ -76,7 +78,8 @@ describe('Phase 18.2 the events seed — a run at 10:00 on 10 October 2026 in Ja
   });
 
   it('P18.2-T5 AC-11 Rina’s /events shows all five card states, and no Leaders’ huddle', async () => {
-    const events = await list('rina@kpm0417.test');
+    // This fixture's events; P19.25's (`EA_…`) are the Event tab's (`event-analytics-seed.spec.ts`).
+    const events = (await list('rina@kpm0417.test')).filter((e) => !e.code.startsWith('EA_'));
     expect(events.map((e) => [e.title, pill(e)])).toEqual([
       [TITLE.NEW_AGENT_BOOTCAMP, 'Feedback sent'],
       [townHall('September'), "Didn't join"],

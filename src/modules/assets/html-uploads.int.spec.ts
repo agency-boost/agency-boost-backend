@@ -6,7 +6,9 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
-import { DOCUMENT_MIME_TYPES, SEED_TRAINING_MODULES, TRAINING_FILE_MIME_TYPES } from '@/domain/constants';
+import {
+  DOCUMENT_MIME_TYPES, RECRUITMENT, SEED_TRAINING_MODULES, TRAINING_FILE_MIME_TYPES,
+} from '@/domain/constants';
 import { NamedTemplateController } from '@/modules/config/named-template.controller';
 import { NamedTemplateService } from '@/modules/config/named-template.service';
 import { TemplateCopyService } from '@/modules/config/template-copy.service';
@@ -281,7 +283,9 @@ describe('P19.6-T2 HTML in the four upload routes, and the readers (ADR-0217)', 
     it.each(WRITERS)('P19.6-T2 AC-1 %s attaches an HTML page to a slot, and every member reads it as HTML', async (_n, who) => {
       session.current = who;
       const signed = await http().post(`${PITCH}/uploads`).send(LESSON).expect(201);
-      expect(wired.storage.signedWith.at(-1)).toMatchObject({ mimeType: 'text/html', allowedMimeTypes: DOCUMENT_MIME_TYPES });
+      // P19.21-T3 AC-6 (ADR-0274): the pitch's list is any format, HTML still among them.
+      expect(wired.storage.signedWith.at(-1)).toMatchObject({ mimeType: 'text/html', allowedMimeTypes: RECRUITMENT.PITCH_MIME_TYPES });
+      expect(RECRUITMENT.PITCH_MIME_TYPES).toContain('text/html');
       await http().put(`${PITCH}/opportunity`).send({ storageKey: signed.body.storageKey }).expect(200);
 
       session.current = AGENT;

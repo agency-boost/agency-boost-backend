@@ -49,6 +49,17 @@ export class AttachPitchDocumentDto {
   storageKey!: string;
 }
 
+/** `PUT /kpm/settings/recruitment-pitch/:slot/link` (P19.21-T3 AC-6, ADR-0274): a material given as a link. */
+export class SetPitchLinkDto {
+  @ApiProperty({
+    maxLength: 2000,
+    example: 'https://www.youtube.com/watch?v=abc123',
+    description: 'An `https://` address, at most 2,000 characters, no user name or password. Never fetched by the server.',
+  })
+  @IsString() @MaxLength(2000)
+  url!: string;
+}
+
 export class SetPitchConfirmationDto {
   @ApiProperty({ type: Boolean, description: 'True to tick the item, false to untick it.' })
   @IsBoolean()

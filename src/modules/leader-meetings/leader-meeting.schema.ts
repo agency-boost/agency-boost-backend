@@ -4,20 +4,30 @@ import { configSchemaOptions } from '@/common/schema/base.schema';
 
 export type LeaderMeetingDocument = HydratedDocument<LeaderMeeting>;
 
-/** *Preparation* · *During* · *Post* (`KPM_Owner.html:2802-2820`), in the order drawn. */
-export const AGENDA_SECTIONS = ['preparation', 'during', 'post'] as const;
-export type AgendaSection = (typeof AGENDA_SECTIONS)[number];
-
-/** *Not yet planned* → *Planned* → *Implemented* (`:2865`), the order the status button cycles. */
-export const ACTION_STATUSES = ['not_planned', 'planned', 'implemented'] as const;
+/**
+ * *Belum* → *Proses* → *Selesai* (P19.22-T8 AC-4; ADR-0276): an action item's three states, the order the status menu
+ * lists them. Until migration `0076` they were *Not yet planned* · *Planned* · *Implemented* (`not_planned`,
+ * `planned`, `implemented`), mapped one to one.
+ */
+export const ACTION_STATUSES = ['todo', 'doing', 'done'] as const;
 export type ActionStatus = (typeof ACTION_STATUSES)[number];
 
-/** How an editor stood when the meeting was frozen: the Owner, an Admin, or a member tagged *Core Leader*. */
+/** An editor as the freeze wrote them before P19.22 (D-coeditors): kept on old meetings, read by nothing. */
 export type EditorStanding = 'owner' | 'admin' | 'core_leader';
 
+/** Who the forum's people are: the Owner, an Admin, or a member tagged *Core leader*. */
+export interface ForumEditor {
+  membershipId: string;
+  as: EditorStanding;
+  rungCode: string;
+  /** Tagged *Core leader* now — what *"n core leader"* counts. */
+  tagged: boolean;
+}
+
 /**
- * **One agenda item** (`:2802-2820`): its text and a PIC typed by hand — a name, never a membership — and, on
- * *During* alone, whether it is ticked. Versioned on its own, so two leaders writing two items both land.
+ * **One line of the agenda's checklist** (P19.22-T8 AC-3; ADR-0276): its text, its PIC — a member of the office, by
+ * membership id (invariant §2), or *Semua* (`picAll`), or none — and its box, ticked during the meeting. Versioned on
+ * its own, so two leaders writing two lines both land.
  */
 @Schema({ _id: false })
 export class LeaderMeetingAgendaItem {
@@ -28,11 +38,14 @@ export class LeaderMeetingAgendaItem {
   @Prop({ type: String, default: '' })
   text!: string;
 
-  /** Free text; `''` is none, drawn *—*. */
-  @Prop({ type: String, default: '' })
-  pic!: string;
+  /** The PIC's membership `_id`, or `null` (none, or *Semua*). Never a name. */
+  @Prop({ type: String, default: null })
+  picMembershipId!: string | null;
 
-  /** Ticked in any section since UI V1 (UI-110); *During*'s alone before, where the prototype draws the boxes (`:2817`). */
+  /** *Semua*: everybody at the forum. `picMembershipId` is then `null`. */
+  @Prop({ type: Boolean, default: false })
+  picAll!: boolean;
+
   @Prop({ type: Boolean, default: false })
   done!: boolean;
 
@@ -42,51 +55,43 @@ export class LeaderMeetingAgendaItem {
 
 export const LeaderMeetingAgendaItemSchema = SchemaFactory.createForClass(LeaderMeetingAgendaItem);
 
-/** The agenda's three sections, each a list of items in the order written. */
-@Schema({ _id: false })
-export class LeaderMeetingAgenda {
-  @Prop({ type: [LeaderMeetingAgendaItemSchema], default: [] })
-  preparation!: LeaderMeetingAgendaItem[];
-
-  @Prop({ type: [LeaderMeetingAgendaItemSchema], default: [] })
-  during!: LeaderMeetingAgendaItem[];
-
-  @Prop({ type: [LeaderMeetingAgendaItemSchema], default: [] })
-  post!: LeaderMeetingAgendaItem[];
-}
-
-export const LeaderMeetingAgendaSchema = SchemaFactory.createForClass(LeaderMeetingAgenda);
-
 /**
- * **One row of the *Action items tracker*** (`:2822-2843`): the six named columns — *Key initiative*, *Success
- * metric*, *Action item*, *PIC*, *Status*, *Remarks / Target* — its place among the rows, and its own version.
+ * **One action item** (P19.22-T8 AC-4; ADR-0276): what is to be done, its PIC (a member, by membership id), its
+ * *tenggat* (an office date), its state, its place, and its own version.
+ *
+ * **Carried over by copy** (ADR-0276): an item not *Selesai* when the next forum is made is copied into it — a new
+ * `itemId`, **the same `lineageId`** — with `fromNumber` the number of the forum its lineage began in (*dari forum #n*).
+ * A write to one copy is passed to the copies of the same lineage in **later** forums only, and a delete removes them
+ * there too, never in an earlier forum.
  */
 @Schema({ _id: false })
 export class LeaderMeetingActionItem {
   @Prop({ type: String, required: true })
   itemId!: string;
 
-  @Prop({ type: String, default: '' })
-  initiative!: string;
+  /** Shared by an item and every copy carried from it: the id the forward sync and the delete follow. */
+  @Prop({ type: String, required: true })
+  lineageId!: string;
 
   @Prop({ type: String, default: '' })
-  metric!: string;
+  text!: string;
 
-  @Prop({ type: String, default: '' })
-  action!: string;
+  /** The PIC's membership `_id`, or `null` for none. Never a name (invariant §2). */
+  @Prop({ type: String, default: null })
+  picMembershipId!: string | null;
 
-  /** Free text, typed by hand (`:2834`). */
-  @Prop({ type: String, default: '' })
-  pic!: string;
+  /** *Tenggat*: an office date, `YYYY-MM-DD`, or `null` for none. */
+  @Prop({ type: String, default: null })
+  dueOn!: string | null;
 
-  @Prop({ type: String, enum: ACTION_STATUSES, default: 'not_planned' })
+  @Prop({ type: String, enum: ACTION_STATUSES, default: 'todo' })
   status!: ActionStatus;
 
-  /** The *Remarks / Target* column (`:2692`, `:2831`, `:2839`). */
-  @Prop({ type: String, default: '' })
-  remarks!: string;
+  /** The number of the forum the lineage began in, on a carried copy; `null` on an item raised in this forum. */
+  @Prop({ type: Number, default: null })
+  fromNumber!: number | null;
 
-  /** The row's place: the rows are served by it, and a reorder writes it and nothing else. */
+  /** The item's place: the items are served by it. */
   @Prop({ type: Number, required: true })
   order!: number;
 
@@ -97,46 +102,17 @@ export class LeaderMeetingActionItem {
 export const LeaderMeetingActionItemSchema = SchemaFactory.createForClass(LeaderMeetingActionItem);
 
 /**
- * **A *Monthly Target* cell, typed as a rate per unit** (ADR-0175 §4, P18.9-T1 AC-10; UI-008), versioned on its own:
- * `rate` in the row's unit — IDR minor units per unit for *APE*, a count per unit for the others — or `null` for none;
- * `typed`, a target typed as text before rates that migration `0043` could not read as one, shown as typed until an
- * editor enters a rate (AC-11), `null` otherwise. The target drawn is `rate × # of units`, the meeting's own.
- */
-export interface MonthlyTargetCell {
-  rate: number | null;
-  typed: string | null;
-  version: number;
-}
-
-/**
- * **A cell typed as free text before rates** (ADR-0129 §5, reversed by ADR-0175 §4): what migration `0043` reads and
- * rewrites, and what a *New AA* target keeps — it is never migrated, and no table draws it (AC-6, AC-11).
- */
-export interface TextTargetCell {
-  value: string;
-  version: number;
-}
-
-/** An editor as the freeze wrote them (D-coeditors): ids and how they stood, never a name (invariant §2). */
-export interface FrozenEditor {
-  membershipId: string;
-  as: EditorStanding;
-  rungCode: string;
-  /** Tagged *Core Leader* at the freeze: what *"{n} core leaders tagged"* counts, the Owner aside. */
-  tagged: boolean;
-}
-
-/**
- * **A meeting of the office's leaders** — a numbered *Strategic Check-in* (D-forum-model, ADR-0129 to ADR-0132;
- * `functional/leader-forum.md`, *The record*).
+ * **A forum of the office's core leaders** — *Forum #n*, every two weeks (P19.22-T8; ADR-0276, amending ADR-0129 to
+ * ADR-0132; `functional/leader-forum.md`, *The record*).
  *
  * The office's, `kpmId` leading every index, read and written only through `LeaderMeetingRepository`, and
- * soft-deleted. **Saved field by field**: each agenda item, action item and *Monthly Target* cell carries its own
- * `version`, and the head's `version` covers the title and the date alone, so two leaders writing different rows
- * both land. *Upcoming* and *Completed* are derived from `date` in the office's calendar, never stored.
+ * soft-deleted. **Saved field by field**: each agenda line and action item carries its own `version`, and the head's
+ * `version` covers its date and time alone, so two leaders writing different lines both land. *Akan datang* and
+ * *Selesai* are derived from `date` in the office's calendar, never stored.
  *
- * **Not stored, ever**: an attendee list, a notes field, a per-meeting list of co-editors and a lock (`lockedAt`,
- * struck by ADR-0132) — the tag is the list, and the minutes stay editable.
+ * **Left on a meeting made before P19.22 and read by nothing** (ADR-0276): its `monthlyTargets`, the scorecard and the
+ * editors written at its freeze (`frozenScorecard`, `frozenAt`, `frozenCoeditors`), and the minutes as they were before
+ * migration `0076` (`legacyMinutes`). The schema does not name them, so no write touches them.
  */
 @Schema({ ...configSchemaOptions, collection: 'leaderMeetings' })
 export class LeaderMeeting {
@@ -150,59 +126,39 @@ export class LeaderMeeting {
   @Prop({ type: Number, required: true, min: 1 })
   number!: number;
 
-  /** Plain text, trimmed, 1 to `LEADER_MEETING_LIMITS.titleMax` characters. */
-  @Prop({ type: String, required: true })
+  /** Kept from before P19.22, when a meeting had a title; `''` on a forum made since. The screens say *Forum #n*. */
+  @Prop({ type: String, default: '' })
   title!: string;
 
   /** `YYYY-MM-DD`, an office date in `kpms.timezone` — never an instant. */
   @Prop({ type: String, required: true })
   date!: string;
 
-  @Prop({ type: LeaderMeetingAgendaSchema, default: () => ({ preparation: [], during: [], post: [] }) })
-  agenda!: LeaderMeetingAgenda;
+  /** `HH:MM`, office time (P19.22-T8 AC-1); `null` on a meeting made before it, drawn with its date alone. */
+  @Prop({ type: String, default: null })
+  time!: string | null;
+
+  @Prop({ type: [LeaderMeetingAgendaItemSchema], default: [] })
+  agendaItems!: LeaderMeetingAgendaItem[];
 
   @Prop({ type: [LeaderMeetingActionItemSchema], default: [] })
   actionItems!: LeaderMeetingActionItem[];
 
   /**
-   * The *Monthly Target* cells typed, keyed by the scorecard's row — the five taking a rate (`TARGET_ROW_KEYS`), and a
-   * *New AA* cell typed before it left the table, kept as it was (P18.9-T1 AC-6). A row never typed is absent, and
-   * served with no rate at version 0. Never frozen: it is typed, and stays editable.
-   */
-  @Prop({ type: Object, default: () => ({}) })
-  monthlyTargets!: Partial<Record<string, MonthlyTargetCell | TextTargetCell>>;
-
-  /**
-   * The first write in the agenda, the tracker or a target after the meeting was made — **what "nobody has
-   * written in" means** (ADR-0130 §5). A move or a share is not writing.
+   * The first write in the agenda or the action items after the forum was made — **what "nobody has written in"
+   * means** (ADR-0130 §5). A move, a share or a carried copy arriving from an earlier forum is not writing.
    */
   @Prop({ type: Date, default: null })
   writtenAt!: Date | null;
 
-  /**
-   * The scorecard as computed at the freeze (ADR-0129 §7), without the typed targets — its *AS OF* with it
-   * (`frozenScorecard.asOf`, P18.9-T1 AC-13); `null` while live. **Read tolerantly** (`scorecard-record.ts`): one frozen
-   * before 2026-10-28 has five columns, *New AA* and no *AS OF*, and is never recomputed (AC-19).
-   */
-  @Prop({ type: Object, default: null })
-  frozenScorecard!: Record<string, unknown> | null;
-
-  /** The first read once *Completed* writes it, in one write that lands only where none has. */
-  @Prop({ type: Date, default: null })
-  frozenAt!: Date | null;
-
-  /** Each editor at the freeze (D-coeditors): the meeting's record of who could edit it then. Grants nothing. */
-  @Prop({ type: Object, default: null })
-  frozenCoeditors!: FrozenEditor[] | null;
-
-  /** The head's version: a move of the title or the date bumps it, nothing else does. */
+  /** The head's version: a move of the date or the time bumps it, nothing else does. */
   @Prop({ type: Number, default: 1 })
   version!: number;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 
-  /** Membership ids, never a user id or a name (invariant §2). */
+  /** Membership ids, never a user id or a name (invariant §2); `null` for the Super Admin inside the KPM. */
   @Prop({ type: String, default: null })
   createdBy!: string | null;
 
@@ -219,3 +175,5 @@ LeaderMeetingSchema.index({ kpmId: 1, date: -1 });
  * is refused by the index and numbered again. A deleted meeting leaves it, so its number may be given again.
  */
 LeaderMeetingSchema.index({ kpmId: 1, number: 1 }, { unique: true, partialFilterExpression: { deletedAt: null } });
+/** A lineage's copies in later forums: the forward sync and the delete (ADR-0276). */
+LeaderMeetingSchema.index({ kpmId: 1, 'actionItems.lineageId': 1 });

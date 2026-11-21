@@ -1,12 +1,9 @@
 import mongoose from 'mongoose';
-import { RequestContext } from '@/common/context/request-context';
-import { MissingTenantContextError } from '@/common/tenancy/tenant-scope.error';
 import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
-import { KPM_A, KPM_B, ROSTER_NOW } from '../../../test/coaching-office';
+import { KPM_B, ROSTER_NOW } from '../../../test/coaching-office';
 import { buildReportingOffice, type ReportingOffice } from '../../../test/reporting-office';
-import { OfficePhones } from './office-phones';
 
 const M = 1_000_000 * 100;
 
@@ -16,9 +13,12 @@ const M = 1_000_000 * 100;
  * Every report resolves its office from the reader's membership and reads every collection through the
  * tenant-scoped repository, so no route takes an id that could name another office — there is no 404 to give,
  * and the proof is that **nothing of 0555 reaches 0417's figures**: a heavy dose of 0555 records (members,
- * production, sessions, logging, leads, goals, a target) changes no figure of 0417's Overview, analytics or
- * directory, and 0555's Owner is answered 0555 alone. The platform's three named cross-office reads refuse anybody
- * but a Super Admin, as an unscoped read must, and so does the platform's service before it reads anything.
+ * production, sessions, logging, leads, goals, a target) changes no figure of 0417's Overview — its people, usage,
+ * coaching, production and *Performa vs target* (P19.19) — or directory, and 0555's Owner is answered 0555 alone.
+ *
+ * *Changed 2026-11-20:* the platform's three named cross-office reads (`adoptionPerOfficeAcrossTenants`,
+ * `signInsPerOfficeAcrossTenants`, `distinctAccountsAcrossTenants`) went with `/admin/analytics`, which read them
+ * (P19.23-T1; ADR-0277), and their test with them.
  */
 describe('the Owner’s reporting, isolated (invariant §1)', () => {
   let wired: ReturnType<typeof configModule>;
@@ -39,9 +39,8 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
     const owner = office.as('OWNER');
     return {
       overview: await wired.kpmOverview.read(owner),
-      notLogged: await wired.kpmOverview.notLogged(owner),
-      thisMonth: await wired.kpmAnalytics.read(owner, { period: 'this_month' }),
-      previousMonth: await wired.kpmAnalytics.read(owner, { period: 'previous_month' }),
+      performance: await wired.kpmOverview.performance(owner),
+      august: await wired.kpmOverview.performance(owner, { month: '2026-08' }),
       directory: await wired.directoryColumns.decorate(owner, {
         members: [{ membershipId: office.id.RINA, status: 'active' } as never, { membershipId: office.id.TARI, status: 'active' } as never],
         nextCursor: null, counts: { directory: 0, pending: 0, removed: 0 },
@@ -88,97 +87,41 @@ describe('the Owner’s reporting, isolated (invariant §1)', () => {
       closingRatePct: 30, savedAt: ROSTER_NOW, savedByMembershipId: id, version: 1, deletedAt: null,
       cascadeMapping: { leadsCode: 'LEADS_CONTACTED', appointmentsCode: 'SELL_PRESENTATION', closingsCode: 'SELL_SUBMISSION' },
     })));
-    await wired.kpmOverview.setRecruitTarget(office.ownerOfB(), { month: '2026-09', target: 99 });
+    await wired.abGroupTargets.set(office.ownerOfB(), bAb, { month: '2026-09', activeAgentTarget: 99, rekrutTarget: 99 });
 
     const after = await snapshot();
     expect(after).toEqual(before);
-    expect(after.overview.recruitment.target).toBeNull();
+    expect(after.performance.total).toMatchObject({ activeAgentTarget: 0, rekrutTarget: 0 });
   }, 60_000);
 
-  it('P18-T1 AC-12 0555’s Owner is answered 0555 alone, and writes 0555’s target alone', async () => {
+  it('P19.19-T1 0555’s Owner is answered 0555 alone, and writes 0555’s targets alone', async () => {
     const b = office.ownerOfB();
     const overview = await wired.kpmOverview.read(b);
     expect(overview.office.code).toBe('0555');
-    expect(overview.composition.total).toBe(22);
-    // P19.3-T1 AC-3: August's upload of 0555 — 21 rows recruiting 1 each — and never its five leads closed won.
-    expect(overview.recruitment).toMatchObject({ target: 99, closedLastMonth: 21, expectedToClose: 15 });
-    // P19.3-T1 AC-1: 0555's own September file, its 21 producers over its 22 members.
-    expect(overview.engagement.activeThisMonth).toMatchObject({ count: 21, of: 22, month: '2026-09' });
-    const analytics = await wired.kpmAnalytics.read(b);
-    expect(analytics.agencies.map((a) => a.head.membershipId)).toEqual([office.id.B_AB]);
-    const ids = new Set(Object.values(office.id));
-    const everyId = JSON.stringify([overview, analytics]).match(/[0-9a-f]{24}/g) ?? [];
+    expect(overview.usage.total.of).toBe(22);
+    // 0555's own September file: its root AB and twenty members at Rp 500 M each.
+    expect(overview.production.months[5]).toEqual({ month: '2026-09', apeMinor: 21 * 500 * M });
+    const performance = await wired.kpmOverview.performance(b);
+    expect(performance.total).toMatchObject({ activeAgentTarget: 99, rekrutTarget: 99, actual: { activeAgents: 21 } });
+    const everyId = JSON.stringify([overview, performance]).match(/[0-9a-f]{24}/g) ?? [];
     const of0417 = ['OWNER', 'ADMIN', 'AGUS', 'INDAH', 'DIMAS', 'SARI', 'RINA', 'BUDI', 'NINA', 'DODI', 'DEWI', 'LUKAS', 'TARI']
       .map((who) => office.id[who as keyof typeof office.id]);
-    expect(everyId.filter((id) => ids.has(id) && of0417.includes(id))).toEqual([]);
-    expect(await db().collection('kpmRecruitTargets').find({}, { projection: { _id: 0, kpmId: 1, target: 1 } }).toArray())
-      .toEqual([{ kpmId: KPM_B, target: 99 }]);
+    expect(everyId.filter((id) => of0417.includes(id))).toEqual([]);
+    expect(await db().collection('abGroupTargets').find({}, { projection: { _id: 0, kpmId: 1, activeAgentTarget: 1 } }).toArray())
+      .toEqual([{ kpmId: KPM_B, activeAgentTarget: 99 }]);
   });
 
-  it('P18.9-T3 AC-5, AC-10 every AB on a board is the reader’s office’s own; another office’s AB who leads nobody is never listed', async () => {
-    // 0555 gains an AB under its root who leads nobody: a *No team* row of 0555's.
-    const lonely = new mongoose.Types.ObjectId();
-    await db().collection('memberships').insertOne({
-      _id: lonely, kpmId: KPM_B, userId: String(new mongoose.Types.ObjectId()), agentCode: 'BLONE', agentSeq: 500, leaderCode: 'BLONE001',
-      orgLevelId: 'x', orgLevelCode: 'AB', role: 'ab', leaderId: office.id.B_AB, ancestorIds: [office.id.B_AB], depth: 1,
-      status: 'active', joinedAt: new Date('2026-01-05T02:00:00Z'), deletedAt: null,
-    });
-
-    const of0417 = (await wired.kpmOverview.read(office.as('OWNER'))).coaching.leaderboard;
-    expect(of0417.map((row) => row.membershipId).sort())
-      .toEqual([office.id.OWNER, office.id.ADMIN, office.id.AGUS, office.id.PEER_AB].sort());
-    expect(of0417.find((row) => !row.leads)!.membershipId).toBe(office.id.ADMIN);
-
-    const of0555 = (await wired.kpmOverview.read(office.ownerOfB())).coaching.leaderboard;
-    expect(of0555.map((row) => [row.membershipId, row.leads, row.pct])).toEqual([
-      [office.id.B_AB, true, expect.any(Number)], [String(lonely), false, null],
-    ]);
-    // The analytics' served shares stay each office's own: 0555's twenty-odd producers reach none of 0417's rows.
-    const analytics = await wired.kpmAnalytics.read(office.as('OWNER'));
-    expect(analytics.total).toMatchObject({ activeAgents: 5, activePct: 31, manpower: { total: 16 } });
-  });
-
-  it('P18-T1 AC-12 the target’s repository refuses a read or a write with no office in the context', async () => {
-    const nobody = RequestContext.platform('root');
-    await expect(wired.recruitTargets.standingFor(nobody, '2026-09')).rejects.toBeInstanceOf(MissingTenantContextError);
-    await expect(wired.recruitTargets.setTarget(nobody, '2026-09', 1)).rejects.toBeInstanceOf(MissingTenantContextError);
-  });
-
-  it('P18-T8 AC-2 the platform’s three named reads refuse anybody but a Super Admin, and read every office for one', async () => {
-    const owner = office.as('OWNER');
-    const month = { start: new Date('2026-08-31T17:00:00Z'), endExclusive: new Date('2026-09-30T17:00:00Z') };
-    await expect(wired.memberships.adoptionPerOfficeAcrossTenants(owner, month)).rejects.toBeInstanceOf(MissingTenantContextError);
-    await expect(wired.memberships.signInsPerOfficeAcrossTenants(owner, { days7: month.start, days30: month.start }))
-      .rejects.toBeInstanceOf(MissingTenantContextError);
-    await expect(wired.memberships.distinctAccountsAcrossTenants(owner, [], { days7: month.start, days30: month.start }))
-      .rejects.toBeInstanceOf(MissingTenantContextError);
-    // No office listed: nobody counted, never a failure.
-    const none = await wired.memberships.distinctAccountsAcrossTenants(RequestContext.platform('root'), [], { days7: month.start, days30: month.start });
-    expect([[...none.companies], none.platform]).toEqual([[], { members: 0, signedIn7d: 0, signedIn30d: 0 }]);
-    // The service asks first, before anything is read: a member, and the operator inside a support session of either kind.
-    const supported = (readOnly: boolean) => new RequestContext(owner.userId, 'none', owner.membership, 'u-support', null, false, readOnly);
-    for (const ctx of [owner, supported(true), supported(false)]) {
-      await expect(wired.platformAnalytics.read(ctx)).rejects.toMatchObject({ code: 'PERM_DENIED' });
-    }
-    const platform = RequestContext.platform('root');
-    const adoption = await wired.memberships.adoptionPerOfficeAcrossTenants(platform, month);
-    expect(new Set(adoption.byRung.map((r) => r.kpmId))).toEqual(new Set([KPM_A, KPM_B]));
-    expect(adoption.joined.get(KPM_B)).toBe(20);
-    expect(adoption.joined.get(KPM_A)).toBeUndefined();
-  });
-
-  it('P19.3-T2 AC-2 a WhatsApp number is read only for a member of the reader’s office — another’s, a malformed id or nobody reads none', async () => {
-    const phones = new OfficePhones(wired.memberships, wired.users as never);
+  it('P19.19-T1 a WhatsApp number on the Overview is only ever a member of the reader’s office’s', async () => {
     const userId = new mongoose.Types.ObjectId(String(
       (await db().collection('memberships').findOne({ _id: new mongoose.Types.ObjectId(office.id.B_AGENT) }))!.userId,
     ));
     const { phone } = (await db().collection('users').findOne({ _id: userId }))!;
     await db().collection('users').updateOne({ _id: userId }, { $set: { phone: '+6281299990001' } });
     try {
-      expect(await phones.of(office.ownerOfB(), [office.id.B_AGENT])).toEqual(new Map([[office.id.B_AGENT, '+6281299990001']]));
-      expect(await phones.of(office.as('OWNER'), [office.id.B_AGENT])).toEqual(new Map());
-      expect(await phones.of(office.as('OWNER'), ['not-an-id'])).toEqual(new Map());
-      expect(await phones.of(office.as('OWNER'), [])).toEqual(new Map());
+      const of0555 = (await wired.kpmOverview.read(office.ownerOfB())).people;
+      expect(of0555.find((p) => p.membershipId === office.id.B_AGENT)?.phone).toBe('+6281299990001');
+      const of0417 = JSON.stringify(await wired.kpmOverview.read(office.as('OWNER')));
+      expect(of0417).not.toContain('+6281299990001');
     } finally {
       await db().collection('users').updateOne({ _id: userId }, phone === undefined ? { $unset: { phone: '' } } : { $set: { phone } });
     }

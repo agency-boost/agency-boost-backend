@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { canOpenMember, officeStewardKind, stewardsWholeOffice } from '@/common/auth/office-steward';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
@@ -15,7 +16,7 @@ import { MembershipRepository } from './membership.repository';
 import { HierarchyRole } from './membership.schema';
 import { ORG_MESSAGES, ORG_REFUSALS } from './org.messages';
 import { scopeFor } from '@/modules/rbac/permissions';
-import { visibleTo } from './reader-visibility';
+import { openableTo, visibleTo } from './reader-visibility';
 
 export interface OrgTreeNode {
   membershipId: string;
@@ -58,6 +59,12 @@ export interface OrgTreeNode {
   todayActivityCount: number;
   /** **Their profile photo**, when they have one (UI-059; `users.avatarUrl`, set by *Profil saya*, UI-111). */
   photoUrl: string | null;
+  /**
+   * **This reader may open them** (ADR-0268 §1; P19.17 F2): always, but for a core leader on the KPM's Org tree
+   * (`view=kpm`), who sees every row and opens only themselves and their downline — the rest are drawn muted, without a
+   * chevron, and `GET /members/:id` answers them `404`.
+   */
+  openable: boolean;
 }
 
 /**
@@ -140,16 +147,27 @@ export class OrgTreeService {
    *   indistinguishable. An Agent, whose grant is `own`, is refused **403**: nobody else's tree is theirs to read.
    * - **Nothing is written**, as the tree records nothing, and nothing in the view writes.
    */
-  async read(ctx: RequestContext, forId?: string): Promise<OrgTree> {
+  async read(ctx: RequestContext, forId?: string, view?: 'kpm'): Promise<OrgTree> {
     const subject = forId === undefined || forId === ctx.membershipId ? null : await this.subjectOf(ctx, forId);
     const self = subject ?? ctx.membershipId;
+    /*
+     * ADR-0268 §1: **a core leader has two trees** — their Group Tree (their own team, the default) and the KPM's Org tree
+     * (`view=kpm`), the whole KPM with only their downline openable. Everybody else's reach is one tree, as before.
+     */
+    const coreLeader = officeStewardKind(ctx) === 'core_leader';
+    const reach = coreLeader && view !== 'kpm' ? openableTo(ctx, 'org_tree:read') : visibleTo(ctx, 'org_tree:read');
 
+    /*
+     * **Never a test account** (P19.20-T3 AC-1; ADR-0267 §1: *akun tes tidak dihitung*) — not drawn and not counted —
+     * **but the tree's own self**, whoever they are: a tree without its root is no tree (a demo account reading its own).
+     */
+    const counted = { $or: [{ testAccount: { $ne: true } }, { _id: self ?? null }] };
     const rows = await this.members.find(
       ctx,
       subject === null
-        ? { ...visibleTo(ctx, 'org_tree:read'), status: 'active' }
+        ? { $and: [{ ...reach, status: 'active' }, counted] }
         // Below a member the reader may see, inside the reader's reach by construction: every reach is downline-closed.
-        : { $or: [{ _id: subject }, { ancestorIds: subject }], status: 'active' },
+        : { $and: [{ $or: [{ _id: subject }, { ancestorIds: subject }], status: 'active' }, counted] },
       { sort: { agentSeq: 1 } },
     );
 
@@ -227,6 +245,7 @@ export class OrgTreeService {
         isSelf: id === self,
         todayActivityCount: today.get(id) ?? 0,
         photoUrl: photos.get(named.get(row.userId)?.avatarUrl ?? '') ?? null,
+        openable: !coreLeader || canOpenMember(ctx, { membershipId: id, ancestorIds: row.ancestorIds }),
       });
     }
 
@@ -241,10 +260,11 @@ export class OrgTreeService {
 
   /** `for`'s member, within the reader's reach and active, or 404; an Agent's `own` grant reaches no other tree (403). */
   private async subjectOf(ctx: RequestContext, forId: string): Promise<string> {
-    const office = ctx.membership?.isKpmOwner === true || ctx.membership?.isKpmAdmin === true;
+    // The Super Admin inside the KPM is its Owner (ADR-0268 §3); a core leader opens their own downline's trees (§1).
+    const office = stewardsWholeOffice(ctx);
     const scope = scopeFor(ctx, 'org_tree:read');
     if (!office && (scope === null || scope === 'own')) throw new PermissionDeniedException('org_tree:read', { for: forId });
-    const found = await this.members.findOne(ctx, { $and: [{ _id: forId, status: 'active' }, visibleTo(ctx, 'org_tree:read')] });
+    const found = await this.members.findOne(ctx, { $and: [{ _id: forId, status: 'active' }, openableTo(ctx, 'org_tree:read')] });
     if (!found) throw new NotFoundException('Member');
     return String(found._id);
   }

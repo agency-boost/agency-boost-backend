@@ -8,7 +8,7 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { Fields, refuseWith } from '@/common/validation/fields';
 import { VALIDATION_REFUSALS } from '@/common/validation/validation.messages';
 import {
-  EVENT_FEEDBACK_TEXT_MAX, NPS, type EventAudienceScope, type EventIssuer, type EventPhase,
+  EVENT_DECLINE_REASON_MAX, EVENT_FEEDBACK_TEXT_MAX, NPS, type EventAudienceScope, type EventIssuer, type EventPhase,
 } from '@/domain/constants';
 import { isNpsScore } from '@/domain/metrics/event-nps';
 import { AuditService } from '@/modules/audit/audit.service';
@@ -64,6 +64,8 @@ export interface GuestEvent {
   ended: boolean;
   me: {
     rsvp: 'going' | 'cancelled' | null;
+    /** *Tidak ikut*'s reason as the member gave it (P19.25-T1 AC-3; ADR-0281 §2); `null` with none, or while not cancelled. */
+    declineReason: string | null;
     claimed: boolean;
     feedback: MyEventFeedback | null;
   };
@@ -150,7 +152,7 @@ export class EventGuestService {
     // Only a row not yet *going*: two taps at once change it once, and the second writes no audit row.
     const changed = await this.rsvps.writeWhen(
       ctx, String(event._id), me, { rsvpStatus: { $ne: 'going' } },
-      { rsvpStatus: 'going', rsvpAt: this.clock.now(), cancelledAt: null }, true,
+      { rsvpStatus: 'going', rsvpAt: this.clock.now(), cancelledAt: null, declineReason: null }, true,
     );
     if (changed) {
       await this.record(ctx, 'event.rsvp', event, me, changed.id,
@@ -160,24 +162,30 @@ export class EventGuestService {
   }
 
   /**
-   * `POST /events/:eventId/rsvp/cancel` — *Tidak ikut*; idempotent; refused from `endsAt`.
+   * `POST /events/:eventId/rsvp/cancel` — *Tidak ikut*, **with the reason the member gives** (P19.25-T1 AC-3; ADR-0281 §2:
+   * the answer to the invite); idempotent; refused from `endsAt`.
    *
    * **From going, or from no answer at all** (UI V1, UI-108: *Ikut* and *Tidak ikut* both on the card): a member who
    * never RSVP'd says they are not coming, and a row is made to hold it, as *Join* makes one. Until UI V1 it changed
-   * only a row still *going*, since the only way to it was the modal's *Cancel RSVP*.
+   * only a row still *going*, since the only way to it was the modal's *Cancel RSVP*. **A new reason on a row already
+   * cancelled replaces the old one**; the same answer twice changes nothing and writes no audit row. The audit row says
+   * whether a reason was given, never its words (PDP).
    */
-  async cancelRsvp(ctx: RequestContext, eventId: string): Promise<GuestEvent> {
+  async cancelRsvp(ctx: RequestContext, eventId: string, body: unknown = {}): Promise<GuestEvent> {
     const me = this.member(ctx);
+    const reason = checkDeclineReason(body);
     const event = await this.visible(ctx, eventId, me);
     this.refuseOnceEnded(event);
-    // Only a row not yet *cancelled*: two taps at once change it once, and the second writes no audit row.
+    // Only a row not yet *cancelled*, or cancelled with another reason: two taps at once change it once, and the second
+    // writes no audit row.
     const changed = await this.rsvps.writeWhen(
-      ctx, String(event._id), me, { rsvpStatus: { $ne: 'cancelled' } },
-      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now() }, true,
+      ctx, String(event._id), me, { $or: [{ rsvpStatus: { $ne: 'cancelled' } }, { declineReason: { $ne: reason } }] },
+      { rsvpStatus: 'cancelled', cancelledAt: this.clock.now(), declineReason: reason }, true,
     );
     if (changed) {
       await this.record(ctx, 'event.rsvp_cancelled', event, me, changed.id,
-        { rsvpStatus: changed.before?.rsvpStatus ?? null }, { rsvpStatus: 'cancelled' });
+        { rsvpStatus: changed.before?.rsvpStatus ?? null, reasonGiven: Boolean(changed.before?.declineReason) },
+        { rsvpStatus: 'cancelled', reasonGiven: reason !== null });
     }
     return this.fresh(ctx, event, me);
   }
@@ -194,7 +202,7 @@ export class EventGuestService {
     this.refuseOnceEnded(event);
     const changed = await this.rsvps.writeWhen(
       ctx, String(event._id), me, { rsvpStatus: { $ne: null } },
-      { rsvpStatus: null, rsvpAt: null, cancelledAt: null }, false,
+      { rsvpStatus: null, rsvpAt: null, cancelledAt: null, declineReason: null }, false,
     );
     if (changed) {
       // No upsert: the row was there, and its answer was not none, or the condition would not have matched it.
@@ -351,6 +359,7 @@ export class EventGuestService {
       ended: facts.ended,
       me: {
         rsvp: rsvp?.rsvpStatus ?? null,
+        declineReason: rsvp?.rsvpStatus === 'cancelled' ? rsvp.declineReason ?? null : null,
         claimed: Boolean(rsvp?.claimedAt),
         feedback: answer && readsOwnAnswer
           ? { score: answer.score, why: answer.why, improve: answer.improve, submittedAt: answer.submittedAt.toISOString() }
@@ -391,4 +400,15 @@ export function checkFeedback(body: unknown): { score: number; why: string; impr
   }
   if (violations.length > 0) refuseWith(violations);
   return { score: score as number, why: why ?? '', improve: improve ?? '' };
+}
+
+/**
+ * *Tidak ikut*'s body (P19.25-T1 AC-3; ADR-0281 §2): `{ reason?: string }`, trimmed, at most `EVENT_DECLINE_REASON_MAX`;
+ * none, or only spaces, is `null` — a member may decline without saying why. Anything else in the body is refused.
+ */
+export function checkDeclineReason(body: unknown): string | null {
+  const f = new Fields(body ?? {}, ['reason']);
+  const reason = f.note('reason', { max: EVENT_DECLINE_REASON_MAX });
+  if (f.violations.length > 0) refuseWith([...f.violations]);
+  return reason ?? null;
 }

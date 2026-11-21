@@ -1,4 +1,6 @@
 import { addDays, calendarMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
+import type { activeAgentsIn } from '@/modules/production/active-agents';
+import type { OfficialApe } from '@/modules/production/official-ape';
 
 /*
  * **The Unit Dashboard's UI V1 figures** (Phase 18.11 T4; `functional/unit-dashboard.md`, *UI V1 (2026-10-30)*): the
@@ -76,11 +78,28 @@ export interface RosterMember {
 }
 
 /**
- * **The roster's order and its two scopes** (UI-001's *Unit | Group*; D-16): ***Unit*** is the head and their direct
- * agents who lead nobody — the rows of *Your Unit*; ***Group*** is everybody in the view, in the order the roster draws
- * them: the Unit, then each unit below the head — the head's own reports first, then those hung from it (ADR-0249 §2) —
- * its head, its members who lead nobody, then the units nested in it; then *Belum punya leader*. Each level A to Z by
- * name, ties by id — the same order `UnitDashboardService.read` draws.
+ * **The roster's order within a level** (P19.18-T1 AC-6; ADR-0271 §4; the brief of 19 November 2026, part A: *"Order
+ * inside every unit and team: the AB first, then their AAB(s), then the other agents"*): by class — `ab`, then `aab`, then
+ * everybody else — then A to Z by name, ties by id. It was A to Z alone.
+ */
+export const CLASS_ORDER: Readonly<Record<string, number>> = { ab: 0, aab: 1 };
+export const classRank = (role: string): number => CLASS_ORDER[role] ?? 2;
+
+/**
+ * **Who sits in a unit's own rows** (ADR-0271 §2, `DIRECT_UNIT`): a direct report who leads nobody and is no AB — an
+ * agent, or an AAB with no team of their own, who sits after the AB. An AB is always a unit of their own, and so is
+ * somebody hung from the head (`attached`). It was the agents alone: an AAB with no team was a unit of one.
+ */
+export const inOwnRows = (m: { role: string; attached?: boolean }, leads: boolean): boolean =>
+  !m.attached && m.role !== 'ab' && !leads;
+
+/**
+ * **The roster's order and its two scopes** (UI-001's *Unit | Group*; D-16): ***Unit*** is `DIRECT_UNIT` — the head and
+ * their direct reports who lead nobody and are no AB (`inOwnRows`) — the rows of *Your Unit*; ***Group*** is everybody in
+ * the view, in the order the roster draws them: the Unit, then each unit below the head — the head's own reports first,
+ * then those hung from it (ADR-0249 §2) — its head, its members who lead nobody, then the units nested in it; then *Belum
+ * punya leader*. Each level AB → AAB → the rest, then A to Z by name, ties by id (`classRank`) — the same order
+ * `UnitDashboardService.read` draws.
  */
 export function rosterScopes(
   headId: string, members: readonly RosterMember[], nameOf: (id: string) => string,
@@ -91,10 +110,10 @@ export function rosterScopes(
     if (m.leaderId === null) unled.push(m);
     else below.set(m.leaderId, [...(below.get(m.leaderId) ?? []), m]);
   }
-  const aToZ = (a: RosterMember, b: RosterMember) =>
-    nameOf(a.membershipId).localeCompare(nameOf(b.membershipId)) || a.membershipId.localeCompare(b.membershipId);
-  for (const level of below.values()) level.sort(aToZ);
-  unled.sort(aToZ);
+  const order = (a: RosterMember, b: RosterMember) => classRank(a.role) - classRank(b.role)
+    || nameOf(a.membershipId).localeCompare(nameOf(b.membershipId)) || a.membershipId.localeCompare(b.membershipId);
+  for (const level of below.values()) level.sort(order);
+  unled.sort(order);
   const leads = (m: RosterMember) => below.has(m.membershipId);
   const rowsOf = (m: RosterMember): string[] => {
     const children = below.get(m.membershipId) ?? [];
@@ -105,8 +124,20 @@ export function rosterScopes(
     ];
   };
   const direct = below.get(headId) ?? [];
-  const inUnit = (c: RosterMember) => !c.attached && c.role === 'agent' && !leads(c);
+  const inUnit = (c: RosterMember) => inOwnRows(c, leads(c));
   const unit = [headId, ...direct.filter(inUnit).map((c) => c.membershipId)];
   const units = [...direct.filter((c) => !inUnit(c) && !c.attached), ...direct.filter((c) => c.attached === true)];
   return { unit, group: [...unit, ...units.flatMap(rowsOf), ...unled.map((m) => m.membershipId)] };
+}
+
+/**
+ * **The month cells `activeAgentsIn` reads, through the official port** (ADR-0195 §5; P19.18-T1 AC-3, T3 AC-1): the
+ * office's file, imported or corrected — never a member's estimate. `OfficialApe` answers them beside the year to date,
+ * from the same one read; the office's months as it answers them.
+ */
+export function officialCells(production: OfficialApe): Parameters<typeof activeAgentsIn>[0] {
+  return {
+    monthCellsFor: async (ctx, ids, range) => (await production.monthCellsAndYearToDateFor(ctx, ids, range)).cells,
+    officeMonths: (ctx, range) => production.officeMonths(ctx, range),
+  };
 }

@@ -5,7 +5,7 @@ import { DomainException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
 import type { Sentence } from '@/common/i18n/sentence';
 import {
-  DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION, SUBSCRIPTION_PLANS, type SubscriptionPlan,
+  BILLING, DEFAULT_TENANT_TIMEZONE, SUBSCRIPTION, SUBSCRIPTION_PLANS, type SubscriptionPlan,
 } from '@/domain/constants';
 import type { KpmSubscription } from './kpm.schema';
 import { TENANTS_REFUSALS } from './tenants.messages';
@@ -55,12 +55,58 @@ export function subscriptionStateOf(
   );
 }
 
-/** Refused, to a member and to an outsider alike: an ended office that is not kept active. */
+/** An office date `days` days on (or back), on the calendar — `YYYY-MM-DD` in, `YYYY-MM-DD` out. */
+export function addOfficeDays(date: string, days: number): string {
+  return DateTime.fromFormat(date, 'yyyy-MM-dd', { zone: 'utc' }).plus({ days }).toFormat('yyyy-MM-dd');
+}
+
+/**
+ * **The last day of the grace** (ADR-0279 §5; P19.23-T5 AC-5): the end date plus `BILLING.GRACE_DAYS` (7). Its members
+ * are still served through it; on the next office day the daily run suspends the KPM.
+ */
+export function graceEndsOn(endDate: string): string {
+  return addOfficeDays(endDate, BILLING.GRACE_DAYS);
+}
+
+/**
+ * **Past the grace** (ADR-0279 §5, amending ADR-0112 §3): ended, not kept active, and today is after the grace's last
+ * day. What the daily run suspends; and, until it has run, what the request path refuses by.
+ */
+export function isPastGraceOn(
+  subscription: Pick<KpmSubscription, 'endDate' | 'keepActiveAfterEnd'> | null | undefined,
+  today: string,
+): boolean {
+  return subscriptionStateOn(subscription, today) === 'ended' && today > graceEndsOn(subscription!.endDate!);
+}
+
+/**
+ * Refused, to a member and to an outsider alike: an ended office that is not kept active, **once its seven days of grace
+ * have passed** (ADR-0279 §5). Through the grace its members are served as before, while AgencyBoost renews it; on the
+ * eighth day the daily run suspends it (*KPM ditangguhkan*), and this refuses it in the minutes before that run.
+ */
 export function isEnded(
   kpm: { subscription?: KpmSubscription | null; timezone?: string | null },
   clock: Clock,
 ): boolean {
-  return subscriptionStateOf(kpm, clock) === 'ended';
+  return isPastGraceOn(kpm.subscription ?? null, clock.localDateFor(kpm.timezone ?? DEFAULT_TENANT_TIMEZONE));
+}
+
+/**
+ * **A new KPM's trial** (ADR-0279 §4; P19.23-T5 AC-3): 30 office days from its creation day, that day the first — so
+ * created on 1 December, its last day is 30 December. No plan, no price and no leader limit; the trial ends as any
+ * period does, then the grace, then the suspension.
+ */
+export function trialSubscription(today: string): KpmSubscription {
+  return {
+    startDate: today,
+    endDate: addOfficeDays(today, BILLING.TRIAL_DAYS - 1),
+    pricePerLeaderMinor: null,
+    currency: 'IDR',
+    maxLeaders: null,
+    keepActiveAfterEnd: false,
+    plan: null,
+    trial: true,
+  };
 }
 
 /** What `PATCH /admin/tenants/:kpmId/subscription` takes: every field present, nulls allowed but one. */

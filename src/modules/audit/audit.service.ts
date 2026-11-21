@@ -137,6 +137,41 @@ export class AuditService {
   }
 
   /**
+   * **The platform console's read across offices, by name** (P19.23-T6 AC-1; ADR-0279): one batch, newest first, after a
+   * row — as `findNewestFirst`, but with **no scope of its own**: `reach` says which rows across every office are read,
+   * and only `AuditReadService` calls it, for the Super Admin's *Semua KPM* — the platform's log and every Super Admin
+   * change inside a KPM. The named cross-tenant method, never an absent scope (invariant §1).
+   */
+  async findNewestFirstAcrossOffices(
+    reach: FilterQuery<AuditLogDocument>,
+    filter: FilterQuery<AuditLogDocument>,
+    after: { at: Date; id: string } | null,
+    limit: number,
+  ): Promise<AuditLogDocument[]> {
+    const past = after
+      ? [{ $or: [{ createdAt: { $lt: after.at } }, { createdAt: after.at, _id: { $lt: new Types.ObjectId(after.id) } }] }]
+      : [];
+    return this.model
+      .find({ $and: [reach, filter, ...past] })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /**
+   * **The different values of one field across offices** (P19.23-T6 AC-1): `distinctWithin`'s, for the same reach — and
+   * `targetId`, for the accounts a `super_admin.*` row names.
+   */
+  async distinctAcrossOffices(
+    reach: FilterQuery<AuditLogDocument>,
+    key: 'action' | 'actorUserId' | 'targetId',
+    filter: FilterQuery<AuditLogDocument> = {},
+  ): Promise<string[]> {
+    const values = await this.model.distinct(key, { $and: [reach, filter] }).exec();
+    return (values as unknown[]).filter((v): v is string => typeof v === 'string');
+  }
+
+  /**
    * **The different values of one field within a scope** (P19.2-T2 AC-6): what the audit page's *Tindakan* and *Pelaku*
    * chips offer. The scope leads, as above; `filter` narrows within it.
    */

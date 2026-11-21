@@ -22,6 +22,15 @@ export const SNIFF_SAMPLE_BYTES = 4096;
 
 type AllowedMimeType = (typeof ASSET_LIMITS.ALLOWED_MIME_TYPES)[number];
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+// P19.21-T3 AC-6 (ADR-0274): a pitch material's office formats and its other videos.
+const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PPT = 'application/vnd.ms-powerpoint';
+const DOC = 'application/msword';
+/** A zip's local file header: every OOXML file (`.xlsx`, `.pptx`, `.docx`) opens with it. */
+const ZIP = [0x50, 0x4b, 0x03, 0x04];
+/** An OLE2 compound file's header: a `.ppt` and a `.doc` (and an `.xls`, and an `.msi`) open with it. */
+const OLE2 = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
 const startsWith = (sample: Buffer, bytes: readonly number[], offset = 0): boolean =>
   sample.length >= offset + bytes.length && bytes.every((byte, i) => sample[offset + i] === byte);
@@ -46,13 +55,27 @@ const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
  *   byte in the sample, and — after an optional UTF-8 byte-order mark, white space and `<!-- … -->` comments — it
  *   begins `<!doctype html` or `<html`, in any case. A file that claims HTML and is not one is
  *   `application/octet-stream`, which every list refuses.
+ * - **pptx, docx** (P19.21-T3 AC-6, ADR-0274): a zip, as an xlsx is — so **the claim names which**: claimed as one, a
+ *   zip is that; claimed as anything else, a zip is still the xlsx it always read as.
+ * - **ppt, doc** (the same): an OLE2 compound file, **named only by the claim** for the same reason. An OLE2 file
+ *   claimed as anything else — an `.xls`, an `.msi` — matches nothing and is refused. One that claims Word and is an
+ *   installer still downloads as `<key>.doc` (`gcs.adapter.ts`), which no system runs.
+ * - **webm**: the EBML header `1A 45 DF A3` (a Matroska `.mkv` carries it too; it is still a video).
+ * - **quicktime**: `ftyp` at offset 4, as an MP4 — **named by the claim**: claimed `video/quicktime` it is that, and
+ *   otherwise the MP4 it always read as.
  */
 const SIGNATURES: Readonly<Record<AllowedMimeType, (sample: Buffer, declared: string) => boolean>> = {
   'image/jpeg': (s) => startsWith(s, [0xff, 0xd8, 0xff]),
   'image/png': (s) => startsWith(s, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   'image/webp': (s) => startsWith(s, ascii('RIFF')) && startsWith(s, ascii('WEBP'), 8),
   'video/mp4': (s) => startsWith(s, ascii('ftyp'), 4),
-  [XLSX]: (s) => startsWith(s, [0x50, 0x4b, 0x03, 0x04]),
+  [XLSX]: (s) => startsWith(s, ZIP),
+  [PPTX]: (s, declared) => declared === PPTX && startsWith(s, ZIP),
+  [DOCX]: (s, declared) => declared === DOCX && startsWith(s, ZIP),
+  [PPT]: (s, declared) => declared === PPT && startsWith(s, OLE2),
+  [DOC]: (s, declared) => declared === DOC && startsWith(s, OLE2),
+  'video/webm': (s) => startsWith(s, [0x1a, 0x45, 0xdf, 0xa3]),
+  'video/quicktime': (s, declared) => declared === 'video/quicktime' && startsWith(s, ascii('ftyp'), 4),
   'application/pdf': (s) => s.subarray(0, 1024).includes('%PDF-', 0, 'latin1'),
   'text/csv': (s, declared) => declared === 'text/csv' && s.length > 0 && !s.includes(0),
   'text/html': (s, declared) => declared === 'text/html' && !s.includes(0) && opensAsHtml(s),
@@ -67,7 +90,10 @@ const SIGNATURES: Readonly<Record<AllowedMimeType, (sample: Buffer, declared: st
  * never meet, since each needs its own claim.
  */
 export const SNIFFED_TYPES: readonly AllowedMimeType[] = [
-  'image/jpeg', 'image/png', 'image/webp', 'video/mp4', XLSX, 'application/pdf', 'text/html', 'text/csv',
+  // The claim-named containers before the type the same bytes otherwise are (P19.21-T3 AC-6): a QuickTime before an
+  // MP4, a PowerPoint or a Word file before an xlsx; the OLE2 two before anything, as nothing else opens like them.
+  'image/jpeg', 'image/png', 'image/webp', 'video/webm', 'video/quicktime', 'video/mp4', PPTX, DOCX, XLSX, PPT, DOC,
+  'application/pdf', 'text/html', 'text/csv',
 ];
 
 /** The UTF-8 byte-order mark an editor may write before the first character. */

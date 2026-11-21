@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
-import { SURVEY_ROLE_CLASSES, type SurveyRoleClass } from '@/domain/constants';
+import { SURVEY_ROLE_CLASSES, WORK_STATUSES, type SurveyRoleClass, type WorkStatus } from '@/domain/constants';
 
 export type SurveyResponseDocument = HydratedDocument<SurveyResponse>;
 
@@ -51,6 +51,13 @@ export class SurveyResponse {
   /** `0` (*Gen Z*) to `2` (*Gen X*) against the snapshot's `ageBandUpper`, or `null` with no birth date. */
   @Prop({ type: Number, default: null })
   ageBand!: number | null;
+
+  /**
+   * *Status kerja* as the member list held it when the form was sent (P19.22-T7, *Siapa yang menjawab*; ADR-0276 §4),
+   * like the bands: read from the profile, never asked. `null` with none, and on every form sent before 19.22.
+   */
+  @Prop({ type: String, enum: [...WORK_STATUSES, null], default: null })
+  workStatus!: WorkStatus | null;
 
   @Prop({ type: Boolean, default: false })
   noticeShown!: boolean;

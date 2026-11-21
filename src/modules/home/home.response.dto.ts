@@ -1,10 +1,13 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
+import { UNIT_DASHBOARD, type UnitView } from '@/domain/constants';
 import { HOME_QUOTE_POSES, type HomeQuotePose } from '@/domain/constants/home';
+import type { ViewsOffered } from '@/domain/metrics/unit-view';
 import type { CalendarTaskView, JoinedEvent } from '@/modules/calendar/calendar-auto-items';
 import { CalendarEntryDto, CalendarJoinedEventDto, CalendarTaskDto } from '@/modules/calendar/calendar.response.dto';
 import type { CalendarEntryView } from '@/modules/calendar/calendar-view';
 import type { CountOf, SplitFigure } from './home-figures';
-import type { HomeTeamPerson, HomeView } from './home.service';
+import { UnitScopesDto } from '@/modules/unit-dashboard/unit-dashboard.response.dto';
+import type { HomeOfficeTeam, HomeTeamPerson, HomeTeamUnit, HomeView } from './home.service';
 
 /** Declared for OpenAPI. The wire shapes live on `HomeService`'s view types. */
 
@@ -105,17 +108,61 @@ class HomeTeamPersonDto implements HomeTeamPerson {
   @ApiProperty({ type: Number, nullable: true, description: 'Yesterday’s saved total; `null` for no saved day.' })
   yesterday!: number | null;
   @ApiProperty({ type: Number, nullable: true }) today!: number | null;
+  @ApiProperty({
+    type: String, nullable: true,
+    description: 'For the owner or an administrator, the key of the unit line they are listed under (`office.units`); '
+      + '`null` on a leader’s list, which is not grouped.',
+  })
+  unitKey!: string | null;
+}
+
+class HomeActiveAgentDto extends HomeSplitDto {
+  @ApiProperty({
+    description: 'The agency holds the month’s production file. Without it `count` is 0 and the tile reads *–*: not uploaded.',
+  })
+  held!: boolean;
+}
+
+class HomeTeamUnitLeaderDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: 'Agus Prasetyo' }) name!: string;
+  @ApiProperty({ type: String, nullable: true, description: 'A signed link to their photo.' }) photoUrl!: string | null;
+}
+
+class HomeTeamUnitDto implements HomeTeamUnit {
+  @ApiProperty({ description: 'The unit leader’s membership, or `unled` for *Belum punya leader*.' }) key!: string;
+  @ApiProperty({ type: HomeTeamUnitLeaderDto, nullable: true }) leader!: HomeTeamUnitLeaderDto | null;
+  @ApiProperty({ description: 'The reader’s own unit: *Unit Anda*.' }) isReader!: boolean;
+  @ApiProperty({ description: 'Its people on the list, the reader left out: *n orang*.' }) count!: number;
+}
+
+class HomeOfficeTeamDto implements HomeOfficeTeam {
+  @ApiProperty({ enum: UNIT_DASHBOARD.VIEWS, description: 'The view the team parts are over: `downline` unless narrowed.' })
+  scope!: UnitView;
+  @ApiProperty({ type: UnitScopesDto }) scopes!: ViewsOffered;
+  @ApiProperty({ type: [HomeTeamUnitDto], description: 'The unit lines the list is grouped by, in the roster’s order.' })
+  units!: HomeTeamUnit[];
 }
 
 class HomeLeaderDto {
-  @ApiProperty({ type: HomeSplitDto, description: 'Exactly the Unit Dashboard’s *Active Agent* tile.' }) activeAgent!: HomeSplitDto;
+  @ApiProperty({
+    type: HomeActiveAgentDto,
+    description: 'Exactly the Unit Dashboard’s *Active Agent* tile: from the uploaded production, out of everybody in scope.',
+  }) activeAgent!: HomeActiveAgentDto;
   @ApiProperty({ type: HomeSplitDto, description: 'Members coached in the last 7 days (`COACHED_7D`), out of manpower.' })
   coached7d!: HomeSplitDto;
   @ApiProperty({
     type: [HomeTeamPersonDto],
-    description: '*Laporan aktivitas tim*: everybody in your Group but you — nobody-reported first, then not today, then the rest.',
+    description: '*Laporan aktivitas tim*: everybody in your Group but you — nobody-reported first, then not today, then the '
+      + 'rest. For the owner or an administrator, everybody in the view but you, in the roster’s order, grouped by unit.',
   })
   team!: HomeTeamPersonDto[];
+  @ApiProperty({
+    type: HomeOfficeTeamDto, nullable: true,
+    description: 'The whole agency, for its owner or an administrator: the view, the views offered and the unit lines. '
+      + '`null` for every other leader.',
+  })
+  office!: HomeOfficeTeam | null;
 }
 
 export class HomeDto implements HomeView {

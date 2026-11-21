@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import type { LocalDate } from '@/common/time/local-day';
+import type { CoachingStatus } from '@/domain/constants/coaching-status';
 import { coached30d, coached7d, daysSinceLastCoaching } from '@/domain/metrics/coaching-recency';
+import { coachingStatus } from '@/domain/metrics/coaching-status';
 import { CoachingSessionRepository } from './coaching-session.repository';
 import { nextFollowUp, type FollowUp } from './follow-up';
 import { shownActionItems } from './lead-visibility';
@@ -161,4 +163,31 @@ export class CoachingReadings {
       return [id, { last: latest, daysSinceLastCoaching: days, coached7d: coached7d(days), coached30d: coached30d(days) }];
     }));
   }
+
+  /**
+   * **`COACHING_STATUS` for each person, with their last 1-on-1** (P19.17-T1 AC-5; ADR-0267 §5; §A.3): red
+   * `never` *Belum pernah coaching*, green `recent` *Coaching n hari lalu* up to 14 days, yellow `lapsed` after — and the
+   * session's day and coach, for *"1:1 terakhir: …"*. `recencyOf`'s one aggregate and its office calendar, so the tile
+   * and the roster read the same 1-on-1 and the same days; only the threshold differs (`coaching-status.ts`). Every id
+   * asked about gets an entry.
+   */
+  async statusOf(
+    ctx: RequestContext,
+    coacheeIds: readonly string[],
+    day: { today: LocalDate; timezone: string },
+  ): Promise<Map<string, CoachingStatusReading>> {
+    const recency = await this.recencyOf(ctx, coacheeIds, day);
+    return new Map([...recency].map(([id, r]) => [id, {
+      last: r.last, daysSinceLastCoaching: r.daysSinceLastCoaching, status: coachingStatus(r.daysSinceLastCoaching),
+    }]));
+  }
+}
+
+/** `COACHING_STATUS` of one person (`statusOf`). */
+export interface CoachingStatusReading {
+  /** The latest 1-on-1 — its session, its day (ADR-0079) and its coach — or `null`. */
+  last: LastOneOnOne | null;
+  /** `DAYS_SINCE_LAST_COACHING`: `null` is *Belum pernah coaching*. */
+  daysSinceLastCoaching: number | null;
+  status: CoachingStatus;
 }

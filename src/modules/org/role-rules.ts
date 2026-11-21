@@ -1,3 +1,4 @@
+import { canManageMember, officeStewardKind, stewardsWholeOffice, type MemberInReach } from '@/common/auth/office-steward';
 import { RequestContext, type HierarchyRole } from '@/common/context/request-context';
 import { can } from '@/modules/rbac/permissions';
 import type { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -84,11 +85,18 @@ export function canHoldUnit(m: { status: string; role: HierarchyRole; directCoun
   return m.status === 'active' && (m.role !== 'agent' || (m.directCounts?.total ?? 0) > 0);
 }
 
-/** The reader as the rules see them, from the request. */
-export function roleReaderOf(ctx: RequestContext): RoleReader {
+/**
+ * The reader as the rules see them, from the request.
+ *
+ * *Since ADR-0268 §1, §3 (P19.17 F2):* **`office` is a steward's**: the Super Admin inside the KPM, the Owner and an
+ * Admin for anybody; **a core leader for somebody strictly below them**, which only a caller naming the `target` can
+ * know — without one, a core leader is read as the leader they are.
+ */
+export function roleReaderOf(ctx: RequestContext, target?: MemberInReach): RoleReader {
   return {
     membershipId: ctx.membershipId ?? null,
-    office: Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin),
+    office: stewardsWholeOffice(ctx)
+      || (target !== undefined && officeStewardKind(ctx) === 'core_leader' && canManageMember(ctx, target)),
     role: ctx.membership?.hierarchyRole ?? null,
     mayChangeRoles: can(ctx, 'member:change_role'),
   };

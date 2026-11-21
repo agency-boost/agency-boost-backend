@@ -26,10 +26,19 @@ export const ADVANCED_ANALYTICS_REFUSALS = refusals('modules/reporting/advanced-
       en: 'value must be a whole number from 0, or null to clear the target',
       id: 'value harus bilangan bulat mulai dari 0, atau null untuk mengosongkan target',
     },
-    targetShape: {
-      en: 'aaTarget and recTarget must each be a whole number from 0 to 1000',
-      id: 'aaTarget dan recTarget masing-masing harus bilangan bulat dari 0 sampai 1000',
+    // P19.22-T2 (ADR-0275 §2): *Upload data*'s file.
+    fileNoCode: {
+      en: 'file must be the Demografi list: its header needs a "Kode agen" column',
+      id: 'file harus daftar Demografi: barisan judulnya perlu kolom "Kode agen"',
     },
+    fileTooLarge: ({ bytes }: { bytes: number }) => ({
+      en: `file must be at most ${bytes} bytes`,
+      id: `file paling besar ${bytes} byte`,
+    }),
+    driverShape: ({ drivers }: { drivers: readonly string[] }) => ({
+      en: `driver must be one of ${drivers.join(', ')}`,
+      id: `driver harus salah satu dari ${drivers.join(', ')}`,
+    }),
     sectionShape: ({ sections }: { sections: readonly string[] }) => ({
       en: `section must be one of ${sections.join(', ')}`,
       id: `section harus salah satu dari ${sections.join(', ')}`,

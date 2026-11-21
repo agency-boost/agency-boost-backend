@@ -3,9 +3,8 @@ import type { DomainException } from '@/common/errors/domain.exception';
 import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
 import { english, indonesian } from '../../../test/i18n';
 import {
-  agentCodePattern, analyticsConfigV1, type AdvancedAnalyticsConfig, type UploadField,
+  analyticsConfigV1, type AdvancedAnalyticsConfig, type UploadField,
 } from '@/modules/config/analytics-config';
-import type { LinearPattern } from '@/modules/config/linear-pattern';
 import {
   buildPreview, headerKey, layoutOf, matchCode, readCell, readFileUpload, readNumber, readUpload, type PreviewCell,
   type PreviewRow, type RosterMember, type RowRules, type StoredFigures,
@@ -55,12 +54,7 @@ const FYC = field('FYC', {
 const V2 = (): AdvancedAnalyticsConfig => ({ ...V1(), uploadFields: [...V1().uploadFields, FYC] });
 
 const HEADER = templateHeader(V1(), 'en');
-const NO_RULES: RowRules = { pattern: null, example: '', unknownAgent: 'reject', ytdTolerancePct: 1 };
-const rule = (pattern: string): LinearPattern => {
-  const compiled = agentCodePattern(pattern);
-  if (!('pattern' in compiled)) throw new Error(pattern);
-  return compiled.pattern;
-};
+const NO_RULES: RowRules = { ytdTolerancePct: 1 };
 
 const NOTHING: StoredFigures = { values: {}, ytdValues: {}, previousYtd: {} };
 
@@ -238,66 +232,52 @@ describe('the preview (P9-T3; read against the template since P19.5-T2)', () => 
       ]);
     });
 
-    it('AC-5 R2 a blank in a required column the file carries skips the row: “<label> wajib diisi”', () => {
+    it('P19.21-T1 AC-5 a blank in a required column no longer skips the row: it is not reported (ADR-0274 §2)', () => {
       const config = V1();
       config.uploadFields = config.uploadFields.map((f) => (f.kode === 'POLICY_COUNT' ? { ...f, required: true } : f));
-      const { rows } = preview([row('PRU-001', 'Rina', { APE: '1' }), row('PRU-002', 'Budi', { APE: '1', POLICY_COUNT: '2' })], {
+      const { rows, summary } = preview([row('PRU-001', 'Rina', { APE: '1' }), row('PRU-002', 'Budi', { APE: '1', POLICY_COUNT: '2' })], {
         config, reader: readerIn('id'),
       });
-      expect(rows[0]).toMatchObject({ status: 'refused', cells: [] });
-      expect(rows[0].issues).toEqual([{ code: 'UPLOAD_REQUIRED_BLANK', kode: 'POLICY_COUNT', ytd: false, message: 'Jumlah polis (case issued) wajib diisi' }]);
-      expect(rows[1].status).toBe('ready');
+      expect(rows.map((r) => r.status)).toEqual(['ready', 'ready']);
+      expect(rows[0].issues).toEqual([]);
+      expect(cell(rows[0], 'POLICY_COUNT')).toMatchObject({ status: 'not_provided', after: null });
+      expect(cell(rows[0], 'APE')).toMatchObject({ status: 'new', after: 100_000_000 });
+      expect(summary).toMatchObject({ ready: 2, refused: 0 });
     });
 
-    it('AC-5 a required leaders’ column asks only a leader’s row', () => {
-      const config = V1();
-      config.uploadFields = config.uploadFields.map((f) => (f.kode === 'UNIT_PERSISTENCY' ? { ...f, required: true } : f));
-      const { rows } = preview([row('PRU-001', 'Rina', { APE: '1' }), row('PRU-009', 'Agus', { APE: '1' })], { config });
-      expect(rows.map((r) => r.status)).toEqual(['ready', 'refused']);
-      expect(rows[1].issues[0].code).toBe('UPLOAD_REQUIRED_BLANK');
+    it('P19.21-T1 AC-5 an unregistered code is kept as Belum jadi anggota, whatever its form — nothing is skipped', () => {
+      const { rows, summary } = preview([
+        row('70019999', 'Dewi Baru', { APE: '1', POLICY_COUNT: '1' }),
+        // Not in any format a template would set.
+        row('ABC', 'Somebody', { APE: '1' }),
+        // A spreadsheet rewrote it: kept as written, so it shows and can be put right.
+        row('8.8213E+04', 'X', { APE: '1' }),
+      ]);
+      expect(rows.map((r) => r.status)).toEqual(['held', 'held', 'held']);
+      expect(rows[0]).toMatchObject({ membershipId: null, fileName: 'Dewi Baru', issues: [] });
+      expect(cell(rows[0], 'APE')).toMatchObject({ status: 'new', after: 100_000_000 });
+      expect(summary).toMatchObject({ held: 3, ready: 0, refused: 0 });
     });
 
-    it('AC-5 ADR-0214 §7 an unregistered code not in the template’s format is refused, naming the example', () => {
-      const { rows } = preview([row('ABC', 'Somebody', { APE: '1' })], {
-        rules: { pattern: rule('^[0-9]{8}$'), example: '70012345', unknownAgent: 'flag' }, reader: readerIn('id'),
-      });
-      expect(rows[0].status).toBe('refused');
-      expect(rows[0].issues[0]).toMatchObject({
-        code: 'UPLOAD_AGENT_CODE_PATTERN', message: 'Kode ini tidak sesuai format kode agen di template KPM ini — contohnya 70012345.',
-      });
-    });
-
-    it('AC-5 a member’s code is the member’s: a code a spreadsheet stripped of zeros is not refused for the format', () => {
-      const { rows } = preview([row('88213', 'Sari', { APE: '1' })], { rules: { pattern: rule('^[0-9]{8}$'), example: '70012345' } });
+    it('AC-5 a member’s code is the member’s: a code a spreadsheet stripped of zeros is recovered', () => {
+      const { rows } = preview([row('88213', 'Sari', { APE: '1' })]);
       expect(rows[0]).toMatchObject({ status: 'ready', membershipId: 'm-sari', codeRecovered: true });
-    });
-
-    it('AC-5 ADR-0214 §8 an unregistered code is held as Belum terdaftar under flag, and refused under reject', () => {
-      const flag = preview([row('70019999', 'Dewi Baru', { APE: '1', POLICY_COUNT: '1' })], {
-        rules: { pattern: rule('^[0-9]{8}$'), example: '70012345', unknownAgent: 'flag' },
-      });
-      expect(flag.rows[0]).toMatchObject({ status: 'held', membershipId: null, fileName: 'Dewi Baru', issues: [] });
-      expect(cell(flag.rows[0], 'APE')).toMatchObject({ status: 'new', after: 100_000_000 });
-      expect(flag.summary).toMatchObject({ held: 1, ready: 0, refused: 0 });
-
-      const reject = preview([row('70019999', 'Dewi Baru', { APE: '1' })], { rules: { unknownAgent: 'reject' } });
-      expect(reject.rows[0]).toMatchObject({ status: 'refused' });
-      expect(reject.rows[0].issues[0]).toMatchObject({ code: 'UPLOAD_UNKNOWN_AGENT_CODE', message: 'No active member of this office has this code.' });
     });
 
     it('AC-5 a held code is compared with what is held for it; a held code listed twice refuses both rows', () => {
       const { rows } = preview([row('70019999', 'Dewi', { APE: '2' })], {
-        rules: { unknownAgent: 'flag' }, held: { '70019999': { values: { APE: 100_000_000 } } },
+        held: { '70019999': { values: { APE: 100_000_000 } } },
       });
       expect(cell(rows[0], 'APE')).toMatchObject({ status: 'changed', before: 100_000_000, after: 200_000_000 });
-      const twice = preview([row('70019999', 'Dewi', { APE: '2' }), row('70019999', 'Dewi', { APE: '3' })], { rules: { unknownAgent: 'flag' } });
+      const twice = preview([row('70019999', 'Dewi', { APE: '2' }), row('70019999', 'Dewi', { APE: '3' })]);
       expect(twice.rows.map((r) => [r.status, r.issues[0]?.code])).toEqual([
         ['refused', 'UPLOAD_DUPLICATE_AGENT_CODE'], ['refused', 'UPLOAD_DUPLICATE_AGENT_CODE'],
       ]);
     });
 
-    it('AC-5 a code a spreadsheet rewrote is refused even under flag — it is not held', () => {
-      const { rows } = preview([row('8.8213E+04', 'X', { APE: '1' })], { rules: { unknownAgent: 'flag' } });
+    it('P19.21-T1 AC-5 a row with no agent code is the one row refused for who it is: it cannot be kept for anybody', () => {
+      const { rows } = preview([row('', 'Nobody', { APE: '1' })]);
+      expect(rows[0]).toMatchObject({ status: 'refused' });
       expect(rows[0].issues[0]).toMatchObject({ code: 'UPLOAD_UNKNOWN_AGENT_CODE' });
     });
 

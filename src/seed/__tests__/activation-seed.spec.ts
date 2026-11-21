@@ -63,8 +63,9 @@ describe.each([
   it('Seed: nine activations, dated from the office’s today, each pinned to its office’s published checklist', async () => {
     expect(first.activation.today).toBe(today);
     // Phase 18.1's cohort adds the twelve graduated long ago, written beside these nine (`cohort-fixture.ts`).
-    // P18.8-T6 adds Lukman's and Tari's (`activation-3m-fixture.ts`).
-    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2);
+    // P18.8-T6 adds Lukman's and Tari's (`activation-3m-fixture.ts`). P19.18 (ADR-0271) adds the two this month's new hires
+    // under Maya were given by their placement (`whole-office-fixture.ts`).
+    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2 + 2);
     expect(first.activation.activations.every((a) => a.templateVersion === 1 && a.items.length === 16 && a.origin === 'backfill')).toBe(true);
   });
 

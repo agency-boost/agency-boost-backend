@@ -4,8 +4,9 @@ import { DateTime } from 'luxon';
 import { FilterQuery, Model } from 'mongoose';
 import { InvalidRequestException } from '@/common/errors/domain.exception';
 import { decodeCursor, encodeCursor } from '@/common/pagination/cursor';
-import { readerOf, type Reader } from '@/common/i18n/reader';
-import { AUDIT_LOG, DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
+import { readerIn, readerOf, type Reader } from '@/common/i18n/reader';
+import { formatRupiah } from '@/common/format/format';
+import { AUDIT_LOG, DEFAULT_TENANT_TIMEZONE, PLATFORM_READ } from '@/domain/constants';
 import { CompanyTemplate, CompanyTemplateDocument } from '@/modules/config/company-template.schema';
 import { NamedTemplate, NamedTemplateDocument } from '@/modules/config/named-template.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -69,6 +70,17 @@ export interface ResolvedAuditRow {
   /** The mutation itself, unchanged. Already part of this shape before names were added. */
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
+  /**
+   * **What changed, before → after, in words** (P19.23-T6 AC-1; ADR-0279): *"6 → 8"*, *"Rp 0 → Rp 1.200.000"*, or
+   * *"status: active → suspended · reason: — → Langganan tidak dibayar"* for several — the fields both sides of the row
+   * name with a plain value that differs, ids and a read's bookkeeping left out. `null` when the row records no such
+   * pair (a creation, a read, a send): the line then says what happened and to what, as before.
+   */
+  change: string | null;
+  /** **The KPM the row is in or about** (P19.23-T6 AC-1): its code and branch; `null` for a platform row about none. */
+  kpm: { id: string; code: string; branch: string } | null;
+  /** **Its company** — the KPM's, the company the row is about, or the one its change names; `null` when none. */
+  company: { id: string; name: string } | null;
 }
 
 /**
@@ -115,6 +127,33 @@ export interface AuditFilters {
   /** Office days, `YYYY-MM-DD`, both inclusive. */
   from?: string;
   to?: string;
+  /** *Cari perubahan* (P19.23-T6 AC-1): words a line says, read as text. Blank narrows nothing. */
+  q?: string;
+}
+
+/**
+ * **The fields of a change *Cari perubahan* reads** (P19.23-T6 AC-1; ADR-0279), before and after: the values a row
+ * names its thing by. A free search over every value of every row is not a query an index can serve, and these are what
+ * somebody remembers — a name, a code, a branch, a reason, a message.
+ */
+const SEARCHED_FIELDS = ['name', 'fullName', 'code', 'branchName', 'label', 'reason', 'email', 'message'] as const;
+
+/**
+ * **Rows a KPM's log holds that the platform's log already has** (P19.23-T6 AC-1): a Super Admin's platform read is
+ * written in both (ADR-0207 §5), and so is a quote sent to a KPM's Owner (ADR-0211 §5). *Semua KPM* reads the platform's
+ * copy and leaves the KPM's out, so one act is one line. A new action recorded in both scopes is added here.
+ */
+const MIRRORED_IN_PLATFORM_LOG: readonly (string | RegExp)[] = [
+  new RegExp(`^${PLATFORM_READ.ACTION.members.split('.')[0]}\\.`),
+  'billing.quote_sent',
+];
+
+/** **The actions that make and unmake a Super Admin** (P19.23-T6 AC-2): whom they name has been one. */
+const SUPER_ADMIN_ACTIONS = ['super_admin.granted', 'super_admin.revoked'] as const;
+
+/** A search, as a pattern that matches exactly the text typed, case-insensitively (`.` is a dot, not a wildcard). */
+function literal(text: string): RegExp {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 }
 
 /** A group being folded: its head (the newest row), its count and its oldest time. */
@@ -176,14 +215,19 @@ export class AuditReadService {
    */
   async page(reach: AuditReach, filters: AuditFilters, cursor?: string): Promise<AuditPage> {
     const after = cursor === undefined ? null : this.cursorOf(cursor);
-    const filter = await this.filterOf(reach.kpmId, filters);
+    const reader = reach.reader ?? readerOf();
+    // *Semua KPM* (P19.23-T6 AC-1): the platform's log and every Super Admin change inside a KPM. One office's otherwise.
+    const across = reach.kpmId === null ? await this.acrossOffices() : null;
+    const filter = await this.filterOf(reach.kpmId, filters, reader, across);
     const windowMs = AUDIT_LOG.GROUP_WINDOW_MINUTES * 60_000;
 
     const groups: Folding[] = [];
     let resumeAfter = after;
     let hasMore = false;
     for (;;) {
-      const batch = await this.audit.findNewestFirst(reach.kpmId, filter, resumeAfter, BATCH);
+      const batch = across
+        ? await this.audit.findNewestFirstAcrossOffices(across, filter, resumeAfter, BATCH)
+        : await this.audit.findNewestFirst(reach.kpmId, filter, resumeAfter, BATCH);
       const kept = await this.withoutNotesAboutTheReader(batch, reach.readerUserId);
       for (const row of kept) {
         const last = groups[groups.length - 1];
@@ -203,7 +247,6 @@ export class AuditReadService {
       resumeAfter = { at: timeOf(tail), id: String(tail._id) };
     }
 
-    const reader = reach.reader ?? readerOf();
     const named = await this.resolve(groups.map((g) => g.head), reader);
     const items = groups.map((g, i) => ({ ...named[i], count: g.count, oldestAt: timeOf(g.oldest) }));
     const lastGroup = groups[groups.length - 1];
@@ -217,7 +260,34 @@ export class AuditReadService {
         limit: AUDIT_LOG.PAGE_SIZE,
         hasMore,
       },
-      facets: cursor === undefined ? await this.facetsOf(reach.kpmId, reader) : null,
+      facets: cursor === undefined ? await this.facetsOf(reach.kpmId, reader, across) : null,
+    };
+  }
+
+  /**
+   * **What *Semua KPM* reads** (P19.23-T6 AC-1; spec §1: *"every Super Admin change … is written to the audit log"*): the
+   * platform's own log, and in every KPM the rows a Super Admin wrote — working inside it as its Owner (ADR-0268 §3),
+   * or as themselves — less the ones the platform's log already holds (`MIRRORED_IN_PLATFORM_LOG`).
+   *
+   * **A Super Admin is anybody who is one now, or ever was**: the accounts holding the role, and every account a
+   * `super_admin.granted` or `.revoked` row names — so a change made by somebody whose role was since revoked still reads
+   * here. Rows by a KPM's own people stay in that KPM's log, which *Semua KPM* › one KPM reads whole.
+   */
+  private async acrossOffices(): Promise<FilterQuery<AuditLogDocument>> {
+    const [current, history] = await Promise.all([
+      this.users.find({ platformRole: 'super_admin' }, { _id: 1 }).lean().exec(),
+      this.audit.distinctAcrossOffices({ kpmId: null, action: { $in: [...SUPER_ADMIN_ACTIONS] } }, 'targetId'),
+    ]);
+    const ids = new Set([...(current as unknown as { _id: unknown }[]).map((u) => String(u._id)), ...history]);
+    return {
+      $or: [
+        { kpmId: null },
+        {
+          kpmId: { $ne: null },
+          actorUserId: { $in: [...ids] },
+          $nor: MIRRORED_IN_PLATFORM_LOG.map((action) => ({ action })),
+        },
+      ],
     };
   }
 
@@ -251,8 +321,15 @@ export class AuditReadService {
    * - **The dates** are office days, from the first's midnight to the midnight after the last, on the scoped office's
    *   calendar — `Asia/Jakarta` for the platform-level log, which belongs to no office (ADR-0016).
    */
-  private async filterOf(kpmId: string | null, filters: AuditFilters): Promise<FilterQuery<AuditLogDocument>> {
+  private async filterOf(
+    kpmId: string | null,
+    filters: AuditFilters,
+    reader: Reader,
+    across: FilterQuery<AuditLogDocument> | null,
+  ): Promise<FilterQuery<AuditLogDocument>> {
     const and: FilterQuery<AuditLogDocument>[] = [];
+    const text = filters.q?.trim() ?? '';
+    if (text) and.push(await this.searchOf(text, kpmId, reader, across));
     if (filters.action) and.push({ action: filters.action });
     if (filters.actorUserId) and.push({ actorUserId: filters.actorUserId });
     if (filters.companyId) {
@@ -282,6 +359,51 @@ export class AuditReadService {
     return and.length === 0 ? {} : { $and: and };
   }
 
+  /**
+   * ***Cari perubahan*** (P19.23-T6 AC-1; ADR-0279): the rows whose line says the words — read as text, case-insensitive,
+   * never as a pattern. A line says its action (in the reader's words, or as recorded), who acted, the KPM it is in or
+   * about (code or branch), its company, and the values its change names (`SEARCHED_FIELDS`). Names are matched on their
+   * own collections first, so the log is asked for ids, not for a scan of every name it never stored.
+   */
+  private async searchOf(
+    text: string,
+    kpmId: string | null,
+    reader: Reader,
+    across: FilterQuery<AuditLogDocument> | null,
+  ): Promise<FilterQuery<AuditLogDocument>> {
+    const pattern = literal(text);
+    const [people, offices, firms, actions] = await Promise.all([
+      this.users.find({ $or: [{ fullName: pattern }, { email: pattern }] }, { _id: 1 }).lean().exec(),
+      this.kpms.find({ $or: [{ code: pattern }, { branchName: pattern }] }, { _id: 1 }).lean().exec(),
+      this.companies.find({ name: pattern }, { _id: 1 }).lean().exec(),
+      across ? this.audit.distinctAcrossOffices(across, 'action') : this.audit.distinctWithin(kpmId, 'action'),
+    ]);
+    const idsOf = (rows: unknown) => (rows as { _id: unknown }[]).map((r) => String(r._id));
+    const personIds = idsOf(people);
+    const firmIds = idsOf(firms);
+    const firmOffices = firmIds.length
+      ? idsOf(await this.kpms.find({ companyId: { $in: firmIds } }, { _id: 1 }).lean().exec())
+      : [];
+    const officeIds = [...new Set([...idsOf(offices), ...firmOffices])];
+    // The action as recorded, and in words — the reader's, and the other language's, so a line is found by either.
+    const said = actions.filter((action) => pattern.test(action)
+      || [reader, readerIn('id'), readerIn('en')].some((r) => pattern.test(actionLabel(action, r))));
+    return {
+      $or: [
+        { action: { $in: said } },
+        { actorUserId: { $in: personIds } },
+        { effectiveUserId: { $in: personIds } },
+        { targetCollection: 'users', targetId: { $in: personIds } },
+        { kpmId: { $in: officeIds } },
+        { targetCollection: 'kpms', targetId: { $in: officeIds } },
+        { targetCollection: 'companies', targetId: { $in: firmIds } },
+        { 'after.companyId': { $in: firmIds } },
+        { 'before.companyId': { $in: firmIds } },
+        ...SEARCHED_FIELDS.flatMap((field) => [{ [`after.${field}`]: pattern }, { [`before.${field}`]: pattern }]),
+      ],
+    };
+  }
+
   /** The office's midnight beginning a day, as an instant; a day that is not one (`2026-02-30`) is `400`. */
   private midnight(day: string, zone: string): Date {
     const at = DateTime.fromISO(day, { zone });
@@ -301,10 +423,15 @@ export class AuditReadService {
    * the others. Every action, and every actor named. The actors of `leader_note.*` rows are left out (ADR-0073): the
    * only row by somebody may be a note about the reader, and an actor offered with nothing to show says a note exists.
    */
-  private async facetsOf(kpmId: string | null, reader: Reader): Promise<AuditFacets> {
+  private async facetsOf(
+    kpmId: string | null, reader: Reader, across: FilterQuery<AuditLogDocument> | null = null,
+  ): Promise<AuditFacets> {
+    const notNotes = { action: { $not: LEADER_NOTE_ACTION } };
     const [actions, actorIds] = await Promise.all([
-      this.audit.distinctWithin(kpmId, 'action'),
-      this.audit.distinctWithin(kpmId, 'actorUserId', { action: { $not: LEADER_NOTE_ACTION } }),
+      across ? this.audit.distinctAcrossOffices(across, 'action') : this.audit.distinctWithin(kpmId, 'action'),
+      across
+        ? this.audit.distinctAcrossOffices(across, 'actorUserId', notNotes)
+        : this.audit.distinctWithin(kpmId, 'actorUserId', notNotes),
     ]);
     const people = await this.lookup(this.users as unknown as Model<Record<string, unknown>>, actorIds.filter(isObjectId));
     const nameOf = (id: string) => {
@@ -346,6 +473,8 @@ export class AuditReadService {
     const officeIds = new Set<string>();
     const templateIds = new Set<string>();
     const productCodes = new Set<string>();
+    // P19.23-T6 AC-1: the company a row names in its change, so *KPM · company* reads for a template's or product's row.
+    const firmIds = new Set<string>();
     for (const row of rows) {
       if (row.actorUserId) userIds.add(String(row.actorUserId));
       if (row.effectiveUserId) userIds.add(String(row.effectiveUserId));
@@ -354,6 +483,7 @@ export class AuditReadService {
       const written = changeOf(row);
       if (typeof written.templateId === 'string') templateIds.add(written.templateId);
       if (row.targetCollection === 'kpmProductConfigs' && typeof written.code === 'string') productCodes.add(written.code);
+      if (typeof written.companyId === 'string') firmIds.add(written.companyId);
       if (!row.targetId) continue;
       const id = String(row.targetId);
       if (row.targetCollection === 'users') userIds.add(id);
@@ -374,7 +504,7 @@ export class AuditReadService {
       // invariant §1, and `repositories.tenancy.spec.ts` enforces it.
       this.memberships.byIdsAnywhereForAudit([...memberIds].filter(isObjectId)),
       this.lookup(loose(this.kpms), [...officeIds].filter(isObjectId)),
-      this.lookup(loose(this.companies), ids('companies')),
+      this.lookup(loose(this.companies), [...new Set([...ids('companies'), ...firmIds])].filter(isObjectId)),
       this.lookup(loose(this.templateRows), [...ids('companyTemplates'), ...ids('platformTemplates')]),
       this.lookup(loose(this.products), ids('products')),
       this.byCode(productCodes),
@@ -389,7 +519,11 @@ export class AuditReadService {
     for (const section of sectionRows.values()) {
       if (typeof section.templateId === 'string') templateIds.add(section.templateId);
     }
-    const [memberPeople, named] = await Promise.all([
+    // And an office names its company: the offices' companies not already read, in the same second pass.
+    const officeFirms = [...offices.values()]
+      .map((o) => String((o as { companyId?: string }).companyId ?? ''))
+      .filter((id) => isObjectId(id) && !firms.has(id));
+    const [memberPeople, named, moreFirms] = await Promise.all([
       this.lookup(
         loose(this.users),
         [...members.values()]
@@ -397,7 +531,9 @@ export class AuditReadService {
           .filter(isObjectId),
       ),
       this.lookup(loose(this.templates), [...templateIds].filter(isObjectId)),
+      this.lookup(loose(this.companies), [...new Set(officeFirms)]),
     ]);
+    for (const [id, firm] of moreFirms) firms.set(id, firm);
 
     const personName = (id: string | null | undefined): string | null => {
       if (!id) return null;
@@ -427,6 +563,9 @@ export class AuditReadService {
         effectiveName: personName(row.effectiveUserId),
         before: row.before ?? null,
         after: row.after ?? null,
+        change: changeWords(row.before ?? null, row.after ?? null, reader),
+        kpm: officeRef(office),
+        company: companyRef(row, office, firms),
       };
     });
   }
@@ -590,4 +729,57 @@ function officeOf(
   const target = row.targetCollection === 'kpms' && row.targetId ? offices.get(String(row.targetId)) : undefined;
   return (target ?? (row.kpmId ? offices.get(String(row.kpmId)) : undefined)) as
     ({ code?: string; companyId?: string } & Record<string, unknown>) | undefined;
+}
+
+/**
+ * **What a change says, before → after** (P19.23-T6 AC-1; ADR-0279): the fields both sides name with a plain value — a
+ * word, a number, yes or no, nothing — that differs. One field reads as its two values, *"6 → 8"*; several as
+ * *"field: a → b"*, at most `CHANGE_FIELDS` of them, joined by *" · "*. Ids and a read's bookkeeping are not a change
+ * anybody reads. Money (`…Minor`) is written in rupiah, in the reader's figures.
+ */
+const CHANGE_FIELDS = 3;
+const NOT_A_CHANGE = /(^_id$|Id$|Ids$|^purpose$|^filters$|^page$|^rows$|^updatedAt$|^createdAt$)/;
+
+function changeWords(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+  reader: Reader,
+): string | null {
+  if (!before || !after) return null;
+  const plain = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+  const said = (key: string, v: unknown): string => {
+    if (v === null || v === undefined || v === '') return '—';
+    if (typeof v === 'boolean') return reader.language === 'en' ? (v ? 'yes' : 'no') : (v ? 'ya' : 'tidak');
+    if (typeof v === 'number' && /Minor$/.test(key)) return formatRupiah(v, reader.figures);
+    return String(v);
+  };
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => !NOT_A_CHANGE.test(key))
+    .filter((key) => key in before && key in after && plain(before[key]) && plain(after[key]) && before[key] !== after[key]);
+  if (keys.length === 0) return null;
+  if (keys.length === 1) return `${said(keys[0], before[keys[0]])} → ${said(keys[0], after[keys[0]])}`;
+  return keys.slice(0, CHANGE_FIELDS)
+    .map((key) => `${key}: ${said(key, before[key])} → ${said(key, after[key])}`)
+    .join(' · ');
+}
+
+/** The office a row is in or about, as the line names it. */
+function officeRef(office: (Record<string, unknown> & { code?: string }) | undefined): ResolvedAuditRow['kpm'] {
+  if (!office) return null;
+  return { id: String(office._id), code: stringOf(office.code) ?? '', branch: stringOf(office.branchName) ?? '' };
+}
+
+/** The row's company: its office's, the company it is about, or the one its change names. */
+function companyRef(
+  row: { targetCollection: string; targetId?: string | null; after?: Record<string, unknown> | null; before?: Record<string, unknown> | null },
+  office: { companyId?: string } | undefined,
+  firms: Map<string, Record<string, unknown>>,
+): ResolvedAuditRow['company'] {
+  const written = changeOf(row);
+  const id = stringOf(office?.companyId)
+    ?? (row.targetCollection === 'companies' && row.targetId ? String(row.targetId) : null)
+    ?? stringOf(written.companyId);
+  if (!id) return null;
+  const name = stringOf(firms.get(id)?.name);
+  return name ? { id, name } : null;
 }

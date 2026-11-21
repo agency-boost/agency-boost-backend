@@ -21,6 +21,11 @@ export const BRANDED_DEMO = Object.freeze({
   /** Fixed folders (ULID-shaped), so a re-run writes the same keys. */
   logoFolder: 'branding/01JC0000000000000000000001',
   mascotFolder: 'branding/01JC0000000000000000000002',
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274): 0555 calls the app *Dynamic Smart System*, the mockup's example — its
+   * members read it on every screen and email where 0417's read AgencyBoost, which keeps the default.
+   */
+  systemName: 'Dynamic Smart System',
 });
 
 const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="96" viewBox="0 0 480 96">
@@ -47,7 +52,11 @@ export interface BrandingFixture {
 export async function seedBrandingFixture(deps: { clock: Clock; storage: StoragePort | null; kpmId: string }): Promise<BrandingFixture> {
   const Rows = mongoose.models[KpmBranding.name] ?? mongoose.model(KpmBranding.name, KpmBrandingSchema);
   const images: BrandingFixture['images'] = deps.storage ? 'stored' : 'skipped: storage is not configured';
-  if (await Rows.exists({ kpmId: deps.kpmId, deletedAt: null })) return { kpmId: deps.kpmId, written: 0, images };
+  if (await Rows.exists({ kpmId: deps.kpmId, deletedAt: null })) {
+    // A database seeded before P19.21-T4 gets the name once; a name set since is left as it is.
+    await Rows.updateOne({ kpmId: deps.kpmId, deletedAt: null, systemName: { $exists: false } }, { $set: { systemName: BRANDED_DEMO.systemName } });
+    return { kpmId: deps.kpmId, written: 0, images };
+  }
 
   let logo: { key: string; width: number; height: number } | null = null;
   let mascot: { default: string; poses: Record<string, string> } | null = null;
@@ -83,6 +92,7 @@ export async function seedBrandingFixture(deps: { clock: Clock; storage: Storage
       secondary: { side: palette.secondary.contrast, ratio: palette.secondary.ratio, fill: palette.secondary.fill },
     },
     mascot,
+    systemName: BRANDED_DEMO.systemName,
     version: 1,
     updatedBy: null,
     deletedAt: null,

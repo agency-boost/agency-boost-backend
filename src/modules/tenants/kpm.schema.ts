@@ -185,6 +185,9 @@ export class Kpm {
    * diundang* and *"KPM {code} belum punya Owner"* until *Ganti pemilik* gives an email (or picks an account) and the
    * Owner is set, which clears this. Personal data: shown to the Super Admin alone, never served to a tenant role, and
    * soft-deleted with the KPM.
+   *
+   * *Since P19.23-T2 AC-3 (OD-420):* or until the person opens the **claim link** the Super Admin sends them on WhatsApp
+   * (`invite`) and accepts it signed in to their own account, which makes them the Owner and clears this.
    */
   @Prop({ type: Object, default: null })
   pendingOwner!: KpmPendingOwner | null;
@@ -215,14 +218,47 @@ export interface KpmSubscription {
    * or absent (a subscription written before 19.4) is no plan. Its renewal date is `endDate`.
    */
   plan?: SubscriptionPlan | null;
+  /** **A new KPM's 30-day trial** (ADR-0279 §4): no plan, no price, no limit. Absent or false: not a trial. */
+  trial?: boolean;
+  /**
+   * **What a confirmed package agreed** (ADR-0279 §3; *Konfirmasi paket*), priced on the server from the calculator's
+   * inputs: the period's total after every discount, integer IDR minor units; the leaders the price was for live in
+   * `maxLeaders`, the price per leader before the annual discount in `pricePerLeaderMinor`. Absent on a subscription
+   * set before 19.23 or through *Edit subscription*: the console then works the total out from the price and the plan.
+   */
+  periodTotalMinor?: number | null;
+  /** *Diskon bulk order* as confirmed: a whole percent, or an amount in sen. */
+  bulkDiscount?: { type: 'percent'; percent: number } | { type: 'amount'; amountMinor: number } | null;
+  /** *Jumlah agent* as confirmed — never billed, kept for the per-agent figure. */
+  agents?: number | null;
+  /** *Catatan*, as typed. Seen by the Super Admin alone. */
+  note?: string | null;
 }
 
 /** An Owner named without an email (ADR-0212 §3): who they are, and the number the Super Admin may call. */
 export interface KpmPendingOwner {
   fullName: string;
-  /** Their WhatsApp number, as typed — a number to call, never a channel the product sends by (ADR-0212 §4). */
+  /**
+   * Their WhatsApp number, as typed. Since P19.23-T2 AC-3 (OD-420) the number the Super Admin's own WhatsApp opens to
+   * send the claim link (`wa.me`, OD-359) — the product itself still sends nothing by WhatsApp.
+   */
   phone: string;
   agentCode: string | null;
+  /** The claim link sent to them on WhatsApp (OD-420), or absent/`null` while none has gone. Machinery, never served. */
+  invite?: KpmOwnerClaimInvite | null;
+}
+
+/**
+ * **The pending Owner's claim link** (P19.23-T2 AC-3; ADR-0277; OD-420): the hash of the one live link (a new one
+ * replaces it, so only the latest works), when it went, when it stops working, and when it was used — single use.
+ */
+export interface KpmOwnerClaimInvite {
+  /** sha256 of the whole token `<kpmId>.<secret>` — the raw token is in the Super Admin's answer and nowhere else. */
+  tokenHash: string;
+  invitedAt: Date;
+  expiresAt: Date;
+  /** Set the moment an account claims it, before the Owner is written; cleared again if that write is refused. */
+  usedAt: Date | null;
 }
 
 /** The source an office was started from (ADR-0115 §4). */
