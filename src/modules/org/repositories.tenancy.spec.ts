@@ -25,6 +25,8 @@ const TENANT_SCOPED_MODELS = [
   // P18.8-T3 (ADR-0170): a leader's invites, and the requests to move a member, from the day they exist.
   'MemberInvite',
   'TransferRequest',
+  // P19.28-T1 (ADR-0286 §2): *Tambah user*'s invitations, from the day the collection exists.
+  'UserInvitation',
   'MembershipHistory',
   'Membership',
   'ActivityCategory',
@@ -100,6 +102,8 @@ const NOT_TENANT_SCOPED = new Map<string, string>([
 const ALLOWED = new Map<string, string>([
   ['org/membership.repository.ts', 'the repository for that model'],
   ['org/org.repositories.ts', 'the repositories for those models'],
+  // P19.28-T1 (ADR-0286 §2): *Tambah user*'s invitations.
+  ['org/user-invitation.repository.ts', 'the repository for that model'],
 
   ['config/activity.repository.ts', 'the repositories for those models'],
   ['training/training.repository.ts', 'the repositories for those models'],

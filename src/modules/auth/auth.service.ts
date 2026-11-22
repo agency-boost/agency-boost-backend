@@ -725,7 +725,7 @@ export class AuthService {
     }
 
     // The account is global (invariant 2), so the row is the platform's scope, `kpmId: null`, written as the person:
-    // they proved the password and the mailbox. Account changes carry the address, as `kpm.owner_assigned` does.
+    // they proved the password and the mailbox. Account changes carry the address, as `kpm.owner_added` does.
     await this.audit?.record(new RequestContext(record.userId, user.platformRole, null), {
       action: 'user.email_changed',
       targetCollection: 'users',

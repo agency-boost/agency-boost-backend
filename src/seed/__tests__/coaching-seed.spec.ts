@@ -438,9 +438,12 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
     expect(await new PasswordService().verify(yoga!.passwordHash, 'demo password field')).toBe(true);
     expect(await col('memberships').countDocuments({ userId: String(yoga!._id) })).toBe(0);
     // Everybody else signs in verified, as the demo always has — but Citra, registered today (P19.12-T2,
-    // `registered-accounts-fixture.ts`), who signed in by registering and has not opened the link either.
+    // `registered-accounts-fixture.ts`), who signed in by registering and has not opened the link either. *Since
+    // 2026-11-22 (OD-475):* the members the demo presents as imported and never opened (`member-page-fixture.ts`, the
+    // second owner of 0602) carry no proven address, as the import writes them — and none of them has signed in.
     expect(await col('users').countDocuments({
-      emailVerifiedAt: null, email: { $nin: ['unverified@agencyboost.test', 'citra.baru@agencyboost.test'] },
+      emailVerifiedAt: null, lastLoginAt: { $ne: null },
+      email: { $nin: ['unverified@agencyboost.test', 'citra.baru@agencyboost.test'] },
     })).toBe(0);
   });
 

@@ -17,6 +17,7 @@ import { Membership } from '@/modules/org/membership.schema';
 import { User } from '@/modules/users/user.schema';
 import { listenOnLoopback } from '../../../test/listen';
 import { startMongo, stopMongo } from '../../../test/mongo';
+import { ownersOf } from '../../../test/owners';
 
 /** One route of the real app, as its decorators declare it and the router serves it. */
 interface Route {
@@ -90,7 +91,7 @@ describe('P19.4-T2 AC-2 a support session writes nothing, on any route of the ap
     ownerId = String(owner._id);
     const kpm = await kpms.create({
       companyId: '66f0000000000000000000c1', code: '0601', branchName: 'KaiZen Family', timezone: 'Asia/Jakarta',
-      status: 'active', ownerUserId: ownerId,
+      status: 'active', owners: ownersOf(ownerId),
     });
     await memberships.create({
       kpmId: String(kpm._id), userId: ownerId, agentCode: '10601', agentSeq: 1, leaderCode: 'LC0601',

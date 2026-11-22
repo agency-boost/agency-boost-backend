@@ -27,8 +27,13 @@ import {
   DEFAULT_KPM_SETTINGS, Kpm, KpmDocument, type KpmPendingOwner, type KpmSubscription,
 } from './kpm.schema';
 import { OwnerInvitations } from './owner-invitations';
+import { isOwnerOf, ownersInOrder, ownerUserIdsOf } from './kpm-owners';
+import { KpmOwnersService } from './kpm-owners.service';
 import { countLeadersUsedPerOffice } from '@/modules/org/leader-limit';
-import { invitationStateOf, type InvitationState } from '@/modules/org/invitation-state';
+import { invitationStateOf, ownsAccount, type InvitationState } from '@/modules/org/invitation-state';
+import { NotificationService } from '@/modules/notifications/notification.service';
+import { NotificationTemplate } from '@/modules/notifications/notification.types';
+import { countedMembers, isCountedMember, isCountedOffice } from '@/modules/org/counted-members';
 import { INSURERS_ONLY, isTemplateLibrary } from './template-library';
 import {
   subscriptionStateOf, trialSubscription, validateSubscription, type SubscriptionInput, type SubscriptionState,
@@ -85,8 +90,13 @@ type OwnerPlan =
 
 /** What `POST /admin/tenants` answers: the KPM, and whether its Owner was sent an invitation (ADR-0212 §2). */
 export interface KpmCreated extends KpmView {
-  /** `true` once the invitation's email is on its way; `false` with no Owner, no email, unticked, or signed in already. */
+  /** `true` once the invitation's email is on its way; `false` with no Owner, no email, unticked, or the account theirs. */
   invitationSent: boolean;
+  /**
+   * `true` when the Owner, an existing account already theirs (OD-475), was told in the app instead — `member.placed`, as
+   * *Masukkan* tells a new KPM's owner (OD-442); `false` otherwise. The WhatsApp half is the console's own link.
+   */
+  ownerNotified: boolean;
 }
 
 /**
@@ -119,10 +129,15 @@ export interface KpmView {
   branchName: string;
   address: string | null;
   contactPhone: string | null;
+  /**
+   * **The first owner** — the earliest `since` (ADR-0285 §3): who a screen names when it names one, *"♛ FIRST OWNER +n"*.
+   * `null` when nobody owns the office, which the screens render as a call to act. Every owner is in `owners`.
+   */
   ownerUserId: string | null;
-  /** Null when nobody owns the office — which the screens already render as a call to act. */
   ownerName: string | null;
   ownerEmail: string | null;
+  /** **Every owner**, in order of `since` (P19.27-T1 AC-3; ADR-0285 §1): all hold the same full KPM Owner rights. */
+  owners: KpmViewOwner[];
   timezone: string;
   locale: string;
   currency: string;
@@ -133,6 +148,15 @@ export interface KpmView {
   suspendedAt: string | null;
   suspendedReason: string | null;
   createdAt: string;
+}
+
+/** One owner of an office as `KpmView` names them (ADR-0285 §3). */
+export interface KpmViewOwner {
+  userId: string;
+  fullName: string;
+  email: string | null;
+  /** When they became an owner, ISO. */
+  since: string;
 }
 
 /**
@@ -152,7 +176,8 @@ export interface KpmAdminView extends KpmView {
    * **Where the Owner stands** (ADR-0212 §2, §3; P19.4-T3 AC-6, AC-8): `none` — no Owner and none named; `not_invited`
    * — *Belum diundang*: an Owner never sent an invitation, or one named with no email (`pendingOwner`); `invited` —
    * *Diundang*: the latest invitation sent (`memberships.invitedAt`) and the account never signed in; `active` —
-   * *Aktif*: the Owner's account has signed in (`users.lastLoginAt`).
+   * *Aktif*: the Owner's account has signed in (`users.lastLoginAt`). **With several owners, the first owner's** (ADR-0285
+   * §3), as `ownerPhone` and `ownerInvitedAt` are: each owner's own state is on *KPM Owner · n* (`KpmOwnersService.list`).
    */
   ownerState: OwnerState;
   /** The Owner's WhatsApp number — the account's `phone`, or the pending Owner's — a number to call, never a channel. */
@@ -161,7 +186,10 @@ export interface KpmAdminView extends KpmView {
   ownerInvitedAt: string | null;
   /** The Owner named with no email, waiting (`kpms.pendingOwner`), or `null`. The Super Admin's alone. */
   pendingOwner: KpmPendingOwner | null;
-  /** Live memberships — active and pending — the Owner's own included. */
+  /**
+   * ***Anggota*: the counted members** (`COUNTED_MEMBERS`, `org/counted-members.ts`; P19.26-T1, ADR-0284 §1) — active, no
+   * test account — the Owner's own included. Until P19.26 it counted pending memberships and test accounts too (UI-204).
+   */
   memberCount: number;
   /** The same, the Owner's own left out: *"Belum ada anggota"* while it is 0 (SA R5). */
   membersBesidesOwner: number;
@@ -188,9 +216,6 @@ type OwnerFacts = Pick<
   KpmAdminView, 'ownerState' | 'ownerPhone' | 'ownerInvitedAt' | 'pendingOwner' | 'memberCount' | 'membersBesidesOwner'
 >;
 
-/** How many accounts *Ganti Owner*'s search answers (P19-T3 AC-5): a search, never the platform's users. */
-const ACCOUNT_SEARCH_LIMIT = 20;
-
 /**
  * **What an office is made with, and what is counted apart**, by collection — not its *records* (P19-T3 AC-7): the configuration
  * provisioning writes with it (`ProvisioningService.provision`), its product shelf and carrier rules, the memberships
@@ -202,33 +227,6 @@ const NOT_OFFICE_DATA = new Set([
   'trainingCategories', 'trainingSkills', 'trainingModules', 'activationTemplates', 'eventTypes', 'capabilityCatalogs',
   'kpmProductConfigs', 'qualificationRules',
 ]);
-
-/** An office an account owns or belongs to, as *Ganti Owner*'s picker shows it (P19-T3 AC-5). */
-export interface AccountOffice {
-  kpmId: string;
-  code: string;
-  branchName: string;
-  companyName: string;
-  isOwner: boolean;
-  /** Their membership's state there; `null` for an office they own with no membership in it. */
-  membershipStatus: 'active' | 'pending' | null;
-}
-
-/** One account *Ganti Owner* may choose (P19-T3 AC-5). */
-export interface AccountChoice {
-  userId: string;
-  fullName: string;
-  email: string;
-  phone: string | null;
-  companyId: string | null;
-  companyName: string | null;
-  /** An Owner needs one: the office makes them its root AB under their insurer's code. */
-  hasAgentCode: boolean;
-  /** ADR-0190 §4: only a verified address may own an office. */
-  emailVerified: boolean;
-  status: 'invited' | 'active' | 'deactivated';
-  offices: AccountOffice[];
-}
 
 /** One person who administers an office, seen from the platform. */
 export interface PlatformAdminRow {
@@ -308,7 +306,22 @@ export class TenantService {
      * it, and an Owner named with an email is refused without it rather than left uninvited unseen.
      */
     @Optional() @Inject(OwnerInvitations) private readonly invitations: OwnerInvitations | null = null,
-  ) {}
+    /*
+     * **A KPM's owners, written** (ADR-0285 §1; P19.27): the one writer of `kpms.owners`. Optional so the specs that build
+     * this service by hand need not wire it — built from this service's own models then, the same writer either way.
+     */
+    @Optional() @Inject(KpmOwnersService) ownersService: KpmOwnersService | null = null,
+    /*
+     * **The notice to an Owner who is told, not invited** (OD-442, OD-475): an existing account made a new KPM's Owner on
+     * *KPM baru* is sent `member.placed` in the app, as *Masukkan* sends it. Optional so the specs that build this service
+     * by hand need not wire the inbox; the application always gives it.
+     */
+    @Optional() @Inject(NotificationService) private readonly notifications: NotificationService | null = null,
+  ) {
+    this.owners = ownersService ?? new KpmOwnersService(kpms, users, memberships, audit, clock);
+  }
+
+  private readonly owners: KpmOwnersService;
 
   private readonly logger = new Logger(TenantService.name);
 
@@ -337,7 +350,19 @@ export class TenantService {
     const byCompany = new Map(companies.map((c) => [String(c._id), c]));
 
     return kpms.map((k) => {
-      const owner = k.ownerUserId ? byUser.get(k.ownerUserId) : undefined;
+      // ADR-0285 §3: every owner in order of `since`; the first is the one a screen names alone.
+      const owners = ownersInOrder(k).map((o) => {
+        const account = byUser.get(o.userId);
+        return {
+          userId: o.userId,
+          // An owner whose account has gone still gets a row: 'Unknown' says the office is owned and the account is
+          // missing, which is a different problem from unowned. In the reader's language.
+          fullName: account?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, reader),
+          email: account?.email ?? null,
+          since: new Date(o.since).toISOString(),
+        };
+      });
+      const first = owners[0] ?? null;
       return {
         _id: String(k._id),
         companyId: k.companyId,
@@ -346,11 +371,10 @@ export class TenantService {
         branchName: k.branchName,
         address: k.address ?? null,
         contactPhone: k.contactPhone ?? null,
-        ownerUserId: k.ownerUserId ?? null,
-        // An owner whose account has gone still gets a row: 'Unknown' says the office is
-        // owned and the account is missing, which is a different problem from unowned. In the reader's language.
-        ownerName: k.ownerUserId ? (owner?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, reader)) : null,
-        ownerEmail: k.ownerUserId ? (owner?.email ?? null) : null,
+        ownerUserId: first?.userId ?? null,
+        ownerName: first?.fullName ?? null,
+        ownerEmail: first?.email ?? null,
+        owners,
         timezone: k.timezone,
         locale: k.locale,
         currency: k.currency,
@@ -364,9 +388,9 @@ export class TenantService {
     });
   }
 
-  /** The offices' Owners' accounts, by id, in one query — a soft-deleted one too, so a row still names its Owner. */
+  /** The offices' owners' accounts, by id, in one query — a soft-deleted one too, so a row still names its owner. */
   private async ownerAccounts(kpms: readonly KpmDocument[]): Promise<Map<string, UserDocument>> {
-    const ownerIds = [...new Set(kpms.map((k) => k.ownerUserId).filter((id): id is string => Boolean(id)))];
+    const ownerIds = [...new Set(kpms.flatMap((k) => ownerUserIdsOf(k)))].filter((id) => isValidObjectId(id));
     const owners = ownerIds.length > 0 ? await this.users.find({ _id: { $in: ownerIds } }).exec() : [];
     return new Map(owners.map((u) => [String(u._id), u]));
   }
@@ -411,7 +435,7 @@ export class TenantService {
     ctx: RequestContext, kpms: readonly KpmDocument[], ownersRead?: Map<string, UserDocument>,
   ): Promise<Map<string, OwnerFacts>> {
     const kpmIds = kpms.map((k) => String(k._id));
-    const ownerIds = [...new Set(kpms.map((k) => k.ownerUserId).filter((id): id is string => Boolean(id)))];
+    const ownerIds = [...new Set(kpms.flatMap((k) => ownerUserIdsOf(k)))];
     const [account, ownerRows, live] = await Promise.all([
       ownersRead ? Promise.resolve(ownersRead) : this.ownerAccounts(kpms),
       ownerIds.length > 0
@@ -419,16 +443,22 @@ export class TenantService {
           userId: { $in: ownerIds }, kpmId: { $in: kpmIds }, status: { $in: ['active', 'pending'] },
         })
         : Promise.resolve([]),
-      this.memberships.countPerOfficeAcrossTenants(ctx, kpmIds, { status: { $in: ['active', 'pending'] } }),
+      // *Anggota*, the console's one count (P19.26-T1 AC-1; ADR-0284 §1): active, never a test account.
+      this.memberships.countPerOfficeAcrossTenants(ctx, kpmIds, countedMembers()),
     ]);
     return new Map(kpms.map((kpm) => {
       const id = String(kpm._id);
-      const user = kpm.ownerUserId ? account.get(kpm.ownerUserId) : undefined;
-      const row = kpm.ownerUserId ? ownerRows.find((m) => m.kpmId === id && m.userId === kpm.ownerUserId) : undefined;
+      // ADR-0285 §3: every owner's row here; the first owner's is the one whose number and invitation the console shows.
+      const ids = ownerUserIdsOf(kpm);
+      const first = ids[0] ?? null;
+      const user = first ? account.get(first) : undefined;
+      const rowsHere = ownerRows.filter((m) => m.kpmId === id && ids.includes(m.userId));
+      const row = first ? rowsHere.find((m) => m.userId === first) : undefined;
       // P19.23-T2 AC-3 (OD-420): a pending Owner sent the WhatsApp claim link reads *Diundang* from when it went.
-      const invitedAt = row?.invitedAt ?? (kpm.ownerUserId ? null : kpm.pendingOwner?.invite?.invitedAt ?? null);
-      const ownerState: OwnerState = kpm.ownerUserId
-        ? consoleState(invitationStateOf(user?.lastLoginAt, invitedAt))
+      const invitedAt = row?.invitedAt ?? (first ? null : kpm.pendingOwner?.invite?.invitedAt ?? null);
+      // The first owner's state (ADR-0285 §3): the owner the console names, invites from the list and counts as an issue.
+      const ownerState: OwnerState = first
+        ? consoleState(invitationStateOf(user, invitedAt))
         : (kpm.pendingOwner ? (invitedAt ? 'invited' : 'not_invited') : 'none');
       const memberCount = live.get(id) ?? 0;
       return [id, {
@@ -440,7 +470,9 @@ export class TenantService {
           ? { fullName: kpm.pendingOwner.fullName, phone: kpm.pendingOwner.phone, agentCode: kpm.pendingOwner.agentCode }
           : null,
         memberCount,
-        membersBesidesOwner: Math.max(0, memberCount - (row ? 1 : 0)),
+        // The owners' own rows leave the count only when they are in it: active, and not a test account (ADR-0285 §3:
+        // every owner, not the first alone).
+        membersBesidesOwner: Math.max(0, memberCount - rowsHere.filter((m) => isCountedMember(m)).length),
       }];
     }));
   }
@@ -813,7 +845,8 @@ export class TenantService {
         settings: { ...DEFAULT_KPM_SETTINGS },
         counters: { nextMemberSeq: 1 },
         status: 'active',
-        ownerUserId: null,
+        // No owner yet: the one named is added below, through `KpmOwnersService` (ADR-0285 §1).
+        owners: [],
         startedFrom: plan.startedFrom,
         // P19.23-T5 AC-3 (ADR-0279 §4): every new KPM starts on a 30-day trial, from its own today.
         subscription: trialSubscription(this.clock.localDateFor(input.timezone ?? company.defaultTimezone)),
@@ -879,7 +912,7 @@ export class TenantService {
       },
     });
 
-    if (ownerPlan === null) return { ...(await this.toView(kpm, ctx.reader)), invitationSent: false };
+    if (ownerPlan === null) return { ...(await this.toView(kpm, ctx.reader)), invitationSent: false, ownerNotified: false };
 
     /*
      * **One unit with the KPM** (ADR-0212 §1, as approval is, ADR-0191 §3): an Owner who cannot be set — the leader
@@ -896,7 +929,29 @@ export class TenantService {
       throw err;
     }
     const invitationSent = await this.inviteIfDue(ctx, kpm, owner, input.sendInvitation ?? true);
-    return { ...(await this.toView(kpm, ctx.reader)), invitationSent };
+    // OD-475, OD-442: an existing account is its person's own — no link goes; they are told in the app, as *Masukkan*
+    // tells a new KPM's owner, so both doors to a KPM with an existing Owner behave alike.
+    const ownerNotified = ownerPlan.kind === 'existing' && owner !== null && !invitationSent
+      ? await this.notifyPlacedOwner(String(owner._id), kpm)
+      : false;
+    return { ...(await this.toView(kpm, ctx.reader)), invitationSent, ownerNotified };
+  }
+
+  /** ***Masukkan*'s notice**, `member.placed`, in the app. A failure is logged and the KPM stands: they see it at sign-in. */
+  private async notifyPlacedOwner(userId: string, kpm: KpmDocument): Promise<boolean> {
+    if (!this.notifications) return false;
+    try {
+      await this.notifications.send({
+        userId,
+        kpmId: String(kpm._id),
+        templateId: NotificationTemplate.MEMBER_PLACED,
+        payload: { kpmName: kpm.branchName, kpmCode: kpm.code },
+      });
+      return true;
+    } catch (err) {
+      this.logger.error({ err, kpmId: String(kpm._id) }, 'the new Owner\'s notice could not be sent');
+      return false;
+    }
   }
 
   /**
@@ -951,9 +1006,8 @@ export class TenantService {
   /**
    * **Make the plan true in the KPM** (ADR-0212 §2, §3): an account made for a new Owner — with no usable password, as
    * the import makes one, its address unverified until the invitation's link proves it (ADR-0190 §3) — the Owner's
-   * membership as the KPM's root AB, `ownerUserId`, and `pendingOwner` cleared; or, with no email, `pendingOwner`
-   * alone. Each step that wrote pushes its undo. Audited: `kpm.owner_assigned` (or `kpm.owner_transferred`), `kpm
-   * .pending_owner_set`. Answers the Owner's account, or `null` for an Owner who waits.
+   * membership as the KPM's root AB, one of its owners (`KpmOwnersService.add`), and `pendingOwner` cleared; or, with no email, `pendingOwner`
+   * alone. Each step that wrote pushes its undo. Audited: `kpm.owner_added` (ADR-0285), `kpm.pending_owner_set`. Answers the Owner's account, or `null` for an Owner who waits.
    */
   private async installOwner(
     ctx: RequestContext, kpm: KpmDocument, plan: OwnerPlan, undo: Array<() => Promise<unknown>>,
@@ -1004,17 +1058,10 @@ export class TenantService {
 
     const userId = String(user._id);
     await this.ensureOwnerMembership(ctx, kpmId, userId);
-    const previousOwnerUserId = kpm.ownerUserId;
-    await this.kpms.updateOne({ _id: kpmId }, { $set: { ownerUserId: userId, pendingOwner: null } }).exec();
-    kpm.ownerUserId = userId;
-    kpm.pendingOwner = null;
-    await this.audit.record(ctx, {
-      action: previousOwnerUserId ? 'kpm.owner_transferred' : 'kpm.owner_assigned',
-      targetCollection: 'kpms',
-      targetId: kpmId,
-      before: { ownerUserId: previousOwnerUserId ?? null },
-      after: { ownerUserId: userId, email: user.email, accountCreated: plan.kind === 'new' },
-    });
+    // One of the KPM's owners — its first, on a new KPM — through the one writer of the list (ADR-0285 §1), its undo on
+    // the caller's stack so a rollback leaves no owner behind. Audited `kpm.owner_added`; `pendingOwner` cleared.
+    await this.owners.add(ctx, kpmId, userId, { undo, auditAfter: { accountCreated: plan.kind === 'new' } });
+    await this.refreshOwners(kpm);
     return user;
   }
 
@@ -1027,7 +1074,8 @@ export class TenantService {
   private async inviteIfDue(
     ctx: RequestContext, kpm: KpmDocument, owner: UserDocument | null, send: boolean,
   ): Promise<boolean> {
-    if (!send || owner === null || owner.lastLoginAt || !this.invitations) return false;
+    // An account already the Owner's own (OD-475) needs no link to set a password it has.
+    if (!send || owner === null || ownsAccount(owner) || !this.invitations) return false;
     try {
       await this.invitations.send(ctx, kpm, owner, { resent: false });
       return true;
@@ -1049,109 +1097,34 @@ export class TenantService {
   }
 
   /**
-   * Assign or transfer the Owner. Both are Super Admin only, and both are audited with
-   * the outgoing and incoming user, because ownership is what makes every other
-   * tenant-admin grant possible.
-   *
-   * **The person is resolved before anything is written.** An earlier version took a
-   * user id on trust and stored it, so an office could be left pointing at an account
-   * that does not exist — permanently, with nothing to notice it, and with nobody able
-   * to administer the office. The console's screen asserted a "user not found" error
-   * the service never produced; the API test and the screen test each passed against a
-   * contract the other did not implement.
-   *
-   * Identified by **email or id**. Email is what a Super Admin actually knows and is
-   * what §6.1 of roles-and-permissions.md describes; the id is kept because Swagger and
-   * the seed output give you one.
+   * **An account made one of a KPM's owners** (ADR-0191 §3, ADR-0285 §1): a KPM request's applicant on approval. Asked
+   * after `refuseOwner` has passed (the KPM's company, an agent code, a verified address). Their membership first — the
+   * KPM's root AB when they have none, which the leader limit may refuse (ADR-0113 §2) before any owner is written — then
+   * the owner, through `KpmOwnersService`. `PATCH /admin/tenants/:id/owner`, which assigned and transferred *the* Owner,
+   * is retired with the one-owner model (P19.27-T1 AC-4): an owner is added, and another removed, from the KPM page.
    */
-  async assignOwner(
-    ctx: RequestContext,
-    kpmId: string,
-    who: { userId?: string; email?: string; owner?: OwnerInput; sendInvitation?: boolean },
-  ): Promise<KpmAdminView> {
-    this.require(ctx, 'kpm:assign_owner');
-
-    const kpm = await this.kpms
-      .findOne({ _id: kpmId, deletedAt: null })
-      .exec()
-      // A malformed id is "not here", not a 500: these arrive from a URL, and an
-      // uncaught CastError renders as INTERNAL_ERROR and is logged as unhandled.
-      .catch(() => null);
-    if (!kpm) throw new NotFoundException('KPM');
-
-    // *Ganti pemilik* to somebody named, with their email (ADR-0212 §3): an account is found or made, and invited.
-    if (who.owner) return this.assignNamedOwner(ctx, kpm, who.owner, who.sendInvitation ?? true);
-
-    const user = await this.resolveOwner(who);
-    // Before anything is written (P19-T3 AC-3, AC-5): the office's own company, an agent code, a verified address.
-    await this.refuseOwner(user, kpm.companyId, { requireVerified: true });
-
-    // An Owner who is not a member cannot be resolved into the office, so nothing they
-    // own is reachable. §6.1 of roles-and-permissions.md creates this on first login;
-    // creating it here instead means the office is administrable the moment it is
-    // assigned, rather than the first time someone happens to sign in.
-    //
-    // **Before the office row, since P13.2-T4.** A new Owner who is not yet a member is made
-    // the office's root AB, and the leader limit can refuse that (ADR-0113 §2). Written after
-    // `ownerUserId`, the refusal left an office owned by somebody with no membership in it —
-    // nobody able to administer it, and the screen saying the assignment had failed.
-    await this.ensureOwnerMembership(ctx, kpmId, String(user._id));
-
-    const previousOwnerUserId = kpm.ownerUserId;
-    kpm.ownerUserId = String(user._id);
-    // An Owner named without an email waited here (ADR-0212 §3); one is set now, so the record goes.
-    kpm.pendingOwner = null;
-    await kpm.save();
-
-    await this.audit.record(ctx, {
-      action: previousOwnerUserId ? 'kpm.owner_transferred' : 'kpm.owner_assigned',
-      targetCollection: 'kpms',
-      targetId: kpmId,
-      before: { ownerUserId: previousOwnerUserId },
-      after: { ownerUserId: String(user._id), email: user.email },
-    });
-
-    return this.toAdminView(ctx, kpm);
+  async installAccountOwner(ctx: RequestContext, kpmId: string, userId: string): Promise<void> {
+    this.require(ctx, 'kpm:create');
+    const kpm = await this.liveKpm(kpmId);
+    await this.ensureOwnerMembership(ctx, kpmId, userId);
+    await this.owners.add(ctx, String(kpm._id), userId);
   }
 
-  /**
-   * ***Ganti pemilik* to a person named with their email** (ADR-0212 §3; P19.4-T3 AC-6): the KPM's pending Owner given
-   * an email, or anybody else. Their account — found by the address and refused as any Owner is, or made for it — becomes
-   * the Owner and is invited (unless `sendInvitation` is `false`, or they have signed in). `owner.email` is required
-   * (`400`): an invitation goes by email, and an Owner with none is already what the KPM has. Checked before anything is
-   * written; a failure after the account was made undoes it.
-   */
-  private async assignNamedOwner(
-    ctx: RequestContext, kpm: KpmDocument, owner: OwnerInput, sendInvitation: boolean,
-  ): Promise<KpmAdminView> {
-    if (!owner.email?.trim()) {
-      throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        TENANTS_REFUSALS.VALIDATION_FAILED.ownerEmailNeeded,
-        HttpStatus.BAD_REQUEST,
-        { field: 'owner.email' },
-      );
-    }
-    const company = await this.companies.findOne({ _id: kpm.companyId }).exec().catch(() => null);
-    const plan = await this.planOwner(kpm.companyId, company?.name ?? kpm.companyId, owner);
-    const undo: Array<() => Promise<unknown>> = [];
-    let user: UserDocument | null;
-    try {
-      user = await this.installOwner(ctx, kpm, plan, undo);
-    } catch (err) {
-      for (const step of undo.reverse()) await step().catch(() => undefined);
-      throw err;
-    }
-    await this.inviteIfDue(ctx, kpm, user, sendInvitation);
-    return this.toAdminView(ctx, kpm);
+  /** The owners and the pending owner of `kpm` as the database holds them now, onto the document in hand. */
+  private async refreshOwners(kpm: KpmDocument): Promise<void> {
+    const row = await this.kpms.findById(kpm._id).select('owners pendingOwner').lean().exec() as
+      { owners?: KpmDocument['owners']; pendingOwner?: KpmPendingOwner | null } | null;
+    kpm.set('owners', row?.owners ?? []);
+    kpm.set('pendingOwner', row?.pendingOwner ?? null);
   }
 
   /**
    * **The pending Owner who accepted the WhatsApp claim link becomes the Owner** (P19.23-T2 AC-3; ADR-0277; OD-420), as
    * the person signed in to their own account — asked by `OwnerClaims.accept` once the link is held and `refuseOwner`
-   * has passed. Their membership first, as the KPM's root AB (the leader limit may refuse it, ADR-0113 §2), then
-   * `ownerUserId` — **only while the KPM still has none** — and `pendingOwner` cleared; their WhatsApp number kept on
-   * the account where it has none. Audited in the KPM's log as `kpm.owner_assigned`, the actor the person who claimed.
+   * has passed. Their membership first, as the KPM's root AB (the leader limit may refuse it, ADR-0113 §2), then one of
+   * its owners (`KpmOwnersService.add`) — **only while the KPM still has none** — and `pendingOwner` cleared; their
+   * WhatsApp number kept on the account where it has none. Audited in the KPM's log as `kpm.owner_added`, `via:
+   * 'whatsapp_claim'`, the actor the person who claimed.
    * Answers `false`, writing no Owner, when somebody else became the Owner meanwhile.
    */
   async installClaimedOwner(ctx: RequestContext, kpm: KpmDocument, user: UserDocument): Promise<boolean> {
@@ -1160,20 +1133,13 @@ export class TenantService {
     // Somebody writing themselves into an office they are joining (`joiningTenant`): never a Super Admin's context.
     const inKpm = RequestContext.joiningTenant(ctx, kpmId);
     await this.ensureOwnerMembership(inKpm, kpmId, userId);
-    const written = await this.kpms
-      .updateOne({ _id: kpmId, deletedAt: null, ownerUserId: null }, { $set: { ownerUserId: userId, pendingOwner: null } })
-      .exec();
-    if (written.modifiedCount === 0) return false;
+    const { added } = await this.owners.add(inKpm, kpmId, userId, {
+      onlyWhileNone: true, auditAfter: { via: 'whatsapp_claim', pendingOwner: kpm.pendingOwner?.fullName ?? null },
+    });
+    if (!added) return false;
     if (!user.phone && kpm.pendingOwner?.phone) {
       await this.users.updateOne({ _id: user._id, phone: null }, { $set: { phone: kpm.pendingOwner.phone } }).exec();
     }
-    await this.audit.record(inKpm, {
-      action: 'kpm.owner_assigned',
-      targetCollection: 'kpms',
-      targetId: kpmId,
-      before: { ownerUserId: null, pendingOwner: kpm.pendingOwner?.fullName ?? null },
-      after: { ownerUserId: userId, email: user.email, via: 'whatsapp_claim' },
-    });
     return true;
   }
 
@@ -1203,8 +1169,8 @@ export class TenantService {
        * A pending member made the Owner is activated **under the leader limit** (ADR-0113 §2, P13.2
        * exit review): one promoted to AB or AAB while pending was not counted, and activating them here
        * asked nobody. `activate` takes the seat for a pending leader and refuses `409
-       * LEADER_LIMIT_REACHED` before anything is written — and before `ownerUserId`, which
-       * `assignOwner` writes after this.
+       * LEADER_LIMIT_REACHED` before anything is written — and before the owner is added, which
+       * `KpmOwnersService.add` writes after this.
        */
       if (existing.status !== 'active') {
         /*
@@ -1225,41 +1191,9 @@ export class TenantService {
     });
   }
 
-  private async resolveOwner(who: { userId?: string; email?: string }): Promise<UserDocument> {
-    const email = who.email?.toLowerCase().trim();
-    if (!who.userId && !email) {
-      throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        TENANTS_REFUSALS.VALIDATION_FAILED.nameTheOwner,
-        HttpStatus.BAD_REQUEST,
-        { fields: ['email', 'userId'] },
-      );
-    }
-
-    // An id that is not a valid ObjectId would make Mongoose throw a CastError, which
-    // surfaces as a 500. It is a caller mistake, so it is a 404 like any other unknown.
-    const byId =
-      who.userId && isValidObjectId(who.userId)
-        ? await this.users.findOne({ _id: who.userId, deletedAt: null }).exec()
-        : null;
-    const user = byId ?? (email ? await this.users.findOne({ email, deletedAt: null }).exec() : null);
-
-    if (!user) throw new NotFoundException('User');
-
-    if (user.status === 'deactivated') {
-      throw new DomainException(
-        ErrorCode.VALIDATION_FAILED,
-        TENANTS_REFUSALS.VALIDATION_FAILED.ownerDeactivated,
-        HttpStatus.BAD_REQUEST,
-        { userId: String(user._id) },
-      );
-    }
-    return user;
-  }
-
   /**
    * **Who may own an office of this company** (ADR-0191 §3, ADR-0190 §4; P19-T3 AC-3, AC-5) — asked before anything
-   * is written, by `assignOwner`, by approving a KPM request and by a move.
+   * is written, by approving a KPM request, by a WhatsApp claim and by a move.
    *
    * - **The office's own company, and an agent code.** The Owner is made the office's root AB, and an office admits
    *   only its insurer's agents (`HierarchyService.agentCodeOf`). Asked *after* the office existed, that rule failed
@@ -1399,81 +1333,6 @@ export class TenantService {
   }
 
   /**
-   * **The accounts *Ganti Owner* chooses from** (ADR-0191 §5, P19-T3 AC-5): `GET /admin/accounts?q=`, by name or email,
-   * at most twenty, each with its company, whether its address is verified, and the offices it already owns or belongs
-   * to — so the Super Admin sees who is already an Owner or a member before choosing, instead of asking for an exact
-   * email. Super Admins are not offered: they sell for nobody.
-   *
-   * Their memberships are read across offices through the named unscoped method (invariant §1), by the Super Admin
-   * who is in none — the same register entry as the overview's.
-   */
-  async searchAccounts(ctx: RequestContext, q: string): Promise<AccountChoice[]> {
-    this.require(ctx, 'kpm:assign_owner');
-    const term = (q ?? '').trim();
-    if (term.length < 2) {
-      throw new InvalidRequestException(TENANTS_REFUSALS.VALIDATION_FAILED.searchTwoCharacters, { field: 'q' });
-    }
-    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const users = await this.users
-      .find({ deletedAt: null, platformRole: { $ne: 'super_admin' }, $or: [{ fullName: pattern }, { email: pattern }] })
-      .sort({ fullName: 1 })
-      .limit(ACCOUNT_SEARCH_LIMIT)
-      .exec();
-    if (users.length === 0) return [];
-
-    const ids = users.map((u) => String(u._id));
-    const [memberships, owned] = await Promise.all([
-      this.memberships.findAcrossAllTenants(ctx, { userId: { $in: ids }, status: { $in: ['active', 'pending'] } }),
-      this.kpms.find({ ownerUserId: { $in: ids }, deletedAt: null }).exec(),
-    ]);
-    const kpmIds = [...new Set([...memberships.map((m) => m.kpmId), ...owned.map((k) => String(k._id))])];
-    const offices = kpmIds.length > 0
-      ? await this.kpms.find({ _id: { $in: kpmIds }, deletedAt: null }).exec()
-      : [];
-    const companyIds = [...new Set([
-      ...users.map((u) => u.companyId).filter((id): id is string => Boolean(id)),
-      ...offices.map((k) => k.companyId),
-    ])];
-    const companies = await this.companies.find({ _id: { $in: companyIds } }).exec().catch(() => []);
-    const companyName = new Map(companies.map((c) => [String(c._id), c.name]));
-    const office = new Map(offices.map((k) => [String(k._id), k]));
-
-    return users.map((u) => {
-      const userId = String(u._id);
-      const theirs = new Map<string, AccountOffice>();
-      for (const m of memberships.filter((row) => row.userId === userId)) {
-        const k = office.get(m.kpmId);
-        if (!k) continue;
-        theirs.set(m.kpmId, {
-          kpmId: m.kpmId, code: k.code, branchName: k.branchName,
-          companyName: companyName.get(k.companyId) ?? render(TENANTS_MESSAGES.unknownCompany, ctx.reader),
-          isOwner: k.ownerUserId === userId, membershipStatus: m.status === 'pending' ? 'pending' : 'active',
-        });
-      }
-      for (const k of owned.filter((row) => row.ownerUserId === userId)) {
-        if (theirs.has(String(k._id))) continue;
-        theirs.set(String(k._id), {
-          kpmId: String(k._id), code: k.code, branchName: k.branchName,
-          companyName: companyName.get(k.companyId) ?? render(TENANTS_MESSAGES.unknownCompany, ctx.reader),
-          isOwner: true, membershipStatus: null,
-        });
-      }
-      return {
-        userId,
-        fullName: u.fullName,
-        email: u.email,
-        phone: u.phone ?? null,
-        companyId: u.companyId ?? null,
-        companyName: u.companyId ? (companyName.get(u.companyId) ?? null) : null,
-        hasAgentCode: Boolean(u.agentCode),
-        emailVerified: Boolean(u.emailVerifiedAt),
-        status: u.status,
-        offices: [...theirs.values()],
-      };
-    });
-  }
-
-  /**
    * **What an office holds** (ADR-0191 §5, P19-T3 AC-7): its members — every membership, whatever its state, the
    * Owner's included — and its records, every row of every collection that carries the office's `kpmId`, apart from
    * what provisioning writes with it (its configuration) and the audit log. `deletable` when both are zero: what the
@@ -1567,9 +1426,9 @@ export class TenantService {
 
     const id = String(kpm._id);
     const scoped = RequestContext.superAdminInTenant(ctx.auditActors.actorUserId, id);
-    const others = await this.memberships.count(
-      scoped, kpm.ownerUserId ? { userId: { $ne: kpm.ownerUserId } } : {},
-    );
+    // Every owner comes along (ADR-0285 §3); anybody else keeps the KPM where it is.
+    const ownerIds = ownerUserIdsOf(kpm);
+    const others = await this.memberships.count(scoped, ownerIds.length > 0 ? { userId: { $nin: ownerIds } } : {});
     if (others > 0) {
       throw new DomainException(
         ErrorCode.TENANT_NOT_EMPTY,
@@ -1579,15 +1438,15 @@ export class TenantService {
       );
     }
 
-    // The Owner comes along: theirs must be the new company, and their rung must be on its ladder.
-    let ownerMove: { membershipId: string; orgLevelId: string; orgLevelCode: string } | null = null;
-    if (kpm.ownerUserId) {
-      const owner = await this.users.findOne({ _id: kpm.ownerUserId, deletedAt: null }).exec().catch(() => null);
+    // The owners come along: theirs must be the new company, and their rungs must be on its ladder.
+    const ownerMoves: { membershipId: string; orgLevelId: string; orgLevelCode: string }[] = [];
+    for (const ownerId of ownerIds) {
+      const owner = await this.users.findOne({ _id: ownerId, deletedAt: null }).exec().catch(() => null);
       if (owner) await this.refuseOwner(owner, companyId, { requireVerified: false });
-      const membership = await this.memberships.findOne(scoped, { userId: kpm.ownerUserId });
+      const membership = await this.memberships.findOne(scoped, { userId: ownerId });
       if (membership) {
         const level = await this.orgLevels.resolveByCode(companyId, membership.orgLevelCode);
-        ownerMove = { membershipId: String(membership._id), orgLevelId: String(level._id), orgLevelCode: level.code };
+        ownerMoves.push({ membershipId: String(membership._id), orgLevelId: String(level._id), orgLevelCode: level.code });
       }
     }
 
@@ -1614,7 +1473,7 @@ export class TenantService {
     const provisioned = await this.provisioning.provision(id, plan);
     await this.provisioning.publishInitialSnapshotFor(id, this.contextFor(ctx, id));
     await this.kpms.updateOne({ _id: id }, { $set: { seededFrom: provisioned.seededFrom } }).exec();
-    if (ownerMove) {
+    for (const ownerMove of ownerMoves) {
       await this.memberships.updateById(scoped, ownerMove.membershipId, {
         $set: { orgLevelId: ownerMove.orgLevelId, orgLevelCode: ownerMove.orgLevelCode },
       });
@@ -1627,7 +1486,8 @@ export class TenantService {
       before,
       after: {
         companyId, startedFrom: plan.startedFrom, seededFrom: provisioned.seededFrom, retired,
-        ownerRung: ownerMove?.orgLevelCode ?? null,
+        ownerRung: ownerMoves[0]?.orgLevelCode ?? null,
+        ownerRungs: ownerMoves.map((m) => m.orgLevelCode),
       },
     });
 
@@ -1639,20 +1499,6 @@ export class TenantService {
     const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec().catch(() => null);
     if (!kpm) throw new NotFoundException('KPM');
     return kpm;
-  }
-
-  /**
-   * A tenant may not be left ownerless. Clearing the owner without naming a successor
-   * would leave nobody able to grant admin access.
-   */
-  async clearOwner(ctx: RequestContext, kpmId: string): Promise<never> {
-    this.require(ctx, 'kpm:assign_owner');
-    throw new DomainException(
-      ErrorCode.PERM_LAST_OWNER,
-      TENANTS_REFUSALS.PERM_LAST_OWNER.alwaysAnOwner,
-      HttpStatus.CONFLICT,
-      { kpmId },
-    );
   }
 
   async setStatus(
@@ -1762,7 +1608,8 @@ export class TenantService {
       // The insurers: the Template library holds templates, and is no company the platform serves (ADR-0164 §3).
       this.companies.find({ deletedAt: null, ...INSURERS_ONLY }).sort({ name: 1 }).exec(),
       this.kpms.find({ deletedAt: null }).exec(),
-      this.memberships.findAcrossAllTenants(ctx, { status: 'active' }),
+      // *Anggota*, the console's one count (P19.26-T1 AC-1; ADR-0284 §1): active, never a test account.
+      this.memberships.findAcrossAllTenants(ctx, countedMembers()),
       // The **model**, not `KpmRequestService` — that service already depends on this
       // one, so injecting it back would be a cycle.
       this.kpmRequests.countDocuments({ status: 'pending', deletedAt: null }).exec(),
@@ -1774,9 +1621,12 @@ export class TenantService {
       ),
     ]);
 
+    // Members and KPMs counted where every page counts them (ADR-0284 §1): an archived KPM is out of both.
+    const counted = new Set(kpms.filter((k) => isCountedOffice(k)).map((k) => String(k._id)));
     const membersByKpm = new Map<string, number>();
     let agencyBuilders = 0;
     for (const m of members) {
+      if (!counted.has(m.kpmId)) continue;
       membersByKpm.set(m.kpmId, (membersByKpm.get(m.kpmId) ?? 0) + 1);
       if (m.role === 'ab') agencyBuilders += 1;
     }
@@ -1791,13 +1641,13 @@ export class TenantService {
     return {
       tiles: {
         companies: companies.length,
-        kpms: kpms.length,
-        totalMembers: members.length,
+        kpms: counted.size,
+        totalMembers: [...membersByKpm.values()].reduce((a, b) => a + b, 0),
         agencyBuilders,
       },
       attention: this.attentionQueue(kpms, await this.ownerFacts(ctx, kpms), pendingRequests, ctx.reader),
       companies: companies.map((c) => {
-        const theirs = kpmsByCompany.get(String(c._id)) ?? [];
+        const theirs = (kpmsByCompany.get(String(c._id)) ?? []).filter((k) => counted.has(String(k._id)));
         return {
           companyId: String(c._id),
           name: c.name,
@@ -1839,7 +1689,7 @@ export class TenantService {
     for (const kpm of open) {
       const id = String(kpm._id);
       const href = `/admin/tenants/${id}`;
-      if (!kpm.ownerUserId) {
+      if (ownerUserIdsOf(kpm).length === 0) {
         items.push({
           tag: render(say.unownedTag, reader),
           severity: 'structural',
@@ -1899,10 +1749,10 @@ export class TenantService {
   async platformAdmins(ctx: RequestContext): Promise<PlatformAdminRow[]> {
     this.require(ctx, 'kpm_admin:list_platform');
 
-    // **Ownership is not on the membership.** `kpms.ownerUserId` holds it, and
-    // `ContextResolver` derives `isKpmOwner` by comparing the two — so this has to make
-    // the same join rather than filter a field that does not exist. Delegated admin
-    // rights *are* on the membership, which is why only one half of this is a query.
+    // **Ownership is not on the membership.** `kpms.owners` holds it (ADR-0285), and
+    // `ContextResolver` derives `isKpmOwner` from it — so this has to make the same join
+    // rather than filter a field that does not exist. Delegated admin rights *are* on the
+    // membership, which is why only one half of this is a query.
     const [kpms, admins] = await Promise.all([
       this.kpms.find({ deletedAt: null }).exec(),
       this.memberships.findAcrossAllTenants(ctx, {
@@ -1911,18 +1761,17 @@ export class TenantService {
       }),
     ]);
 
-    const ownerOf = new Map(
-      kpms.filter((k) => k.ownerUserId).map((k) => [String(k._id), String(k.ownerUserId)]),
-    );
+    const ownersOf = new Map(kpms.map((k) => [String(k._id), new Set(ownerUserIdsOf(k))]));
+    const isOwnerHere = (kpmId: string, userId: string) => ownersOf.get(kpmId)?.has(userId) ?? false;
     const owners = await this.memberships.findAcrossAllTenants(ctx, {
       status: 'active',
-      userId: { $in: [...new Set(ownerOf.values())] },
+      userId: { $in: [...new Set(kpms.flatMap((k) => ownerUserIdsOf(k)))] },
     });
 
     // An Owner who is also a delegated Admin is one person and one row.
     const byId = new Map(admins.map((m) => [String(m._id), m]));
     for (const m of owners) {
-      if (ownerOf.get(m.kpmId) === m.userId) byId.set(String(m._id), m);
+      if (isOwnerHere(m.kpmId, m.userId)) byId.set(String(m._id), m);
     }
     const rows = [...byId.values()];
     if (rows.length === 0) return [];
@@ -1945,7 +1794,7 @@ export class TenantService {
           initials: initialsOf(fullName),
           kpmId: r.kpmId,
           kpmLabel: office.get(r.kpmId) ?? render(TENANTS_MESSAGES.unknownOffice, ctx.reader),
-          isOwner: ownerOf.get(r.kpmId) === r.userId,
+          isOwner: isOwnerHere(r.kpmId, r.userId),
           isAdmin: Boolean(r.adminAccess?.isKpmAdmin),
           // An Owner's rights come with the office, not from a grant, so there is no date
           // to show and a blank is the honest answer rather than the office's own.
@@ -2013,9 +1862,10 @@ export class TenantService {
     const live = rows as unknown as {
       userId: string; orgLevelCode: string; status: string; invitedAt?: Date | null; adminAccess?: { isKpmAdmin?: boolean };
     }[];
-    const admins = live.filter((m) => m.adminAccess?.isKpmAdmin === true && m.userId !== kpm.ownerUserId);
+    const admins = live.filter((m) => m.adminAccess?.isKpmAdmin === true && !isOwnerOf(kpm, m.userId));
     const users = admins.length === 0 ? [] : await this.users.find({ _id: { $in: admins.map((m) => m.userId) } })
-      .select('fullName lastLoginAt').lean().exec() as { _id: unknown; fullName: string; lastLoginAt?: Date | null }[];
+      .select('fullName lastLoginAt emailVerifiedAt').lean().exec() as
+      { _id: unknown; fullName: string; lastLoginAt?: Date | null; emailVerifiedAt?: Date | null }[];
     const byUser = new Map(users.map((u) => [String(u._id), u]));
     const ladder = ladders.get(kpm.companyId) ?? [];
     const codes = [...new Set([...ladder.map((l) => l.code), ...live.map((m) => m.orgLevelCode)])];
@@ -2024,7 +1874,7 @@ export class TenantService {
         const user = byUser.get(m.userId);
         return {
           fullName: user?.fullName ?? render(TENANTS_MESSAGES.unknownPerson, ctx.reader),
-          state: consoleState(invitationStateOf(user?.lastLoginAt, m.invitedAt)),
+          state: consoleState(invitationStateOf(user, m.invitedAt)),
         };
       }).sort((a, b) => a.fullName.localeCompare(b.fullName)),
       membersByRole: codes.map((code) => ({

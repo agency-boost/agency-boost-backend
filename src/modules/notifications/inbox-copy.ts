@@ -126,6 +126,12 @@ export function describeNotification(
         title: say(SAY.inviteAccepted({ joiner: nameOf(payload, JOINER_KEYS, say(SAY.somebody)) })),
         detail: say(SAY.inviteAcceptedDetail),
       };
+    // P19.28-T1 AC-2 (OD-442): *Masukkan* — placed in a KPM by AgencyBoost, *Aktif* at once.
+    case NotificationTemplate.MEMBER_PLACED:
+      return {
+        title: say(SAY.memberPlaced({ kpm: typeof payload.kpmName === 'string' && payload.kpmName ? payload.kpmName : 'KPM' })),
+        detail: say(SAY.memberPlacedDetail),
+      };
     case NotificationTemplate.TRANSFER_REQUEST_RECEIVED:
       // P19.12-T4 (ADR-0247 §3): a leader's move of one of their people says where to.
       if (payload.kind === 'move') {

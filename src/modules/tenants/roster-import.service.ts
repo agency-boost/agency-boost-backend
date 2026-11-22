@@ -30,6 +30,7 @@ import { ONBOARDING_REFUSALS } from '@/modules/org/onboarding.messages';
 import { MemberInviteRepository, MembershipHistoryRepository } from '@/modules/org/org.repositories';
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
+import { ownerUserIdsOf } from './kpm-owners';
 import { Kpm, KpmDocument } from './kpm.schema';
 import { RosterImportRecordRepository } from './roster-import-record.schema';
 import { OrgLevelService, type OrgLevelRow } from './org-level.service';
@@ -485,7 +486,8 @@ export class RosterImportService {
     const classOf = (rung: OrgLevelRow): RoleClass => roleClassOf(tierOfRung(rung));
     const leaderRungs = ladder.filter((r) => isLeaderClass(classOf(r))).map(shortOfRung);
     const needingUpline = ladder.filter((r) => classOf(r) !== 'ab').map(shortOfRung);
-    const ownerUserId = kpm.ownerUserId ?? null;
+    // Every owner's rung is the office's, never a file's (ADR-0285 §3: any owner).
+    const ownerIds = ownerUserIdsOf(kpm);
 
     const skip = (p: Plan, reason: Message) => { p.outcome = 'skipped'; p.reasons = [reason]; };
 
@@ -521,7 +523,7 @@ export class RosterImportService {
         plan.outcome = 'updated';
         plan.existing = existing;
         plan.account = office.accounts.get(existing.userId) ?? null;
-        if (rung.code !== existing.orgLevelCode && ownerUserId !== null && existing.userId === ownerUserId) {
+        if (rung.code !== existing.orgLevelCode && ownerIds.includes(existing.userId)) {
           skip(plan, ROW.ownerRole);
         }
       }

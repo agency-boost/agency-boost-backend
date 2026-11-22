@@ -44,10 +44,11 @@ export const PLATFORM_MEMBER_ROLES = ['ab', 'aab', 'agent'] as const;
 export type PlatformMemberRole = (typeof PLATFORM_MEMBER_ROLES)[number];
 
 /**
- * *Anggota*'s test-account filter (P19.23-T3 AC-1; OD-421): `only`, *Akun tes* under *Semua status* — the test accounts
- * alone. Absent, they are left out of every row and count (ADR-0267 §1).
+ * *Anggota*'s test-account filter (P19.23-T3 AC-1; OD-421): `only` — the test accounts alone. Since P19.28-T3 AC-4
+ * (UI-209 (21 Nov); ADR-0286 §5) `include` — *Tampilkan akun tes*, the switch that lists them beside everybody else, each
+ * tagged. Absent, they are left out of every row; they are in no count whichever is asked (ADR-0267 §1).
  */
-export const PLATFORM_MEMBER_TEST_FILTERS = ['only'] as const;
+export const PLATFORM_MEMBER_TEST_FILTERS = ['only', 'include'] as const;
 export type PlatformMemberTestFilter = (typeof PLATFORM_MEMBER_TEST_FILTERS)[number];
 
 /** *All members*' status filter (SA R1): a membership's own status. */

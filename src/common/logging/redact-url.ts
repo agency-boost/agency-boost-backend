@@ -10,9 +10,11 @@ export const REDACTED = '[redacted]';
  * (`/v1/invites/{token}` and its `/accept`, ADR-0170 §3), which is a credential to join an office. Not
  * `/new-hires/invites/{inviteId}`, whose id is a row's, not a secret. Since P19.23-T2 AC-3 (OD-420) a KPM Owner's claim
  * link too (`/v1/owner-invites/{token}` and its `/accept`), a credential to own a KPM. Since P19.24 (ADR-0280 §5) the
- * KPM report's *Kirim ke owner* link (`/kpm-report/shared/{token}`), signed and alive seven days.
+ * KPM report's *Kirim ke owner* link (`/kpm-report/shared/{token}`), signed and alive seven days. Since P19.28-T1 AC-4
+ * (ADR-0286 §2) *Tambah user*'s invitation link (`/v1/user-invites/{token}` and its `/accept`), a credential to join a
+ * KPM — not `/user-invitations/{invitationId}`, whose id is a row's.
  */
-const SHARED_LINK_TOKEN = /(\/leader-meetings\/shared\/|\/kpm-report\/shared\/|\/v\d+\/invites\/|\/v\d+\/owner-invites\/)[^/?#]+/g;
+const SHARED_LINK_TOKEN = /(\/leader-meetings\/shared\/|\/kpm-report\/shared\/|\/v\d+\/invites\/|\/v\d+\/owner-invites\/|\/v\d+\/user-invites\/)[^/?#]+/g;
 
 export function redactUrl(url: string | undefined): string | undefined {
   return url === undefined ? url : url.replace(SHARED_LINK_TOKEN, `$1${REDACTED}`);

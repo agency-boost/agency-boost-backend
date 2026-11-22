@@ -395,6 +395,12 @@ export const METRIC_REGISTRY: readonly MetricDefinition[] = [
    * requirable: a share of a set of members, like the other compliance rates.
    */
   { key: 'MANAGED_LEADS_RATE', name: 'Leads managed', unit: 'percentage', phase: '19.19', requirable: false },
+  /*
+   * Phase 19.26 (P19.26-T0 AC-2, T1 AC-1; ADR-0284 §1; UI-204 (21 Nov)): *Anggota*, the counted member — an *Aktif*
+   * membership, never a test account, in a KPM that is not archived (`org/counted-members.ts`). Every count of members on
+   * the Super Admin console reads it. Not requirable: a headcount, not something a rule asks of a person.
+   */
+  { key: 'COUNTED_MEMBERS', name: 'Anggota (counted member)', unit: 'count', phase: '19.26', requirable: false },
 ];
 
 /**

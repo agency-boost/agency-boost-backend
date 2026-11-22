@@ -1,6 +1,7 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { IsMongoId, IsOptional } from 'class-validator';
 import type { Request } from 'express';
 import { Ctx, Public, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -21,6 +22,17 @@ const ACCEPT_PER_HOUR = 20;
 
 /** Where the link points: the app's origin, not the API's — a person opens a page (`invites.controller.ts`). */
 const appOriginOf = (config: ConfigService) => config.get<string>('APP_ORIGIN') ?? 'http://localhost:3000';
+
+/** *Kirim ulang undangan* for one owner (ADR-0285; P19.27-T1 AC-4): which of the KPM's owners. */
+export class OwnerInvitationRequestDto {
+  @ApiPropertyOptional({
+    description: 'One of the KPM\'s owners (`users._id`) — *Kirim ulang undangan* on their ⋯. Absent: the first owner, '
+      + 'or the owner named with no email.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  userId?: string;
+}
 
 /**
  * ***Kirim undangan* by WhatsApp** (P19.23-T2 AC-3; ADR-0277; OD-420): the Super Admin asks for the KPM Owner's one-time
@@ -45,17 +57,19 @@ export class OwnerWhatsAppInvitationController {
       + 'WhatsApp sends (`wa.me`, OD-359). For an Owner named with no email (`pendingOwner`), `kind: claim` — '
       + '`<app>/owner-invite/<token>`, single use, alive `ROSTER_INVITATION.TTL_DAYS`, a new one replacing the last; the '
       + 'person signs in or signs up and accepts it (`POST /owner-invites/:token/accept`). For an Owner whose account '
-      + 'never signed in, `kind: password` — the email invitation\'s link to choose a password (`/reset-password/<token>`), '
+      + 'is not theirs yet (never signed in, no address proven), `kind: password` — the email invitation\'s link to choose a password (`/reset-password/<token>`), '
       + 'the account\'s older links revoked, `memberships.invitedAt` stamped. Audited `kpm.owner_invited` with `channel: '
-      + 'whatsapp`. The token is in this answer and nowhere else.',
+      + 'whatsapp`. The token is in this answer and nowhere else. Since ADR-0285 a KPM has one or more owners: '
+      + '`userId` names which (*Kirim ulang undangan* on their ⋯); absent, the first owner.',
   })
   @ApiResponse(OK)
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no KPM with that id: indistinguishable from another office’s.'))
+  @ApiResponse(refusal(404, '`NOT_FOUND` — no KPM with that id, indistinguishable from another office’s; or `userId` '
+    + 'is not one of its owners.'))
   @ApiResponse(refusal(409, '`TENANT_OWNER_NOT_INVITABLE` — `details.reason` `no_owner` (nobody named) or `signed_in` '
-    + '(the Owner has signed in already).'))
+    + '(the Owner\'s account is theirs already: signed in, or its address proven — OD-475).'))
   @ApiResponse(refusal(429, '`AUTH_RATE_LIMITED` — more than ten links for this KPM within the hour.'))
-  async invite(@Ctx() ctx: RequestContext, @Param('id') id: string) {
-    return this.claims.invite(ctx, id, appOriginOf(this.config));
+  async invite(@Ctx() ctx: RequestContext, @Param('id') id: string, @Body() dto: OwnerInvitationRequestDto = {}) {
+    return this.claims.invite(ctx, id, appOriginOf(this.config), dto?.userId);
   }
 }
 
@@ -112,7 +126,7 @@ export class OwnerInvitesController {
       'The signed-in account becomes the KPM\'s Owner — its root AB — through the checks every Owner meets, asked '
       + '**before** the link is spent: the KPM\'s company and an agent code, and a verified address. Then the link is '
       + 'used (single use), the Owner written only while the KPM has none, `pendingOwner` cleared, and the claim audited '
-      + 'in the KPM\'s log as `kpm.owner_assigned` (`via: whatsapp_claim`). Refused in a support session, which only '
+      + 'in the KPM\'s log as `kpm.owner_added` (`via: whatsapp_claim`; ADR-0285). Refused in a support session, which only '
       + 'looks. Rate limited per account, twenty an hour.',
   })
   @ApiResponse(OK)

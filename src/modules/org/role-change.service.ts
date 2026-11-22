@@ -127,7 +127,7 @@ export class RoleChangeService {
     const [users, ladder, owner, waiting] = await Promise.all([
       this.users.find({ _id: { $in: rows.map((r) => r.userId) } }).exec(),
       this.ladder(ctx),
-      this.hierarchy.officeOwnerUserId(ctx),
+      this.hierarchy.officeOwnerUserIds(ctx),
       this.transfers ? this.transfers.pendingMovesBy(ctx, rows.map((r) => String(r._id))) : new Map<string, PendingMoveView>(),
     ]);
     const byUser = new Map(users.map((u) => [String(u._id), u]));
@@ -137,7 +137,8 @@ export class RoleChangeService {
 
     return rows.map((r) => {
       const fullName = byUser.get(r.userId)?.fullName ?? unknown;
-      const isOwner = owner !== null && r.userId === owner;
+      // Any owner (ADR-0285 §3).
+      const isOwner = owner.includes(r.userId);
       // ADR-0247 §1: the one rule the write below enforces — an AB report is an AB leader's to change too.
       const choices = roleChoices(reader, { leaderId: r.leaderId, role: r.role, orgLevelCode: r.orgLevelCode, status: r.status, isOwner }, ladder);
       return {

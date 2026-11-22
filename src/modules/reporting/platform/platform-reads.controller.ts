@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Optional, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
@@ -6,6 +6,7 @@ import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { PLATFORM_READ } from '@/domain/constants';
 import { CompanyKpmsQueryDto, PlatformAccountsQueryDto, PlatformMembersQueryDto } from './platform-reads.dto';
 import { PlatformReads } from './platform-reads.service';
+import { AnggotaWaiting } from './anggota-waiting';
 import { CompanyKpmsDto, PlatformAccountsPageDto, PlatformMembersPageDto } from './platform-reads.response.dto';
 
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
@@ -34,7 +35,14 @@ const AUDITED = (action: string) =>
 @ApiBearerAuth()
 @Controller('admin')
 export class PlatformReadsController {
-  constructor(private readonly reads: PlatformReads) {}
+  constructor(
+    private readonly reads: PlatformReads,
+    /**
+     * *Aktif n · Menunggu n · Keluar n* beside the rows (P19.28-T3 AC-4; ADR-0286 §5). Optional so the specs that build
+     * this controller for another route need not wire it; the application always gives it.
+     */
+    @Optional() @Inject(AnggotaWaiting) private readonly waiting: AnggotaWaiting | null = null,
+  ) {}
 
   @Get('members')
   @RequirePermission('platform_members:read')
@@ -45,7 +53,9 @@ export class PlatformReadsController {
       + 'page, by name: the person, the company, the KPM, the rung with the *Owner* and *Admin* badges, the leader, the '
       + 'status, the invitation’s state, the join date and the last day an activity was logged. Filtered and searched on '
       + 'the server; `q` matches a name, a phone number or an email address, **neither of which is returned**. A person in '
-      + 'two KPMs is two rows. View-only: a row links to its KPM.'
+      + 'two KPMs is two rows. View-only: a row links to its KPM. With every page, *Aktif n · Menunggu n · Keluar n* over the '
+      + 'same scope, test accounts never (`chips`); `status=removed` rows carry the day they left '
+      + '(`leftOn`), and `testAccount=include` (*Tampilkan akun tes*) lists test accounts beside the others, tagged.'
       + AUDITED(PLATFORM_READ.ACTION.members) + ' The entries name the memberships returned.',
   })
   @ApiResponse(refusal(400, '`VALIDATION_FAILED` — `q` shorter than two characters, an unknown `role` or `status`, a '
@@ -54,7 +64,8 @@ export class PlatformReadsController {
   @ApiResponse(UNRECORDED)
   @ApiResponse({ status: 200, type: PlatformMembersPageDto })
   async members(@Ctx() ctx: RequestContext, @Query() query: PlatformMembersQueryDto) {
-    return this.reads.members(ctx, query);
+    const [page, chips] = await Promise.all([this.reads.members(ctx, query), this.waiting?.chips(ctx, query)]);
+    return chips ? { ...page, chips } : page;
   }
 
   @Get('users')

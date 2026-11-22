@@ -52,6 +52,11 @@ function indonesianByCode(): ReadonlyMap<string, ReadonlyMap<string, string>> {
  * products share reads as each product's own translation gives it.
  */
 export function productWordsFor(code: string, reader: Reader): ProductWords {
+  /*
+   * *Noted 2026-11-22 (P19.26-T4 AC-4; OD-440):* a company's catalogue is now written in the seed's Indonesian
+   * (`seedProductInIndonesian`) — the company's words, which every reader reads as stored, as ADR-0179 §5 says of any
+   * company's wording. This lookup serves the rows still holding the seed's English until the operator corrects them.
+   */
   if (reader.language !== 'id') return asTyped;
   const words = indonesianByCode().get(code);
   return words ? (text) => words.get(text) ?? text : asTyped;

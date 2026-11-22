@@ -1,6 +1,6 @@
 import type { Reader } from '@/common/i18n/reader';
 import { SEED_PRODUCTS, SEED_REPLY_BY_NEED, type SeedProduct } from '@/domain/constants/product-catalog';
-import { SEED_PRODUCTS_ID, SEED_REPLY_BY_NEED_ID } from '@/domain/constants/product-words-id';
+import { SEED_PRODUCTS_ID, SEED_REPLY_BY_NEED_ID, seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import { productWordsFor } from './product-words';
 
 const ID: Reader = { language: 'id', figures: 'id' };
@@ -82,6 +82,7 @@ describe('UI-107 productWordsFor — the platform’s words translated, a compan
     expect(productWordsFor('PRUSEHAT', EN)(prusehat.tagline)).toBe(prusehat.tagline);
   });
 
+
   it('UI-107 a word a company or an office typed is shown as typed, in Indonesian too (ADR-0179 §5)', () => {
     const say = productWordsFor('PRUSEHAT', ID);
     expect(say('Our office’s own words for PRUSehat.')).toBe('Our office’s own words for PRUSehat.');
@@ -100,5 +101,29 @@ describe('UI-107 productWordsFor — the platform’s words translated, a compan
 
   it('UI-107 a blank stays blank', () => {
     expect(productWordsFor('PRUSEHAT', ID)('')).toBe('');
+  });
+});
+
+describe('P19.26-T4 AC-4 a company’s catalogue is written in Bahasa Indonesia (UI-216; OD-440)', () => {
+  it.each(SEED_PRODUCTS.map((p) => [p.code]))('%s: every word the seed’s Indonesian, the rest of the product as it was', (code) => {
+    const en = seed(code);
+    const stored = seedProductInIndonesian(en);
+    const id = SEED_PRODUCTS_ID[code];
+    expect(stored).toMatchObject({
+      code: en.code, name: en.name, channel: en.channel, category: en.category, sortOrder: en.sortOrder,
+      tagline: id.tagline, benefits: id.benefits, differentiator: id.differentiator, bestFor: id.bestFor,
+    });
+    expect(stored.defaultAttackPlan).toMatchObject({ ...id.defaultAttackPlan });
+    // The reply is the need's own, in Indonesian, wherever the seed's English is one of the eight.
+    const need = (Object.keys(SEED_REPLY_BY_NEED) as (keyof typeof SEED_REPLY_BY_NEED)[])
+      .find((n) => SEED_REPLY_BY_NEED[n] === en.defaultAttackPlan.objectionYouSay);
+    expect(stored.defaultAttackPlan.objectionYouSay).toBe(need ? SEED_REPLY_BY_NEED_ID[need] : en.defaultAttackPlan.objectionYouSay);
+    // The company's words now: every reader reads them as stored (ADR-0179 §5).
+    expect(productWordsFor(code, ID)(stored.tagline)).toBe(stored.tagline);
+  });
+
+  it('leaves a product it holds no Indonesian for as it is', () => {
+    const own = { ...seed('PRUSEHAT'), code: 'OUR_OWN' };
+    expect(seedProductInIndonesian(own)).toBe(own);
   });
 });

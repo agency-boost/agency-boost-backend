@@ -9,6 +9,7 @@ import { readerOf, type Reader } from '@/common/i18n/reader';
 import { isLanguage, type Language } from '@/domain/constants/language';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
+import { ownedBy } from '@/modules/tenants/kpm-owners';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
 import { ProductDataGrant, ProductDataGrantDocument } from '@/modules/product-data/product-data-grant.schema';
@@ -196,8 +197,8 @@ export class ContextResolver {
    * KPM, and telling them so is what lets the app say "waiting for your leader" rather
    * than "you are in no office".
    *
-   * Ownership is read from the office, not stored on the membership — `kpms.ownerUserId`
-   * is the single writer, and P2 made assigning it the only way it changes.
+   * Ownership is read from the office, not stored on the membership — `kpms.owners`, written
+   * by `KpmOwnersService` alone (ADR-0285): **any** of its owners is the KPM Owner here.
    */
   private async resolveMembership(userId: string): Promise<TenantMembership | null> {
     const membership = await this.memberships
@@ -206,7 +207,7 @@ export class ContextResolver {
     if (!membership) return null;
 
     const owned = await this.kpms
-      .findOne({ _id: membership.kpmId, ownerUserId: userId, deletedAt: null })
+      .findOne({ _id: membership.kpmId, ...ownedBy(userId), deletedAt: null })
       .exec();
 
     return {

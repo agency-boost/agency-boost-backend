@@ -12,6 +12,10 @@ import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { configModule } from '../../../test/config-module';
 import { OFFICE_0417, prototypeRender, shelf0417 } from '../../../test/sales-tools';
 import { ProductCatalogService } from './product-catalog.service';
+import { seedProductInIndonesian } from '@/domain/constants/product-words-id';
+
+/** PRUMapan's catalogue line as a company's catalogue is written: in the seed's Indonesian (P19.26-T4 AC-4; OD-440). */
+const MAPAN_TAGLINE = seedProductInIndonesian(SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!).tagline;
 
 const NOW = new Date('2026-10-08T02:00:00Z');
 const KPM_A = '66f0000000000000000000a1';
@@ -128,7 +132,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
       expect(products.map((p) => p.code)).toEqual(shelf0417().map((p) => p.code));
       expect(products[0]).toEqual({
         code: 'PRUMAPAN', name: 'PRUMapan BSD',
-        tagline: 'Endowment-style life with guaranteed retirement payouts from age 55.',
+        tagline: MAPAN_TAGLINE,
         category: { code: 'life', label: 'Life' }, channel: 'conventional', lifecycle: 'active', needs: ['retirement'],
         currencies: ['IDR'],
       });
@@ -198,7 +202,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
 
       expect((await service.product(agent(KPM_ALLIANZ), 'PRUMAPAN')).tagline).toBe('Allianz’s own sentence.');
       expect((await service.product(agent(KPM_A), 'PRUMAPAN')).tagline)
-        .toBe('Endowment-style life with guaranteed retirement payouts from age 55.');
+        .toBe(MAPAN_TAGLINE);
       expect((await service.catalog(agent(KPM_A))).products.find((p) => p.code === 'PRUMAPAN')!.tagline)
         .not.toBe('Allianz’s own sentence.');
     });
@@ -288,7 +292,7 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
     it('P14-T7 AC-8 the office’s description reaches agents only once approved, in place of the tagline everywhere', async () => {
       const ctx = owner(KPM_A);
       await wired.kpmProducts.saveOverrides(ctx, ids.PRUMAPAN, { description: 'Pensiun tenang mulai Rp200 ribu sebulan.' });
-      const tagline = 'Endowment-style life with guaranteed retirement payouts from age 55.';
+      const tagline = MAPAN_TAGLINE;
       // Pending: the company's tagline on the card, the drawer and the plan.
       expect((await service.catalog(agent(KPM_A))).products[0].tagline).toBe(tagline);
       expect((await service.product(agent(KPM_A), 'PRUMAPAN')).tagline).toBe(tagline);
@@ -313,8 +317,9 @@ describe('the Product Catalog and the Sales Attack Plan, read by an office’s m
         runOffNote: null, successorCode: null,
       });
       expect(mapan.benefits.length).toBeGreaterThan(0);
-      expect(mapan.differentiator).toMatch(/^The accessible retirement-income option/);
-      expect(mapan.bestFit).toMatch(/^Sandwich-generation/);
+      // The company's catalogue in the seed's Indonesian since P19.26-T4 AC-4 (OD-440).
+      expect(mapan.differentiator).toMatch(/^Pilihan penghasilan pensiun yang terjangkau/);
+      expect(mapan.bestFit).toMatch(/^Milenial dan Gen Z generasi sandwich/);
       // The one pair became a list of cards in P19.4-T4 (ADR-0209 §9).
       expect(Object.keys(mapan.script)).toEqual([
         'goodFit', 'opening', 'benefits', 'fullScript', 'objections', 'nextAction',

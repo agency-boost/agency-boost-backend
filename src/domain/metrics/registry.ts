@@ -440,6 +440,10 @@ const COMPUTATIONS: Record<string, MetricComputation> = {
   // ---- The KPM Overview's second version (Phase 19.19, P19.19-T3; ADR-0272 §6) ----
   // As of the office's today: each open lead's next action set and not before it (`leads-managed.ts`).
   MANAGED_LEADS_RATE: { period: 'POINT_IN_TIME', threshold: null },
+
+  // ---- The console's one count (Phase 19.26, P19.26-T1; ADR-0284 §1) ----
+  // As of now: the memberships that are active, no test account, in a KPM that is not archived (`counted-members.ts`).
+  COUNTED_MEMBERS: { period: 'POINT_IN_TIME', threshold: null },
 };
 
 export const METRIC_REGISTRY = define(join(SERVED, COMPUTATIONS));

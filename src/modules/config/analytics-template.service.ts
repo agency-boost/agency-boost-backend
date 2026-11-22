@@ -15,6 +15,7 @@ import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-d
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { OWNERS_PROJECTION, ownerUserIdsOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import {
   agentCodePattern, analyticsViolations, codeCheck, KODE_OF_CELL, newColumns, normaliseAnalyticsDraft,
   platformAnalyticsConfig, refuseAnalyticsViolations, uploadChanged, type AdvancedAnalyticsConfig,
@@ -180,10 +181,10 @@ export class AnalyticsTemplateService {
     let told = 0;
     for (const kpmId of await this.reader.officesReading(template.companyId, template.id)) {
       const kctx = RequestContext.superAdminInTenant(ctx.userId, kpmId);
-      const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }, { ownerUserId: 1 }).lean().exec() as
-        { ownerUserId?: string | null } | null;
+      const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }, OWNERS_PROJECTION).lean().exec() as WithOwners | null;
       const admins = await this.memberships.find(kctx, { status: 'active', 'adminAccess.isKpmAdmin': true });
-      const people = new Set([...(kpm?.ownerUserId ? [kpm.ownerUserId] : []), ...admins.map((m) => String(m.userId))]);
+      // Every owner (ADR-0285 §5), and the Admins.
+      const people = new Set([...ownerUserIdsOf(kpm), ...admins.map((m) => String(m.userId))]);
       for (const userId of people) {
         await this.notifications.send({
           userId,

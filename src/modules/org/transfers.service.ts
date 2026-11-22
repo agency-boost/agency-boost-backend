@@ -11,6 +11,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { HierarchyService } from './hierarchy.service';
 import { MemberNames } from './member-names.service';
 import { MembershipRepository } from './membership.repository';
@@ -477,11 +478,12 @@ export class TransfersService {
     return row ? alreadyDecided(row) : new NotFoundException('Transfer request');
   }
 
-  /** Who decides a transfer: the office's Owner and every active Admin, as accounts — never the one who asked. */
+  /** Who decides a transfer: the office's owners and every active Admin, as accounts — never the one who asked. */
   private async deciders(ctx: RequestContext): Promise<string[]> {
     const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
     const admins = await this.members.find(ctx, { status: 'active', 'adminAccess.isKpmAdmin': true });
-    const ids = new Set([...(kpm?.ownerUserId ? [kpm.ownerUserId] : []), ...admins.map((m) => m.userId)]);
+    // Every owner (ADR-0285 §3), and every active Admin.
+    const ids = new Set([...ownerUserIdsOf(kpm), ...admins.map((m) => m.userId)]);
     ids.delete(ctx.userId);
     return [...ids];
   }

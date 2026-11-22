@@ -25,6 +25,7 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { OWNERS_PROJECTION, ownerUserIdsOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import { asContent } from '@/modules/training/training.service';
 import { storageKeysOf } from '@/modules/training/training-content';
 import { trainingSeedDocuments, type TrainingTaxonomyPayload } from '@/modules/training/training-payload';
@@ -503,14 +504,14 @@ export class TemplatePushService {
     return { ...head, results, awaitingPublish: applied.length > 0 && waiting };
   }
 
-  /** **The Owner and the Admins, told in-app** (ADR-0208 §7; OD-260): the template, the sections, and whether they wait. */
+  /** **The owners and the Admins, told in-app** (ADR-0208 §7; OD-260; every owner, ADR-0285 §5): the template, the sections, and whether they wait. */
   private async tell(
     kctx: RequestContext, kpmId: string, templateName: string, kinds: OfficeTemplateKind[], waiting: boolean,
   ): Promise<void> {
-    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }, { ownerUserId: 1 }).lean().exec() as
-      { ownerUserId?: string | null } | null;
+    const kpm = await this.kpms.findOne({ _id: kpmId, deletedAt: null }, OWNERS_PROJECTION).lean().exec() as WithOwners | null;
     const admins = await this.members.find(kctx, { status: 'active', 'adminAccess.isKpmAdmin': true });
-    const told = new Set([...(kpm?.ownerUserId ? [kpm.ownerUserId] : []), ...admins.map((m) => m.userId)]);
+    // Every owner (ADR-0285 §5), and the Admins.
+    const told = new Set([...ownerUserIdsOf(kpm), ...admins.map((m) => m.userId)]);
     for (const userId of told) {
       await this.notifications.send({
         userId,

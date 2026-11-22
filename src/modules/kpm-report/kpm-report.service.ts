@@ -14,7 +14,8 @@ import { dispositionOf } from '@/modules/proposals/proposal-pdf.layout';
 import { can } from '@/modules/rbac/permissions';
 import { shiftMonth } from '@/modules/reporting/office-figures';
 import { Company, type CompanyDocument } from '@/modules/tenants/company.schema';
-import { Kpm, type KpmDocument } from '@/modules/tenants/kpm.schema';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
+import { Kpm, type KpmDocument, type KpmOwner } from '@/modules/tenants/kpm.schema';
 import { User, type UserDocument } from '@/modules/users/user.schema';
 import { KpmReportBuilder } from './kpm-report.builder';
 import { reportFileName } from './kpm-report.layout';
@@ -35,7 +36,7 @@ export const KPM_REPORT_ACTIONS = {
 } as const;
 
 /** One office as `kpms` holds it, for the report's first lines. */
-interface OfficeRow { _id: unknown; branchName: string; code: string; companyId: string; timezone?: string; ownerUserId: string | null; pendingOwner?: { fullName: string; phone?: string | null } | null }
+interface OfficeRow { _id: unknown; branchName: string; code: string; companyId: string; timezone?: string; owners?: KpmOwner[]; pendingOwner?: { fullName: string; phone?: string | null } | null }
 
 /**
  * **The KPM report** (P19.24-T1, T2; [ADR-0280](../../../../docs/04-adr/0280-the-kpm-report-is-one-pdf-built-on-the-server-from-the-pages-own-readings.md)):
@@ -103,7 +104,7 @@ export class KpmReportService {
     await this.audit.recordInScopesOrFail(ctx, this.inBothLogs(kpmId, {
       action: KPM_REPORT_ACTIONS.linkMade, month, linkId: claims.linkId, expiresAt,
     }));
-    const owner = await this.ownerOf(row);
+    const owners = await this.ownersOf(row);
     return {
       link: `${this.appOrigin}/laporan-kpm/${token}`,
       month,
@@ -111,8 +112,9 @@ export class KpmReportService {
       kpmName: office.name,
       kpmCode: office.code,
       companyName: office.company,
-      ownerName: owner.name,
-      ownerPhone: owner.phone,
+      ownerName: owners[0]?.name ?? null,
+      ownerPhone: owners[0]?.phone ?? null,
+      owners,
     };
   }
 
@@ -167,7 +169,7 @@ export class KpmReportService {
   /** A live KPM by id — any company's — or `404`: an unknown id and a deleted KPM are alike. */
   private async officeRow(kpmId: string): Promise<OfficeRow> {
     const row = isValidObjectId(kpmId)
-      ? await this.kpms.findOne({ _id: kpmId, deletedAt: null }, { branchName: 1, code: 1, companyId: 1, timezone: 1, ownerUserId: 1, pendingOwner: 1 })
+      ? await this.kpms.findOne({ _id: kpmId, deletedAt: null }, { branchName: 1, code: 1, companyId: 1, timezone: 1, owners: 1, pendingOwner: 1 })
         .lean().exec() as OfficeRow | null
       : null;
     if (!row) throw new NotFoundException('KPM');
@@ -189,18 +191,29 @@ export class KpmReportService {
   private async officeOf(row: OfficeRow): Promise<ReportOffice> {
     const [company, owner] = await Promise.all([
       isValidObjectId(row.companyId) ? this.companies.findOne({ _id: row.companyId }, { name: 1 }).lean().exec() as Promise<{ name?: string } | null> : null,
-      this.ownerOf(row),
+      this.ownersOf(row),
     ]);
-    return { kpmId: String(row._id), name: row.branchName, company: company?.name ?? '', code: row.code, ownerName: owner.name };
+    // Every owner named on the report, in order of `since` (ADR-0285 §3).
+    const ownerName = owner.length > 0 ? owner.map((o) => o.name).join(', ') : null;
+    return { kpmId: String(row._id), name: row.branchName, company: company?.name ?? '', code: row.code, ownerName };
   }
 
-  /** The Owner's name and WhatsApp number: the account's, or the named Owner who waits (`pendingOwner`). */
-  private async ownerOf(row: OfficeRow): Promise<{ name: string | null; phone: string | null }> {
-    const owner = row.ownerUserId && isValidObjectId(row.ownerUserId)
-      ? await this.users.findOne({ _id: row.ownerUserId, deletedAt: null }, { fullName: 1, phone: 1 }).lean().exec() as { fullName?: string; phone?: string | null } | null
-      : null;
-    if (owner) return { name: owner.fullName ?? null, phone: owner.phone ?? null };
-    return { name: row.pendingOwner?.fullName ?? null, phone: row.pendingOwner?.phone ?? null };
+  /**
+   * **The owners' names and WhatsApp numbers** (P19.27-T5 AC-1; ADR-0285 §5), in order of `since`: each account's, or —
+   * with no owner yet — the named Owner who waits (`pendingOwner`). An owner whose account has gone is left out.
+   */
+  private async ownersOf(row: OfficeRow): Promise<{ userId: string | null; name: string; phone: string | null }[]> {
+    const ids = ownerUserIdsOf(row).filter((id) => isValidObjectId(id));
+    if (ids.length === 0) {
+      return row.pendingOwner ? [{ userId: null, name: row.pendingOwner.fullName, phone: row.pendingOwner.phone ?? null }] : [];
+    }
+    const users = await this.users.find({ _id: { $in: ids }, deletedAt: null }, { fullName: 1, phone: 1 }).lean().exec() as
+      { _id: unknown; fullName?: string; phone?: string | null }[];
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    return ids.flatMap((id) => {
+      const u = byId.get(id);
+      return u ? [{ userId: id, name: u.fullName ?? '', phone: u.phone ?? null }] : [];
+    });
   }
 
   /** One entry in the platform's log and one in the KPM's (ADR-0207 §5): the same action, the KPM named. */

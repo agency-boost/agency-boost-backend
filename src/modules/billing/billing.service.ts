@@ -17,6 +17,7 @@ import { dispositionOf } from '@/modules/proposals/proposal-pdf.layout';
 import { can, type Permission } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument, type KpmSubscription } from '@/modules/tenants/kpm.schema';
+import { firstOwnerOf } from '@/modules/tenants/kpm-owners';
 import { addOfficeDays, graceEndsOn, isPastGraceOn, subscriptionStateOn } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import type { BillingKpmFilter, OfferInputDto, OfferPdfDto } from './billing.dto';
@@ -253,7 +254,8 @@ export class BillingService {
   private async rowsOf(ctx: RequestContext, kpms: KpmDocument[]): Promise<BillingKpmRow[]> {
     if (kpms.length === 0) return [];
     const ids = kpms.map((k) => String(k._id));
-    const ownerIds = kpms.map((k) => k.ownerUserId).filter((id): id is string => !!id && isValidObjectId(id));
+    // The first owner (ADR-0285 §3): the one an offer's WhatsApp goes to from the row.
+    const ownerIds = kpms.map((k) => firstOwnerOf(k)?.userId).filter((id): id is string => !!id && isValidObjectId(id));
     const [companies, leaders, owners] = await Promise.all([
       this.companies.find({ _id: { $in: [...new Set(kpms.map((k) => k.companyId))] } }, { name: 1 }).exec(),
       countLeadersUsedPerOffice(this.memberships, ctx, ids),
@@ -268,7 +270,7 @@ export class BillingService {
       kpm,
       companyName.get(kpm.companyId) ?? '',
       leaders.get(String(kpm._id)) ?? 0,
-      (kpm.ownerUserId && ownerOf.get(kpm.ownerUserId))
+      (ownerOf.get(firstOwnerOf(kpm)?.userId ?? ''))
         || (kpm.pendingOwner ? { fullName: kpm.pendingOwner.fullName, phone: kpm.pendingOwner.phone ?? null } : null),
       this.clock.localDateFor(kpm.timezone ?? DEFAULT_TENANT_TIMEZONE),
     ));

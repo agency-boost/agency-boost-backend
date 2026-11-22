@@ -26,7 +26,7 @@ import { listenOnLoopback } from '../../../../test/listen';
 import { startMongo, stopMongo } from '../../../../test/mongo';
 import { OfficeGroups } from '../office-groups';
 import { PlatformConsoleController } from './platform-console.controller';
-import { issuesOf, monthBefore, PlatformConsole } from './platform-console.service';
+import { issuesOf, monthBefore, PlatformConsole, trialDaysLeftOf } from './platform-console.service';
 
 const NOW = new Date('2026-11-20T05:00:00Z');
 const PRU = '66f0000000000000000002c1';
@@ -60,7 +60,10 @@ const office = (over: Partial<KpmAdminView> & Pick<KpmAdminView, '_id' | 'compan
   locale: 'id', currency: 'IDR', fiscalYearStartMonth: 1, settings: {}, status: 'active', suspendedAt: null,
   suspendedReason: null, createdAt: '2026-01-05T00:00:00.000Z', subscription: null, leadersUsed: 0,
   subscriptionState: 'active', ownerState: 'active', ownerPhone: null, ownerInvitedAt: null, pendingOwner: null,
-  memberCount: 1, membersBesidesOwner: 3, ...over,
+  memberCount: 1, membersBesidesOwner: 3,
+  // ADR-0285 §3: the first owner, named alone, is the list's first.
+  owners: over.ownerUserId ? [{ userId: over.ownerUserId, fullName: over.ownerName ?? '', email: null, since: '2026-01-05T00:00:00.000Z' }] : [],
+  ...over,
 }) as KpmAdminView;
 
 const OFFICES: KpmAdminView[] = [
@@ -198,7 +201,13 @@ describe('P19.23-T1 the console’s Dashboard and a KPM’s page (ADR-0277)', ()
       expect(res.body.scale).toEqual({ greenFromPct: 80, yellowFromPct: 50 });
       // Five live KPMs; Magni made this month; three insurers; BSD, Magni and Cempaka active (Gading ended, one
       // suspended); their members — BSD 5 (the test account left out), Magni 1, Cempaka 1 — 4 leaders, 3 agents.
-      expect(res.body.overall).toEqual({ kpms: 5, kpmsNewThisMonth: 1, companies: 3, activeKpms: 3, leaders: 5, agents: 2 });
+      // *Perlu tindakan* counts KPMs (P19.26-T1 AC-3; ADR-0284 §2): Magni (no members), Cempaka (Owner, data) and Gading
+      // (ended, no Owner) — three, however many rows they make; the suspended one never.
+      expect(res.body.overall).toEqual({
+        kpms: 5, kpmsNewThisMonth: 1, companies: 3, activeKpms: 3, leaders: 5, agents: 2, needsAction: 3,
+      });
+      const marked = (res.body.kpms as { name: string; needsAction: boolean }[]).filter((k) => k.needsAction).map((k) => k.name);
+      expect(marked.sort()).toEqual(['Cempaka Putih Branch', 'Kelapa Gading Branch', 'Magni']);
     });
 
     it('P19.23-T1 AC-2 Pernah pakai, Pakai 14 hari terakhir and Power user, now and a month ago — test accounts never', async () => {
@@ -363,5 +372,22 @@ describe('P19.23-T1 the console’s rules', () => {
     expect(issuesOf({ ...kpm, ownerState: 'invited' }, false, null)).toEqual([]);
     expect(issuesOf({ ...kpm, status: 'suspended', ownerState: 'none' }, true, '2026-10')).toEqual(['suspended']);
     expect(issuesOf({ ...kpm, status: 'archived' }, false, null)).toEqual(['archived']);
+  });
+
+  it('OD-477 a KPM in its trial with its owners alone is not *no members*; after the trial it is again', () => {
+    const fresh = { status: 'active' as const, ownerState: 'active' as const, membersBesidesOwner: 0 };
+    expect(issuesOf(fresh, false, null, true)).toEqual([]);
+    expect(issuesOf(fresh, false, null, false)).toEqual(['no_members']);
+    // Every other issue still stands in a trial.
+    expect(issuesOf({ ...fresh, ownerState: 'not_invited' }, false, '2026-10', true)).toEqual(['owner_not_invited', 'data_missing']);
+  });
+
+  it('OD-477 the days left of a running trial count today and the last day; no trial, a paid one or a past one: null', () => {
+    const trial = { trial: true, endDate: '2026-12-21' } as never;
+    expect(trialDaysLeftOf({ subscription: trial }, '2026-11-22')).toBe(30);
+    expect(trialDaysLeftOf({ subscription: trial }, '2026-12-21')).toBe(1);
+    expect(trialDaysLeftOf({ subscription: trial }, '2026-12-22')).toBeNull();
+    expect(trialDaysLeftOf({ subscription: { trial: false, endDate: '2026-12-21' } as never }, '2026-11-22')).toBeNull();
+    expect(trialDaysLeftOf({ subscription: null }, '2026-11-22')).toBeNull();
   });
 });

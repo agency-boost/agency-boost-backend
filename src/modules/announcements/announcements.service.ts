@@ -13,6 +13,7 @@ import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { can, type Permission } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { OWNERS_PROJECTION, ownerUserIdsOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Announcement, AnnouncementDocument } from './announcement.schema';
@@ -159,15 +160,16 @@ export class AnnouncementsService {
     const scope = input.audience === 'selected'
       ? { ...REACHABLE_KPM, $or: [{ _id: { $in: kpmIds } }, { companyId: { $in: companyIds } }] }
       : REACHABLE_KPM;
-    const offices = await this.kpms.find(scope, { ownerUserId: 1 }).sort({ _id: 1 }).lean().exec() as unknown as
-      { _id: unknown; ownerUserId?: string | null }[];
+    const offices = await this.kpms.find(scope, OWNERS_PROJECTION).sort({ _id: 1 }).lean().exec() as unknown as
+      ({ _id: unknown } & WithOwners)[];
     if (offices.length === 0) return [];
 
     const seen = new Set<string>();
     const once = (list: Recipient[]) => list.filter((r) => (seen.has(r.userId) ? false : (seen.add(r.userId), true)));
 
     if (input.audience === 'owners') {
-      const owners = offices.filter((o) => o.ownerUserId).map((o) => ({ userId: String(o.ownerUserId), kpmId: String(o._id) }));
+      // Every owner of every KPM (ADR-0285 §5), each once.
+      const owners = offices.flatMap((o) => ownerUserIdsOf(o).map((userId) => ({ userId, kpmId: String(o._id) })));
       const accounts = await this.users
         .find(
           { _id: { $in: owners.map((o) => o.userId) }, deletedAt: null, status: { $ne: 'deactivated' }, ...NOT_A_TEST_ACCOUNT },

@@ -9,6 +9,7 @@ import { AUTH_REFUSALS } from './auth.messages';
 import { AuditService } from '@/modules/audit/audit.service';
 import { can } from '@/modules/rbac/permissions';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { ownedBy, ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import {
   ImpersonationPurpose, ImpersonationSession, ImpersonationSessionDocument,
@@ -300,7 +301,7 @@ export class ImpersonationService {
      */
     const membership = await this.memberships.liveForUserAnywhere(targetUserId);
     const ownedByTarget = await this.kpms
-      .findOne({ ownerUserId: targetUserId, deletedAt: null }).exec();
+      .findOne({ ...ownedBy(targetUserId), deletedAt: null }).exec();
     const targetIsAdmin = Boolean(ownedByTarget) || Boolean(membership?.adminAccess?.isKpmAdmin);
 
     if (targetIsAdmin && !can(ctx, 'impersonation:target_kpm_admin_or_owner')) {
@@ -445,7 +446,7 @@ export class ImpersonationService {
       after: { reason: reason.trim(), minutes, readOnly: true, sessionId, ...(handoff ? { window: true } : {}) },
     });
 
-    await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim());
+    await this.announce(targetUserId, kpmId, ownerUserIdsOf(office), reason.trim());
 
     return { accessToken, handoffCode, handoffExpiresAt, expiresAt, sessionId };
   }
@@ -498,7 +499,7 @@ export class ImpersonationService {
   }
 
   /**
-   * Tell the office a session has begun — **the person and their Owner, always** (§3.13).
+   * Tell the office a session has begun — **the person and their Owners, always** (§3.13; every owner, ADR-0285 §5).
    *
    * Not a per-office setting. Somebody being acted as has a right to know, and the Owner
    * is who they would ask about it; making either one optional would make the notice
@@ -511,11 +512,11 @@ export class ImpersonationService {
   private async announce(
     targetUserId: string,
     kpmId: string | null,
-    ownerUserId: string | null,
+    ownerUserIds: readonly string[],
     reason: string,
   ): Promise<void> {
     const told = new Set<string>();
-    for (const userId of [targetUserId, ownerUserId]) {
+    for (const userId of [targetUserId, ...ownerUserIds]) {
       if (!userId || told.has(userId)) continue;
       told.add(userId);
       await this.notifications.send({

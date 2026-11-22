@@ -1,3 +1,4 @@
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { Announcement, AnnouncementSchema } from '@/modules/announcements/announcement.schema';
@@ -100,11 +101,11 @@ export async function seedPlatformConsoleFixture(deps: PlatformConsoleFixtureDep
   // *Pengumuman*: one, to every Owner of a live, active KPM — each once, in their notifications.
   let announcement = await Announcements.findOne({ message: PLATFORM_CONSOLE_SEED.announcement }).exec();
   if (!announcement) {
-    const offices = await Kpms.find({ deletedAt: null, status: 'active', ownerUserId: { $ne: null } }, { ownerUserId: 1 }).lean().exec();
+    const offices = await Kpms.find({ deletedAt: null, status: 'active', 'owners.0': { $exists: true } }, { owners: 1 }).lean().exec();
+    // Every owner of every KPM (ADR-0285 §5), each once.
     const owners = new Map<string, string>();
     for (const office of offices) {
-      const owner = String(office.ownerUserId);
-      if (!owners.has(owner)) owners.set(owner, String(office._id));
+      for (const owner of ownerUserIdsOf(office as never)) if (!owners.has(owner)) owners.set(owner, String(office._id));
     }
     const sentAt = daysAgo(2);
     announcement = await Announcements.create({

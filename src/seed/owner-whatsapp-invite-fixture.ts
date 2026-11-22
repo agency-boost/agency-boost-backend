@@ -32,7 +32,7 @@ type Office = { _id: unknown; code: string; companyId: string };
 export interface OwnerWhatsAppFixtureDeps {
   companyId: string;
   /** `demo.ts`'s office writer: an office of that company and code made before is found. */
-  office: (companyId: string, code: string, branchName: string, opts?: { ownerUserId?: string }) => Promise<Office>;
+  office: (companyId: string, code: string, branchName: string, opts?: { ownerId?: string }) => Promise<Office>;
   /** `demo.ts`'s provisioning mirror, guarded per collection: the KPM's settings screens are not empty. */
   configure: (kpmId: string) => Promise<unknown>;
   /** `demo.ts`'s account writer: an address it made before is found. */
@@ -57,7 +57,7 @@ export async function seedOwnerWhatsAppFixture(deps: OwnerWhatsAppFixtureDeps): 
   const serpong = await deps.office(deps.companyId, pending.code, pending.branchName);
   await deps.configure(String(serpong._id));
   await Kpms.updateOne(
-    { _id: serpong._id, ownerUserId: null, pendingOwner: null },
+    { _id: serpong._id, 'owners.0': { $exists: false }, pendingOwner: null },
     { $set: { pendingOwner: { fullName: pending.owner.fullName, phone: pending.owner.phone, agentCode: null } } },
   ).exec();
   await deps.user(pending.claimer.email, pending.claimer.fullName, {
@@ -69,7 +69,7 @@ export async function seedOwnerWhatsAppFixture(deps: OwnerWhatsAppFixtureDeps): 
     agentCode: neverSignedIn.owner.agentCode, companyId: deps.companyId, pronoun: 'she',
   });
   const alamSutera = await deps.office(deps.companyId, neverSignedIn.code, neverSignedIn.branchName, {
-    ownerUserId: String(rina._id),
+    ownerId: String(rina._id),
   });
   await deps.configure(String(alamSutera._id));
   await deps.placeOwner(alamSutera, String(rina._id));

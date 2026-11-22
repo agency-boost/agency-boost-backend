@@ -16,9 +16,7 @@ import { AuditQueryDto } from '@/modules/audit/audit-query.dto';
 import { ImpersonateDto, ImpersonationHandoffDto } from '@/modules/auth/auth.dto';
 import { ImpersonationService } from '@/modules/auth/impersonation.service';
 import {
-  AccountSearchQueryDto,
   ApproveKpmRequestDto,
-  AssignOwnerDto,
   CodeAvailabilityQueryDto,
   MoveCompanyDto,
   CreateCompanyDto,
@@ -174,18 +172,8 @@ export class AdminController {
     return this.kpmRequestService.remove(ctx, requestId);
   }
 
-  @Get('accounts')
-  @RequirePermission('kpm:assign_owner')
-  @ApiOperation({
-    summary: 'Find the account to make an Owner',
-    description:
-      '"Ganti Owner"\'s picker (ADR-0191 §5): accounts whose name or email contains `q` (at least two '
-      + 'characters, else `400`), at most twenty, Super Admins left out — each with its company, whether its address '
-      + 'is verified and whether it holds an agent code, and the offices it already owns or belongs to.',
-  })
-  async searchAccounts(@Ctx() ctx: RequestContext, @Query() query: AccountSearchQueryDto) {
-    return this.tenants.searchAccounts(ctx, query.q);
-  }
+  // `GET accounts`, *Ganti Owner*'s search of every account (ADR-0191 §5), is retired with its page (P19.27-T1 AC-4;
+  // ADR-0285): an owner is a member of the KPM, chosen on *Tambah owner* from the KPM's own members.
 
   @Get('companies')
   @RequirePermission('company:crud')
@@ -553,27 +541,9 @@ export class AdminController {
     return this.tenants.readProfile(ctx, id);
   }
 
-  @Patch('tenants/:id/owner')
-  @RequirePermission('kpm:assign_owner')
-  @ApiOperation({
-    summary: 'Assign or transfer the KPM Owner',
-    description:
-      'Name the person by email or by user id — "Ganti Owner" picks the id from `GET /admin/accounts` — or, with '
-      + '`owner { fullName, phone, email, agentCode? }`, somebody named (ADR-0212 §3): an account with that email is made '
-      + 'the Owner, or one is made for it (no usable password; `agentCode` then required, `400`, and free in the company, '
-      + '`409 AGENT_CODE_TAKEN`), and invited by email unless `sendInvitation` is `false` (an account that has signed in '
-      + 'is sent none); `owner.email` is required (`400`). A pending Owner (`pendingOwner`) is cleared once one is set. '
-      + 'Refused before anything is written: `409 TENANT_COMPANY_MISMATCH` for an account of another company or with no '
-      + 'agent code, `409 AUTH_EMAIL_NOT_VERIFIED` for an unverified address (ADR-0190 §4). '
-      + 'Audited with both the outgoing and incoming user. Answers the office as the list reads it.',
-  })
-  async assignOwner(
-    @Ctx() ctx: RequestContext,
-    @Param('id') id: string,
-    @Body() dto: AssignOwnerDto,
-  ) {
-    return this.tenants.assignOwner(ctx, id, dto);
-  }
+  // `PATCH tenants/:id/owner`, *Ganti Owner* — assign or transfer **the** Owner — is retired (P19.27-T1 AC-4; ADR-0285
+  // §4): a KPM has one or more owners, added and removed from inside it (`POST`/`DELETE /members/:membershipId/owner`),
+  // and the route answers 404 like any that does not exist. *Ganti owner* = add the new one, then remove the old one.
 
   // `POST tenants/:id/owner/invitation`, *Kirim ulang undangan* by email, is retired (P19.23-T2; ADR-0277 §3; OD-420): the
   // Owner is invited by WhatsApp (`owner-invites.controller.ts`), and the route answers 404 like any that does not exist.
@@ -794,10 +764,13 @@ export class AdminController {
   })
   async readAudit(@Ctx() ctx: RequestContext, @Query() query: AuditQueryDto) {
     const scope = ctx.isSuperAdmin ? (query.kpmId ?? null) : ctx.kpmId;
-    const { kpmId: _asked, cursor, ...filters } = query;
+    const { kpmId: _asked, cursor, includeViewed, ...filters } = query;
     // The reader, so a leader note's rows about them are never served to them (ADR-0073).
     // And their language: the actions, the kinds of target and a section's name in their words (P19.4-T3 AC-11).
-    return this.auditRead.page({ kpmId: scope, readerUserId: ctx.userId, reader: ctx.reader }, filters, cursor);
+    // Changes only unless *Termasuk dilihat* (P19.26-T3 AC-1; ADR-0284 §3).
+    return this.auditRead.page(
+      { kpmId: scope, readerUserId: ctx.userId, reader: ctx.reader }, { ...filters, includeViewed: includeViewed === 'true' }, cursor,
+    );
   }
 
   /**

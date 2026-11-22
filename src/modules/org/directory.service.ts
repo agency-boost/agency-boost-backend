@@ -11,6 +11,7 @@ import { render } from '@/common/i18n/sentence';
 import { preferredNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { MembershipRepository } from './membership.repository';
 import { HierarchyRole, MembershipDocument, MembershipStatus } from './membership.schema';
@@ -243,9 +244,9 @@ export class DirectoryService {
   constructor(
     private readonly members: MembershipRepository,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
-    // The office, for one field: `kpms.ownerUserId`. Ownership is not on the membership
-    // — `ContextResolver` derives `isKpmOwner` by comparing the two — so a roster that
-    // wants to say who owns the office has to make the same join.
+    // The office, for one field: `kpms.owners` (ADR-0285). Ownership is not on the membership
+    // — `ContextResolver` derives `isKpmOwner` from the office — so a roster that wants to
+    // say who owns the office has to make the same join.
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     /*
      * The office's company, for one field on one member's read: `personal.companyName` (ADR-0205 §4). Optional so the
@@ -285,11 +286,11 @@ export class DirectoryService {
     return (company as { name?: string } | null)?.name ?? null;
   }
 
-  /** The office's owner, as a user id. Null for an office nobody administers yet. */
-  private async ownerUserId(ctx: RequestContext): Promise<string | null> {
-    if (!ctx.kpmId) return null;
-    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
-    return kpm?.ownerUserId ?? null;
+  /** The office's owners, as user ids (ADR-0285 §1). Empty for an office nobody administers yet. */
+  private async ownerUserIds(ctx: RequestContext): Promise<string[]> {
+    if (!ctx.kpmId) return [];
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('owners').exec();
+    return ownerUserIdsOf(kpm);
   }
 
   async list(ctx: RequestContext, query: DirectoryQuery = {}): Promise<DirectoryPage> {
@@ -449,7 +450,7 @@ export class DirectoryService {
       ]),
     );
 
-    const owner = await this.ownerUserId(ctx);
+    const owner = await this.ownerUserIds(ctx);
     const ladder = await this.ladder(ctx);
     const [returns, photos, places] = await Promise.all([
       this.returnsOf(ctx, rows),
@@ -520,7 +521,7 @@ export class DirectoryService {
     user: UserDocument | undefined,
     leaderNameValue: string | null,
     ctx: RequestContext,
-    ownerUserId: string | null,
+    ownerUserIds: readonly string[],
     ladder: readonly LadderRung[] = DEFAULT_LADDER,
   ): Omit<DirectoryMember, 'rejoinedOn' | 'photoUrl' | 'groupPlace'> {
     // A person whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
@@ -533,7 +534,8 @@ export class DirectoryService {
     // **This used to be hardcoded `false`**, so the roster's `Owner` tag — gated on it —
     // could never appear. It is also what stops an Admin removing the person who owns the
     // office and leaving it with no working administration.
-    const isOwner = Boolean(ownerUserId) && m.userId === ownerUserId;
+    // Any owner (ADR-0285 §3): every owner carries the *Owner* chip.
+    const isOwner = ownerUserIds.includes(m.userId);
     return {
       membershipId: String(m._id),
       agentCode: m.agentCode,
@@ -565,7 +567,7 @@ export class DirectoryService {
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
       registeredAt: (m as unknown as { createdAt?: Date }).createdAt?.toISOString() ?? null,
       // ADR-0248 §4: a first sign-in decides it; before one, whether an invitation went.
-      invitation: invitationStateOf(user?.lastLoginAt, m.invitedAt),
+      invitation: invitationStateOf(user, m.invitedAt),
       // The rung and the leader by the rules the writes enforce (`role-rules.ts`, ADR-0247), never a copy of them;
       // removal mirrors `RemovalService.remove`. A refusal the screen did not anticipate is a worse experience than a
       // control that was never offered — but the service is still the gate.

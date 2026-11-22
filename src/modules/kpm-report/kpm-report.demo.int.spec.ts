@@ -18,6 +18,7 @@ import { listenOnLoopback } from '../../../test/listen';
 import { startMongo, stopMongo } from '../../../test/mongo';
 import { readPdf } from '../../../test/pdf-text';
 import { ReportLinkSigner } from './kpm-report.link';
+import { ownersOf } from '../../../test/owners';
 
 const RUN_MS = 420_000;
 const quiet = () => undefined;
@@ -84,7 +85,7 @@ describe('P19.24 the KPM report on the demo KPM', () => {
     const allianz = await db.collection('companies').findOne({ name: 'Allianz Life' });
     const made = await db.collection('kpms').insertOne({
       companyId: String(allianz!._id), code: '7001', branchName: 'Allianz Uji Branch', timezone: 'Asia/Jakarta', status: 'active',
-      ownerUserId: null, pendingOwner: null, deletedAt: null, createdAt: clock.now(), updatedAt: clock.now(),
+      owners: ownersOf(null), pendingOwner: null, deletedAt: null, createdAt: clock.now(), updatedAt: clock.now(),
     });
     allianzKpm = String(made.insertedId);
   }, RUN_MS);
@@ -138,6 +139,13 @@ describe('P19.24 the KPM report on the demo KPM', () => {
     expect(flat(pdf(res).pages[0].text)).toContain('Allianz Uji Branch');
   }, RUN_MS);
 
+  it('P19.27-T5 AC-1 a KPM with two owners: the link names both, in order of since — Kirim ke owner goes to every owner', async () => {
+    const kpm0602 = String((await db.collection('kpms').findOne({ code: '0602' }))!._id);
+    const res = await http().post(`/api/v1/admin/tenants/${kpm0602}/report/link`).set(as('sa')).send({ month: '2026-10' }).expect(200);
+    expect(res.body.owners.map((o: { name: string }) => o.name)).toEqual(['Yohanes Saputra', 'Sinta Maharani']);
+    expect(res.body.ownerName).toBe('Yohanes Saputra');
+  });
+
   it('P19.24-T2 AC-1 an unknown KPM is 404, a month outside the thirteen is 400', async () => {
     await report('66f0000000000000000000ff', '2026-10').expect(404);
     await report('not-an-id', '2026-10').expect(404);
@@ -158,6 +166,8 @@ describe('P19.24 the KPM report on the demo KPM', () => {
     beforeAll(async () => {
       const res = await http().post(`/api/v1/admin/tenants/${kpm0417}/report/link`).set(as('sa')).send({ month: '2026-10' }).expect(200);
       expect(res.body).toMatchObject({ month: '2026-10', kpmName: 'BSD City Branch', companyName: 'Prudential', ownerName: 'Wilson Tanoto' });
+      // P19.27-T5 AC-1 (ADR-0285 §5): every owner, in order of since — the pick-list *Kirim ke owner* offers.
+      expect(res.body.owners).toEqual([{ userId: expect.any(String), name: 'Wilson Tanoto', phone: res.body.ownerPhone }]);
       expect(res.body.link).toMatch(/\/laporan-kpm\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
       link = res.body.link.split('/laporan-kpm/')[1];
     }, RUN_MS);

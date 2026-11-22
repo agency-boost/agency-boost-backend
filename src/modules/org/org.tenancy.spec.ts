@@ -29,6 +29,7 @@ import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { clearCollections, seedLadder, startMongo, stopMongo, syncIndexes } from '../../../test/mongo';
 import { GroupRepository, JoinRequestRepository, MembershipHistoryRepository } from './org.repositories';
+import { ownersOf } from '../../../test/owners';
 
 /** A clock that can be moved, so as-of-date history is testable without sleeping. */
 class MovableClock extends Clock {
@@ -1486,7 +1487,7 @@ describe('organisation', () => {
       const ownerId = await person('Pending Owner');
       await onboarding.registerKpm(new RequestContext(ownerId, 'none', null), KPM_A);
       const owner = await mongoose.model(Membership.name).findOne({ userId: ownerId });
-      await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { ownerUserId: ownerId } });
+      await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { owners: ownersOf(ownerId) } });
       await expect(approvals.placeByCode(ctx(KPM_A), String(owner!._id), leader, leaderCode))
         .rejects.toMatchObject({ code: 'ORG_NOT_PERMITTED_TO_TAG' });
       expect(await mongoose.model(Membership.name).findById(owner!._id)).toMatchObject({ status: 'pending', leaderId: null });
@@ -3933,15 +3934,15 @@ describe('organisation', () => {
       // The root check catches an owner *usually*, because a new owner is created with no
       // leader. Not after an ordinary transfer: ownership moving to somebody already in
       // the office keeps their existing row, `leaderId` and all. An Admin could then
-      // remove them — leaving `kpms.ownerUserId` naming a person with no membership, so
+      // remove them — leaving `kpms.owners` naming a person with no membership, so
       // nobody resolves as Owner and `kpm_admin:grant` is Owner-reserved. The office
-      // would have no working administration until a Super Admin re-ran `assignOwner`.
+      // would have no working administration until a Super Admin added an owner again.
       const root = await join(KPM_A, 'ab');
       const sari = await join(KPM_A, 'ab', root);
       const sariRow = await members.findById(ctx(KPM_A), sari);
       await mongoose
         .model(Kpm.name)
-        .updateOne({ _id: KPM_A }, { $set: { ownerUserId: sariRow!.userId } });
+        .updateOne({ _id: KPM_A }, { $set: { owners: ownersOf(sariRow!.userId) } });
 
       const admin = ctx(KPM_A, { isKpmOwner: false, membershipId: 'mem-admin' });
       (admin.membership as { isKpmAdmin: boolean }).isKpmAdmin = true;
@@ -3967,7 +3968,7 @@ describe('organisation', () => {
       const other = await join(KPM_A, 'agent', root);
       await mongoose
         .model(Kpm.name)
-        .updateOne({ _id: KPM_A }, { $set: { ownerUserId: rootRow!.userId } });
+        .updateOne({ _id: KPM_A }, { $set: { owners: ownersOf(rootRow!.userId) } });
 
       const office = ctx(KPM_A, { isKpmOwner: true });
       expect((await directory.read(office, root)).isKpmOwner).toBe(true);
@@ -4049,7 +4050,7 @@ describe('organisation', () => {
       const sari = await join(KPM_A, 'ab', root);
       const sariRow = await members.findById(ctx(KPM_A), sari);
       await mongoose.model(Kpm.name).updateOne(
-        { _id: KPM_A }, { $set: { ownerUserId: sariRow!.userId } },
+        { _id: KPM_A }, { $set: { owners: ownersOf(sariRow!.userId) } },
       );
       await members.updateById(ctx(KPM_A), sari, { $set: { leaderId: null, ancestorIds: [], depth: 0 } });
 

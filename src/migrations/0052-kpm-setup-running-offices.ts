@@ -34,17 +34,24 @@ const PAGES = ['branch-info', 'activity-types', 'activation-checklist', 'product
 export async function up(db: mongoose.mongo.Db, now: Date): Promise<KpmSetupRunningOfficesResult> {
   const result: KpmSetupRunningOfficesResult = { marked: 0, current: 0, setup: 0 };
   const offices = await emptyIfMissing(db.collection('kpms')
-    .find({ deletedAt: null }, { projection: { ownerUserId: 1 } })
+    // `owners` once 0077 has run on this database (ADR-0285): a fresh one seeded after it holds no `ownerUserId`.
+    .find({ deletedAt: null }, { projection: { ownerUserId: 1, owners: 1 } })
     .sort({ _id: 1 })
     .toArray());
   const marks = db.collection('kpmSetupMarks');
 
   for (const office of offices) {
     const kpmId = String(office._id);
-    const owner = (office as { ownerUserId?: string | null }).ownerUserId ?? null;
+    const row = office as { ownerUserId?: string | null; owners?: { userId: string }[] | null };
+    // Every owner is nobody *besides the Owner* (ADR-0285 §3), as `KpmSetup.read` counts: a KPM with two owners and an
+    // upload is not running until somebody else is in it. This runs on every deploy, so it meets lists of several.
+    const owners = [...new Set([
+      ...(row.ownerUserId ? [row.ownerUserId] : []),
+      ...(row.owners ?? []).map((o) => o.userId),
+    ])];
     const [member, upload] = await Promise.all([
       db.collection('memberships').findOne(
-        { kpmId, status: 'active', deletedAt: null, ...(owner ? { userId: { $ne: owner } } : {}) },
+        { kpmId, status: 'active', deletedAt: null, ...(owners.length > 0 ? { userId: { $nin: owners } } : {}) },
         { projection: { _id: 1 } },
       ),
       db.collection('dataUploadBatches').findOne({ kpmId, status: 'committed', deletedAt: null }, { projection: { _id: 1 } }),

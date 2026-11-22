@@ -52,6 +52,7 @@ import { ProductService } from '@/modules/products/product.service';
 import {
   CompanyTemplate, CompanyTemplateSchema,
 } from '@/modules/config/company-template.schema';
+import { ownerUserIdsOf } from './kpm-owners';
 
 const NOW = new Date('2026-09-06T02:00:00Z');
 
@@ -426,7 +427,7 @@ describe('KpmRequestService (P3.1-T2)', () => {
       const kpm = await tenants.readProfile(platform(), after.createdKpmId!);
       expect(kpm).toMatchObject({ companyId: other, code: '1001', ownerUserId: victor });
       const [audit] = await audits('kpm_request.approved');
-      expect(audit).toMatchObject({ before: { companyId }, after: { companyId: other, ownerUserId: victor } });
+      expect(audit).toMatchObject({ before: { companyId }, after: { companyId: other, firstOwnerUserId: victor } });
     });
 
     it('P19-T3 AC-3 one press makes the office and its Owner; pressing again answers the same office, not a second', async () => {
@@ -439,7 +440,7 @@ describe('KpmRequestService (P3.1-T2)', () => {
         kpmId: first.createdKpmId, code: '0629', branchName: 'Surabaya Branch', deleted: false,
       });
       expect(await offices()).toHaveLength(1);
-      expect((await offices())[0]).toMatchObject({ ownerUserId: requesterId });
+      expect(ownerUserIdsOf((await offices())[0] as never)).toEqual([requesterId]);
     });
 
     it('P19-T3 AC-3 an applicant of another company is refused before anything is written', async () => {
@@ -468,7 +469,7 @@ describe('KpmRequestService (P3.1-T2)', () => {
 
     it('P19-T3 AC-3 if the Owner cannot be set, the office is undone, the code is free, and a second press succeeds', async () => {
       const { requestId } = await service.create(asker(requesterId), ask());
-      const spy = jest.spyOn(tenants, 'assignOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
+      const spy = jest.spyOn(tenants, 'installAccountOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
 
       await expect(service.approve(platform(), requestId, { code: '0629' })).rejects.toThrow('the Owner could not be set');
       const [undone] = await offices();
@@ -549,7 +550,7 @@ describe('KpmRequestService (P3.1-T2)', () => {
       const { requestId } = await service.create(asker(requesterId), ask());
       const made = await tenants.createKpm(platform(), { companyId, code: '0629', branchName: 'Surabaya Branch' });
       await mongoose.model(KpmRequest.name).updateOne({ _id: requestId }, { $set: { createdKpmId: made._id } });
-      const spy = jest.spyOn(tenants, 'assignOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
+      const spy = jest.spyOn(tenants, 'installAccountOwner').mockRejectedValueOnce(new Error('the Owner could not be set'));
 
       await expect(service.approve(platform(), requestId, { code: '0629' })).rejects.toThrow('the Owner could not be set');
       spy.mockRestore();
@@ -627,7 +628,8 @@ describe('KpmRequestService (P3.1-T2)', () => {
       const { requestId } = await service.create(asker(requesterId), ask());
       const [after] = await service.approve(platform(), requestId, {});
       expect(after).toMatchObject({ status: 'approved', createdKpm: { code: '0001', branchName: 'Surabaya Branch' } });
-      expect((await offices())[0]).toMatchObject({ code: '0001', ownerUserId: requesterId });
+      expect((await offices())[0]).toMatchObject({ code: '0001' });
+      expect(ownerUserIdsOf((await offices())[0] as never)).toEqual([requesterId]);
     });
 
     it('P19.23-T3 AC-2 the code made is one more than the highest all-digit code the company holds, past any taken', async () => {

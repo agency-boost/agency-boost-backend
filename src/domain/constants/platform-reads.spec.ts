@@ -36,7 +36,7 @@ describe('P19.4-T3 the platform reads’ constants (§B.35)', () => {
   });
 
   it('P19.23-T3 AC-1 Anggota’s test-account filter: Akun tes alone (OD-421)', () => {
-    expect(PLATFORM_MEMBER_TEST_FILTERS).toEqual(['only']);
+    expect(PLATFORM_MEMBER_TEST_FILTERS).toEqual(['only', 'include']);
   });
 
   it('P19.12-T2 AC-1 Akun terdaftar’s KPM filter: Tanpa KPM and Punya KPM', () => {

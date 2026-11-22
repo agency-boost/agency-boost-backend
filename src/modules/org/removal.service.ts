@@ -224,10 +224,10 @@ export class RemovalService {
      * The root check above catches them *usually*, because `ensureOwnerMembership`
      * creates an owner with no leader. It does not catch the ordinary transfer case: when
      * ownership moves to somebody who is already a member, their existing row keeps its
-     * `leaderId`. A KPM Admin could then remove them — leaving `kpms.ownerUserId` naming
+     * `leaderId`. A KPM Admin could then remove them — leaving `kpms.owners` naming
      * somebody with no membership, so nobody resolves as Owner, and `kpm_admin:grant` is
      * Owner-reserved. The office would have no working administration until a Super Admin
-     * re-ran `assignOwner`.
+     * added an owner again.
      */
     if (await this.hierarchy.ownsTheOffice(ctx, target)) {
       throw new DomainException(

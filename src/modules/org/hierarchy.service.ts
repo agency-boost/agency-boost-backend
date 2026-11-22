@@ -10,6 +10,7 @@ import type { LocalDate } from '@/common/time/local-day';
 import {
   DEFAULT_TENANT_TIMEZONE, isLeaderClass, joinDateViolation, joinedAsFor, roleClassOf, tierOfRung, type JoinedAs, type LeaderTier,
 } from '@/domain/constants';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { EdgeEvent, MembershipHistory } from './membership-history.schema';
@@ -233,23 +234,22 @@ export class HierarchyService {
    * Returns the rung, so the caller can record it in history.
    */
   /**
-   * Is this membership the one that owns the office?
+   * Is this membership one of those that own the office? **Any owner** (ADR-0285 §3).
    *
-   * Ownership lives on `kpms.ownerUserId`, not on the membership — `ContextResolver`
-   * derives `isKpmOwner` by comparing the two — so anything that needs the answer has to
-   * make the same join. Here because this service already holds the Kpm model, and
-   * because both callers that need it already depend on it.
+   * Ownership lives on `kpms.owners`, not on the membership — `ContextResolver` derives
+   * `isKpmOwner` from the office — so anything that needs the answer has to make the same
+   * join. Here because this service already holds the Kpm model, and because every caller
+   * that needs it already depends on it.
    */
   async ownsTheOffice(ctx: RequestContext, membership: { userId: string }): Promise<boolean> {
-    const owner = await this.officeOwnerUserId(ctx);
-    return owner !== null && owner === membership.userId;
+    return (await this.officeOwnerUserIds(ctx)).includes(membership.userId);
   }
 
-  /** The account that owns the caller's office, or `null` — for a caller asking about many members at once. */
-  async officeOwnerUserId(ctx: RequestContext): Promise<string | null> {
-    if (!ctx.kpmId) return null;
-    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).exec();
-    return kpm?.ownerUserId || null;
+  /** The accounts that own the caller's office (ADR-0285 §1), or none — for a caller asking about many members at once. */
+  async officeOwnerUserIds(ctx: RequestContext): Promise<string[]> {
+    if (!ctx.kpmId) return [];
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('owners').exec();
+    return ownerUserIdsOf(kpm);
   }
 
   /**

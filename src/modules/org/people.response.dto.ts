@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { KpmOwnerViewDto } from '@/modules/tenants/kpm-owners.response.dto';
 import type { HierarchyRole } from './membership.schema';
 import type { KpmStewards, PeopleHistoryEntry, PeopleHistoryKind, RosterImportView } from './people.service';
 
@@ -51,8 +52,14 @@ class StewardOwnerDto {
 
 /** *KPM admins*' three tiles. */
 export class KpmStewardsDto implements KpmStewards {
-  @ApiProperty({ type: () => StewardOwnerDto, nullable: true, description: 'The KPM Owner; `null` while it has none.' })
+  @ApiProperty({ type: () => StewardOwnerDto, nullable: true, description: 'The first owner (ADR-0285 §3); `null` while it has none.' })
   owner!: KpmStewards['owner'];
+
+  @ApiProperty({ type: () => KpmOwnerViewDto, isArray: true, description: '*KPM Owner · n*: every owner, in order of `since`.' })
+  owners!: KpmOwnerViewDto[];
+
+  @ApiProperty({ type: Boolean, description: 'The reader may add and remove owners: an owner, or the Super Admin inside the KPM.' })
+  canManageOwners!: boolean;
 
   @ApiProperty({ type: Number, description: 'Active Admins, test accounts not counted.' })
   admins!: number;

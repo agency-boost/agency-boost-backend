@@ -10,6 +10,7 @@ import { ActivationTemplateRepository } from '@/modules/activation/activation.re
 import { AuditService } from '@/modules/audit/audit.service';
 import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { ownerUserIdsOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import { KpmProductConfigRepository } from '@/modules/products/kpm-product.repository';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { ProductionMonthRepository } from '@/modules/production/production-month.repository';
@@ -173,9 +174,9 @@ export class KpmSetup {
   /** The card, what waits, and the year's months — for `GET /kpm/overview`. */
   async read(ctx: RequestContext, facts: SetupFacts): Promise<SetupReading> {
     const office = (await this.kpms.findById(ctx.kpmId)
-      .select('createdAt ownerUserId address contactPhone settings timezone').lean().exec()) as
-      | { createdAt?: Date; ownerUserId?: string | null; address?: string | null; contactPhone?: string | null;
-        settings?: { productionLockGraceDays?: number } }
+      .select('createdAt owners address contactPhone settings timezone').lean().exec()) as
+      | ({ createdAt?: Date; address?: string | null; contactPhone?: string | null;
+        settings?: { productionLockGraceDays?: number } } & WithOwners)
       | null;
     const year = facts.today.slice(0, 4);
     // The KPM's first month, in its own zone (UI-150's *"KPM creation month (exists on the KPM)"*).
@@ -188,7 +189,8 @@ export class KpmSetup {
     const waiting = monthsFrom(from, facts.month).filter((m) => latestHeld === null || m > latestHeld);
     const grace = office?.settings?.productionLockGraceDays ?? PRODUCTION.LOCK_GRACE_DAYS;
 
-    const ownerUserId = office?.ownerUserId ?? null;
+    // Every owner is nobody *besides the Owner* (ADR-0285 §3).
+    const ownerIds = ownerUserIdsOf(office);
     const [marks, overrides, productsAwaiting, draft, besidesOwner, uploaded] = await Promise.all([
       this.marks.marksOf(ctx),
       waiting.length === 0
@@ -199,7 +201,7 @@ export class KpmSetup {
       this.products.count(ctx, { reviewState: 'pending' }),
       this.checklists.findOne(ctx, { status: 'draft' }),
       // ADR-0267 §1 (P19.19): a test account is nobody besides the Owner.
-      this.memberships.count(ctx, withoutTestAccounts({ status: 'active', ...(ownerUserId ? { userId: { $ne: ownerUserId } } : {}) })),
+      this.memberships.count(ctx, withoutTestAccounts({ status: 'active', ...(ownerIds.length > 0 ? { userId: { $nin: ownerIds } } : {}) })),
       facts.held.length > 0 ? Promise.resolve(true) : this.batches.exists(ctx, { status: 'committed' }),
     ]);
 

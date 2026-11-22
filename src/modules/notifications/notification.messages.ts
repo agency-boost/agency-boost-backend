@@ -55,6 +55,15 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     en: 'They are in your unit now, with the join date you gave.',
     id: 'Dia sudah ada di unit Anda, dengan tanggal bergabung yang Anda berikan.',
   },
+  /** P19.28-T1 AC-2 (OD-442): *Masukkan*'s notice, to the person placed. */
+  memberPlaced: ({ kpm }: { kpm: string }) => ({
+    en: `You were added to ${kpm}`,
+    id: `Anda dimasukkan ke ${kpm}`,
+  }),
+  memberPlacedDetail: {
+    en: 'Your KPM, your leader and your role are on your profile.',
+    id: 'KPM, leader dan peran Anda ada di profil Anda.',
+  },
   transferRequested: ({ requester, member }: { requester: string; member: string }) => ({
     en: `${requester} asked to move ${member} into their unit`,
     id: `${requester} meminta ${member} dipindahkan ke unitnya`,

@@ -359,6 +359,8 @@ describe('the metric registry (P4-T4)', () => {
       TRAINING_MODULE_DONE_COUNT: '19.25',
       // P19.25-T1, T2 (ADR-0281): Advanced analytics › *Event*'s *hadir* or *tidak hadir*.
       EVENT_KEHADIRAN: '19.25',
+      // P19.26-T1 (ADR-0284 §1): the console's one count of members.
+      COUNTED_MEMBERS: '19.26',
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -405,7 +407,7 @@ describe('the metric registry (P4-T4)', () => {
       // 19.8 since P19.8-T2 (Home's *Leads*, `OWN_OPEN_LEADS`, ADR-0228 §4). 19.12 since P19.12-T6 (*Grup informal*'s line,
       // `ABS_NOT_IN_INFORMAL_GROUP`, ADR-0249 §4). 19.17 since P19.17-T1 (one definition per number, ADR-0267). 19.19 since
       // P19.19-T3 (*Leads Mgmt*, ADR-0272 §6). 19.22 since P19.22-T6, T7 (NPS's headline, *Per orang*; ADR-0276).
-      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25']);
+      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25', '19.26']);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -478,6 +480,8 @@ describe('the metric registry (P4-T4)', () => {
         'TRAINING_MODULE_DONE_COUNT',
         // And Advanced analytics › *Event*'s *hadir* or *tidak hadir*, a share over events (P19.25-T1, T2, ADR-0281).
         'EVENT_KEHADIRAN',
+        // And the console's one count of members, a headcount across KPMs (P19.26-T1, ADR-0284 §1).
+        'COUNTED_MEMBERS',
       ].sort());
     });
 
@@ -524,7 +528,7 @@ describe('the metric registry (P4-T4)', () => {
         // 19.5 since P19.5-T4: the surveys' six, no requirement's. 19.8 since P19.8-T2: Home's *Leads*, no requirement's.
         // 19.12 since P19.12-T6: *Grup informal*'s line, no requirement's. 19.17 since P19.17-T1: the 19 November
         // definitions (ADR-0267), no requirement's.
-        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25']);
+        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25', '19.26']);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -600,6 +604,8 @@ describe('the metric registry (P4-T4)', () => {
           'TRAINING_MODULE_DONE_COUNT',
           // P19.25-T1, T2 (ADR-0281): *hadir* or *tidak hadir* over events, no requirement's.
           'EVENT_KEHADIRAN',
+          // P19.26-T1 (ADR-0284 §1): the console's one count of members, no requirement's.
+          'COUNTED_MEMBERS',
         ].sort());
       });
 

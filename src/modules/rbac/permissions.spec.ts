@@ -211,6 +211,23 @@ describe('permission matrix', () => {
         expect(isBlockedWhileImpersonating(permission)).toBe(false);
       }
     });
+
+    it('P19.28 N4 member:add and member:place in a support session: as member:invite — refused by the verb, never blocked outright', () => {
+      for (const permission of ['member:add', 'member:place'] as const) {
+        expect(isReadLike(permission)).toBe(false);
+        expect(isBlockedWhileImpersonating(permission)).toBe(false);
+      }
+      // The Owner and an Admin hold member:add in their KPM; a session looking as either holds neither write.
+      expect(scopeFor(ctx({ role: NO_CLASS, owner: true }), 'member:add')).toBe('own-kpm');
+      expect(scopeFor(ctx({ role: NO_CLASS, admin: true }), 'member:add')).toBe('own-kpm');
+      expect(can(ctx({ role: NO_CLASS, owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:add')).toBe(false);
+      expect(can(ctx({ role: NO_CLASS, admin: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:add')).toBe(false);
+      // member:place is the Super Admin's alone: a session — a member's context — holds it nowhere.
+      expect(can(ctx({ role: NO_CLASS, owner: true, impersonatedBy: 'sa-1', readOnly: true }), 'member:place')).toBe(false);
+      for (const role of ['ab', 'aab', 'agent'] as const) {
+        expect([role, can(ctx({ role }), 'member:add'), can(ctx({ role }), 'member:place')]).toEqual([role, false, false]);
+      }
+    });
   });
 
   /*
@@ -490,6 +507,7 @@ describe('permission matrix', () => {
       'kpm_overview:set_recruit_target': `${STRUCK} (P19.19, ADR-0272 §7: the monthly targets per AB group, \`ab_group_target:write\`)`,
       'kpm_analytics:read': `${STRUCK} (P19.19-T4, ADR-0272 §1: KPM Analytics is removed for everyone)`,
       'platform_analytics:read': `${STRUCK} (P19.23-T1, ADR-0277: \`/admin/analytics\` is retired; no route declared it)`,
+      'kpm:transfer_ownership': `${STRUCK} (P19.27, ADR-0285 §7: no route checks it; owners are added and removed instead)`,
       'member:list_directory': UNDECLARED,
       'member:add_leader_by_code': UNDECLARED,
       'member:move_subtree': `${STRUCK} (P19.12-T4, ADR-0247 §2: a move always carries the subtree)`,
@@ -617,7 +635,8 @@ describe('permission matrix', () => {
        * fails the build until somebody has made it on purpose, with an ADR.
        */
       const reserved = (Object.keys(PERMISSIONS) as Permission[]).filter(isOwnerReserved).sort();
-      expect(reserved).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+      // ADR-0285 §4 (P19.27): and adding and removing owners, never an Admin's.
+      expect(reserved).toEqual(['kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke']);
     });
 
     it('grants the Admin exactly what it grants the Owner, scope and status alike (ADR-0028)', () => {
@@ -643,7 +662,7 @@ describe('permission matrix', () => {
           return JSON.stringify(as(grants, 'kpm_owner')) !== JSON.stringify(as(grants, 'kpm_admin'));
         })
         .sort();
-      expect(differ).toEqual(['kpm_admin:grant', 'kpm_admin:revoke']);
+      expect(differ).toEqual(['kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke']);
       // And the one that used to differ is now held by both.
       expect(can(ctx({ admin: true }), 'audit_log:export')).toBe(true);
     });
@@ -1272,6 +1291,13 @@ describe('permission matrix', () => {
      * and any added later, is granted to no office role and no platform role; one who stands on a rung holds that
      * rung's, as the member they are (§1.1), which reaches only the hires they coach.
      */
+    it('P19.27 kpm:transfer_ownership is retired: nobody holds it, and no session list names it (ADR-0285 §7)', () => {
+      expect('kpm:transfer_ownership' in PERMISSIONS).toBe(false);
+      expect(BLOCKED_WHILE_IMPERSONATING as readonly string[]).not.toContain('kpm:transfer_ownership');
+      // What it guarded is two grants now, each the Super Admin's and an owner's, and both blocked in a session.
+      expect(BLOCKED_WHILE_IMPERSONATING).toEqual(expect.arrayContaining(['kpm_owner:grant', 'kpm_owner:revoke']));
+    });
+
     it('UI-025 new_hire:mark_left is retired with its route: nobody holds it (ADR-0180 §6)', () => {
       expect('new_hire:mark_left' in PERMISSIONS).toBe(false);
       expect(Object.keys(PERMISSIONS).filter((name) => name.startsWith('new_hire:'))).toEqual([]);

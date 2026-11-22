@@ -132,7 +132,8 @@ office already **running** — an active member besides its Owner and a committe
 `kpmSetupMarks` row `via: 'migration'` for each of the setup card's four settings pages (*Branch info*, *Activity types*,
 *Activation checklist*, *Products*), so *Siapkan KPM* does not ask it to confirm what its people already use; then the
 running offices marked already; then the offices not running yet, left for their Owner. Steps 5 to 7 stay derived. A
-mark already there is kept, whatever made it, and no page's data is touched. A second run marks none.
+mark already there is kept, whatever made it, and no page's data is touched. A second run marks none. Since 0077
+(ADR-0285 §3) it reads a KPM's `owners` list too, and **no owner** is a member besides the Owner, as the setup card counts.
 `0053-product-kind-and-currency` (Phase 19.4, P19.4-T4; ADR-0209 §1, §8) prints `{ kind, attachesTo, currencies }`: every
 product written before the fields given `kind: 'base'`, `attachesTo: []` and `currencies: ['IDR']` — what it always was,
 a standalone product sold in rupiah. A product that states any of them keeps it, no version moves, and agents' catalogue
@@ -245,3 +246,12 @@ full, preferred or unique first name — *Semua* / *All* read as *Semua* on an a
 `time: null`. The old agenda and rows are kept as `legacyMinutes`, read by nothing. One `leader_meeting.reshaped` audit
 row per forum, named to the job. A second run writes none; with no `leaderMeetings` collection it reads nothing and
 creates none. **It has a `down`** (call it by hand) that puts the old agenda and rows back from `legacyMinutes`.
+
+`0077-kpm-owners-list` (Phase 19.27, P19.27-T1; ADR-0285 §1) prints `{ moved, empty, current }`: every KPM's one owner,
+`ownerUserId`, becomes a one-owner **`owners`** list — `{ userId, since, addedByUserId: null }`, `since` the owner's
+membership's `joinedAt` in that KPM, else its creation, else the KPM's — a soft-deleted KPM included; a KPM with none
+`owners: []`; a list written since kept, a stray `ownerUserId` beside it added to it first; `ownerUserId` removed and its
+index `ownerUserId_1` dropped (the application builds `owners_userId`). A second run finds every KPM `current`; with no
+`kpms` collection it reads nothing and creates none. **It has a `down`** (call it by hand) that writes each KPM's first
+owner — the earliest `since` — back as `ownerUserId` and removes `owners`, building the old index again: the second and
+later owners are lost.

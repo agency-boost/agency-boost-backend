@@ -7,6 +7,8 @@ import { NotFoundException } from '@/common/errors/domain.exception';
 import { render } from '@/common/i18n/sentence';
 import { LEADER_CLASSES } from '@/domain/constants';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { firstOwnerOf } from '@/modules/tenants/kpm-owners';
+import { KpmOwnersService, type KpmOwnerView } from '@/modules/tenants/kpm-owners.service';
 import { RosterImportRecordRepository } from '@/modules/tenants/roster-import-record.schema';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -66,7 +68,12 @@ export interface PeopleHistoryEntry {
 
 /** The three tiles of *KPM admins* (P19.20-T4 AC-1): who owns the KPM, and how many admins and core leaders it has. */
 export interface KpmStewards {
+  /** **The first owner** (ADR-0285 §3) — the earliest `since` — or `null`. Every owner is in `owners`. */
   owner: { membershipId: string; fullName: string; agentCode: string; role: HierarchyRole; photoUrl: string | null } | null;
+  /** ***KPM Owner · n*** (P19.27-T4 AC-1): every owner in order of `since`, an invited one reading *Diundang*. */
+  owners: KpmOwnerView[];
+  /** The reader may add and remove owners (`kpm_owner:grant`): an owner, or the Super Admin inside the KPM. Never an Admin. */
+  canManageOwners: boolean;
   admins: number;
   coreLeaders: number;
 }
@@ -103,6 +110,8 @@ export class PeopleService {
     private readonly approvals: ApprovalsService,
     @Optional() @Inject(RosterImportRecordRepository) private readonly records: RosterImportRecordRepository | null = null,
     @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
+    /** *KPM Owner · n* (P19.27-T4; ADR-0285). Optional for the specs that build this service by hand: no list then. */
+    @Optional() @Inject(KpmOwnersService) private readonly kpmOwners: KpmOwnersService | null = null,
   ) {}
 
   /**
@@ -167,19 +176,23 @@ export class PeopleService {
   }
 
   /**
-   * **`GET /people/stewards`** — the three tiles of *KPM admins* (P19.20-T4 AC-1): the KPM's Owner by name, and how many
-   * Admins and core leaders it has now. The Super Admin is never among them — they hold no membership here (ADR-0268 §3).
+   * **`GET /people/stewards`** — the three tiles of *KPM admins* (P19.20-T4 AC-1): the KPM's first owner by name, and how
+   * many Admins and core leaders it has now. The Super Admin is never among them — they hold no membership here (ADR-0268
+   * §3). Since P19.27-T4 (ADR-0285) also *KPM Owner · n*: every owner, and whether the reader may add and remove them.
    */
   async stewards(ctx: RequestContext): Promise<KpmStewards> {
     requireOfficeSteward(ctx, 'KPM');
-    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('ownerUserId').exec();
+    const kpm = await this.kpms.findOne({ _id: ctx.kpmId, deletedAt: null }).select('owners').exec();
+    const first = firstOwnerOf(kpm);
     const live = { status: 'active', ...NOT_A_TEST_ACCOUNT };
-    const [ownerRow, admins, coreLeaders] = await Promise.all([
-      kpm?.ownerUserId ? this.members.findOne(ctx, { userId: kpm.ownerUserId, status: 'active' }) : Promise.resolve(null),
+    const [ownerRow, admins, coreLeaders, list] = await Promise.all([
+      first ? this.members.findOne(ctx, { userId: first.userId, status: 'active' }) : Promise.resolve(null),
       this.members.count(ctx, { ...live, 'adminAccess.isKpmAdmin': true }),
       this.members.count(ctx, { ...live, isCoreLeader: true, role: { $in: [...LEADER_CLASSES] } }),
+      this.kpmOwners && ctx.kpmId ? this.kpmOwners.list(ctx, ctx.kpmId) : Promise.resolve({ owners: [], canManage: false }),
     ]);
-    if (!ownerRow) return { owner: null, admins, coreLeaders };
+    const owners = { owners: list.owners, canManageOwners: list.canManage };
+    if (!ownerRow) return { owner: null, ...owners, admins, coreLeaders };
     const user = await this.users.findOne({ _id: ownerRow.userId }).select('fullName avatarUrl').exec();
     const photo = this.avatarLinks ? await this.avatarLinks.linkFor(user?.avatarUrl) : null;
     return {
@@ -190,6 +203,7 @@ export class PeopleService {
         role: ownerRow.role,
         photoUrl: photo,
       },
+      ...owners,
       admins,
       coreLeaders,
     };

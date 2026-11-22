@@ -6,6 +6,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { ContextResolver } from './context-resolver';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { ownersOf } from '../../../test/owners';
 
 const PRU = '66f0000000000000000000c1';
 const MANU = '66f0000000000000000000c2';
@@ -43,7 +44,7 @@ describe('P19.15-T4 ContextResolver — the Kelola data produk grant', () => {
     });
     const userId = String(user._id);
     const kpm = await mongoose.model(Kpm.name).create({
-      companyId: PRU, code: `0${seq}`, branchName: 'Bandung', ownerUserId: opts.owner ? userId : null,
+      companyId: PRU, code: `0${seq}`, branchName: 'Bandung', owners: ownersOf(opts.owner ? userId : null),
     });
     await mongoose.model(Membership.name).create({
       kpmId: String(kpm._id), userId, agentCode: `PRU-${seq}`, agentSeq: seq, leaderCode: `LC${seq}`,

@@ -42,8 +42,9 @@ import { InformalGroupCreatedDto, InformalGroupsViewDto } from '@/modules/org/in
 import { AbGroupTargetsViewDto } from '@/modules/reporting/ab-group-targets/ab-group-targets.dto';
 import { MemberPersonalCompletedDto } from '@/modules/org/member-personal.dto';
 import { KpmStewardsDto, PeopleHistoryEntryDto, RosterImportViewDto } from '@/modules/org/people.response.dto';
+import { KpmOwnerListDto } from '@/modules/tenants/kpm-owners.response.dto';
 import {
-  AccountChoiceDto, CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
+  CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
   MyKpmRequestStateDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto, RosterCommitDto, RosterPreviewDto,
   RosterTemplateDto,
 } from '@/modules/tenants/tenant.response.dto';
@@ -52,6 +53,7 @@ import { GroupMembersAddedDto } from '@/modules/org/group-members.dto';
 import { AuditPageDto } from '@/modules/audit/audit.response.dto';
 // P19.23-T6 (ADR-0279): the console's *Platform* sections.
 import { SuperAdminRowDto } from '@/modules/platform-team/platform-team.response.dto';
+import { WaitingPageDto } from '@/modules/reporting/platform/anggota-waiting.controller';
 import { PlatformSettingsDto } from '@/modules/platform-settings/platform-settings.response.dto';
 import { AnnouncementDto, AnnouncementPreviewDto } from '@/modules/announcements/announcements.response.dto';
 import {
@@ -100,6 +102,10 @@ import {
 import {
   OwnerInviteAcceptedDto, OwnerInviteBannerDto, OwnerWhatsAppInvitationDto,
 } from '@/modules/tenants/owner-invites.response.dto';
+import {
+  AddUserOptionsDto, UserInvitationCancelledDto, UserInvitationResentDto, UserInviteAcceptedDto, UserInviteBannerDto,
+  UserInvitedDto, UserPlacedDto,
+} from '@/modules/tenants/add-user.response.dto';
 
 /**
  * What one operation answers with: a class, and whether it comes back as an array — or, with no class, **only a file**
@@ -220,6 +226,8 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   // P19.12-T2 (ADR-0245 §1): *Akun terdaftar*.
   PlatformReadsController_accounts: { type: PlatformAccountsPageDto },
   PlatformReadsController_companyKpms: { type: CompanyKpmsDto },
+  // ADR-0286 §5: *Anggota* › *Menunggu* — invited and unplaced, across KPMs.
+  AnggotaWaitingController_list: { type: WaitingPageDto },
   // Phase 18.1, P19.22-T8: the Strategic Leader Forum — the forums, their agenda and action items, and their links.
   LeaderMeetingsController_list: { type: MeetingListViewDto },
   LeaderMeetingsController_create: { type: MeetingCardDto },
@@ -343,8 +351,19 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   TransferRequestsController_decline: { type: TransferDto, isArray: true },
   // P19.23-T2 AC-3 (OD-420): the KPM Owner invited by WhatsApp, the claim link's banner and its accept.
   OwnerWhatsAppInvitationController_invite: { type: OwnerWhatsAppInvitationDto },
+  // P19.27 (ADR-0285): *Jadikan owner* · *Hapus sebagai owner*, each answering *KPM Owner · n*.
+  KpmOwnersController_add: { type: KpmOwnerListDto },
+  KpmOwnersController_remove: { type: KpmOwnerListDto },
   OwnerInvitesController_banner: { type: OwnerInviteBannerDto },
   OwnerInvitesController_accept: { type: OwnerInviteAcceptedDto },
+  // P19.28 (ADR-0286): *Tambah user*, its choices, *Kirim ulang* and *Batalkan*; *Masukkan*; the invitation link.
+  AddUserController_options: { type: AddUserOptionsDto },
+  AddUserController_add: { type: UserInvitedDto },
+  AddUserController_resend: { type: UserInvitationResentDto },
+  AddUserController_cancel: { type: UserInvitationCancelledDto },
+  PlacementController_place: { type: UserPlacedDto },
+  UserInviteLinkController_banner: { type: UserInviteBannerDto },
+  UserInviteLinkController_accept: { type: UserInviteAcceptedDto },
 
   TenantConfigController_listActivityTypes: { type: ActivityCategoryDto, isArray: true },
   TenantConfigController_createCategory: { type: ActivityCategoryDto },
@@ -716,7 +735,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_declineKpmRequest: { type: KpmRequestRowDto, isArray: true },
   // P19-T3 (ADR-0191): removing a request, the owner picker, the code check, moving and deleting an office.
   AdminController_deleteKpmRequest: { type: KpmRequestRowDto, isArray: true },
-  AdminController_searchAccounts: { type: AccountChoiceDto, isArray: true },
   AdminController_codeAvailability: { type: CodeAvailabilityDto },
   AdminController_moveCompany: { type: KpmAdminViewDto },
   AdminController_tenantContents: { type: KpmContentsDto },
@@ -738,7 +756,6 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminController_listTenants: { type: KpmListRowDto, isArray: true },
   AdminController_createTenant: { type: KpmCreatedDto },
   AdminController_readTenant: { type: KpmProfileDto },
-  AdminController_assignOwner: { type: KpmAdminViewDto },
   AdminController_setStatus: { type: KpmAdminViewDto },
   AdminController_updateSubscription: { type: KpmAdminViewDto },
   // ADR-0184: `format=csv` and `format=xlsx` answer the file itself.

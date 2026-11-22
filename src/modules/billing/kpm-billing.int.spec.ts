@@ -23,6 +23,7 @@ import { listenOnLoopback } from '../../../test/listen';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { BillingService } from './billing.service';
 import { KpmBillingController } from './kpm-billing.controller';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on 20 November 2026 in Jakarta. */
 const NOW = new Date('2026-11-20T03:00:00Z');
@@ -137,7 +138,7 @@ describe('Langganan & akses per KPM (P19.23-T5)', () => {
         email: 'o@kpm.test', fullName: 'Hendra Gunawan', passwordHash: 'x', status: 'active', phone: '+6281111111111',
       });
       const over = await office(String(pru._id), {
-        branchName: 'Tangerang Branch', ownerUserId: String(owner._id),
+        branchName: 'Tangerang Branch', owners: ownersOf(String(owner._id)),
         subscription: sub({ endDate: '2027-03-15', plan: 'annual', periodTotalMinor: rp(50_160_000) }),
       });
       await leaders(String(over._id), 11);

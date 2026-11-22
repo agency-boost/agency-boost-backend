@@ -15,8 +15,8 @@ import {
 } from '../../../test/http-permissions';
 import { IN_INDONESIAN } from '../../../test/i18n';
 import { listenOnLoopback } from '../../../test/listen';
-import { SEED_PRODUCTS } from '@/domain/constants/product-catalog';
-import { SEED_PRODUCTS_ID, SEED_REPLY_BY_NEED_ID } from '@/domain/constants/product-words-id';
+import { SEED_PRODUCTS, seedObjectionsOf } from '@/domain/constants/product-catalog';
+import { SEED_PRODUCTS_ID, SEED_REPLY_BY_NEED_ID, seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import { AttackPlanController, ProductCatalogController } from './product-catalog.controller';
 import { ProductCatalogService } from './product-catalog.service';
 
@@ -194,6 +194,23 @@ describe('the Product Catalog and the Sales Attack Plan over HTTP (Phase 14)', (
   describe('UI-107 the seed products in the reader’s language', () => {
     const MAPAN = SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!;
     const MAPAN_ID = SEED_PRODUCTS_ID.PRUMAPAN;
+    const words = (p: typeof MAPAN) => ({
+      tagline: p.tagline, benefits: [...p.benefits], differentiator: p.differentiator, bestFor: p.bestFor,
+      defaultAttackPlan: { ...p.defaultAttackPlan, objections: seedObjectionsOf(p.defaultAttackPlan) },
+    });
+    const mapanRow = { companyId: PRUDENTIAL, code: 'PRUMAPAN' };
+
+    // A company that still holds the seed's English, as staging and production do until the operator corrects them: a new
+    // company's catalogue is written in Indonesian since P19.26-T4 (OD-440), so this one is put back as it was.
+    beforeEach(async () => {
+      await mongoose.connection.db!.collection('products').updateOne(mapanRow, { $set: words(MAPAN) });
+    });
+
+    it('P19.26-T4 AC-4 a new company’s catalogue is written in the seed’s Indonesian, and read as stored', async () => {
+      await mongoose.connection.db!.collection('products').updateOne(mapanRow, { $set: words(seedProductInIndonesian(MAPAN)) });
+      const en = await get('/product-catalog').expect(200);
+      expect(en.body.products.find((p: { code: string }) => p.code === 'PRUMAPAN')).toMatchObject({ tagline: MAPAN_ID.tagline });
+    });
 
     it('UI-107 the shelf: each line in Indonesian to an Indonesian reader, as stored to an English one', async () => {
       const id = await get('/product-catalog').set(...IN_INDONESIAN).expect(200);

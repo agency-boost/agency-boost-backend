@@ -46,6 +46,10 @@ import { UnregisteredAgentDataRepository } from './modules/production/unregister
 import { DataUploadBatchRepository } from './modules/production/data-upload-batch.repository';
 import { DataUploadRowRepository } from './modules/production/data-upload-row.repository';
 import { CampaignService } from './modules/campaigns/campaign.service';
+import { AnggotaWaiting } from './modules/reporting/platform/anggota-waiting';
+import { NotificationService } from './modules/notifications/notification.service';
+import { TenantService } from './modules/tenants/tenant.service';
+import { PlatformReadsController } from './modules/reporting/platform/platform-reads.controller';
 
 /**
  * Boots the real AppModule.
@@ -136,6 +140,10 @@ describe('AppModule boots', () => {
       [ProductionCorrections, 'batches', DataUploadBatchRepository],
       [ProductionCorrections, 'batchRows', DataUploadRowRepository],
       [CampaignService, 'orgLevels', OrgLevelService],
+      // ADR-0286 §5: *Anggota*'s chips beside its rows — null in the running app until it named its token.
+      [PlatformReadsController, 'waiting', AnggotaWaiting],
+      // OD-442, OD-475: an existing account made a new KPM's Owner on *KPM baru* is told in the app.
+      [TenantService, 'notifications', NotificationService],
     ];
     const wrong = wiring
       .map(([consumer, field, token]) => {

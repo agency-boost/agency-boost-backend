@@ -51,6 +51,29 @@ describe('0052-kpm-setup-running-offices', () => {
     expect(await marks(GONE)).toEqual([]);
   });
 
+  it('ADR-0285 §3 after 0077: reads the owners list, and no owner of it counts as a member besides the Owner', async () => {
+    const TWO_OWNERS = '66f0000000000000000000f5';
+    const OWNERS_AND_AGENT = '66f0000000000000000000f6';
+    await db().collection('kpms').insertMany([TWO_OWNERS, OWNERS_AND_AGENT].map((id) => ({
+      _id: new mongoose.Types.ObjectId(id), code: id.slice(-4), deletedAt: null,
+      owners: [{ userId: `first-${id}`, since: EARLIER, addedByUserId: null }, { userId: `second-${id}`, since: NOW, addedByUserId: null }],
+    })));
+    const member = (kpmId: string, userId: string) => ({ kpmId, userId, status: 'active', deletedAt: null });
+    await db().collection('memberships').insertMany([
+      member(TWO_OWNERS, `first-${TWO_OWNERS}`), member(TWO_OWNERS, `second-${TWO_OWNERS}`),
+      member(OWNERS_AND_AGENT, `first-${OWNERS_AND_AGENT}`), member(OWNERS_AND_AGENT, `second-${OWNERS_AND_AGENT}`),
+      member(OWNERS_AND_AGENT, 'u-rina'),
+    ]);
+    await db().collection('dataUploadBatches').insertMany([TWO_OWNERS, OWNERS_AND_AGENT].map((kpmId) => (
+      { kpmId, month: '2026-10', status: 'committed', deletedAt: null }
+    )));
+
+    expect(await up(db(), NOW)).toEqual({ marked: 2, current: 0, setup: 3 });
+    // Two owners and an upload, nobody else: still its owners' to set up.
+    expect(await marks(TWO_OWNERS)).toEqual([]);
+    expect(await marks(OWNERS_AND_AGENT)).toHaveLength(4);
+  });
+
   it('P19.3-T2 AC-5 keeps a mark already there, whatever made it, and a second run marks none', async () => {
     await db().collection('kpmSetupMarks').insertOne({ kpmId: RUNNING, mark: 'products', via: 'reviewed', at: EARLIER, deletedAt: null });
     expect(await up(db(), NOW)).toEqual({ marked: 1, current: 0, setup: 2 });

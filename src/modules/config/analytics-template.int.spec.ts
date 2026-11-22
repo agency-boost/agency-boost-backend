@@ -24,6 +24,7 @@ import { TemplateCopyService } from './template-copy.service';
 import { TemplateMaterialService } from './template-material.service';
 import { TemplatePushService } from './template-push.service';
 import { TemplateService } from './template.service';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-11-05T03:00:00Z');
 const PRUDENTIAL = '66f0000000000000000000c1';
@@ -104,10 +105,10 @@ describe('P19.5-T1 the template’s Advanced analytics section over HTTP', () =>
     const kpms = wired.kpms as unknown as mongoose.Model<never>;
     const startedFrom = (id: string) => ({ source: 'template', templateId: id, templateName: 'x' });
     await kpms.create([
-      { _id: FIXTURE_KPM, companyId: PRUDENTIAL, code: '0417', branchName: 'BSD', startedFrom: startedFrom(templateId), ownerUserId: U_OWNER },
+      { _id: FIXTURE_KPM, companyId: PRUDENTIAL, code: '0417', branchName: 'BSD', startedFrom: startedFrom(templateId), owners: ownersOf(U_OWNER) },
       // Made before templates were recorded: reads its company's default, the same template.
-      { _id: KPM_B, companyId: PRUDENTIAL, code: '0555', branchName: 'Kelapa Gading', startedFrom: null, ownerUserId: U_OWNER_B },
-      { _id: KPM_ALLIANZ, companyId: ALLIANZ, code: '0701', branchName: 'Allianz', startedFrom: startedFrom(allianzTemplate), ownerUserId: U_OWNER_C },
+      { _id: KPM_B, companyId: PRUDENTIAL, code: '0555', branchName: 'Kelapa Gading', startedFrom: null, owners: ownersOf(U_OWNER_B) },
+      { _id: KPM_ALLIANZ, companyId: ALLIANZ, code: '0701', branchName: 'Allianz', startedFrom: startedFrom(allianzTemplate), owners: ownersOf(U_OWNER_C) },
     ] as never);
     const member = (kpmId: string, userId: string, agentCode: string, isKpmAdmin = false) => ({
       kpmId, userId, agentCode, leaderCode: `L-${userId}`, status: 'active', adminAccess: { isKpmAdmin }, deletedAt: null,

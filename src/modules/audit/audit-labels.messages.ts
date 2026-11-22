@@ -124,6 +124,10 @@ const ACTIONS = {
   'kpm.deleted': { en: 'KPM deleted', id: 'KPM dihapus' },
   'kpm.discarded': { en: 'Half-made KPM undone', id: 'KPM yang belum jadi dibatalkan' },
   'kpm.identity_updated': { en: 'Branch info changed', id: 'Info cabang diubah' },
+  // P19.27 (ADR-0285): a KPM has one or more owners — one added (*Tambah owner*, a new KPM's first, a claim) or removed.
+  // `kpm.owner_assigned` and `kpm.owner_transferred` stay for the rows written before.
+  'kpm.owner_added': { en: 'Owner added', id: 'Owner ditambahkan' },
+  'kpm.owner_removed': { en: 'Owner removed', id: 'Owner dihapus' },
   'kpm.owner_assigned': { en: 'Owner set', id: 'Owner ditetapkan' },
   'kpm.owner_invited': { en: 'Owner invited', id: 'Owner diundang' },
   // P19.24 (ADR-0280 §6): *Laporan KPM* — made (*Unduh PDF*), a *Kirim ke owner* link made, and that link opened.
@@ -204,6 +208,9 @@ const ACTIONS = {
   'member.role_changed': { en: 'Member’s role changed', id: 'Peran anggota diubah' },
   'member.tagged': { en: 'Member tagged', id: 'Anggota ditandai' },
   'member.tagged_by_leader': { en: 'Member added to a unit', id: 'Anggota ditambahkan ke unit' },
+  // P19.28-T1 AC-2 (ADR-0286 §3): *Masukkan* — an account with no KPM placed in one, a new KPM included; or moved from
+  // the KPM they waited in (`before.kpmId`).
+  'member.placed': { en: 'Member placed in a KPM', id: 'Anggota dimasukkan ke KPM' },
   'member_invite.accepted': { en: 'Invitation accepted', id: 'Undangan diterima' },
   'member_invite.cancelled': { en: 'Invitation cancelled', id: 'Undangan dibatalkan' },
   'member_invite.created': { en: 'Member invited', id: 'Anggota diundang' },
@@ -253,6 +260,8 @@ const ACTIONS = {
     'KPM monthly data viewed', 'Data bulanan KPM dilihat',
   ),
   'platform_read.members': { en: 'Member list viewed', id: 'Daftar anggota dilihat' },
+  // P19.28-T1 AC-5 (ADR-0286 §5): Anggota's *Menunggu*, each read.
+  'platform_read.members_waiting': { en: 'Waiting list viewed', id: 'Daftar menunggu dilihat' },
   // P19.23-T3 (ADR-0277): *Anggota*'s detail — a member's phone and email — each read.
   'platform_read.member_detail': { en: 'Member details viewed', id: 'Detail anggota dilihat' },
   // P19.23-T6 AC-3 (ADR-0279): *Pengaturan platform* saved.
@@ -337,6 +346,12 @@ const ACTIONS = {
   'user.email_changed': { en: 'Email changed', id: 'Email diubah' },
   // P19.23-T3 (ADR-0267 §1; ADR-0277): *Anggota*'s *Akun tes* switch.
   'user.test_account_set': { en: 'Test account flag changed', id: 'Tanda akun tes diubah' },
+  // P19.28-T1 AC-1, AC-4 (ADR-0286 §2): *Tambah user*'s invitation — made (a new KPM with it, when `after.newKpm`), sent
+  // again, cancelled, accepted.
+  'user_invitation.accepted': { en: 'Invitation accepted', id: 'Undangan diterima' },
+  'user_invitation.cancelled': { en: 'Invitation cancelled', id: 'Undangan dibatalkan' },
+  'user_invitation.created': { en: 'Person added and invited', id: 'Pengguna ditambahkan & diundang' },
+  'user_invitation.resent': { en: 'Invitation sent again', id: 'Undangan dikirim ulang' },
 } as const satisfies Record<string, ActionEntry>;
 
 /** The kind of thing each collection a row names holds, as the page writes it before the thing's name. */
@@ -408,6 +423,7 @@ const TARGETS = {
   trainingSkills: { en: 'Training skill', id: 'Skill training' },
   transferRequests: { en: 'Transfer request', id: 'Permintaan perpindahan' },
   users: { en: 'Account', id: 'Akun' },
+  userInvitations: { en: 'Invitation', id: 'Undangan' },
   // P19.23-T6 (ADR-0279): the platform console's own records.
   announcements: { en: 'Announcement', id: 'Pengumuman' },
   platformSettings: { en: 'Platform settings', id: 'Pengaturan platform' },

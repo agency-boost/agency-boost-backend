@@ -59,8 +59,9 @@ export class PlatformMembersQueryDto {
 
   @ApiPropertyOptional({
     enum: PLATFORM_MEMBER_TEST_FILTERS,
-    description: '*Anggota*\'s *Akun tes* (OD-421): `only` lists the test accounts alone. Absent, test '
-      + 'accounts are in no row and no count (ADR-0267 §1).',
+    description: '*Anggota*\'s test accounts: `only` lists them alone (OD-421); `include` — *Tampilkan akun tes* '
+      + '— lists them beside everybody else, each tagged. Absent, test accounts are in no row. They are '
+      + 'in no count whichever is asked (ADR-0267 §1).',
   })
   @IsOptional()
   @IsIn(PLATFORM_MEMBER_TEST_FILTERS, { message: field(SAY.testAccountShape) })

@@ -447,7 +447,18 @@ export const ErrorCode = {
   PERM_DENIED: 'PERM_DENIED',
   PERM_OUT_OF_SCOPE: 'PERM_OUT_OF_SCOPE',
   PERM_OWNER_ONLY: 'PERM_OWNER_ONLY',
+  /**
+   * **Retired** (P19.27; ADR-0285 §4, §7): `TenantService.clearOwner`, which no route called, raised it. A KPM's last
+   * owner is refused `KPM_LAST_OWNER`, decided in one conditional write. Kept and never reused: a client may branch on it.
+   */
   PERM_LAST_OWNER: 'PERM_LAST_OWNER',
+  /**
+   * **The last owner of a KPM was to be removed** (P19.27-T1 AC-4; ADR-0285 §4; F-2 (21 Nov)): `DELETE
+   * /members/:membershipId/owner` naming the KPM's only owner. `409`, `details: { kpmId, userId }`; nothing is written.
+   * A KPM always has at least one owner — *"Tambah owner lain dulu"*. Two owners removing each other at once: the second
+   * meets this, since the write is one conditional update on the KPM row.
+   */
+  KPM_LAST_OWNER: 'KPM_LAST_OWNER',
 
   // Configuration
   /**

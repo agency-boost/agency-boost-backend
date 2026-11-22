@@ -18,11 +18,12 @@ import { OfficialApe } from '@/modules/production/official-ape';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { isOwnerOf, ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { AvatarLinks } from '@/modules/users/avatar.service';
-import { withoutTestAccounts } from '@/modules/org/counted-members';
+import { countedMembers, isCountedOffice, withoutTestAccounts } from '@/modules/org/counted-members';
 import { daysFrom, usageStatus } from '@/domain/metrics/usage';
 import type { UsageStatus } from '@/domain/constants/usage';
 import { shiftMonth } from '../office-figures';
@@ -61,6 +62,11 @@ export interface PlatformMemberRow {
   /** The last day the member logged an activity (the Overview's `lastLoggedOn`), or `null`: *"Belum pernah"*. */
   lastActiveOn: string | null;
   /**
+   * ***Keluar <Mon YYYY>*** (P19.28-T3 AC-5; UI-209): the office day the membership ended (`removedAt`, in the KPM's own
+   * zone), or `null` while it has not.
+   */
+  leftOn: string | null;
+  /**
    * ***Terakhir pakai*, read by the server** (P19.23-T3 AC-1; ADR-0267 §4): whole days from `lastActiveOn` to the KPM's
    * today, and the bucket — `recent` within `USAGE.RECENT_MAX_DAYS`, `lapsed` past it, `never` — so the pill's colour is
    * the one definition's (`usageStatus`), never a threshold of the page's own.
@@ -73,8 +79,15 @@ export interface PlatformMembersPage {
   page: number;
   pageSize: number;
   total: number;
-  /** How many KPMs the matched memberships are in: *Anggota*'s *"n anggota di m KPM"* (P19.23-T3 AC-1). */
+  /** How many KPMs the matched memberships are in (P19.23-T3 AC-1). */
   kpmCount: number;
+  /**
+   * ***Anggota*'s footer, *"n anggota di m KPM"*, and its *Aktif n*** (P19.26-T1 AC-1; ADR-0284 §1): the counted members
+   * (`COUNTED_MEMBERS`) the scope holds — the company, the KPM, the role and the search asked, **whatever status is
+   * listed**, test accounts never, archived KPMs never — and how many KPMs they are in. The Dashboard's *Anggota* is this
+   * number with no filter.
+   */
+  counted: { members: number; kpms: number };
 }
 
 export interface PlatformMembersQuery {
@@ -86,9 +99,10 @@ export interface PlatformMembersQuery {
   page?: number;
   /**
    * **`only`: the test accounts alone** (P19.23-T3 AC-1; OD-421): *Semua status*' *Akun tes*. Absent, test accounts are
-   * left out of the rows and the counts (ADR-0267 §1), as every list of members leaves them out.
+   * left out of the rows and the counts (ADR-0267 §1), as every list of members leaves them out. **`include`**:
+   * *Tampilkan akun tes* (P19.28-T3 AC-4) — listed beside the others, each tagged, still in no count.
    */
-  testAccount?: 'only';
+  testAccount?: 'only' | 'include';
 }
 
 /**
@@ -238,10 +252,23 @@ export class PlatformReads {
     /*
      * **Test accounts: never listed or counted, but under *Akun tes*** (P19.23-T3 AC-1; ADR-0267 §1; OD-421): the
      * membership's copy of the flag, one clause on the read; `testAccount=only` lists them alone, so one flagged by
-     * mistake can be found and its switch turned off again.
+     * mistake can be found and its switch turned off again. `include` (*Tampilkan akun tes*, P19.28-T3 AC-4) lists them
+     * beside everybody else, each tagged — still in no count.
      */
-    filter = query.testAccount === 'only' ? { ...filter, testAccount: true } : withoutTestAccounts(filter);
+    filter = query.testAccount === 'only' ? { ...filter, testAccount: true }
+      : query.testAccount === 'include' ? filter : withoutTestAccounts(filter);
     const found = await this.memberships.listMembershipsAcrossTenants(ctx, offices.map((k) => String(k._id)), filter);
+    // The footer's count (P19.26-T1 AC-1): the same scope's counted members, the status asked set aside.
+    const countedScope: Record<string, unknown> = {};
+    if (query.role) countedScope.role = query.role;
+    if (filter.userId) countedScope.userId = filter.userId;
+    const countedPerKpm = await this.memberships.countPerOfficeAcrossTenants(
+      ctx, offices.filter((k) => isCountedOffice(k)).map((k) => String(k._id)), countedMembers(countedScope),
+    );
+    const counted = {
+      members: [...countedPerKpm.values()].reduce((a, b) => a + b, 0),
+      kpms: [...countedPerKpm.values()].filter((n) => n > 0).length,
+    };
 
     const people = await this.peopleOf(found.map((m) => m.userId));
     const byOffice = new Map(offices.map((k) => [String(k._id), k]));
@@ -258,7 +285,7 @@ export class PlatformReads {
       filters, page, rows: rows.map((r) => ({ kpmId: r.kpm.id, membershipId: r.membershipId })),
     });
     return {
-      rows, page, pageSize: PLATFORM_READ.PAGE_SIZE, total: found.length, kpmCount: new Set(found.map((m) => m.kpmId)).size,
+      rows, page, pageSize: PLATFORM_READ.PAGE_SIZE, total: found.length, kpmCount: new Set(found.map((m) => m.kpmId)).size, counted,
     };
   }
 
@@ -299,11 +326,14 @@ export class PlatformReads {
   private async peopleOf(userIds: readonly string[]): Promise<Map<string, PersonFacts>> {
     const ids = [...new Set(userIds)].filter((id) => isValidObjectId(id));
     if (ids.length === 0) return new Map();
-    const rows = await this.users.find({ _id: { $in: ids } }).select('fullName lastLoginAt avatarUrl testAccount').lean().exec() as
-      { _id: unknown; fullName: string; lastLoginAt?: Date | null; avatarUrl?: string | null; testAccount?: boolean }[];
+    const rows = await this.users.find({ _id: { $in: ids } }).select('fullName lastLoginAt emailVerifiedAt avatarUrl testAccount').lean().exec() as {
+      _id: unknown; fullName: string; lastLoginAt?: Date | null; emailVerifiedAt?: Date | null; avatarUrl?: string | null;
+      testAccount?: boolean;
+    }[];
     return new Map(rows.map((u) => [
       String(u._id), {
         fullName: u.fullName, signedIn: Boolean(u.lastLoginAt), lastLoginAt: u.lastLoginAt ?? null,
+        emailVerifiedAt: u.emailVerifiedAt ?? null,
         avatarKey: u.avatarUrl ?? null, testAccount: u.testAccount === true,
       },
     ]));
@@ -359,17 +389,19 @@ export class PlatformReads {
           code: m.orgLevelCode,
           label: rung?.label ?? m.orgLevelCode,
           class: m.role,
-          isOwner: office.ownerUserId === m.userId,
+          // Any owner carries the *Owner* chip (ADR-0285 §3).
+          isOwner: isOwnerOf(office, m.userId),
           isAdmin: m.adminAccess?.isKpmAdmin === true,
         },
         testAccount: person?.testAccount ?? false,
         leader: leader === null ? null : { fullName: leader },
         status: m.status,
         // One rule with the office's own Directory (ADR-0248 §4).
-        invitation: invitationStateOf(person?.lastLoginAt, m.invitedAt),
+        invitation: invitationStateOf(person, m.invitedAt),
         joinedOn: m.joinDate ?? (m.joinedAt ? this.clock.localDateFor(office.timezone, m.joinedAt) : null),
         lastActiveOn: last,
         lastActive: { days: lastDays, status: usageStatus(lastDays) },
+        leftOn: m.status === 'removed' && m.removedAt ? this.clock.localDateFor(office.timezone, m.removedAt) : null,
       };
     });
   }
@@ -475,10 +507,12 @@ export class PlatformReads {
       return { ...r, peers: { status: count >= QUANT.MIN_PEERS ? 'enough' as const : 'not_enough' as const, count, needed: QUANT.MIN_PEERS } };
     }).sort((a, b) => a.code.localeCompare(b.code));
 
-    const ownerIds = offices.flatMap((k) => (k.ownerUserId ? [k.ownerUserId] : []));
+    // Every owner of the company's KPMs (ADR-0285 §3), each counted once.
+    const ownerIds = [...new Set(offices.flatMap((k) => ownerUserIdsOf(k)))];
     const [ownersSignedIn, people] = await Promise.all([
       this.peopleOf(ownerIds),
-      this.memberships.listMembershipsAcrossTenants(ctx, offices.map((k) => String(k._id)), { status: { $in: ['active', 'pending'] } }),
+      // *Anggota*, the console's one count (P19.26-T1 AC-1; ADR-0284 §1): active, never a test account.
+      this.memberships.listMembershipsAcrossTenants(ctx, offices.map((k) => String(k._id)), countedMembers()),
     ]);
     const signedIn = await this.peopleOf(people.map((m) => m.userId));
     const view: CompanyKpmsView = {
@@ -650,12 +684,14 @@ interface PersonFacts {
   fullName: string;
   signedIn: boolean;
   lastLoginAt: Date | null;
+  /** The address proven: with `lastLoginAt`, whether the account is already theirs (`ownsAccount`, OD-475). */
+  emailVerifiedAt: Date | null;
   /** `users.avatarUrl`, the storage key — signed into a link by `AvatarLinks` (P19.23-T3). */
   avatarKey: string | null;
   testAccount: boolean;
 }
 
-function searchOf(q: string, { phone }: { phone: boolean }): Record<string, unknown>[] {
+export function searchOf(q: string, { phone }: { phone: boolean }): Record<string, unknown>[] {
   const pattern = new RegExp(escape(q), 'i');
   const or: Record<string, unknown>[] = [{ fullName: pattern }, { email: pattern }];
   const digits = q.replace(/[\s\-().]/g, '');

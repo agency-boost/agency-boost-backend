@@ -163,8 +163,11 @@ describe('reading another member’s activity is audited (P10.1-T7, §3.5)', () 
         .filter((file) => !file.includes('.spec.') && !file.startsWith('seed/'))
         .filter((file) => readFileSync(join(src, file), 'utf8').includes("'activity_log.read_raw'"));
       // The audit log's label catalogue names the action as a key to translate it (P19.2-T2, the audit read); it writes
-      // nothing and reads nothing, so the seam is still the only module that spells the action to record it.
-      expect(spelling.sort()).toEqual(['modules/audit/audit-labels.messages.ts', 'modules/audit/subject-read-audit.ts']);
+      // nothing and reads nothing, so the seam is still the only module that spells the action to record it. So does
+      // `AUDIT_LOG.VIEWED_ACTIONS` (ADR-0284 §3): it classes the action as a look for *Termasuk dilihat*, and records none.
+      expect(spelling.sort()).toEqual([
+        'domain/constants/audit.ts', 'modules/audit/audit-labels.messages.ts', 'modules/audit/subject-read-audit.ts',
+      ]);
     });
   });
 

@@ -66,6 +66,7 @@ import { up as successRatesWithoutFollowUps } from './0067-success-rates-without
 import { up as informalGroupsOnAbs } from './0068-informal-groups-on-abs';
 import { up as abGroupTargetsByMonth } from './0069-ab-group-targets-by-month';
 import { up as forumOneAgendaAndCarriedItems } from './0076-forum-one-agenda-and-carried-items';
+import { up as kpmOwnersList } from './0077-kpm-owners-list';
 
 /*
  * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
@@ -208,4 +209,7 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // P19.22-T8 (ADR-0276): the forum's three agenda sections one checklist, its rows the new action items — text, state
   // mapped, a typed PIC matched to one member or none (OD-418), each its own lineage; the old minutes kept; audited.
   ['0076-forum-one-agenda-and-carried-items', forumOneAgendaAndCarriedItems],
+  // P19.27-T1 (ADR-0285 §1): every KPM's `ownerUserId` a one-owner `owners` list, `since` the owner's join date there;
+  // a KPM with none an empty list; the old index dropped. `down` keeps each KPM's first owner.
+  ['0077-kpm-owners-list', kpmOwnersList],
 ];

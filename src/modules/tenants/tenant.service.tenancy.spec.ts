@@ -54,6 +54,8 @@ import {
 import { NamedTemplate, NamedTemplateSchema } from '@/modules/config/named-template.schema';
 import { NamedTemplateService } from '@/modules/config/named-template.service';
 import { KpmOfficeCounter } from '@/modules/config/office-counter';
+import { ownersOf } from '../../../test/owners';
+import { ownerUserIdsOf } from './kpm-owners';
 
 const NOW = new Date('2026-09-05T02:00:00Z');
 
@@ -413,6 +415,7 @@ describe('TenantService', () => {
       expect(kpm.code).toBe('0417');
       expect(kpm.status).toBe('active');
       expect(kpm.ownerUserId).toBeNull();
+      expect(kpm.owners).toEqual([]);
     });
 
     it('P19.23-T5 AC-3 starts every new KPM on a 30-day trial from its own today (ADR-0279 §4)', async () => {
@@ -511,19 +514,20 @@ describe('TenantService', () => {
       expect(created.ownerName).toBeNull();
       expect(created.ownerEmail).toBeNull();
 
-      await users.create({
+      const rina = await users.create({
         email: 'owner@kpm0417.test', fullName: 'Rina Wijaya', passwordHash: 'x',
         platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
         companyId, agentCode: nextCode(),
       });
-      const owned = await service.assignOwner(ctx({ superAdmin: true }), created._id, {
-        email: 'owner@kpm0417.test',
-      });
+      await service.installAccountOwner(ctx({ superAdmin: true }), created._id, String(rina._id));
+      const owned = await service.readProfile(ctx({ superAdmin: true }), created._id);
 
       expect(owned.ownerName).toBe('Rina Wijaya');
       expect(owned.ownerEmail).toBe('owner@kpm0417.test');
       // And the id stays: the detail screen shows it deliberately, labelled, for support.
       expect(owned.ownerUserId).toEqual(expect.any(String));
+      // Every owner, in order of since (ADR-0285 §3): here, the one.
+      expect(owned.owners).toEqual([{ userId: String(rina._id), fullName: 'Rina Wijaya', email: 'owner@kpm0417.test', since: NOW.toISOString() }]);
     });
 
     it('P3.1-T14 AC-7: carries the company name, so no screen joins it client-side', async () => {
@@ -544,7 +548,7 @@ describe('TenantService', () => {
       const created = await service.createKpm(ctx({ superAdmin: true }), input());
       await mongoose.model(Kpm.name).updateOne(
         { _id: created._id },
-        { $set: { ownerUserId: String(ghost._id) } },
+        { $set: { owners: ownersOf(String(ghost._id)) } },
       );
       await users.deleteOne({ _id: ghost._id });
 
@@ -566,7 +570,7 @@ describe('TenantService', () => {
         const k = await service.createKpm(ctx({ superAdmin: true }), { ...input(), code });
         await mongoose.model(Kpm.name).updateOne(
           { _id: k._id },
-          { $set: { ownerUserId: String(owner._id) } },
+          { $set: { owners: ownersOf(String(owner._id)) } },
         );
       }
       const spy = jest.spyOn(users, 'find');
@@ -612,65 +616,18 @@ describe('TenantService', () => {
       return String(user._id);
     }
 
-    it('assigns an owner and audits it', async () => {
+    const install = (kpmId: unknown, userId: string) =>
+      service.installAccountOwner(ctx({ superAdmin: true }), String(kpmId), userId);
+    const ownersOfKpm = async (kpmId: unknown) => ownerUserIdsOf(await mongoose.model(Kpm.name).findById(kpmId).lean().exec() as never);
+
+    it('P19.27-T1 AC-1 makes an account an owner and audits it kpm.owner_added (ADR-0285)', async () => {
       const owner = await makeUser('owner@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      const updated = await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
-        userId: owner,
-      });
-      expect(updated.ownerUserId).toBe(owner);
+      await install(kpm._id, owner);
+      expect(await ownersOfKpm(kpm._id)).toEqual([owner]);
 
-      const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.owner_assigned' });
-      expect(audit).not.toBeNull();
-    });
-
-    it('accepts the email a Super Admin actually knows', async () => {
-      // §6.1 of roles-and-permissions.md describes this by email. Requiring a Mongo id
-      // made the console's own screen unusable — there was no way to learn one from it.
-      const owner = await makeUser('owner@kpm0417.test');
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      const updated = await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
-        email: '  Owner@KPM0417.test ',
-      });
-      expect(updated.ownerUserId).toBe(owner);
-    });
-
-    it('refuses an account that does not exist, instead of storing the string', async () => {
-      // The bug this pins: the id was written on trust, so an office could be left
-      // pointing at nobody — permanently, and with no one able to administer it.
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await expect(
-        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
-          email: 'nobody@nowhere.test',
-        }),
-      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-
-      const unchanged = await mongoose.model(Kpm.name).findById(kpm._id);
-      expect(unchanged?.get('ownerUserId')).toBeNull();
-    });
-
-    it('treats a malformed id as unknown rather than letting Mongoose throw a 500', async () => {
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await expect(
-        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: 'not-an-id' }),
-      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    });
-
-    it('refuses a deactivated account, which could never sign in to administer anything', async () => {
-      await makeUser('gone@kpm0417.test', 'deactivated');
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await expect(
-        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {
-          email: 'gone@kpm0417.test',
-        }),
-      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    });
-
-    it('asks for one of the two identifiers rather than silently doing nothing', async () => {
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await expect(
-        service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), {}),
-      ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.owner_added' });
+      expect(audit?.get('after')).toMatchObject({ owners: [owner], userId: owner });
     });
 
     it('gives the new Owner a membership, or they cannot reach their own office', async () => {
@@ -678,7 +635,7 @@ describe('TenantService', () => {
       // administrable the moment it is assigned, and a context resolves for the Owner.
       const owner = await makeUser('owner@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: owner });
+      await install(kpm._id, owner);
 
       const membership = await mongoose
         .model(Membership.name)
@@ -695,52 +652,38 @@ describe('TenantService', () => {
     it('writes the joined history row from the first day, before any screen reads it', async () => {
       const owner = await makeUser('owner@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: owner });
+      await install(kpm._id, owner);
 
       const events = await mongoose.model(MembershipHistory.name).find({ kpmId: String(kpm._id) });
       expect(events.map((e) => e.get('eventType'))).toEqual(['joined']);
       expect(events[0].get('validTo')).toBeNull();
     });
 
-    it('does not mint a second membership when ownership returns to a previous owner', async () => {
-      // The partial unique index would reject it, and the right answer is the row they
-      // already have.
+    it('P19.27-T1 AC-1 a second owner sits beside the first; adding one again mints no second membership or entry', async () => {
       const first = await makeUser('first@kpm0417.test');
       const second = await makeUser('second@kpm0417.test');
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: second });
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
+      await install(kpm._id, first);
+      await install(kpm._id, second);
+      await install(kpm._id, first);
 
+      expect(await ownersOfKpm(kpm._id)).toEqual([first, second]);
       const rows = await mongoose.model(Membership.name).find({ kpmId: String(kpm._id), userId: first });
       expect(rows).toHaveLength(1);
+      expect(await mongoose.model(AuditLog.name).countDocuments({ action: 'kpm.owner_added' })).toBe(2);
+      // The office names its first owner alone, and every owner in order (ADR-0285 §3).
+      const read = await service.readProfile(ctx({ superAdmin: true }), String(kpm._id));
+      expect(read.ownerUserId).toBe(first);
+      expect(read.owners.map((o) => o.userId)).toEqual([first, second]);
     });
 
-    it('records a transfer with both parties', async () => {
-      const first = await makeUser('first@kpm0417.test');
-      const second = await makeUser('second@kpm0417.test');
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: first });
-      await service.assignOwner(ctx({ superAdmin: true }), String(kpm._id), { userId: second });
-
-      const audit = await mongoose.model(AuditLog.name).findOne({ action: 'kpm.owner_transferred' });
-      expect(audit?.get('before')).toMatchObject({ ownerUserId: first });
-      expect(audit?.get('after')).toMatchObject({ ownerUserId: second });
-    });
-
-    it('refuses an Owner transferring ownership themselves', async () => {
+    it('refuses an Owner making an owner through the platform path themselves', async () => {
       const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
       await expect(
-        service.assignOwner(ctx({ owner: true }), String(kpm._id), { email: 'other@kpm.test' }),
+        service.installAccountOwner(ctx({ owner: true }), String(kpm._id), await makeUser('other@kpm.test')),
       ).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
 
-    it('refuses to leave a KPM ownerless', async () => {
-      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
-      await expect(
-        service.clearOwner(ctx({ superAdmin: true }), String(kpm._id)),
-      ).rejects.toMatchObject({ code: 'PERM_LAST_OWNER' });
-    });
   });
 
   describe('suspension', () => {
@@ -982,7 +925,7 @@ describe('TenantService', () => {
         email: 'o@kpm.test', fullName: 'Owner', passwordHash: 'x',
         companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
-      await service.assignOwner(sa, String(kpm._id), { userId: String(user._id) });
+      await service.installAccountOwner(sa, String(kpm._id), String(user._id));
       // P19.4-T3 AC-8 (SA R5): an Owner alone is not a KPM set up — a member besides the Owner clears the last row.
       expect((await service.platformOverview(sa)).attention.map((a) => a.title)).toEqual([`KPM ${kpm.code} has no members yet`]);
       await seedMember(String(kpm._id), 'u-first-agent', 'agent');
@@ -1012,7 +955,7 @@ describe('TenantService', () => {
         email: 'o@kpm.test', fullName: 'Wilson Tanoto', passwordHash: 'x',
         companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
-      await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
+      await service.installAccountOwner(sa, String(kpm._id), String(owner._id));
 
       const [row] = await service.platformAdmins(sa);
       expect(row).toMatchObject({
@@ -1046,7 +989,7 @@ describe('TenantService', () => {
         email: 'both@kpm.test', fullName: 'Both Roles', passwordHash: 'x',
         companyId, agentCode: nextCode(), emailVerifiedAt: NOW,
       });
-      await service.assignOwner(sa, String(kpm._id), { userId: String(owner._id) });
+      await service.installAccountOwner(sa, String(kpm._id), String(owner._id));
       await mongoose.model(Membership.name).updateOne(
         { kpmId: String(kpm._id), userId: String(owner._id) },
         { $set: { adminAccess: { isKpmAdmin: true, grantedAt: NOW, grantedByUserId: 'u1', revokedAt: null } } },
@@ -1079,7 +1022,7 @@ describe('TenantService', () => {
       const sa = ctx({ superAdmin: true });
       await expect(service.readProfile(sa, BAD)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(
-        service.assignOwner(sa, BAD, { email: 'nobody@agencyboost.test' }),
+        service.installAccountOwner(sa, BAD, 'nobody'),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(service.setStatus(sa, BAD, 'suspended')).rejects.toMatchObject({
         code: 'NOT_FOUND',
@@ -1239,13 +1182,13 @@ describe('TenantService', () => {
       const person = await aPerson(`pending-owner-${Math.random()}@kpm.test`);
       const sa = ctx({ superAdmin: true });
 
-      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      await service.installAccountOwner(sa, kpmId, String(person._id));
       const first = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
       expect(first?.status).toBe('active');
 
       // Set it back to pending and assign again: the row is reused, not duplicated.
       await memberModel.updateOne({ _id: first!._id }, { $set: { status: 'pending' } }).exec();
-      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      await service.installAccountOwner(sa, kpmId, String(person._id));
 
       const rows = await memberModel.find({ userId: String(person._id), kpmId }).exec();
       expect(rows).toHaveLength(1);
@@ -1259,11 +1202,11 @@ describe('TenantService', () => {
       const person = await aPerson(`active-owner-${Math.random()}@kpm.test`);
       const sa = ctx({ superAdmin: true });
 
-      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      await service.installAccountOwner(sa, kpmId, String(person._id));
       const before = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
       await memberModel.updateOne({ _id: before!._id }, { $set: { role: 'ab' } }).exec();
 
-      await service.assignOwner(sa, kpmId, { userId: String(person._id) });
+      await service.installAccountOwner(sa, kpmId, String(person._id));
 
       const after = await memberModel.findOne({ userId: String(person._id), kpmId }).exec();
       expect(after?.role).toBe('ab');
@@ -1335,7 +1278,7 @@ describe('TenantService', () => {
         platformRole: 'none', status: 'active', emailVerifiedAt: NOW, deletedAt: null,
         companyId, agentCode: nextCode(),
       });
-      await service.assignOwner(sa, kpm._id, { userId: String(owner._id) });
+      await service.installAccountOwner(sa, kpm._id, String(owner._id));
 
       const admin = await users.create({
         email: `aaa-admin-${Math.random()}@kpm.test`, fullName: 'Ann Admin', passwordHash: 'x',

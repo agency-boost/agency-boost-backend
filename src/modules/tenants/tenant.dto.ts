@@ -336,50 +336,8 @@ export class CreateKpmDto {
   @ApiPropertyOptional({
     default: true,
     description: '*"Kirim undangan … sekarang"*: email the Owner a one-time link to choose a password, alive for '
-      + '`ROSTER_INVITATION.TTL_DAYS`. Only an Owner with an account who has never signed in is sent one.',
-  })
-  @IsOptional()
-  @IsBoolean()
-  sendInvitation?: boolean;
-}
-
-export class AssignOwnerDto {
-  @ApiPropertyOptional({
-    example: 'owner@kpm0417.test',
-    description:
-      'The account to make Owner. It must already exist — create one at /register or ' +
-      'with POST /auth/register. Email is what a Super Admin normally knows.',
-  })
-  @IsOptional()
-  // Trimmed before validation, not after. The service normalises too, but @IsEmail
-  // runs first and rejects a pasted address with surrounding whitespace — so the
-  // service's own trim never got the chance, and a service test passed against a
-  // contract HTTP did not honour.
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsEmail()
-  email?: string;
-
-  @ApiPropertyOptional({
-    description: 'Alternative to email, for when you already have the id.',
-  })
-  @IsOptional()
-  @IsString()
-  userId?: string;
-
-  @ApiPropertyOptional({
-    type: () => OwnerInputDto,
-    description: '*Ganti pemilik* to somebody named here (ADR-0212 §3): `owner.email` required. An account with it is '
-      + 'made the Owner under the same refusals; with none, an account is made for it and the Owner invited. Instead '
-      + 'of `email`/`userId`.',
-  })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => OwnerInputDto)
-  owner?: OwnerInputDto;
-
-  @ApiPropertyOptional({
-    default: true,
-    description: 'With `owner`: email the new Owner their invitation (an account that has signed in is sent none).',
+      + '`ROSTER_INVITATION.TTL_DAYS`. Only an Owner whose account is not theirs yet — never signed in, no address '
+      + 'proven (OD-475) — is sent one.',
   })
   @IsOptional()
   @IsBoolean()
@@ -565,14 +523,6 @@ export class CodeAvailabilityQueryDto {
   @IsString()
   @Matches(/^[A-Za-z0-9-]{1,16}$/)
   code!: string;
-}
-
-/** `GET /admin/accounts?q=`: part of a name or an email address, at least two characters. */
-export class AccountSearchQueryDto {
-  @ApiProperty({ example: 'victor' })
-  @IsString()
-  @MaxLength(100)
-  q!: string;
 }
 
 /** *Pindahkan ke perusahaan lain* (ADR-0191 §5). */

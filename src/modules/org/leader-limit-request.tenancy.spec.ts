@@ -30,6 +30,7 @@ import {
   JoinRequestRepository, LeaderLimitRequestRepository, MembershipHistoryRepository,
 } from './org.repositories';
 import { RoleChangeService } from './role-change.service';
+import { ownersOf } from '../../../test/owners';
 
 const KPM_A = new mongoose.Types.ObjectId().toString();
 const KPM_B = new mongoose.Types.ObjectId().toString();
@@ -125,7 +126,7 @@ describe('P18.5-T2 — a leader past the limit waits for AgencyBoost', () => {
       });
     }
     owner = await join(KPM_A, 'ab', null, 'Wilson Ownerman');
-    await kpms.updateOne({ _id: KPM_A }, { $set: { ownerUserId: (await members.findById(office(KPM_A), owner))!.userId } });
+    await kpms.updateOne({ _id: KPM_A }, { $set: { owners: ownersOf((await members.findById(office(KPM_A), owner))!.userId) } });
     aab = await join(KPM_A, 'aab', owner, 'Sari Leader');
     agent = await join(KPM_A, 'agent', aab, 'Rina Agent');
     other = await join(KPM_A, 'agent', owner, 'Budi Agent');

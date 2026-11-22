@@ -8,6 +8,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { Product, ProductDocument } from '@/modules/products/product.schema';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { HAS_AN_OWNER, OWNERS_PROJECTION, ownerUserIdsOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { inForceOn, nextScheduled, type VersionFacts } from './rate-table-status';
@@ -168,20 +169,24 @@ export class PremiumNoticesService {
     return rows.map((u) => String(u._id));
   }
 
-  /** **The KPM Owner of every active KPM of the company** (ADR-0261 §3), once each, with their KPM. */
+  /**
+   * **Every owner of every active KPM of the company** (ADR-0261 §3; ADR-0285 §5: every owner, not the first alone), once
+   * each per KPM, with their KPM.
+   */
   private async ownersOf(companyId: string): Promise<{ userId: string; kpmId: string }[]> {
     const offices = await this.kpms
-      .find({ companyId, status: 'active', deletedAt: null, ownerUserId: { $ne: null } }, { ownerUserId: 1 })
+      .find({ companyId, status: 'active', deletedAt: null, ...HAS_AN_OWNER }, OWNERS_PROJECTION)
       .lean()
-      .exec() as { _id: unknown; ownerUserId?: string | null }[];
+      .exec() as ({ _id: unknown } & WithOwners)[];
     const seen = new Set<string>();
     const owners: { userId: string; kpmId: string }[] = [];
     for (const office of offices) {
-      const userId = String(office.ownerUserId);
-      const key = `${userId}:${String(office._id)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      owners.push({ userId, kpmId: String(office._id) });
+      for (const userId of ownerUserIdsOf(office)) {
+        const key = `${userId}:${String(office._id)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        owners.push({ userId, kpmId: String(office._id) });
+      }
     }
     return owners;
   }

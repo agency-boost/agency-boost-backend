@@ -6,7 +6,7 @@ import { InvalidRequestException } from '@/common/errors/domain.exception';
 import { decodeCursor, encodeCursor } from '@/common/pagination/cursor';
 import { readerIn, readerOf, type Reader } from '@/common/i18n/reader';
 import { formatRupiah } from '@/common/format/format';
-import { AUDIT_LOG, DEFAULT_TENANT_TIMEZONE, PLATFORM_READ } from '@/domain/constants';
+import { AUDIT_LOG, DEFAULT_TENANT_TIMEZONE, isViewedAction, PLATFORM_READ } from '@/domain/constants';
 import { CompanyTemplate, CompanyTemplateDocument } from '@/modules/config/company-template.schema';
 import { NamedTemplate, NamedTemplateDocument } from '@/modules/config/named-template.schema';
 import { MembershipRepository } from '@/modules/org/membership.repository';
@@ -129,7 +129,18 @@ export interface AuditFilters {
   to?: string;
   /** *Cari perubahan* (P19.23-T6 AC-1): words a line says, read as text. Blank narrows nothing. */
   q?: string;
+  /**
+   * ***Termasuk dilihat*** (P19.26-T3 AC-1; ADR-0284 §3; UI-217): `true` lists the entries that record a look
+   * (`isViewedAction`) too. Absent or `false`, **changes only** — filtered here, before the page is cut, so the paging is
+   * right. An `action` that is itself a look is listed whatever this says: the reader asked for it by name.
+   */
+  includeViewed?: boolean;
 }
+
+/** `isViewedAction` as a query: an action that is not a look. */
+const NOT_VIEWED: FilterQuery<AuditLogDocument> = {
+  action: { $not: new RegExp(`^${AUDIT_LOG.VIEWED_ACTION_PREFIX.replace('.', '\\.')}`), $nin: [...AUDIT_LOG.VIEWED_ACTIONS] },
+};
 
 /**
  * **The fields of a change *Cari perubahan* reads** (P19.23-T6 AC-1; ADR-0279), before and after: the values a row
@@ -260,7 +271,7 @@ export class AuditReadService {
         limit: AUDIT_LOG.PAGE_SIZE,
         hasMore,
       },
-      facets: cursor === undefined ? await this.facetsOf(reach.kpmId, reader, across) : null,
+      facets: cursor === undefined ? await this.facetsOf(reach.kpmId, reader, across, filters.includeViewed === true) : null,
     };
   }
 
@@ -331,6 +342,8 @@ export class AuditReadService {
     const text = filters.q?.trim() ?? '';
     if (text) and.push(await this.searchOf(text, kpmId, reader, across));
     if (filters.action) and.push({ action: filters.action });
+    // Changes only, unless *Termasuk dilihat* — or the action asked is a look (P19.26-T3 AC-1).
+    if (filters.includeViewed !== true && !(filters.action && isViewedAction(filters.action))) and.push(NOT_VIEWED);
     if (filters.actorUserId) and.push({ actorUserId: filters.actorUserId });
     if (filters.companyId) {
       const offices = await this.kpms.find({ companyId: filters.companyId }, { _id: 1 }).lean().exec();
@@ -424,7 +437,7 @@ export class AuditReadService {
    * only row by somebody may be a note about the reader, and an actor offered with nothing to show says a note exists.
    */
   private async facetsOf(
-    kpmId: string | null, reader: Reader, across: FilterQuery<AuditLogDocument> | null = null,
+    kpmId: string | null, reader: Reader, across: FilterQuery<AuditLogDocument> | null = null, includeViewed = false,
   ): Promise<AuditFacets> {
     const notNotes = { action: { $not: LEADER_NOTE_ACTION } };
     const [actions, actorIds] = await Promise.all([
@@ -438,7 +451,8 @@ export class AuditReadService {
       const row = people.get(id) as { fullName?: string } | undefined;
       return row?.fullName ? String(row.fullName) : null;
     };
-    const sorted = [...actions].sort();
+    // *Tindakan* offers the looks only beside *Termasuk dilihat* (P19.26-T3 AC-1).
+    const sorted = [...actions].filter((action) => includeViewed || !isViewedAction(action)).sort();
     return {
       actions: sorted,
       actionLabels: sorted.map((action) => ({ action, label: actionLabel(action, reader) })),

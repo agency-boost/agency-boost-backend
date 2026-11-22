@@ -33,6 +33,8 @@ import { GroupRepository, JoinRequestRepository, MembershipHistoryRepository } f
 import { OrgTreeService } from './org-tree.service';
 import { PeopleController } from './people.controller';
 import { PeopleService } from './people.service';
+import { ownersOf } from '../../../test/owners';
+import { KpmOwnersService } from '@/modules/tenants/kpm-owners.service';
 
 /** 10:00 on Friday 20 November 2026 in Jakarta. */
 const NOW = new Date('2026-11-20T03:00:00Z');
@@ -97,7 +99,9 @@ describe('P19.20 People over HTTP and through the services', () => {
     );
     tree = new OrgTreeService(members, users as never);
     approvals = new ApprovalsService(members, hierarchy, requests, history, users as never, audit, notifications, clock);
-    const people = new PeopleService(members, history, users as never, kpms as never, directory, approvals, records, null);
+    // *KPM Owner · n* (P19.27-T4; ADR-0285): the real owners' reader.
+    const kpmOwners = new KpmOwnersService(kpms as never, users as never, members, audit, clock);
+    const people = new PeopleService(members, history, users as never, kpms as never, directory, approvals, records, null, kpmOwners);
 
     const moduleRef = await Test.createTestingModule({
       controllers: [PeopleController],
@@ -163,11 +167,11 @@ describe('P19.20 People over HTTP and through the services', () => {
     userOf = u;
     await mongoose.model(Kpm.name).create({
       _id: KPM_A, companyId, code: '0417', branchName: 'BSD City', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.OWNER),
     });
     await mongoose.model(Kpm.name).create({
       _id: KPM_B, companyId, code: '0555', branchName: 'Kelapa Gading', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.B_OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.B_OWNER),
     });
     const i = {} as Record<Who, string>;
     i.OWNER = await place(KPM_A, u.OWNER, 'ab', null);
@@ -376,9 +380,24 @@ describe('P19.20 People over HTTP and through the services', () => {
 
       expect(res.body).toEqual({
         owner: { membershipId: id.OWNER, fullName: 'Wilson Tanoto', agentCode: expect.any(String), role: 'ab', photoUrl: null },
+        // P19.27-T4 AC-1 (ADR-0285): *KPM Owner · n*, and the Owner may add and remove owners.
+        owners: [expect.objectContaining({ membershipId: id.OWNER, fullName: 'Wilson Tanoto', role: 'ab', state: expect.any(String) })],
+        canManageOwners: true,
         admins: 1,
         coreLeaders: 1,
       });
+    });
+
+    it('P19.27-T4 AC-1 an Admin reads every owner, in order of since, without the controls', async () => {
+      const kpmRow = await col('kpms').findOne({ _id: oid(KPM_A) });
+      const adminUser = (await col('memberships').findOne({ _id: oid(id.ADMIN) }))!.userId as string;
+      await col('kpms').updateOne({ _id: oid(KPM_A) }, { $push: { owners: { userId: adminUser, since: NOW, addedByUserId: null } } } as never);
+      session.current = await as('ADMIN');
+
+      const res = await http().get('/people/stewards').expect(200);
+      expect(res.body.owners.map((o: { membershipId: string }) => o.membershipId)).toEqual([id.OWNER, id.ADMIN]);
+      expect(res.body.canManageOwners).toBe(false);
+      expect(kpmRow).not.toBeNull();
     });
 
     it.each([

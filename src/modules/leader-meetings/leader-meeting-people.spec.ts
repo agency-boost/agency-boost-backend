@@ -55,7 +55,7 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
   });
 
   it('P19.22-T8 AC-1 an office whose row says nothing reads Jakarta, no branch, no Owner, no company', async () => {
-    expect(await people({ kpm: null }).office(ctx())).toEqual({ timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: null });
+    expect(await people({ kpm: null }).office(ctx())).toEqual({ timezone: 'Asia/Jakarta', branch: '', ownerUserIds: [], companyId: null });
   });
 
   it('P19.22-T8 AC-2 the editors: the Owner, the Admins, then the core leaders, each once — never a test account', async () => {
@@ -65,7 +65,7 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
       { _id: 'm-owner', userId: 'u-owner', orgLevelCode: 'AB', role: 'ab', isCoreLeader: true },
       { _id: 'm-agus', userId: 'u-agus', orgLevelCode: 'AB', role: 'ab', isCoreLeader: true },
     ];
-    const editors = await people({ rows, asked }).liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserId: 'u-owner', companyId: null });
+    const editors = await people({ rows, asked }).liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserIds: ['u-owner'], companyId: null });
     expect(editors.map((e) => [e.membershipId, e.as, e.tagged])).toEqual([
       ['m-owner', 'owner', true], ['m-admin', 'admin', false], ['m-agus', 'core_leader', true],
     ]);
@@ -85,7 +85,7 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
       ladder: [{ code: 'AB', label: 'Agency Builder' }],
     });
     const { people: drawn, coreLeaders } = await service.people(ctx({}, 'm-sari'), {
-      timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: 'c-1',
+      timezone: 'Asia/Jakarta', branch: '', ownerUserIds: [], companyId: 'c-1',
     }, editors, ['m-old', 'm-agus']);
     expect(drawn.map((p) => [p.firstName, p.pickable, p.isReader])).toEqual([
       ['Wilson', true, false], ['Sari', true, true], ['Agus', true, false], ['Hendra', false, false],
@@ -110,12 +110,12 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
       { _id: 'm-admin', userId: 'u-admin', orgLevelCode: 'AB', role: 'ab', isCoreLeader: false, adminAccess: { isKpmAdmin: true } },
       { _id: 'm-agus', userId: 'u-agus', orgLevelCode: 'AB', role: 'ab', isCoreLeader: true },
     ];
-    const editors = await people({ rows }).liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserId: 'u-owner', companyId: null });
+    const editors = await people({ rows }).liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserIds: ['u-owner'], companyId: null });
     expect(editors.map((e) => [e.membershipId, e.as])).toEqual([['m-admin', 'admin'], ['m-agus', 'core_leader']]);
     // An office with no owning account at all asks for no Owner's membership.
     const asked: { $or: unknown[] }[] = [];
     const ownerless = await people({ rows, asked: asked as unknown[] })
-      .liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: null });
+      .liveEditors(ctx(), { timezone: 'Asia/Jakarta', branch: '', ownerUserIds: [], companyId: null });
     expect(ownerless.map((e) => e.as)).toEqual(['admin', 'core_leader']);
     expect(JSON.stringify(asked[0].$or)).not.toContain('userId');
   });
@@ -134,7 +134,7 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
       names: { 'm-1': 'Budi Santoso', 'm-2': 'Budi Santoso', 'm-old-a': 'Hendra Gunawan', 'm-old-b': 'Hendra Gunawan', 'm-zul': 'Ani Wijaya' },
     });
     const { people: drawn, coreLeaders } = await service.people(ctx(), {
-      timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: null,
+      timezone: 'Asia/Jakarta', branch: '', ownerUserIds: [], companyId: null,
     }, editors, ['m-old-b', 'm-zul', 'm-old-a']);
     // The editors in their own order, then the others by name, a tie by membership id.
     expect(drawn.map((p) => p.membershipId)).toEqual(['m-2', 'm-1', 'm-zul', 'm-old-a', 'm-old-b']);
@@ -143,7 +143,7 @@ describe('who reads the forum, and who edits it (P19.22-T8 AC-1, AC-2; ADR-0268,
 
   it('P19.22-T8 AC-2 a person whose membership is gone is left out', async () => {
     const { people: drawn } = await people({ names: {} }).people(ctx(), {
-      timezone: 'Asia/Jakarta', branch: '', ownerUserId: null, companyId: null,
+      timezone: 'Asia/Jakarta', branch: '', ownerUserIds: [], companyId: null,
     }, [{ membershipId: 'm-gone', as: 'admin', rungCode: 'AB', tagged: false }]);
     expect(drawn).toEqual([]);
   });

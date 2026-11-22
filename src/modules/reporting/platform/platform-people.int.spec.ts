@@ -24,6 +24,7 @@ import { PlatformPeopleController } from './platform-people.controller';
 import { PlatformReadsController } from './platform-reads.controller';
 import { PlatformReads } from './platform-reads.service';
 import { TestAccounts } from './test-accounts.service';
+import { ownersOf } from '../../../../test/owners';
 
 const NOW = new Date('2026-11-20T05:00:00Z');
 const PRUDENTIAL = '66f0000000000000000001c1';
@@ -91,9 +92,9 @@ describe('P19.23-T3 Anggota — every member of every KPM, a detail and the Akun
     ]);
     await db().collection('kpms').insertMany([
       { _id: oid(BSD), companyId: PRUDENTIAL, code: '0417', branchName: 'BSD City Branch', timezone: 'Asia/Jakarta',
-        ownerUserId: U.WILSON, status: 'active', deletedAt: null },
+        owners: ownersOf(U.WILSON), status: 'active', deletedAt: null },
       { _id: oid(CEMPAKA), companyId: SEJAHTERA, code: '0701', branchName: 'Cempaka Putih Branch', timezone: 'Asia/Jakarta',
-        ownerUserId: U.HADI, status: 'active', deletedAt: null },
+        owners: ownersOf(U.HADI), status: 'active', deletedAt: null },
     ]);
     const account = (id: string, fullName: string, over: Record<string, unknown> = {}) => ({
       _id: oid(id), email: `${fullName.split(' ')[0].toLowerCase()}@contoh.test`, fullName, passwordHash: 'x',
@@ -203,6 +204,29 @@ describe('P19.23-T3 Anggota — every member of every KPM, a detail and the Akun
     it('P19.23-T3 AC-1 searches a phone number however it is typed, never returning it', async () => {
       asSuperAdmin();
       expect(names(await http().get('/admin/members').query({ q: '0812-1111-2222' }).expect(200))).toEqual(['Wilson Tanoto']);
+    });
+
+    it('P19.28-T3 AC-4 Tampilkan akun tes lists the test accounts beside everybody else, each saying so', async () => {
+      asSuperAdmin();
+      const res = await http().get('/admin/members').query({ testAccount: 'include' }).expect(200);
+      expect(names(res)).toContain('Tes Impor Satu');
+      expect(res.body.total).toBe(7);
+      expect(res.body.rows.find((r: { fullName: string }) => r.fullName === 'Tes Impor Satu').testAccount).toBe(true);
+    });
+
+    it('P19.28-T3 AC-5 a membership that ended reads the day it ended (Keluar <Mon YYYY>); a live one, none', async () => {
+      asSuperAdmin();
+      const memberships = mongoose.models[Membership.name];
+      await memberships.updateOne({ _id: M.RINA }, { $set: { status: 'removed', removedAt: new Date('2026-09-14T03:00:00Z') } });
+      try {
+        const res = await http().get('/admin/members').query({ status: 'removed' }).expect(200);
+        expect(res.body.rows.map((r: { fullName: string; leftOn: string | null }) => [r.fullName, r.leftOn]))
+          .toEqual([['Rina Kurnia', '2026-09-14']]);
+        const live = await http().get('/admin/members').query({ q: 'wilson' }).expect(200);
+        expect(live.body.rows[0].leftOn).toBeNull();
+      } finally {
+        await memberships.updateOne({ _id: M.RINA }, { $set: { status: 'active', removedAt: null } });
+      }
     });
 
     it('P19.23-T3 AC-1 validation: an Akun tes filter that is not `only` is 400 naming it', async () => {
