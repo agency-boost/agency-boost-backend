@@ -45,6 +45,14 @@ export class QuantRun {
   @Prop({ type: String, required: true })
   periodEnd!: string;
 
+  /**
+   * **The first of the months the run was computed over**, `YYYY-MM` (P19.22-T4; ADR-0275 §4): its half-year's — January
+   * or July. **Absent on a run written before the half-years**, which was computed from January: a December run frozen
+   * then holds the whole year, and keeps it (a frozen run is never recomputed).
+   */
+  @Prop({ type: String, default: null })
+  fromMonth!: string | null;
+
   @Prop({ type: MongooseSchema.Types.Mixed, required: true })
   values!: Record<QuantMetric, StoredQuantValue>;
 

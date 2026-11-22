@@ -154,6 +154,21 @@ describe('POST /admin/tenants — Start from, without the AgencyBoost defaults (
     expect(await startedFrom('0417')).toEqual(recorded());
   });
 
+  it('P19.23-T2 AC-3 KPM baru names no code: the company’s next free one, and the Owner named by WhatsApp waits', async () => {
+    const make = (branchName: string, extra: Record<string, unknown> = {}) => request(app.getHttpServer())
+      .post('/api/admin/tenants').send({ companyId, branchName, ...extra });
+    // The first KPM of the company: 0001. Then one more than the highest all-digit code held, stepping past a taken one.
+    expect((await make('Serpong Branch').expect(201)).body.code).toBe('0001');
+    await post(undefined, '0417').expect(201);
+    await post(undefined, '0418').expect(201);
+    const res = await make('Medan Kota Branch', { owner: { fullName: 'Budi Hartono', phone: '0812 3456 7890' } }).expect(201);
+    expect(res.body).toMatchObject({ code: '0419', branchName: 'Medan Kota Branch', ownerUserId: null, invitationSent: false });
+    expect((await col('kpms').findOne({ companyId, code: '0419' }))?.pendingOwner)
+      .toMatchObject({ fullName: 'Budi Hartono', phone: '+6281234567890' });
+    // A code given still wins, and a taken one is still refused.
+    expect((await make('Bandung', { code: '0417' }).expect(409)).body.error.code).toBe('TENANT_CODE_TAKEN');
+  });
+
   it.each(EVERY_MEMBER)('refuses %s 403 PERM_DENIED before the source is read', async (_who, ctx) => {
     session.current = ctx;
     const res = await post({ kind: 'defaults' }).expect(403);

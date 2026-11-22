@@ -9,6 +9,7 @@ import type { SurveyRoleClass } from '@/domain/constants';
 import { SurveyParticipationRepository, SurveyRunRepository } from './survey.repositories';
 import type { SurveyKind, SurveyRunDocument, SurveySnapshot } from './survey-run.schema';
 import { askedQuestions } from './survey-rules';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 
 /** The template section a kind belongs to. */
 export const SECTION_OF: Record<SurveyKind, 'NPS' | 'QUAL'> = { nps: 'NPS', qual: 'QUAL' };
@@ -100,11 +101,12 @@ export class SurveyOpening {
     const claimed = await this.runs.claimOpening(ctx, String(run._id), snapshot, this.clock.now());
     if (!claimed) return;
     const members = await this.memberships.find(
-      ctx, { status: 'active', role: { $in: [...run.invitedRoleClasses] } }, { projection: { _id: 1, role: 1 } },
+      // P19.22 (ADR-0267 §1; ADR-0276 §2): a test account is never invited, so never counted in *x dari y*.
+      ctx, withoutTestAccounts({ status: 'active', role: { $in: [...run.invitedRoleClasses] } }), { projection: { _id: 1, role: 1 } },
     );
     // Who has a leader below them today: Q10 and Q11 are theirs to answer.
     const leaders = await this.memberships.find(
-      ctx, { status: 'active', role: { $in: ['aab', 'ab'] }, leaderId: { $ne: null } }, { projection: { leaderId: 1 } },
+      ctx, withoutTestAccounts({ status: 'active', role: { $in: ['aab', 'ab'] }, leaderId: { $ne: null } }), { projection: { leaderId: 1 } },
     );
     const leadsLeaders = new Set(leaders.map((m) => String(m.leaderId)));
     const rows = members.map((m) => {

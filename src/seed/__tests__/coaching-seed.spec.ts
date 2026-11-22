@@ -27,6 +27,11 @@ import { backfillCoachingSnapshots } from '../coaching-snapshots';
 import { LEADER_LIMIT_PEOPLE, SUBSCRIPTION_FIXTURE_PEOPLE } from '../subscription-fixture';
 import { TEMPLATE_FIXTURE_PEOPLE } from '../template-fixture';
 import { REPORTING_CAST } from '../reporting-fixture';
+import { TEST_ACCOUNTS_SEED } from '../test-accounts-fixture';
+import { WHOLE_OFFICE_SEED } from '../whole-office-fixture';
+import { PEOPLE_SEED } from '../people-fixture';
+import { OWNER_WHATSAPP_SEED } from '../owner-whatsapp-invite-fixture';
+import { PLATFORM_CONSOLE_SEED } from '../platform-console-fixture';
 
 /** The people the subscription fixture makes, by pronoun — 0603's leaders past its limit among them (ADR-0157). */
 const subscriptionPeople = (pronoun: 'she' | 'he') =>
@@ -156,6 +161,12 @@ const WOMEN = [
   'tari@kpm0417.test',
   // P19.12-T2: Citra, registered and signed in unverified, in no KPM (`registered-accounts-fixture.ts`).
   'citra.baru@agencyboost.test',
+  // P19.17-T1: the *TES IMPOR …* test account under Agus (`test-accounts-fixture.ts`).
+  TEST_ACCOUNTS_SEED.imported.email,
+  // P19.18: Zahra, this month's new hire under Maya (`whole-office-fixture.ts`).
+  WHOLE_OFFICE_SEED.zahra.email,
+  // P19.23-T2 AC-3: Rina Kurniawati, 0419's Owner who has never signed in (`owner-whatsapp-invite-fixture.ts`).
+  OWNER_WHATSAPP_SEED.neverSignedIn.owner.email,
   // P13.2-T6: office 0701 (`template-fixture.ts`).
   ...templatePeople('she'),
 ];
@@ -169,6 +180,16 @@ const MEN = [
   'rudi@agencyboost.test',
   // P19.12-T2: Hadi, the leader registered with no KPM (`registered-accounts-fixture.ts`).
   'hadi.leader@agencyboost.test',
+  // P19.17-T1: the *FMT …* test account under Agus (`test-accounts-fixture.ts`).
+  TEST_ACCOUNTS_SEED.fmt.email,
+  // P19.18: Hilmy, this month's new hire under Maya (`whole-office-fixture.ts`).
+  WHOLE_OFFICE_SEED.hilmy.email,
+  // P19.20: Hendra Wijaya, moved and removed in 0417 (`people-fixture.ts`).
+  PEOPLE_SEED.moved.email,
+  // P19.23-T2 AC-3: Budi Hartono, the Prudential account 0418's claim link is for (`owner-whatsapp-invite-fixture.ts`).
+  OWNER_WHATSAPP_SEED.pending.claimer.email,
+  // P19.23-T6: Rudi Hartono, registered and in no KPM, whom *Tambah Super Admin* can take (`platform-console-fixture.ts`).
+  PLATFORM_CONSOLE_SEED.candidate.email,
   // P18.8-T6: Lukman, Agus's new hire not activated by a sale on day 96 (`activation-3m-fixture.ts`).
   'lukman@kpm0417.test',
   // P19.9-T6: Fajar, the agent Lina recruited in 0555 — the demo's Agent who leads somebody (`demo.ts`).
@@ -178,7 +199,7 @@ const MEN = [
 ];
 const OPERATORS = [
   'superadmin@agencyboost.test', 'root@agencyboost.test',
-  // P19.2-T1 AC-8: the Owner's own Super Admin login, linked to his field login — an operator account, coached by nobody.
+  // P19.2-T1 AC-8: the Owner's own Super Admin login (linked to nothing since ADR-0269) — an operator account, coached by nobody.
   'wilson@agencyboost.test',
 ];
 
@@ -222,7 +243,10 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
   // ------------------------------------------------------------------ AC-1: the cast
 
   it('P11-T2 AC-1 the demo AB has direct agents as well as AAB units, so both roster groups have rows', async () => {
-    const directs = await col('memberships').find({ kpmId: await office(), leaderId: String(agus._id), status: 'active' }).toArray();
+    // P19.17-T1 (ADR-0267 §1): the two test accounts under Agus (`test-accounts-fixture.ts`) are on no roster.
+    const directs = await col('memberships').find({
+      kpmId: await office(), leaderId: String(agus._id), status: 'active', testAccount: { $ne: true },
+    }).toArray();
     const agents = directs.filter((d) => d.role === 'agent');
     const aabs = directs.filter((d) => d.role === 'aab');
     // P18.8-T6 adds Lukman, a new hire not activated (`activation-3m-fixture.ts`).
@@ -587,11 +611,14 @@ describe('P11-T2 the early coaching demo seed — a run on 2 October 2026, 10:00
       membershipId: String(agus._id), kpmId: await office(), orgLevelCode: agus.orgLevelCode, hierarchyRole: agus.role,
       status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 6,
     } as never));
-    const rows = [...view.directAgents, ...view.units.flatMap((u) => [u.head, ...u.members])];
+    const rows = view.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]);
 
-    // P18.8-T6: and Lukman Hakim, a new hire with no goal (`activation-3m-fixture.ts`).
-    expect(view.directAgents.map((r) => r.name)).toEqual(['Dimas Pratama', 'Indah Permatasari', 'Lukman Hakim', 'Siti Rahmawati']);
-    expect(view.units.map((u) => u.head.name)).toEqual(['Arief Hidayat', 'Dewi Lestari', 'Sari Puspita']);
+    // P18.8-T6: and Lukman Hakim, a new hire with no goal (`activation-3m-fixture.ts`). P19.18-T5 (ADR-0271 §9): *Unit
+    // Anda* holds Agus himself and Dewi, an AAB with no team; Arief's and Sari's units follow.
+    expect(view.sections[0].rows.map((r) => r.name)).toEqual([
+      'Agus Prasetyo', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari', 'Lukman Hakim', 'Siti Rahmawati',
+    ]);
+    expect(view.sections.slice(1).map((x) => x.leader?.name)).toEqual(['Arief Hidayat', 'Sari Puspita']);
     for (const key of KEYS) {
       const row = rows.find((r) => r.membershipId === ids[key])!;
       const last = row.lastOneOnOne === null ? 'none'
@@ -1122,8 +1149,10 @@ describe('P11-T2 AC-5 a run at 03:30 on 16 March 2027 in Jakarta, still the 15th
     expect(melati).toMatchObject({ nextActionDate: '2027-03-18', commitments: [expect.objectContaining({ month: '2027-03' })] });
     const months = await col('monthlyAgentData').distinct('month', { kpmId });
     // This month and last; and since Phase 18 (`reporting-fixture.ts`) the files from January last year to three months
-    // ago — the month before last, January, left empty as it always was.
-    const history = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+    // ago — the month before last, January, left empty as it always was. Since P19.21-T1 (ADR-0274; `data-upload-fixture.ts`)
+    // March and July of last year were never uploaded, so *Data upload* has two open months to show.
+    const history = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`)
+      .filter((month) => month !== '2026-03' && month !== '2026-07');
     expect(months.sort()).toEqual([...history, '2027-02', '2027-03']);
   });
 

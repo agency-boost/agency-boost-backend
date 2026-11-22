@@ -181,3 +181,67 @@ from `SEED_ACTIVITY_TYPES` by code where it holds none (the key missing, `null` 
 published snapshot the same, so the working copy and what agents read agree and no publish bar speaks. An office's own
 short name, and a type of its own code, are left alone. No version moves; templates are not written (a template type
 without the key gives the seed's words by code when an office is provisioned or pushed). A second run writes none.
+`0061-group-leader-is-a-member` (Phase 19.13, P19.13-T3; ADR-0253 §2, UI-199) prints `{ tagged, cleared, current }`:
+every live group with an owner, whose owner is now its ★ group leader — a leader who is a member of it. An owner who is
+an active AB or AAB of the office is tagged into the group (`tagged`; their other tags stay, and they read as the group
+they lead); an owner who left, is pending, is on an Agent's rung or was erased is cleared to `null`, *Belum ada group
+leader* (`cleared`); a leader owning several groups keeps the first by name and the others are cleared; an owner already
+a member is `current`. Each write has its audit row, `member.tagged` or `group.updated`, named to the job, with what it
+replaced. A second run writes none.
+`0062-subgroup-targets-by-year` (Phase 19.13, P19.13-T3; ADR-0253 §4, UI-199) prints `{ dated, created, dropped }`: every
+`analyticsTargets` row of kind `subgroup` with no `year` given the current year on its office's clock (`kpms.timezone`,
+else `Asia/Jakarta`); `one_subgroup_target_per_leader_and_year` built, then `kpmId_1_kind_1_headMembershipId_1` — one row
+per head — dropped. A field added and an index swapped: no row is deleted or changed otherwise. A second run does
+nothing; with no `analyticsTargets` collection it does nothing.
+`0063-proposal-items-carry-cara-bayar` (Phase 19.14, P19.14-T1 and T2; ADR-0254 §1, ADR-0255 §1, §2) prints
+`{ proposals, items, renamed }`: every proposal that still carried the proposal-wide `channel` or `payFrequency`,
+soft-deleted ones too, given the 11 November shape — each item its own `payFrequency` (the proposal's), `isSyariah` (the
+proposal was *Syariah*), the insured's `gender`, `smoker`, `payTerm` and `up` as `null`, `fixedField: 'none'`, a premium
+not typed as `null`, and a snapshot that is `manual` with no pay terms, the four periodic *Cara bayar* and its category's
+need; the client given `ageSetOn` (the KPM's day the proposal was made) and empty `details`; `channel` and
+`payFrequency` removed and kept as `migrated0063` with each item's former name — `renamed` counts the items of a
+*Syariah* proposal that took their product's `syariahName`, as they showed. **No lead is touched.** A second run writes
+none. **It has a `down`** (not run by `pnpm migrate`; call it by hand) that puts the 3 November shape back from
+`migrated0063`.
+`0065-test-accounts` (Phase 19.17, P19.17-T1; ADR-0267 §1; OD-370) prints `{ flagged, cleared, memberships }`: every
+account written before `users.testAccount` decided once by its full name — beginning *FMT* or *TES IMPOR*, trimmed, any
+case, whole words (`isTestAccountName`) `true`, every other `false` — and then every membership of a flagged account, any
+office and status, given `testAccount: true`. **Only an account with no value is read**, so a flag set or cleared by hand
+survives every deploy. A second run writes none; on an empty database it reads nothing.
+`0066-membership-registered-by` (Phase 19.17, P19.17-T1; ADR-0267 §3) prints `{ fromInvite, fromLeader, none }`: every
+membership without `registeredByMembershipId`, any office and status, given who registered them — the sender of the
+accepted invitation that made it (`memberInvites.invitedByMembershipId`), else the leader it was placed under
+(`recruitedByMembershipId`), else `null` (an Owner, a roster row, a pending person). Only rows without the field; a
+second run writes none.
+`0067-success-rates-without-follow-ups` (Phase 19.17, P19.17-T1; ADR-0267 §6; the owner's part D) prints `{ ratios,
+kept, snapshots, templates }`: every office's `SELLING_SUCCESS_RATE` and `RECRUITMENT_SUCCESS_RATE` (`origin: 'platform'`,
+archived too, not soft-deleted) whose formula **and** recorded standard are still the ones with follow-ups, given the new
+formula and standard together — *Submission polis ÷ Presentasi penjualan*, *Proses NPA ÷ Presentasi rekrut* — then those
+on an Owner's own formula, kept; each office's newest published snapshot and every `ratio_set` company template moved
+element by element by the same rule. Sides compared as sets, by code; no version moves. A second run moves none, and an
+Owner who puts follow-ups back later is left alone (their standard is the new one).
+`0068-informal-groups-on-abs` (Phase 19.17, P19.17-T4; ADR-0270 §1, §2) prints `{ leadersCarried, leadersDropped,
+noLeader, absNarrowed, othersUntagged }`: every membership carrying tags, any office and status — **an AB keeps one live
+group** (the one they were ★ of, else the first of their live groups by name, then id), **an AAB or an agent keeps
+none** (they follow their AB), what was removed kept as `migrated0068.groupIds`; then every group without
+`leaderMembershipIds` given the list — **its ★ as its one Group Leader while an active AB who now reads in it**, anybody
+else dropped — `ownerMembershipId` removed and kept as `migrated0068.ownerMembershipId`. One `member.tagged` and one
+`group.updated` audit row per change, named to the job, in the office's own log: what was dropped is there. A second run
+writes none. **It has a `down`** (call it by hand) that puts every ★ and tag back from `migrated0068`.
+`0069-ab-group-targets-by-month` (Phase 19.17, P19.17-T4; ADR-0270 §4; OD-387) prints `{ carried, months, kept,
+droppedAab, droppedGone }`: every live `analyticsTargets` row of kind `subgroup` with a year whose leader is **an active
+AB** carried into `abGroupTargets`, one row per month of that year — Active Agent as it was (it was already monthly),
+Rekrut **spread** so the twelve add up to the year's (`spreadOverYear`; 6 a year reads 0, 1, 0, 1 …), `source:
+'migration-0069'`; a month that already had a row kept (`$setOnInsert`); an AAB's row dropped (no AB group of their own)
+and so is a leaver's or a non-leader's — both counted. **The `analyticsTargets` rows are left in place**, unread, and
+`kpmRecruitTargets` is not touched. A second run writes none; with no `subgroup` row it reads nothing and creates no
+collection. **It has a `down`** (call it by hand) that removes the rows it wrote and nobody has saved over since.
+`0076-forum-one-agenda-and-carried-items` (Phase 19.22, P19.22-T8; ADR-0276; OD-418) prints `{ forums, picsMatched,
+picsDropped, picsAll }`: every `leaderMeetings` row without `agendaItems` reshaped — *Preparation*, *During* and *Post*
+**one checklist in that order** (text, box, id and version kept), the rows the new action items (*Action item* the text,
+else the *Key initiative*, else the *Success metric*; *Not yet planned · Planned · Implemented* → `todo · doing · done`;
+no *tenggat*; **its own lineage**, `fromNumber: null`), each typed PIC **matched to one active member of the office** by
+full, preferred or unique first name — *Semua* / *All* read as *Semua* on an agenda line — and anything else no PIC;
+`time: null`. The old agenda and rows are kept as `legacyMinutes`, read by nothing. One `leader_meeting.reshaped` audit
+row per forum, named to the job. A second run writes none; with no `leaderMeetings` collection it reads nothing and
+creates none. **It has a `down`** (call it by hand) that puts the old agenda and rows back from `legacyMinutes`.

@@ -4,17 +4,9 @@ import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { PLATFORM_READ } from '@/domain/constants';
-import { ComplianceQueryDto } from '../compliance/compliance.dto';
-import { KpmAnalyticsQueryDto } from '../reporting.dto';
-import {
-  CompanyKpmsQueryDto, KpmComparisonQueryDto, KpmDataQueryDto, PlatformAccountsQueryDto, PlatformMembersQueryDto,
-} from './platform-reads.dto';
+import { CompanyKpmsQueryDto, PlatformAccountsQueryDto, PlatformMembersQueryDto } from './platform-reads.dto';
 import { PlatformReads } from './platform-reads.service';
-import {
-  CompanyKpmsDto, KpmComparisonPageDto, KpmDataDto, PlatformAccountsPageDto, PlatformMembersPageDto,
-} from './platform-reads.response.dto';
-import { KpmAnalyticsDto } from '../reporting.response.dto';
-import { ComplianceViewDto } from '../compliance/compliance.response.dto';
+import { CompanyKpmsDto, PlatformAccountsPageDto, PlatformMembersPageDto } from './platform-reads.response.dto';
 
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
@@ -35,7 +27,7 @@ const AUDITED = (action: string) =>
 
 /**
  * **The Super Admin's reads across KPMs** (ADR-0207; P19.4-T3; `functional/kpm-analytics.md` and
- * `functional/tenant-provisioning.md`, the Data contracts): six named reads, each reached from one screen. Every figure is
+ * `functional/tenant-provisioning.md`, the Data contracts): named reads, each reached from one screen. Every figure is
  * the KPM's own, through the function its Owner's page uses; every route is a `GET`.
  */
 @ApiTags('admin (Super Admin)')
@@ -88,83 +80,12 @@ export class PlatformReadsController {
     return this.reads.accounts(ctx, query);
   }
 
-  @Get('analytics/kpms')
-  @RequirePermission('platform_kpm_figures:read')
-  @ApiOperation({
-    summary: 'The KPM comparison — the Overview’s figures, one row per KPM',
-    description:
-      'Under the adoption figures on `/admin/analytics` (SA UI-013, SA R4): per KPM, *Total members*, *Aktif bulan ini*, '
-      + '*Pengguna aktif*, *Coached 7 hari · 30 hari*, *Production this year* against target and the *Recruitment '
-      + 'pipeline* against the month’s target — **each the same figure that KPM’s `/kpm/overview` shows**, computed by the '
-      + 'same code over the KPM. Counts and sums only; no benchmark, score or rank. Archived KPMs are left out.'
-      + AUDITED(PLATFORM_READ.ACTION.kpmComparison),
-  })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — an unknown `sort`, a `page` that is no whole number from 1, or a '
-    + 'parameter of any other name.'))
-  @ApiResponse(PLATFORM_ONLY)
-  @ApiResponse(UNRECORDED)
-  @ApiResponse({ status: 200, type: KpmComparisonPageDto })
-  async comparison(@Ctx() ctx: RequestContext, @Query() query: KpmComparisonQueryDto) {
-    return this.reads.kpmComparisonAcrossTenants(ctx, query);
-  }
-
-  @Get('tenants/:id/analytics')
-  @RequirePermission('platform_kpm_figures:read')
-  @ApiOperation({
-    summary: '*Lihat sebagai KPM* — the KPM’s analytics, read-only',
-    description:
-      'Exactly what `GET /kpm/analytics` answers the KPM’s Owner (SA R4, A2, A-R8), through the same service over the '
-      + 'KPM: the totals, the Leader list and *Monthly production*, names included. Not a support session: it acts as '
-      + 'nobody and needs no reason. The same `period` and `group` as the Owner’s.'
-      + AUDITED(PLATFORM_READ.ACTION.kpmAnalytics) + ' Each visit is one.',
-  })
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no live KPM with this id; a `group` the KPM does not hold. Indistinguishable from another office’s.'))
-  @ApiResponse(PLATFORM_ONLY)
-  @ApiResponse(UNRECORDED)
-  @ApiResponse({ status: 200, type: KpmAnalyticsDto })
-  async analytics(@Ctx() ctx: RequestContext, @Param('id') id: string, @Query() query: KpmAnalyticsQueryDto) {
-    return this.reads.kpmAnalytics(ctx, id, query);
-  }
-
-  @Get('tenants/:id/analytics/compliance')
-  @RequirePermission('platform_kpm_figures:read')
-  @ApiOperation({
-    summary: '*Lihat sebagai KPM* — the KPM’s compliance tree, read-only',
-    description:
-      'Exactly what `GET /kpm/analytics/compliance` answers the KPM’s Owner, through the same service over the KPM, '
-      + 'with `can.override` always `false`. The chosen category’s disclosure entries are written in the KPM’s log, the '
-      + 'Super Admin their actor, as the Owner’s own read writes them.'
-      + AUDITED(PLATFORM_READ.ACTION.kpmAnalytics),
-  })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — as the Owner’s read refuses it.'))
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no live KPM with this id; an item or a group the KPM does not list. Indistinguishable from another office’s.'))
-  @ApiResponse(PLATFORM_ONLY)
-  @ApiResponse(UNRECORDED)
-  @ApiResponse({ status: 200, type: ComplianceViewDto })
-  async compliance(@Ctx() ctx: RequestContext, @Param('id') id: string, @Query() query: ComplianceQueryDto) {
-    return this.reads.kpmCompliance(ctx, id, query);
-  }
-
-  @Get('tenants/:id/data')
-  @RequirePermission('platform_kpm_figures:read')
-  @ApiOperation({
-    summary: '*Data bulanan* — the KPM’s twelve months and its uploads, read-only',
-    description:
-      `The KPM page's *Data bulanan* tab and *Ringkasan*'s grid (A2): ${PLATFORM_READ.DATA_MONTHS} months ending with the `
-      + 'KPM’s current month, each `complete` (*Lengkap*), `missing` (*Belum*) or `none` (*—*, before the KPM); and the '
-      + 'uploads of those months, newest first — the month, who uploaded it, when, the agents’ rows written and the '
-      + 'note. No figure, no upload: the KPM’s Owner and Admins upload.'
-      + AUDITED(PLATFORM_READ.ACTION.kpmData),
-  })
-  @ApiResponse(refusal(400, '`VALIDATION_FAILED` — a parameter of any name.'))
-  @ApiResponse(refusal(404, '`NOT_FOUND` — no live KPM with this id: indistinguishable from another office’s.'))
-  @ApiResponse(PLATFORM_ONLY)
-  @ApiResponse(UNRECORDED)
-  @ApiResponse({ status: 200, type: KpmDataDto })
-  async data(@Ctx() ctx: RequestContext, @Param('id') id: string, @Query() _query: KpmDataQueryDto) {
-    return this.reads.kpmData(ctx, id);
-  }
-
+  /*
+   * `GET /admin/analytics/kpms` (the KPM comparison) and `GET /admin/tenants/:id/data` (*Data bulanan*) were here, and
+   * before them *Lihat sebagai KPM*'s two reads (removed with KPM Analytics, P19.19-T4). **Retired 2026-11-20 by the
+   * console's rebuild** (P19.23-T1, T2; ADR-0277): the Dashboard's *Adopsi per KPM* (`GET /admin/dashboard`) replaces the
+   * comparison, and inside a KPM the Owner's own *Data upload* replaces *Data bulanan* (ADR-0268 §3).
+   */
   @Get('companies/:companyId/kpms')
   @RequirePermission('platform_kpm_figures:read')
   @ApiOperation({

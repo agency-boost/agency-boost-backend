@@ -54,15 +54,20 @@ class LeaveProbeController {
 const END_DATE = '2026-10-07';
 /** 23:30 on the end date in Jakarta: still served. */
 const ON_THE_END_DATE = new Date('2026-10-07T16:30:00Z');
-/** 00:00 the next day in Jakarta, 17:00 UTC on the end date: refused. */
+/** 00:00 the next day in Jakarta, 17:00 UTC on the end date: the first day of grace, still served (ADR-0279 §5). */
 const THE_NEXT_DAY = new Date('2026-10-07T17:00:00Z');
+/** 23:59:59 on the seventh day of grace in Jakarta: still served. */
+const LAST_OF_THE_GRACE = new Date('2026-10-14T16:59:59Z');
+/** 00:00 on the eighth day after the end in Jakarta: past the grace, refused (P19.23-T5 AC-5). */
+const PAST_THE_GRACE = new Date('2026-10-14T17:00:00Z');
 
 /**
  * **The end of a subscription, over HTTP** (ADR-0112 §3, P13.2-T3 AC-5), through the real `AuthGuard`,
  * `ContextResolver` and `PermissionsGuard`: a signed token, a real membership, a real office row.
  *
- * One test per role — the Owner, the Admin, an AB, an AAB and an Agent — each served on the end date and
- * refused `403 TENANT_SUBSCRIPTION_ENDED` from 00:00 the next day in Jakarta, on `/auth/me` and on a
+ * One test per role — the Owner, the Admin, an AB, an AAB and an Agent — each served on the end date and through the
+ * seven days of grace (ADR-0279 §5), and refused `403 TENANT_SUBSCRIPTION_ENDED` from 00:00 on the eighth day in
+ * Jakarta, on `/auth/me` and on a
  * tenant route after it, the office named in the details. Then what is never refused: an office kept
  * active, one with no dates, the Super Admin, a support session, and another office's members; and what
  * keeps its own code: a suspended or archived office.
@@ -171,14 +176,18 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
 
   it.each<[string, Role]>([
     ['the Owner', 'owner'], ['the Admin', 'admin'], ['an AB', 'ab'], ['an AAB', 'aab'], ['an Agent', 'agent'],
-  ])('%s is served on the end date, and refused from 00:00 the next day in Jakarta', async (_who, role) => {
+  ])('%s is served on the end date and through the seven days of grace, and refused from 00:00 on the eighth in Jakarta (P19.23-T5 AC-5)', async (_who, role) => {
     const kpm = await office();
     const userId = await member(kpm, role);
 
     await me(userId).expect(200);
     await probe(userId).expect(200);
-
     clock.set(THE_NEXT_DAY);
+    await me(userId).expect(200);
+    clock.set(LAST_OF_THE_GRACE);
+    await probe(userId).expect(200);
+
+    clock.set(PAST_THE_GRACE);
     const refusedMe = await me(userId).expect(403);
     expect(refusedMe.body.error).toMatchObject(ENDED);
     const refusedLater = await probe(userId).expect(403);
@@ -191,7 +200,7 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
       await office({ subscription: subscription({ startDate: null, endDate: null }) }), 'agent',
     );
     const none = await member(await office({ subscription: null }), 'agent');
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     for (const userId of [kept, undated, none]) {
       await me(userId).expect(200);
       await probe(userId).expect(200);
@@ -201,7 +210,7 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
   it('a suspended and an archived office keep their own codes, which win', async () => {
     const suspended = await member(await office({ status: 'suspended' }), 'owner');
     const archived = await member(await office({ status: 'archived' }), 'agent');
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     expect((await me(suspended).expect(403)).body.error).toMatchObject({
       code: 'TENANT_SUSPENDED', details: { kpmCode: '0601', branch: 'Cikarang Branch' },
     });
@@ -214,13 +223,13 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
       email: 'sa@agencyboost.test', passwordHash: 'x', fullName: 'Root', status: 'active',
       platformRole: 'super_admin',
     });
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     await me(String(sa._id)).expect(200);
   });
 
   it('serves a support session into an ended office, so support can still look', async () => {
     const agent = await member(await office(), 'agent');
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     const res = await me(agent, 'imp:sa-1').expect(200);
     expect(res.body).toMatchObject({ isImpersonating: true, impersonatedBy: 'sa-1' });
     await probe(agent, 'imp:sa-1').expect(200);
@@ -250,14 +259,14 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
   it('leaves another office’s members alone', async () => {
     await member(await office(), 'agent');
     const elsewhere = await member(await office({ code: '0417', subscription: subscription({ endDate: '2027-01-06' }) }), 'agent');
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     await me(elsewhere).expect(200);
   });
 
   it('lets the members back in at their next request once the end is moved', async () => {
     const kpm = await office();
     const agent = await member(kpm, 'agent');
-    clock.set(THE_NEXT_DAY);
+    clock.set(PAST_THE_GRACE);
     await me(agent).expect(403);
     await kpms.updateOne({ _id: kpm._id }, { $set: { 'subscription.endDate': '2026-12-31' } });
     await me(agent).expect(200);

@@ -23,5 +23,10 @@ export const AUDIT_REFUSALS = refusals('modules/audit', {
       en: 'action must be an action’s name, such as company.created',
       id: 'action harus berupa nama tindakan, misalnya company.created',
     },
+    // P19.23-T6 AC-1 (ADR-0279): *Cari perubahan* is a few words, at most `AUDIT_LOG.SEARCH_MAX_LENGTH` characters.
+    searchTooLong: {
+      en: 'q must be at most 100 characters',
+      id: 'q paling banyak 100 karakter',
+    },
   },
 });

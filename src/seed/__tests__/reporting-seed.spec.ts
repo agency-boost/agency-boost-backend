@@ -3,14 +3,22 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { SOURCE_READER } from '@/common/i18n/reader';
 import { up as mocPersistency } from '@/migrations/0026-moc-persistency';
+import { ActivationReadings } from '@/modules/activation/activation-readings';
 import { DirectoryService } from '@/modules/org/directory.service';
-import type { KpmAnalyticsView } from '@/modules/reporting/kpm-analytics.service';
-import type { KpmOverviewView } from '@/modules/reporting/kpm-overview.service';
-import type { PlatformAnalyticsView } from '@/modules/reporting/platform-analytics.service';
+import { MemberNames } from '@/modules/org/member-names.service';
+import { ActivationComplianceCategory } from '@/modules/reporting/compliance/activation.category';
+import { ActivityComplianceCategory } from '@/modules/reporting/compliance/activity.category';
+import { CampaignsComplianceCategory } from '@/modules/reporting/compliance/campaigns.category';
+import { ComplianceService } from '@/modules/reporting/compliance/compliance.service';
+import { EventsComplianceCategory } from '@/modules/reporting/compliance/events.category';
+import { GoalsComplianceCategory } from '@/modules/reporting/compliance/goals.category';
+import { LeadsComplianceCategory } from '@/modules/reporting/compliance/leads.category';
+import { TrainingComplianceCategory } from '@/modules/reporting/compliance/training.category';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
+import type { KpmOverviewView, OverviewPerformanceView } from '@/modules/reporting/kpm-overview.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { seedDemo } from '../demo';
-import { REPORTING_RECRUIT_TARGET } from '../reporting-fixture';
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -28,18 +36,20 @@ async function as(code: string, email: string, flags: { owner?: boolean; admin?:
 }
 
 /**
- * **Phase 18 — the Owner's reporting, seeded** (P18-T1 AC-13, P18-T2 AC-11, P18-T8 AC-5; `reporting-fixture.ts`).
+ * **The Owner's reporting, seeded** (P18-T1 AC-13, P18-T8 AC-5; since P19.19 the KPM Overview's second version —
+ * `reporting-fixture.ts`, `informal-groups-fixture.ts`).
  *
- * The seed run as the command runs it, then read back through the reports' own services, so what is asserted is
- * what the Owner, the Admin and the Super Admin see on a fresh seed — every state the phase file's *Seed* asks for.
+ * The seed run as the command runs it, then read back through the reports' own services, so what is asserted is what the
+ * Owner, the Admin and the Super Admin see on a fresh seed — **every section of the Overview shows something** (the
+ * phase file's *Seed*): each usage and coaching bucket, targets for this month and the one before, compliance with a
+ * *Leads Mgmt* figure, and *Produksi 6 bulan* with its one empty month.
  */
-describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 2026 in Jakarta', () => {
+describe('the Owner’s reporting seed — a run at 10:00 on 9 October 2026 in Jakarta', () => {
   const clock = new FixedClock(new Date('2026-10-09T03:00:00Z'));
   let wired: ReturnType<typeof configModule>;
+  let owner: RequestContext;
   let overview: KpmOverviewView;
-  let analytics: KpmAnalyticsView;
-  let previous: KpmAnalyticsView;
-  let platform: PlatformAnalyticsView;
+  let performance: OverviewPerformanceView;
 
   beforeAll(async () => {
     await startMongo();
@@ -47,72 +57,99 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     await seedDemo({ clock, log: quiet });
     wired = configModule(clock.now());
     await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
-    const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
+    owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     overview = await wired.kpmOverview.read(owner);
-    analytics = await wired.kpmAnalytics.read(owner);
-    previous = await wired.kpmAnalytics.read(owner, { period: 'previous_month' });
-    platform = await wired.platformAnalytics.read(RequestContext.platform('root'));
+    performance = await wired.kpmOverview.performance(owner);
   }, RUN_MS);
   afterAll(stopMongo);
 
-  const agency = (name: string) => analytics.agencies.find((a) => a.head.name === name)!;
+  const person = (name: string) => overview.people.find((p) => p.name === name)!;
 
-  it('P18-T1 AC-13 five AB agencies: the Owner’s, the Admin’s, Agus’s, Yosef’s and Satria’s; Satria’s furthest behind', () => {
-    expect(analytics.agencies.map((a) => a.head.name).sort())
-      .toEqual(['Agus Prasetyo', 'Maya Halim', 'Satria Nugraha', 'Wilson Tanoto', 'Yosef Tambunan']);
-    expect(analytics.agencies.find((a) => a.head.isReader)!.head.name).toBe('Wilson Tanoto');
-    expect(overview.production.agencies[0].name).toBe('Satria Nugraha');
-    expect(overview.production.agencies).toHaveLength(5);
-    expect(agency('Yosef Tambunan').aabUnits.map((u) => u.head.name)).toEqual(['Winda Anggraeni']);
-    // P19.3-T1 AC-4 (D3): Yosef counted once, as AB.
-    expect(agency('Yosef Tambunan').manpower).toEqual({ ab: 1, aab: 1, agents: 8, total: 10 });
+  it('P19.19-T1 AC-2 seed: the informal groups A to Z, then Tanpa group; Pakai over the last 30 days counted per group', () => {
+    expect(overview.groups.map((g) => g.name)).toEqual(['LEADER MUDA', 'Mentoring Agen Baru', 'Top Producers 2026', null]);
+    expect(overview.groups[0].people).toBe(0);
+    expect(overview.usage.total.of).toBe(overview.people.length);
+    expect(overview.usage.total.used).toBeGreaterThan(0);
+    expect(overview.usage.total.used).toBeLessThan(overview.usage.total.of);
+    expect(overview.usage.byGroup.reduce((sum, g) => sum + g.total.of, 0)).toBe(overview.usage.total.of);
   });
 
-  it('P18-T1 AC-13, P18.9-T3 AC-5 the leaderboard ranks every AB: the four who lead somebody, then Maya Halim, No team', () => {
-    expect(overview.coaching.leaderboard.slice(0, 4).map((l) => l.name).sort())
-      .toEqual(['Agus Prasetyo', 'Satria Nugraha', 'Wilson Tanoto', 'Yosef Tambunan']);
-    // UI-017: Maya Halim, the Admin on the AB rung, leads nobody — listed last, no rate; *Showing 4 of 5 ABs*.
-    expect(overview.coaching.leaderboard).toHaveLength(5);
-    expect(overview.coaching.leaderboard[4]).toMatchObject({ name: 'Maya Halim', leads: false, teamSize: 0, coached: 0, pct: null });
-    expect(overview.coaching.leaderboard.find((l) => l.name === 'Satria Nugraha')).toMatchObject({ teamSize: 3, coached: 0, pct: 0 });
-    expect(overview.coaching.leaderboard.find((l) => l.name === 'Yosef Tambunan')!.coached).toBe(3);
+  it('P19.19-T1 AC-3 seed: every usage bucket holds somebody — Raka and Agus never; somebody > 14 days; most ≤ 14', () => {
+    expect(person('Raka Aditama').usage.status).toBe('never');
+    expect(person('Agus Prasetyo').usage.status).toBe('never');
+    expect(person('Pandu Wirawan').usage).toEqual({ status: 'lapsed', days: 20, usedInWindow: true });
+    for (const status of ['never', 'lapsed', 'recent'] as const) {
+      expect([status, overview.people.some((p) => p.usage.status === status)]).toEqual([status, true]);
+    }
   });
 
-  it('P18-T1 AC-13 who hasn’t logged: the ones who never have first — Agus, Lukman, Raka — then the longest silent', async () => {
-    const list = await wired.kpmOverview.notLogged(await as('0417', 'owner@kpm0417.test', { owner: true }));
-    // P18.8-T6 adds two new hires who have logged nothing (`activation-3m-fixture.ts`): Lukman, and Tari after him.
-    // P19.3-T2 AC-2: *Belum mencatat · 7 hari* names five, then the longest silent — Maya, and Pandu after her.
-    expect(list.members.map((m) => [m.name, m.daysSince])).toEqual([
-      ['Agus Prasetyo', null], ['Lukman Hakim', null], ['Raka Aditama', null], ['Maya Halim', 13], ['Pandu Wirawan', 12],
+  it('P19.19-T1 AC-4 seed: every coaching bucket holds somebody', () => {
+    for (const status of ['never', 'lapsed', 'recent'] as const) {
+      expect([status, overview.people.some((p) => p.coaching.status === status)]).toEqual([status, true]);
+    }
+  });
+
+  it('P19.19-T1 AC-3 seed: Yosef’s AB group — Yosef, Winda one step in with her team two, his own agents one', () => {
+    const yosef = person('Yosef Tambunan');
+    const winda = person('Winda Anggraeni');
+    expect(yosef).toMatchObject({ role: 'ab', depth: 0, groupId: null });
+    expect(winda).toMatchObject({ role: 'aab', depth: 1, abMembershipId: yosef.membershipId });
+    expect(overview.people.filter((p) => p.leaderIds.includes(winda.membershipId)).every((p) => p.depth === 2)).toBe(true);
+    expect(overview.people.some((p) => p.name === 'Gilang Saputra')).toBe(false);
+  });
+
+  it('P19.19-T2 AC-2 seed: this month’s targets — Agus 8 / 4 set now, Wilson, Satria and Yosef carried, Maya none', () => {
+    const row = (name: string) => performance.groups.flatMap((g) => g.abGroups).find((r) => r.name === name)!;
+    expect(row('Agus Prasetyo')).toMatchObject({ activeAgentTarget: 8, rekrutTarget: 4, source: 'set' });
+    expect(row('Wilson Tanoto')).toMatchObject({ activeAgentTarget: 3, rekrutTarget: 2, source: 'carried' });
+    expect(row('Maya Halim')).toMatchObject({ activeAgentTarget: null, source: 'none' });
+    expect(performance.total).toMatchObject({ activeAgentTarget: 8 + 3 + 2 + 4, rekrutTarget: 4 + 2 + 1 + 2 });
+    expect(performance.held).toBe(true);
+    expect(performance.total.actual.apeMinor).toBeGreaterThan(0);
+  });
+
+  it('P19.19-T2 AC-1 seed: last month reads its own targets — Agus 6 / 3, carried', async () => {
+    const september = await wired.kpmOverview.performance(owner, { month: '2026-09' });
+    const agus = september.groups.flatMap((g) => g.abGroups).find((r) => r.name === 'Agus Prasetyo')!;
+    expect(agus).toMatchObject({ activeAgentTarget: 6, rekrutTarget: 3, source: 'carried' });
+  });
+
+  it('P19.19-T3 AC-1 seed: Produksi 6 bulan — May to October, August (the month before last) without a file', () => {
+    expect(overview.production.months.map((m) => [m.month, m.apeMinor === null])).toEqual([
+      ['2026-05', false], ['2026-06', false], ['2026-07', false], ['2026-08', true], ['2026-09', false], ['2026-10', false],
     ]);
-    expect(list.total).toBeGreaterThan(5);
-    // Each row carries its leader (*"Agent · ke Satria"*): Raka is Satria's.
-    expect(list.members.find((m) => m.name === 'Raka Aditama')!.leader).toMatchObject({ name: 'Satria Nugraha' });
+  });
+
+  it('P19.19-T3 AC-2 seed: seven compliance cards over the same people, Leads Mgmt among them with a figure', async () => {
+    const names = new MemberNames(wired.memberships, wired.users as never);
+    const compliance = new ComplianceService(
+      new TenantDay(wired.kpms as never, wired.clock), wired.clock, wired.subjectReads, wired.officeGroups, names,
+      new TrainingComplianceCategory(wired.offeredTraining, wired.trainingReadings, wired.clock),
+      new GoalsComplianceCategory(wired.goals, wired.clock),
+      new ActivityComplianceCategory(wired.activityReadings),
+      new ActivationComplianceCategory(new ActivationReadings(wired.activationRows, wired.activationProgress, wired.clock)),
+      new EventsComplianceCategory(wired.eventReadings),
+      new CampaignsComplianceCategory(wired.campaignStandingsReader, names),
+      new LeadsComplianceCategory(wired.leadReadings),
+    );
+    const view = await compliance.read(owner, { category: 'leads' });
+    expect(view.cards).toHaveLength(7);
+    const leads = view.cards.find((c) => c.category === 'leads')!;
+    expect(leads.of).toBe(overview.usage.total.of);
+    expect(leads.count).toBeGreaterThan(0);
+    expect(leads.count).toBeLessThan(leads.of);
+    expect(view.selected!.cells.map((c) => c.membershipId)).toEqual(overview.people.map((p) => p.membershipId));
   });
 
   it('P18-T1 AC-13 the Owner and Maya logged weeks ago and not since; Gilang left Yosef’s agency last month', async () => {
-    const owner = await as('0417', 'owner@kpm0417.test', { owner: true });
     const directory = new DirectoryService(wired.memberships, wired.users as never, wired.kpms as never);
     const people = (await wired.directoryColumns.decorate(owner, await directory.list(owner, { limit: 200 }))).members;
     expect(people.find((m) => m.fullName === 'Maya Halim')).toMatchObject({ lastActivityDays: 13 });
     expect(people.find((m) => m.fullName === 'Wilson Tanoto')).toMatchObject({ lastActivityDays: 11 });
+    expect(person('Maya Halim').usage).toMatchObject({ status: 'recent', days: 13 });
     const gilang = (await col('memberships').findOne({ agentCode: '87015' }))!;
     expect(gilang).toMatchObject({ status: 'removed' });
     expect((gilang.removedAt as Date).toISOString().slice(0, 7)).toBe('2026-09');
-    // On every file this year to July; the Overview's year to date holds it (OD-74), and since P19.3-T3 AC-5 the
-    // analytics' total holds it too: one production total per KPM (ADR-0204 §1, OWN case 2).
-    const files = await col('monthlyAgentData').find({ membershipId: String(gilang._id), month: { $gte: '2026-01' } }).sort({ month: 1 }).toArray();
-    expect(files.map((f) => f.month)).toEqual(['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']);
-    expect(files.at(-1)!.values.APE.value).toBeGreaterThan(0);
-    expect(analytics.total.apeAnnual.achievedMinor).toBe(overview.production.ytd.achievedMinor);
-  });
-
-  it('P18-T1 AC-13 the recruitment target is 15, set by the Owner this month; late stages and two closed won last month', async () => {
-    expect(overview.recruitment.target).toBe(REPORTING_RECRUIT_TARGET);
-    expect(overview.recruitment.closedLastMonth).toBeGreaterThanOrEqual(2);
-    expect(overview.recruitment.expectedToClose).toBeGreaterThanOrEqual(3);
-    const entry = await col('auditLog').findOne({ action: 'kpm_overview.recruit_target_set' });
-    expect(entry).toMatchObject({ before: null, after: { month: '2026-10', target: 15 } });
   });
 
   it('P19.3-T2 AC-4 seed: 0417 is running — no Siapkan KPM card, and all seven stored as done', async () => {
@@ -123,8 +160,8 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
 
   it('P19.3-T2 AC-4 AC-5 seed: 0701 shows Siapkan KPM at 2 dari 7 — Branch info reviewed, a member besides the Owner', async () => {
     const kpm = await col('kpms').findOne({ code: '0701' });
-    const owner = await col('users').findOne({ email: 'owner@kpm0701.test' });
-    const member = (await col('memberships').findOne({ kpmId: String(kpm!._id), userId: String(owner!._id), status: 'active' }))!;
+    const ownerOf0701 = await col('users').findOne({ email: 'owner@kpm0701.test' });
+    const member = (await col('memberships').findOne({ kpmId: String(kpm!._id), userId: String(ownerOf0701!._id), status: 'active' }))!;
     const hadi = new RequestContext(String(member.userId), 'none', {
       membershipId: String(member._id), kpmId: member.kpmId, orgLevelCode: member.orgLevelCode, hierarchyRole: member.role,
       status: 'active', isKpmOwner: true, isKpmAdmin: false, directCount: 1,
@@ -132,79 +169,16 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
     const view = await wired.kpmOverview.read(hadi);
     expect(view.setup).toMatchObject({ done: 2, openMonth: { month: '2026-10', closesOn: '2026-11-07' }, target: null });
     expect(view.setup!.steps.filter((s) => s.done).map((s) => s.key)).toEqual(['branch-info', 'import']);
-    // Nothing ever uploaded: *"Belum diunggah"* and October, still open, named.
-    expect(view.production.ytd).toMatchObject({ achievedMinor: null });
-    expect(view.production.ytd.missingMonths).toContain('2026-10');
+    // Nothing ever uploaded: every month of Produksi 6 bulan *"–"*.
+    expect(view.production.months.every((m) => m.apeMinor === null)).toBe(true);
   });
 
-  it('P18-T1 AC-13 a year of files: the month before last empty, nothing waited on, a projection to run on', async () => {
-    // October held: the year to date waits on nothing (item 3), August's gap covered by October's own.
-    expect(overview.production.ytd.missingMonths).toEqual([]);
-    // P19.3-T1 AC-12: October, this month, is in progress (D8), so the projection runs from September — the year to date
-    // as of September covers nine months, August's missing one included.
-    expect(overview.production.projectionThrough).toBe('2026-09');
-    const kpm = await col('kpms').findOne({ code: '0417' });
-    // The year to date as the product reads it since P19.5-T2 (R4): every month's APE held, January to September.
-    const rows = await col('monthlyAgentData')
-      .find({ kpmId: String(kpm!._id), deletedAt: null, month: { $gte: '2026-01', $lte: '2026-09' }, 'values.APE.value': { $ne: null } })
-      .toArray();
-    const throughSeptember = rows.reduce((sum, r) => sum + (r.values.APE.value as number), 0);
-    expect(overview.production.projectionMinor).toBe(Math.round((throughSeptember / 9) * 12));
-    // P19.3-T3 AC-7 (UI-091): the chart ends with this month, October, held.
-    expect(analytics.monthly.map((m) => [m.month, m.apeMinor === null])).toEqual([
-      ['2026-05', false], ['2026-06', false], ['2026-07', false], ['2026-08', true], ['2026-09', false], ['2026-10', false],
-    ]);
-  });
-
-  it('P18-T2 AC-11 Yosef’s agency at Star Club and meeting MOC on the standard path; Winda’s unit —; Satria’s failing with its gaps', () => {
-    const yosef = agency('Yosef Tambunan');
-    expect(yosef.club).toEqual({ code: 'STAR_CLUB', label: 'Star Club' });
-    expect(yosef.moc).toMatchObject({ status: 'met', path: 'Met via the standard three-criteria path.' });
-    // Winda's persistency is not on this month's file; her Monthly2 AA is a count, every agent of hers on both files.
-    expect(yosef.aabUnits[0].moc).toMatchObject({ status: 'unknown', missing: 'Not uploaded yet: Rolling Persistency — DU.' });
-    expect(yosef.aabUnits[0].moc!.criteria.find((c) => c.code === 'MONTHLY2_AA')).toMatchObject({ current: 2, met: true });
-    expect(analytics.mocRulesText).toBe(
-      // P19.3-T1 AC-5: *APE*, never *Net APE*.
-      'AAB: APE ≥ Rp 200 Jt AND Monthly2 AA ≥ 2 AND Rolling Persistency DU ≥ 75%.\n'
-      + 'AB: (APE ≥ Rp 600 Jt AND Monthly2 AA DU ≥ 4 / DG ≥ 6 AND Rolling Persistency DU/DG ≥ 75%) OR Direct AB (AB on AB) ≥ 5.',
-    );
-    const satria = agency('Satria Nugraha');
-    expect(satria.moc!.status).toBe('not_met');
-    expect(satria.moc!.criteria.filter((c) => c.met === false).map((c) => c.code))
-      .toEqual(['MOC_APE', 'MONTHLY2_AA_DU', 'MONTHLY2_AA_DG', 'MOC_PERSISTENCY', 'DIRECT_AB_COUNT']);
-    expect(satria.club).toBeNull();
-  });
-
-  it('P18-T2 AC-3 the period moves the month: September’s file is held, last month’s target fixed', () => {
-    expect(previous.month).toBe('2026-09');
-    expect(previous.total.apeMonth.achievedMinor).not.toBeNull();
-    expect(previous.total.manpower).toEqual(analytics.total.manpower);
-  });
-
-  it('P18-T6 AC-1 on the seed, the total equals the Overview: headcount, 7-day coverage', () => {
-    expect(analytics.total.manpower.total).toBe(overview.composition.total);
-    expect(analytics.total.coached7d).toEqual(overview.coaching.coverage7d);
-  });
-
-  it('P18-T8 AC-5 sign-ins across offices: most of 0417 within the week; none of 0601’s within thirty days', () => {
-    const office = (code: string) => platform.offices.find((o) => o.code === code)!;
-    expect(office('0417').signedIn7d).toBeGreaterThan(office('0417').members / 2);
-    expect(office('0417').signedIn30d).toBeGreaterThan(office('0417').signedIn7d);
-    expect(office('0417').signedIn30d).toBeLessThan(office('0417').members);
-    expect(office('0601')).toMatchObject({ signedIn30d: 0, state: 'ended' });
-    expect(office('0555').signedIn7d).toBeGreaterThan(0);
-    expect(office('0701').members).toBeGreaterThan(0);
-  });
-
-  it('P18-T1 AC-12 0555’s Owner reads 0555’s own figures; two members joined two months ago, and Fajar after them', async () => {
+  it('P19.19-T1 0555’s Owner reads 0555’s own people: three, one of whom joined 45 days back', async () => {
     const b = await wired.kpmOverview.read(await as('0555', 'owner@kpm0555.test', { owner: true }));
     expect(b.office.code).toBe('0555');
-    // P19.9-T6: three since Lina, an Agent, recruited Fajar (`demo.ts`, `AGENT_LEADER_0555`) — 45 days back, not this month.
-    expect(b.composition).toMatchObject({ total: 3, newThisMonth: 0 });
-    // P19.3-T2 (ADR-0200 §3): logging is the week's *Pengguna aktif* alone; 0555's three members are counted in it.
-    expect(b.engagement.loggedThisWeek.logged + b.engagement.loggedThisWeek.notLogged).toBe(3);
-    expect(b.production.ytd.achievedMinor).not.toBeNull();
-    expect(b.coaching.coverage30d.count).toBeGreaterThan(0);
+    expect(b.usage.total.of).toBe(3);
+    expect(b.production.months.some((m) => m.apeMinor !== null)).toBe(true);
+    expect(b.people.some((p) => p.coaching.status !== 'never')).toBe(true);
   });
 
   it('P18-T2 AC-4 the MOC migration on the seed: every rule carries persistency; run again, it changes nothing', async () => {
@@ -218,7 +192,7 @@ describe('Phase 18 the Owner’s reporting seed — a run at 10:00 on 9 October 
 
   it('P18-T1 AC-13 a second run writes none of it', async () => {
     const again = await seedDemo({ clock, log: quiet });
-    for (const name of ['kpmRecruitTargets', 'monthlyAgentData', 'dataUploadBatches', 'goals', 'coachingSessions', 'leads', 'memberships']) {
+    for (const name of ['abGroupTargets', 'monthlyAgentData', 'dataUploadBatches', 'goals', 'coachingSessions', 'leads', 'memberships']) {
       expect([name, again.written[name] ?? 0]).toEqual([name, 0]);
     }
   }, RUN_MS);

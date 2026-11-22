@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
-import { GENDERS, type Gender } from '@/domain/constants';
 
 export type LeadDocument = HydratedDocument<Lead>;
 
@@ -163,23 +162,12 @@ export class Lead {
   @Prop({ type: Date, default: null })
   consentAt!: Date | null;
 
-  /**
-   * **The client's age at the next birthday, on `ageRecordedOn`** (P19.7-T1 AC-1; ADR-0224 §1): optional, an integer
-   * from `LEAD_AGE.MIN` to `LEAD_AGE.MAX`, and read as **today's** age (`lead-age.ts`). A third party's personal data,
-   * kept for one purpose — to choose the products that fit and to read the premium from the insurer's illustration — and
-   * cleared by name with the lead's erasure (P20-T1). **No birth date** is stored (minimisation, ADR-0224 §6). No index:
-   * nothing searches or sorts on it.
+  /*
+   * *Removed 2026-11-12 (P19.14-T1 AC-4; ADR-0254 §1, §5, superseding ADR-0224):* `age`, `ageRecordedOn` and `gender`.
+   * **The lead stays general**: the client's age, gender and details are each proposal's, entered at step 1. A lead
+   * written between 5 and 12 November may still hold the three in the database: **left as they are, read by nothing and
+   * answered to nobody**, and erased by name with the lead (P20-T1). No migration clears them (ADR-0254 §5).
    */
-  @Prop({ type: Number, default: null })
-  age!: number | null;
-
-  /** The KPM's day `age` was written, `YYYY-MM-DD`: set by the server, never by a body. `null` with `age`. */
-  @Prop({ type: String, default: null })
-  ageRecordedOn!: string | null;
-
-  /** **`male` or `female`, or `null`** (ADR-0224 §1; ADR-0158's values): *Laki-laki*, *Perempuan* on screen. */
-  @Prop({ type: String, enum: [...GENDERS, null], default: null })
-  gender!: Gender | null;
 
   /** What the lead holds. Renaming a status moves neither this nor the id beside it. */
   @Prop({ type: String, default: null, uppercase: true, trim: true })

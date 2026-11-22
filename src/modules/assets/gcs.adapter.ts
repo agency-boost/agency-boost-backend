@@ -31,12 +31,22 @@ const sdkNow = (): number => Date.now();
  */
 const INLINE_TYPES: ReadonlySet<string> = new Set([
   'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'text/html',
+  // P19.21-T3 AC-6 (ADR-0274): a pitch material's other videos play in the browser's own player, as an MP4 does.
+  'video/webm', 'video/quicktime',
 ]);
 
-/** The extension a downloaded attachment is saved with, since a key carries none (`<…>/<ulid>`). */
+/**
+ * The extension a downloaded attachment is saved with, since a key carries none (`<…>/<ulid>`). **An office document
+ * is always an attachment named by its confirmed type** (P19.21-T3 AC-6, ADR-0274): v1 scans nothing (ADR-0040), so a
+ * file that claimed Word and is not one still lands as `<key>.doc`, which opens in Word and runs nowhere.
+ */
 const ATTACHMENT_EXTENSION: Readonly<Record<string, string>> = {
   'text/csv': 'csv',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/msword': 'doc',
 };
 
 /**

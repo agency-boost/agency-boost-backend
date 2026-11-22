@@ -49,6 +49,12 @@ export class SessionBrandingDto {
   @ApiProperty() icons!: boolean;
   @ApiProperty({ type: String, isArray: true }) mascotPoses!: string[];
   @ApiProperty({ type: () => LessonColoursDto, nullable: true }) lesson!: LessonColoursDto | null;
+  @ApiProperty({
+    type: String, nullable: true, example: 'Dynamic Smart System',
+    description: '*Nama sistem* (ADR-0274): written in place of the word *AgencyBoost* on the KPM’s screens; '
+      + '`null` is the default, *AgencyBoost*.',
+  })
+  systemName!: string | null;
 }
 
 /** `GET /kpm-branding/:kpmId`, and an invitation's `branding` (ADR-0218 §9). */
@@ -57,6 +63,12 @@ export class PublicBrandingDto {
   @ApiProperty({ type: String, nullable: true }) version!: string | null;
   @ApiProperty({ type: () => BrandingPaletteDto, nullable: true }) palette!: BrandingPaletteDto | null;
   @ApiProperty({ type: () => LogoSizeDto, nullable: true }) logo!: LogoSizeDto | null;
+  @ApiProperty({
+    type: String, nullable: true, required: false,
+    description: '*Nama sistem* (ADR-0274): the sign-in and registration pages a KPM’s link opens call the app '
+      + 'this; `null` is *AgencyBoost*. An invitation’s `branding` does not carry it.',
+  })
+  systemName?: string | null;
 }
 
 export class InviteBrandingDto extends PublicBrandingDto {

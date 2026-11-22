@@ -88,7 +88,7 @@ describe('P19.5-T2 the Data upload from the template', () => {
   });
   const importFile = async (ctx: RequestContext, month: string, f: ReturnType<typeof file>, asOf?: string) => {
     const p = await wired.production.preview(ctx, month, f);
-    return wired.productionImport.commit(ctx, month, String(p.revision), f, undefined, asOf);
+    return wired.productionImport.commit(ctx, month, String(p.revision), f, asOf);
   };
   const header = (config: AdvancedAnalyticsConfig) => templateHeader(config, 'en');
   /** A line under `header(config)`: the code, a name, and each kode's figure as the file writes it. */
@@ -174,14 +174,13 @@ describe('P19.5-T2 the Data upload from the template', () => {
       expect(p.summary).toMatchObject({ ready: 2, refused: 0 });
     });
 
-    it('AC-5 R2 a file that carries FYC and leaves it blank on a row, from December, skips that row: “… wajib diisi”', async () => {
+    it('P19.21-T1 AC-5 a file that leaves a required FYC blank on a row keeps the row: the blank is not reported', async () => {
       await publish(2, V2());
       const v2 = V2();
       const p = await wired.production.preview(A, '2026-12', file(header(v2),
         line(v2, '70012345', { APE: '1', FYC: '0.5' }), line(v2, '70012346', { APE: '2' })));
-      expect(p.rows.map((r) => [r.status, r.issues[0]?.code ?? null, r.issues[0]?.message ?? null])).toEqual([
-        ['ready', null, null], ['refused', 'UPLOAD_REQUIRED_BLANK', 'Komisi tahun pertama wajib diisi'],
-      ]);
+      expect(p.rows.map((r) => [r.status, r.issues[0]?.code ?? null])).toEqual([['ready', null], ['ready', null]]);
+      expect(p.rows[1].cells.find((c) => c.kode === 'FYC' && !c.ytd)).toMatchObject({ status: 'not_provided' });
     });
   });
 
@@ -189,7 +188,7 @@ describe('P19.5-T2 the Data upload from the template', () => {
     const v1 = V1();
     const held = () => file(header(v1), line(v1, '70012345', { APE: '1' }), line(v1, '70088888', { APE: '7', POLICY_COUNT: '2' }));
 
-    it('AC-5 a code no member holds is held apart, listed after the members, counted in nothing; reject skips it', async () => {
+    it('P19.21-T1 AC-5 a code no member holds is held apart, listed after the members, counted in nothing; reject no longer skips it', async () => {
       const { batch } = await importFile(A, '2026-11', held());
       expect(batch).toMatchObject({ heldRowCount: 1, writtenRowCount: 2 });
       expect(await col('unregisteredAgentData').findOne({ agentCode: '70088888' })).toMatchObject({
@@ -202,10 +201,10 @@ describe('P19.5-T2 the Data upload from the template', () => {
       expect(view.rows).toHaveLength(3);
       expect(view.completeness.members).toBe(3);
 
-      // Under reject, the same file skips it, with the reason.
+      // A template still saying *reject* is no longer read (ADR-0274 §2): the row is kept all the same.
       await publish(2, { ...V1(), uploadRules: { ...V1().uploadRules, unknownAgent: 'reject' } });
       const p = await wired.production.preview(A, '2026-12', held());
-      expect(p.rows[1]).toMatchObject({ status: 'refused', issues: [{ code: 'UPLOAD_UNKNOWN_AGENT_CODE' }] });
+      expect(p.rows[1]).toMatchObject({ status: 'held', issues: [] });
     });
 
     it('AC-5 ADR-0214 §8 the held months move onto the membership that takes the code, filling only empty cells; audited', async () => {
@@ -303,14 +302,17 @@ describe('P19.5-T2 the Data upload from the template', () => {
   });
 
   describe('AC-8, R5, AT-9, AA UI-016 — the required history', () => {
-    it('AT-9 the month grid starts twelve months before the KPM joined; a never-written month of it takes an upload', async () => {
+    it('P19.21-T1 AC-1 AC-8 the month grid starts in January 2024 for every KPM; a never-written month of it takes an upload', async () => {
       const view = await wired.production.readMonth(A, '2026-12');
-      expect(view.config).toMatchObject({ historyFrom: '2025-06', firstMonth: '2026-06', completePct: 90 });
-      expect(view.months[0].month).toBe('2025-06');
+      expect(view.config).toMatchObject({ historyFrom: '2024-01', firstMonth: '2026-06', completePct: 90 });
+      expect(view.months[0].month).toBe('2024-01');
       expect(view.months.at(-1)!.month).toBe('2026-12');
-      // July 2025 was never written: open whatever its date (ADR-0214 §11). May 2025 is before the history.
+      expect(view.months).toHaveLength(36);
+      // July 2025 and May 2025 were never written: open whatever their date (ADR-0274 §3). December 2023 is before it.
       expect(await wired.productionMonths.state(A, '2025-07')).toMatchObject({ locked: false, reason: 'history', editableUntil: '2026-12-22' });
-      expect(await wired.productionMonths.state(A, '2025-05')).toMatchObject({ locked: true, reason: 'schedule' });
+      expect(await wired.productionMonths.state(A, '2025-05')).toMatchObject({ locked: false, reason: 'history' });
+      expect(await wired.productionMonths.state(A, '2024-01')).toMatchObject({ locked: false, reason: 'history' });
+      expect(await wired.productionMonths.state(A, '2023-12')).toMatchObject({ locked: true, reason: 'schedule' });
       const v1 = V1();
       await importFile(A, '2025-07', file(header(v1), line(v1, '70012345', { APE: '1' })));
       // The first write opens a window of the grace days from its day, then the month locks as any month does.
@@ -330,9 +332,9 @@ describe('P19.5-T2 the Data upload from the template', () => {
       // A day after today, or outside the month, is refused.
       const f = file(header(v1), line(v1, '70012345', { APE: '3' }));
       const p = await wired.production.preview(A, '2026-12', f);
-      await expect(wired.productionImport.commit(A, '2026-12', String(p.revision), f, undefined, '2026-12-20'))
+      await expect(wired.productionImport.commit(A, '2026-12', String(p.revision), f, '2026-12-20'))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'asOf' } });
-      await expect(wired.productionImport.commit(A, '2026-12', String(p.revision), f, undefined, '2026-11-30'))
+      await expect(wired.productionImport.commit(A, '2026-12', String(p.revision), f, '2026-11-30'))
         .rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'asOf' } });
       // November ended: its upload is final.
       const nov = await importFile(A, '2026-11', file(header(v1), line(v1, '70012345', { APE: '1' })), '2026-11-15');

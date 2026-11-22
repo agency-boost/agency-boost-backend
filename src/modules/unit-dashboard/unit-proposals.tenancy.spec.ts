@@ -7,7 +7,7 @@ import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import {
-  AAB, AGENT, NOW, SIBLING, aab, ab, agent, agentB, completeProposal, seedProposalOffice, sibling, type SeededLeads,
+  AAB, AGENT, CLIENT, NOW, SIBLING, aab, ab, agent, agentB, completeProposal, seedProposalOffice, sibling, type SeededLeads,
 } from '../../../test/proposals';
 import { UnitDashboardService, type UnitDashboardView, type UnitRow } from './unit-dashboard.service';
 
@@ -48,7 +48,7 @@ describe('P19.7-T2 AC-13 the Unit Dashboard’s Proposal count', () => {
     await finished(agent, leads.budi, new Date('2026-11-02T03:00:00Z'));
     await finished(agent, leads.budi, new Date('2026-10-20T03:00:00Z'));
     await finished(sibling, leads.siblings, new Date('2026-11-04T03:00:00Z'));
-    await wired.proposals.create(agent(), leads.budi);
+    await wired.proposals.create(agent(), leads.budi, CLIENT);
 
     const month = await wired.unitDashboard.read(aab(), { period: 'month' });
     expect(row(month, AGENT).proposalsMade).toBe(1);

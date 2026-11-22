@@ -7,8 +7,9 @@ import { LEAD_PIPELINES, type LeadPipeline } from './lead-status.schema';
 import { RATIO_ORIGINS, type RatioOrigin } from './ratio-definition.schema';
 import type { RatioDefinitionView } from './ratio.service';
 import type {
-  PublishState, SnapshotEventTypeView, TenantConfigView,
+  PublishState, SettingPublishState, SnapshotEventTypeView, TenantConfigView,
 } from './tenant-config.service';
+import { PUBLISHED_SETTINGS, type PublishedSetting } from './publish-settings';
 import type { PublishAllOutcome, PublishAllView, PublishedKindView, TemplateView } from './template.service';
 import type { NamedTemplateView, TemplateOfficeView, TemplateSectionState } from './named-template.service';
 import type { DroppedSettingView } from './office-template';
@@ -596,6 +597,31 @@ export class CompanyTemplateDto implements TemplateView {
   analytics?: AnalyticsEditorDto;
 }
 
+/** One setting with a draft: the version agents are on, and whether it has changes they do not see (P19.21-T2). */
+export class SettingPublishStateDto implements SettingPublishState {
+  @ApiProperty({ enum: PUBLISHED_SETTINGS })
+  setting!: PublishedSetting;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'The version agents are on — *"Agent masih memakai versi n"*; `0` when never published. For '
+      + '`activation_checklist`, the version new hires are given.',
+  })
+  version!: number;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Its rows differ from what agents read (created, edited, archived or restored; a reorder is not a change) — and, '
+      + 'for `activation_checklist`, a saved draft differs from the version new hires are given.',
+  })
+  hasUnpublishedChanges!: boolean;
+
+  @ApiProperty({ type: String, nullable: true, description: 'When it was last published with changes.' })
+  publishedAt!: string | null;
+}
+
 /** Whether the office has edited anything since agents last had a copy (P4-T6). */
 export class PublishStateDto implements PublishState {
   @ApiProperty({ type: Number, description: 'What agents are on. 0 when nothing is published.' })
@@ -621,6 +647,13 @@ export class PublishStateDto implements PublishState {
 
   @ApiProperty({ type: String, nullable: true })
   publishedAt!: string | null;
+
+  @ApiProperty({
+    type: () => SettingPublishStateDto, isArray: true,
+    description: 'Each of the six settings with a draft, in this order: `activity_types`, `lead_statuses`, '
+      + '`activation_checklist`, `training`, `capability_mapping`, `events` (ADR-0274 §5).',
+  })
+  settings!: SettingPublishStateDto[];
 }
 
 /** Where a template came from (ADR-0115). A record, never a link. */

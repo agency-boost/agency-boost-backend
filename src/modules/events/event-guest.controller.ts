@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
-import { NoEventBodyDto, NoEventQueryDto, SubmitEventFeedbackDto } from './event.dto';
+import { DeclineEventDto, NoEventBodyDto, NoEventQueryDto, SubmitEventFeedbackDto } from './event.dto';
 import { GuestEventDto, GuestEventListDto } from './event.response.dto';
 import { EventGuestService } from './event-guest.service';
 
@@ -63,14 +63,16 @@ export class EventGuestController {
   @Post(':eventId/rsvp/cancel')
   @RequirePermission('event:cancel_rsvp')
   @ApiOperation({
-    summary: '*Cancel RSVP* — the card’s *Tidak ikut*',
-    description: 'From going, or from no answer at all, which makes the row (UI V1, UI-108). '
+    summary: '*Cancel RSVP* — the card’s *Tidak ikut*, with its reason',
+    description: 'From going, or from no answer at all, which makes the row (UI V1, UI-108). `reason` — optional, '
+      + 'trimmed, at most 200 characters — is what Advanced analytics › *Event* shows beside *Tidak ikut* (ADR-0281 §2); '
+      + 'a new one replaces the last. '
       + `Idempotent; refused from \`endsAt\`. ${OUTSIDE}`,
   })
   @ApiResponse({ status: 201, type: GuestEventDto })
   @ApiResponse(refusal(409, '`EVENT_RSVP_CLOSED` — the event has ended.'))
-  async cancelRsvp(@Ctx() ctx: RequestContext, @Param('eventId') eventId: string, @Body() _body: NoEventBodyDto) {
-    return this.guests.cancelRsvp(ctx, eventId);
+  async cancelRsvp(@Ctx() ctx: RequestContext, @Param('eventId') eventId: string, @Body() body: DeclineEventDto) {
+    return this.guests.cancelRsvp(ctx, eventId, body);
   }
 
   @Post(':eventId/rsvp/withdraw')

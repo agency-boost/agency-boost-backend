@@ -236,6 +236,25 @@ describe('P18.4-T2 GcsAdapter (ADR-0153)', () => {
       },
     );
 
+    it.each(['video/webm', 'video/quicktime'])('P19.21-T3 AC-6 opens a pitch video %s inline (ADR-0274)', async (mimeType) => {
+      await makeAdapter().createSignedUrl('dev/k/recruitment-pitch/1', 300, mimeType);
+      expect(mockFile.getSignedUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ responseType: mimeType, responseDisposition: 'inline' }),
+      );
+    });
+
+    it.each([
+      ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pptx'],
+      ['application/vnd.ms-powerpoint', 'ppt'],
+      ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
+      ['application/msword', 'doc'],
+    ])('P19.21-T3 AC-6 downloads a pitch office file %s as an attachment named .%s, never inline (ADR-0274)', async (mimeType, extension) => {
+      await makeAdapter().createSignedUrl('dev/k/recruitment-pitch/01PITCH', 300, mimeType);
+      expect(mockFile.getSignedUrl).toHaveBeenCalledWith(expect.objectContaining({
+        responseType: mimeType, responseDisposition: `attachment; filename="01PITCH.${extension}"`,
+      }));
+    });
+
     it('P18.4-T2 never renders a type nobody recorded or accepts: an attachment, under the platform’s lifetime by default', async () => {
       await makeAdapter().createSignedUrl('dev/k/f/1');
       expect(mockFile.getSignedUrl).toHaveBeenLastCalledWith({

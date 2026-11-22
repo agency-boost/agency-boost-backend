@@ -25,8 +25,8 @@ describe('MembershipRepository.countHoldingRungAcrossTenants', () => {
 /**
  * **The named cross-tenant reads Phase 19 added** (invariant §1; `named-cross-tenant-reads.tenancy.spec.ts` registers
  * who calls each): *All members*' list (P19.4-T3 AC-1, ADR-0207 §2), the template's agent-code test (P19.5-T1 AC-11,
- * ADR-0214 §7) and a linked login's office (UI-169 item 5, ADR-0199 §1). Each is narrowed to what it names — the offices
- * named, or the one login — and the two a Super Admin calls refuse anybody else before the database is asked anything.
+ * ADR-0214 §7); a linked login's office (UI-169 item 5, ADR-0199 §1) was retired with the linked login (ADR-0269). Each
+ * is narrowed to what it names, and the two a Super Admin calls refuse anybody else before the database is asked anything.
  */
 describe('MembershipRepository — the Phase 19 named cross-tenant reads', () => {
   const untouchable = new Proxy({}, { get: () => { throw new Error('the model was asked'); } });
@@ -57,16 +57,15 @@ describe('MembershipRepository — the Phase 19 named cross-tenant reads', () =>
       await expect(guarded.countPerOfficeAcrossTenants(sa, [], { status: 'active' })).resolves.toEqual(new Map());
     });
 
-    it('P18-T8, P13.2-T3 AC-3 the platform’s counts across offices refuse an Owner too, asking nothing', async () => {
-      const month = { start: new Date('2026-10-01T00:00:00Z'), endExclusive: new Date('2026-11-01T00:00:00Z') };
-      const since = { days7: new Date('2026-10-30T00:00:00Z'), days30: new Date('2026-10-07T00:00:00Z') };
-      const reads = [
-        () => guarded.countPerOfficeAcrossTenants(owner, ['kpm-a'], {}),
-        () => guarded.adoptionPerOfficeAcrossTenants(owner, month),
-        () => guarded.signInsPerOfficeAcrossTenants(owner, since),
-        () => guarded.distinctAccountsAcrossTenants(owner, [{ kpmId: 'kpm-a', companyId: 'co-1' }], since),
-      ];
-      for (const read of reads) await expect(read()).rejects.toBeInstanceOf(MissingTenantContextError);
+    it('P13.2-T3 AC-3 the platform’s count across offices refuses an Owner too, asking nothing', async () => {
+      // *Cross-platform analytics*' three adoption reads went with `/admin/analytics` (P19.23-T1; ADR-0277).
+      await expect(guarded.countPerOfficeAcrossTenants(owner, ['kpm-a'], {})).rejects.toBeInstanceOf(MissingTenantContextError);
+    });
+
+    it('P19.23-T3 AC-1 setTestAccountAcrossTenants refuses an Owner and a signed-in nobody, writing nothing', async () => {
+      for (const ctx of [owner, new RequestContext('u-none', 'none', null)]) {
+        await expect(guarded.setTestAccountAcrossTenants(ctx, 'u-agent', true)).rejects.toBeInstanceOf(MissingTenantContextError);
+      }
     });
 
     it('P19.12-T2 AC-1 liveMembershipCountsPerUserAcrossTenants refuses an Owner and a signed-in nobody, asking nothing', async () => {
@@ -148,32 +147,6 @@ describe('MembershipRepository — the Phase 19 named cross-tenant reads', () =>
       expect(await repository.agentCodesInOfficesAcrossTenants(sa, [KPM_A, KPM_B])).toEqual(['70045001', '70045002']);
     });
 
-    it('P18-T8 adoption counts by office: active by rung, joined by joinedAt and left by removedAt inside the month only', async () => {
-      const inMonth = new Date('2026-10-15T00:00:00Z');
-      const before = new Date('2026-09-15T00:00:00Z');
-      await member(KPM_A, '7001', { joinedAt: inMonth });
-      await member(KPM_A, '7002', { joinedAt: before, orgLevelCode: 'AB', role: 'ab' });
-      await member(KPM_B, '7003', { joinedAt: before, status: 'removed', removedAt: inMonth });
-      await member(KPM_B, '7004', { joinedAt: inMonth, deletedAt: inMonth });
-
-      const counts = await repository.adoptionPerOfficeAcrossTenants(sa, {
-        start: new Date('2026-10-01T00:00:00Z'), endExclusive: new Date('2026-11-01T00:00:00Z'),
-      });
-      expect(counts.byRung.sort((x, y) => x.orgLevelCode.localeCompare(y.orgLevelCode))).toEqual([
-        { kpmId: KPM_A, orgLevelCode: 'AB', n: 1 }, { kpmId: KPM_A, orgLevelCode: 'AGENT', n: 1 },
-      ]);
-      expect(counts.joined).toEqual(new Map([[KPM_A, 1]]));
-      expect(counts.left).toEqual(new Map([[KPM_B, 1]]));
-    });
-
-    it('P18-T8 accounts across offices nobody is a member of are nought, the platform’s included — never a missing row', async () => {
-      await member(KPM_C, '7001');
-      const since = { days7: new Date('2026-10-30T00:00:00Z'), days30: new Date('2026-10-07T00:00:00Z') };
-      expect(await repository.distinctAccountsAcrossTenants(sa, [{ kpmId: KPM_A, companyId: 'co-1' }], since)).toEqual({
-        companies: new Map(), platform: { members: 0, signedIn7d: 0, signedIn30d: 0 },
-      });
-    });
-
     it('P19.12-T2 AC-1 counts each account’s live memberships in any office — active and pending; ended or erased is none', async () => {
       const two = await member(KPM_A, '7001');
       await member(KPM_B, '7002', { userId: two.userId });
@@ -185,36 +158,6 @@ describe('MembershipRepository — the Phase 19 named cross-tenant reads', () =>
       expect(Object.fromEntries(counts)).toEqual({ [two.userId]: 2, [pending.userId]: 1 });
       expect(counts.has(left.userId)).toBe(false);
       expect(counts.has(erased.userId)).toBe(false);
-    });
-
-    describe('a linked login’s office (UI-169 item 5; ADR-0199 §1, §3)', () => {
-      it('P19.2-T1 AC-8 answers the office, its status and whether it administers it — an Owner’s Admin flag included', async () => {
-        const admin = await member(KPM_A, '7001', {
-          adminAccess: { isKpmAdmin: true, grantedByUserId: 'u-owner', grantedAt: new Date('2026-10-01T00:00:00Z'), revokedAt: null },
-        });
-        const joining = await member(KPM_B, '7002', { status: 'pending' });
-
-        expect(await repository.officeRoleOfLoginAcrossTenants(admin.userId))
-          .toEqual({ kpmId: KPM_A, status: 'active', isKpmAdmin: true });
-        expect(await repository.officeRoleOfLoginAcrossTenants(joining.userId))
-          .toEqual({ kpmId: KPM_B, status: 'pending', isKpmAdmin: false });
-      });
-
-      it('P19.2-T1 AC-8 a membership written before admin access existed reads as no Admin, never as an error', async () => {
-        await mongoose.connection.collection('memberships').insertOne({
-          kpmId: KPM_A, userId: 'u-legacy', role: 'agent', status: 'active', agentCode: '7009', deletedAt: null,
-        });
-        expect(await repository.officeRoleOfLoginAcrossTenants('u-legacy'))
-          .toEqual({ kpmId: KPM_A, status: 'active', isKpmAdmin: false });
-      });
-
-      it('P19.2-T1 AC-8 a login with no live office answers nothing: removed, deleted, or never a member', async () => {
-        const left = await member(KPM_A, '7001', { status: 'removed' });
-        const erased = await member(KPM_A, '7002', { deletedAt: new Date('2026-10-02T00:00:00Z') });
-        for (const userId of [left.userId, erased.userId, '66f00000000000000000eeee']) {
-          expect(await repository.officeRoleOfLoginAcrossTenants(userId)).toBeNull();
-        }
-      });
     });
   });
 });

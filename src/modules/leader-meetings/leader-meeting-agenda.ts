@@ -1,123 +1,72 @@
-import { readerIn, SOURCE_READER, type Reader } from '@/common/i18n/reader';
 import { render } from '@/common/i18n/sentence';
-import { LANGUAGES, type Language } from '@/domain/constants';
-import type { AgendaSection, LeaderMeetingAgenda, LeaderMeetingAgendaItem } from './leader-meeting.schema';
-import { LEADER_MEETINGS_MESSAGES as SAY, MONTH_NAMES } from './leader-meetings.messages';
+import { SOURCE_READER, type Reader } from '@/common/i18n/reader';
+import type { LeaderMeetingActionItem, LeaderMeetingAgendaItem } from './leader-meeting.schema';
+import { LEADER_MEETINGS_MESSAGES as SAY } from './leader-meetings.messages';
 
 /**
- * **The words a new meeting is given are its maker's** (P18.10-T5 AC-6; ADR-0179 §7): the first agenda, and the rows
- * *+ Add item* and *+ Add action item* make, are written in the language of the person who makes them — `reader`,
- * the request's — and stored as text. From then they are the office's: copied as stored, edited as typed, and read
- * as stored in both languages (ADR-0179 §5). A call with no reader is English, as before the phase; the service hands
- * them the request's reader, and one who has chosen nothing reads Indonesian since the default went live (2026-10-29).
+ * **What a new forum starts with** (P19.22-T8 AC-3, AC-4; ADR-0276, amending ADR-0130 §3).
+ *
+ * - **The agenda** is the office's previous forum's — each line's text and PIC, **every box unticked**, each line a new
+ *   one with an id of its own — or, in an office with none, the mockup's three lines, written in the language of the
+ *   person making the forum and stored as text (ADR-0179 §7).
+ * - **The action items** are the previous forum's that are not *Selesai*, copied: a new id, **the same lineage**, its
+ *   text, PIC, *tenggat* and state, and *dari forum #n* — the number of the forum its lineage began in.
  */
 
-/** The month before a meeting's month, in English: *September* for a meeting on 13 October. */
-export function monthBefore(meetingDate: string): string {
-  const month = Number(meetingDate.slice(5, 7));
-  return MONTH_NAMES.en[(month + 10) % 12];
-}
-
-/** A meeting's own month in full, in English unless asked: *October* — *Oktober* — for 27 October (ADR-0176 §11). */
-export function meetingMonth(meetingDate: string, language: Language = 'en'): string {
-  return MONTH_NAMES[language][Number(meetingDate.slice(5, 7)) - 1];
+/** A fresh agenda line: its own id, unticked, at version 1. */
+function agendaLine(itemId: string, text: string, picMembershipId: string | null, picAll: boolean): LeaderMeetingAgendaItem {
+  return { itemId, text, picMembershipId, picAll, done: false, version: 1 };
 }
 
 /**
- * ***"Prepare {month} performance data"*** (`KPM_Owner.html:2501`), **naming the meeting's own month** — *October* for
- * a meeting on 27 October (ADR-0176 §11, amending ADR-0130 §3; P18.9-T2 AC-4, the client's UI-015, who read the month
- * before as a date left behind) — in `reader`'s language: *Siapkan data kinerja Oktober*.
+ * **An office's first agenda** (the SLF mockup's checklist, `slf-tablet` frame 6): *Review angka MAPA driver dan informal
+ * group* · *Update action items* (PIC *Semua*) · *Kesepakatan dan action items baru*, in `reader`'s language.
  */
-export const preparePerformanceData = (meetingDate: string, reader: Reader = SOURCE_READER): string =>
-  render(SAY.preparePerformanceData({ month: Number(meetingDate.slice(5, 7)) }), reader);
-
-/**
- * The language a month item is written in — any meeting's, in either language, with nothing a leader typed around
- * it — or `null` for every other text.
- */
-function monthItemLanguage(text: string): Language | null {
-  return LANGUAGES.find((language) => MONTH_NAMES[language].some((_, i) =>
-    render(SAY.preparePerformanceData({ month: i + 1 }), readerIn(language)) === text)) ?? null;
+export function firstAgenda(newId: () => string, reader: Reader = SOURCE_READER): LeaderMeetingAgendaItem[] {
+  return [
+    agendaLine(newId(), render(SAY.reviewNumbers, reader), null, false),
+    agendaLine(newId(), render(SAY.updateActionItems, reader), null, true),
+    agendaLine(newId(), render(SAY.agreeNewItems, reader), null, false),
+  ];
 }
 
-/**
- * **An agenda item's text for a new meeting** (ADR-0176 §11; P18.9-T2 AC-4): the month item re-dated to the new
- * meeting's month, **in the language it was written in** — the agenda is copied as stored; every other item, and a
- * month item a leader reworded, as typed.
- */
-export function redated(text: string, meetingDate: string): string {
-  const language = monthItemLanguage(text);
-  return language === null ? text : preparePerformanceData(meetingDate, readerIn(language));
-}
-
-/**
- * **An office's first agenda** (ADR-0130 §3): the prototype's ten items (`KPM_Owner.html:2500-2513`) verbatim —
- * three for *Preparation*, five for *During*, two for *Post* — **their PICs empty** (the prototype's *Wilson* is
- * its mock Owner), and *"Prepare {month} performance data"* naming the meeting's own month (ADR-0176 §11, where it
- * named the month before). *RBDO/BDO* verbatim and unexpanded (D-copy, OD-26). **In `reader`'s language** (AC-6).
- */
-export function firstAgendaTexts(meetingDate: string, reader: Reader = SOURCE_READER): Record<AgendaSection, string[]> {
-  return {
-    preparation: [
-      render(SAY.compileFollowUps, reader),
-      preparePerformanceData(meetingDate, reader),
-      render(SAY.reviewScorecard, reader),
-    ],
-    during: [
-      render(SAY.processUpdate, reader),
-      render(SAY.performanceReview, reader),
-      render(SAY.prioritiesCorporate, reader),
-      render(SAY.prioritiesAgency, reader),
-      render(SAY.summarizeNextSteps, reader),
-    ],
-    post: [
-      render(SAY.documentOutcomes, reader),
-      render(SAY.noteFeedback, reader),
-    ],
-  };
-}
-
-/** A fresh item: its own id, unticked, at version 1. */
-function item(itemId: string, text: string, pic: string): LeaderMeetingAgendaItem {
-  return { itemId, text, pic, done: false, version: 1 };
-}
-
-/**
- * **What a new meeting's agenda starts from** (D-forum-model, ADR-0130 §3): the office's latest meeting's — each
- * item's text and PIC, in its three sections, **every box unticked**, each item a new one with an id of its own, **its
- * month item re-dated to the new meeting's month** (ADR-0176 §11; P18.9-T2 AC-4) — or, in an office with none, the
- * first agenda above, **in the language of the person making the meeting** (P18.10-T5 AC-6). Nothing of the tracker
- * is carried: a new meeting has no rows.
- */
+/** **A new forum's agenda**: the previous forum's lines, unticked, each with a new id — or the first agenda. */
 export function startingAgenda(
-  meetingDate: string, previous: LeaderMeetingAgenda | null, newId: () => string, reader: Reader = SOURCE_READER,
-): LeaderMeetingAgenda {
-  if (previous) {
-    const copy = (items: readonly LeaderMeetingAgendaItem[] | undefined) =>
-      (items ?? []).map((from) => item(newId(), redated(from.text, meetingDate), from.pic));
-    return { preparation: copy(previous.preparation), during: copy(previous.during), post: copy(previous.post) };
-  }
-  const texts = firstAgendaTexts(meetingDate, reader);
+  previous: readonly LeaderMeetingAgendaItem[] | null, newId: () => string, reader: Reader = SOURCE_READER,
+): LeaderMeetingAgendaItem[] {
+  if (previous === null) return firstAgenda(newId, reader);
+  return previous.map((from) => agendaLine(newId(), from.text, from.picMembershipId ?? null, from.picAll === true));
+}
+
+/**
+ * **A copy of an action item carried into a later forum** (ADR-0276): a new id, the same lineage, the same text, PIC,
+ * *tenggat* and state, and the number of the forum its lineage began in — `origin`, the forum it is copied from, when
+ * the item was raised there.
+ */
+export function carriedCopy(
+  from: Pick<LeaderMeetingActionItem, 'lineageId' | 'text' | 'picMembershipId' | 'dueOn' | 'status' | 'fromNumber'>,
+  origin: number, itemId: string, order: number,
+): LeaderMeetingActionItem {
   return {
-    preparation: texts.preparation.map((text) => item(newId(), text, '')),
-    during: texts.during.map((text) => item(newId(), text, '')),
-    post: texts.post.map((text) => item(newId(), text, '')),
+    itemId,
+    lineageId: from.lineageId,
+    text: from.text,
+    picMembershipId: from.picMembershipId ?? null,
+    dueOn: from.dueOn ?? null,
+    status: from.status,
+    fromNumber: from.fromNumber ?? origin,
+    order,
+    version: 1,
   };
 }
 
-/** *+ Add item* (`:2863`): *"New agenda item"* — *Item agenda baru* — no PIC, unticked; in the adder's language. */
-export function newAgendaItemText(reader: Reader = SOURCE_READER): string {
-  return render(SAY.newAgendaItem, reader);
-}
-
-/** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*; its words in the adder's language. */
-export function newActionItem(reader: Reader = SOURCE_READER) {
-  return {
-    initiative: render(SAY.newInitiative, reader),
-    metric: render(SAY.successMetric, reader),
-    action: render(SAY.newActionItem, reader),
-    pic: render(SAY.tbd, reader),
-    status: 'not_planned' as const,
-    remarks: render(SAY.tbd, reader),
-  };
+/** **The action items a new forum starts with**: the previous forum's not *Selesai*, copied in their order. */
+export function carriedItems(
+  previous: { number: number; actionItems: readonly LeaderMeetingActionItem[] } | null, newId: () => string,
+): LeaderMeetingActionItem[] {
+  if (!previous) return [];
+  return [...previous.actionItems]
+    .sort((a, b) => a.order - b.order)
+    .filter((item) => item.status !== 'done')
+    .map((item, order) => carriedCopy(item, previous.number, newId(), order));
 }

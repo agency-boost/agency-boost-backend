@@ -33,6 +33,10 @@ const ACTIONS = {
   'activity_binding.updated': { en: 'Activity binding changed', id: 'Pengikatan aktivitas diubah' },
   // P19.5-T3 (ADR-0215 §7): a KPM's MAPA or sub-group target, with its value before and after.
   'advanced_analytics.target_set': { en: 'Advanced analytics target set', id: 'Target Advanced analytics diatur' },
+  // P19.17-T4 (ADR-0270 §4): an AB group's *Target Active Agent* and *Target Rekrut* for a month, before and after.
+  'ab_group_target.set': { en: 'AB group target set', id: 'Target AB group diatur' },
+  // P19.23-T6 AC-4 (ADR-0279): *Pengumuman*, sent from the platform console.
+  'announcement.sent': { en: 'Announcement sent', id: 'Pengumuman dikirim' },
   'activity_category.archived': { en: 'Activity section archived', id: 'Bagian aktivitas diarsipkan' },
   'activity_category.created': { en: 'Activity section added', id: 'Bagian aktivitas ditambahkan' },
   'activity_category.reordered': { en: 'Activity sections reordered', id: 'Urutan bagian aktivitas diubah' },
@@ -71,6 +75,8 @@ const ACTIONS = {
   'coaching_session.reopened': { en: 'Coaching session reopened', id: 'Sesi coaching dibuka kembali' },
   'company.created': { en: 'Company created', id: 'Perusahaan dibuat' },
   'company.updated': { en: 'Company changed', id: 'Perusahaan diubah' },
+  // P19.23-T4 AC-1 (ADR-0278 §3): *Perusahaan baru*, a company set up from a copy of another's template.
+  'company.set_up': { en: 'Company set up from a copy', id: 'Perusahaan disiapkan dari salinan' },
   'company_template.applied': { en: 'Template applied to KPMs', id: 'Template diterapkan ke KPM' },
   'company_template.draft_saved': { en: 'Template draft saved', id: 'Draf template disimpan' },
   'company_template.material_saved': { en: 'Template material saved', id: 'Materi template disimpan' },
@@ -79,6 +85,8 @@ const ACTIONS = {
   },
   'company_template.material_uploaded': { en: 'Template material uploaded', id: 'Materi template diunggah' },
   'company_template.published': { en: 'Template published', id: 'Template diterbitkan' },
+  // P19.23-T4 (ADR-0278 §5): *Terbitkan ke KPM*, the changes chosen published to the KPMs chosen.
+  'company_template.published_to_kpms': { en: 'Template published to KPMs', id: 'Template diterbitkan ke KPM' },
   'event.archived': { en: 'Event archived', id: 'Event diarsipkan' },
   'event.attendance_claimed': { en: 'Attendance claimed', id: 'Kehadiran diklaim' },
   'event.attendance_cleared': { en: 'Attendance cleared', id: 'Kehadiran dikosongkan' },
@@ -104,6 +112,8 @@ const ACTIONS = {
   'group.updated': { en: 'Group changed', id: 'Grup diubah' },
   'impersonation.ended': { en: 'View-as session ended', id: 'Sesi lihat sebagai diakhiri' },
   'impersonation.started': { en: 'View-as session started', id: 'Sesi lihat sebagai dimulai' },
+  // P19.23-T2 AC-7 (ADR-0277): *Lihat sebagai*'s new window took up its session.
+  'impersonation.window_opened': { en: 'View-as window opened', id: 'Jendela lihat sebagai dibuka' },
   'kpm.active': { en: 'KPM reactivated', id: 'KPM diaktifkan kembali' },
   // P19.6-T1 AC-15 (ADR-0218 §13): *Tampilan KPM* saved, and *Kembalikan ke default*.
   'kpm_branding.updated': { en: 'KPM branding changed', id: 'Tampilan KPM diubah' },
@@ -116,6 +126,10 @@ const ACTIONS = {
   'kpm.identity_updated': { en: 'Branch info changed', id: 'Info cabang diubah' },
   'kpm.owner_assigned': { en: 'Owner set', id: 'Owner ditetapkan' },
   'kpm.owner_invited': { en: 'Owner invited', id: 'Owner diundang' },
+  // P19.24 (ADR-0280 §6): *Laporan KPM* — made (*Unduh PDF*), a *Kirim ke owner* link made, and that link opened.
+  'kpm_report.built': { en: 'KPM report made', id: 'Laporan KPM dibuat' },
+  'kpm_report.link_made': { en: 'KPM report link made for the owner', id: 'Tautan laporan KPM dibuat untuk owner' },
+  'kpm_report.link_opened': { en: 'KPM report link opened', id: 'Tautan laporan KPM dibuka' },
   'kpm.owner_transferred': { en: 'Owner changed', id: 'Owner diganti' },
   'kpm.pending_owner_set': { en: 'Owner named, not yet invited', id: 'Owner dicatat, belum diundang' },
   'kpm.subscription_updated': { en: 'Subscription changed', id: 'Langganan diubah' },
@@ -170,6 +184,8 @@ const ACTIONS = {
   'leader_meeting.frozen': { en: 'Forum meeting closed', id: 'Pertemuan forum ditutup' },
   'leader_meeting.monthly_target_saved': { en: 'Forum monthly target saved', id: 'Target bulanan forum disimpan' },
   'leader_meeting.rescheduled': { en: 'Forum meeting rescheduled', id: 'Jadwal pertemuan forum diubah' },
+  // P19.22-T8 (ADR-0276; migration `0076`): a forum's agenda and action items carried into the one-agenda shape.
+  'leader_meeting.reshaped': { en: 'Forum meeting reshaped to one agenda', id: 'Pertemuan forum disusun ulang menjadi satu agenda' },
   'leader_meeting_share_link.created': { en: 'Forum share link made', id: 'Tautan berbagi forum dibuat' },
   'leader_meeting_share_link.opened': { en: 'Forum share link opened', id: 'Tautan berbagi forum dibuka' },
   'leader_meeting_share_link.revoked': { en: 'Forum share link revoked', id: 'Tautan berbagi forum dicabut' },
@@ -179,6 +195,8 @@ const ACTIONS = {
   'leader_request.created': { en: 'Leader requested', id: 'Leader diminta' },
   'leader_request.declined': { en: 'Leader request declined', id: 'Permintaan leader ditolak' },
   'member.personal_completed': { en: 'Member’s details completed', id: 'Data anggota dilengkapi' },
+  // P19.20-T2 (ADR-0273 §3): any field of the member sheet, before and after.
+  'member.details_edited': { en: 'Member’s details changed', id: 'Data anggota diubah' },
   'member.phone_updated': { en: 'WhatsApp number changed', id: 'No. WhatsApp diubah' },
   // P19.12-T4 (ADR-0247 §2): somebody moved to another leader at once, with everybody under them.
   'member.leader_changed': { en: 'Member’s leader changed', id: 'Leader anggota diganti' },
@@ -198,6 +216,26 @@ const ACTIONS = {
   'org_level.created': { en: 'Role added', id: 'Peran ditambahkan' },
   'org_level.deleted': { en: 'Role deleted', id: 'Peran dihapus' },
   'org_level.updated': { en: 'Role changed', id: 'Peran diubah' },
+  // P19.15-T4 (ADR-0260 §4): *Kelola data produk* given for ticked insurers, its companies changed, and removed.
+  'product_data_grant.granted': { en: 'Product data access given', id: 'Kelola data produk diberikan' },
+  'product_data_grant.changed': { en: 'Product data access insurers changed', id: 'Perusahaan Kelola data produk diubah' },
+  'product_data_grant.revoked': { en: 'Product data access removed', id: 'Kelola data produk dicabut' },
+  // P19.15-T1 (ADR-0258): a premium table version's life, and *Isian*'s changes to a product's proposal setup.
+  'rate_table.uploaded': { en: 'Premium table uploaded', id: 'Tabel premi diunggah' },
+  'rate_table.updated': { en: 'Premium table draft changed', id: 'Draf tabel premi diubah' },
+  'rate_table.tested': { en: 'Premium table tested with 3 profiles', id: 'Tabel premi diuji 3 contoh' },
+  'rate_table.activated': { en: 'Premium table activated', id: 'Tabel premi diaktifkan' },
+  'rate_table.turned_off': { en: 'Premium table turned off', id: 'Tabel premi dimatikan' },
+  'rate_table.deleted': { en: 'Premium table deleted', id: 'Tabel premi dihapus' },
+  'product_rules.updated': { en: 'Product proposal setup changed', id: 'Isian proposal produk diubah' },
+  // P19.15-T2, T3 (ADR-0259): *Unggah file*'s upload, a question answered, a card applied or rejected; an illustration's life.
+  'intake.uploaded': { en: 'Files uploaded for reading', id: 'File diunggah untuk dibaca' },
+  'intake.answered': { en: 'Upload question answered', id: 'Pertanyaan unggahan dijawab' },
+  'intake.applied': { en: 'Upload card applied', id: 'Kartu unggahan diterapkan' },
+  'intake.rejected': { en: 'Upload card rejected', id: 'Kartu unggahan ditolak' },
+  'illustration.uploaded': { en: 'Illustration uploaded', id: 'Ilustrasi diunggah' },
+  'illustration.edited': { en: 'Illustration blocks edited', id: 'Bagian ilustrasi diubah' },
+  'illustration.published': { en: 'Illustration published to the PDF', id: 'Ilustrasi diterbitkan ke PDF' },
   // P19.12-T2 (ADR-0245 §1): *All members* › *Akun terdaftar*, each read.
   'platform_read.accounts': { en: 'Account list viewed', id: 'Daftar akun dilihat' },
   'platform_read.company_kpms': { en: 'Company’s KPMs & data viewed', id: 'KPM & data perusahaan dilihat' },
@@ -215,10 +253,19 @@ const ACTIONS = {
     'KPM monthly data viewed', 'Data bulanan KPM dilihat',
   ),
   'platform_read.members': { en: 'Member list viewed', id: 'Daftar anggota dilihat' },
+  // P19.23-T3 (ADR-0277): *Anggota*'s detail — a member's phone and email — each read.
+  'platform_read.member_detail': { en: 'Member details viewed', id: 'Detail anggota dilihat' },
+  // P19.23-T6 AC-3 (ADR-0279): *Pengaturan platform* saved.
+  'platform_settings.updated': { en: 'Platform settings changed', id: 'Pengaturan platform diubah' },
   'platform_template.draft_saved': { en: 'Template draft saved', id: 'Draf template disimpan' },
   'platform_template.published': { en: 'Template published', id: 'Template diterbitkan' },
   'product.created': { en: 'Product added', id: 'Produk ditambahkan' },
   'product.deleted': { en: 'Product deleted', id: 'Produk dihapus' },
+  // P19.23-T4 (ADR-0278 §4): a product's draft, and its release to KPMs by *Terbitkan ke KPM*.
+  'product.draft_created': { en: 'Product added as a draft', id: 'Produk ditambahkan sebagai draf' },
+  'product.draft_discarded': { en: 'Product draft discarded', id: 'Draf produk dibuang' },
+  'product.draft_saved': { en: 'Product draft saved', id: 'Draf produk disimpan' },
+  'product.released': { en: 'Product published to KPMs', id: 'Produk diterbitkan ke KPM' },
   'product.objections_split': { en: 'Objections split into cards', id: 'Keberatan dipecah menjadi kartu' },
   'product.reordered': { en: 'Products reordered', id: 'Urutan produk diubah' },
   'product.updated': { en: 'Product changed', id: 'Produk diubah' },
@@ -234,6 +281,7 @@ const ACTIONS = {
   'ratio.restored': { en: 'Ratio restored', id: 'Rasio dipulihkan' },
   'ratio.updated': { en: 'Ratio changed', id: 'Rasio diubah' },
   'recruitment_pitch.attached': { en: 'Recruitment material attached', id: 'Materi rekrutmen dilampirkan' },
+  'recruitment_pitch.linked': { en: 'Recruitment material set to a link', id: 'Materi rekrutmen diganti dengan link' },
   'recruitment_pitch.ticked': { en: 'Recruitment material ticked', id: 'Materi rekrutmen dicentang' },
   'recruitment_pitch.unticked': { en: 'Recruitment material unticked', id: 'Centang materi rekrutmen dibatalkan' },
   'recruitment_playbook.saved': { en: 'Recruitment playbook saved', id: 'Panduan rekrutmen disimpan' },
@@ -243,6 +291,9 @@ const ACTIONS = {
   'roster.member_updated': { en: 'Member updated by an import', id: 'Anggota diperbarui lewat impor' },
   'sales_script.approved': { en: 'Sales script approved', id: 'Naskah penjualan disetujui' },
   'sales_script.rejected': { en: 'Sales script returned', id: 'Naskah penjualan dikembalikan' },
+  // P19.23-T6 AC-2 (ADR-0279): *Tim Super Admin* — somebody made one, or the role taken away.
+  'super_admin.granted': { en: 'Super Admin added', id: 'Super Admin ditambahkan' },
+  'super_admin.revoked': { en: 'Super Admin removed', id: 'Super Admin dicabut' },
   // P19.5-T4 (ADR-0216 §3): a KPM's survey runs. An answer is never recorded.
   'survey_run.cancelled': { en: 'Survey cancelled', id: 'Survei dibatalkan' },
   'survey_run.created': { en: 'Survey started', id: 'Survei dimulai' },
@@ -277,12 +328,15 @@ const ACTIONS = {
   'transfer_request.created': { en: 'Transfer requested', id: 'Perpindahan diminta' },
   'transfer_request.declined': { en: 'Transfer declined', id: 'Perpindahan ditolak' },
   'upload.cell_corrected': { en: 'Uploaded figure corrected', id: 'Angka unggahan diperbaiki' },
+  'upload.cell_restored': { en: 'Corrected figure put back to the file’s', id: 'Angka koreksi dikembalikan ke angka dari file' },
   'upload.commit': { en: 'Monthly data uploaded', id: 'Data bulanan diunggah' },
   'upload.month_locked': { en: 'Month locked', id: 'Bulan dikunci' },
   'upload.month_reopened': { en: 'Month reopened', id: 'Bulan dibuka kembali' },
   'upload.revert': { en: 'Upload undone', id: 'Unggahan dibatalkan' },
   'user.email_change_requested': { en: 'Email change requested', id: 'Perubahan email diminta' },
   'user.email_changed': { en: 'Email changed', id: 'Email diubah' },
+  // P19.23-T3 (ADR-0267 §1; ADR-0277): *Anggota*'s *Akun tes* switch.
+  'user.test_account_set': { en: 'Test account flag changed', id: 'Tanda akun tes diubah' },
 } as const satisfies Record<string, ActionEntry>;
 
 /** The kind of thing each collection a row names holds, as the page writes it before the thing's name. */
@@ -316,6 +370,8 @@ const TARGETS = {
   joinRequests: { en: 'Join request', id: 'Permintaan bergabung' },
   kpmProductConfigs: { en: 'KPM product', id: 'Produk KPM' },
   kpmRecruitTargets: { en: 'Recruitment target', id: 'Target rekrutmen' },
+  // P19.17-T4 (ADR-0270 §4): an AB group's monthly targets.
+  abGroupTargets: { en: 'AB group target', id: 'Target AB group' },
   kpmRecruitmentPitchDocuments: { en: 'Recruitment material', id: 'Materi rekrutmen' },
   kpmRequests: { en: 'KPM request', id: 'Permintaan KPM' },
   kpms: { en: 'Office', id: 'Kantor' },
@@ -334,6 +390,13 @@ const TARGETS = {
   productionMonths: { en: 'Data month', id: 'Bulan data' },
   surveyRuns: { en: 'Survey', id: 'Survei' },
   products: { en: 'Product', id: 'Produk' },
+  // P19.15-T4 (ADR-0260): one person's *Kelola data produk*.
+  productDataGrants: { en: 'Product data access', id: 'Akses Kelola data produk' },
+  // P19.15-T1 (ADR-0258): a premium table version.
+  rateTables: { en: 'Premium table', id: 'Tabel premi' },
+  uploadIntakes: { en: 'Upload', id: 'Unggahan' },
+  intakeItems: { en: 'Upload card', id: 'Kartu unggahan' },
+  illustrations: { en: 'Illustration', id: 'Ilustrasi' },
   proposals: { en: 'Proposal', id: 'Proposal' },
   kpmBranding: { en: 'KPM branding', id: 'Tampilan KPM' },
   ratioDefinitions: { en: 'Ratio', id: 'Rasio' },
@@ -345,6 +408,9 @@ const TARGETS = {
   trainingSkills: { en: 'Training skill', id: 'Skill training' },
   transferRequests: { en: 'Transfer request', id: 'Permintaan perpindahan' },
   users: { en: 'Account', id: 'Akun' },
+  // P19.23-T6 (ADR-0279): the platform console's own records.
+  announcements: { en: 'Announcement', id: 'Pengumuman' },
+  platformSettings: { en: 'Platform settings', id: 'Pengaturan platform' },
 } as const satisfies Record<string, Message>;
 
 /** A template section's name, by the kind its rows hold — the template editor's own words (`admin-template.tsx`). */

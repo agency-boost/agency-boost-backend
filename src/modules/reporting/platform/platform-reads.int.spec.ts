@@ -4,23 +4,16 @@ import { Test } from '@nestjs/testing';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
-import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
-import { KPM_COMPARISON_SORTS, PLATFORM_READ, type KpmComparisonSort } from '@/domain/constants';
-import { MemberNames } from '@/modules/org/member-names.service';
-import { DataUploadBatch, DataUploadBatchSchema } from '@/modules/production/data-upload-batch.schema';
-import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
+import { PLATFORM_READ } from '@/domain/constants';
 import { COMPANY } from '../../../../test/coaching-office';
 import {
   KPM_A, KPM_B, startComplianceHarness, stopComplianceHarness, type ComplianceHarness,
 } from '../../../../test/compliance-office';
 import { declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../../test/http-permissions';
 import { listenOnLoopback } from '../../../../test/listen';
-import { ComplianceController } from '../compliance/compliance.controller';
-import { ComplianceService } from '../compliance/compliance.service';
-import { KpmAnalyticsService } from '../kpm-analytics.service';
 import { KpmOverviewService } from '../kpm-overview.service';
-import { KpmAnalyticsController, KpmOverviewController } from '../reporting.controller';
+import { KpmOverviewController } from '../reporting.controller';
 import { PlatformReadsController } from './platform-reads.controller';
 import { PlatformReads } from './platform-reads.service';
 
@@ -28,10 +21,13 @@ import { PlatformReads } from './platform-reads.service';
 const MANULIFE = '66f0000000000000000000c2';
 const KPM_C = '66f0000000000000000000d1';
 
-/** Every field a row of *All members* carries (ADR-0207 §2), and nothing else. */
+/**
+ * Every field a row of *All members* carries (ADR-0207 §2), and nothing else — with *Anggota*'s since P19.23-T3
+ * (ADR-0277): the account, its photo, *Akun tes* and the server's *Terakhir pakai* bucket. Never a phone or an email.
+ */
 const MEMBER_FIELDS = [
-  'agentCode', 'company', 'fullName', 'invitation', 'joinedOn', 'kpm', 'lastActiveOn', 'leader', 'membershipId', 'role',
-  'status',
+  'agentCode', 'avatarUrl', 'company', 'fullName', 'invitation', 'joinedOn', 'kpm', 'lastActive', 'lastActiveOn', 'leader',
+  'membershipId', 'role', 'status', 'testAccount', 'userId',
 ].sort();
 
 /**
@@ -54,10 +50,6 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
   const since = async (at: mongoose.mongo.ObjectId | null, action?: string) => db().collection('auditLog').find({
     ...(at ? { _id: { $gt: at } } : {}), ...(action ? { action } : {}),
   }).toArray();
-  /** Every collection's document count but the audit log's: a read that only looks moves none. */
-  const counts = async () => Object.fromEntries(await Promise.all((await db().listCollections().toArray())
-    .map((c) => c.name).filter((n) => n !== 'auditLog').sort()
-    .map(async (n) => [n, await db().collection(n).countDocuments()] as const)));
   let crossUserId: string;
 
   beforeAll(async () => {
@@ -100,20 +92,16 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
       asOf: null, deletedAt: null,
     });
 
-    const batchModel = mongoose.models[DataUploadBatch.name] ?? mongoose.model(DataUploadBatch.name, DataUploadBatchSchema);
     reads = new PlatformReads(
       h.wired.kpms as never, h.wired.companies as never, h.wired.users as never, h.wired.memberships,
-      h.wired.orgLevels, h.wired.activityReadings, h.wired.kpmOverview, h.wired.kpmAnalytics, h.compliance,
-      h.wired.productionReadings, new DataUploadBatchRepository(batchModel as never),
-      new MemberNames(h.wired.memberships, h.wired.users as never), h.wired.officePeople, h.wired.audit, h.wired.clock,
+      h.wired.orgLevels, h.wired.activityReadings, h.wired.productionReadings, h.wired.officePeople, h.wired.audit,
+      h.wired.clock,
     );
     const moduleRef = await Test.createTestingModule({
-      controllers: [PlatformReadsController, KpmOverviewController, KpmAnalyticsController, ComplianceController],
+      controllers: [PlatformReadsController, KpmOverviewController],
       providers: [
         { provide: PlatformReads, useValue: reads },
         { provide: KpmOverviewService, useValue: h.wired.kpmOverview },
-        { provide: KpmAnalyticsService, useValue: h.wired.kpmAnalytics },
-        { provide: ComplianceService, useValue: h.compliance },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -134,17 +122,14 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
       members: 'platform_members:read',
       // P19.12-T2 AC-1 (ADR-0245 §1): *Akun terdaftar*, under the same grant (`platform-accounts.int.spec.ts`).
       accounts: 'platform_members:read',
-      comparison: 'platform_kpm_figures:read',
-      analytics: 'platform_kpm_figures:read',
-      compliance: 'platform_kpm_figures:read',
-      data: 'platform_kpm_figures:read',
+      // *Lihat sebagai KPM*'s analytics and compliance were removed with KPM Analytics (P19.19-T4 AC-1; ADR-0272 §8), the
+      // comparison and *Data bulanan* with the console's rebuild (P19.23; ADR-0277).
       companyKpms: 'platform_kpm_figures:read',
     });
   });
 
   const ROUTES = [
-    `/admin/members`, `/admin/analytics/kpms`, `/admin/tenants/${KPM_A}/analytics`,
-    `/admin/tenants/${KPM_A}/analytics/compliance`, `/admin/tenants/${KPM_A}/data`, `/admin/companies/${COMPANY}/kpms`,
+    `/admin/members`, `/admin/companies/${COMPANY}/kpms`,
   ];
 
   describe('P19.4-T3 AC-16 the Super Admin’s alone', () => {
@@ -163,18 +148,13 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
       for (const path of ROUTES) await http().get(path).expect(403);
     });
 
-    it('P19.4-T3 AC-16 negative: a context that is no platform read cannot reach the `…ForOffice` reads', async () => {
-      await expect(h.wired.kpmOverview.figuresForOffice(h.office.as('OWNER'))).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
-      await expect(h.wired.kpmAnalytics.analyticsForOffice(RequestContext.superAdminInTenant('root', KPM_A)))
-        .rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
-      await expect(h.compliance.complianceForOffice(h.supporting('OWNER'))).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
-    });
-
     it('P19.4-T3 AC-16 positive: the Super Admin reads each, and an unknown or malformed KPM is 404', async () => {
       asSuperAdmin();
       for (const path of ROUTES) await http().get(path).expect(200);
-      await http().get(`/admin/tenants/${new mongoose.Types.ObjectId()}/analytics`).expect(404);
-      await http().get('/admin/tenants/not-an-id/data').expect(404);
+      // P19.19-T4 AC-1, P19.23 (ADR-0277): the removed reads answer as no route does.
+      await http().get(`/admin/tenants/${KPM_A}/analytics`).expect(404);
+      await http().get(`/admin/tenants/${KPM_A}/data`).expect(404);
+      await http().get('/admin/analytics/kpms').expect(404);
       await http().get(`/admin/companies/${new mongoose.Types.ObjectId()}/kpms`).expect(404);
     });
   });
@@ -189,7 +169,8 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
         expect(Object.keys(row).sort()).toEqual(MEMBER_FIELDS);
         expect(Object.keys(row.company).sort()).toEqual(['id', 'name']);
         expect(Object.keys(row.kpm).sort()).toEqual(['branch', 'code', 'id']);
-        expect(Object.keys(row.role).sort()).toEqual(['code', 'isAdmin', 'isOwner', 'label']);
+        // P19.23-T3: the rung's class, which draws *Anggota*'s orange label.
+        expect(Object.keys(row.role).sort()).toEqual(['class', 'code', 'isAdmin', 'isOwner', 'label']);
         if (row.leader !== null) expect(Object.keys(row.leader)).toEqual(['fullName']);
       }
       const text = JSON.stringify(res.body);
@@ -199,13 +180,13 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
     it('P19.4-T3 AC-2 (SA case 1) a name finds the row with every field', async () => {
       asSuperAdmin();
       const res = await http().get('/admin/members').query({ q: 'indah perm' }).expect(200);
-      expect(res.body.rows).toEqual([{
+      expect(res.body.rows).toEqual([expect.objectContaining({
         membershipId: h.id('INDAH'), fullName: 'Indah Permatasari', agentCode: expect.any(String),
         company: { id: COMPANY, name: 'Prudential' }, kpm: { id: KPM_A, code: '0417', branch: 'A' },
-        role: { code: 'AGENT', label: expect.any(String), isOwner: false, isAdmin: false },
+        role: expect.objectContaining({ code: 'AGENT', label: expect.any(String), isOwner: false, isAdmin: false }),
         leader: { fullName: 'Agus Salim' }, status: 'active', invitation: 'signed_in', joinedOn: '2026-01-02',
         lastActiveOn: '2026-09-10',
-      }]);
+      })]);
     });
 
     it('P19.4-T3 AC-1 a phone number finds its person however it is typed, and an email too — neither returned', async () => {
@@ -291,128 +272,13 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
     });
   });
 
-  describe('P19.4-T3 AC-3 — the KPM comparison', () => {
-    it('P19.4-T3 AC-3 each cell equals the same figure on that KPM’s /kpm/overview, field by field', async () => {
-      asSuperAdmin();
-      const res = await http().get('/admin/analytics/kpms').expect(200);
-      expect(res.body).toMatchObject({ page: 1, pageSize: PLATFORM_READ.PAGE_SIZE, total: 3, sort: 'kpm' });
-      expect(res.body.rows.map((r: { code: string }) => r.code)).toEqual(['0417', '0555', 'M01']);
-      for (const [kpmId, owner] of [[KPM_A, h.office.as('OWNER')], [KPM_B, h.ownerOfB()]] as const) {
-        session.current = owner;
-        const overview = (await http().get('/kpm/overview').expect(200)).body;
-        const row = res.body.rows.find((r: { kpmId: string }) => r.kpmId === kpmId);
-        expect(Object.keys(row).sort()).toEqual(
-          ['activeThisMonth', 'activeUsers', 'branch', 'coached', 'code', 'company', 'kpmId', 'members', 'production', 'recruitment'],
-        );
-        expect(row.members).toBe(overview.composition.total);
-        const { asOf: _asOf, ...active } = overview.engagement.activeThisMonth;
-        expect(row.activeThisMonth).toEqual(active);
-        expect(row.activeUsers).toEqual(overview.engagement.loggedThisWeek);
-        expect(row.coached).toEqual({ d7: overview.coaching.coverage7d, d30: overview.coaching.coverage30d });
-        expect(row.production).toEqual({
-          achievedMinor: overview.production.ytd.achievedMinor, targetMinor: overview.production.ytd.targetMinor,
-          pct: overview.production.ytd.pct,
-        });
-        expect(row.recruitment).toEqual({ pipeline: overview.recruitment.pipelineNow, target: overview.recruitment.target });
-      }
-    });
-
-    it('P19.4-T3 AC-3 filters by company and sorts by a column, a KPM with no figure last', async () => {
-      asSuperAdmin();
-      const manulife = await http().get('/admin/analytics/kpms').query({ companyId: MANULIFE }).expect(200);
-      expect(manulife.body.rows.map((r: { code: string }) => r.code)).toEqual(['M01']);
-      const desc = await http().get('/admin/analytics/kpms').query({ sort: '-members' }).expect(200);
-      const members = desc.body.rows.map((r: { members: number }) => r.members);
-      expect(members).toEqual([...members].sort((a, b) => b - a));
-      await http().get('/admin/analytics/kpms').query({ sort: 'rank' }).expect(400);
-    });
-
-    it('P19.4-T3 AC-3 audited once in the platform’s log and once in each KPM’s; nothing in any KPM is written', async () => {
-      asSuperAdmin();
-      const before = await counts();
-      const at = await mark();
-      await http().get('/admin/analytics/kpms').expect(200);
-      const rows = await since(at);
-      expect(rows.map((r) => [r.action, r.kpmId]).sort()).toEqual([
-        [PLATFORM_READ.ACTION.kpmComparison, KPM_A], [PLATFORM_READ.ACTION.kpmComparison, KPM_B],
-        [PLATFORM_READ.ACTION.kpmComparison, KPM_C], [PLATFORM_READ.ACTION.kpmComparison, null],
-      ].sort());
-      expect(rows.find((r) => r.kpmId === null)!.after).toMatchObject({ purpose: PLATFORM_READ.PURPOSE.figures, rows: 3 });
-      expect(await counts()).toEqual(before);
-    });
-  });
-
-  describe('P19.4-T3 AC-4 — Lihat sebagai KPM (and P19.4-T2 AC-6)', () => {
-    /** The reader's own flags aside — the Owner is a reader of the page, the Super Admin nobody in it. */
-    const asOffice = (view: { leaders: { head: { isReader: boolean } }[]; agencies: unknown[] }) => JSON.parse(
-      JSON.stringify(view).replace(/"isReader":true/g, '"isReader":false'),
-    );
-
-    it('P19.4-T3 AC-4 *Overview* is exactly what the KPM’s Owner reads, for each period', async () => {
-      for (const period of ['this_month', 'previous_month']) {
-        session.current = h.office.as('OWNER');
-        const owner = (await http().get('/kpm/analytics').query({ period }).expect(200)).body;
-        asSuperAdmin();
-        const platform = (await http().get(`/admin/tenants/${KPM_A}/analytics`).query({ period }).expect(200)).body;
-        expect(asOffice(platform)).toEqual(asOffice(owner));
-      }
-    });
-
-    it('P19.4-T3 AC-4 *Compliance* is exactly what the Owner reads, but `can.override`, which writes', async () => {
-      for (const category of ['training', 'activity', 'goals']) {
-        session.current = h.office.as('OWNER');
-        const owner = (await http().get('/kpm/analytics/compliance').query({ category }).expect(200)).body;
-        asSuperAdmin();
-        const platform = (await http().get(`/admin/tenants/${KPM_A}/analytics/compliance`).query({ category }).expect(200)).body;
-        expect(platform.can).toEqual({ override: false });
-        expect({ ...platform, can: null }).toEqual({ ...owner, can: null });
-      }
-    });
-
-    it('P19.4-T3 AC-4 (A-R8, P19.4-T2 AC-6) each visit writes its entries, and nothing else changes', async () => {
-      asSuperAdmin();
-      const before = await counts();
-      const at = await mark();
-      await http().get(`/admin/tenants/${KPM_A}/analytics`).expect(200);
-      await http().get(`/admin/tenants/${KPM_A}/analytics/compliance`).query({ category: 'campaigns' }).expect(200);
-      const visits = await since(at, PLATFORM_READ.ACTION.kpmAnalytics);
-      expect(visits.map((r) => [r.kpmId, r.after.filters?.tab ?? r.after.tab]).sort()).toEqual([
-        [KPM_A, 'compliance'], [KPM_A, 'overview'], [null, 'compliance'], [null, 'overview'],
-      ].sort());
-      for (const row of visits) expect(row).toMatchObject({ actorUserId: 'root', targetCollection: 'kpms', targetId: KPM_A });
-      expect(await counts()).toEqual(before);
-    });
-  });
-
-  describe('P19.4-T3 AC-9 — Data bulanan', () => {
-    it('P19.4-T3 AC-9 twelve months — Lengkap, Belum, — — and the uploads, by name, read-only', async () => {
-      asSuperAdmin();
-      const res = await http().get(`/admin/tenants/${KPM_A}/data`).expect(200);
-      expect(Object.keys(res.body).sort()).toEqual(['kpmId', 'months', 'uploads']);
-      expect(res.body.months).toHaveLength(PLATFORM_READ.DATA_MONTHS);
-      expect(res.body.months.map((m: { month: string }) => m.month)).toEqual([
-        '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07',
-        '2026-08', '2026-09',
-      ]);
-      expect(res.body.uploads).toEqual([{
-        month: '2026-09', by: 'Wilson Tanoto', at: '2026-09-05T03:01:00.000Z', agents: 5, note: { status: 'committed', asOf: null },
-      }]);
-      // M01, made today: its September is held, every month before it is *—*.
-      const m01 = await http().get(`/admin/tenants/${KPM_C}/data`).expect(200);
-      expect(m01.body.months[11]).toEqual({ month: '2026-09', status: 'complete' });
-      expect(new Set(m01.body.months.slice(0, 11).map((m: { status: string }) => m.status))).toEqual(new Set(['none']));
-      expect(m01.body.uploads).toEqual([]);
-    });
-
-    it('P19.4-T3 AC-9 a month the KPM existed in and did not upload is *Belum*', async () => {
-      asSuperAdmin();
-      await db().collection('kpms').updateOne({ _id: oid(KPM_B) }, { $set: { createdAt: new Date('2025-01-02T03:00:00Z') } });
-      const res = await http().get(`/admin/tenants/${KPM_B}/data`).expect(200);
-      // 0555 was made before the window: every month is its own, so a month not held is *Belum*, never *—*.
-      for (const m of res.body.months) expect(['missing', 'complete']).toContain(m.status);
-      expect(res.body.months.some((m: { status: string }) => m.status === 'missing')).toBe(true);
-    });
-  });
+  /*
+   * `P19.4-T3 AC-4 — Lihat sebagai KPM`'s *Overview* and *Compliance* were here: KPM Analytics' and its tree's read-only
+   * copies. Removed with KPM Analytics (P19.19-T4 AC-1; ADR-0272 §8); the Super Admin reads a KPM's own Overview from
+   * inside it (ADR-0268 §3), which `kpm-overview.int.spec.ts` covers. `AC-3 — the KPM comparison` and `AC-9 — Data
+   * bulanan` went with the console's rebuild (P19.23; ADR-0277): the Dashboard's *Adopsi per KPM* and the Owner's *Data
+   * upload* inside the KPM replace them.
+   */
 
   describe('P19.4-T3 AC-8 — the offices list’s data status', () => {
     it('P19.4-T3 AC-8 the latest month held, and the last ended month when it is missing and the KPM existed in it', async () => {
@@ -449,11 +315,8 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
           ? { status: 'not_enough', count: res.body.tiles.complete - 1, needed: 3 }
           : { status: 'not_counted', count: 0, needed: 3 });
       }
-      // The month's headcount and MAA are the Overview's for the current month, through the same functions.
-      session.current = h.office.as('OWNER');
-      const overview = (await http().get('/kpm/overview').expect(200)).body;
-      expect(a.manpower).toBe(overview.composition.total);
-      expect(a.maa).toBe(overview.engagement.activeThisMonth.count);
+      // The month's headcount: the office's live members (the comparison that cross-checked it went with P19.23, ADR-0277).
+      expect(a.manpower).toBeGreaterThan(0);
     });
 
     it('P19.4-T3 AC-15 a KPM with its month complete and no peer: *Belum cukup KPM pembanding (0 dari 3)*', async () => {
@@ -492,19 +355,6 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
     const GHOSTS = ['66f0000000000000000009e1', '66f0000000000000000009e2'];
     /** Kurnia Putra, active in D01 under the first of them. */
     const KID = '66f0000000000000000009e3';
-
-    type ComparisonRow = {
-      code: string; company: { name: string }; members: number; activeThisMonth: { pct: number | null };
-      activeUsers: { pct: number | null }; coached: { d7: { pct: number | null }; d30: { pct: number | null } };
-      production: { pct: number | null }; recruitment: { pipeline: number };
-    };
-    /** The figure each column of the comparison sorts by (ADR-0207 §7). */
-    const COLUMN: Record<KpmComparisonSort, (r: ComparisonRow) => string | number | null> = {
-      kpm: (r) => r.code, company: (r) => r.company.name, members: (r) => r.members,
-      activeThisMonth: (r) => r.activeThisMonth.pct, activeUsers: (r) => r.activeUsers.pct,
-      coached7d: (r) => r.coached.d7.pct, coached30d: (r) => r.coached.d30.pct,
-      production: (r) => r.production.pct, recruitment: (r) => r.recruitment.pipeline,
-    };
 
     const member = (id: string, kpmId: string, userId: string, over: Record<string, unknown> = {}) => ({
       _id: oid(id), kpmId, userId, agentCode: `EDGE-${id.slice(-3)}`, agentSeq: Number.parseInt(id.slice(-3), 16),
@@ -562,8 +412,6 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
     it('P19.4-T3 AC-16 the service is the second wall: called directly, an Owner or a view-as session is refused', async () => {
       for (const ctx of [h.office.as('OWNER'), h.supporting('OWNER')]) {
         await expect(reads.members(ctx, {})).rejects.toMatchObject({ code: 'PERM_DENIED' });
-        await expect(reads.kpmComparisonAcrossTenants(ctx, {})).rejects.toMatchObject({ code: 'PERM_DENIED' });
-        await expect(reads.kpmData(ctx, KPM_A)).rejects.toMatchObject({ code: 'PERM_DENIED' });
         await expect(reads.companyKpmsAcrossTenants(ctx, COMPANY)).rejects.toMatchObject({ code: 'PERM_DENIED' });
       }
     });
@@ -573,14 +421,15 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
       const res = await http().get('/admin/members').query({ kpmId: KPM_D }).expect(200);
       const ghost = (id: string) => ({
         membershipId: id, fullName: '', agentCode: `EDGE-${id.slice(-3)}`, company: { id: GONE_COMPANY, name: '' },
-        kpm: { id: KPM_D, code: 'D01', branch: 'Gone' }, role: { code: 'AGENT', label: 'AGENT', isOwner: false, isAdmin: false },
+        kpm: { id: KPM_D, code: 'D01', branch: 'Gone' },
+        role: expect.objectContaining({ code: 'AGENT', label: 'AGENT', isOwner: false, isAdmin: false }),
         leader: null, status: 'pending', invitation: 'not_invited', joinedOn: null, lastActiveOn: null,
       });
       expect(res.body.rows).toEqual([
-        ghost(GHOSTS[0]),
-        ghost(GHOSTS[1]),
+        expect.objectContaining(ghost(GHOSTS[0])),
+        expect.objectContaining(ghost(GHOSTS[1])),
         // Under a leader whose account is gone: a leader, but no name to give, so none.
-        { ...ghost(KID), fullName: 'Kurnia Putra', status: 'active', joinedOn: '2026-03-02' },
+        expect.objectContaining({ ...ghost(KID), fullName: 'Kurnia Putra', status: 'active', joinedOn: '2026-03-02' }),
       ]);
     });
 
@@ -594,7 +443,7 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
 
     it('P19.4-T3 AC-1 a malformed KPM id that reaches the service finds nobody — never a cast error', async () => {
       expect(await reads.members(SUPER_ADMIN, { kpmId: 'not-an-id' })).toEqual({
-        rows: [], page: 1, pageSize: PLATFORM_READ.PAGE_SIZE, total: 0,
+        rows: [], page: 1, pageSize: PLATFORM_READ.PAGE_SIZE, total: 0, kpmCount: 0,
       });
     });
 
@@ -602,60 +451,6 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
       asSuperAdmin();
       const res = await http().get('/admin/members?role=ab&role=agent').expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
-    });
-
-    it('P19.4-T3 AC-3 a KPM whose company is gone is compared with no company name, never dropped', async () => {
-      asSuperAdmin();
-      const res = await http().get('/admin/analytics/kpms').expect(200);
-      expect(res.body.rows.find((r: { kpmId: string }) => r.kpmId === KPM_D))
-        .toMatchObject({ code: 'D01', company: { id: GONE_COMPANY, name: '' } });
-    });
-
-    it('P19.4-T3 AC-3 ADR-0207 §7 every column sorts both ways — by its figure, a KPM with none last either way, a tie by code', async () => {
-      asSuperAdmin();
-      const violations: string[] = [];
-      let figureThenNone = 0;
-      let noneThenNone = 0;
-      for (const key of KPM_COMPARISON_SORTS) {
-        for (const descending of [false, true]) {
-          const sort = `${descending ? '-' : ''}${key}`;
-          const res = await http().get('/admin/analytics/kpms').query({ sort }).expect(200);
-          expect([sort, res.body.sort, res.body.rows.length]).toEqual([sort, sort, res.body.total]);
-          const rows = res.body.rows as ComparisonRow[];
-          for (let i = 1; i < rows.length; i += 1) {
-            const [a, b] = [rows[i - 1], rows[i]];
-            const [x, y] = [COLUMN[key](a), COLUMN[key](b)];
-            const byCode = a.code.localeCompare(b.code) < 0;
-            let ok: boolean;
-            if (x === null && y === null) {
-              noneThenNone += 1;
-              ok = byCode;
-            } else if (x === null) {
-              ok = false;
-            } else if (y === null) {
-              figureThenNone += 1;
-              ok = true;
-            } else {
-              const order = typeof x === 'string' ? x.localeCompare(y as string) : x - (y as number);
-              ok = order === 0 ? byCode : descending ? order > 0 : order < 0;
-            }
-            if (!ok) violations.push(`${sort}: ${a.code} (${x}) before ${b.code} (${y})`);
-          }
-        }
-      }
-      expect(violations).toEqual([]);
-      // The cases the rule is about were met: a KPM with no figure after one with, and two with none.
-      expect(figureThenNone).toBeGreaterThan(0);
-      expect(noneThenNone).toBeGreaterThan(0);
-    });
-
-    it('P19.4-T3 AC-9 an upload whose committer names nobody reads by nobody; one with no time recorded has none', async () => {
-      asSuperAdmin();
-      const res = await http().get(`/admin/tenants/${KPM_D}/data`).expect(200);
-      expect(res.body.uploads).toEqual([
-        { month: '2026-09', by: null, at: '2026-09-03T03:00:00.000Z', agents: 2, note: { status: 'reverting', asOf: '2026-09-02' } },
-        { month: '2026-08', by: null, at: null, agents: 0, note: { status: 'reverted', asOf: null } },
-      ]);
     });
 
     it('P19.4-T3 AC-15 (D4) four KPMs complete for the month: each has three peers, enough', async () => {

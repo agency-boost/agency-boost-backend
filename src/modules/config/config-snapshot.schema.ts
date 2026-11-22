@@ -4,7 +4,7 @@ import { configSchemaOptions } from '@/common/schema/base.schema';
 
 export type ConfigSnapshotDocument = HydratedDocument<ConfigSnapshot>;
 
-/** Where a published version came from (ADR-0208 §5). */
+/** Where a published version came from (ADR-0208 §5). `kpm` is the office's own *Terbitkan*, one setting or all. */
 export type ConfigSnapshotOrigin =
   | { source: 'kpm' }
   | {
@@ -83,6 +83,24 @@ export class ConfigSnapshot {
    */
   @Prop({ type: Object, default: null })
   origin!: ConfigSnapshotOrigin | null;
+
+  /**
+   * **Each setting's published version** (P19.21-T2 AC-3; ADR-0274 §5): `activity_types`, `lead_statuses`,
+   * `activation_checklist`, `training`, `capability_mapping`, `events` — what *"Agent masih memakai versi n"* names. A
+   * setting published with changes moves to the next; one carried over from the version before keeps its number.
+   * `activation_checklist` holds the activation module's own version number. Absent on a snapshot written before
+   * P19.21: every publish then rendered every setting, so each reads as the snapshot's `version` (`settingVersionsOf`).
+   */
+  @Prop({ type: Object, default: null })
+  settingVersions!: Partial<Record<string, number>> | null;
+
+  /** When each setting was last published with changes, and by whom (membership id; `null` for a platform write). */
+  @Prop({ type: Object, default: null })
+  settingPublished!: Partial<Record<string, { at: Date; by: string | null }>> | null;
+
+  /** The settings this version published (`[]` for none in particular: a template push, a sync, provisioning). */
+  @Prop({ type: [String], default: null })
+  publishedSettings!: string[] | null;
 
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;

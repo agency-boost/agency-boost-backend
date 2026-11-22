@@ -43,8 +43,17 @@ trap 'rm -rf "$work"' EXIT
 
 printf '%s\n' "$SUPERPROJECT_DEPLOY_KEY" >"$work/key"
 chmod 600 "$work/key"
-curl -fsS --retry 3 https://api.github.com/meta |
-  python3 -c 'import json, sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' >"$work/known_hosts"
+# github.com's SSH host keys, **asked with this job's own token** (2026-11-17): an anonymous call to api.github.com is
+# limited per address, a hosted runner shares its address with other repositories' jobs, and a spent limit answers 403,
+# which `curl --retry` alone does not retry — the backend's coverage job failed so, on a JSON decode of nothing. With the
+# token the limit is this repository's own; 403 and 429 are retried as well, should a limit be met anyway.
+auth=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then auth=(-H "Authorization: Bearer $GITHUB_TOKEN"); fi
+if ! meta=$(curl -fsS --retry 5 --retry-all-errors --retry-delay 10 ${auth[@]+"${auth[@]}"} https://api.github.com/meta); then
+  echo "::error::Could not read github.com's SSH host keys from api.github.com/meta (a rate limit or an outage). Re-run the job."
+  exit 1
+fi
+python3 -c 'import json, sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' <<<"$meta" >"$work/known_hosts"
 export GIT_SSH_COMMAND="ssh -i $work/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$work/known_hosts -o StrictHostKeyChecking=yes"
 
 url="git@github.com:${SUPERPROJECT_REPOSITORY}.git"

@@ -2,7 +2,8 @@ import { Logger } from '@nestjs/common';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { NotFoundException } from '@/common/errors/domain.exception';
-import type { OfficePerson } from '../office-people';
+import { placeInformalGroups } from '@/domain/metrics/leader-groups';
+import type { InformalPartition } from '../office-groups';
 import type { ComplianceCategoryRead, ComplianceScope } from './compliance-category';
 import { ComplianceService } from './compliance.service';
 import { TrainingComplianceCategory } from './training.category';
@@ -12,11 +13,21 @@ const owner = new RequestContext('u-owner', 'none', {
   membershipId: 'ab', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
   isKpmOwner: true, isKpmAdmin: false, directCount: 1,
 } as never);
-const person = (membershipId: string, orgLevelCode: string, leaderId: string | null, ancestorIds: string[]): OfficePerson => ({
-  // The default ladder's rungs, whose class is the code lower-cased (ADR-0156).
-  membershipId, orgLevelCode, role: orgLevelCode.toLowerCase() as OfficePerson['role'], leaderId, ancestorIds, status: 'active', joinedAt: new Date('2026-01-02T02:00:00Z'),
-  joinDate: '2026-01-02', joinDateStart: new Date('2026-01-01T17:00:00Z'), removedAt: null,
-});
+/** The office as `OfficeGroups.partition` reads it (P19.19): Wilson, an AB with no group, and Rina, his agent. */
+function partition(): InformalPartition {
+  const members = [
+    { membershipId: 'ab', role: 'ab', leaderId: null, ancestorIds: [] as string[], groupIds: [] as string[] },
+    { membershipId: 'agent', role: 'agent', leaderId: 'ab', ancestorIds: ['ab'], groupIds: [] as string[] },
+  ];
+  return {
+    groups: [],
+    ungroupedAbIds: ['ab'],
+    abGroups: new Map([['ab', { abMembershipId: 'ab', memberIds: ['ab', 'agent'] }]]),
+    unplacedIds: [],
+    members: new Map(members.map((m) => [m.membershipId, { ...m, userId: null, agentCode: null, isCoreLeader: false }])),
+    placement: placeInformalGroups(members, []),
+  };
+}
 
 /** A category answering what it is told to, and remembering what it was asked. */
 function category(answer: (scope: ComplianceScope, selection: { selected: boolean; item: string | null }) => Partial<ComplianceCategoryRead<unknown>>) {
@@ -38,36 +49,33 @@ function category(answer: (scope: ComplianceScope, selection: { selected: boolea
 describe('ComplianceService (P18.3-T1)', () => {
   const office = { today: '2026-09-14', month: '2026-09', timezone: 'Asia/Jakarta', settings: {}, companyId: 'c' };
   const build = (over: { names?: Map<string, string>; categories?: Partial<Record<string, ReturnType<typeof category>>> } = {}) => {
-    const people = {
-      read: jest.fn(async () => {
-        const active = [person('ab', 'AB', null, []), person('agent', 'AGENT', 'ab', ['ab'])];
-        return { everyone: active, active, names: over.names ?? new Map([['ab', 'Wilson'], ['agent', 'Rina']]) };
-      }),
-    };
+    // P19.19-T3: the Overview's scope — the informal groups' partition — and its names.
+    const people = { partition: jest.fn(async () => partition()) };
+    const names = { byMembershipId: jest.fn(async () => over.names ?? new Map([['ab', 'Wilson'], ['agent', 'Rina']])) };
     const subjectReads = { recordMany: jest.fn(async () => undefined) };
     const six = {
       training: category(() => ({ catalog: [] })),
       goals: category(() => ({ catalog: { year: '2026' } })),
       activity: category(() => ({})),
+      leads: category(() => ({})),
       activation: category(() => ({})),
       events: category(() => ({ catalog: [] })),
       campaigns: category(() => ({ catalog: [] })),
       ...over.categories,
     };
     const service = new ComplianceService(
-      people as never, { office: async () => office } as never, new FixedClock(NOW), subjectReads as never,
+      { office: async () => office } as never, new FixedClock(NOW), subjectReads as never, people as never, names as never,
       six.training as never, six.goals as never, six.activity as never, six.activation as never,
-      six.events as never, six.campaigns as never,
+      six.events as never, six.campaigns as never, six.leads as never,
     );
-    return { service, subjectReads, six, people };
+    return { service, subjectReads, six, people: { read: people.partition } };
   };
 
-  it('P18.3-T1 AC-2 reads training by default, asks every category once, the chosen one with its item', async () => {
+  it('P19.19-T3 AC-2 no card asked: every category once, none selected, nothing listed; the chosen one with its item', async () => {
     const { service, six } = build();
     const view = await service.read(owner);
-    expect(view.selected).toEqual({ category: 'training', item: null });
-    expect(six.training.asked).toEqual([{ selected: true, item: null }]);
-    for (const key of ['goals', 'activity', 'activation', 'events', 'campaigns'] as const) {
+    expect(view.selected).toBeNull();
+    for (const key of ['training', 'goals', 'activity', 'leads', 'activation', 'events', 'campaigns'] as const) {
       expect([key, six[key].asked]).toEqual([key, [{ selected: false, item: null }]]);
     }
     const { service: other, six: asked } = build();
@@ -90,22 +98,32 @@ describe('ComplianceService (P18.3-T1)', () => {
       categories: { activity: category((_, s) => ({ cells: s.selected ? new Map([['agent', { status: 'logged', done: true, on: '2026-09-14' }]]) : null })) },
     });
     const view = await service.read(owner, { category: 'activity' });
-    expect(view.tree[0].units[0].rows.map((r) => [r.membershipId, r.cell])).toEqual([
-      ['ab', { status: null, done: null, on: null }],
-      ['agent', { status: 'logged', done: true, on: '2026-09-14' }],
+    expect(view.selected!.cells).toEqual([
+      { membershipId: 'ab', status: null, done: null, on: null },
+      { membershipId: 'agent', status: 'logged', done: true, on: '2026-09-14' },
     ]);
-    expect([view.tree[0].done, view.tree[0].of]).toEqual([1, 1]);
+    expect([view.selected!.done, view.selected!.of]).toEqual([1, 1]);
     const { service: silent } = build();
     const none = await silent.read(owner, { category: 'goals' });
-    expect(none.tree[0].units[0].rows.every((r) => r.cell.done === null)).toBe(true);
+    expect(none.selected!.cells.every((c) => c.done === null)).toBe(true);
   });
 
-  it('P18.3-T1 AC-8 a member nobody can name is listed under an empty name, never dropped', async () => {
+  it('P18.3-T1 AC-8 a member nobody can name is still counted and given a cell, never dropped', async () => {
     const { service } = build({ names: new Map([['ab', 'Wilson']]) });
+    const view = await service.read(owner, { category: 'goals' });
+    expect(view.selected!.cells.map((c) => c.membershipId)).toEqual(['ab', 'agent']);
+  });
+
+  it('P19.19-T3 AC-2 the cards lowest % first, a card nobody it applies to last, the brief’s order within a tie', async () => {
+    const chip = (count: number, of: number) => category(() => ({ chip: { count, of } }));
+    const { service } = build({
+      categories: { training: chip(1, 2), goals: chip(2, 2), activity: chip(0, 2), leads: chip(1, 2), activation: chip(0, 0) },
+    });
     const view = await service.read(owner);
-    expect(view.tree[0].units[0].rows.map((r) => [r.membershipId, r.name, r.leads, r.personal])).toEqual([
-      ['ab', 'Wilson', true, true], ['agent', '', false, false],
+    expect(view.cards.map((c) => [c.category, c.pct])).toEqual([
+      ['activity', 0], ['training', 50], ['leads', 50], ['goals', 100], ['activation', null], ['events', null], ['campaigns', null],
     ]);
+    expect(view.thresholds).toEqual({ lowBelowPct: 34, highFromPct: 67 });
   });
 
   it('P18.3-T1 AC-9 exit review 5: the chosen category refusing its item is answered before any other chip reads, and nothing is audited', async () => {
@@ -113,7 +131,7 @@ describe('ComplianceService (P18.3-T1)', () => {
       categories: { training: category(() => { throw new NotFoundException('Training module'); }) },
     });
     await expect(service.read(owner, { category: 'training', item: 'OTHER' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    for (const key of ['goals', 'activity', 'activation', 'events', 'campaigns'] as const) {
+    for (const key of ['goals', 'activity', 'leads', 'activation', 'events', 'campaigns'] as const) {
       expect([key, six[key].read.mock.calls.length]).toEqual([key, 0]);
     }
     expect(subjectReads.recordMany).not.toHaveBeenCalled();
@@ -131,11 +149,11 @@ describe('ComplianceService (P18.3-T1)', () => {
     const refusal = await service.read(owner, { category: 'activity' }).catch((err: unknown) => err);
     expect(refusal).toBeInstanceOf(Error);
     expect(refusal).not.toBeInstanceOf(NotFoundException);
-    expect((refusal as Error).message).toBe('The goals chip could not be read.');
+    expect((refusal as Error).message).toBe('The goals card could not be read.');
     expect((refusal as Error & { cause: unknown }).cause).toBeInstanceOf(NotFoundException);
     expect(settled).toBe(true);
     expect(subjectReads.recordMany).not.toHaveBeenCalled();
-    expect(logged).toHaveBeenCalledWith(expect.objectContaining({ category: 'goals' }), 'a compliance chip could not be read');
+    expect(logged).toHaveBeenCalledWith(expect.objectContaining({ category: 'goals' }), 'a compliance card could not be read');
     logged.mockRestore();
   });
 
@@ -170,6 +188,24 @@ describe('ComplianceService (P18.3-T1)', () => {
     expect(scope.memberIds).toEqual(['ab', 'agent']);
     expect(scope.today).toBe('2026-09-14');
   });
+
+  it('P19.19-T3 a harness built before Leads Mgmt reads it as a card of nobody; a category that lists nothing offers no item', async () => {
+    const { six } = build();
+    // Built as it was before P19.19-T3: no Leads reader at all. Events and Campaigns answer no catalog.
+    const silent = category(() => ({}));
+    const service = new ComplianceService(
+      { office: async () => office } as never, new FixedClock(NOW), { recordMany: jest.fn() } as never,
+      { partition: jest.fn(async () => partition()) } as never,
+      { byMembershipId: jest.fn(async () => new Map([['ab', 'Wilson'], ['agent', 'Rina']])) } as never,
+      six.training as never, six.goals as never, six.activity as never, six.activation as never, silent as never, silent as never,
+    );
+    const view = await service.read(owner);
+    expect(view.cards.find((c) => c.category === 'leads')).toEqual({ category: 'leads', count: 0, of: 0, pct: null });
+    expect(view.catalog).toMatchObject({ events: [], campaigns: [] });
+    const opened = await service.read(owner, { category: 'leads' });
+    expect(opened.selected).toMatchObject({ category: 'leads', item: null, done: 0, of: 0 });
+    expect(opened.selected!.cells.every((c) => c.done === null)).toBe(true);
+  });
 });
 
 describe('TrainingComplianceCategory — an office that offers nothing (P18.3-T1 AC-4)', () => {
@@ -192,6 +228,10 @@ describe('TrainingComplianceCategory — an office that offers nothing (P18.3-T1
     expect(read.chip).toEqual({ count: 0, of: 0 });
     expect([...read.cells!.values()]).toEqual([{ status: null, done: null, on: null }, { status: null, done: null, on: null }]);
     expect(read.disclosure).toBeUndefined();
+    expect(reader.rowsOf).not.toHaveBeenCalled();
+    // Read for its chip while another card is open: still nobody counted, and no progress read.
+    const unselected = await category.read(scope, { selected: false, item: null });
+    expect([unselected.item, unselected.cells, unselected.chip]).toEqual([null, null, { count: 0, of: 0 }]);
     expect(reader.rowsOf).not.toHaveBeenCalled();
   });
 

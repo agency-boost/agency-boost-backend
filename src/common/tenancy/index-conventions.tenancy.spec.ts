@@ -1,5 +1,7 @@
 import { Schema } from 'mongoose';
 import { AuditLogSchema } from '@/modules/audit/audit-log.schema';
+import { AnnouncementSchema } from '@/modules/announcements/announcement.schema';
+import { PlatformSettingsSchema } from '@/modules/platform-settings/platform-settings.schema';
 import { AssetSchema } from '@/modules/assets/asset.schema';
 import {
   NotificationSchema,
@@ -7,6 +9,10 @@ import {
 } from '@/modules/notifications/notification.schema';
 import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { AccountLinkSchema } from '@/modules/auth/account-link.schema';
+import { ProductDataGrantSchema } from '@/modules/product-data/product-data-grant.schema';
+import { RateRowSchema, RateTableSchema } from '@/modules/product-data/rate-table.schema';
+import { IntakeItemSchema, UploadIntakeSchema } from '@/modules/product-data/upload-intake.schema';
+import { IllustrationSchema } from '@/modules/product-data/illustration.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
 import { KpmSchema } from '@/modules/tenants/kpm.schema';
@@ -17,6 +23,7 @@ import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
 import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
+import { RosterImportRecordSchema } from '@/modules/tenants/roster-import-record.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
 import { MembershipSchema } from '@/modules/org/membership.schema';
 import { unclassified } from '@/common/schema/registered-schemas';
@@ -96,7 +103,7 @@ import { PitchConfirmationSchema, RecruitmentPitchSlotSchema } from '@/modules/r
 import { KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
 import { KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
 import {
-  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingAgendaSchema, LeaderMeetingSchema,
+  LeaderMeetingActionItemSchema, LeaderMeetingAgendaItemSchema, LeaderMeetingSchema,
 } from '@/modules/leader-meetings/leader-meeting.schema';
 import { LeaderMeetingShareLinkSchema } from '@/modules/leader-meetings/leader-meeting-share-link.schema';
 import { TrainingProgressSchema } from '@/modules/training/training-progress.schema';
@@ -105,6 +112,7 @@ import { SurveyParticipationSchema } from '@/modules/surveys/survey-participatio
 import { SurveyResponseSchema } from '@/modules/surveys/survey-response.schema';
 import { AnalyticsTargetSchema } from '@/modules/reporting/advanced-analytics/analytics-target.schema';
 import { QuantRunSchema } from '@/modules/reporting/advanced-analytics/quant-run.schema';
+import { AbGroupTargetSchema } from '@/modules/reporting/ab-group-targets/ab-group-target.schema';
 import { ProposalSchema } from '@/modules/proposals/proposal.schema';
 import { KpmBrandingSchema } from '@/modules/branding/kpm-branding.schema';
 
@@ -129,6 +137,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   // P18.8-T3 (ADR-0170): a leader's invites — opened by `(kpmId, tokenHash)` — and the requests to move a member.
   ['memberInvites', MemberInviteSchema],
   ['transferRequests', TransferRequestSchema],
+  // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
+  ['rosterImports', RosterImportRecordSchema],
   ['groups', GroupSchema],
   ['activityCategories', ActivityCategorySchema],
   ['activityTypes', ActivityTypeSchema],
@@ -187,6 +197,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   // P19.5-T3 (ADR-0215 §6, §7): the KPM's targets and its Quant runs, every index `kpmId`-led.
   ['analyticsTargets', AnalyticsTargetSchema],
   ['quantRuns', QuantRunSchema],
+  // P19.17-T4 (ADR-0270 §4): an AB group's monthly targets, every index `kpmId`-led.
+  ['abGroupTargets', AbGroupTargetSchema],
   // P19.7-T2 (ADR-0221 §1): an agent's proposals, items inside; every index `kpmId`-led; deleted by `deletedAt`.
   ['proposals', ProposalSchema],
   // P19.6-T1 (ADR-0218 §1, §12): a KPM's own branding, one live row; `kpmId`-led; *Kembalikan ke default* soft-deletes it.
@@ -209,6 +221,9 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of an activation aspect, for the same reason',
   ],
   ['auditLog', AuditLogSchema, 'kpmId is nullable: platform actions belong to no tenant'],
+  // P19.23-T6 (ADR-0279): the platform console's own records — no KPM owns them.
+  ['platformSettings', PlatformSettingsSchema, 'the platform\'s one settings document, written by the Super Admin alone'],
+  ['announcements', AnnouncementSchema, 'an announcement may reach every KPM: a platform record of a Super Admin\'s send'],
   [
     'notificationPreferences',
     NotificationPreferencesSchema,
@@ -404,6 +419,46 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
       'verification and password reset all predate membership',
   ],
   [
+    'rateTables',
+    RateTableSchema,
+    'company-partitioned, not tenant-scoped (ADR-0258, as `products` per ADR-0033): a product\'s premium table '
+      + 'versions belong to the insurer, every office of the company calculates with the same one, live. Read by '
+      + '`companyId` and the product on the Proposal tab, and by product id — a product of the office\'s own shelf — '
+      + 'for the agent\'s card (`PremiumCalculator`)',
+  ],
+  [
+    'rateRows',
+    RateRowSchema,
+    'the rows of one premium table version (ADR-0258 §1), read only through their version\'s id, which is '
+      + 'company-partitioned: no office owns a price, so no `kpmId`',
+  ],
+  [
+    'uploadIntakes',
+    UploadIntakeSchema,
+    'company-partitioned, not tenant-scoped (ADR-0259, as `products` per ADR-0033): *Unggah file*\'s uploads of an '
+      + 'insurer\'s product data, `companyId` the insurer or `null` for the Super Admin\'s *Perusahaan* upload. Read '
+      + 'by company through `ProductDataAccess`, never by an office',
+  ],
+  [
+    'intakeItems',
+    IntakeItemSchema,
+    'the cards of one upload (ADR-0259 §4), read through their intake\'s id, which is company-partitioned: no office '
+      + 'owns an insurer\'s product data, so no `kpmId`',
+  ],
+  [
+    'illustrations',
+    IllustrationSchema,
+    'company-partitioned, not tenant-scoped (ADR-0259 §8, as `products` per ADR-0033): a product\'s official '
+      + 'illustration and the PDF detail it publishes belong to the insurer; read by `companyId` and the product',
+  ],
+  [
+    'productDataGrants',
+    ProductDataGrantSchema,
+    '*Kelola data produk* (ADR-0260 §1): a grant to one person, keyed by the global userId, to manage insurer '
+      + 'companies\' proposal data — a company\'s, which no office owns. Read by the person\'s own userId on each of '
+      + 'their requests (`ContextResolver`) and by the Super Admin; no office reads it',
+  ],
+  [
     'accountLinks',
     AccountLinkSchema,
     'two logins of one person, linked (ADR-0199 §3): logins are global (invariant 2), and a link may join a Super '
@@ -490,14 +545,9 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'one tick of a pitch slot\'s checklist, inside the slot it confirms: no collection and no _id of its own',
   ],
   [
-    'leaderMeetingAgenda (subdocument)',
-    LeaderMeetingAgendaSchema,
-    'a leader meeting\'s three agenda sections, inside the meeting: no collection and no _id of its own',
-  ],
-  [
     'leaderMeetingAgendaItem (subdocument)',
     LeaderMeetingAgendaItemSchema,
-    'one item of a meeting\'s agenda section, inside the meeting: no collection, and an item id of its own, not an _id',
+    'one line of a forum\'s agenda checklist, inside the forum: no collection, and an item id of its own, not an _id',
   ],
   [
     'leaderMeetingActionItem (subdocument)',
@@ -603,8 +653,16 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [NotificationSchema, 'NotificationSchema'],
   [NotificationPreferencesSchema, 'NotificationPreferencesSchema'],
   [AuditLogSchema, 'AuditLogSchema'],
+  [PlatformSettingsSchema, 'PlatformSettingsSchema'],
+  [AnnouncementSchema, 'AnnouncementSchema'],
   [AuthTokenSchema, 'AuthTokenSchema'],
   [AccountLinkSchema, 'AccountLinkSchema'],
+  [ProductDataGrantSchema, 'ProductDataGrantSchema'],
+  [RateTableSchema, 'RateTableSchema'],
+  [RateRowSchema, 'RateRowSchema'],
+  [UploadIntakeSchema, 'UploadIntakeSchema'],
+  [IntakeItemSchema, 'IntakeItemSchema'],
+  [IllustrationSchema, 'IllustrationSchema'],
   [CompanySchema, 'CompanySchema'],
   [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],
@@ -614,6 +672,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [MemberInviteSchema, 'MemberInviteSchema'],
   [TransferRequestSchema, 'TransferRequestSchema'],
+  [RosterImportRecordSchema, 'RosterImportRecordSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],
   [MembershipSchema, 'MembershipSchema'],
   [KpmRequestSchema, 'KpmRequestSchema'],
@@ -641,7 +700,6 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [KpmSetupMarkSchema, 'KpmSetupMarkSchema'],
   [PitchConfirmationSchema, 'PitchConfirmationSchema'],
   [LeaderMeetingSchema, 'LeaderMeetingSchema'],
-  [LeaderMeetingAgendaSchema, 'LeaderMeetingAgendaSchema'],
   [LeaderMeetingAgendaItemSchema, 'LeaderMeetingAgendaItemSchema'],
   [LeaderMeetingActionItemSchema, 'LeaderMeetingActionItemSchema'],
   [LeaderMeetingShareLinkSchema, 'LeaderMeetingShareLinkSchema'],
@@ -650,6 +708,7 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [SurveyResponseSchema, 'SurveyResponseSchema'],
   [AnalyticsTargetSchema, 'AnalyticsTargetSchema'],
   [QuantRunSchema, 'QuantRunSchema'],
+  [AbGroupTargetSchema, 'AbGroupTargetSchema'],
   [ProposalSchema, 'ProposalSchema'],
   [KpmBrandingSchema, 'KpmBrandingSchema'],
   [TrainingProgressSchema, 'TrainingProgressSchema'],

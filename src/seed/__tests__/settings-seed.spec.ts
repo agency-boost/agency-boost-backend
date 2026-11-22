@@ -6,6 +6,7 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { LONG_PIPELINE } from '../long-pipeline';
 import { seedDemo } from '../demo';
+import { SETTINGS_HUB_DEMO } from '../settings-hub-fixture';
 
 /**
  * **P13.1-T3 — the seed follows the prototype** (`phase-13.1-client-revisions-iii.md`, K5): office 0417's
@@ -52,8 +53,10 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
   it('AC-2 office 0417 holds the platform defaults: nothing archived, no ratio of its own, no edit', async () => {
     const kpmId = await office('0417');
     const types = await col('activityTypes').find({ kpmId }).sort({ displayOrder: 1 }).toArray();
+    // *Amended 2026-11-20 (P19.21-T2; ADR-0274 §8):* but one edit — the Pengaturan hub's seed describes *Diskusi follow up*
+    // after the publish (`settings-hub-fixture.ts`), its next version, so the hub has *Belum diterbitkan* to show.
     expect(types.map((t) => [t.code, t.label, t.status, t.version]))
-      .toEqual(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.label, 'active', 1]));
+      .toEqual(SEED_ACTIVITY_TYPES.map((t) => [t.code, t.label, 'active', t.code === SETTINGS_HUB_DEMO.typeCode ? 2 : 1]));
 
     const statuses = await col('leadStatuses').find({ kpmId }).sort({ pipeline: -1, rank: 1 }).toArray();
     expect(statuses.map((s) => [s.code, s.status, s.version]))
@@ -76,9 +79,13 @@ describe('P13.1-T3 the seed follows the prototype — a run at 10:00 on 7 Octobe
       .toMatchObject({ shortLabel: '1-on-1 dgn leader' });
   });
 
-  it('AC-2 0417’s publish bar reads clean, and item 7 reaches its agents under the client’s label', async () => {
+  it('AC-2 0417’s publish bar speaks only of the hub seed’s Activity types edit, and item 7 reaches its agents under the client’s label', async () => {
     const owner = await as('owner@kpm0417.test', true);
-    expect(await wired.config.state(owner)).toMatchObject({ publishedVersion: 1, hasUnpublishedChanges: false });
+    // *Amended 2026-11-20 (P19.21-T2; ADR-0274 §8):* each setting publishes on its own; only *Activity types* holds a
+    // change agents do not see yet (`settings-hub-fixture.ts`). Every other setting reads as published.
+    const state = await wired.config.state(owner);
+    expect(state).toMatchObject({ publishedVersion: 1, hasUnpublishedChanges: true });
+    expect(state.settings.filter((s) => s.hasUnpublishedChanges).map((s) => s.setting)).toEqual(['activity_types']);
 
     const published = await wired.config.readPublished(await as('rina@kpm0417.test'));
     const item7 = published.activity.flatMap((c) => c.types).find((t) => t.code === 'RECRUIT_PRESENTATION');

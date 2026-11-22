@@ -1,6 +1,6 @@
 import { LEAD_AGE } from '@/domain/constants';
 import { FixedClock } from '@/common/clock/clock.port';
-import { ageToday, ageWrite, isLeadAge, wholeYearsBetween } from './lead-age';
+import { ageToday, wholeYearsBetween } from './lead-age';
 
 /**
  * **P19.7-T1 AC-1 — the client's age at the next birthday** (ADR-0224 §2, §3; `metrics-and-definitions.md` §B.34,
@@ -9,7 +9,6 @@ import { ageToday, ageWrite, isLeadAge, wholeYearsBetween } from './lead-age';
 describe('P19.7-T1 AC-1 the lead’s age (lead-age.ts)', () => {
   it('P19.7-T1 AC-1 pins the bounds: 1 to 100 (LEAD_AGE, §B.34)', () => {
     expect(LEAD_AGE).toEqual({ MIN: 1, MAX: 100 });
-    expect([0, 1, 50, 100, 101, 1.5, -3].map(isLeadAge)).toEqual([false, true, true, true, false, false, false]);
   });
 
   it('P19.7-T1 AC-1 counts whole years on anniversaries, and none before the first', () => {
@@ -47,24 +46,5 @@ describe('P19.7-T1 AC-1 the lead’s age (lead-age.ts)', () => {
     expect(ageToday(30, '2028-02-29', '2029-02-28')).toBe(30);
     expect(ageToday(30, '2028-02-29', '2029-03-01')).toBe(31);
     expect(ageToday(30, '2028-02-29', '2032-02-29')).toBe(34);
-  });
-
-  describe('P19.7-T1 AC-1 what a write sets', () => {
-    const stored = { age: 36, ageRecordedOn: '2026-11-05' };
-
-    it('P19.7-T1 AC-1 moves nothing when the age written is the one the lead reads today', () => {
-      expect(ageWrite(stored, 37, '2027-12-01')).toBeNull();
-      expect(ageWrite(stored, 36, '2026-12-01')).toBeNull();
-    });
-
-    it('P19.7-T1 AC-1 stores another age with today as its day', () => {
-      expect(ageWrite(stored, 38, '2027-12-01')).toEqual({ age: 38, ageRecordedOn: '2027-12-01' });
-      expect(ageWrite({ age: null, ageRecordedOn: null }, 52, '2026-11-05')).toEqual({ age: 52, ageRecordedOn: '2026-11-05' });
-    });
-
-    it('P19.7-T1 AC-1 clears both with null, and writes nothing when there was none', () => {
-      expect(ageWrite(stored, null, '2027-01-01')).toEqual({ age: null, ageRecordedOn: null });
-      expect(ageWrite({}, null, '2027-01-01')).toBeNull();
-    });
   });
 });

@@ -21,9 +21,9 @@ import { AuthGuard } from './auth.guard';
 describe('AuthGuard', () => {
   const USER = '65b1f0c2a4d3e5f6a7b8c9d0';
 
-  function execution(authorization?: string, isPublic = false, language?: string) {
+  function execution(authorization?: string, isPublic = false, language?: string, kpmId?: string) {
     const request: { headers: Record<string, string | undefined>; context?: unknown; reader?: unknown } = {
-      headers: { authorization, 'accept-language': language },
+      headers: { authorization, 'accept-language': language, 'x-kpm-id': kpmId },
     };
     return {
       request,
@@ -110,7 +110,7 @@ describe('AuthGuard', () => {
     // Roles come from `resolve`, which reads the row — that is what makes revoking a
     // grant take effect on the next request rather than at the next sign-in.
     // `false`: a person acting as themselves is not being restrained (P4-T10).
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null, null);
     expect((request.context as RequestContext).userId).toBe(USER);
   });
 
@@ -123,7 +123,7 @@ describe('AuthGuard', () => {
 
     await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
     // The resolver marks the context read-only from the impersonator alone: every session only looks (ADR-0206 §4).
-    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, false, null);
+    expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, false, null, null);
     expect((request.context as RequestContext).isImpersonating).toBe(true);
   });
 
@@ -169,7 +169,7 @@ describe('AuthGuard', () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
       const { context, reflector, request } = execution('Bearer good.token', false, 'EN');
       await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, 'en');
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, 'en', null);
       // The resolver's context's reader — here nobody's choice, the stub reading no row — is the request's.
       expect(request.reader).toEqual((request.context as RequestContext).reader);
 
@@ -177,6 +177,28 @@ describe('AuthGuard', () => {
       await new AuthGuard(saved.reflector, signer, savedIndonesian, live()).canActivate(saved.context);
       expect(saved.request.reader).toEqual({ language: 'id', figures: 'id' });
       expect((saved.request.context as RequestContext).reader).toEqual({ language: 'id', figures: 'id' });
+    });
+  });
+
+  /*
+   * **The KPM a Super Admin works inside** (ADR-0268 §3; P19.17 F2): the guard hands `X-Kpm-Id` to the resolver, which
+   * alone decides whether it means anything — only a Super Admin acting as themselves is placed inside the KPM.
+   */
+  describe('ADR-0268 §3 X-Kpm-Id', () => {
+    const KPM = '65b1f0c2a4d3e5f6a7b8c9e0';
+
+    it('hands the header, trimmed, to the resolver', async () => {
+      const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
+      const { context, reflector } = execution('Bearer good.token', false, undefined, `  ${KPM} `);
+      await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null, KPM);
+    });
+
+    it('reads an empty header as none', async () => {
+      const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
+      const { context, reflector } = execution('Bearer good.token', false, undefined, '   ');
+      await new AuthGuard(reflector, signer, resolver, live()).canActivate(context);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null, null);
     });
   });
 
@@ -195,14 +217,14 @@ describe('AuthGuard', () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: `imp:${OPERATOR}` })) } as unknown as TokenSigner;
       const { context } = execution('Bearer impersonating.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, null);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, OPERATOR, true, null, null);
     });
 
     it('never for somebody acting as themselves, on the same route', async () => {
       const signer = { verify: jest.fn(() => ({ sub: USER, sid: 'session-1' })) } as unknown as TokenSigner;
       const { context } = execution('Bearer good.token');
       await new AuthGuard(marked, signer, resolver, live()).canActivate(context);
-      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null);
+      expect(resolver.resolve).toHaveBeenCalledWith(USER, null, false, null, null);
     });
   });
 });

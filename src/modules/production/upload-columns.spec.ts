@@ -115,8 +115,31 @@ describe('the completeness of a month, and the history (P19.5-T2)', () => {
     expect(monthFill(config, '2026-11', [agent, leader], [rows[0], row('leader', '2026-11', full)], end).filled).toBe(1);
   });
 
-  it('P19.5-T2 AC-8 AT-9 R5 a KPM joining in March 2027 is asked for March 2026 to February 2027, and nothing of 2025', () => {
-    expect(historyOf('2027-03')).toEqual({ firstMonth: '2027-03', historyFrom: '2026-03', historyTo: '2027-02' });
+  /*
+   * Found 2026-11-20 by a walk on a fresh deploy-then-seed: the template's columns all started the month migration 0057
+   * ran, the seed's history lay before it, and `monthFill` asked only the columns in force — so every seeded month read
+   * red while the Overview summed its figures.
+   */
+  it('never calls a month that holds a figure missing: before every column’s effectiveFrom it is complete, not missing', () => {
+    const late = analyticsConfigV1({ effectiveFrom: '2026-11' });
+    const people = [person('m1'), person('m2')];
+    const held = [row('m1', '2025-06', { APE: 5 }), row('m2', '2025-06', { APE: null })];
+    // No column in force in June 2025: nothing is asked of anybody, and a figure is held — complete, never missing.
+    expect(monthFill(late, '2025-06', people, held, end)).toEqual({ month: '2025-06', members: 2, filled: 2, status: 'complete' });
+    // A figure only in a column not yet in force still makes the month uploaded: judged on the columns in force.
+    const config = V1();
+    config.uploadFields.push({ ...config.uploadFields[0], kode: 'FYC', system: false, effectiveFrom: '2026-12' });
+    expect(monthFill(config, '2026-11', people, [row('m1', '2026-11', { FYC: 3 })], end))
+      .toEqual({ month: '2026-11', members: 2, filled: 0, status: 'incomplete' });
+    // Nothing held is still missing — an empty cell, or another month's figure, is not this month's.
+    expect(monthFill(late, '2025-06', people, [row('m1', '2025-06', { APE: null }), row('m2', '2025-07', { APE: 1 })], end).status)
+      .toBe('missing');
+  });
+
+  it('P19.21-T1 AC-1 every KPM is asked for its months from January 2024, whenever it joined (ADR-0274 §3)', () => {
+    expect(historyOf('2027-03')).toEqual({ firstMonth: '2027-03', historyFrom: '2024-01', historyTo: '2027-02' });
+    expect(historyOf('2026-11').historyFrom).toBe('2024-01');
+    expect(historyOf('2023-06')).toEqual({ firstMonth: '2023-06', historyFrom: '2024-01', historyTo: '2023-05' });
     expect(monthsBetween('2026-11', '2027-02')).toEqual(['2026-11', '2026-12', '2027-01', '2027-02']);
     expect([shiftMonth('2027-03', -12), shiftMonth('2026-12', 1), shiftMonth('2026-01', -1)]).toEqual(['2026-03', '2027-01', '2025-12']);
   });

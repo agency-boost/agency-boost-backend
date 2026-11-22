@@ -12,7 +12,6 @@ import { replacedEstimate, SummaryService } from '@/modules/summary/summary.serv
 import { FixedClock } from '@/common/clock/clock.port';
 import { UnitDashboardService } from '@/modules/unit-dashboard/unit-dashboard.service';
 import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
-import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
 import { PaceStatusReadings } from '@/modules/coaching/pace-status';
 import { LeaderScorecardService } from '@/modules/leader-meetings/scorecard/scorecard.service';
 import { ActivityService } from '@/modules/activity/activity.service';
@@ -213,8 +212,9 @@ describe('P19.1-T4 the member’s own estimate of the APE produced (UI-157)', ()
       roster: await wired.coachingRoster.read(office.as('SARI')),
       pace: await wired.paceStatus.paceOf(office.as('SARI'), [office.id.BUDI], { today: '2026-09-14', month: MONTH, onTrackRatio: 0.7 }),
       overview: await wired.kpmOverview.read(office.as('OWNER')),
-      analyticsThisMonth: await wired.kpmAnalytics.read(office.as('OWNER'), { period: 'this_month' }),
-      analyticsPreviousMonth: await wired.kpmAnalytics.read(office.as('OWNER'), { period: 'previous_month' }),
+      // P19.19 (ADR-0272): KPM analytics is gone; the Overview's *Performa vs target*, this month and the one before.
+      performanceThisMonth: await wired.kpmOverview.performance(office.as('OWNER')),
+      performancePreviousMonth: await wired.kpmOverview.performance(office.as('OWNER'), { month: '2026-08' }),
       scorecard: await scorecardServiceOf(wired).compute({ kpmId: KPM_A, timezone: 'Asia/Jakarta', meetingDate: '2026-09-14' }),
     });
 
@@ -236,7 +236,8 @@ describe('P19.1-T4 the member’s own estimate of the APE produced (UI-157)', ()
       const year = rowOf(await wired.unitDashboard.read(office.as('SARI'), { period: 'year' }));
       expect(year.goal).toMatchObject({ targetMinor: 500 * M, actualMinor: null, attainmentPct: null, source: null });
       // Nothing uploaded and no estimate read: 500 over the 4 months left, where his own Summary says (500 − 120) ÷ 4.
-      const month = rowOf(await wired.unitDashboard.read(office.as('SARI')));
+      // *Bulan ini* asked for: the dashboard opens on *Tahun ini* since ADR-0271 §1 (P19.18-T1 AC-1).
+      const month = rowOf(await wired.unitDashboard.read(office.as('SARI'), { period: 'month' }));
       expect(month.goal).toMatchObject({ targetMinor: 125 * M, actualMinor: null });
       expect((await wired.summary.read(budi())).monthly.targetMinor).toBe(95 * M);
     });
@@ -277,7 +278,7 @@ describe('P19.1-T4 the member’s own estimate of the APE produced (UI-157)', ()
  */
 describe('P19.1-T4 AC-13 the official APE is one port', () => {
   it.each([
-    GoalService, SummaryService, UnitDashboardService, KpmOverviewService, KpmAnalyticsService, PaceStatusReadings,
+    GoalService, SummaryService, UnitDashboardService, KpmOverviewService, PaceStatusReadings,
     LeaderScorecardService, ActivityService,
   ] as const)('P19.1-T4 AC-13 %p asks the port, not the file’s reader', (service) => {
     const params = Reflect.getMetadata('design:paramtypes', service) as unknown[];

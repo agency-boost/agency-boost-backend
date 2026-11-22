@@ -19,6 +19,11 @@ export const PRODUCTS_REFUSALS = refusals('modules/products', {
       en: 'Nothing to change.',
       id: 'Tidak ada yang diubah.',
     },
+    // P19.15-T1 (ADR-0258 §2): the product's pointer to its premium table is the tables' own.
+    rateTableIdIsTables: {
+      en: 'rateTableId is set by the premium tables on the Proposal tab, not written here.',
+      id: 'rateTableId diisi oleh tabel premi di tab Proposal, tidak ditulis di sini.',
+    },
 
     /* The office's settings over the company's catalogue (`KpmProductService`). */
     withdrawn: ({ name }: { name: string }) => ({

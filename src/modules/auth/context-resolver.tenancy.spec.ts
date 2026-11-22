@@ -224,8 +224,9 @@ describe('ContextResolver', () => {
   });
 
   describe('an office whose subscription has ended (ADR-0112 §3, P13.2-T3 AC-5)', () => {
+    // Ended on 30 September: today, 8 October, is the eighth day after it — past the seven days of grace (ADR-0279 §5).
     const ended = (over: Record<string, unknown> = {}) => ({
-      startDate: '2025-10-08', endDate: '2026-10-07', pricePerLeaderMinor: null,
+      startDate: '2024-10-01', endDate: '2026-09-30', pricePerLeaderMinor: null,
       currency: 'IDR', maxLeaders: null, keepActiveAfterEnd: false, ...over,
     });
 
@@ -239,16 +240,23 @@ describe('ContextResolver', () => {
       return String(u._id);
     }
 
-    it('refuses its member the day after the end, naming the date and the office', async () => {
+    it('P19.23-T5 AC-5 refuses its member once the seven days of grace have passed, naming the date and the office', async () => {
       const userId = await memberOf({ subscription: ended() });
       await expect(resolver.resolve(userId)).rejects.toMatchObject({
         code: 'TENANT_SUBSCRIPTION_ENDED',
-        details: { endDate: '2026-10-07', kpmCode: '0601', branch: 'Ended Branch' },
+        details: { endDate: '2026-09-30', kpmCode: '0601', branch: 'Ended Branch' },
       });
       // The sentence writes the date as ADR-0167 §1 does; `details` keeps it machine-readable.
       await expect(resolver.resolve(userId)).rejects.toThrow(
-        'This office’s subscription ended on 7 Okt 2026. Nobody in it can use AgencyBoost until it is renewed. Contact AgencyBoost.',
+        'This office’s subscription ended on 30 Sep 2026. Nobody in it can use AgencyBoost until it is renewed. Contact AgencyBoost.',
       );
+    });
+
+    it('P19.23-T5 AC-5 serves its member through the grace: the day after the end, and the seventh day', async () => {
+      const dayOne = await memberOf({ subscription: ended({ endDate: '2026-10-07' }) });
+      const daySeven = await memberOf({ subscription: ended({ endDate: '2026-10-01' }) });
+      await expect(resolver.resolve(dayOne)).resolves.toBeDefined();
+      await expect(resolver.resolve(daySeven)).resolves.toBeDefined();
     });
 
     it('serves its member on the end date itself', async () => {
@@ -301,5 +309,80 @@ describe('ContextResolver', () => {
     expect((await resolver.resolve(String(u._id), 'sa-1')).impersonationReadOnly).toBe(true);
     expect((await resolver.resolve(String(u._id), 'sa-1', true)).impersonationReadOnly).toBe(true);
     expect((await resolver.resolve(String(u._id))).impersonationReadOnly).toBe(false);
+  });
+
+  /*
+   * **A Super Admin inside a KPM** (ADR-0268 §3; P19.17 F2): `X-Kpm-Id`, honoured for a Super Admin acting as themselves
+   * and nobody else. The context is the KPM's Owner's (`can()`), writable, with no membership and the Super Admin as the
+   * actor — never the support session, which stays a member's and read-only.
+   */
+  describe('ADR-0268 §3 the KPM a Super Admin enters', () => {
+    async function office(over: Record<string, unknown> = {}) {
+      return mongoose.model(Kpm.name).create({ companyId: 'c1', code: '0417', branchName: 'BSD', ...over });
+    }
+
+    it('places a Super Admin inside the KPM the header names, writable and as themselves', async () => {
+      const sa = await makeUser({ platformRole: 'super_admin' });
+      const kpm = await office();
+      const ctx = await resolver.resolve(String(sa._id), null, false, null, String(kpm._id));
+      expect(ctx.isSuperAdminInKpm).toBe(true);
+      expect(ctx.kpmId).toBe(String(kpm._id));
+      expect(ctx.membership).toBeNull();
+      expect(ctx.impersonationReadOnly).toBe(false);
+      expect(ctx.auditActors).toEqual({ actorUserId: String(sa._id), effectiveUserId: String(sa._id) });
+    });
+
+    it('sets aside a membership the Super Admin holds elsewhere, and keeps their password state', async () => {
+      const sa = await makeUser({ platformRole: 'super_admin', mustChangePassword: true });
+      const theirs = await office({ code: '0001' });
+      await join(String(sa._id), String(theirs._id));
+      const entered = await office({ code: '0002' });
+      const ctx = await resolver.resolve(String(sa._id), null, false, null, String(entered._id));
+      expect(ctx.kpmId).toBe(String(entered._id));
+      expect(ctx.membership).toBeNull();
+      expect(ctx.mustChangePassword).toBe(true);
+    });
+
+    it('enters a suspended or archived KPM: the Super Admin is who mends it', async () => {
+      const sa = await makeUser({ platformRole: 'super_admin' });
+      for (const status of ['suspended', 'archived']) {
+        const kpm = await office({ code: `09${status.length}`, status });
+        await expect(resolver.resolve(String(sa._id), null, false, null, String(kpm._id)))
+          .resolves.toMatchObject({ isSuperAdminInKpm: true });
+      }
+    });
+
+    it('refuses a KPM that does not exist, a deleted one and a malformed id, 404 — never a cast error', async () => {
+      const sa = await makeUser({ platformRole: 'super_admin' });
+      const deleted = await office({ deletedAt: new Date() });
+      for (const id of [String(new mongoose.Types.ObjectId()), String(deleted._id), 'not-an-id', '{"$ne":null}']) {
+        await expect(resolver.resolve(String(sa._id), null, false, null, id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+    });
+
+    it('ignores the header for anybody else: a member, somebody in no KPM, and a support session', async () => {
+      const kpm = await office();
+      const other = await office({ code: '0999' });
+      const member = await makeUser();
+      await join(String(member._id), String(kpm._id));
+      const mine = await resolver.resolve(String(member._id), null, false, null, String(other._id));
+      expect(mine.kpmId).toBe(String(kpm._id));
+      expect(mine.isSuperAdminInKpm).toBe(false);
+
+      const newcomer = await makeUser();
+      expect((await resolver.resolve(String(newcomer._id), null, false, null, String(other._id))).kpmId).toBeNull();
+
+      const session = await resolver.resolve(String(member._id), 'sa-1', false, null, String(other._id));
+      expect(session.kpmId).toBe(String(kpm._id));
+      expect(session.impersonationReadOnly).toBe(true);
+      expect(session.isSuperAdminInKpm).toBe(false);
+    });
+
+    it('without the header a Super Admin is in no KPM, as before', async () => {
+      const sa = await makeUser({ platformRole: 'super_admin' });
+      const ctx = await resolver.resolve(String(sa._id));
+      expect(ctx.kpmId).toBeNull();
+      expect(ctx.isSuperAdminInKpm).toBe(false);
+    });
   });
 });

@@ -350,4 +350,23 @@ describe('environment validation', () => {
     expect(validateEnv(withoutBase).APP_BASE_URL).toBeUndefined();
     expect(validateEnv({ ...valid, APP_BASE_URL: '' }).APP_BASE_URL).toBeUndefined();
   });
+
+  /*
+   * P19.16-T5 (ADR-0262 §4; C17-5, *"the AI integration is on hold; make sure the system keeps running without that API
+   * key"*): no Anthropic key in any environment, production included — the API boots, and the model has its default.
+   */
+  describe('P19.16-T5 reading files with Claude on hold', () => {
+    const { SMTP_HOST: _none, ...withoutHost } = valid;
+    const production = {
+      ...withoutHost, NODE_ENV: 'production', GCS_BUCKET: 'agencyboost-prod-assets', STORAGE_KEY_PREFIX: 'prod', TRUST_PROXY: '1',
+      MAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_Ab12Cd34_secretpart', MAIL_FROM: 'AgencyBoost <no-reply@notify.agencyboost.id>',
+    };
+
+    it.each([undefined, '', '   '])('P19.16-T5 AC-1 production boots with ANTHROPIC_API_KEY=%j, read as no key', (key) => {
+      const env = validateEnv({ ...production, ANTHROPIC_API_KEY: key });
+      expect(env.NODE_ENV).toBe('production');
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_MODEL).toBe('claude-opus-5-5');
+    });
+  });
 });

@@ -35,6 +35,18 @@ import { CoachingSessionService } from './coaching-session.service';
 import { LeaderNoteService } from './leader-note.service';
 
 type Doc = Record<string, unknown>;
+type Row = Doc & { membershipId: string; isReader: boolean; opens: boolean };
+type Roster = { sections: { rows: Row[]; teams: { rows: Row[] }[] }[] };
+/**
+ * Everybody the roster lists but the reader (P19.18-T5 AC-2; ADR-0271 §9): each section's rows, then its team lines', the
+ * reader's own row (*ANDA*) left out. The roster was `directAgents` and `units` until ADR-0271.
+ */
+const coached = (body: Roster) => body.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]).filter((r) => !r.isReader);
+/**
+ * Those of them whose row opens a *Coaching Session*: whom the reader coaches. The Owner's and an Admin's roster lists the
+ * whole office (ADR-0271 §9), a row outside their downline listed and not opening — reach is `COACH`'s (ADR-0074).
+ */
+const opened = (body: Roster) => coached(body).filter((r) => r.opens);
 /** Somebody the office fixture holds, or Wawan, whom this spec adds below Tari. */
 type Person = Who | 'WAWAN';
 
@@ -201,8 +213,7 @@ describe('P19.9-T6 — every upline coaches: an Agent who leads, over HTTP', () 
     it('P19.9-T6 AC-1 the roster answers Lukas his downline at depth 1 and 2, and nobody else', async () => {
       as('LUKAS');
       const res = await http().get('/coaching/coachees').expect(200);
-      const rows = [...res.body.directAgents, ...res.body.units.flatMap((u: { head: Doc; members: Doc[] }) => [u.head, ...u.members])];
-      expect(rows.map((r: Doc) => [r.membershipId, r.depth])).toEqual([[id('TARI'), 1], [id('WAWAN'), 2]]);
+      expect(coached(res.body).map((r) => [r.membershipId, r.depth])).toEqual([[id('TARI'), 1], [id('WAWAN'), 2]]);
     });
 
     it.each([
@@ -254,7 +265,7 @@ describe('P19.9-T6 — every upline coaches: an Agent who leads, over HTTP', () 
 
     it('P19.9-T6 AC-1 an Agent who leads nobody holds the grants and coaches nobody: an empty roster, 404 on anybody', async () => {
       as('INDAH');
-      expect((await http().get('/coaching/coachees').expect(200)).body).toMatchObject({ directAgents: [], units: [] });
+      expect((await http().get('/coaching/coachees').expect(200)).body).toMatchObject({ total: 0, sections: [] });
       for (const call of [coachee('DIMAS'), start('DIMAS'), profile('DIMAS'), note('DIMAS')]) {
         expect((await call).status).toBe(404);
       }
@@ -431,10 +442,13 @@ describe('P19.9-T6 — every upline coaches: an Agent who leads, over HTTP', () 
      * or an Admin coaches exactly as the member on theirs does — here the Agent's — and the office role adds nothing.
      */
     it.each([['the Owner', 'owner'], ['an Admin', 'admin']] as const)(
-      'P19.9-T6 AC-4 %s on the Agent rung who leads nobody coaches nobody: an empty roster, 404 on every write, nothing written',
+      'P19.9-T6 AC-4 %s on the Agent rung who leads nobody coaches nobody: no row opens, 404 on every write, nothing written',
       async (_who, role) => {
         session.current = officeOnAgentRung('INDAH', role);
-        expect((await http().get('/coaching/coachees').expect(200)).body).toMatchObject({ directAgents: [], units: [] });
+        // The whole office listed (ADR-0271 §9), and not one row of it opens.
+        const roster = (await http().get('/coaching/coachees').expect(200)).body;
+        expect(coached(roster).length).toBeGreaterThan(0);
+        expect(opened(roster)).toEqual([]);
         for (const call of [start('DIMAS'), tick('DIMAS'), note('DIMAS'), start('TARI')]) {
           const res = await call;
           expect([res.status, res.body.error.code]).toEqual([404, 'NOT_FOUND']);
@@ -450,8 +464,8 @@ describe('P19.9-T6 — every upline coaches: an Agent who leads, over HTTP', () 
       async (_who, role) => {
         session.current = officeOnAgentRung('LUKAS', role);
         const rows = (await http().get('/coaching/coachees').expect(200)).body;
-        expect([...rows.directAgents, ...rows.units.flatMap((u: { head: Doc; members: Doc[] }) => [u.head, ...u.members])]
-          .map((r: Doc) => r.membershipId)).toEqual([id('TARI'), id('WAWAN')]);
+        // The whole office listed (ADR-0271 §9); only the Agent rung's downline opens.
+        expect(opened(rows).map((r) => r.membershipId)).toEqual([id('TARI'), id('WAWAN')]);
         const started = (await start('WAWAN').expect(201)).body;
         expect(started).toMatchObject({ coach: { membershipId: id('LUKAS') } });
         await tick('TARI').expect(200);

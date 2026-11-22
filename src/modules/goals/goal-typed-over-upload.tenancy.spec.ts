@@ -320,7 +320,8 @@ describe('P19.8-T5 MOB UI-190 a member types over the automatic APE, and the new
       sariYear: await wired.unitDashboard.read(as('SARI'), { period: 'year' }),
       roster: await wired.coachingRoster.read(as('SARI')),
       overview: await wired.kpmOverview.read(as('OWNER')),
-      analytics: await wired.kpmAnalytics.read(as('OWNER'), { period: 'this_month' }),
+      // P19.19 (ADR-0272): KPM analytics is gone; the Overview's *Performa vs target*.
+      performance: await wired.kpmOverview.performance(as('OWNER')),
       scorecard: await scorecardServiceOf(wired).compute({ kpmId: KPM_A, timezone: 'Asia/Jakarta', meetingDate: '2026-09-14' }),
     });
 

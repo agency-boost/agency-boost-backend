@@ -379,22 +379,53 @@ describe('UI V1 GET /members/search and PUT /members/:membershipId/phone over HT
       expect(await phoneOf(m.PEER_AGENT)).toBeNull();
     });
 
-    it('UI-081 an Agent is refused, 403: no grant', async () => {
+    it('P19.16-T1 AC-2 an Agent who leads nobody is answered 404 for somebody else’s agent, and nothing is written', async () => {
       session.current = as(m.DIRECT, 'AGENT');
 
-      expect((await put(m.AGENT, { phone: '0812-1100-2200' }).expect(403)).body.error.code).toBe('PERM_DENIED');
+      expect((await put(m.AGENT, { phone: '0812-1100-2200' }).expect(404)).body.error.code).toBe('NOT_FOUND');
       expect(await phoneOf(m.AGENT)).toBeNull();
     });
 
+    it('P19.16-T1 AC-2 an Agent who leads somebody saves the number of the person they lead', async () => {
+      const led = await join(KPM_A, 'agent', m.DIRECT, 'Rudi Hartanto');
+      session.current = as(m.DIRECT, 'AGENT');
+
+      await put(led, { phone: '0812-7700-1100' }).expect(200);
+
+      expect(await phoneOf(led)).toBe('+6281277001100');
+    });
+
     it.each([['the Owner', { isKpmOwner: true }], ['an Admin', { isKpmAdmin: true }]])(
-      'UI-081 %s on the Agent rung is refused, 403: the office’s administrators hold no grant',
+      'P19.16-T1 AC-1 %s on the Agent rung saves the number of anybody active in the office',
       async (_, over) => {
         session.current = as(new mongoose.Types.ObjectId().toString(), 'AGENT', over);
 
-        expect((await put(m.DIRECT, { phone: '0812-1100-2200' }).expect(403)).body.error.code).toBe('PERM_DENIED');
-        expect(await phoneOf(m.DIRECT)).toBeNull();
+        await put(m.PEER_AGENT, { phone: '0812-1100-2200' }).expect(200);
+
+        expect(await phoneOf(m.PEER_AGENT)).toBe('+6281211002200');
       },
     );
+
+    it.each([['the Owner', { isKpmOwner: true }], ['an Admin', { isKpmAdmin: true }]])(
+      'P19.16-T1 AC-4 %s is answered 404 for somebody who has left and for another office’s member, and nothing is written',
+      async (_, over) => {
+        session.current = as(new mongoose.Types.ObjectId().toString(), 'AGENT', over);
+
+        await put(m.GONE, { phone: '0812-1100-2200' }).expect(404);
+        expect((await put(m.B_AGENT, { phone: '0812-1100-2200' }).expect(404)).body.error.code).toBe('NOT_FOUND');
+        expect(await phoneOf(m.GONE)).toBeNull();
+        expect(await phoneOf(m.B_AGENT)).toBeNull();
+      },
+    );
+
+    it('P19.16-T1 AC-4 the Owner is refused 409 for a number on file, as a leader is', async () => {
+      session.current = as(m.AB, 'AB');
+      await put(m.DIRECT, { phone: '0812-1100-2200' }).expect(200);
+      session.current = as(new mongoose.Types.ObjectId().toString(), 'AGENT', { isKpmOwner: true });
+
+      expect((await put(m.DIRECT, { phone: '0813-9999-8888' }).expect(409)).body.error.code).toBe('MEMBER_PHONE_ON_FILE');
+      expect(await phoneOf(m.DIRECT)).toBe('+6281211002200');
+    });
 
     it('UI-081 cross-tenant: office A’s AB is answered 404 for office B’s agent, and nothing is written', async () => {
       session.current = as(m.ROOT, 'AB', { isKpmOwner: true });

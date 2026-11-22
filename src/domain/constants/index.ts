@@ -437,6 +437,8 @@ export {
   type UnitDashboardPeriod,
   type UnitView,
 } from './unit-dashboard';
+// P19.17-T4 (ADR-0270): informal groups' bounds and the monthly targets per AB group.
+export { AB_GROUP_TARGETS, INFORMAL_GROUPS } from './informal-groups';
 
 export {
   EVENT_ISSUERS,
@@ -452,6 +454,10 @@ export {
   type EventAttendanceStatus,
   NPS,
   EVENT_FEEDBACK_TEXT_MAX,
+  // P19.25-T1, T2 (ADR-0281): Kehadiran's bands and windows, the event NPS's bands, the decline reason's limit.
+  EVENT_KEHADIRAN,
+  EVENT_FEEDBACK_BANDS,
+  EVENT_DECLINE_REASON_MAX,
 } from './events';
 
 export {
@@ -504,10 +510,9 @@ export {
   RESERVED_CAMPAIGN_CODES,
 } from './campaigns';
 
-// Phase 18: the Owner's reporting — the analytics' periods, the monthly chart's length and MOC's two months.
+// Phase 18: the Owner's reporting — since P19.19 (ADR-0272) *Produksi 6 bulan*'s months and the compliance cards' splits.
 export {
   KPM_REPORTING,
-  type KpmAnalyticsPeriod,
 } from './reporting';
 
 // Phase 18.1: the Strategic Leader Forum — how long a shared link opens, and the bounds of what leaders type; since
@@ -547,6 +552,11 @@ export {
   BILLING_ANNUAL_DISCOUNT_PCT,
   BILLING_PRICE_TIERS,
   type BillingTier,
+  // P19.23-T5 (ADR-0279): the trial, the grace, the per-day figures, *Balik modal* and the lapse's reason.
+  BILLING,
+  BILLING_BREAK_EVEN,
+  BILLING_INCOME_PER_POLICY_MINOR,
+  BILLING_LAPSE_SUSPENSION_REASON,
   // P19.4-T3 (ADR-0211 §1): a subscription's plan, and the months each runs.
   SUBSCRIPTION_PLANS,
   SUBSCRIPTION_PLAN_MONTHS,
@@ -637,6 +647,8 @@ export {
 
 // Phase 19.2: the audit log's pages, 50 groups a read and a 10-minute group window (§B.32; UI-132).
 export { AUDIT_LOG } from './audit';
+// P19.23-T6 (ADR-0279): *Pengumuman*'s audiences and bounds.
+export { ANNOUNCEMENT, type AnnouncementAudience } from './platform-console';
 
 // Phase 19.5: the template's *Advanced analytics* section — its bounds and its defaults (§B.33; ADR-0214 to ADR-0216).
 export {
@@ -655,17 +667,24 @@ export {
   PDF_DETAIL_BLOCKS, type PdfDetailBlockKind, PROPOSAL_DEFAULT_INSURED, type ProposalDefaultInsured,
   PROPOSAL_FIELD_KEY_PATTERN, PROPOSAL_RESERVED_KEYS, PROPOSAL_TYPE_LABEL_BY_CATEGORY, defaultInsuredFor,
   // P19.7-T2 (ADR-0221): the proposal's own words and bounds, and the age band its catalogue filters by.
-  PROPOSAL_CHANNELS, type ProposalChannel, PROPOSAL_PAY_FREQUENCIES, type ProposalPayFrequency,
+  PROPOSAL_PAY_FREQUENCIES, type ProposalPayFrequency,
   PROPOSAL_STATUSES, type ProposalStatus, PROPOSAL_INSURED_RELATIONS, type ProposalInsuredRelation,
   PROPOSAL_REFUSAL_REASONS, type ProposalRefusalReason, PRODUCT_AGE_BAND_FLOORS, ageBandOf,
+  // P19.14 (ADR-0254, ADR-0255): cara bayar per product, the catalogue's calculation fields, the client's details.
+  PROPOSAL_PERIODIC_FREQUENCIES, type ProposalPeriodicFrequency, PROPOSAL_CALC_TYPES, type ProposalCalcType,
+  PROPOSAL_FIXED_FIELDS, type ProposalFixedField, PROPOSAL_CLIENT_STATUSES, type ProposalClientStatus,
+  PROPOSAL_CLIENT_NEEDS, type ProposalClientNeed, PROPOSAL_NEED_TAGS, type ProposalNeedTag, needTagFor,
+  PROPOSAL_CLIENT_TEXT_MAX, PROPOSAL_CATALOGUE, PROPOSAL_PAY_TERM_KEY_PATTERN,
 } from './proposal';
 
 // Phase 19.4: the Super Admin's reads across KPMs — the page, the purposes, the actions (§B.35; ADR-0207).
 export {
-  PLATFORM_READ, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES, KPM_COMPARISON_SORTS,
-  type PlatformMemberRole, type PlatformMemberStatus, type KpmComparisonSort,
+  PLATFORM_READ, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES,
+  type PlatformMemberRole, type PlatformMemberStatus,
   // P19.12-T2 (ADR-0245 §1): *Akun terdaftar*'s KPM filter.
   PLATFORM_ACCOUNT_KPM_FILTERS, type PlatformAccountKpmFilter,
+  // P19.23-T3 (OD-421): *Anggota*'s *Akun tes*.
+  PLATFORM_MEMBER_TEST_FILTERS, type PlatformMemberTestFilter,
 } from './platform-reads';
 
 // Phase 19.6: a KPM's branding — the contrast rule, the palette's shades, the pictures' bounds (§B.36; ADR-0218).
@@ -673,3 +692,28 @@ export {
   BRANDING, BRANDING_ICON_FILES, BRANDING_MASCOT_FILE, HEX_COLOUR,
   type BrandingUploadKind, type MascotPose, type BrandingIconFile,
 } from './branding';
+
+// P19.15-T1 (ADR-0258): premium tables, their rules, the three test profiles and the calculation (§B.39).
+export {
+  RATE_BASES, type RateBasis, RATE_TABLE_STATUSES, type RateTableStatus, RATE_TABLE_SOURCES, type RateTableSource,
+  RATE_COLUMN_ROLES, type RateColumnRole, PRODUCT_DATA_STATUSES, type ProductDataStatus, PRODUCT_DATA_CHECK_REASONS,
+  type ProductDataCheckReason, CALC_STATES, type CalcState, CALC_NOTES, type CalcNote, CALC_LIMIT_KINDS,
+  type CalcLimitKind, RATE_GAP_KINDS, type RateGapKind, PRODUCT_DATA,
+} from './product-data';
+
+// P19.15-T2, T3 (ADR-0259): *Unggah file*'s bounds, the intake's kinds and states, and the illustration's blocks (§B.40).
+export {
+  INTAKE, INTAKE_FILE_KINDS, type IntakeFileKind, INTAKE_STATUSES, type IntakeStatus, INTAKE_ITEM_KINDS,
+  type IntakeItemKind, INTAKE_ITEM_STATUSES, type IntakeItemStatus, INTAKE_QUESTION_KINDS, type IntakeQuestionKind,
+  INTAKE_RULE_KEYS, type IntakeRuleKey, INTAKE_FIELD_KEYS, type IntakeFieldKey, ILLUSTRATION_STATUSES,
+  type IllustrationStatus, ILLUSTRATION, ILLUSTRATION_CHECK_STATES, type IllustrationCheckState,
+} from './product-data-intake';
+
+// P19.15-T4 (ADR-0260, ADR-0261): *Perubahan oleh pengelola*'s page, and the premium table notices' days and time (§B.41).
+export { PRODUCT_DATA_CHANGES, PREMIUM_TABLE_NOTICES } from './product-data-access';
+
+// P19.23-T1, T2 (ADR-0277): the Super Admin console's colour scale, a KPM page's members and a KPM's issues (§B.45).
+export { CONSOLE, KPM_ISSUES, KPM_ACTION_ISSUES, type KpmIssue } from './console';
+
+// P19.24 (ADR-0280): the KPM report's months, smallest text, table chunks and its shared link's life (§B.46).
+export { KPM_REPORT } from './kpm-report';

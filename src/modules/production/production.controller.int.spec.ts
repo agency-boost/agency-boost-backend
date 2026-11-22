@@ -23,6 +23,7 @@ import { ProductionMonths } from './production-months.service';
 import { ProductionMonth } from './production-month.schema';
 import { ProductionCorrections } from './production-correction.service';
 import { listenOnLoopback } from '../../../test/listen';
+import { RequestContext } from '@/common/context/request-context';
 
 const NOW = new Date('2026-09-27T02:00:00Z');
 
@@ -46,6 +47,7 @@ const ROUTES: Record<string, string> = {
   lock: 'data_upload:lock_month',
   reopen: 'data_upload:reopen_month',
   correct: 'data_upload:correct_cell',
+  restore: 'data_upload:correct_cell',
   readMonth: 'data_upload:read',
 };
 
@@ -400,19 +402,19 @@ describe('production over HTTP (P9-T1)', () => {
       const file = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,140,,,,,,,,,,\nPRU-999,"Nobody",1,,,,,,,,,,,\n`;
       const issues = (body: { rows: { issues: { code: string; message: string }[] }[] }) =>
         body.rows.map((row) => row.issues.map((issue) => [issue.code, issue.message]));
-      // P19.5-T2: a cell is named by the template's header for its column, in the reader's language; PRU-999 is not in the
-      // format of the office's codes either (ADR-0214 §5 step 2), which is said first.
+      // P19.5-T2: a cell is named by the template's header for its column, in the reader's language. PRU-999 is nobody's:
+      // kept as *Belum jadi anggota* with no issue since P19.21-T1 AC-5 (ADR-0274 §2), whatever its format.
       expect(issues((await send(file).set('Accept-Language', 'en').expect(200)).body)).toEqual([
         [['UPLOAD_VALUE_OUT_OF_RANGE', 'Rolling persistency (%) [PERSISTENCY]: “140” is above 100 — persistency is a percentage.']],
-        [['UPLOAD_AGENT_CODE_PATTERN', 'This code is not in the agent code format of this KPM\'s template — for example 80777.']],
+        [],
       ]);
       const indonesian = await send(file).set('Accept-Language', 'id').expect(200);
       expect(issues(indonesian.body)).toEqual([
         [['UPLOAD_VALUE_OUT_OF_RANGE', 'Persistensi rolling (%) [PERSISTENCY]: “140” lebih dari 100 — persistency adalah persentase.']],
-        [['UPLOAD_AGENT_CODE_PATTERN', 'Kode ini tidak sesuai format kode agen di template KPM ini — contohnya 80777.']],
+        [],
       ]);
       // Everything else in the preview is the same in both: codes, statuses, figures.
-      expect(indonesian.body.summary).toMatchObject({ rows: 2, ready: 1, refused: 1, newCells: 1, refusedCells: 1 });
+      expect(indonesian.body.summary).toMatchObject({ rows: 2, ready: 1, refused: 0, held: 1, newCells: 2, refusedCells: 1 });
     });
 
     it('P18.10-T5 AC-2 refuses the file in Indonesian: its header, its size, a missing file', async () => {
@@ -529,7 +531,7 @@ describe('production over HTTP (P9-T1)', () => {
       expect(badMonth.body.error.code).toBe('VALIDATION_FAILED');
     });
 
-    it('replaces a correction named in the form, and keeps one that is not (ADR-0053)', async () => {
+    it('P19.21-T1 AC-5 the upload replaces a correction — no choice is asked, and a `replace` field is refused', async () => {
       await request(app.getHttpServer()).patch('/kpm/data-upload/cell').send({
         month: '2026-09', membershipId: RINA, kode: 'APE', ytd: false, value: 300_000_000, revision: 0, reason: 'x',
       });
@@ -537,14 +539,23 @@ describe('production over HTTP (P9-T1)', () => {
         .field('month', '2026-09').attach('file', Buffer.from(FILLED), 'filled.csv');
       expect(preview.body.summary.correctionCells).toBe(1);
 
-      const kept = await commit('1', FILLED);
-      expect(kept.status).toBe(400);
-
-      const replaced = await request(app.getHttpServer()).post('/kpm/data-upload/commit')
+      const ticked = await request(app.getHttpServer()).post('/kpm/data-upload/commit')
         .field('month', '2026-09').field('revision', '1').field('replace', `${RINA}:APE`)
         .attach('file', Buffer.from(FILLED), 'filled.csv');
+      expect([ticked.status, ticked.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+
+      const replaced = await commit('1', FILLED);
       expect(replaced.status).toBe(201);
-      expect(replaced.body.batch).toMatchObject({ replacedCorrectionCount: 1, keptCorrectionCount: 0 });
+      expect(replaced.body.batch).toMatchObject({ replacedCorrectionCount: 1, keptCorrectionCount: 0, memberRowCount: 1, heldRowCount: 0 });
+    });
+
+    it('P19.21-T1 AC-5 keeps a row of an unregistered code as Belum jadi anggota, and counts both kinds of row', async () => {
+      const file = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,,,,,,,,,,,\n91200451,"Rudi Hartono",1.24,,,,,,,,,,,\n`;
+      const res = await commit('0', file).expect(201);
+      expect(res.body.batch).toMatchObject({ rowCount: 2, memberRowCount: 1, heldRowCount: 1 });
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      expect(month.body.unregistered).toEqual([expect.objectContaining({ agentCode: '91200451', fileName: 'Rudi Hartono' })]);
+      expect(month.body.rows).toHaveLength(1);
     });
 
     it('answers a stale preview with 409 VERSION_CONFLICT', async () => {
@@ -586,14 +597,17 @@ describe('production over HTTP (P9-T1)', () => {
       });
     });
 
-    it('P18.10-T5 AC-6 keeps a commit’s issues with the batch in the words of whoever imported it', async () => {
+    it('P19.21-T1 AC-5 refuses a file with a problem whole, each problem in the words of whoever uploads it', async () => {
       const file = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.5,140,,,,,,,,,,\n`;
-      await commit('0', file).set('Accept-Language', 'id').expect(201);
-      const [row] = await mongoose.connection.db!.collection('dataUploadRows').find({}).toArray();
-      expect(row.issues).toEqual([{
-        code: 'UPLOAD_VALUE_OUT_OF_RANGE', kode: 'PERSISTENCY', ytd: false,
+      const res = await commit('0', file).set('Accept-Language', 'id').expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(res.body.error.message).toContain('belum ada yang disimpan');
+      expect(res.body.error.details.problems).toEqual([{
+        line: 2, agentCode: 'PRU-001', code: 'UPLOAD_VALUE_OUT_OF_RANGE', kode: 'PERSISTENCY', ytd: false,
         message: 'Persistensi rolling (%) [PERSISTENCY]: “140” lebih dari 100 — persistency adalah persentase.',
       }]);
+      expect(await mongoose.connection.db!.collection('dataUploadRows').countDocuments()).toBe(0);
+      expect(await mongoose.connection.db!.collection('monthlyAgentData').countDocuments()).toBe(0);
     });
   });
 
@@ -739,9 +753,10 @@ describe('production over HTTP (P9-T1)', () => {
       expect(id.body.rows[0].issues[0].message).toContain('ada di baris agen dan tidak disimpan');
     });
 
-    it('P19.3-T1 AC-6 commits a leader’s figure, not an agent’s, and the month table shows it', async () => {
-      const res = await upload('commit', V2('85', '82.5'), '0').expect(201);
-      expect(res.body.batch).toMatchObject({ status: 'committed', templateVersion: 1, cellCount: 3, issueCount: 1 });
+    it('P19.3-T1 AC-6 commits a leader’s figure, and refuses a file with an agent’s (P19.21-T1 AC-5)', async () => {
+      await upload('commit', V2('85', '82.5'), '0').expect(400);
+      const res = await upload('commit', V2('', '82.5'), '0').expect(201);
+      expect(res.body.batch).toMatchObject({ status: 'committed', templateVersion: 1, cellCount: 3, issueCount: 0 });
       const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
       const row = (code: string) => month.body.rows.find((r: { agentCode: string }) => r.agentCode === code);
       expect(row('PRU-002')).toMatchObject({ leader: true, values: { UNIT_PERSISTENCY: { value: 82.5, provenance: 'imported', correction: null } } });
@@ -769,5 +784,95 @@ describe('production over HTTP (P9-T1)', () => {
         expect(month.body.withData).toBe(0);
       },
     );
+  });
+  /**
+   * **P19.21-T1 — who may upload, correct and put back** (PERMISSIONS.md *Upload data, correct a number*; ADR-0268): the
+   * Owner, an Admin, a core leader and a Super Admin working inside the KPM — never an AB, an AAB or an agent — and the
+   * office is the request's own, so another KPM's member is `404`.
+   */
+  describe('P19.21-T1 — the roles, over HTTP', () => {
+    const CORE_LEADER = new RequestContext('u-cl', 'none', {
+      membershipId: 'mem-cl', kpmId: FIXTURE_KPM, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+      isKpmOwner: false, isKpmAdmin: false, isCoreLeader: true, directCount: 0,
+    } as never);
+    const OTHER_KPM = '66f0000000000000000000b9';
+    const OTHER_OWNER = new RequestContext('u-owner-b', 'none', {
+      membershipId: 'mem-ob', kpmId: OTHER_KPM, orgLevelCode: 'AB', hierarchyRole: 'none', status: 'active',
+      isKpmOwner: true, isKpmAdmin: false, directCount: 0,
+    } as never);
+    const SUPER_ADMIN_IN_KPM = RequestContext.superAdminInKpm(SUPER_ADMIN, FIXTURE_KPM);
+    const FILE = `${TEMPLATE_HEADER_V1.join(',')}\nPRU-001,"Rina Wijaya",1.412,,,,,,,,,,,\n`;
+    const commitAs = (revision: string) => request(app.getHttpServer()).post('/kpm/data-upload/commit')
+      .field('month', '2026-09').field('revision', revision).attach('file', Buffer.from(FILE), 'nov.csv');
+    const correctAt = (revision: number) => request(app.getHttpServer()).patch('/kpm/data-upload/cell').send({
+      month: '2026-09', membershipId: RINA, kode: 'APE', ytd: false, value: 161_200_000, revision, reason: 'Polis susulan',
+    });
+    const restoreAt = (revision: number, membershipId = RINA) => request(app.getHttpServer()).post('/kpm/data-upload/cell/restore')
+      .send({ month: '2026-09', membershipId, kode: 'APE', ytd: false, revision });
+
+    it.each([
+      ['a core leader', CORE_LEADER], ['a Super Admin inside the KPM', SUPER_ADMIN_IN_KPM], ['the Owner', OWNER], ['an Admin', ADMIN],
+    ] as [string, RequestContext][])('P19.21-T1 AC-5 AC-4 %s uploads, corrects and puts a figure back to the file’s', async (_who, ctx) => {
+      session.current = ctx;
+      await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      await commitAs('0').expect(201);
+      await correctAt(1).expect(200);
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      expect(month.body.rows[0].values.APE).toMatchObject({ value: 161_200_000, correction: { fileValue: 141_200_000 } });
+      const res = await restoreAt(2).expect(200);
+      expect(res.body).toMatchObject({ changed: true, after: { value: 141_200_000, provenance: 'imported' }, state: { revision: 3 } });
+    });
+
+    it.each(NOT_ADMINISTRATORS.filter(([who]) => who !== 'a Super Admin'))(
+      'P19.21-T1 AC-4 refuses %s the way back to the file’s number (403)',
+      async (_who, ctx) => {
+        session.current = ctx;
+        const res = await restoreAt(0);
+        expect([res.status, res.body.error.code]).toEqual([403, 'PERM_DENIED']);
+      },
+    );
+
+    it('P19.21-T1 AC-4 refuses a Super Admin outside any KPM the way back (403)', async () => {
+      session.current = SUPER_ADMIN;
+      expect((await restoreAt(0)).status).toBe(403);
+    });
+
+    it('P19.21-T1 AC-4 another KPM’s Owner cannot reach this office’s member: 404, and nothing changes', async () => {
+      await commitAs('0').expect(201);
+      await correctAt(1).expect(200);
+      session.current = OTHER_OWNER;
+      const res = await restoreAt(0);
+      expect([res.status, res.body.error.code]).toEqual([404, 'NOT_FOUND']);
+      session.current = OWNER;
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      expect(month.body.rows[0].values.APE.value).toBe(161_200_000);
+    });
+
+    it('P19.21-T1 AC-4 refuses what the form gets wrong, and a figure nobody corrected', async () => {
+      const noKode = await request(app.getHttpServer()).post('/kpm/data-upload/cell/restore')
+        .send({ month: '2026-09', membershipId: RINA, ytd: false, revision: 0 });
+      expect([noKode.status, noKode.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+      const badMonth = await request(app.getHttpServer()).post('/kpm/data-upload/cell/restore')
+        .send({ month: 'Sep', membershipId: RINA, kode: 'APE', ytd: false, revision: 0 });
+      expect(badMonth.status).toBe(400);
+      await commitAs('0').expect(201);
+      const notCorrected = await restoreAt(1);
+      expect([notCorrected.status, notCorrected.body.error.code]).toEqual([400, 'VALIDATION_FAILED']);
+    });
+
+    it('P19.21-T1 AC-3 the month read names each member’s class, rung and photo, and leaves a test account out', async () => {
+      await mongoose.connection.db!.collection('memberships').insertOne({
+        _id: new mongoose.Types.ObjectId('66f000000000000000000109'), kpmId: FIXTURE_KPM, userId: '66f000000000000000000309',
+        agentCode: 'FMT-01', agentSeq: 9, orgLevelCode: 'AGENT', role: 'agent', status: 'active', deletedAt: null, testAccount: true,
+      } as never);
+      const month = await request(app.getHttpServer()).get('/kpm/data-upload/2026-09').expect(200);
+      expect(month.body.rows).toHaveLength(1);
+      expect(month.body.rows[0]).toMatchObject({ agentCode: 'PRU-001', orgLevelCode: 'AGENT', photoUrl: null });
+      expect(month.body.rows[0]).toHaveProperty('role');
+      expect(month.body.config.historyFrom).toBe('2024-01');
+      expect(month.body.months[0].month).toBe('2024-01');
+      const template = await request(app.getHttpServer()).get('/kpm/data-upload/template?month=2026-09').expect(200);
+      expect(template.body.file).not.toContain('FMT-01');
+    });
   });
 });

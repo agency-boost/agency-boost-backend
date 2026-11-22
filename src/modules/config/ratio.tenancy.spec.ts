@@ -56,9 +56,14 @@ describe('the office ratio definitions (P4-T2)', () => {
        */
       const list = await ratios.list(ctx(KPM_A));
       const byCode = new Map(list.map((r) => [r.code, r]));
+      // P19.17-T1 AC-6 (ADR-0267 §6): submissions ÷ presentations, the follow-up no longer counted.
       expect(byCode.get('SELLING_SUCCESS_RATE')).toMatchObject({
         numerator: ['SELL_SUBMISSION'],
-        denominator: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'],
+        denominator: ['SELL_PRESENTATION'],
+      });
+      expect(byCode.get('RECRUITMENT_SUCCESS_RATE')).toMatchObject({
+        numerator: ['RECRUIT_AGENT_CODE'],
+        denominator: ['RECRUIT_PRESENTATION'],
       });
       expect(byCode.get('LEADS_PER_ACTIVITY')).toMatchObject({
         numerator: ['LEADS_NEW_PROSPECT'], denominator: ['LEADS_GEN_ACTIVITY'],
@@ -125,8 +130,9 @@ describe('the office ratio definitions (P4-T2)', () => {
         .find((t) => t.code === 'SELL_FOLLOWUP')!;
       await activity.archiveType(ctx(KPM_A), type.id);
 
+      // The balance still counts every Selling type, the follow-up among them (ADR-0267 §6 left it as it was).
       const list = await ratios.list(ctx(KPM_A));
-      expect(list.find((r) => r.code === 'SELLING_SUCCESS_RATE')!.denominator)
+      expect(list.find((r) => r.code === 'SELLING_VS_RECRUITMENT')!.numerator)
         .toContain('SELL_FOLLOWUP');
     });
 
@@ -478,11 +484,12 @@ describe('the office ratio definitions (P4-T2)', () => {
         const row = await platform();
         expect(row.divergesFromStandard).toBe(false);
 
+        // P19.17-T1 (ADR-0267 §6): the standard is presentations alone now, so counting follow-ups too diverges.
         const updated = await ratios.update(ctx(KPM_A), row.id, {
-          denominator: ['SELL_PRESENTATION'],
+          denominator: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'],
         });
 
-        expect(updated.denominator).toEqual(['SELL_PRESENTATION']);
+        expect(updated.denominator).toEqual(['SELL_PRESENTATION', 'SELL_FOLLOWUP']);
         expect(updated.divergesFromStandard).toBe(true);
       });
 
@@ -491,7 +498,7 @@ describe('the office ratio definitions (P4-T2)', () => {
         const updated = await ratios.update(ctx(KPM_A), row.id, { numerator: ['SELL_PRESENTATION'] });
 
         expect(updated.standardNumerator).toEqual(['SELL_SUBMISSION']);
-        expect(updated.standardDenominator).toEqual(['SELL_PRESENTATION', 'SELL_FOLLOWUP']);
+        expect(updated.standardDenominator).toEqual(['SELL_PRESENTATION']);
       });
 
       it('stops saying so when the formula is put back', async () => {
@@ -503,9 +510,11 @@ describe('the office ratio definitions (P4-T2)', () => {
       });
 
       it('does not call a reordered formula a divergence — order is display, not meaning', async () => {
-        const row = await platform();
+        // *Set appointment to meeting*'s two presentations: the selling success rate's sides are one code each since
+        // ADR-0267 §6.
+        const row = (await ratios.list(ctx(KPM_A))).find((r) => r.code === 'MEETING_PER_APPROACH')!;
         const updated = await ratios.update(ctx(KPM_A), row.id, {
-          denominator: ['SELL_FOLLOWUP', 'SELL_PRESENTATION'],
+          numerator: ['RECRUIT_PRESENTATION', 'SELL_PRESENTATION'],
         });
 
         expect(updated.divergesFromStandard).toBe(false);

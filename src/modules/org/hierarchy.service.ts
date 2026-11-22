@@ -34,6 +34,12 @@ export interface CreateMembershipInput {
   leaderId?: string | null;
   status?: 'active' | 'pending';
   recruitedByMembershipId?: string | null;
+  /**
+   * **Who registered them** (ADR-0267 §3): the recruiter `RECRUITS_JOINED` credits — the invitation's sender, the leader
+   * whose code they joined on, the member who imported them. Omitted: nobody (an Owner; a pending person, whose placement
+   * writes it).
+   */
+  registeredByMembershipId?: string | null;
   sourceLeadId?: string | null;
   /**
    * Full-time or part-time in this office (ADR-0158 §1). The roster import names it; every other
@@ -55,8 +61,13 @@ export interface CreateMembershipInput {
 export interface JoiningInput {
   /** An office date `YYYY-MM-DD`, checked: a real day, not after the office's today, not before 1980. Omitted: today. */
   joinDate?: string;
-  /** Forced, for a roster import and an Owner (ADR-0169 §6, ADR-0103). Omitted: from the date, once. */
+  /** Forced, for a roster import and an Owner (ADR-0169 §6, ADR-0103). Omitted: from the company join month or the date. */
   joinedAs?: JoinedAs;
+  /**
+   * ADR-0264: the month the person joined the company, `YYYY-MM`, which decides when on file (`joinedAsFor`). Omitted:
+   * read from the person's account when there is one; `null`: none on file.
+   */
+  companyJoinMonth?: string | null;
 }
 
 /** The two fields a membership made active is written with (ADR-0169 §1, §3). */
@@ -180,10 +191,13 @@ export class HierarchyService {
    * answer waits on the account (`users.registeredWorkStatus`) and is carried onto the membership they
    * are given here — through a leader's code, an office's approval, or being made its Owner alike.
    * `null` for anybody who registered before it was asked.
+   *
+   * **And whether the account is a test account** (ADR-0267 §1), in the same read: every membership of a test account
+   * carries the flag, which is what the reads of a KPM's members leave out (`NOT_A_TEST_ACCOUNT`).
    */
-  private async registeredWorkStatusOf(userId: string): Promise<WorkStatus | null> {
-    const user = await this.users.findOne({ _id: userId }).select('registeredWorkStatus').exec();
-    return user?.registeredWorkStatus ?? null;
+  private async accountOf(userId: string): Promise<{ registeredWorkStatus: WorkStatus | null; testAccount: boolean }> {
+    const user = await this.users.findOne({ _id: userId }).select('registeredWorkStatus testAccount').exec();
+    return { registeredWorkStatus: user?.registeredWorkStatus ?? null, testAccount: user?.testAccount === true };
   }
 
   /**
@@ -332,13 +346,14 @@ export class HierarchyService {
    * read through the injected clock (invariant §9). A given date is refused `400 VALIDATION_FAILED` naming
    * `joinDate` when it is not a real day, is after the office's today, or is before 1980; an existing agent may have
    * joined decades ago, so there is no other lower bound. `joinedAs` is the forced one where a path names it, else
-   * `new_hire` when the date is no more than 90 days before today and `existing_agent` otherwise — computed here,
+   * `joinedAsFor` (ADR-0264): `new_hire` when the person joined the company in the join date's year, from the month
+   * given or on their account (`userId`), and with none the 90-day rule — computed here,
    * once, and written beside the date; nothing recomputes it.
    *
    * Asked **before anything is written**, so a refused date leaves the membership, the request and the counter as
    * they were.
    */
-  async joining(ctx: RequestContext, given: JoiningInput = {}): Promise<JoiningFields> {
+  async joining(ctx: RequestContext, given: JoiningInput = {}, userId: string | null = null): Promise<JoiningFields> {
     const today = await this.officeToday(ctx);
     if (given.joinDate !== undefined) {
       // A sentence in both languages (`joining.messages.ts`), refused in the shared envelope (P18.10-T5 AC-3).
@@ -346,7 +361,17 @@ export class HierarchyService {
       if (violation) refuseWith([violation]);
     }
     const joinDate = given.joinDate ?? today;
-    return { joinDate, joinedAs: given.joinedAs ?? joinedAsFor(joinDate, today) };
+    if (given.joinedAs) return { joinDate, joinedAs: given.joinedAs };
+    // ADR-0264: the company join month decides when on file — the one given, else the account's.
+    const month = given.companyJoinMonth !== undefined ? given.companyJoinMonth : await this.companyJoinMonthOf(userId);
+    return { joinDate, joinedAs: joinedAsFor(joinDate, today, month) };
+  }
+
+  /** `users.companyJoinMonth`, a global record (ADR-0002), or `null` with no account or no month on it. */
+  private async companyJoinMonthOf(userId: string | null): Promise<string | null> {
+    if (!userId) return null;
+    const user = await this.users.findOne({ _id: userId }).select('companyJoinMonth').lean<{ companyJoinMonth?: string | null }>().exec();
+    return user?.companyJoinMonth ?? null;
   }
 
   /** The office's today, in its own zone. A row that names none reads the platform's (ADR-0016). */
@@ -477,7 +502,7 @@ export class HierarchyService {
     const status = input.status ?? 'pending';
     // ADR-0169: an active membership is given its join date and classification here, before the increment, so a
     // refused date spends nothing. A pending one waits for whoever lets them in.
-    const joining = status === 'active' ? await this.joining(ctx, input.joining) : null;
+    const joining = status === 'active' ? await this.joining(ctx, input.joining, userId) : null;
     return { leader, companyId, agentCode, level, status, joining };
   }
 
@@ -497,6 +522,7 @@ export class HierarchyService {
     const { agentSeq } = await this.nextMemberSeq(ctx.kpmId as string);
     const leaderCode = await this.freshLeaderCode();
     const role = classOfRung(level);
+    const account = await this.accountOf(input.userId);
 
     const membership = await this.members.create(ctx, {
       userId: input.userId,
@@ -514,9 +540,13 @@ export class HierarchyService {
       joinDate: joining?.joinDate ?? null,
       joinedAs: joining?.joinedAs ?? null,
       recruitedByMembershipId: input.recruitedByMembershipId ?? null,
+      // ADR-0267 §3: the recruiter, as the path that places them names it.
+      registeredByMembershipId: input.registeredByMembershipId ?? null,
       sourceLeadId: input.sourceLeadId ?? null,
       // ADR-0158 §1: what the caller names (a roster row), else what they said when they registered.
-      workStatus: input.workStatus ?? (await this.registeredWorkStatusOf(input.userId)),
+      workStatus: input.workStatus ?? account.registeredWorkStatus,
+      // ADR-0267 §1: the account's flag, carried by every membership of a test account.
+      testAccount: account.testAccount,
     });
 
     await this.recordJoined(ctx, String(membership._id), {

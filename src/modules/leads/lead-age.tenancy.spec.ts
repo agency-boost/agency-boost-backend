@@ -22,11 +22,12 @@ const ctxFor = (membershipId: string, rung: string, kpmId = KPM_A) => new Reques
 } as never);
 
 /**
- * **P19.7-T1 AC-1 — the client's age and gender on a lead, through the service, over a real database** (ADR-0224):
- * stored with the day it was written, read as today's on the office's calendar, read and written by whoever the lead's
- * own rules let read and write it, never across offices, and never copied into the audit log.
+ * **P19.14-T1 AC-4 — a lead written while it could carry an age** (ADR-0254 §5, superseding ADR-0224): a lead saved
+ * between 5 and 12 November may still hold `age`, `ageRecordedOn` and `gender` in the database. **They are left as they
+ * are and read by nothing**: no read answers them, to its owner or a leader; a write neither moves nor clears them; and
+ * a proposal for the lead starts from no client data of the lead's — only from an earlier proposal's.
  */
-describe('P19.7-T1 AC-1 the lead’s age and gender', () => {
+describe('P19.14-T1 AC-4 a lead’s stored age and gender, read by nothing', () => {
   let wired: ReturnType<typeof configModule>;
   const clock = () => wired.clock as FixedClock;
   const db = () => mongoose.connection.db!;
@@ -63,106 +64,45 @@ describe('P19.7-T1 AC-1 the lead’s age and gender', () => {
   });
 
   const agent = () => ctxFor(AGENT, 'AGENT');
+  const aab = () => ctxFor(AAB, 'AAB');
   const stored = async (id: string) => db().collection('leads').findOne({ _id: new mongoose.Types.ObjectId(id) });
+  const legacy = async (ctx: RequestContext) => {
+    const lead = await wired.leadRecords.create(ctx, { name: 'Pak Budi', type: 'sales' });
+    await db().collection('leads').updateOne(
+      { _id: new mongoose.Types.ObjectId(lead.id) }, { $set: { age: 36, ageRecordedOn: '2026-11-05', gender: 'male' } },
+    );
+    return lead.id;
+  };
 
-  it('P19.7-T1 AC-1 stores the age with today’s day and the gender, and answers both on every read', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', type: 'sales', age: 36, gender: 'male' });
-    expect(lead).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05', gender: 'male' });
-    expect(await stored(lead.id)).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05', gender: 'male' });
-    expect(await wired.leadRecords.read(agent(), lead.id)).toMatchObject({ age: 36, gender: 'male' });
-    const page = await wired.leadRecords.list(agent(), {});
-    expect(page.rows[0]).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05', gender: 'male' });
+  it('P19.14-T1 AC-4 answers none of the three to the owner, on a read or a list', async () => {
+    const id = await legacy(agent());
+    const read = await wired.leadRecords.read(agent(), id);
+    const row = (await wired.leadRecords.list(agent(), { pageSize: 50 })).rows.find((r) => r.id === id)!;
+    for (const view of [read, row]) for (const key of ['age', 'ageRecordedOn', 'gender']) expect(view).not.toHaveProperty(key);
   });
 
-  it('P19.7-T1 AC-1 leaves both optional: a lead with neither answers null, null, null', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Ibu Sari' });
-    expect(lead).toMatchObject({ age: null, ageRecordedOn: null, gender: null });
+  it('P19.14-T1 AC-4 answers none of the three to a leader reading a downline’s lead', async () => {
+    const id = await legacy(agent());
+    const read = await wired.leadRecords.read(aab(), id);
+    for (const key of ['age', 'ageRecordedOn', 'gender']) expect(read).not.toHaveProperty(key);
   });
 
-  it('P19.7-T1 AC-1 moves the age up on the anniversary at 00:00 WIB, and reads the year before unchanged', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 36 });
-    clock().set(new Date('2027-11-04T16:59:00Z')); // 23:59 WIB, 4 November 2027
-    expect((await wired.leadRecords.read(agent(), lead.id)).age).toBe(36);
-    clock().set(new Date('2027-11-04T17:00:00Z')); // 00:00 WIB, 5 November 2027
-    expect((await wired.leadRecords.read(agent(), lead.id)).age).toBe(37);
-    // The stored age is the one written, with its day: only the reading moved.
-    expect(await stored(lead.id)).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05' });
+  it('P19.14-T1 AC-4 a write neither moves nor clears them: they stay as stored, untouched (no destructive migration)', async () => {
+    const id = await legacy(agent());
+    const lead = await wired.leadRecords.read(agent(), id);
+    await wired.leadRecords.update(agent(), id, { name: 'Pak Budi S.', version: lead.version });
+    expect(await stored(id)).toMatchObject({ name: 'Pak Budi S.', age: 36, ageRecordedOn: '2026-11-05', gender: 'male' });
   });
 
-  it('P19.7-T1 AC-1 leaves the age and its day alone when the sheet saves the age it shows; another age moves the day', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 36 });
-    clock().set(new Date('2028-01-10T03:00:00Z'));
-    const same = await wired.leadRecords.update(agent(), lead.id, { age: 37, remarks: 'Sudah bicara.' });
-    expect(same).toMatchObject({ age: 37, ageRecordedOn: '2026-11-05' });
-    expect(await stored(lead.id)).toMatchObject({ age: 36, ageRecordedOn: '2026-11-05' });
-
-    const moved = await wired.leadRecords.update(agent(), lead.id, { age: 40 });
-    expect(moved).toMatchObject({ age: 40, ageRecordedOn: '2028-01-10' });
-
-    const cleared = await wired.leadRecords.update(agent(), lead.id, { age: null, gender: null });
-    expect(cleared).toMatchObject({ age: null, ageRecordedOn: null, gender: null });
+  it('P19.14-T1 AC-5 the first proposal for such a lead starts empty: the lead’s stored age is no prefill', async () => {
+    const id = await legacy(agent());
+    const row = (await wired.leadRecords.list(agent(), { pageSize: 50 })).rows.find((r) => r.id === id)!;
+    expect(row.proposals).toBeNull();
   });
 
-  it('P19.7-T1 AC-1 names the fields changed in the audit entry, never their values', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi' });
-    await wired.leadRecords.update(agent(), lead.id, { age: 52, gender: 'female' });
-    const entry = await db().collection('auditLog').findOne({ action: 'lead.updated', targetId: lead.id });
-    expect(entry!.after.fields).toEqual(expect.arrayContaining(['age', 'gender']));
-    const written = JSON.stringify(await db().collection('auditLog').find({ targetId: lead.id }).toArray());
-    expect(written).not.toMatch(/"age":\s*52|female|ageRecordedOn/);
-  });
-
-  it('P19.7-T1 AC-1 an unchanged age is not named as changed', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 30, gender: 'male' });
-    await wired.leadRecords.update(agent(), lead.id, { age: 30, gender: 'male', remarks: 'x' });
-    const entry = await db().collection('auditLog').findOne({ action: 'lead.updated', targetId: lead.id });
-    expect(entry!.after.fields).toEqual(['remarks']);
-  });
-
-  describe('P19.7-T1 AC-1 who reads and writes them: whoever the lead’s own rules let', () => {
-    it('P19.7-T1 AC-1 a leader reads a downline’s lead with its age and gender', async () => {
-      const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 45, gender: 'male' });
-      expect(await wired.leadRecords.read(ctxFor(AAB, 'AAB'), lead.id)).toMatchObject({ age: 45, gender: 'male' });
-      expect(await wired.leadRecords.read(ctxFor(AB, 'AB'), lead.id)).toMatchObject({ age: 45, gender: 'male' });
-    });
-
-    it('P19.7-T1 AC-1 a leader’s write is pinned to the version read, and carries the leader’s name (ADR-0044)', async () => {
-      const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi' });
-      await expect(wired.leadRecords.update(ctxFor(AAB, 'AAB'), lead.id, { age: 45 }))
-        .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-      await expect(wired.leadRecords.update(ctxFor(AAB, 'AAB'), lead.id, { age: 45, version: lead.version + 3 }))
-        .rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
-      const written = await wired.leadRecords.update(ctxFor(AAB, 'AAB'), lead.id, { age: 45, version: lead.version });
-      expect(written).toMatchObject({ age: 45, ageRecordedOn: '2026-11-05', lastEditedBy: { membershipId: AAB } });
-    });
-
-    it('P19.7-T1 AC-1 a colleague in the same unit can neither read nor write them: 404', async () => {
-      const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 45 });
-      await expect(wired.leadRecords.read(ctxFor(SIBLING, 'AGENT'), lead.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-      await expect(wired.leadRecords.update(ctxFor(SIBLING, 'AGENT'), lead.id, { age: 50 }))
-        .rejects.toMatchObject({ code: 'NOT_FOUND' });
-    });
-
-    it('P19.7-T1 AC-1 KPM B cannot read or write KPM A’s lead’s age: 404, and nothing changes', async () => {
-      const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 45, gender: 'male' });
-      const other = ctxFor(STRANGER, 'AGENT', KPM_B);
-      await expect(wired.leadRecords.read(other, lead.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-      await expect(wired.leadRecords.update(other, lead.id, { age: 99, gender: 'female', version: lead.version }))
-        .rejects.toMatchObject({ code: 'NOT_FOUND' });
-      expect(await stored(lead.id)).toMatchObject({ age: 45, gender: 'male' });
-      expect((await wired.leadRecords.list(other, {})).rows).toEqual([]);
-    });
-  });
-
-  it('P19.7-T1 AC-1 refuses an age outside 1–100 with LEAD_AGE_OUT_OF_RANGE and { min, max }, writing nothing', async () => {
-    const lead = await wired.leadRecords.create(agent(), { name: 'Pak Budi', age: 30 });
-    for (const age of [0, 101, -1]) {
-      await expect(wired.leadRecords.update(agent(), lead.id, { age }))
-        .rejects.toMatchObject({ code: 'LEAD_AGE_OUT_OF_RANGE', details: { min: 1, max: 100 } });
-    }
-    await expect(wired.leadRecords.create(agent(), { name: 'Ibu Ani', age: 101 }))
-      .rejects.toMatchObject({ code: 'LEAD_AGE_OUT_OF_RANGE' });
-    expect(await stored(lead.id)).toMatchObject({ age: 30, version: lead.version });
-    expect(await db().collection('leads').countDocuments({})).toBe(1);
+  it('P19.14-T1 AC-4 KPM B cannot read KPM A’s lead at all: 404, as before (cross-tenant)', async () => {
+    const id = await legacy(agent());
+    const b = ctxFor(STRANGER, 'AGENT', KPM_B);
+    await expect(wired.leadRecords.read(b, id)).rejects.toMatchObject({ status: 404 });
   });
 });

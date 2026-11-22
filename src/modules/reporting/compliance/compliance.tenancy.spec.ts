@@ -22,7 +22,8 @@ describe('the compliance tree, isolated (invariant §1; P18.3-T1 AC-1)', () => {
   let h: ComplianceHarness;
   const db = () => mongoose.connection.db!;
   const T1: ComplianceCategoryKey[] = ['training', 'goals', 'activity', 'activation'];
-  const rows = (view: ComplianceView) => view.tree.flatMap((s) => s.units.flatMap((u) => u.rows));
+  /** *Since P19.19-T3:* the opened card's cells, keyed by membership (the Overview's tree draws the rows). */
+  const rows = (view: ComplianceView) => (view.selected?.cells ?? []).map(({ membershipId, ...cell }) => ({ membershipId, cell }));
 
   beforeAll(async () => {
     h = await startComplianceHarness();
@@ -50,7 +51,7 @@ describe('the compliance tree, isolated (invariant §1; P18.3-T1 AC-1)', () => {
       .rejects.toMatchObject({ code: 'NOT_FOUND' });
     // 0555's Owner reads it.
     const view = await h.compliance.read(h.ownerOfB(), { category: 'training', item: 'GADING_ONLY' });
-    expect(view.selected).toEqual({ category: 'training', item: 'GADING_ONLY' });
+    expect(view.selected).toMatchObject({ category: 'training', item: 'GADING_ONLY' });
   });
 
   it('P18.3-T1 AC-1, P18.3-T2 events and campaigns: 0555’s own event and campaign, asked of 0417, are 404', async () => {
@@ -67,9 +68,9 @@ describe('the compliance tree, isolated (invariant §1; P18.3-T1 AC-1)', () => {
     }
     // 0555's Owner reads both, and 0417's lists neither.
     expect((await h.compliance.read(h.ownerOfB(), { category: 'events', item: event.id })).selected)
-      .toEqual({ category: 'events', item: event.id });
+      .toMatchObject({ category: 'events', item: event.id });
     expect((await h.compliance.read(h.ownerOfB(), { category: 'campaigns', item: 'GADING_PUSH' })).selected)
-      .toEqual({ category: 'campaigns', item: 'GADING_PUSH' });
+      .toMatchObject({ category: 'campaigns', item: 'GADING_PUSH' });
     const mine = await h.compliance.read(h.ctx('OWNER'), { category: 'events' });
     expect(mine.catalog.events.map((e) => e.id)).not.toContain(event.id);
     expect(mine.catalog.campaigns.map((c) => c.code)).not.toContain('GADING_PUSH');

@@ -10,6 +10,8 @@ const SAY = PRODUCTS_REFUSALS.VALIDATION_FAILED;
  */
 const CASES: [entry: keyof typeof SAY, sentence: Message, values: string[]][] = [
   ['nothingToChange', SAY.nothingToChange, []],
+  // P19.15-T1 (ADR-0258 §2): the catalogue's write refuses the premium tables' pointer.
+  ['rateTableIdIsTables', SAY.rateTableIdIsTables, ['rateTableId']],
   ['withdrawn', SAY.withdrawn({ name: 'PRUMapan' }), ['PRUMapan']],
   ['companysFields', SAY.companysFields({ fields: ['code', 'channel'], allowed: ['displayName', 'description'] }),
     ['code, channel', 'displayName, description']],

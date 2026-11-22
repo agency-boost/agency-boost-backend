@@ -198,6 +198,38 @@ export class TemplatePushService {
     return out;
   }
 
+  /**
+   * **Which kinds each KPM changed itself** (P19.23-T4 AC-5; ADR-0278 §6 — *akan tertimpa*): its live rows differ, by code
+   * on the fields an Owner edits, from the version of this template it was last given (ADR-0208 §4's rule) — **whatever
+   * version it holds**. {@link standings} says `current` for a KPM on the newest version, edits or not, because nothing
+   * would be pushed to it; *Terbitkan ke KPM* publishes a draft first, after which the same KPM's edits would be
+   * replaced, so it asks this. For training, a module showing the KPM's own material counts. Kinds the template has
+   * published nothing of are left out. Keyed by KPM id; a KPM that changed none is absent.
+   */
+  async ownEdits(
+    ctx: RequestContext, companyId: string, templateId: string, kinds: readonly OfficeTemplateKind[],
+  ): Promise<Map<string, OfficeTemplateKind[]>> {
+    if (!can(ctx, 'company_template:read')) throw new PermissionDeniedException('company_template:read');
+    const template = await this.named.findOf(companyId, templateId);
+    const id = String(template._id);
+    const newest = await this.newestOf(companyId, id);
+    const asked = kinds.filter((k) => newest[k]);
+    const out = new Map<string, OfficeTemplateKind[]>();
+    if (asked.length === 0) return out;
+    for (const office of await this.officesOf.officesOf(companyId, this.named.scopeOf(template))) {
+      const rows = await this.rowsOf(RequestContext.superAdminInTenant(ctx.userId, office.id), asked);
+      const changed: OfficeTemplateKind[] = [];
+      for (const kind of asked) {
+        const given = await this.givenOf(companyId, id, kind, office, newest[kind]!.version);
+        const differences = differencesOf(kind, itemsOfPayload(kind, given.payload), itemsOfOffice(kind, rows));
+        const own = kind === 'training_taxonomy' ? ownMaterialDifferences(rows.trainingModules) : [];
+        if (differences.length > 0 || own.length > 0) changed.push(kind);
+      }
+      if (changed.length) out.set(office.id, changed);
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------- the push (POST …/apply)
 
   /**

@@ -36,7 +36,7 @@ const NOBODY = new RequestContext('u-none', 'none', {
  */
 describe('UI-100 GET /home — who may read it', () => {
   let app: INestApplication;
-  const read = jest.fn(async (_ctx: RequestContext) => VIEW);
+  const read = jest.fn(async (_ctx: RequestContext, _query?: unknown) => VIEW);
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -64,6 +64,23 @@ describe('UI-100 GET /home — who may read it', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
+  it.each(EVERY_MEMBER)('P19.18-T4 AC-2 %s may name a view; the read receives it (the service decides who it widens)', async (_who, ctx) => {
+    session.current = ctx;
+    await request(app.getHttpServer()).get('/home').query({ scope: 'unit' }).expect(200);
+    expect(read.mock.calls[0][1]).toEqual({ scope: 'unit' });
+  });
+
+  it.each([
+    ['a view it does not know', { scope: 'all' }, 'scope'],
+    ['a parameter of any other name', { for: 'mem-1' }, 'for'],
+  ])('P19.18-T4 AC-2 %s is 400 VALIDATION_FAILED, named in details, and the read never runs', async (_, query, named) => {
+    session.current = EVERY_MEMBER[0][1];
+    const { body } = await request(app.getHttpServer()).get('/home').query(query).expect(400);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(body.error.details)).toContain(named);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it('UI-100 a member holding no grant is refused 403 PERM_DENIED, and the read never runs', async () => {
     session.current = NOBODY;
     const { body } = await request(app.getHttpServer()).get('/home').expect(403);
@@ -73,7 +90,7 @@ describe('UI-100 GET /home — who may read it', () => {
 
   it('UI-100 a Super Admin belongs to no office: the read refuses them before it reads anything', async () => {
     // The real service, with nothing behind it: it must refuse before it touches a dependency.
-    const service = new HomeService(...(Array.from({ length: 14 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
+    const service = new HomeService(...(Array.from({ length: 13 }, () => ({})) as never as ConstructorParameters<typeof HomeService>));
     await expect(service.read(SUPER_ADMIN)).rejects.toBeInstanceOf(NoMembershipException);
   });
 });

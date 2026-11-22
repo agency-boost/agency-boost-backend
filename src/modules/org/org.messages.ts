@@ -215,17 +215,31 @@ export const ORG_REFUSALS = refusals('modules/org', {
       id: 'Salah satu grup itu tidak ada di KPM ini, atau sudah dinonaktifkan.',
     },
   },
-  ORG_GROUP_OWNER_NOT_IN_KPM: {
-    ownerInOffice: {
-      en: 'Give the group an owner who is in this office.',
-      id: 'Pilih pemilik grup dari anggota KPM ini.',
-    },
-  },
   ORG_GROUP_NAME_TAKEN: {
     /** The group's name, as the office typed it. */
     taken: ({ name }: { name: string }) => ({
       en: `This office already has a group called “${name}”.`,
       id: `KPM ini sudah memiliki grup bernama “${name}”.`,
+    }),
+  },
+  /* P19.17-T4 (ADR-0270 §1, §2): only an AB carries a group or is a Group Leader. *Group*, *Group Leader*, *Tanpa group* as the pages write them. */
+  ORG_GROUP_ONE_PER_LEADER: {
+    oneGroup: {
+      en: 'An AB can be in one group only. Choose one group, or none.',
+      id: 'Seorang AB hanya bisa masuk satu group. Pilih satu group, atau Tanpa group.',
+    },
+  },
+  ORG_GROUP_AB_ONLY: {
+    abOnly: {
+      en: 'Only an AB carries a group. AABs and agents follow their AB.',
+      id: 'Hanya AB yang punya group. AAB dan agent ikut group AB-nya.',
+    },
+  },
+  ORG_GROUP_LEADER_NOT_IN_GROUP: {
+    /** The group's name, as the office typed it. */
+    inGroup: ({ name }: { name: string }) => ({
+      en: `Only an AB in ${name} can be its Group Leader. Move them into the group first.`,
+      id: `Hanya AB di ${name} yang bisa jadi Group Leader-nya. Pindahkan dulu ke group ini.`,
     }),
   },
   CORE_LEADER_NOT_A_LEADER: {
@@ -270,6 +284,11 @@ export const ORG_REFUSALS = refusals('modules/org', {
   },
 
   VALIDATION_FAILED: {
+    /** *Atur group* or *★ Jadikan core* with neither a group nor the tag (P19.13-T3; ADR-0253 §6). */
+    bulkNothing: {
+      en: 'Send a group (or null for no group), the Core leader tag, or both.',
+      id: 'Kirim group (atau null untuk Tanpa group), tag Core leader, atau keduanya.',
+    },
     /** Asking AgencyBoost about a role change the leader limit would not stop (ADR-0157 §1). */
     changeDirectly: {
       en: 'That change does not make a new leader, so it needs nobody’s approval. Make it directly.',

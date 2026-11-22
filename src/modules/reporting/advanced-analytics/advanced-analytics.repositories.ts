@@ -25,59 +25,16 @@ async function onceMore<T>(write: () => Promise<T>): Promise<T> {
 /**
  * **`analyticsTargets` behind the chokepoint** (invariant §1; P19.5-T3 AC-4, AC-10): every read and write carries the
  * caller's own `kpmId`, so an office never reads or writes another's target.
+ *
+ * *Changed 2026-11-20:* **nothing reads or writes it any more** — the MAPA and sub-group targets are the AB groups'
+ * (`abGroupTargets`; ADR-0275 §3, ADR-0270 §4), and the collection's rows stay where they are, unread (migration 0069).
+ * `mapaFor` and `setMapa` went with their last caller; the class stays because `AdvancedAnalyticsService` keeps its
+ * constructor's place (`_targets`).
  */
 @Injectable()
 export class AnalyticsTargetRepository extends TenantScopedRepository<AnalyticsTargetDocument> {
   constructor(@InjectModel(AnalyticsTarget.name) model: Model<AnalyticsTargetDocument>) {
     super(model, 'analyticsTargets');
-  }
-
-  /** The MAPA targets of the months given. */
-  async mapaFor(ctx: RequestContext, months: readonly string[]): Promise<{ month: string; row: string; value: number | null }[]> {
-    const rows = await this.find(ctx, { kind: 'mapa', month: { $in: [...months] } });
-    return rows.map((r) => ({ month: r.month as string, row: r.row as string, value: r.value }));
-  }
-
-  /** Every head's sub-group targets the KPM has set. */
-  async subgroupAll(ctx: RequestContext): Promise<Map<string, { aaTarget: number; recTarget: number }>> {
-    const rows = await this.find(ctx, { kind: 'subgroup' });
-    return new Map(rows.map((r) => [r.headMembershipId as string, { aaTarget: r.aaTarget ?? 0, recTarget: r.recTarget ?? 0 }]));
-  }
-
-  /** **Set a MAPA target in one atomic write, and say what it replaced** — `null` when this write created it. */
-  async setMapa(
-    ctx: RequestContext, month: string, row: string, value: number | null,
-  ): Promise<{ id: string; before: number | null | undefined }> {
-    return onceMore(async () => {
-      const result = await this.model.findOneAndUpdate(
-        this.scope(ctx, 'setMapa', { kind: 'mapa', month, row }),
-        { $set: { value, updatedBy: ctx.membershipId }, $setOnInsert: { kpmId: ctx.kpmId, kind: 'mapa', deletedAt: null, createdBy: ctx.membershipId } },
-        { new: false, upsert: true, includeResultMetadata: true, setDefaultsOnInsert: true },
-      ).exec();
-      const before = result.value;
-      return { id: String(before ? before._id : result.lastErrorObject!.upserted), before: before ? before.value : undefined };
-    });
-  }
-
-  /** **Set a head's targets in one atomic write, and say what they replaced** — `null` when this write created them. */
-  async setSubgroup(
-    ctx: RequestContext, headMembershipId: string, aaTarget: number, recTarget: number,
-  ): Promise<{ id: string; before: { aaTarget: number | null; recTarget: number | null } | null }> {
-    return onceMore(async () => {
-      const result = await this.model.findOneAndUpdate(
-        this.scope(ctx, 'setSubgroup', { kind: 'subgroup', headMembershipId }),
-        {
-          $set: { aaTarget, recTarget, updatedBy: ctx.membershipId },
-          $setOnInsert: { kpmId: ctx.kpmId, kind: 'subgroup', deletedAt: null, createdBy: ctx.membershipId },
-        },
-        { new: false, upsert: true, includeResultMetadata: true, setDefaultsOnInsert: true },
-      ).exec();
-      const before = result.value;
-      return {
-        id: String(before ? before._id : result.lastErrorObject!.upserted),
-        before: before ? { aaTarget: before.aaTarget, recTarget: before.recTarget } : null,
-      };
-    });
   }
 }
 
@@ -108,11 +65,6 @@ export class QuantRunRepository extends TenantScopedRepository<QuantRunDocument>
     return this.findOne(ctx, { periodEnd });
   }
 
-  /** The KPM's live (not frozen) runs past their `freezesAt`. */
-  async dueToFreeze(ctx: RequestContext, now: Date): Promise<QuantRunDocument[]> {
-    return this.find(ctx, { frozenAt: null, freezesAt: { $lte: now } });
-  }
-
   /** The KPM's runs whose read window (23 months before `periodEnd` to it) holds `month`. */
   async reading(ctx: RequestContext, month: string): Promise<QuantRunDocument[]> {
     const runs = await this.find(ctx, { periodEnd: { $gte: month } });
@@ -123,13 +75,16 @@ export class QuantRunRepository extends TenantScopedRepository<QuantRunDocument>
   async writeLive(
     ctx: RequestContext,
     periodEnd: string,
-    fields: { companyId: string; values: QuantRunDocument['values']; computedAt: Date; freezesAt: Date },
+    fields: { companyId: string; values: QuantRunDocument['values']; computedAt: Date; freezesAt: Date; fromMonth: string },
   ): Promise<QuantRunDocument | null> {
     return onceMore(async () => {
       const existing = await this.findOne(ctx, { periodEnd });
       if (existing?.frozenAt) return null;
       return this.upsertOne(ctx, { periodEnd, frozenAt: null }, {
-        $set: { companyId: fields.companyId, values: fields.values, computedAt: fields.computedAt, freezesAt: fields.freezesAt },
+        $set: {
+          companyId: fields.companyId, values: fields.values, computedAt: fields.computedAt, freezesAt: fields.freezesAt,
+          fromMonth: fields.fromMonth,
+        },
         $setOnInsert: { peers: null, lateWriteAt: null },
       });
     });
@@ -167,7 +122,9 @@ export class QuantRunRepository extends TenantScopedRepository<QuantRunDocument>
    * Walks `quantRuns` by the company's KPM ids, `kpmId` leading its index (invariant §1). A tenant role's context only:
    * the Super Admin reads it through a platform read's context, which names the KPM.
    */
-  async peerMediansAcrossTenants(ctx: RequestContext, periodEnd: string): Promise<Record<QuantMetric, StoredPeers>> {
+  async peerMediansAcrossTenants(
+    ctx: RequestContext, periodEnd: string, fromMonth: string = `${periodEnd.slice(0, 4)}-01`,
+  ): Promise<Record<QuantMetric, StoredPeers>> {
     if (!ctx.kpmId) throw new MissingTenantContextError(this.collectionName, 'peerMediansAcrossTenants');
     const own = await this.kpms.findOne({ _id: ctx.kpmId }, { companyId: 1 }).lean().exec() as { companyId?: string } | null;
     const empty = Object.fromEntries(QUANT_METRICS.map(({ metric }) => [metric, { median: null, peers: 0 }])) as Record<QuantMetric, StoredPeers>;
@@ -176,8 +133,13 @@ export class QuantRunRepository extends TenantScopedRepository<QuantRunDocument>
       .find({ companyId: own.companyId, status: 'active', deletedAt: null, _id: { $ne: ctx.kpmId } }, { _id: 1 }).lean().exec();
     const ids = others.map((k) => String(k._id));
     if (ids.length === 0) return empty;
-    const runs = await this.model
-      .find({ kpmId: { $in: ids }, periodEnd, deletedAt: null }, { values: 1 }).lean().exec() as { values?: QuantRunDocument['values'] }[];
+    const found = await this.model
+      .find({ kpmId: { $in: ids }, periodEnd, deletedAt: null }, { values: 1, fromMonth: 1 }).lean().exec() as {
+        values?: QuantRunDocument['values']; fromMonth?: string | null;
+      }[];
+    // P19.22-T4 (ADR-0275 §4): only the runs over the same months — a December run frozen before the half-years held the
+    // whole year (`fromMonth` absent: January), and is never a half-year's peer.
+    const runs = found.filter((r) => (r.fromMonth ?? `${periodEnd.slice(0, 4)}-01`) === fromMonth);
     return Object.fromEntries(QUANT_METRICS.map(({ metric }) => {
       const values = runs
         .map((r) => r.values?.[metric])

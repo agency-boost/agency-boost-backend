@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { FilterQuery, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -24,6 +24,9 @@ import {
   checkTrainingContent, emptyContent, storageKeysOf, type CheckedContent,
 } from './training-content';
 import { TRAINING_REFUSALS } from './training.messages';
+import {
+  materialItemOf, TrainingModuleFacts, type ModuleCompletion, type ModuleMaterialItem,
+} from './training-module-facts';
 
 const SAY = TRAINING_REFUSALS.VALIDATION_FAILED;
 
@@ -58,6 +61,16 @@ export interface TrainingModuleView {
    * settings list only: what *x / y modul punya materi* counts. Never in what agents are offered.
    */
   material?: ModuleMaterial;
+  /**
+   * **The item the settings row names beside *Ganti*** (P19.25-T4 AC-2, ADR-0282 §2): the first file, video or link of
+   * the material agents are shown; `null` draws *Unggah materi*. On the settings list only.
+   */
+  materialItem?: ModuleMaterialItem | null;
+  /**
+   * ***"n dari 30 selesai"*** (P19.25-T4 AC-2, ADR-0282 §2; `TRAINING_MODULE_DONE_COUNT`): the office's counted members
+   * who marked it done, who began it, and how many are counted. On the settings list only.
+   */
+  completion?: ModuleCompletion;
 }
 
 /** Where a module's effective material comes from (ADR-0208 §1). */
@@ -139,6 +152,11 @@ export class TrainingService {
     // P5-T2. Content is files, and files are the asset registry's (ADR-0032).
     private readonly assets: AssetService,
     @InjectModel(Kpm.name) private readonly kpms: Model<Kpm>,
+    /**
+     * *"n dari 30 selesai"* (P19.25-T4 AC-2). Optional only so a harness built before it still constructs, as the
+     * compliance service's *Leads* is; the app always provides it, and without it the list carries no `completion`.
+     */
+    @Optional() @Inject(TrainingModuleFacts) private readonly facts: TrainingModuleFacts | null = null,
   ) {}
 
   /**
@@ -148,7 +166,18 @@ export class TrainingService {
   async list(ctx: RequestContext, includeArchived = false): Promise<TrainingCategoryView[]> {
     const live = includeArchived ? {} : { status: 'active' };
     // Each module says where its material comes from: what *x / y modul punya materi* counts (UI-162).
-    return this.tree(ctx, live, live, live, true);
+    const tree = await this.tree(ctx, live, live, live, true);
+    if (!this.facts) return tree;
+    // P19.25-T4 AC-2: each module's *"n dari 30 selesai"*, every module in one read.
+    const codes = tree.flatMap((c) => c.skills.flatMap((s) => s.modules.map((m) => m.code)));
+    const completion = await this.facts.completion(ctx, codes);
+    return tree.map((category) => ({
+      ...category,
+      skills: category.skills.map((skill) => ({
+        ...skill,
+        modules: skill.modules.map((module) => ({ ...module, completion: completion.get(module.code) })),
+      })),
+    }));
   }
 
   /**
@@ -561,7 +590,12 @@ export class TrainingService {
           modules: modules
             .filter((module) => module.skillCode === skill.code)
             .map((module) => (withMaterial
-              ? { ...this.moduleView(module), material: materialOf(module) }
+              ? {
+                ...this.moduleView(module),
+                material: materialOf(module),
+                // P19.25-T4 AC-2: the item the row names, from what agents are shown — the office's, else the template's.
+                materialItem: materialItemOf(asContent(module.officeContent ?? module.companyContent)),
+              }
               : this.moduleView(module))),
         })),
     }));

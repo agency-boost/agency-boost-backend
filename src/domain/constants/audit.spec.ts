@@ -6,7 +6,11 @@ import { AUDIT_LOG } from './index';
  */
 describe('the audit log’s pages (§B.32)', () => {
   it('P19.2-T2 AC-6 pins 50 groups a page and a 10-minute group window', () => {
-    expect(AUDIT_LOG).toEqual({ PAGE_SIZE: 50, GROUP_WINDOW_MINUTES: 10 });
+    expect(AUDIT_LOG).toMatchObject({ PAGE_SIZE: 50, GROUP_WINDOW_MINUTES: 10 });
+  });
+
+  it('P19.23-T6 AC-1 pins Cari perubahan at 100 characters at most', () => {
+    expect(AUDIT_LOG).toEqual({ PAGE_SIZE: 50, GROUP_WINDOW_MINUTES: 10, SEARCH_MAX_LENGTH: 100 });
   });
 
   it('P19.2-T2 AC-6 is frozen, so no caller can move either number at run time', () => {

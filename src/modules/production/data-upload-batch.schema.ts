@@ -68,6 +68,13 @@ export class DataUploadBatch {
   heldRowCount!: number;
 
   /**
+   * P19.21-T1 AC-7: the file's rows that went to members — the history's *"n ke anggota"*. `null` on a batch from before
+   * it, which the history reads as its written rows less its held ones.
+   */
+  @Prop({ type: Number, default: null })
+  memberRowCount!: number | null;
+
+  /**
    * A CSV or an Excel workbook (ADR-0184). A batch written before workbooks were read has none stored, and reads
    * `csv` — which it was.
    */

@@ -1715,6 +1715,24 @@ describe('organisation', () => {
       expect(await approvals.waitingCount(elsewhere)).toEqual({ count: 0 });
     });
 
+    it('P19.23 OD-377 a Super Admin inside the KPM reads its whole queue and decides it, as its Owner; another KPM’s is not theirs', async () => {
+      const first = await askedFor(ab, 'For The AB');
+      const second = await askedFor(aab, 'For The AAB');
+      const inside = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), KPM_A).withReader(SOURCE_READER);
+      expect((await approvals.inbox(inside)).map((r) => r.membershipId).sort()).toEqual([first.membershipId, second.membershipId].sort());
+      expect(await approvals.waitingCount(inside)).toEqual({ count: 2 });
+      // Nobody's unit: *mine* is empty.
+      expect(await approvals.inbox(inside, 'mine')).toEqual([]);
+      expect(await approvals.waitingCount(inside, 'mine')).toEqual({ count: 0 });
+      const left = await approvals.approve(inside, (await approvals.inbox(inside)).find((r) => r.membershipId === first.membershipId)!.requestId);
+      expect(left.map((r) => r.membershipId)).toEqual([second.membershipId]);
+      expect(await approvals.decline(inside, left[0].requestId, 'Belum lengkap')).toEqual([]);
+      // Inside KPM B, KPM A's queue is not there.
+      const elsewhere = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), KPM_B).withReader(SOURCE_READER);
+      await askedFor(ab, 'Waiting Again');
+      expect(await approvals.inbox(elsewhere)).toEqual([]);
+    });
+
     it('UI-085 counts nothing once the request is decided, and drops a request whose member is gone, as the inbox does', async () => {
       const first = await askedFor(ab, 'First Asker');
       const second = await askedFor(ab, 'Second Asker');
@@ -2337,391 +2355,354 @@ describe('organisation', () => {
     });
   });
 
-  describe('groups and Core Leader (P3-T9)', () => {
-    async function asOwner(membershipId: string) {
-      const row = await members.findById(ctx(KPM_A), membershipId);
+  describe('informal groups on ABs, and the Core Leader tag (P3-T9, P19.17-T4; ADR-0270)', () => {
+    /** A steward of the office: its Owner, unless `flags` says an Admin, or a core leader (an AB or AAB tagged). */
+    async function steward(kpmId: string, membershipId: string, flags: { owner?: boolean; admin?: boolean; core?: boolean } = { owner: true }) {
+      const row = await members.findById(ctx(kpmId), membershipId);
       return new RequestContext(row!.userId, 'none', {
         membershipId,
-        kpmId: KPM_A,
+        kpmId,
         orgLevelCode: row!.role.toUpperCase(),
-      hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
+        hierarchyRole: row!.role as 'ab' | 'aab' | 'agent',
         status: 'active',
-        isKpmOwner: true,
-        isKpmAdmin: false,
+        isKpmOwner: flags.owner === true,
+        isKpmAdmin: flags.admin === true,
+        isCoreLeader: flags.core === true,
         directCount: row!.directCounts?.total ?? 0,
-      }).withReader(SOURCE_READER);
+      } as never).withReader(SOURCE_READER);
     }
+    const rowOf = async (id: string) => (await members.findById(ctx(KPM_A), id))!;
+    const groupRow = (id: string) => mongoose.model(Group.name).findById(id).lean().exec() as Promise<Record<string, unknown> | null>;
+    const audits = (action: string) => mongoose.model(AuditLog.name).find({ action }).lean().exec();
 
+    /*
+     * root (AB, the Owner) ─┬─ ab (AB) ─┬─ aab (AAB) ── agent2
+     *                       │           └─ agent
+     *                       └─ ab2 (AB)
+     */
     let root: string;
     let ab: string;
+    let aab: string;
     let agent: string;
+    let agent2: string;
+    let ab2: string;
     let owner: RequestContext;
 
     beforeEach(async () => {
       root = await join(KPM_A, 'ab');
       ab = await join(KPM_A, 'ab', root);
+      aab = await join(KPM_A, 'aab', ab);
       agent = await join(KPM_A, 'agent', ab);
-      await hierarchy.refreshCounts(ctx(KPM_A), root);
-      await hierarchy.refreshCounts(ctx(KPM_A), ab);
-      owner = await asOwner(root);
+      agent2 = await join(KPM_A, 'agent', aab);
+      ab2 = await join(KPM_A, 'ab', root);
+      for (const id of [root, ab, aab]) await hierarchy.refreshCounts(ctx(KPM_A), id);
+      owner = await steward(KPM_A, root);
     });
 
     describe('AC-1: a group is a tag, and never touches what anybody can see', () => {
-      it('does not change one person visibility of another', async () => {
-        // The whole point of the acceptance criterion. Two people in one group, with no
-        // hierarchy between them, still cannot see each other.
-        const [created] = await groups.create(owner, {
-          name: 'Top Producers 2026',
-          ownerMembershipId: root,
+      it('P3-T9 AC-1 moving an AB into a group changes nobody’s roster or tree', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Top Producers 2026' });
+        const asAb2 = new RequestContext((await rowOf(ab2)).userId, 'none', {
+          membershipId: ab2, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+          isKpmOwner: false, isKpmAdmin: false, directCount: 0,
         });
-        const peer = await join(KPM_A, 'agent', root);
-        await hierarchy.refreshCounts(ctx(KPM_A), root);
-
-        const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
-          membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-          isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-        });
-
-        const before = (await directory.list(asAb, {})).members.map((m) => m.membershipId);
-        expect(before).not.toContain(peer);
-
-        await groups.tag(owner, ab, { groupIds: [created.groupId], isCoreLeader: false });
-        await groups.tag(owner, peer, { groupIds: [created.groupId], isCoreLeader: false });
-
-        const after = (await directory.list(asAb, {})).members.map((m) => m.membershipId);
-        expect(after).toEqual(before);
+        const before = (await directory.list(asAb2, {})).members.map((m) => m.membershipId);
+        const treeBefore = (await tree.read(asAb2)).nodes.map((n) => n.membershipId);
+        await groups.setAbGroup(owner, ab, groupId);
+        await groups.setAbGroup(owner, ab2, groupId);
+        expect((await directory.list(asAb2, {})).members.map((m) => m.membershipId)).toEqual(before);
+        expect((await tree.read(asAb2)).nodes.map((n) => n.membershipId)).toEqual(treeBefore);
+        expect(before).not.toContain(agent);
       });
 
-      it('does not put a group member into anybody tree', async () => {
-        const [created] = await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
-        const peer = await join(KPM_A, 'agent', root);
-        await hierarchy.refreshCounts(ctx(KPM_A), root);
-        await groups.tag(owner, ab, { groupIds: [created.groupId], isCoreLeader: false });
-        await groups.tag(owner, peer, { groupIds: [created.groupId], isCoreLeader: false });
-
-        const asAb = new RequestContext((await members.findById(ctx(KPM_A), ab))!.userId, 'none', {
+      it('P3-T9 AC-1 nor for a core leader: what they see of the office (ADR-0268\u2019s reach) is the same in a group or out', async () => {
+        await groups.setCoreLeader(owner, ab, true);
+        expect((await rowOf(ab)).isCoreLeader).toBe(true);
+        const tagged = new RequestContext((await rowOf(ab)).userId, 'none', {
           membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-          isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-        });
-        expect((await tree.read(asAb)).nodes.map((n) => n.membershipId)).not.toContain(peer);
-      });
-
-      it('AC-2: Core Leader changes nothing about scope either — what a tagged leader sees of the office', async () => {
-        // A leader, since ADR-0159 makes the tag a leader's (P18.5-T5). It opens the forum and the office's
-        // analytics, read by their own services; the roster and the tree stay the leader's unit.
-        const asAb = new RequestContext(
-          (await members.findById(ctx(KPM_A), ab))!.userId,
-          'none',
-          {
-            membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-            isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-          },
-        );
-        const before = (await directory.list(asAb, {})).members.map((m) => m.membershipId);
-        const treeBefore = (await tree.read(asAb)).nodes.map((n) => n.membershipId);
-
-        await groups.tag(owner, ab, { groupIds: [], isCoreLeader: true });
-        expect((await members.findById(ctx(KPM_A), ab))!.isCoreLeader).toBe(true);
-
-        const tagged = new RequestContext(asAb.userId, 'none', { ...asAb.membership!, isCoreLeader: true });
+          isKpmOwner: false, isKpmAdmin: false, isCoreLeader: true, directCount: 2,
+        } as never);
         expect(tagged.isCoreLeader).toBe(true);
+        const before = (await directory.list(tagged, {})).members.map((m) => m.membershipId);
+        const treeBefore = (await tree.read(tagged)).nodes.map((n) => n.membershipId);
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await groups.setAbGroup(owner, ab2, groupId);
         expect((await directory.list(tagged, {})).members.map((m) => m.membershipId)).toEqual(before);
         expect((await tree.read(tagged)).nodes.map((n) => n.membershipId)).toEqual(treeBefore);
       });
     });
 
-    describe('creating and naming', () => {
-      it('names the owner by membership, and reads their name back', async () => {
-        const list = await groups.create(owner, {
-          name: 'New Agent Mentoring Circle',
-          ownerMembershipId: ab,
-        });
-        expect(list[0]).toMatchObject({
-          name: 'New Agent Mentoring Circle',
-          ownerMembershipId: ab,
-          ownerHasLeft: false,
-          memberCount: 0,
-        });
-        expect(list[0].ownerName).toBeTruthy();
+    describe('Group baru, Ubah nama, Hapus group', () => {
+      it('P19.17-T4 AC-2 makes a group with a name only — no Group Leader — audited', async () => {
+        const { groupId, view } = await groups.create(owner, { name: '  Rising Stars 2027  ' });
+        expect(view.groups).toEqual([{
+          groupId, name: 'Rising Stars 2027', leaders: [], abs: [], counts: { leaders: 0, people: 0, abGroups: 0 },
+        }]);
+        expect(await groupRow(groupId)).toMatchObject({ leaderMembershipIds: [], status: 'active', createdByMembershipId: root });
+        expect(await audits('group.created')).toEqual([expect.objectContaining({ targetId: groupId, after: { name: 'Rising Stars 2027', leaderMembershipIds: [] } })]);
+        // Every AB of the office is Tanpa group, each with their AB group's size: the teams follow.
+        expect(view.ungrouped.abs.map((a) => [a.membershipId, a.people, a.leaders]).sort()).toEqual(
+          [[ab, 4, 2], [ab2, 1, 1], [root, 1, 1]].sort(),
+        );
+        expect(view).toMatchObject({ unplaced: 0, canWrite: true, ungrouped: { counts: { leaders: 4, people: 6, abGroups: 3 } } });
       });
 
-      it('refuses a second live group with the same name', async () => {
-        await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
-        await expect(
-          groups.create(owner, { name: 'Task Force', ownerMembershipId: root }),
-        ).rejects.toMatchObject({ code: 'ORG_GROUP_NAME_TAKEN' });
+      it('P19.17-T4 AC-2 Group baru from an AB’s picker moves that AB and their team into it at once', async () => {
+        const { groupId, view } = await groups.create(owner, { name: 'Rising Stars 2027', abMembershipId: ab });
+        expect(view.groups[0]).toMatchObject({ groupId, leaders: [], abs: [{ membershipId: ab, people: 4, isGroupLeader: false }] });
+        expect(view.groups[0].counts).toEqual({ leaders: 2, people: 4, abGroups: 1 });
+        expect((await rowOf(ab)).groupIds).toEqual([groupId]);
+        // Nothing is copied onto the team: they follow.
+        expect((await rowOf(aab)).groupIds).toEqual([]);
+        expect((await rowOf(agent2)).groupIds).toEqual([]);
+        expect(await audits('member.tagged')).toEqual([expect.objectContaining({ targetMembershipId: ab, after: { groupIds: [groupId], isCoreLeader: false } })]);
       });
 
-      it('refuses an owner who is not in this office', async () => {
+      it('P19.17-T4 AC-1 refuses a group from an AAB’s or an agent’s picker (422 ORG_GROUP_AB_ONLY), and makes nothing', async () => {
+        for (const who of [aab, agent]) {
+          await expect(groups.create(owner, { name: 'X', abMembershipId: who }))
+            .rejects.toMatchObject({ code: 'ORG_GROUP_AB_ONLY', status: 422 });
+        }
+        expect(await mongoose.model(Group.name).countDocuments()).toBe(0);
+      });
+
+      it('refuses a live name twice (409 ORG_GROUP_NAME_TAKEN); an archived one gives its name back', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Top Producers 2026' });
+        await expect(groups.create(owner, { name: 'Top Producers 2026' })).rejects.toMatchObject({ code: 'ORG_GROUP_NAME_TAKEN', status: 409 });
+        const { groupId: other } = await groups.create(owner, { name: 'Other' });
+        await expect(groups.rename(owner, other, { name: 'Top Producers 2026' })).rejects.toMatchObject({ code: 'ORG_GROUP_NAME_TAKEN' });
+        await groups.archive(owner, groupId);
+        await expect(groups.create(owner, { name: 'Top Producers 2026' })).resolves.toBeTruthy();
+      });
+
+      it('P19.17-T4 AC-2 Ubah nama: the ABs follow, audited before and after; the same name writes nothing', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Old', abMembershipId: ab });
+        const view = await groups.rename(owner, groupId, { name: 'New' });
+        expect(view.groups[0]).toMatchObject({ name: 'New', abs: [{ membershipId: ab }] });
+        await groups.rename(owner, groupId, { name: 'New' });
+        expect((await audits('group.updated')).map((e) => [e.before, e.after])).toEqual([[{ name: 'Old' }, { name: 'New' }]]);
+      });
+
+      it('P19.17-T4 AC-2 Hapus group archives it, its ABs to Tanpa group, its leaders cleared — audited per row untagged', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await groups.setAbGroup(owner, ab2, groupId);
+        await groups.addLeader(owner, groupId, ab);
+        // A tag on an agent, from before the rule, goes too.
+        await mongoose.model(Membership.name).updateOne({ _id: agent }, { $set: { groupIds: [groupId] } });
+        const view = await groups.archive(owner, groupId);
+        expect(view.groups).toEqual([]);
+        expect(view.ungrouped.abs).toHaveLength(3);
+        expect(await groupRow(groupId)).toMatchObject({ status: 'archived', leaderMembershipIds: [] });
+        expect((await groupRow(groupId))!.archivedAt).toBeInstanceOf(Date);
+        for (const id of [ab, ab2, agent]) expect((await rowOf(id)).groupIds).toEqual([]);
+        expect(await audits('group.archived')).toEqual([expect.objectContaining({
+          before: { status: 'active', name: 'Circle', leaderMembershipIds: [ab] }, after: { status: 'archived', untagged: 3 },
+        })]);
+        await expect(groups.archive(owner, groupId)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      });
+    });
+
+    describe('an AB’s group', () => {
+      it('P19.17-T4 AC-2 moves an AB — and with them the whole team — into a group, and back to Tanpa group', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle' });
+        let view = await groups.setAbGroup(owner, ab, groupId);
+        expect(view.groups[0]).toMatchObject({ abs: [{ membershipId: ab, people: 4 }], counts: { leaders: 2, people: 4, abGroups: 1 } });
+        view = await groups.setAbGroup(owner, ab, null);
+        expect(view.groups[0].abs).toEqual([]);
+        expect((await rowOf(ab)).groupIds).toEqual([]);
+        // The same again writes nothing.
+        const before = (await audits('member.tagged')).length;
+        await groups.setAbGroup(owner, ab, null);
+        expect(await audits('member.tagged')).toHaveLength(before);
+      });
+
+      it('P19.17-T4 AC-1 refuses an AAB or an agent (422 ORG_GROUP_AB_ONLY) — they follow their AB', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle' });
+        for (const who of [aab, agent]) {
+          await expect(groups.setAbGroup(owner, who, groupId)).rejects.toMatchObject({
+            code: 'ORG_GROUP_AB_ONLY', status: 422, details: { membershipId: who },
+          });
+        }
+      });
+
+      it('refuses a group that is not live, and a member who is not here (404)', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle' });
+        await groups.archive(owner, groupId);
+        await expect(groups.setAbGroup(owner, ab, groupId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.setAbGroup(owner, 'not-an-id', null)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      });
+
+      it('P19.17-T4 AC-1 an AB leaving a group they led is no longer one of its Group Leaders', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await groups.addLeader(owner, groupId, ab);
+        const { groupId: other } = await groups.create(owner, { name: 'Other' });
+        const view = await groups.setAbGroup(owner, ab, other);
+        expect(view.groups.find((g) => g.groupId === groupId)!.leaders).toEqual([]);
+        expect(await groupRow(groupId)).toMatchObject({ leaderMembershipIds: [] });
+      });
+    });
+
+    describe('Group Leaders', () => {
+      it('P19.17-T4 AC-1 any number of ABs in the group — appointing adds, never replaces; removing keeps them in the group', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await groups.setAbGroup(owner, ab2, groupId);
+        await groups.addLeader(owner, groupId, ab);
+        let view = await groups.addLeader(owner, groupId, ab2);
+        expect(view.groups[0].leaders.map((l) => l.membershipId).sort()).toEqual([ab, ab2].sort());
+        expect(view.groups[0].abs.every((a) => a.isGroupLeader)).toBe(true);
+        // Again: nothing written.
+        const before = (await audits('group.updated')).length;
+        await groups.addLeader(owner, groupId, ab2);
+        expect(await audits('group.updated')).toHaveLength(before);
+        view = await groups.removeLeader(owner, groupId, ab);
+        expect(view.groups[0].leaders.map((l) => l.membershipId)).toEqual([ab2]);
+        expect(view.groups[0].abs.map((a) => a.membershipId).sort()).toEqual([ab, ab2].sort());
+        // Not a leader: nothing written.
+        await groups.removeLeader(owner, groupId, agent);
+        expect(await groupRow(groupId)).toMatchObject({ leaderMembershipIds: [ab2] });
+      });
+
+      it('P19.17-T4 AC-1 refuses an AB not in the group (ORG_GROUP_LEADER_NOT_IN_GROUP) and an AAB (ORG_GROUP_AB_ONLY), 422', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await expect(groups.addLeader(owner, groupId, ab2)).rejects.toMatchObject({ code: 'ORG_GROUP_LEADER_NOT_IN_GROUP', status: 422 });
+        await expect(groups.addLeader(owner, groupId, aab)).rejects.toMatchObject({ code: 'ORG_GROUP_AB_ONLY', status: 422 });
+        expect(await groupRow(groupId)).toMatchObject({ leaderMembershipIds: [] });
+      });
+
+      it('a Group Leader who has left is not shown', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        await groups.addLeader(owner, groupId, ab);
+        await mongoose.model(Membership.name).updateOne({ _id: ab }, { $set: { status: 'removed' } });
+        const view = await groups.list(owner);
+        expect(view.groups[0]).toMatchObject({ leaders: [], abs: [] });
+      });
+    });
+
+    describe('the member page’s tags', () => {
+      it('P19.17-T4 AC-1 an AB carries one group; an AAB and an agent read their AB’s, and carry none', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        expect(await groups.tagsFor(owner, ab)).toMatchObject({
+          groupIds: [groupId], canCarryGroup: true, group: { groupId, name: 'Circle' }, ab: { membershipId: ab },
+        });
+        expect(await groups.tagsFor(owner, agent2)).toMatchObject({
+          groupIds: [], canCarryGroup: false, canBeCoreLeader: false, group: { groupId, name: 'Circle' }, ab: { membershipId: ab },
+        });
+        expect(await groups.tagsFor(owner, root)).toMatchObject({ groupIds: [], group: null, ab: { membershipId: root } });
+      });
+
+      it('P19.17-T4 AC-1 refuses two groups for an AB (400) and any group for an agent (422); [] clears an old tag', async () => {
+        const { groupId: a } = await groups.create(owner, { name: 'A' });
+        const { groupId: b } = await groups.create(owner, { name: 'B' });
+        await expect(groups.tag(owner, ab, { groupIds: [a, b], isCoreLeader: false })).rejects.toMatchObject({ code: 'ORG_GROUP_ONE_PER_LEADER', status: 400 });
+        await expect(groups.tag(owner, agent, { groupIds: [a], isCoreLeader: false })).rejects.toMatchObject({ code: 'ORG_GROUP_AB_ONLY', status: 422 });
+        await expect(groups.tag(owner, ab, { groupIds: ['66f0000000000000000000ff'], isCoreLeader: false })).rejects.toMatchObject({ code: 'ORG_GROUP_NOT_FOUND', status: 404 });
+        await mongoose.model(Membership.name).updateOne({ _id: agent }, { $set: { groupIds: [a] } });
+        expect((await groups.tag(owner, agent, { groupIds: [], isCoreLeader: false })).groupIds).toEqual([]);
+        expect((await rowOf(agent)).groupIds).toEqual([]);
+        expect((await groups.tag(owner, ab, { groupIds: [a], isCoreLeader: true })).group).toEqual({ groupId: a, name: 'A' });
+      });
+
+      it('ADR-0159 §1 the Core Leader tag is a leader’s (400 CORE_LEADER_NOT_A_LEADER), and never a core leader’s to give', async () => {
+        await expect(groups.setCoreLeader(owner, agent, true)).rejects.toMatchObject({ code: 'CORE_LEADER_NOT_A_LEADER', status: 400 });
+        const core = await steward(KPM_A, ab2, { core: true });
+        await expect(groups.setCoreLeader(core, ab, true)).rejects.toMatchObject({ code: 'PERM_DENIED' });
+        expect((await groups.setCoreLeader(owner, ab, true)).isCoreLeader).toBe(true);
+      });
+    });
+
+    describe('P18.5-T5 AC-2 — the Core Leader tag is a leader\u2019s (ADR-0159 §1), kept for All members ⋯', () => {
+      const tagAudits = () => mongoose.connection.db!.collection('auditLog')
+        .find({ action: 'member.tagged', targetId: ab }).sort({ _id: 1 }).toArray();
+
+      it('refuses tagging an Agent, on either route, and writes nothing', async () => {
+        for (const write of [
+          () => groups.tag(owner, agent, { groupIds: [], isCoreLeader: true }),
+          () => groups.setCoreLeader(owner, agent, true),
+        ]) {
+          await expect(write()).rejects.toMatchObject({
+            code: 'CORE_LEADER_NOT_A_LEADER', status: 400, details: { membershipId: agent, role: 'agent' },
+          });
+        }
+        expect((await rowOf(agent)).isCoreLeader).toBe(false);
+        expect(await groups.tagsFor(owner, agent)).toMatchObject({ isCoreLeader: false, canBeCoreLeader: false });
+      });
+
+      it('tags and untags a leader alone, their group untouched, audited before and after; the same again writes nothing', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Kept', abMembershipId: ab });
+        const before = (await tagAudits()).length;
+        expect(await groups.setCoreLeader(owner, ab, true)).toMatchObject({ isCoreLeader: true, groupIds: [groupId] });
+        expect(await groups.setCoreLeader(owner, ab, true)).toMatchObject({ isCoreLeader: true });
+        expect(await groups.setCoreLeader(owner, ab, false)).toMatchObject({ isCoreLeader: false, groupIds: [groupId] });
+        expect((await tagAudits()).slice(before).map((e) => [e.before, e.after])).toEqual([
+          [{ groupIds: [groupId], isCoreLeader: false }, { groupIds: [groupId], isCoreLeader: true }],
+          [{ groupIds: [groupId], isCoreLeader: true }, { groupIds: [groupId], isCoreLeader: false }],
+        ]);
+      });
+
+      it('keeps the tag on a leader moved to an Agent\u2019s rung: untagging is taken, tagging again refused', async () => {
+        await groups.setCoreLeader(owner, ab, true);
+        await members.updateById(ctx(KPM_A), ab, { $set: { role: 'agent' } });
+        expect(await groups.tag(owner, ab, { groupIds: [], isCoreLeader: true })).toMatchObject({ isCoreLeader: true, canBeCoreLeader: false });
+        expect((await groups.setCoreLeader(owner, ab, false)).isCoreLeader).toBe(false);
+        await expect(groups.setCoreLeader(owner, ab, true)).rejects.toMatchObject({ code: 'CORE_LEADER_NOT_A_LEADER' });
+      });
+
+      it('never reaches another office\u2019s member', async () => {
         const theirs = await join(KPM_B, 'ab');
-        await expect(
-          groups.create(owner, { name: 'Cross-office', ownerMembershipId: theirs }),
-        ).rejects.toMatchObject({ code: 'ORG_GROUP_OWNER_NOT_IN_KPM' });
-      });
-
-      it('renames, and hands it to a different owner', async () => {
-        const [made] = await groups.create(owner, { name: 'Old name', ownerMembershipId: root });
-        const [renamed] = await groups.rename(owner, made.groupId, {
-          name: 'New name',
-          ownerMembershipId: ab,
-        });
-        expect(renamed).toMatchObject({ name: 'New name', ownerMembershipId: ab });
-      });
-
-      it('lets a group keep its own name when only the owner changes', async () => {
-        const [made] = await groups.create(owner, { name: 'Steady', ownerMembershipId: root });
-        await expect(
-          groups.rename(owner, made.groupId, { name: 'Steady', ownerMembershipId: ab }),
-        ).resolves.toBeDefined();
-      });
-
-      it('counts the people tagged into it', async () => {
-        const [made] = await groups.create(owner, { name: 'Circle', ownerMembershipId: root });
-        await groups.tag(owner, ab, { groupIds: [made.groupId], isCoreLeader: false });
-        await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
-
-        expect((await groups.list(owner))[0].memberCount).toBe(2);
-      });
-
-      it('says so when the owner has left, rather than showing a blank', async () => {
-        const leaver = await join(KPM_A, 'aab', root);
-        await hierarchy.refreshCounts(ctx(KPM_A), root);
-        await groups.create(owner, { name: 'Theirs to run', ownerMembershipId: leaver });
-
-        await removals.remove(owner, leaver, { confirmation: 'REMOVE' });
-
-        const [listed] = await groups.list(owner);
-        // Still named — they really are the recorded owner, and a blank would read as a
-        // fault — but flagged, because the group now has nobody running it.
-        expect(listed.ownerName).toBeTruthy();
-        expect(listed.ownerHasLeft).toBe(true);
-        // The group itself survives its owner leaving — somebody has to be able to
-        // hand it on, and a group that vanished would take its tags with it.
-        expect(listed.name).toBe('Theirs to run');
-      });
-
-      it('never counts, or shows, another office groups', async () => {
-        const theirRoot = await join(KPM_B, 'ab');
-        const theirOwner = new RequestContext(
-          (await members.findById(ctx(KPM_B), theirRoot))!.userId,
-          'none',
-          {
-            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
-          },
-        );
-        await groups.create(theirOwner, { name: 'Theirs', ownerMembershipId: theirRoot });
-
-        expect(await groups.list(owner)).toEqual([]);
-        // And the same name is free over here, because uniqueness is per office.
-        await expect(
-          groups.create(owner, { name: 'Theirs', ownerMembershipId: root }),
-        ).resolves.toBeDefined();
-      });
-    });
-
-    describe('retiring one', () => {
-      it('archives rather than deleting, and keeps the tags on the people', async () => {
-        // The prototype splices the row and strips everybody tags in the same breath,
-        // so the record that a cohort existed is gone.
-        const [made] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
-        await groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false });
-
-        expect(await groups.archive(owner, made.groupId)).toEqual([]);
-        expect((await members.findById(ctx(KPM_A), agent))!.groupIds).toEqual([made.groupId]);
-      });
-
-      it('frees the name for reuse once it is retired', async () => {
-        const [made] = await groups.create(owner, { name: 'Task Force', ownerMembershipId: root });
-        await groups.archive(owner, made.groupId);
-        await expect(
-          groups.create(owner, { name: 'Task Force', ownerMembershipId: root }),
-        ).resolves.toBeDefined();
-      });
-
-      it('404s a group that is not here, and one already retired', async () => {
-        const [made] = await groups.create(owner, { name: 'Gone', ownerMembershipId: root });
-        await groups.archive(owner, made.groupId);
-        await expect(groups.archive(owner, made.groupId)).rejects.toMatchObject({
-          code: 'NOT_FOUND',
-        });
-        await expect(groups.archive(owner, 'not-an-id')).rejects.toMatchObject({
-          code: 'NOT_FOUND',
-        });
-      });
-    });
-
-    describe('tagging one person', () => {
-      it('sets and clears groups, and the Core Leader flag, together', async () => {
-        const [a] = await groups.create(owner, { name: 'A', ownerMembershipId: root });
-        const list = await groups.create(owner, { name: 'B', ownerMembershipId: root });
-        const b = list.find((g) => g.name === 'B')!;
-
-        let tags = await groups.tag(owner, ab, {
-          groupIds: [a.groupId, b.groupId],
-          isCoreLeader: true,
-        });
-        expect(tags.groupIds.sort()).toEqual([a.groupId, b.groupId].sort());
-        expect(tags).toMatchObject({ isCoreLeader: true, canBeCoreLeader: true });
-
-        tags = await groups.tag(owner, ab, { groupIds: [a.groupId], isCoreLeader: false });
-        expect(tags.groupIds).toEqual([a.groupId]);
-        expect(tags.isCoreLeader).toBe(false);
-      });
-
-      describe('P18.5-T5 AC-2 — the Core Leader tag is a leader’s (ADR-0159 §1)', () => {
-        const audits = () => mongoose.connection.db!.collection('auditLog')
-          .find({ action: 'member.tagged', targetId: ab }).sort({ _id: 1 }).toArray();
-
-        it('refuses tagging an Agent, on either route, and writes nothing', async () => {
-          for (const write of [
-            () => groups.tag(owner, agent, { groupIds: [], isCoreLeader: true }),
-            () => groups.setCoreLeader(owner, agent, true),
-          ]) {
-            await expect(write()).rejects.toMatchObject({
-              code: 'CORE_LEADER_NOT_A_LEADER', status: 400, details: { membershipId: agent, role: 'agent' },
-            });
-          }
-          expect((await members.findById(ctx(KPM_A), agent))!.isCoreLeader).toBe(false);
-          expect(await groups.tagsFor(owner, agent)).toMatchObject({ isCoreLeader: false, canBeCoreLeader: false });
-        });
-
-        it('tags and untags a leader alone, their groups untouched, audited before and after; the same again writes nothing', async () => {
-          const [made] = await groups.create(owner, { name: 'Kept', ownerMembershipId: root });
-          await groups.tag(owner, ab, { groupIds: [made.groupId], isCoreLeader: false });
-          const before = (await audits()).length;
-
-          expect(await groups.setCoreLeader(owner, ab, true)).toMatchObject({ isCoreLeader: true, groupIds: [made.groupId] });
-          expect(await groups.setCoreLeader(owner, ab, true)).toMatchObject({ isCoreLeader: true });
-          expect(await groups.setCoreLeader(owner, ab, false)).toMatchObject({ isCoreLeader: false, groupIds: [made.groupId] });
-
-          const written = (await audits()).slice(before);
-          expect(written.map((e) => [e.before, e.after])).toEqual([
-            [{ groupIds: [made.groupId], isCoreLeader: false }, { groupIds: [made.groupId], isCoreLeader: true }],
-            [{ groupIds: [made.groupId], isCoreLeader: true }, { groupIds: [made.groupId], isCoreLeader: false }],
-          ]);
-        });
-
-        it('keeps the tag on a leader moved to an Agent’s rung: their groups still save, and untagging is taken', async () => {
-          await groups.setCoreLeader(owner, ab, true);
-          await members.updateById(ctx(KPM_A), ab, { $set: { role: 'agent' } });
-          const [made] = await groups.create(owner, { name: 'Still', ownerMembershipId: root });
-          // The flag unchanged is not asked about.
-          expect(await groups.tag(owner, ab, { groupIds: [made.groupId], isCoreLeader: true }))
-            .toMatchObject({ isCoreLeader: true, canBeCoreLeader: false });
-          expect((await groups.setCoreLeader(owner, ab, false)).isCoreLeader).toBe(false);
-          await expect(groups.setCoreLeader(owner, ab, true)).rejects.toMatchObject({ code: 'CORE_LEADER_NOT_A_LEADER' });
-        });
-
-        it('refuses a change to the tag without member:tag_core_leader, and asks nothing of an unchanged one', async () => {
-          // A context the guard would never let through, built to reach the service's own check.
-          const leader = new RequestContext('u-x', 'none', {
-            membershipId: root, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-            isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-          });
-          await expect(groups.setCoreLeader(leader, ab, true)).rejects.toMatchObject({
-            code: 'PERM_DENIED', details: { permission: 'member:tag_core_leader' },
-          });
-          await expect(groups.tag(leader, ab, { groupIds: [], isCoreLeader: true })).rejects.toMatchObject({ code: 'PERM_DENIED' });
-          await expect(groups.tag(leader, ab, { groupIds: [], isCoreLeader: false })).resolves.toMatchObject({ isCoreLeader: false });
-        });
-
-        it('never reaches another office’s member', async () => {
-          const theirs = await join(KPM_B, 'ab');
-          await expect(groups.setCoreLeader(owner, theirs, true)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-          expect((await members.findById(ctx(KPM_B), theirs))!.isCoreLeader ?? false).toBe(false);
-        });
-
-        it('P18.5-T5 AC-3 the directory row says who is one now, and offers the control on a leader’s row alone', async () => {
-          await groups.setCoreLeader(owner, ab, true);
-          const rows = (await directory.list(owner, {})).members;
-          const row = (id: string) => rows.find((m) => m.membershipId === id)!;
-          expect([row(ab).isCoreLeader, row(ab).canTagCoreLeader]).toEqual([true, true]);
-          expect([row(root).isCoreLeader, row(root).canTagCoreLeader]).toEqual([false, true]);
-          expect([row(agent).isCoreLeader, row(agent).canTagCoreLeader]).toEqual([false, false]);
-          // A leader's own read of the roster is offered no control.
-          const asAb = new RequestContext('u-ab', 'none', {
-            membershipId: ab, kpmId: KPM_A, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-            isKpmOwner: false, isKpmAdmin: false, directCount: 1,
-          });
-          expect((await directory.list(asAb, {})).members.every((m) => !m.canTagCoreLeader)).toBe(true);
-          // Moved to an Agent's rung, the chip goes and the tag stays.
-          await members.updateById(ctx(KPM_A), ab, { $set: { role: 'agent' } });
-          const after = (await directory.list(owner, {})).members.find((m) => m.membershipId === ab)!;
-          expect([after.isCoreLeader, after.canTagCoreLeader]).toEqual([false, false]);
-          expect((await members.findById(ctx(KPM_A), ab))!.isCoreLeader).toBe(true);
-        });
-      });
-
-      it('keeps a tag on a retired group, because it is the record of a past cohort', async () => {
-        const [old] = await groups.create(owner, { name: 'Class of 2025', ownerMembershipId: root });
-        await groups.tag(owner, agent, { groupIds: [old.groupId], isCoreLeader: false });
-        await groups.archive(owner, old.groupId);
-
-        const [now] = await groups.create(owner, { name: 'Class of 2026', ownerMembershipId: root });
-        const tags = await groups.tag(owner, agent, {
-          groupIds: [now.groupId],
-          isCoreLeader: false,
-        });
-
-        // Saving the panel does not silently drop what the panel could not offer.
-        expect(tags.groupIds.sort()).toEqual([old.groupId, now.groupId].sort());
-      });
-
-      it('refuses a group id from another office', async () => {
-        const theirRoot = await join(KPM_B, 'ab');
-        const theirOwner = new RequestContext(
-          (await members.findById(ctx(KPM_B), theirRoot))!.userId,
-          'none',
-          {
-            membershipId: theirRoot, kpmId: KPM_B, orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
-            isKpmOwner: true, isKpmAdmin: false, directCount: 0,
-          },
-        );
-        const [theirs] = await groups.create(theirOwner, {
-          name: 'Theirs',
-          ownerMembershipId: theirRoot,
-        });
-
-        await expect(
-          groups.tag(owner, agent, { groupIds: [theirs.groupId], isCoreLeader: false }),
-        ).rejects.toMatchObject({ code: 'ORG_GROUP_NOT_FOUND' });
-      });
-
-      it('refuses a retired group rather than quietly re-adding it', async () => {
-        const [made] = await groups.create(owner, { name: 'Retired', ownerMembershipId: root });
-        await groups.archive(owner, made.groupId);
-        await expect(
-          groups.tag(owner, agent, { groupIds: [made.groupId], isCoreLeader: false }),
-        ).rejects.toMatchObject({ code: 'ORG_GROUP_NOT_FOUND' });
-      });
-
-      it('never reaches another office member', async () => {
-        const theirs = await join(KPM_B, 'agent');
-        await expect(
-          groups.tag(owner, theirs, { groupIds: [], isCoreLeader: false }),
-        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.setCoreLeader(owner, theirs, true)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.tag(owner, theirs, { groupIds: [], isCoreLeader: false })).rejects.toMatchObject({ code: 'NOT_FOUND' });
         await expect(groups.tagsFor(owner, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect((await members.findById(ctx(KPM_B), theirs))!.isCoreLeader ?? false).toBe(false);
       });
 
-      it('does not duplicate a group somebody is already in', async () => {
-        const [made] = await groups.create(owner, { name: 'Once', ownerMembershipId: root });
-        await groups.tag(owner, agent, {
-          groupIds: [made.groupId, made.groupId],
-          isCoreLeader: false,
-        });
-        expect((await groups.tagsFor(owner, agent)).groupIds).toEqual([made.groupId]);
+      it('P18.5-T5 AC-3 the directory row says who is one now, and offers the control on a leader\u2019s row alone', async () => {
+        await groups.setCoreLeader(owner, ab, true);
+        const rows = (await directory.list(owner, {})).members;
+        const row = (id: string) => rows.find((m) => m.membershipId === id)!;
+        expect([row(ab).isCoreLeader, row(ab).canTagCoreLeader]).toEqual([true, true]);
+        expect([row(agent).isCoreLeader, row(agent).canTagCoreLeader]).toEqual([false, false]);
+        await members.updateById(ctx(KPM_A), ab, { $set: { role: 'agent' } });
+        const after = (await directory.list(owner, {})).members.find((m) => m.membershipId === ab)!;
+        expect([after.isCoreLeader, after.canTagCoreLeader]).toEqual([false, false]);
+        expect((await rowOf(ab)).isCoreLeader).toBe(true);
       });
     });
 
     it('refuses every surface to somebody in no office', async () => {
       const nowhere = new RequestContext('u-new', 'none', null);
       await expect(groups.list(nowhere)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
-      await expect(
-        groups.create(nowhere, { name: 'X', ownerMembershipId: root }),
-      ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
-      await expect(groups.tagsFor(nowhere, agent)).rejects.toMatchObject({
-        code: 'TENANT_NO_MEMBERSHIP',
+      await expect(groups.create(nowhere, { name: 'X' })).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      await expect(groups.tagsFor(nowhere, agent)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+    });
+
+    describe('who', () => {
+      it('P19.17-T4 AC-2 an Admin and a core leader write groups as the Owner does', async () => {
+        const admin = await steward(KPM_A, ab2, { admin: true });
+        const core = await steward(KPM_A, ab, { core: true });
+        const { groupId } = await groups.create(admin, { name: 'Circle' });
+        await groups.setAbGroup(core, ab, groupId);
+        expect((await groups.addLeader(core, groupId, ab)).groups[0].leaders.map((l) => l.membershipId)).toEqual([ab]);
+      });
+
+      it('P19.17-T4 AC-2 an AB who is no steward is answered 404 — the groups are not confirmed', async () => {
+        const plain = await steward(KPM_A, ab, {});
+        await expect(groups.list(plain)).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+        await expect(groups.create(plain, { name: 'X' })).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+      });
+
+      it('cross-tenant: KPM B’s Owner neither reads nor writes KPM A’s groups or members (404)', async () => {
+        const { groupId } = await groups.create(owner, { name: 'Circle', abMembershipId: ab });
+        const bOwner = await steward(KPM_B, await join(KPM_B, 'ab'));
+        expect((await groups.list(bOwner)).groups).toEqual([]);
+        await expect(groups.rename(bOwner, groupId, { name: 'Mine' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.archive(bOwner, groupId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.addLeader(bOwner, groupId, ab)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.removeLeader(bOwner, groupId, ab)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.setAbGroup(bOwner, ab, null)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(groups.addMembers(bOwner, groupId, [ab2])).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        const { groupId: theirs } = await groups.create(bOwner, { name: 'Theirs' });
+        await expect(groups.setAbGroup(owner, ab, theirs)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        expect((await rowOf(ab)).groupIds).toEqual([groupId]);
       });
     });
   });
@@ -4286,14 +4267,16 @@ describe('organisation', () => {
       expect(granted?.grantedAt).toEqual(expect.any(String));
     });
 
-    it('still lists a group whose owner has gone, and says they have left', async () => {
+    it('still lists a group whose Group Leader\u2019s account has gone, the leader named as nobody rather than dropped', async () => {
       const root = await join(KPM_A, 'ab');
-      const owner = await join(KPM_A, 'aab', root);
-      await groups.create(office(), { name: 'Mentoring Circle', ownerMembershipId: owner });
-      await orphanUser(owner);
+      const leader = await join(KPM_A, 'ab', root);
+      const { groupId } = await groups.create(office(), { name: 'Mentoring Circle', abMembershipId: leader });
+      await groups.addLeader(office(), groupId, leader);
+      await orphanUser(leader);
 
-      const [group] = await groups.list(office());
-      expect(group.ownerName).toBe('Unknown');
+      const { groups: [group] } = await groups.list(office());
+      expect(group.leaders).toEqual([{ membershipId: leader, name: '' }]);
+      expect(group.abs.map((a) => a.membershipId)).toEqual([leader]);
     });
 
     it('still offers a leader whose account has gone, rather than an empty row', async () => {
@@ -4459,7 +4442,7 @@ describe('organisation', () => {
         code: 'TENANT_NO_MEMBERSHIP',
       });
       await expect(
-        groups.create(noOffice, { name: 'Anything', ownerMembershipId: 'm1' }),
+        groups.create(noOffice, { name: 'Anything', abMembershipId: 'm1' }),
       ).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
     });
 
@@ -4488,68 +4471,27 @@ describe('organisation', () => {
      * account was erased is worse than a screen with one odd-looking row, and PDP erasure
      * (UU 27/2022) makes "that person's row is gone" an ordinary state rather than a bug.
      */
-    it('names a group’s owner as Unknown when their account has been erased', async () => {
-      const ownerId = await join(KPM_A, 'ab');
-      await groups.create(ctx(KPM_A, { isKpmOwner: true }), {
-        name: 'Mentoring circle', ownerMembershipId: ownerId,
-      });
+    it('lists a group\u2019s AB whose account has been erased, unnamed rather than dropped', async () => {
+      const abId = await join(KPM_A, 'ab');
+      await groups.create(ctx(KPM_A, { isKpmOwner: true }), { name: 'Mentoring circle', abMembershipId: abId });
 
-      const membership = await members.findById(ctx(KPM_A), ownerId);
+      const membership = await members.findById(ctx(KPM_A), abId);
       await users.deleteOne({ _id: membership!.userId }).exec();
 
-      const [group] = await groups.list(ctx(KPM_A, { isKpmOwner: true }));
-      expect(group.ownerName).toBe('Unknown');
+      const { groups: [group] } = await groups.list(ctx(KPM_A, { isKpmOwner: true }));
+      expect(group.abs).toEqual([expect.objectContaining({ membershipId: abId, name: '' })]);
     });
 
     it('names a tagged member as Unknown for the same reason', async () => {
       const ownerId = await join(KPM_A, 'ab');
       const memberId = await join(KPM_A, 'agent', ownerId);
-      const made = await groups.create(ctx(KPM_A, { isKpmOwner: true }), {
-        name: 'Task force', ownerMembershipId: ownerId,
-      });
-      const group = made.find((g) => g.name === 'Task force')!;
-      await groups.tag(ctx(KPM_A, { isKpmOwner: true }), memberId, {
-        groupIds: [group.groupId], isCoreLeader: false,
-      });
+      await groups.create(ctx(KPM_A, { isKpmOwner: true }), { name: 'Task force', abMembershipId: ownerId });
 
       const membership = await members.findById(ctx(KPM_A), memberId);
       await users.deleteOne({ _id: membership!.userId }).exec();
 
       const tags = await groups.tagsFor(ctx(KPM_A, { isKpmOwner: true }), memberId);
       expect(tags.fullName).toBe('Unknown');
-    });
-
-    it('keeps a tag on an archived group, because it is the record of a past cohort', async () => {
-      /*
-       * The prototype splices the row and strips the id from everybody in one breath, so
-       * the record that these people were ever a cohort is gone. Here the tag survives
-       * the group being retired — and survives a later edit that does not offer it.
-       */
-      const ownerId = await join(KPM_A, 'ab');
-      const memberId = await join(KPM_A, 'agent', ownerId);
-      const admin = ctx(KPM_A, { isKpmOwner: true });
-      // `create` answers the whole list, sorted by name — so destructuring the first
-      // entry is not the group just made.
-      await groups.create(admin, { name: 'Last year’s circle', ownerMembershipId: ownerId });
-      const all = await groups.create(admin, {
-        name: 'This year’s circle', ownerMembershipId: ownerId,
-      });
-      const retired = all.find((g) => g.name === 'Last year’s circle')!;
-      const live = all.find((g) => g.name === 'This year’s circle')!;
-
-      await groups.tag(admin, memberId, {
-        groupIds: [retired.groupId, live.groupId], isCoreLeader: false,
-      });
-      await groups.archive(admin, retired.groupId);
-
-      // The panel now offers only the live group, and an edit that names just it must not
-      // silently drop the archived tag.
-      await groups.tag(admin, memberId, { groupIds: [live.groupId], isCoreLeader: false });
-
-      const membership = await members.findById(ctx(KPM_A), memberId);
-      expect(membership!.groupIds).toEqual(
-        expect.arrayContaining([retired.groupId, live.groupId]),
-      );
     });
 
     it('refuses a leader code to somebody whose membership has gone', async () => {

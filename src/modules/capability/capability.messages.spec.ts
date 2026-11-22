@@ -23,7 +23,9 @@ const CASES: [entry: keyof typeof SAY, sentence: Message, values: string[]][] = 
   ['stageUnknownMilestone', SAY.stageUnknownMilestone({ stage: 1, code: 'GHOST' }), ['GHOST']],
   ['gridNoItems', SAY.gridNoItems({ grid: 2 }), ['Grid 2']],
   ['labelEmpty', SAY.labelEmpty, []],
-  ['milestoneRequired', SAY.milestoneRequired({ stages: ['Competent Producer', 'Leader'] }), ['Competent Producer, Leader']],
+  // P19.21-T3 AC-4 (ADR-0274): archiving takes a milestone out of its stages, refused only for a stage's last one.
+  ['lastMilestoneOf', SAY.lastMilestoneOf({ stages: ['Competent Producer', 'Leader'] }), ['Competent Producer, Leader']],
+  ['stageNeedsMilestone', SAY.stageNeedsMilestone, []],
   ['itemNeedsCode', SAY.itemNeedsCode, []],
   ['itemNeedsLabel', SAY.itemNeedsLabel, []],
   ['codeUsed', SAY.codeUsed({ code: 'CLOSES_ALONE' }), ['CLOSES_ALONE']],

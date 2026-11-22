@@ -34,6 +34,12 @@ const CALLERS: Record<string, Record<string, string>> = {
       'the offices list, a KPM\'s page and *Perlu perhatian Anda* (P19.4-T3 AC-8, SA R5, ADR-0212): each office\'s live '
       + 'memberships, for *Anggota* and *"KPM {code} belum punya anggota"* — a count per office, never a row',
   },
+  'product-data/product-data-grant.service.ts': {
+    findAcrossAllTenants:
+      '*Kelola data produk* (ADR-0260 §1, §4; `product_data_grant:read`, `:manage`): whether the people the Super Admin '
+      + 'gives it to, or lists, are an active KPM Owner or KPM Admin now — their live memberships, by userId, by the Super '
+      + 'Admin who is in no office; the role and the KPM, never another member\'s row',
+  },
   'assets/asset.service.ts': {
     findAcrossAllTenants:
       'the orphan sweep: storage accounting is a platform job, and a per-office sweep would never see '
@@ -68,28 +74,10 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*Leaders used* per office on the Super Admin\'s offices list (P13.2-T3, ADR-0113): counts, never '
       + 'a row, for the offices named',
   },
-  'reporting/platform-analytics.service.ts': {
-    adoptionPerOfficeAcrossTenants:
-      '*Cross-platform analytics* (P18-T8, OD-148, D-admin): each office\'s active members by rung, and the '
-      + 'memberships that began and ended this month — counts, never a row, by the Super Admin who is in no office',
-    signInsPerOfficeAcrossTenants:
-      '*Cross-platform analytics* (P18-T8): how many of each office\'s active members signed in within 7 and 30 '
-      + 'days, the account joined inside the aggregate so no id or time leaves the database — two counts per office',
-    distinctAccountsAcrossTenants:
-      '*Cross-platform analytics* (P18-T8, the exit review item 6): the company and platform rows\' members and '
-      + 'sign-ins as people, not memberships — distinct accounts grouped inside the aggregate, three counts a row',
-  },
   'config/office-settings.source.ts': {
     findInOfficeAcrossTenants:
       '*Save as template* (P13.2-T7, ADR-0115 §5): one named office\'s published configuration — and '
       + 'its own training files, to duplicate, and its live activity binding — read by the Super Admin, who is in no office',
-  },
-  'auth/account-links.service.ts': {
-    officeRoleOfLoginAcrossTenants:
-      '*Tambah akun* (P19.2-T1 AC-8, UI-169 item 5, ADR-0199 §1, §3): one login\'s own membership — its office id, '
-      + 'status and admin flag — in whichever office holds it, for whether a login may be linked (an Owner\'s, an '
-      + 'Admin\'s or a Super Admin\'s) and for the caller\'s own other login\'s views on `GET /auth/me`; never a row '
-      + 'of anything the office holds',
   },
   'products/product.service.ts': {
     referencesToProductAcrossTenants:
@@ -133,10 +121,34 @@ const CALLERS: Record<string, Record<string, string>> = {
       + 'any office, for *Tanpa KPM*, *Punya KPM* and each row\'s *n KPM*, by the Super Admin who is in none — a count '
       + 'per account, never an office, a row or a name; audited per read in the platform\'s log',
   },
+  // P19.23-T1, T2 (ADR-0277): the console's Dashboard and KPM list, by the Super Admin who is in no office.
+  'reporting/platform/platform-console.service.ts': {
+    listMembershipsAcrossTenants:
+      'the Dashboard\'s *Pemakaian AgencyBoost* and *Adopsi per KPM*, and the KPM list\'s cards (P19.23-T1 AC-2, AC-4; '
+      + 'ADR-0277 §1): the active memberships of every live KPM, test accounts left out, counted by class and read for '
+      + 'each KPM\'s usage through its own tenant-scoped reading — counts answered, never a member',
+    dataStatusAcrossTenants:
+      'the Dashboard\'s *Perlu tindakan* and the KPM cards\' *Data <bulan> belum diunggah* (P19.23-T1 AC-3, T2 AC-1; '
+      + 'ADR-0277 §2): whether each KPM\'s last ended month is uploaded, never a figure of it',
+  },
+  // P19.23-T6 AC-4 (ADR-0279): *Pengumuman*'s recipients, by the Super Admin who is in no office.
+  'announcements/announcements.service.ts': {
+    listMembershipsAcrossTenants:
+      '*Pengumuman* (P19.23-T6 AC-4, ADR-0279): the active, non-test members of the live KPMs an announcement goes to, '
+      + 'by the Super Admin — each person once, for the preview\'s count and the in-app send; no figure is read, and the '
+      + 'send is audited in the platform\'s log',
+  },
+  'reporting/platform/test-accounts.service.ts': {
+    findAcrossAllTenants:
+      '*Anggota*\'s *Akun tes* switch (P19.23-T3 AC-1, ADR-0267 §1): the person\'s memberships in every office, by userId, '
+      + 'so the audit row names the KPMs the flag reaches — the Super Admin is in none; the KPM ids alone are kept',
+    setTestAccountAcrossTenants:
+      '*Anggota*\'s *Akun tes* switch (P19.23-T3 AC-1, ADR-0267 §1): `memberships.testAccount`, the copy every read of a '
+      + 'KPM\'s members filters on, written on each of the person\'s memberships with `users.testAccount` — one field, a '
+      + 'count answered, never a row',
+  },
   'reporting/platform/platform-reads.controller.ts': {
-    kpmComparisonAcrossTenants:
-      'the KPM comparison (P19.4-T3 AC-3, ADR-0207 §2, §4): each KPM\'s Overview, computed by its own code over the KPM '
-      + 'through `figuresForOffice`, counts and sums only, audited per read',
+    // The KPM comparison (`kpmComparisonAcrossTenants`) went with `/admin/analytics` (P19.23-T1; ADR-0277 §1).
     companyKpmsAcrossTenants:
       'the company\'s *KPM & data* (P19.4-T3 AC-15, ADR-0207 §2): each KPM\'s month through the Overview\'s functions over '
       + 'the KPM, and the D4 peer count, audited per read',
@@ -197,7 +209,8 @@ function callers(): Map<string, Set<string>> {
  * each is called from one file: the platform reads, which audit every call.
  */
 const FOR_OFFICE: Record<string, string[]> = {
-  'reporting/platform/platform-reads.service.ts': ['analyticsForOffice', 'complianceForOffice', 'figuresForOffice'],
+  // The platform reads call none since P19.23 (ADR-0277): the comparison's `figuresForOffice` went with it, and
+  // *Lihat sebagai KPM*'s `analyticsForOffice` and `complianceForOffice` with KPM Analytics (P19.19-T4).
   // P19.5-T3 AC-12 (ADR-0215 §9): the *Advanced analytics* tab, its own reads' file, audited per visit.
   'reporting/advanced-analytics/admin-advanced-analytics.service.ts': ['advancedAnalyticsForOffice'],
 };
@@ -235,10 +248,9 @@ describe('named cross-tenant reads (invariant §1, P13.2-T7 AC-6)', () => {
       }
     }
     expect(Object.fromEntries([...found].map(([file, methods]) => [file, [...methods].sort()]))).toEqual(FOR_OFFICE);
-    for (const file of [
-      'reporting/kpm-overview.service.ts', 'reporting/kpm-analytics.service.ts', 'reporting/compliance/compliance.service.ts',
-      'reporting/advanced-analytics/advanced-analytics.service.ts',
-    ]) {
+    // The one `…ForOffice` read left (P19.23, ADR-0277): the Overview's `figuresForOffice` went with the KPM comparison, and
+    // KPM analytics' and compliance's with KPM Analytics (P19.19-T4).
+    for (const file of ['reporting/advanced-analytics/advanced-analytics.service.ts']) {
       const source = readFileSync(join(MODULES, file), 'utf8');
       const at = source.search(/async (figuresForOffice|analyticsForOffice|complianceForOffice|advancedAnalyticsForOffice)\(/);
       expect([file, at > 0]).toEqual([file, true]);

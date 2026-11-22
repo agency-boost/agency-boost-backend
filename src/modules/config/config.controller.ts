@@ -25,6 +25,7 @@ import {
   UpdateActivityTypeDto,
 } from './activity.dto';
 import { ApplyConfigChangesDto } from './changes.dto';
+import { PublishSettingsDto } from './publish-settings.dto';
 import { ConfigChangeService } from './changes.service';
 
 /**
@@ -400,7 +401,8 @@ export class TenantConfigController {
     description:
       'What agents are working against, and whether the office has edited anything since. '
       + 'Compared by version rather than by timestamp: clocks and edit ordering are a '
-      + 'worse comparison than a counter.',
+      + 'worse comparison than a counter. `settings` says the same for each of the six settings with a '
+      + 'draft: the version agents are on, whether it has changes, and when it was last published with some.',
   })
   async publishState(@Ctx() ctx: RequestContext) {
     return this.config.state(ctx);
@@ -409,15 +411,19 @@ export class TenantConfigController {
   @Post('publish')
   @RequirePermission('tenant_config:write')
   @ApiOperation({
-    summary: 'Publish the working copy to this office\'s agents',
+    summary: 'Publish the working copy to this office\'s agents — one setting, several, or all',
     description:
       'Renders the live rows into one document. Until this is pressed, agents keep seeing '
       + 'the previous copy — an Owner restructuring a taxonomy does it in steps, and '
       + 'between them a ratio can name a type archived a minute ago that nobody can log '
-      + 'against any more.',
+      + 'against any more. **Per setting (ADR-0274 §5):** `settings` names the settings to publish — '
+      + '`activity_types` (with its ratio benchmarks), `lead_statuses`, `activation_checklist`, `training`, '
+      + '`capability_mapping`, `events`; the others keep what agents read now. Absent or empty, every setting '
+      + '(*Terbitkan semua*). Each named setting with changes moves to its next version; `activation_checklist` first '
+      + 'publishes the checklist\'s draft as its next version. An unknown setting is `400 VALIDATION_FAILED`.',
   })
-  async publish(@Ctx() ctx: RequestContext) {
-    return this.config.publish(ctx);
+  async publish(@Ctx() ctx: RequestContext, @Body() body: PublishSettingsDto) {
+    return this.config.publish(ctx, { source: 'kpm' }, body?.settings ?? []);
   }
 
   // ---- Branch info (P4-T5). ----

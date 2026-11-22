@@ -164,13 +164,21 @@ export class ProductCatalogService {
     const plan = planFor(scored, brief, chosen?.toUpperCase());
     // A switch to something that is not one of this brief's matches has nothing to show.
     if (!plan) throw new NotFoundException('Product');
+    /*
+     * ***Juga sesuai*** (P19.23-T4 AC-3; ADR-0278 §4): the products the Super Admin named for the one shown come first,
+     * in their order, among the brief's other matches — never a product the brief does not match, which a tap could not
+     * switch to. Named none, the scorer's order as before (a stable sort).
+     */
+    const named = plan.shown?.item.product.alsoFits ?? [];
+    const rank = (code: string) => (named.includes(code) ? named.indexOf(code) : named.length);
+    const alternatives = [...plan.alternatives].sort((a, b) => rank(a.item.product.code) - rank(b.item.product.code));
 
     return {
       brief: { need: brief.need, age: brief.age, budget: brief.budget },
       product: plan.shown ? this.detail(ctx, plan.shown.item) : null,
       verdict: plan.fit?.verdict ?? null,
       outside: [...(plan.fit?.outside ?? [])],
-      alternatives: plan.alternatives.map(({ item }) => ({ code: item.product.code, name: item.view.displayName.value })),
+      alternatives: alternatives.map(({ item }) => ({ code: item.product.code, name: item.view.displayName.value })),
       moreCount: plan.moreCount,
       shelfEmpty: items.length === 0,
     };

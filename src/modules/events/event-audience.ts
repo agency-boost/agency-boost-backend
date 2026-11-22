@@ -37,6 +37,12 @@ export interface AudiencePerson extends CountedMembership {
   orgLevelCode?: string;
   /** The current leader, for an upcoming event and for a row older than the history. */
   leaderId: string | null;
+  /**
+   * **A test account** (ADR-0267 §1; P19.25, ADR-0281 §1): still in the audience it belongs to — it reads, answers and is
+   * refused like anybody (*lists and counts only, never access*) — and left out of every count and list the office
+   * reads (`countedAudienceOf`): the roll call, the rate, the NPS, Advanced analytics › *Event*.
+   */
+  testAccount?: boolean;
 }
 
 /** A leader-setting edge: who the member reported to from `validFrom`, and who before it. */
@@ -93,6 +99,16 @@ export class OfficeAudience {
     return present.map((p) => p.membershipId);
   }
 
+  /**
+   * **The audience as the office counts it** (ADR-0267 §1; ADR-0281 §1): `audienceOf` with every test account left out —
+   * the roll call's people, the attendance rate, the NPS's authors and *Kehadiran*'s *expected*. Access reads
+   * `audienceOf`/`holds`, which keep them.
+   */
+  countedAudienceOf(event: AudienceQuestion): string[] {
+    const testing = new Set(this.people.filter((p) => p.testAccount === true).map((p) => p.membershipId));
+    return this.audienceOf(event).filter((id) => !testing.has(id));
+  }
+
   /** Does the event's audience hold this membership? */
   holds(event: AudienceQuestion, membershipId: string): boolean {
     return this.audienceOf(event).includes(membershipId);
@@ -136,7 +152,7 @@ export class EventAudienceReader {
       ctx,
       // A pending membership has registered and nothing more: never in an audience (OD-24).
       { status: { $in: ['active', 'removed'] } },
-      { projection: { status: 1, joinedAt: 1, removedAt: 1, leaderId: 1, orgLevelCode: 1 }, sort: { agentSeq: 1 } },
+      { projection: { status: 1, joinedAt: 1, removedAt: 1, leaderId: 1, orgLevelCode: 1, testAccount: 1 }, sort: { agentSeq: 1 } },
     );
     // Hydrated with the schema's defaults: a missing date or leader reads `null`, never `undefined`.
     const people = rows.map((row): AudiencePerson => ({
@@ -146,6 +162,7 @@ export class EventAudienceReader {
       joinedAt: row.joinedAt,
       removedAt: row.removedAt,
       leaderId: row.leaderId,
+      testAccount: row.testAccount === true,
     }));
 
     // The edges only for an event that has started with a *Leaders* audience: every other question is answered by

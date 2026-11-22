@@ -1,0 +1,21 @@
+# Daily, at 00:10 in Jakarta: the premium table notices (P19.15-T4 AC-4, ADR-0261). Ten minutes after a
+# scheduled premium table version comes into force at 00:00, so its announcement names a version in force.
+# The time is PREMIUM_TABLE_NOTICES.DAILY_RUN_AT (src/domain/constants), which a test compares with this line.
+#
+# Persistent: a day the VM was down is caught up at the next boot rather than skipped.
+# `systemctl list-timers agencyboost-daily.timer` shows when it last ran and runs next.
+#
+# deploy.sh installs it and reloads systemd, and enables nothing: the operator enables it once on a VM
+# that predates it — `sudo systemctl enable --now agencyboost-daily.timer` — and bootstrap.sh enables it
+# on a new one (docs/03-engineering/deployment-gcp.md, The daily run).
+
+[Unit]
+Description=Daily AgencyBoost run (premium table notices, subscription lapses)
+
+[Timer]
+OnCalendar=*-*-* 00:10:00 Asia/Jakarta
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

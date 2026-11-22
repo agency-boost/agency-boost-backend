@@ -133,6 +133,8 @@ class ResponseRateDto {
   @ApiProperty({ example: 12 }) sent!: number;
   @ApiProperty({ example: 30 }) invited!: number;
   @ApiProperty({ type: Number, nullable: true, example: 40, description: '`SURVEY_RESPONSE_RATE`.' }) pct!: number | null;
+  @ApiProperty({ example: 4, description: 'Of those who sent it, the ABs and AABs.' }) leaders!: number;
+  @ApiProperty({ example: 8, description: 'Of those who sent it, the agents.' }) agents!: number;
 }
 
 export class SurveyRunDto {
@@ -147,6 +149,11 @@ export class SurveyRunDto {
   @ApiProperty() perPerson!: boolean;
   @ApiProperty() remindHalfway!: boolean;
   @ApiProperty({ type: ResponseRateDto }) responses!: ResponseRateDto;
+  @ApiProperty({
+    type: Number, nullable: true, example: 62,
+    description: '*Survei sebelumnya*’s *NPS 62%*: `NPS_KPM_OVERALL` over every form; `null` for a qualitative run or under the floor.',
+  })
+  headlineScore!: number | null;
 }
 
 class TemplateDefaultsDto {
@@ -165,20 +172,49 @@ class SelectedRunDto extends SurveyRunDto {
   @ApiProperty({ type: String, nullable: true }) previousRunId!: string | null;
   @ApiProperty({
     type: Object, nullable: true,
-    description: '`NPS_SCORE`: `cutoffs`, `respondents`, `overall`, `change`, `aspects`, `questions` (with `textChanged`), '
-      + '`openAnswers` (`null` in a summary) and `breakdowns` by role class, tenure band and age band — a cell under three '
-      + 'respondents `null`, and never the only one of its dimension. **An anonymous run under three respondents**: '
-      + '`overall`, every score and change, and `openAnswers` are `null`; the counts stay. Never a person.',
+    description: 'ADR-0276 §1–§3, for the view asked (`who`): `cutoffs`, `who`, `whoShown`, `respondents`, '
+      + '`headline` — the first question, *Keseluruhan KPM* (`NPS_KPM_OVERALL`) — and `questions`, the others lowest '
+      + 'first; each with `score`, `n`, `change` (poin), `textChanged`, `shares` (promoter · passive · detractor %), '
+      + '`trend` over `trendPeriods`, and `reasons` (its *Kenapa?* answers, each tagged `leader`, `agent` or `null`); '
+      + '`improve`, the open question’s answers. **An anonymous run**: a figure under three answers is `null`, a class '
+      + 'view while a class has under three forms is all `null` (`whoShown: false`), a quote is tagged only from three '
+      + 'forms of its class; a summary gets no quote. Never a person.',
   })
   nps!: Record<string, unknown> | null;
   @ApiProperty({
     type: Object, nullable: true,
-    description: '`QUAL_ITEM_ISSUE_PCT` per block and item, with `severity`; `aspiration`; `support` (`QUAL_LEADER_SUPPORT`, the '
-      + 'Owner’s and the Admins’ alone, else `null`); `coachingDownline`. **An anonymous run’s figure over fewer than three '
-      + 'answers** (an item’s `issues`, `issuePct`, `severity`; an aspiration’s `count`, `pct`; a support share; '
-      + '`coachingDownline.pct`, `good`) is `null`; how many answered stays. Never a person, a note or a reason.',
+    description: 'ADR-0276 §4, §5, for the view asked: `profile` (*Status kerja*, *Lama di KPM*), `aspiration` '
+      + '(with the leaders’ and agents’ shares in *Semua*), `aspirationNotes`, `blocks` A–D (`asked`, `respondents`, rows '
+      + 'ranked by `issuePct` with `severity`, `previousPct` and `trend` against the run before, `comfortPct` for D), '
+      + '`support` per rater (`average`, shares), `coachingDownline` (with a named run’s table of downline leaders), and '
+      + '`voices` — Q12’s reasons, the office’s alone, from three. Floors as NPS’s.',
   })
   qual!: Record<string, unknown> | null;
+}
+
+class PreviewLineDto {
+  @ApiProperty({ type: [String], example: ['Q8', 'Q9'] }) kodes!: string[];
+  @ApiProperty({ type: LabelPairDto }) text!: LabelPairDto;
+  @ApiProperty({ example: 'scale_items' }) type!: string;
+  @ApiProperty({ enum: ['all', 'leader'] }) audience!: string;
+  @ApiProperty({ example: 7 }) items!: number;
+}
+
+class NotAnsweredDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: 'Dewi Lestari' }) name!: string;
+  @ApiProperty({ enum: SURVEY_ROLE_CLASSES }) roleClass!: string;
+}
+
+class SendViewDto {
+  @ApiProperty({ example: '2026-Q4' }) periodKey!: string;
+  @ApiProperty({ example: '2026-11-20' }) opensOn!: string;
+  @ApiProperty({ example: '2026-12-31', description: '*Tutup*: the latest it may close.' }) closesOnMax!: string;
+  @ApiProperty({ example: 30, description: '*Kirim ke n anggota*: active members, every role, test accounts never.' }) invitable!: number;
+  @ApiProperty({ type: SurveyRunDto, nullable: true }) run!: SurveyRunDto | null;
+  @ApiProperty({ type: [NotAnsweredDto], nullable: true, description: '`null` before it opens and for a summary.' }) notAnswered!: NotAnsweredDto[] | null;
+  @ApiProperty({ type: [PreviewLineDto] }) preview!: PreviewLineDto[];
+  @ApiProperty({ example: 2 }) minutes!: number;
 }
 
 export class SurveyResultsDto {
@@ -186,11 +222,55 @@ export class SurveyResultsDto {
   @ApiProperty() today!: string;
   @ApiProperty({ description: 'The tab is shown: the section on, or a run still open (AT-12).' }) visible!: boolean;
   @ApiProperty() sectionOn!: boolean;
-  @ApiProperty({ description: '*Mulai survei*, *Ubah*, *Batalkan* may be offered.' }) canWrite!: boolean;
+  @ApiProperty({ description: '*Kirim*, *Tutup* and *Batalkan* may be offered: a steward, never in a view-as session.' }) canWrite!: boolean;
   @ApiProperty({ enum: ['office', 'core_leader', 'summary'] }) audience!: string;
+  @ApiProperty({ enum: ['all', 'leader', 'agent'] }) who!: string;
   @ApiProperty({ type: SurveyTemplateDto }) template!: SurveyTemplateDto;
   @ApiProperty({ type: [SurveyRunDto] }) runs!: SurveyRunDto[];
   @ApiProperty({ type: SelectedRunDto, nullable: true }) selected!: SelectedRunDto | null;
+  @ApiProperty({ type: SendViewDto, description: '*Survei baru* (ADR-0276 §2).' }) send!: SendViewDto;
+}
+
+// ------------------------------------------------------------------------------------------ *Per orang*
+
+class SurveyPersonRowDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty({ example: 'Agus Prasetyo' }) name!: string;
+  @ApiProperty({ type: String, nullable: true }) photoUrl!: string | null;
+  @ApiProperty({ enum: SURVEY_ROLE_CLASSES }) roleClass!: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Wilson Tanoto' }) upline!: string | null;
+  @ApiProperty({ type: String, nullable: true }) groupId!: string | null;
+  @ApiProperty({ type: String, nullable: true, enum: ['full_time', 'part_time'] }) workStatus!: string | null;
+  @ApiProperty({ type: Number, nullable: true }) tenureYears!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) age!: number | null;
+  @ApiProperty({ type: Number, nullable: true, description: '0 Gen Z · 1 Gen Y · 2 Gen X.' }) generation!: number | null;
+  @ApiProperty() answered!: boolean;
+  @ApiProperty({ type: Number, nullable: true, description: '`QUAL_PERSON_ISSUE_ITEMS`.' }) issues!: number | null;
+  @ApiProperty({ description: 'Answered, a named *per orang* run, and within the reader’s reach.' }) canOpen!: boolean;
+  @ApiProperty({ type: String, nullable: true, description: 'For *Belum menjawab*’s WhatsApp only.' }) phone!: string | null;
+}
+
+export class SurveyPeopleDto {
+  @ApiProperty() today!: string;
+  @ApiProperty({ enum: ['office', 'core_leader', 'summary'] }) audience!: string;
+  @ApiProperty({ type: Object, isArray: true }) runs!: Record<string, unknown>[];
+  @ApiProperty({ type: Object, nullable: true }) run!: Record<string, unknown> | null;
+  @ApiProperty() answersShown!: boolean;
+  @ApiProperty({ type: Object, isArray: true }) groups!: Record<string, unknown>[];
+  @ApiProperty({ type: Number, nullable: true }) issueMaxRating!: number | null;
+  @ApiProperty({ type: [SurveyPersonRowDto], nullable: true, description: '`null` for a summary.' }) people!: SurveyPersonRowDto[] | null;
+}
+
+export class SurveyPersonAnswersDto {
+  @ApiProperty() membershipId!: string;
+  @ApiProperty() runId!: string;
+  @ApiProperty({ enum: SURVEY_ROLE_CLASSES }) roleClass!: string;
+  @ApiProperty({ type: Object }) person!: Record<string, unknown>;
+  @ApiProperty() issueMaxRating!: number;
+  @ApiProperty({ type: Object, isArray: true, description: '*Item bermasalah* per card: `count` of `of`.' }) tiles!: Record<string, unknown>[];
+  @ApiProperty({ type: Object, nullable: true }) aspiration!: Record<string, unknown> | null;
+  @ApiProperty({ type: Object, isArray: true }) sections!: Record<string, unknown>[];
+  @ApiProperty({ type: Object, nullable: true, description: 'Q12’s score: the office’s alone, `null` for a core leader.' }) support!: Record<string, unknown> | null;
 }
 
 // -------------------------------------------------------------------------------------- the coaching tab

@@ -1,15 +1,18 @@
 import { UNIT_DASHBOARD, type UnitView } from '@/domain/constants';
 
 /*
- * **The Unit Dashboard's three views** (`metrics-and-definitions.md`, *The views*; ADR-0249; `functional/unit-dashboard.md`,
- * *Views*): who a leader's figures are over, defined once and pure, so every reader that says *Group* reads the same
- * people (invariant §8).
+ * **The Unit Dashboard's four views** (`metrics-and-definitions.md`, *The views*; ADR-0249, ADR-0271 §2;
+ * `functional/unit-dashboard.md`, *Views*): who a leader's figures are over, defined once and pure, so every reader that
+ * says *Group* reads the same people (invariant §8).
  *
  * The client's message of 11 November 2026, items 5 and 7: *"AB di bawah gw harusnya ga masuk grup gw, cuma muncul di
  * Group Tree"* — an AB below a leader is not that leader's AAB.
  *
  * With H the head:
  *
+ * - **`DIRECT_UNIT(H)`** (*Direct Unit*; P19.18-T1 AC-2, the brief of 19 November 2026, part A): H and each **direct
+ *   report** of H's who leads nobody and is not of the `ab` class — H's own agents, and an AAB with no team of their own,
+ *   who sits in H's unit after H. An AB below H is always a unit of their own. `DIRECT_UNIT(H) ⊆ DIRECT_GROUP(H)`.
  * - **`DIRECT_GROUP(H)`** (*Grup langsung*): H and everybody below H, **never descending into a member of the `ab` class**
  *   (ADR-0156 §4: a rung marked *Senior Leader*). An AB below H, and everybody under that AB, is out. For an AB this is
  *   the agency `partitionAgencies` computes (`reporting/agency-partition.ts`), which a test says. Only an **active**
@@ -20,7 +23,7 @@ import { UNIT_DASHBOARD, type UnitView } from '@/domain/constants';
  * - **`DOWNLINE(H)`** (*Semua downline*): H's coachees (`CoachResolver.coacheesOf`) — and for the Owner or an Admin reading
  *   their own dashboard, every active member of the office, other roots and people with no leader included.
  *
- * `DIRECT_GROUP(H) ⊆ INFORMAL_GROUP(H) ⊆ DOWNLINE(H)`.
+ * `DIRECT_UNIT(H) ⊆ DIRECT_GROUP(H) ⊆ INFORMAL_GROUP(H) ⊆ DOWNLINE(H)`.
  */
 
 export type { UnitView };
@@ -42,6 +45,22 @@ export interface ViewMember {
 const AB_CLASS = 'ab';
 
 const isActive = (m: ViewMember) => m.active !== false;
+
+/**
+ * **`DIRECT_UNIT(H)`** (ADR-0271 §2): the head first, then — in the order given — every active direct report of the head
+ * who leads no active member of `members` and is not of the `ab` class. The *Unit* of the Activities tab and of Home
+ * (`rosterScopes`) is this, over the same people.
+ */
+export function directUnit(headId: string, members: readonly ViewMember[]): string[] {
+  const leaders = new Set(members.filter(isActive).map((m) => m.leaderId).filter((id): id is string => id !== null));
+  return [
+    headId,
+    ...members
+      .filter((m) => m.membershipId !== headId && isActive(m) && m.leaderId === headId && m.role !== AB_CLASS
+        && !leaders.has(m.membershipId))
+      .map((m) => m.membershipId),
+  ];
+}
 
 /**
  * **`DIRECT_GROUP(H)`**: the head first, then every member below them in the order given, kept when neither they nor any
@@ -118,36 +137,44 @@ export interface ViewFacts {
   ownsLiveGroup: boolean;
   /** Active members of the `ab` class in `DOWNLINE(H)` but H. */
   abBelow: number;
+  /**
+   * `DIRECT_GROUP(H)` holds somebody outside `DIRECT_UNIT(H)` — an AAB with a team, or an agent who leads (ADR-0271 §2):
+   * *"an AB with a group opens on Grup langsung; with only a unit, on Direct Unit"*.
+   */
+  groupBeyondUnit: boolean;
 }
 
 export interface ViewsOffered {
-  /** In the order drawn: *Grup langsung · Grup informal · Semua downline*. */
+  /** In the order drawn: *Direct Unit · Grup langsung · Grup informal · Semua downline*. */
   offered: UnitView[];
   default: UnitView;
 }
 
 /**
- * **The views offered, and the default** (the client's item 7: *"Pilihan yang ga relevan disembunyiin"*):
+ * **The views offered, and the default** (the client's item 7: *"Pilihan yang ga relevan disembunyiin"*; P19.18-T1 AC-2,
+ * ADR-0271 §2):
  *
- * - *Grup langsung* while H leads somebody;
+ * - ***Direct Unit*** while H leads somebody — for every leader;
+ * - *Grup langsung* while H leads somebody and it holds more than *Direct Unit* — the same people twice is hidden — and
+ *   always for the Owner or an Admin on their own dashboard who leads somebody, as the owner's mockup draws all four;
  * - *Grup informal* while H owns a live group or has an AB below them;
  * - *Semua downline* while an AB is below H — without one it is *Grup langsung* again — and always for the Owner or an
  *   Admin on their own dashboard, where it is the whole office.
  *
- * **The default**: the Owner's own dashboard *Semua downline*; an Admin's *Grup langsung* while they lead somebody, else
- * *Semua downline*; every leader's — and any `for` view's, a `leader` here — *Grup langsung*. A default not offered gives
- * way to the first view that is; with none offered (a head who leads nobody) it stands, and the unit is empty.
+ * **The default**: the Owner's or an Admin's own dashboard *Semua downline* (ADR-0268 §1: an Admin is the Owner but for
+ * admins); every leader's — and any `for` view's, a `leader` here — *Grup langsung* while it holds more than *Direct
+ * Unit*, else *Direct Unit*. A default not offered gives way to the first view that is; with none offered (a head who leads
+ * nobody) it stands, and the unit is empty.
  */
 export function viewsOffered(facts: ViewFacts): ViewsOffered {
   const office = facts.reader !== 'leader';
   const offered = UNIT_DASHBOARD.VIEWS.filter((view) => {
-    if (view === 'direct') return facts.leadsSomebody;
+    if (view === 'unit') return facts.leadsSomebody;
+    if (view === 'direct') return facts.leadsSomebody && (office || facts.groupBeyondUnit);
     if (view === 'informal') return facts.ownsLiveGroup || facts.abBelow > 0;
     return office || facts.abBelow > 0;
   });
-  const preferred: UnitView = facts.reader === 'owner' || (facts.reader === 'admin' && !facts.leadsSomebody)
-    ? 'downline'
-    : 'direct';
+  const preferred: UnitView = office ? 'downline' : facts.groupBeyondUnit ? 'direct' : 'unit';
   return { offered, default: offered.includes(preferred) ? preferred : offered[0] ?? preferred };
 }
 

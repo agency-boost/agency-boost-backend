@@ -125,7 +125,12 @@ export class UnitActivitiesService {
     if (date > office.today) throw invalid('futureDate', { field: 'date', today: office.today });
     const period = activityPeriodOf(query.span ?? 'week', date, office.today);
 
-    const people = await this.dashboard.people(ctx, query.for);
+    /*
+     * P19.18-T2 AC-2 (ADR-0271 §7): the KPM Owner and an Admin on their own dashboard read **the whole office** — *Semua
+     * downline*, one column per person — where they read themselves alone; a leader's *Group* stays *Grup langsung*
+     * (ADR-0249 §5). The view picker is not drawn on this tab, so no view is asked for.
+     */
+    const people = await this.dashboard.people(ctx, query.for, { office: true });
     const shown = people.empty ? [] : people.group;
     // One person's ratios only within the dashboard's reach: a member of the *Group* shown, never the 404's other cases.
     const asked = query.ratioFor === undefined ? null : askedOf(people, shown, query.ratioFor);

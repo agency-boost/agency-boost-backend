@@ -169,6 +169,8 @@ describe('the leader limit', () => {
       ['a deleted AAB', 0, 'aab', { deletedAt: NOW }],
       ['an Admin at AAB', 1, 'aab', { 'adminAccess.isKpmAdmin': true }],
       ['an Admin at Agent', 0, 'agent', { 'adminAccess.isKpmAdmin': true }],
+      // P19.23-T5 AC-4 (ADR-0267 §1): a test account is never counted, at a leader rung or anywhere.
+      ['a test account at AB', 0, 'ab', { testAccount: true }],
     ])('%s counts %i', async (_what, expected, role, change) => {
       const id = await join(KPM_A, role);
       if (Object.keys(change).length) await mongoose.model(Membership.name).updateOne({ _id: id }, { $set: change });
@@ -265,6 +267,9 @@ describe('the leader limit', () => {
       ['an Admin', () => as(owner, { admin: true }), () => agentOfAb],
       ['an AB, their direct report', () => as(sub), () => agentOfAb],
       ['an AAB, their direct report', () => as(aab), () => agentOfAab],
+      // P19.23 (OD-377; ADR-0277 §3): the Super Admin inside the KPM, its Owner there and nobody's member.
+      ['the Super Admin inside the KPM', async () => RequestContext.superAdminInKpm(RequestContext.platform('root'), KPM_A)
+        .withReader(SOURCE_READER), () => agentOfAb],
     ])('a role change by %s is refused at the limit and served below it', async (_who, actor, target) => {
       await limit(KPM_A, 3);
       await expect(roles.change(await actor(), target(), 'aab')).rejects.toMatchObject(LIMIT);

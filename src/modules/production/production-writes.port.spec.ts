@@ -32,13 +32,13 @@ describe('P19.5-T3 AC-9 ProductionWrites', () => {
     await expect(signalAfterWrite(port, ctx, '2026-06')).resolves.toBeUndefined();
   });
 
-  it('P19.5-T3 AC-9 every writer of the file signals both: a commit, a revert, a correction and a batch of corrections', () => {
+  it('P19.5-T3 AC-9 every writer of the file signals both: a commit, a revert, a correction, a batch of corrections and a restore (P19.21-T1 AC-4)', () => {
     const read = (file: string) => readFileSync(join(__dirname, file), 'utf8');
     const imports = read('production-import.service.ts');
     const corrections = read('production-correction.service.ts');
     expect(imports.match(/signalBeforeWrite\(this\.writes/g)).toHaveLength(2);
     expect(imports.match(/signalAfterWrite\(this\.writes/g)).toHaveLength(2);
-    expect(corrections.match(/signalBeforeWrite\(this\.writes/g)).toHaveLength(2);
-    expect(corrections.match(/signalAfterWrite\(this\.writes/g)).toHaveLength(2);
+    expect(corrections.match(/signalBeforeWrite\(this\.writes/g)).toHaveLength(3);
+    expect(corrections.match(/signalAfterWrite\(this\.writes/g)).toHaveLength(3);
   });
 });

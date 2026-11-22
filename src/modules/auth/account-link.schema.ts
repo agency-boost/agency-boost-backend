@@ -15,6 +15,9 @@ export type AccountLinkDocument = HydratedDocument<AccountLink>;
  * **A login is in at most one live link** — a pair — in v1: the unique index below over `userIds`, a multikey index, so
  * no two live rows hold the same login. Removing a link soft-deletes it (`deletedAt`, `deletedBy`; invariant 6), which
  * frees both logins to be linked again.
+ *
+ * **Retired (ADR-0269, one login)**: the `/auth/links` routes are gone and nothing writes a link any more. The stored
+ * rows stay, untouched, and are read only by `ImpersonationService`'s refusal of a login linked to the operator's own.
  */
 @Schema({ ...baseSchemaOptions, collection: 'accountLinks' })
 export class AccountLink {
@@ -37,7 +40,8 @@ export class AccountLink {
 export const AccountLinkSchema = SchemaFactory.createForClass(AccountLink);
 /*
  * One live link per login. `userIds` is an array, so the index is multikey: a second live row holding either login of
- * the first is a duplicate key, which the confirm answers `409 AUTH_LINK_EXISTS` when two confirms race.
+ * the first is a duplicate key, which the confirm answered `409 AUTH_LINK_EXISTS` when two confirms raced (both retired,
+ * ADR-0269). Kept: the stored rows still carry it.
  */
 AccountLinkSchema.index({ userIds: 1 }, { unique: true, partialFilterExpression: { deletedAt: null } });
 

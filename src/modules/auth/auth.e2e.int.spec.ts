@@ -511,10 +511,8 @@ describe('auth and admin over HTTP', () => {
       // invite, or ask for one that has never been provisioned — plus their own inbox,
       // which is addressed to them as a person and exists before any office does.
       // Anything more would be a grant that outlives the reason for it. And their own profile (ADR-0189 §5, P19-T4
-      // AC-5): a person in no office still signs out and corrects their details on *Profil saya*. And a link they are a
-      // party to (P19.2-T1 AC-8, ADR-0199 §5): held by everybody, though only an Owner, an Admin or a Super Admin makes one.
+      // AC-5): a person in no office still signs out and corrects their details on *Profil saya*.
       expect(me.body.permissions.sort()).toEqual([
-        'account_link:manage_self',
         'join_via_code_link_qr',
         'kpm:read_directory',
         'kpm_registration:create',
@@ -1999,6 +1997,43 @@ describe('auth and admin over HTTP', () => {
     const file = (...rows: string[]) => [HEADER, ...rows].join('\n');
     const row = (code: string, name: string, rung: string, email: string, up = '') => `${code},${name},${rung},${up},,${email}`;
 
+    /*
+     * **`X-Kpm-Id` through the real `AuthGuard` and `ContextResolver`** (ADR-0268 §3; the permission review of 20 November
+     * 2026): the header places a Super Admin inside the KPM it names and means nothing for anybody else — an Owner who
+     * sends another KPM's id stays in their own, and the other KPM is `404` to them.
+     */
+    it('ADR-0268 §3 an Owner’s X-Kpm-Id naming another KPM is ignored; a Super Admin’s works, audited as the Super Admin', async () => {
+      const a = await anOffice();
+      const b = await anOffice();
+      const csv = () => file(row(digits(), 'Header Person', 'AB', `xkpm-${Math.random()}@k.test`));
+
+      // The Owner of A, naming B: still A's Owner — A's import answers, B's is 404, and nothing is written in B.
+      await api().post(`/api/v1/admin/tenants/${a.kpmId}/roster/preview`).set({ ...a.auth, 'X-Kpm-Id': b.kpmId })
+        .send({ rows: csv() }).expect(200);
+      for (const path of ['roster/preview', 'roster']) {
+        const res = await api().post(`/api/v1/admin/tenants/${b.kpmId}/${path}`).set({ ...a.auth, 'X-Kpm-Id': b.kpmId })
+          .send({ rows: csv() });
+        expect([path, res.status, res.body.error?.code]).toEqual([path, 404, 'NOT_FOUND']);
+      }
+      const memberships = app.get<Connection>(getConnectionToken()).collection('memberships');
+      const inB = await memberships.countDocuments({ kpmId: b.kpmId });
+
+      // A Super Admin naming B works inside B, as its Owner, and the audit row names them.
+      const sa = await makeUser(`sa-xkpm-${Math.random()}@agencyboost.test`, 'super_admin');
+      const committed = await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster`)
+        .set({ Authorization: `Bearer ${sa.accessToken}`, 'X-Kpm-Id': b.kpmId }).send({ rows: csv() }).expect(201);
+      expect(committed.body.counts.imported).toBe(1);
+      expect(await memberships.countDocuments({ kpmId: b.kpmId })).toBe(inB + 1);
+      const audit = app.get<Model<{ kpmId: string; action: string; actorUserId: string; actorMembershipId: string | null }>>(getModelToken(AuditLog.name));
+      const entry = await audit.findOne({ kpmId: b.kpmId, action: 'roster.imported' }).sort({ createdAt: -1 }).lean().exec();
+      // The Super Admin themselves, in B's log — no membership of B's is named as the actor.
+      expect(entry).toMatchObject({ actorUserId: sa.id, actorMembershipId: null });
+      // Without the header the Super Admin is in no KPM: nothing to import into.
+      const outside = await api().post(`/api/v1/admin/tenants/${b.kpmId}/roster/preview`)
+        .set({ Authorization: `Bearer ${sa.accessToken}` }).send({ rows: csv() });
+      expect(outside.status).toBeGreaterThanOrEqual(403);
+    });
+
     it('offers the template in A3’s words, on a route an :id would otherwise swallow', async () => {
       const { auth } = await anOffice();
       const res = await api().get('/api/v1/admin/tenants/roster-template').set(auth).expect(200);
@@ -2250,7 +2285,8 @@ describe('auth and admin over HTTP', () => {
       expect((await api().get('/api/v1/join/requests').set(auth).expect(200)).body).toHaveLength(1);
       expect((await api().get('/api/v1/join/me').set(asJoiner).expect(200)).body.status).toBe('pending');
 
-      // An existing agent who joined years ago: accepted, and classified once.
+      // An existing agent who joined years ago: accepted, and classified once (their company month, 2021, is not 2009's
+      // year either: ADR-0264).
       await api().post(`/api/v1/join/requests/${requestId}/approve`).set(auth).send({ joinDate: '2009-03-01' }).expect(200);
       const member = await api().get(`/api/v1/members/${membershipId}`).set(auth).expect(200);
       expect(member.body).toMatchObject({ status: 'active', joinDate: '2009-03-01' });
@@ -2258,9 +2294,13 @@ describe('auth and admin over HTTP', () => {
         .toMatchObject({ joinDate: '2009-03-01', joinedAs: 'existing_agent' });
     });
 
-    it('P18.8-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire', async () => {
+    it('P18.8-T2 AC-1, P19.16-T2 AC-1: a tag carries one too; omitted, the office’s today — a new hire, who joined the company this year', async () => {
       const { kpmId, auth } = await officeWithLeader();
-      const joiner = await makeUser(`dated-${Math.random()}@kpm.test`);
+      const joinerEmail = `dated-${Math.random()}@kpm.test`;
+      const joiner = await makeUser(joinerEmail);
+      // ADR-0264: a new hire joined the company the year they joined the office.
+      await app.get<Connection>(getConnectionToken()).collection('users')
+        .updateOne({ email: joinerEmail }, { $set: { companyJoinMonth: officeToday().slice(0, 7) } });
       await api().post('/api/v1/join/kpm').set({ Authorization: `Bearer ${joiner.accessToken}` }).send({ kpmId }).expect(200);
       const pool = await api().get('/api/v1/join/untagged').set(auth).expect(200);
       const { membershipId } = pool.body[0];
@@ -2828,76 +2868,70 @@ describe('auth and admin over HTTP', () => {
     it('routes /members/groups to groups, not to a member called "groups"', async () => {
       const { asOwner } = await office();
       const res = await api().get('/api/v1/members/groups').set(asOwner).expect(200);
-      expect(Array.isArray(res.body)).toBe(true);
+      expect(Array.isArray(res.body.groups)).toBe(true);
     });
 
-    it('creates, renames, and counts who is tagged', async () => {
+    // Changed 2026-11-20 (P19.17-T4, ADR-0270 §1): only an AB carries a group; their team follows.
+    it('P19.17-T4 creates a group with an AB in it, counts the team that follows, and renames it', async () => {
       const { kpmId, asOwner, ownerMembershipId } = await office();
       const them = await joins(kpmId, asOwner);
 
       const made = await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'New Agent Mentoring Circle', ownerMembershipId })
+        .send({ name: 'New Agent Mentoring Circle', abMembershipId: ownerMembershipId })
         .expect(201);
-      expect(made.body[0]).toMatchObject({ name: 'New Agent Mentoring Circle', memberCount: 0 });
-      const groupId = made.body[0].groupId;
+      const groupId = made.body.groupId;
+      // The Owner, an AB, and the agent below them, who follows.
+      expect(made.body.view.groups[0]).toMatchObject({ groupId, name: 'New Agent Mentoring Circle', counts: { people: 2, abGroups: 1 } });
 
+      // The agent carries no group of their own: they follow their AB.
       await api().put(`/api/v1/members/${them.membershipId}/tags`).set(asOwner)
-        .send({ groupIds: [groupId], isCoreLeader: false }).expect(200);
-
-      const listed = await api().get('/api/v1/members/groups').set(asOwner).expect(200);
-      expect(listed.body[0].memberCount).toBe(1);
+        .send({ groupIds: [groupId], isCoreLeader: false }).expect(422);
+      const theirs = await api().get(`/api/v1/members/${them.membershipId}/tags`).set(asOwner).expect(200);
+      expect(theirs.body).toMatchObject({ groupIds: [], group: { groupId }, ab: { membershipId: ownerMembershipId } });
 
       const renamed = await api().put(`/api/v1/members/groups/${groupId}`).set(asOwner)
-        .send({ name: 'Top Producers 2026', ownerMembershipId }).expect(200);
-      expect(renamed.body[0].name).toBe('Top Producers 2026');
+        .send({ name: 'Top Producers 2026' }).expect(200);
+      expect(renamed.body.groups[0].name).toBe('Top Producers 2026');
     });
 
     it('refuses a duplicate name, and frees it once the group is retired', async () => {
-      const { asOwner, ownerMembershipId } = await office();
+      const { asOwner } = await office();
       const made = await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Task Force', ownerMembershipId }).expect(201);
+        .send({ name: 'Task Force' }).expect(201);
 
       const clash = await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Task Force', ownerMembershipId }).expect(409);
+        .send({ name: 'Task Force' }).expect(409);
       expect(clash.body.error.code).toBe('ORG_GROUP_NAME_TAKEN');
 
-      await api().delete(`/api/v1/members/groups/${made.body[0].groupId}`).set(asOwner).expect(200);
+      await api().delete(`/api/v1/members/groups/${made.body.groupId}`).set(asOwner).expect(200);
       await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Task Force', ownerMembershipId }).expect(201);
+        .send({ name: 'Task Force' }).expect(201);
     });
 
-    it('AC-1: retiring keeps the tag, so who was in a cohort stays readable', async () => {
+    // Changed 2026-11-12 (P19.13-T3 AC-4, ADR-0253 §3), and 2026-11-20 (ADR-0270 §3): deleting a group moves its ABs —
+    // and their teams — to Tanpa group; the audit log keeps the cohort.
+    it('P19.17-T4 AC-2: deleting a group leaves its AB and their team in no group', async () => {
       const { kpmId, asOwner, ownerMembershipId } = await office();
       const them = await joins(kpmId, asOwner);
       const made = await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Class of 2025', ownerMembershipId }).expect(201);
-      const groupId = made.body[0].groupId;
+        .send({ name: 'Class of 2025', abMembershipId: ownerMembershipId }).expect(201);
+      await api().delete(`/api/v1/members/groups/${made.body.groupId}`).set(asOwner).expect(200);
 
-      await api().put(`/api/v1/members/${them.membershipId}/tags`).set(asOwner)
-        .send({ groupIds: [groupId], isCoreLeader: false }).expect(200);
-      await api().delete(`/api/v1/members/groups/${groupId}`).set(asOwner).expect(200);
-
-      const tags = await api().get(`/api/v1/members/${them.membershipId}/tags`)
-        .set(asOwner).expect(200);
-      expect(tags.body.groupIds).toEqual([groupId]);
-      expect(await api().get('/api/v1/members/groups').set(asOwner).expect(200))
-        .toHaveProperty('body', []);
+      const mine = await api().get(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner).expect(200);
+      expect(mine.body.groupIds).toEqual([]);
+      const theirs = await api().get(`/api/v1/members/${them.membershipId}/tags`).set(asOwner).expect(200);
+      expect(theirs.body.group).toBeNull();
+      expect((await api().get('/api/v1/members/groups').set(asOwner).expect(200)).body.groups).toEqual([]);
     });
 
     it('AC-1: a group changes nothing about what anybody can see', async () => {
       const { kpmId, asOwner, ownerMembershipId } = await office();
       const one = await joins(kpmId, asOwner);
       const two = await joins(kpmId, asOwner);
-      const made = await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Circle', ownerMembershipId }).expect(201);
 
       const before = await api().get('/api/v1/members').set(one.as).expect(200);
-
-      // Groups alone: since ADR-0159 the Core Leader tag is a leader's, and these two are agents.
-      for (const person of [one, two]) {
-        await api().put(`/api/v1/members/${person.membershipId}/tags`).set(asOwner)
-          .send({ groupIds: [made.body[0].groupId], isCoreLeader: false }).expect(200);
-      }
+      await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Circle', abMembershipId: ownerMembershipId }).expect(201);
 
       const after = await api().get('/api/v1/members').set(one.as).expect(200);
       expect(after.body.members.map((m: { membershipId: string }) => m.membershipId))
@@ -2913,10 +2947,12 @@ describe('auth and admin over HTTP', () => {
       const them = await joins(kpmId, asOwner);
 
       const listed = await api().get('/api/v1/members/groups').set(them.as).expect(403);
-      expect(listed.body.error.details.permission).toBe('group_informal:create');
+      expect(listed.body.error.details.permission).toBe('member:read_tags');
 
       await api().post('/api/v1/members/groups').set(them.as)
-        .send({ name: 'Mine', ownerMembershipId }).expect(403);
+        .send({ name: 'Mine', abMembershipId: ownerMembershipId }).expect(403);
+      await api().put(`/api/v1/members/${ownerMembershipId}/group`).set(them.as)
+        .send({ groupId: null }).expect(403);
       await api().put(`/api/v1/members/${them.membershipId}/tags`).set(them.as)
         .send({ groupIds: [], isCoreLeader: true }).expect(403);
     });
@@ -2925,12 +2961,14 @@ describe('auth and admin over HTTP', () => {
       const mine = await office();
       const theirs = await office();
       const made = await api().post('/api/v1/members/groups').set(theirs.asOwner)
-        .send({ name: 'Theirs', ownerMembershipId: theirs.ownerMembershipId }).expect(201);
-      const groupId = made.body[0].groupId;
+        .send({ name: 'Theirs', abMembershipId: theirs.ownerMembershipId }).expect(201);
+      const groupId = made.body.groupId;
 
-      expect((await api().get('/api/v1/members/groups').set(mine.asOwner).expect(200)).body)
+      expect((await api().get('/api/v1/members/groups').set(mine.asOwner).expect(200)).body.groups)
         .toEqual([]);
       await api().delete(`/api/v1/members/groups/${groupId}`).set(mine.asOwner).expect(404);
+      await api().put(`/api/v1/members/${mine.ownerMembershipId}/group`).set(mine.asOwner)
+        .send({ groupId }).expect(404);
       await api().put(`/api/v1/members/${mine.ownerMembershipId}/tags`).set(mine.asOwner)
         .send({ groupIds: [groupId], isCoreLeader: false }).expect(404);
     });
@@ -2938,9 +2976,9 @@ describe('auth and admin over HTTP', () => {
     it('validates the body rather than writing what arrives', async () => {
       const { asOwner, ownerMembershipId } = await office();
       await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: '', ownerMembershipId }).expect(400);
+        .send({ name: '', abMembershipId: ownerMembershipId }).expect(400);
       await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name: 'Fine', ownerMembershipId, colour: 'red' }).expect(400);
+        .send({ name: 'Fine', abMembershipId: ownerMembershipId, colour: 'red' }).expect(400);
       await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
         .send({ groupIds: 'not-an-array', isCoreLeader: false }).expect(400);
       await api().put(`/api/v1/members/${ownerMembershipId}/tags`).set(asOwner)
@@ -2975,7 +3013,8 @@ describe('auth and admin over HTTP', () => {
       await api().patch(`/api/v1/members/${leader.membershipId}/role`).set(asOwner)
         .send({ toRole: 'aab', reason: 'Leads a unit' }).expect(200);
       const agent = await joins();
-      return { kpmId, code, asOwner, leader, agent };
+      const ownerMembershipId = String((await api().get('/api/v1/auth/me').set(asOwner).expect(200)).body.membership.membershipId);
+      return { kpmId, code, asOwner, ownerMembershipId, leader, agent };
     }
 
     it('P18.5-T5 AC-2 refuses tagging an Agent on both routes, 400 CORE_LEADER_NOT_A_LEADER, and writes nothing', async () => {
@@ -3025,26 +3064,23 @@ describe('auth and admin over HTTP', () => {
       expect((await api().get('/api/v1/auth/me').set(mine.leader.as).expect(200)).body.membership.isCoreLeader).toBe(false);
     });
 
-    it('P18.5-T6 AC-1 /auth/me names the live tag groups A to Z and the office’s code and branch', async () => {
-      const { asOwner, leader, code } = await office();
-      const ownerMembershipId = (await api().get('/api/v1/members').set(asOwner).expect(200)).body.members
-        .find((m: { isKpmOwner: boolean }) => m.isKpmOwner).membershipId;
-      const make = async (name: string) => (await api().post('/api/v1/members/groups').set(asOwner)
-        .send({ name, ownerMembershipId }).expect(201)).body.find((g: { name: string }) => g.name === name).groupId as string;
-      const top = await make('Top Producers 2026');
-      const circle = await make('Mentoring Circle');
-      const retired = await make('Class of 2025');
-      await api().put(`/api/v1/members/${leader.membershipId}/tags`).set(asOwner)
-        .send({ groupIds: [top, circle, retired], isCoreLeader: true }).expect(200);
-      await api().delete(`/api/v1/members/groups/${retired}`).set(asOwner).expect(200);
+    // Changed 2026-11-12 (ADR-0253 §1): a leader has one group, so the A-to-Z list is an Agent's, who may have several.
+    // Changed 2026-11-20 (P19.17-T4, ADR-0270 §1): the line names the member's informal group — an AB's own, an AAB's or an
+    // agent's their AB's.
+    it('P18.5-T6 AC-1 P19.17-T4 /auth/me names the informal group the member is in, and the office\u2019s code and branch', async () => {
+      const { asOwner, ownerMembershipId, leader, agent, code } = await office();
+      const made = await api().post('/api/v1/members/groups').set(asOwner)
+        .send({ name: 'Top Producers 2026', abMembershipId: ownerMembershipId }).expect(201);
+      await api().put(`/api/v1/members/${leader.membershipId}/core-leader`).set(asOwner).send({ isCoreLeader: true }).expect(200);
+      expect(made.body.groupId).toEqual(expect.any(String));
 
-      const me = (await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership;
-      expect(me).toMatchObject({
-        isCoreLeader: true,
-        groups: ['Mentoring Circle', 'Top Producers 2026'],
-        office: { code, branch: 'Cempaka Putih' },
-      });
-      // The Owner: in no group, not tagged, the same office.
+      for (const who of [leader, agent]) {
+        expect((await api().get('/api/v1/auth/me').set(who.as).expect(200)).body.membership).toMatchObject({
+          groups: ['Top Producers 2026'], office: { code, branch: 'Cempaka Putih' },
+        });
+      }
+      expect((await api().get('/api/v1/auth/me').set(leader.as).expect(200)).body.membership.isCoreLeader).toBe(true);
+      await api().delete(`/api/v1/members/groups/${made.body.groupId}`).set(asOwner).expect(200);
       expect((await api().get('/api/v1/auth/me').set(asOwner).expect(200)).body.membership)
         .toMatchObject({ isCoreLeader: false, groups: [], office: { code, branch: 'Cempaka Putih' } });
     });

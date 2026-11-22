@@ -168,12 +168,8 @@ describe('P18.6-T3 the Template library (ADR-0164)', () => {
       expect(overview.companies.map((c) => c.name)).toEqual(['Prudential']);
     });
 
-    it('AC-3 is not in platform analytics', async () => {
-      await prudential();
-      const analytics = await wired.platformAnalytics.read(SA);
-      expect(analytics.companies.map((c) => c.name)).toEqual(['Prudential']);
-      expect(analytics.platform.companies).toBe(1);
-    });
+    // *Is not in platform analytics* went with `/admin/analytics` (P19.23-T1, ADR-0277): the console's Dashboard reads
+    // the companies through `platformOverview`, asserted above.
 
     it('AC-3 is on /admin/companies, as kind template, beside the insurers', async () => {
       await prudential();

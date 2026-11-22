@@ -1,0 +1,606 @@
+{
+  "$comment": "P19.23-T5 (ADR-0279 §2): the calculator's figures, one fixture for both copies of the pricing function — backend/src/modules/billing/price-offer.ts and frontend/src/lib/billing.ts (priceOffer). The first four are the mockup's frames (superadmin-tablet f43, f45, f50, f51). Integer IDR minor units (sen).",
+  "cases": [
+    {
+      "case": "Frame 43: 15 leaders, Tahunan, the offer price Rp 375.000",
+      "input": {
+        "leaders": 15,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 37500000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "months": 12,
+        "rateMinor": 37500000,
+        "priceMode": "per_leader",
+        "normalMinor": 8550000000,
+        "grossMinor": 6750000000,
+        "priceDiscountMinor": 1800000000,
+        "annualDiscountMinor": 337500000,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 6412500000,
+        "savingMinor": 2137500000,
+        "savingPct": 25,
+        "perMonthMinor": 534375000,
+        "perLeaderPerDayMinor": 1190000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 80,
+          "policiesPerMonthTenths": 7
+        }
+      }
+    },
+    {
+      "case": "Frame 45: 22 leaders and 80 agents, Tahunan, Rp 350.000",
+      "input": {
+        "leaders": 22,
+        "agents": 80,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 35000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_21_50",
+        "months": 12,
+        "rateMinor": 35000000,
+        "priceMode": "per_leader",
+        "normalMinor": 11880000000,
+        "grossMinor": 9240000000,
+        "priceDiscountMinor": 2640000000,
+        "annualDiscountMinor": 462000000,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 8778000000,
+        "savingMinor": 3102000000,
+        "savingPct": 26,
+        "perMonthMinor": 731500000,
+        "perLeaderPerDayMinor": 1110000,
+        "perAgentPerDayMinor": 300000,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 110,
+          "policiesPerMonthTenths": 9
+        }
+      }
+    },
+    {
+      "case": "Frame 50: 11 leaders, Tahunan, Rp 375.000",
+      "input": {
+        "leaders": 11,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 37500000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "months": 12,
+        "rateMinor": 37500000,
+        "priceMode": "per_leader",
+        "normalMinor": 6270000000,
+        "grossMinor": 4950000000,
+        "priceDiscountMinor": 1320000000,
+        "annualDiscountMinor": 247500000,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 4702500000,
+        "savingMinor": 1567500000,
+        "savingPct": 25,
+        "perMonthMinor": 391875000,
+        "perLeaderPerDayMinor": 1190000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 59,
+          "policiesPerMonthTenths": 5
+        }
+      }
+    },
+    {
+      "case": "Frame 51: 11 leaders, 6 bulan, the total typed: Rp 24.750.000",
+      "input": {
+        "leaders": 11,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "total",
+          "totalMinor": 2475000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "months": 6,
+        "rateMinor": 37500000,
+        "priceMode": "total",
+        "normalMinor": 3135000000,
+        "grossMinor": 2475000000,
+        "priceDiscountMinor": 660000000,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 2475000000,
+        "savingMinor": 660000000,
+        "savingPct": 21,
+        "perMonthMinor": 412500000,
+        "perLeaderPerDayMinor": 1250000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 31,
+          "policiesPerMonthTenths": 5
+        }
+      }
+    },
+    {
+      "case": "Diskon bulk order 10% on frame 45",
+      "input": {
+        "leaders": 22,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 35000000
+        },
+        "bulk": {
+          "type": "percent",
+          "percent": 10
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_21_50",
+        "months": 12,
+        "rateMinor": 35000000,
+        "priceMode": "per_leader",
+        "normalMinor": 11880000000,
+        "grossMinor": 9240000000,
+        "priceDiscountMinor": 2640000000,
+        "annualDiscountMinor": 462000000,
+        "bulkDiscountMinor": 877800000,
+        "totalMinor": 7900200000,
+        "savingMinor": 3979800000,
+        "savingPct": 34,
+        "perMonthMinor": 658350000,
+        "perLeaderPerDayMinor": 1000000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 99,
+          "policiesPerMonthTenths": 8
+        }
+      }
+    },
+    {
+      "case": "Diskon bulk order Rp 1.000.000: 8 leaders, 6 bulan, Rp 400.000",
+      "input": {
+        "leaders": 8,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": {
+          "type": "amount",
+          "amountMinor": 100000000
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "months": 6,
+        "rateMinor": 40000000,
+        "priceMode": "per_leader",
+        "normalMinor": 2400000000,
+        "grossMinor": 1920000000,
+        "priceDiscountMinor": 480000000,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 100000000,
+        "totalMinor": 1820000000,
+        "savingMinor": 580000000,
+        "savingPct": 24,
+        "perMonthMinor": 303333300,
+        "perLeaderPerDayMinor": 1260000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 23,
+          "policiesPerMonthTenths": 4
+        }
+      }
+    },
+    {
+      "case": "101+ is Harga khusus: 120 leaders, Tahunan, Rp 250.000 typed",
+      "input": {
+        "leaders": 120,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 25000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_101_PLUS",
+        "months": 12,
+        "rateMinor": 25000000,
+        "priceMode": "per_leader",
+        "normalMinor": null,
+        "grossMinor": 36000000000,
+        "priceDiscountMinor": 0,
+        "annualDiscountMinor": 1800000000,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 34200000000,
+        "savingMinor": 0,
+        "savingPct": 0,
+        "perMonthMinor": 2850000000,
+        "perLeaderPerDayMinor": 790000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 428,
+          "policiesPerMonthTenths": 36
+        }
+      }
+    },
+    {
+      "case": "The annual 5% rounded half up: 7 leaders, Tahunan, Rp 333.333",
+      "input": {
+        "leaders": 7,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 33333300
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "months": 12,
+        "rateMinor": 33333300,
+        "priceMode": "per_leader",
+        "normalMinor": 4200000000,
+        "grossMinor": 2799997200,
+        "priceDiscountMinor": 1400002800,
+        "annualDiscountMinor": 139999900,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 2659997300,
+        "savingMinor": 1540002700,
+        "savingPct": 37,
+        "perMonthMinor": 221666400,
+        "perLeaderPerDayMinor": 1060000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 33,
+          "policiesPerMonthTenths": 3
+        }
+      }
+    },
+    {
+      "case": "A total typed on Tahunan derives the price: 7 leaders, Rp 26.600.000",
+      "input": {
+        "leaders": 7,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "total",
+          "totalMinor": 2660000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "months": 12,
+        "rateMinor": 33333300,
+        "priceMode": "total",
+        "normalMinor": 4200000000,
+        "grossMinor": 2800000000,
+        "priceDiscountMinor": 1400000000,
+        "annualDiscountMinor": 140000000,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 2660000000,
+        "savingMinor": 1540000000,
+        "savingPct": 37,
+        "perMonthMinor": 221666700,
+        "perLeaderPerDayMinor": 1060000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 33,
+          "policiesPerMonthTenths": 3
+        }
+      }
+    },
+    {
+      "case": "A price above the standard saves nothing: 5 leaders, 6 bulan, Rp 600.000",
+      "input": {
+        "leaders": 5,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 60000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "months": 6,
+        "rateMinor": 60000000,
+        "priceMode": "per_leader",
+        "normalMinor": 1500000000,
+        "grossMinor": 1800000000,
+        "priceDiscountMinor": 0,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 1800000000,
+        "savingMinor": 0,
+        "savingPct": 0,
+        "perMonthMinor": 300000000,
+        "perLeaderPerDayMinor": 2000000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 23,
+          "policiesPerMonthTenths": 4
+        }
+      }
+    },
+    {
+      "case": "A bulk discount of 100% leaves nothing to pay",
+      "input": {
+        "leaders": 3,
+        "agents": 3,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": {
+          "type": "percent",
+          "percent": 100
+        }
+      },
+      "expected": {
+        "tierCode": "TIER_1_10",
+        "months": 6,
+        "rateMinor": 40000000,
+        "priceMode": "per_leader",
+        "normalMinor": 900000000,
+        "grossMinor": 720000000,
+        "priceDiscountMinor": 180000000,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 720000000,
+        "totalMinor": 0,
+        "savingMinor": 900000000,
+        "savingPct": 100,
+        "perMonthMinor": 0,
+        "perLeaderPerDayMinor": 0,
+        "perAgentPerDayMinor": 0,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 0,
+          "policiesPerMonthTenths": 0
+        }
+      }
+    },
+    {
+      "case": "The inversion: 20 leaders, 6 bulan, Rp 375.000",
+      "input": {
+        "leaders": 20,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 37500000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_11_20",
+        "months": 6,
+        "rateMinor": 37500000,
+        "priceMode": "per_leader",
+        "normalMinor": 5700000000,
+        "grossMinor": 4500000000,
+        "priceDiscountMinor": 1200000000,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 4500000000,
+        "savingMinor": 1200000000,
+        "savingPct": 21,
+        "perMonthMinor": 750000000,
+        "perLeaderPerDayMinor": 1250000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 56,
+          "policiesPerMonthTenths": 9
+        }
+      }
+    },
+    {
+      "case": "The inversion: 21 leaders, 6 bulan, Rp 350.000",
+      "input": {
+        "leaders": 21,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 35000000
+        },
+        "bulk": null
+      },
+      "expected": {
+        "tierCode": "TIER_21_50",
+        "months": 6,
+        "rateMinor": 35000000,
+        "priceMode": "per_leader",
+        "normalMinor": 5670000000,
+        "grossMinor": 4410000000,
+        "priceDiscountMinor": 1260000000,
+        "annualDiscountMinor": 0,
+        "bulkDiscountMinor": 0,
+        "totalMinor": 4410000000,
+        "savingMinor": 1260000000,
+        "savingPct": 22,
+        "perMonthMinor": 735000000,
+        "perLeaderPerDayMinor": 1170000,
+        "perAgentPerDayMinor": null,
+        "breakEven": {
+          "incomePerPolicyMinor": 800000000,
+          "policiesPerPeriodTenths": 55,
+          "policiesPerMonthTenths": 9
+        }
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "case": "No leaders",
+      "input": {
+        "leaders": 0,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": null
+      },
+      "field": "leaders"
+    },
+    {
+      "case": "A fraction of a leader",
+      "input": {
+        "leaders": 2.5,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": null
+      },
+      "field": "leaders"
+    },
+    {
+      "case": "Negative agents",
+      "input": {
+        "leaders": 2,
+        "agents": -1,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": null
+      },
+      "field": "agents"
+    },
+    {
+      "case": "A price in a fraction of a rupiah",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 4000050
+        },
+        "bulk": null
+      },
+      "field": "price.rateMinor"
+    },
+    {
+      "case": "A price above Rp 100.000.000",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "annual",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 10000000100
+        },
+        "bulk": null
+      },
+      "field": "price.rateMinor"
+    },
+    {
+      "case": "A negative total",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "total",
+          "totalMinor": -100
+        },
+        "bulk": null
+      },
+      "field": "price.totalMinor"
+    },
+    {
+      "case": "A bulk percent above 100",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": {
+          "type": "percent",
+          "percent": 101
+        }
+      },
+      "field": "bulk.percent"
+    },
+    {
+      "case": "A bulk percent with decimals",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": {
+          "type": "percent",
+          "percent": 2.5
+        }
+      },
+      "field": "bulk.percent"
+    },
+    {
+      "case": "A bulk amount above what is left after the annual discount",
+      "input": {
+        "leaders": 2,
+        "agents": null,
+        "plan": "six_months",
+        "price": {
+          "mode": "per_leader",
+          "rateMinor": 40000000
+        },
+        "bulk": {
+          "type": "amount",
+          "amountMinor": 480000100
+        }
+      },
+      "field": "bulk.amountMinor"
+    }
+  ]
+}

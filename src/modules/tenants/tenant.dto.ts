@@ -258,10 +258,15 @@ export class CreateKpmDto {
   @IsString()
   companyId!: string;
 
-  @ApiProperty({ example: '0417', description: 'Unique within the company. Prefixes agent codes.' })
+  @ApiPropertyOptional({
+    example: '0417',
+    description: 'Unique within the company. Prefixes agent codes. **Absent: made automatically** (ADR-0277 §3) — '
+      + 'four digits, one more than the company\'s highest all-digit code, the first free one.',
+  })
+  @IsOptional()
   @IsString()
   @Matches(/^[A-Za-z0-9-]{2,16}$/)
-  code!: string;
+  code?: string;
 
   @ApiProperty({ example: 'BSD City Branch' })
   @IsString()
@@ -477,10 +482,15 @@ export class UpdateSubscriptionDto {
  * exactly that reason.
  */
 export class ApproveKpmRequestDto {
-  @ApiProperty({ example: '0629', description: 'Unique within the company.' })
+  @ApiPropertyOptional({
+    example: '0629',
+    description: 'Unique within the company. **Absent: made automatically** (ADR-0277) — the company\'s '
+      + 'next free four-digit code (`TenantService.autoCode`), so *Setujui* on *Persetujuan* is one press.',
+  })
+  @IsOptional()
   @IsString()
   @Matches(/^\d{4}$/, { message: field(SAY.kpmCodeShape) })
-  code!: string;
+  code?: string;
 
   @ApiPropertyOptional({
     example: '65b1f0c2a4d3e5f6a7b8c9d0',
@@ -627,6 +637,13 @@ export class RosterImportDto extends RosterRowsDto {
   @IsOptional()
   @IsBoolean()
   invite?: boolean;
+
+  /** P19.20-T5 AC-3 (ADR-0273 §6): the file the rows came from, for *Riwayat unggah*. */
+  @ApiPropertyOptional({ type: String, maxLength: 255, example: 'anggota_nov_2026.xlsx' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  fileName?: string;
 }
 
 /**

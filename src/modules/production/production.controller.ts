@@ -52,20 +52,35 @@ class CommitUploadDto {
   revision!: string;
 
   /**
-   * The corrections by hand to replace with the file's figure, as `membershipId:KODE` joined by commas —
-   * `66f…101:APE`, `66f…101:KOMISI_YTD`; a held code's as `held:<CODE>:KODE`. Absent, every correction stays (ADR-0053).
-   */
-  @IsOptional()
-  @IsString()
-  replace?: string;
-
-  /**
    * D8 (P19.5-T2): the office day an upload into the current month stands at, `YYYY-MM-DD` — today when absent. Ignored
    * for a month that has ended, whose upload is final.
    */
   @IsOptional()
   @IsString()
   asOf?: string;
+}
+
+/**
+ * **Back to the file's number** (P19.21-T1 AC-4): one corrected figure, by member and `{ kode, ytd }`, and the month's
+ * revision the reader saw.
+ */
+class RestoreCellDto {
+  @IsString()
+  month!: string;
+
+  @IsString()
+  membershipId!: string;
+
+  @IsString()
+  @Matches(/^[A-Z][A-Z0-9_]{0,39}$/)
+  kode!: string;
+
+  @IsBoolean()
+  ytd!: boolean;
+
+  @IsInt()
+  @Min(0)
+  revision!: number;
 }
 
 class RevertDto {
@@ -183,8 +198,9 @@ export class ProductionController {
       + 'or Windows-1252 when it is not valid UTF-8, with a comma, semicolon or tab delimiter. Either way the header is '
       + 'matched column by column against the KPM’s template — `[KODE]`, then the ID label, the EN label and the aliases '
       + '(ADR-0214 §5) — and `notes` say what the file lacks or carries that is not stored. **Writes nothing.** Answers '
-      + 'every data row against the roster and what is stored: `refused` with its reason, `held` for a code no member '
-      + 'holds under the template’s `unknownAgent: flag`, else `ready`, its cells — one per `columns` entry — each `new`, '
+      + 'every data row against the roster and what is stored: `refused` with its reason (a problem the commit refuses the '
+      + 'file for — ADR-0274 §2), `held` for every code no member holds (*Belum jadi anggota*; the template’s '
+      + '`unknownAgent` is no longer read), else `ready`, its cells — one per `columns` entry — each `new`, '
       + '`changed`, `unchanged`, `not_provided` or `refused`. A blank cell is not provided and would change nothing '
       + '(ADR-0051). `UPLOAD_TEMPLATE_MISMATCH` (422) for a file with no Agent Code column, no column read, or two '
       + 'headers on one kode; `UPLOAD_MALFORMED_CSV` (422); `ASSET_TOO_LARGE` (413) above 1 MiB.',
@@ -209,22 +225,25 @@ export class ProductionController {
       properties: {
         month: { type: 'string', example: '2026-09' },
         revision: { type: 'string', example: '4', description: 'The `revision` the preview answered with.' },
-        replace: { type: 'string', example: '66f000000000000000000101:APE', description: 'Corrections by hand to replace, `membershipId:KODE` (`KODE_YTD` for an uploaded year to date; `held:<CODE>:KODE` for a held code), comma-separated. Absent: every correction stays (ADR-0053).' },
         asOf: { type: 'string', example: '2026-11-03', description: 'D8: the office day an upload into the current month stands at; today when absent. Ignored for a month that has ended. `VALIDATION_FAILED` (400) outside the month or after today.' },
         file: { type: 'string', format: 'binary', description: 'The same file that was previewed.' },
       },
     },
   })
   @ApiOperation({
-    summary: 'Confirm import: write what the preview showed',
+    summary: 'Simpan semua: save the whole file',
     description:
       'Reads the file again against what is stored now, and writes each `new` and `changed` figure as '
-      + '`imported`, with this batch as its source. A blank is not written (ADR-0051). The batch and its '
-      + 'rows — every figure’s previous value — are written before any figure changes, and a failure '
-      + 'part-way puts back what was written. `VERSION_CONFLICT` (409) when the month has moved since '
-      + 'the preview; `UPLOAD_BATCH_ALREADY_COMMITTED` (409) for the same file against the same '
-      + 'revision; `UPLOAD_MONTH_LOCKED` (409); `VALIDATION_FAILED` (400) when the file would change '
-      + 'nothing; the preview’s own refusals for the file itself.',
+      + '`imported`, with this batch as its source. A blank is not written (ADR-0051). **Nothing in the file is '
+      + 'skipped** (ADR-0274 §2): every row with an agent code is saved — a member’s to the member, any '
+      + 'other code as *Belum jadi anggota* — and **the file replaces earlier corrections by hand** (§1). A file with a '
+      + 'problem — a row with no code, more cells than the header, a code twice, a cell refused — is `VALIDATION_FAILED` '
+      + '(400) whole, `details.problems` naming each (`line`, `agentCode`, `code`, `message`, `kode`, `ytd`; at most 50, '
+      + '`details.problemCount` all of them), and nothing is written. The batch and its rows — every figure’s previous '
+      + 'value — are written before any figure changes, and a failure part-way puts back what was written. '
+      + '`VERSION_CONFLICT` (409) when the month has moved since the preview; `UPLOAD_BATCH_ALREADY_COMMITTED` (409) for '
+      + 'the same file against the same revision; `UPLOAD_MONTH_LOCKED` (409); `VALIDATION_FAILED` (400) when the file '
+      + 'would change nothing; the preview’s own refusals for the file itself.',
   })
   @ApiResponse({ status: 201, type: ImportResultDto })
   async commit(
@@ -232,7 +251,7 @@ export class ProductionController {
     @Body() body: CommitUploadDto,
     @UploadedFile() file?: FileUpload,
   ) {
-    return this.imports.commit(ctx, body.month, body.revision, file, body.replace, body.asOf);
+    return this.imports.commit(ctx, body.month, body.revision, file, body.asOf);
   }
 
   @Post('revert')
@@ -307,15 +326,33 @@ export class ProductionController {
     return this.corrections.correct(ctx, body);
   }
 
+  @Post('cell/restore')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('data_upload:correct_cell')
+  @ApiOperation({
+    summary: 'Put a corrected figure back to the file’s number',
+    description:
+      '*Kembalikan ke angka dari file*. The figure the month’s standing uploads wrote into the cell '
+      + '(`correction.fileValue` on the month read) goes back, as `imported` from that upload, with an audit entry '
+      + '(`upload.cell_restored`) carrying the correction it undoes. `VALIDATION_FAILED` (400) for a figure nobody '
+      + 'corrected, one no standing upload wrote, or a kode not in the template; `UPLOAD_MONTH_LOCKED` / '
+      + '`VERSION_CONFLICT` (409); `NOT_FOUND` (404) for somebody who is not an active member of the office.',
+  })
+  @ApiResponse({ status: 200, type: CorrectionResultDto })
+  async restore(@Ctx() ctx: RequestContext, @Body() body: RestoreCellDto) {
+    return this.corrections.restore(ctx, body);
+  }
+
   @Get(':month')
   @RequirePermission('data_upload:read')
   @ApiOperation({
     summary: 'The office’s production for a month',
     description:
-      'Every active member, with each column of the KPM’s template (ADR-0214 §14): this month’s figure by '
+      'Every active member but a test account, with their class, rung and photo, and each column of the '
+      + 'KPM’s template (ADR-0214 §14): this month’s figure by '
       + 'kode, and its year to date — summed from the months for a `ytd: sum` column, never stored. `config` names the '
       + 'template, its version, its columns (each with the months its year to date lacks), the history’s first month and '
-      + '`completePct`; `months` is the grid from the history’s first month; `unregistered` lists the *Belum terdaftar* '
+      + '`completePct`; `months` is the grid from January 2024 (ADR-0274 §3); `unregistered` lists the *Belum jadi anggota* '
       + 'rows. **`null` is not zero**: a cell nothing has written says the carrier has not reported this person.',
   })
   @ApiParam({ name: 'month', example: '2026-09', description: '`YYYY-MM`, the office’s calendar month.' })

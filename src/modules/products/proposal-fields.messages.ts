@@ -140,5 +140,50 @@ export const PROPOSAL_FIELDS_REFUSALS = refusals('modules/products/proposal-fiel
       en: `${field}: "${name}" is not a plan of this product.`,
       id: `${field}: "${name}" bukan plan produk ini.`,
     }),
+    // ---- P19.14-T2 (ADR-0255 §2–§5): the catalogue's calculation fields ----
+    ageShape: ({ field, max }: { field: string; max: number }) => ({
+      en: `${field} is an age at the next birthday, a whole number from 1 to ${max}, or null.`,
+      id: `${field} berupa usia ulang tahun berikutnya, bilangan bulat 1 sampai ${max}, atau null.`,
+    }),
+    entryAgeOrder: ({ field }: { field: string }) => ({
+      en: `${field}: the youngest entry age is no older than the oldest.`,
+      id: `${field}: usia masuk termuda tidak boleh lebih tua dari yang tertua.`,
+    }),
+    payTermKeyTwice: ({ field, key }: { field: string; key: string }) => ({
+      en: `${field}: "${key}" is already the key of another pay term of this product.`,
+      id: `${field}: "${key}" sudah menjadi kunci masa bayar lain di produk ini.`,
+    }),
+    payTermShape: ({ field }: { field: string }) => ({
+      en: `${field}: a pay term is a number of years, up to an age, or single — one of the three at most.`,
+      id: `${field}: masa bayar berupa jumlah tahun, sampai usia tertentu, atau sekali bayar — paling banyak salah satu.`,
+    }),
+    frequencyTwice: ({ field, frequency }: { field: string; frequency: string }) => ({
+      en: `${field}: "${frequency}" is there twice.`,
+      id: `${field}: "${frequency}" ada dua kali.`,
+    }),
+    limitOrder: ({ field }: { field: string }) => ({
+      en: `${field}: the minimum is no larger than the maximum.`,
+      id: `${field}: batas minimum tidak boleh lebih besar dari batas maksimum.`,
+    }),
+    positiveAmount: ({ field }: { field: string }) => ({
+      en: `${field} is a whole sum in minor units above zero, or null.`,
+      id: `${field} berupa jumlah bulat dalam satuan terkecil di atas nol, atau null.`,
+    }),
+    derivedNeedsRule: ({ field }: { field: string }) => ({
+      en: `${field}: a derived field is worked out by the product's planRule, which names it. One per product.`,
+      id: `${field}: kolom derived dihitung dari planRule produk, yang menyebut kolom ini. Satu per produk.`,
+    }),
+    ruleField: ({ field }: { field: string }) => ({
+      en: `${field} names this product's derived field.`,
+      id: `${field} harus menyebut kolom derived produk ini.`,
+    }),
+    ruleWhen: ({ field }: { field: string }) => ({
+      en: `${field}: each condition names a chips field of this product and one of its options.`,
+      id: `${field}: setiap syarat menyebut kolom chips produk ini dan salah satu pilihannya.`,
+    }),
+    ruleValue: ({ field }: { field: string }) => ({
+      en: `${field} is one of the derived field's options.`,
+      id: `${field} harus salah satu pilihan kolom derived.`,
+    }),
   },
 });

@@ -4,6 +4,7 @@ import {
   ASSET_LIMITS, AVATAR, DEFAULT_UPLOAD_MIME_TYPES, DOCUMENT_MIME_TYPES, HTML_MIME_TYPE, RECRUITMENT,
   TRAINING_FILE_MIME_TYPES,
 } from '@/domain/constants';
+import { OFFICE_DOCUMENT_MIME_TYPES, PITCH_MATERIAL_MIME_TYPES } from '@/domain/constants/assets';
 
 const SRC = join(__dirname, '..', '..');
 
@@ -29,24 +30,56 @@ describe('P19.6-T2 AC-1 HTML is accepted by four routes and no other (ADR-0217 �
     expect(ASSET_LIMITS.ALLOWED_MIME_TYPES).toContain(HTML_MIME_TYPE);
   });
 
-  it('P19.6-T2 AC-1 a training file takes today’s list and HTML', () => {
+  it('P19.6-T2 AC-1, P19.25-T4 AC-2 a training file takes today’s list, HTML, and the pitch’s office and video formats (ADR-0282 §3)', () => {
     expect([...TRAINING_FILE_MIME_TYPES]).toEqual([
       'image/jpeg', 'image/png', 'image/webp',
       'application/pdf',
       'video/mp4',
       'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'text/html',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'video/webm',
+      'video/quicktime',
     ]);
+    // "Any format" (the brief): every pitch format is a training format, and every one is in the vocabulary.
+    for (const type of PITCH_MATERIAL_MIME_TYPES) expect(TRAINING_FILE_MIME_TYPES).toContain(type);
+    for (const type of TRAINING_FILE_MIME_TYPES) expect(ASSET_LIMITS.ALLOWED_MIME_TYPES).toContain(type);
   });
 
-  it('P19.6-T2 AC-1 a pitch or product document is a PDF or an HTML page', () => {
+  it('P19.6-T2 AC-1 a product document is a PDF or an HTML page', () => {
     expect([...DOCUMENT_MIME_TYPES]).toEqual(['application/pdf', 'text/html']);
-    expect(RECRUITMENT.PITCH_MIME_TYPES).toBe(DOCUMENT_MIME_TYPES);
   });
 
-  it('P19.6-T2 AC-1 a route that names no list takes the vocabulary without HTML', () => {
+  it('P19.21-T3 AC-6 a pitch material is any format the owner named: PDF, a page, PowerPoint, Word, an image, a video (ADR-0274)', () => {
+    expect(RECRUITMENT.PITCH_MIME_TYPES).toBe(PITCH_MATERIAL_MIME_TYPES);
+    expect([...PITCH_MATERIAL_MIME_TYPES]).toEqual([
+      'application/pdf',
+      'text/html',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'image/jpeg', 'image/png', 'image/webp',
+      'video/mp4', 'video/webm', 'video/quicktime',
+    ]);
+    // Every one is in the vocabulary, so `content-sniff.ts` holds a signature for it.
+    for (const type of PITCH_MATERIAL_MIME_TYPES) expect(ASSET_LIMITS.ALLOWED_MIME_TYPES).toContain(type);
+  });
+
+  it('P19.21-T3 AC-6, P19.25-T4 AC-2 the office formats are named by the pitch and training lists alone (ADR-0274, ADR-0282 §3)', () => {
+    for (const type of [...OFFICE_DOCUMENT_MIME_TYPES, 'video/webm', 'video/quicktime']) {
+      expect([type, DEFAULT_UPLOAD_MIME_TYPES.includes(type)]).toEqual([type, false]);
+      expect([type, (DOCUMENT_MIME_TYPES as readonly string[]).includes(type)]).toEqual([type, false]);
+    }
+  });
+
+  it('P19.6-T2 AC-1 a route that names no list takes the vocabulary it always took, without HTML', () => {
     expect(DEFAULT_UPLOAD_MIME_TYPES).not.toContain(HTML_MIME_TYPE);
-    expect([...DEFAULT_UPLOAD_MIME_TYPES, HTML_MIME_TYPE].sort()).toEqual([...ASSET_LIMITS.ALLOWED_MIME_TYPES].sort());
+    // Every default type, and HTML, is a training type; since P19.25-T4 (ADR-0282 §3) training takes the office formats too.
+    for (const type of [...DEFAULT_UPLOAD_MIME_TYPES, HTML_MIME_TYPE]) expect(TRAINING_FILE_MIME_TYPES).toContain(type);
   });
 
   it('P19.6-T2 AC-1 the profile photo’s list has no HTML', () => {

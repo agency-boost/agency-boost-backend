@@ -1,6 +1,9 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
+import {
+  canManageMember, canOpenMember, isOfficeSteward, officeStewardKind, stewardsWholeOffice,
+} from '@/common/auth/office-steward';
 import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { can } from '@/modules/rbac/permissions';
 import { NotFoundException } from '@/common/errors/domain.exception';
@@ -19,14 +22,33 @@ import {
   canChangeRoleOf, canPromoteToAbOf, DEFAULT_LADDER, readLadder, roleChoices, roleReaderOf, type LadderRung,
 } from './role-rules';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
-import { isLeaderClass, type Gender, type WorkStatus } from '@/domain/constants';
+import { isLeaderClass, LEADER_CLASSES, type Gender, type WorkStatus } from '@/domain/constants';
+import { AvatarLinks } from '@/modules/users/avatar.service';
+import { OfficeGroups } from '@/modules/reporting/office-groups';
+import { NOT_A_TEST_ACCOUNT } from './counted-members';
 
 export interface DirectoryQuery {
   q?: string;
   role?: HierarchyRole;
   status?: MembershipStatus;
+  /** *★ Core leader* (P19.20-T1 AC-2): only the core leaders now — tagged, on a leader rung (ADR-0159 §1). */
+  coreLeader?: boolean;
   cursor?: string;
   limit?: number;
+}
+
+/**
+ * **Where a row stands among the informal groups** (P19.20-T1 AC-2; ADR-0270 §1, ADR-0273 §2): an AB's own group, an AAB's
+ * or an agent's their AB's (*ikut AB …*), and whether an AB is one of its Group Leaders. Only for a steward of the KPM —
+ * the people who change groups — and only on an active row.
+ */
+export interface DirectoryGroupPlace {
+  /** The live group, or `null` — *Tanpa group*. */
+  group: { groupId: string; name: string } | null;
+  /** The AB whose AB group they are in — themselves for an AB — or `null` under no AB. */
+  ab: { membershipId: string; name: string } | null;
+  /** An AB who is one of their group's Group Leaders (ADR-0270 §2). */
+  isGroupLeader: boolean;
 }
 
 export interface DirectoryMember {
@@ -48,10 +70,22 @@ export interface DirectoryMember {
   isLeader: boolean;
   isKpmOwner: boolean;
   isKpmAdmin: boolean;
+  /**
+   * **Their profile photo, signed** (P19.20; `DESIGN-RULES.md`, *Names*: *photo next to the name wherever a person is
+   * listed*), or `null` — the row draws their initials. `users.avatarUrl`, linked by `AvatarLinks`.
+   */
+  photoUrl: string | null;
+  /** Their informal group, for a steward reading an active row (P19.20-T1 AC-2); absent otherwise. */
+  groupPlace?: DirectoryGroupPlace;
   /** A Core Leader now: tagged, on a leader rung (ADR-0159 §1). */
   isCoreLeader: boolean;
   /** This viewer may tag or untag them from the row (P18.5-T5 AC-3) — an offer, never the gate. */
   canTagCoreLeader: boolean;
+  /**
+   * **This viewer may open them** (ADR-0268 §1): always, but for a core leader, who sees the whole KPM and opens only
+   * themselves and their downline — `read` answers the rest `404`, and the row is drawn muted with no chevron.
+   */
+  openable: boolean;
   joinedAt: string | null;
   /**
    * The person's **join date** in this office, an office date (ADR-0169 §1): what the person page prints as *Join
@@ -60,6 +94,11 @@ export interface DirectoryMember {
   joinDate: string | null;
   /** Set only on a removed row. The Removed tab answers "when", which is the first thing asked. */
   removedAt: string | null;
+  /**
+   * **When the membership was made** — the day they registered here (P19.20-T1 AC-4: *Sudah daftar, belum masuk unit*,
+   * *"daftar 4 hari lalu"*). The system's stamp, `createdAt`; `null` on a row written without one.
+   */
+  registeredAt: string | null;
   /**
    * **Whether they have been invited, and have signed in** (P19.12-T5 AC-4; ADR-0248 §4, `invitationStateOf`): `signed_in`
    * once the account has signed in, else `invited` when an invitation went (`invitedAt`), else `not_invited`. An
@@ -103,6 +142,13 @@ export interface DirectoryMember {
    * directly. `PUT /members/:id/leader` refuses regardless.
    */
   canChangeLeader: boolean;
+  /**
+   * **This viewer may change their details in the member sheet** (P19.20-T2 AC-2; ADR-0273 §3): they hold
+   * `member:complete_personal` and may manage them — the Owner, an Admin and the Super Admin inside the KPM anybody who
+   * has not left, a core leader somebody strictly below them (`canManageMember`). An offer: `PATCH …/personal` refuses
+   * regardless.
+   */
+  canEditDetails: boolean;
 
   /**
    * **What the person records** (ADR-0158 §6, P18.5-T4 AC-6): on **one member's read** —
@@ -210,7 +256,17 @@ export class DirectoryService {
      * The company's ladder, for `roleChoices` (P19.12-T4, ADR-0247 §1). Optional for the specs that build this service
      * by hand; without it the default ladder is read.
      */
-    @Optional() private readonly orgLevels: OrgLevelService | null = null,
+    @Optional() @Inject(OrgLevelService) private readonly orgLevels: OrgLevelService | null = null,
+    /*
+     * **Each photo as a signed link** (P19.20; `users.avatarUrl` holds a storage key and the bucket is private), as the
+     * Org tree signs them. Optional: without it every row draws its initials, never a key.
+     */
+    @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
+    /*
+     * **The KPM's informal groups, read once for a page** (P19.20-T1 AC-2; ADR-0270 §1): each row's group chip and *Group
+     * Leader*. Optional for the specs that build this service by hand; without it no row carries `groupPlace`.
+     */
+    @Optional() @Inject(OfficeGroups) private readonly officeGroups: OfficeGroups | null = null,
   ) {}
 
   /** The office's ladder, junior first, with each rung's class (`role-rules.ts`). */
@@ -242,7 +298,8 @@ export class DirectoryService {
     // What this requester may see (`reader-visibility.ts`): a tenant admin the office, below that the scope
     // `DIRECTORY_READ` grants. Spread, because no key of a narrowing is one this page adds; a filter that names an id
     // goes through `withinReach` instead.
-    const filter: FilterQuery<MembershipDocument> = { ...visibleTo(ctx, DIRECTORY_READ) };
+    // **Never a test account** (P19.20-T1 AC-2; ADR-0267 §1): not listed and not counted on any tab.
+    const filter: FilterQuery<MembershipDocument> = { ...visibleTo(ctx, DIRECTORY_READ), ...NOT_A_TEST_ACCOUNT };
     // **Active only.** The roster's question is who is here now, and somebody still
     // waiting for a leader is not here yet — they have registered, nothing more.
     //
@@ -253,6 +310,11 @@ export class DirectoryService {
     // Removed (3)` implies, and each count now counts what its tab shows.
     filter.status = query.status ?? 'active';
     if (query.role) filter.role = query.role;
+    // *★ Core leader* (P19.20-T1 AC-2): the effective flag — tagged, on a leader rung (`isEffectiveCoreLeader`).
+    if (query.coreLeader) {
+      filter.isCoreLeader = true;
+      if (!query.role) filter.role = { $in: [...LEADER_CLASSES] };
+    }
 
     // Cursor rather than offset: an offset skips a row whenever someone joins
     // mid-scroll. The key is the numeric sequence, not the code — the code sorts wrong
@@ -267,7 +329,7 @@ export class DirectoryService {
     });
 
     const page = rows.slice(0, limit);
-    const visible = visibleTo(ctx, DIRECTORY_READ);
+    const visible = { ...visibleTo(ctx, DIRECTORY_READ), ...NOT_A_TEST_ACCOUNT };
     const [directory, pending, removed] = await Promise.all([
       this.members.count(ctx, { ...visible, status: 'active' }),
       this.members.count(ctx, { ...visible, status: 'pending' }),
@@ -299,7 +361,8 @@ export class DirectoryService {
     const limit = Math.min(Math.max(query.limit ?? MEMBER_SEARCH_DEFAULT, 1), MEMBER_SEARCH_MAX);
     // Under `$and`, never spread: the narrowing for an Agent is `{ _id: self }`, which would collide with the `$ne`.
     const filter = await this.byName(
-      { $and: [visibleTo(ctx, DIRECTORY_READ), { _id: { $ne: ctx.membershipId ?? null }, status: 'active' }] },
+      // Never a test account (ADR-0267 §1): a picker is a list.
+      { $and: [visibleTo(ctx, DIRECTORY_READ), { _id: { $ne: ctx.membershipId ?? null }, status: 'active', ...NOT_A_TEST_ACCOUNT }] },
       query.q,
       PICKER_SEARCH,
     );
@@ -388,11 +451,52 @@ export class DirectoryService {
 
     const owner = await this.ownerUserId(ctx);
     const ladder = await this.ladder(ctx);
-    const returns = await this.returnsOf(ctx, rows);
-    return rows.map((m) => ({
-      ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner, ladder),
-      rejoinedOn: rejoinedOn(rejoinFacts(m), returns.get(m.userId) ?? []),
-    }));
+    const [returns, photos, places] = await Promise.all([
+      this.returnsOf(ctx, rows),
+      this.avatarLinks ? this.avatarLinks.linksFor(users.map((u) => u.avatarUrl)) : Promise.resolve(new Map<string, string>()),
+      this.groupPlaces(ctx, rows),
+    ]);
+    return rows.map((m) => {
+      const place = places.get(String(m._id));
+      return {
+        ...this.present(m, byUser.get(m.userId), leaderName.get(m.leaderId ?? '') ?? null, ctx, owner, ladder),
+        photoUrl: photos.get(byUser.get(m.userId)?.avatarUrl ?? '') ?? null,
+        ...(place ? { groupPlace: place } : {}),
+        rejoinedOn: rejoinedOn(rejoinFacts(m), returns.get(m.userId) ?? []),
+      };
+    });
+  }
+
+  /**
+   * **Each active row's informal group** (P19.20-T1 AC-2; ADR-0270 §1): the partition's two reads of the KPM, and one of
+   * the accounts of the ABs the rows follow, for *ikut AB …*. Only for a steward — the people who change groups; a
+   * leader's read of their unit carries none. Test accounts are in no group (`OfficeGroups`).
+   */
+  private async groupPlaces(ctx: RequestContext, rows: MembershipDocument[]): Promise<Map<string, DirectoryGroupPlace>> {
+    const out = new Map<string, DirectoryGroupPlace>();
+    const active = rows.filter((m) => m.status === 'active');
+    if (!this.officeGroups || active.length === 0 || !isOfficeSteward(ctx)) return out;
+    const partition = await this.officeGroups.partition(ctx);
+    const { placement } = partition;
+    const groupName = new Map(partition.groups.map((g) => [g.groupId, g.name]));
+    const abIds = [...new Set(active.map((m) => placement.abOf.get(String(m._id))).filter((id): id is string => !!id))];
+    const abUsers = abIds.map((id) => partition.members.get(id)?.userId).filter((id): id is string => !!id);
+    const named = abUsers.length
+      ? await this.users.find({ _id: { $in: [...new Set(abUsers)] } }).select('fullName').exec()
+      : [];
+    const nameOfUser = new Map(named.map((u) => [String(u._id), u.fullName]));
+    for (const m of active) {
+      const id = String(m._id);
+      const ab = placement.abOf.get(id) ?? null;
+      const groupId = ab ? placement.groupOfAb.get(ab) ?? null : null;
+      const abUser = ab ? partition.members.get(ab)?.userId ?? null : null;
+      out.set(id, {
+        group: groupId ? { groupId, name: groupName.get(groupId) ?? '' } : null,
+        ab: ab ? { membershipId: ab, name: (abUser && nameOfUser.get(abUser)) || render(ORG_MESSAGES.unknownName, ctx.reader) } : null,
+        isGroupLeader: ab === id && groupId !== null && (placement.leadersOf.get(groupId) ?? []).includes(id),
+      });
+    }
+    return out;
   }
 
   /**
@@ -418,10 +522,12 @@ export class DirectoryService {
     ctx: RequestContext,
     ownerUserId: string | null,
     ladder: readonly LadderRung[] = DEFAULT_LADDER,
-  ): Omit<DirectoryMember, 'rejoinedOn'> {
+  ): Omit<DirectoryMember, 'rejoinedOn' | 'photoUrl' | 'groupPlace'> {
     // A person whose account is gone is still named, in the reader's language (P18.10-T5 AC-4).
     const fullName = user?.fullName ?? render(ORG_MESSAGES.unknownName, ctx.reader);
-    const tenantAdmin = Boolean(ctx?.membership?.isKpmOwner || ctx?.membership?.isKpmAdmin);
+    // The Super Admin inside the KPM is its Owner (ADR-0268 §3); a core leader is not the office here but where they open.
+    const tenantAdmin = ctx !== undefined && stewardsWholeOffice(ctx);
+    const inReach = { membershipId: String(m._id), ancestorIds: m.ancestorIds };
     const isDirectLeader = Boolean(ctx?.membershipId) && m.leaderId === ctx?.membershipId;
     const removed = m.status === 'removed';
     // **This used to be hardcoded `false`**, so the roster's `Owner` tag — gated on it —
@@ -453,9 +559,11 @@ export class DirectoryService {
       // The row's control (P18.5-T5 AC-3): the viewer may tag, and the member leads by rung and has not left.
       // `GroupService.setCoreLeader` refuses regardless.
       canTagCoreLeader: !removed && isLeaderClass(m.role) && ctx !== undefined && can(ctx, 'member:tag_core_leader'),
+      openable: ctx === undefined || officeStewardKind(ctx) !== 'core_leader' || canOpenMember(ctx, inReach),
       joinedAt: m.joinedAt ? m.joinedAt.toISOString() : null,
       joinDate: m.joinDate ?? null,
       removedAt: m.removedAt ? m.removedAt.toISOString() : null,
+      registeredAt: (m as unknown as { createdAt?: Date }).createdAt?.toISOString() ?? null,
       // ADR-0248 §4: a first sign-in decides it; before one, whether an invitation went.
       invitation: invitationStateOf(user?.lastLoginAt, m.invitedAt),
       // The rung and the leader by the rules the writes enforce (`role-rules.ts`, ADR-0247), never a copy of them;
@@ -473,6 +581,7 @@ export class DirectoryService {
         String(m._id) !== ctx?.membershipId &&
         m.leaderId !== null &&
         (tenantAdmin || isDirectLeader),
+      canEditDetails: !removed && ctx !== undefined && can(ctx, 'member:complete_personal') && canManageMember(ctx, inReach),
     };
   }
 
@@ -490,7 +599,8 @@ export class DirectoryService {
     office: boolean,
     isDirectLeader: boolean,
   ): Pick<DirectoryMember, 'roleChoices' | 'canChangeRole' | 'canPromoteToAb' | 'canChangeLeader'> {
-    const roleChoicesOf = roleChoices(roleReaderOf(ctx), {
+    // ADR-0268 §1: a core leader decides as the office for somebody below them.
+    const roleChoicesOf = roleChoices(roleReaderOf(ctx, { membershipId: String(m._id), ancestorIds: m.ancestorIds }), {
       leaderId: m.leaderId, role: m.role, orgLevelCode: m.orgLevelCode, status: m.status, isOwner,
     }, ladder);
     return {
@@ -498,7 +608,7 @@ export class DirectoryService {
       canChangeRole: canChangeRoleOf(roleChoicesOf),
       canPromoteToAb: canPromoteToAbOf(roleChoicesOf, ladder),
       canChangeLeader: m.status === 'active' && !isOwner && String(m._id) !== ctx.membershipId
-        && (office || isDirectLeader) && can(ctx, 'member:reassign_leader'),
+        && (office || isDirectLeader || canManageBelow(ctx, m)) && can(ctx, 'member:reassign_leader'),
     };
   }
 
@@ -534,10 +644,24 @@ export class DirectoryService {
     if (!scoped) throw new NotFoundException('Membership');
     const [decorated] = await this.decorate(ctx, [scoped]);
 
-    // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here.
-    const office = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    // ADR-0158 §6: the Owner, the Admins and the person — never a leader, whose read of their unit stops here. *Since
+    // ADR-0268 §1, §3:* every steward — the Super Admin inside the KPM, and a core leader, whose reach `withinReach` has
+    // already narrowed to their downline.
+    const office = isOfficeSteward(ctx);
     if (!office && String(scoped._id) !== ctx.membershipId) return decorated;
     return { ...decorated, personal: await this.personalOf(ctx, scoped) };
+  }
+
+  /**
+   * **A member as the roster shows them**, never opened (ADR-0268 §1): the reader may see them — a core leader sees the
+   * whole KPM — and the answer is `list`'s row, `openable` saying whether they may go further, without the personal data
+   * `read` adds. What a core leader is answered after moving somebody out of their own downline. `404` beyond sight.
+   */
+  async readListed(ctx: RequestContext, membershipId: string): Promise<DirectoryMember> {
+    const seen = await this.members.findOne(ctx, { $and: [{ _id: membershipId }, visibleTo(ctx, DIRECTORY_READ)] });
+    if (!seen) throw new NotFoundException('Membership');
+    const [decorated] = await this.decorate(ctx, [seen]);
+    return decorated;
   }
 
   /**
@@ -572,4 +696,10 @@ function rejoinFacts(m: MembershipDocument): RejoinFacts {
     joinDate: m.joinDate ?? null,
     startedAt: m.joinedAt ?? made ?? new Date(0),
   };
+}
+
+/** **A core leader moves somebody below them as the office would** (ADR-0268 §1): `LeaderChangeService`'s rule, offered. */
+function canManageBelow(ctx: RequestContext, m: MembershipDocument): boolean {
+  return officeStewardKind(ctx) === 'core_leader'
+    && canManageMember(ctx, { membershipId: String(m._id), ancestorIds: m.ancestorIds });
 }

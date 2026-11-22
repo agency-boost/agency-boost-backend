@@ -9,6 +9,7 @@ import {
   type EventPhase,
 } from '@/domain/constants';
 import { AuditService } from '@/modules/audit/audit.service';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { EventDocument, EventTypeDocument } from './event.schema';
@@ -305,8 +306,9 @@ export class EventService {
     const inviteeMembershipIds = chosen.filter((id) => !kept.has(id));
     if (inviteeMembershipIds.length === 0) return;
 
+    // The picker lists no test account (ADR-0267 §1; ADR-0281 §1), so none is chosen: one sent is the 404 a stranger gets.
     const found = await this.memberships.find(ctx, {
-      _id: { $in: inviteeMembershipIds }, status: 'active',
+      _id: { $in: inviteeMembershipIds }, status: 'active', ...NOT_A_TEST_ACCOUNT,
     });
     if (found.length !== inviteeMembershipIds.length) {
       throw new NotFoundException('Membership');
@@ -318,7 +320,7 @@ export class EventService {
       // *P18.2-T5 (D-picker):* read from the active members' leaders — the picker's own `leads`, one definition —
       // rather than the `directCounts` cache, which a seeded or migrated row can hold stale.
       const leading = new Set((await this.memberships.find(
-        ctx, { status: 'active', leaderId: { $in: inviteeMembershipIds } }, { projection: { leaderId: 1 } },
+        ctx, { status: 'active', ...NOT_A_TEST_ACCOUNT, leaderId: { $in: inviteeMembershipIds } }, { projection: { leaderId: 1 } },
       )).map((m) => m.leaderId));
       const notLeading = found.filter((m) => !leading.has(String(m._id)));
       if (notLeading.length > 0) {

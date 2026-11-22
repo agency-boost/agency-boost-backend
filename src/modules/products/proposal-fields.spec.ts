@@ -4,8 +4,8 @@ import {
 } from '@/domain/constants';
 import { english, indonesian } from '../../../test/i18n';
 import {
-  checkProposalSettings, effectiveProposalWordsOf, insuredOf, readFaq, readOfficePlanHighlights, typeLabelOf,
-  type ProductFacts,
+  calcSettingsOf, checkProposalSettings, EMPTY_CALC_SETTINGS, effectiveProposalWordsOf, frequenciesOf, insuredOf,
+  isSyariahProduct, needTagOf, readFaq, readOfficePlanHighlights, typeLabelOf, type ProductFacts,
 } from './proposal-fields';
 import { PROPOSAL_FIELDS_REFUSALS } from './proposal-fields.messages';
 
@@ -37,7 +37,8 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
   it('P19.7-T1 AC-2 pins the bounds of §B.34', () => {
     // T1's bounds; T2's own (ITEMS_MAX and the rest) are pinned with the whole object by `domain/constants/proposal.spec.ts`.
     expect(PROPOSAL).toMatchObject({
-      FIELDS_MAX: 8, SUMMARY_FIELDS_MAX: 4, CHIP_OPTIONS_MAX: 8, QUICK_AMOUNTS_MAX: 4, PLAN_OPTIONS_MAX: 8,
+      // CHIP_OPTIONS_MAX raised from 8 by P19.14-T2 (ADR-0255 §9).
+      FIELDS_MAX: 8, SUMMARY_FIELDS_MAX: 4, CHIP_OPTIONS_MAX: 12, QUICK_AMOUNTS_MAX: 4, PLAN_OPTIONS_MAX: 8,
       PLAN_HIGHLIGHTS_MAX: 4, FAQ_MAX: 20, PDF_DETAIL_ROWS_MAX: 8, EXCLUSIONS_MAX: 3, FORMULA_MAX_LENGTH: 120,
       PAYMENT_YEARS_MAX: 99,
     });
@@ -46,7 +47,8 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
       FAQ_ANSWER: 1000, DETAIL_LABEL: 80, DETAIL_NOTE: 40, SOURCE_FILE: 120, SYARIAH_NAME: 80, TYPE_LABEL: 30,
     });
     expect(LEAD_AGE).toEqual({ MIN: 1, MAX: 100 });
-    expect(PROPOSAL_FIELD_TYPES).toEqual(['chips', 'money', 'fixed']);
+    // `derived` added by P19.14-T2 (ADR-0255 §3).
+    expect(PROPOSAL_FIELD_TYPES).toEqual(['chips', 'money', 'fixed', 'derived']);
     expect(PDF_DETAIL_BLOCKS).toEqual(['manfaat', 'jadwal', 'masa', 'pengecualian', 'nilai_tunai']);
     expect(PROPOSAL_RESERVED_KEYS).toEqual(['insured', 'premium']);
   });
@@ -103,7 +105,7 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
       ['two plan fields', { proposalFields: [chips('a', ['1'], { plan: true }), chips('b', ['1'], { plan: true })] }, 'proposalFields[1].plan'],
       ['two currency fields', { proposalFields: [chips('a', ['1'], { currency: true }), chips('b', ['1'], { currency: true })] }, 'proposalFields[0].options[0].currency'],
       ['chips with no option', { proposalFields: [{ key: 'a', label: 'A', type: 'chips', options: [], default: null }] }, 'proposalFields[0].options'],
-      ['chips with nine options', { proposalFields: [chips('a', Array.from({ length: 9 }, (_, i) => `o${i}`))] }, 'proposalFields[0].options'],
+      ['chips with thirteen options', { proposalFields: [chips('a', Array.from({ length: 13 }, (_, i) => `o${i}`))] }, 'proposalFields[0].options'],
       ['an option of 41 characters', { proposalFields: [chips('a', ['x'.repeat(41)])] }, 'proposalFields[0].options[0].label'],
       ['an option twice', { proposalFields: [chips('a', ['Gold', 'Gold'])] }, 'proposalFields[0].options'],
       ['a default that is no option', { proposalFields: [chips('a', ['Gold'], { default: 'Silver' })] }, 'proposalFields[0].default'],
@@ -298,6 +300,96 @@ describe('P19.7-T1 the catalogue’s proposal fields (proposal-fields.ts)', () =
       expect(words.source).toBe('kpm');
       expect(words.faq).toEqual([{ question: 'Q?', answer: 'Office.' }]);
       expect(words.plans.map((p) => [p.name, p.highlights[0].value])).toEqual([['Silver', '1 Jt'], ['Gold', 'VIP']]);
+    });
+  });
+
+  describe('P19.14-T2 AC-5 the catalogue’s calculation fields (ADR-0255 §2–§5)', () => {
+    const term = (key: string, over: Record<string, unknown> = {}) => ({ key, label: key, ...over });
+    const derived = { key: 'plan', label: 'Plan', type: 'derived', options: [{ label: 'Bronze A' }, { label: 'Gold' }], plan: true };
+    const rule = { field: 'plan', rules: [{ when: { wilayah: 'Indonesia' }, value: 'Bronze A' }, { when: { wilayah: 'Asia' }, value: 'Gold' }] };
+    const withDerived = [chips('wilayah', ['Indonesia', 'Asia']), derived];
+
+    it('P19.14-T2 AC-5 defaults every calculation field to what changes nothing: manual, no limits, no terms', () => {
+      expect(check({})).toMatchObject(EMPTY_CALC_SETTINGS);
+      expect(EMPTY_CALC_SETTINGS).toEqual({
+        calcType: 'manual', entryAge: null, payTerms: [], frequencies: [], smokerRated: false, planRule: null,
+        upStep: null, upMin: null, upMax: null, premiumMin: null, premiumMax: null, rateTableId: null, needTag: null,
+      });
+      expect(calcSettingsOf({ calcType: 'goal', smokerRated: null })).toMatchObject({ calcType: 'goal', smokerRated: false });
+    });
+
+    it('P19.14-T2 AC-5 takes a whole set, normalised: pay terms with their limits, frequencies in order, a plan rule', () => {
+      const out = check({
+        proposalFields: withDerived, planRule: rule, calcType: 'up_premium', entryAge: { min: 21, max: 70 }, smokerRated: true,
+        payTerms: [term('y5', { years: 5, maxEntryAge: 70 }), term('y10', { years: 10, maxEntryAge: 60, default: true }), term('to60', { toAge: 60 }), term('once', { single: true })],
+        frequencies: ['annual', 'monthly'], upStep: 1_000_000_00, upMin: 100_000_000_00, upMax: null, premiumMin: 0, premiumMax: 5,
+        rateTableId: null, needTag: 'CRITICAL_INCOME',
+      });
+      expect(out).toMatchObject({ calcType: 'up_premium', entryAge: { min: 21, max: 70 }, smokerRated: true, frequencies: ['monthly', 'annual'], needTag: 'CRITICAL_INCOME', upStep: 1_000_000_00 });
+      expect(out.payTerms[1]).toEqual({ key: 'y10', label: 'y10', years: 10, toAge: null, single: false, maxEntryAge: 60, default: true });
+      expect(out.payTerms[3]).toMatchObject({ single: true, years: null, toAge: null, default: false });
+      expect(out.planRule).toEqual(rule);
+    });
+
+    it.each([
+      ['a calcType it does not know', { calcType: 'auto' }, 'calcType'],
+      ['an entry age of 0', { entryAge: { min: 0, max: 60 } }, 'entryAge.min'],
+      ['an entry age of 101', { entryAge: { min: 1, max: 101 } }, 'entryAge.max'],
+      ['an entry age without its max', { entryAge: { min: 1 } }, 'entryAge.max'],
+      ['an entry age upside down', { entryAge: { min: 60, max: 21 } }, 'entryAge'],
+      ['a pay term with a key of the wrong shape', { payTerms: [term('Y 5')] }, 'payTerms[0].key'],
+      ['two pay terms of one key', { payTerms: [term('y5'), term('y5')] }, 'payTerms[1].key'],
+      ['a pay term of years and an age', { payTerms: [term('y5', { years: 5, toAge: 60 })] }, 'payTerms[0]'],
+      ['a single pay term with years', { payTerms: [term('y5', { years: 5, single: true })] }, 'payTerms[0]'],
+      ['a pay term of 0 years', { payTerms: [term('y0', { years: 0 })] }, 'payTerms[0].years'],
+      ['a pay term’s max entry age of 101', { payTerms: [term('y5', { maxEntryAge: 101 })] }, 'payTerms[0].maxEntryAge'],
+      ['two default pay terms', { payTerms: [term('a', { default: true }), term('b', { default: true })] }, 'payTerms[1].default'],
+      ['nine pay terms', { payTerms: Array.from({ length: 9 }, (_, i) => term(`t${i}`)) }, 'payTerms'],
+      ['a pay term with an unknown key', { payTerms: [term('a', { months: 3 })] }, 'payTerms[0].months'],
+      ['a frequency it does not know', { frequencies: ['weekly'] }, 'frequencies[0]'],
+      ['a frequency twice', { frequencies: ['monthly', 'monthly'] }, 'frequencies[1]'],
+      ['smokerRated that is not a boolean', { smokerRated: 'ya' }, 'smokerRated'],
+      ['an upStep of 0', { upStep: 0 }, 'upStep'],
+      ['a fractional upMin', { upMin: 1.5 }, 'upMin'],
+      ['upMin above upMax', { upMin: 10, upMax: 5 }, 'upMin'],
+      ['premiumMin above premiumMax', { premiumMin: 10, premiumMax: 5 }, 'premiumMin'],
+      ['a needTag it does not know', { needTag: 'OTHER' }, 'needTag'],
+      ['a derived field without a rule', { proposalFields: withDerived }, 'proposalFields[1].type'],
+      ['two derived fields', { proposalFields: [...withDerived, { ...derived, key: 'plan2', plan: false }], planRule: rule }, 'proposalFields[2].type'],
+      ['a rule without a derived field', { proposalFields: [chips('wilayah', ['Indonesia'])], planRule: rule }, 'planRule.field'],
+      ['a rule naming another field', { proposalFields: withDerived, planRule: { ...rule, field: 'wilayah' } }, 'planRule.field'],
+      ['a rule with no rules', { proposalFields: withDerived, planRule: { field: 'plan', rules: [] } }, 'planRule.rules'],
+      ['a condition on a field that is no chips', { proposalFields: withDerived, planRule: { field: 'plan', rules: [{ when: { kamar: '1' }, value: 'Gold' }] } }, 'planRule.rules[0].when.kamar'],
+      ['a condition on an option it does not have', { proposalFields: withDerived, planRule: { field: 'plan', rules: [{ when: { wilayah: 'Eropa' }, value: 'Gold' }] } }, 'planRule.rules[0].when.wilayah'],
+      ['a rule with no conditions', { proposalFields: withDerived, planRule: { field: 'plan', rules: [{ when: {}, value: 'Gold' }] } }, 'planRule.rules[0].when'],
+      ['a value the derived field lacks', { proposalFields: withDerived, planRule: { field: 'plan', rules: [{ when: { wilayah: 'Asia' }, value: 'Diamond' }] } }, 'planRule.rules[0].value'],
+      ['a derived field with a default', { proposalFields: [chips('wilayah', ['Indonesia']), { ...derived, default: 'Gold' }], planRule: rule }, 'proposalFields[1].default'],
+      ['a derived field with no options', { proposalFields: [chips('wilayah', ['Indonesia']), { ...derived, options: [] }] }, 'proposalFields[1].options'],
+    ])('P19.14-T2 AC-5 refuses %s', (_case, input, field) => {
+      expect(refusal(() => check(input))).toEqual({ code: 'VALIDATION_FAILED', field });
+    });
+
+    it('P19.14-T2 AC-5 a derived plan may name plan cards, as a chips plan does', () => {
+      const out = check({
+        proposalFields: withDerived, planRule: rule,
+        planOptions: [{ name: 'Gold', highlights: [{ label: 'Kamar', value: '1 jt' }] }],
+      });
+      expect(out.planOptions.map((p) => p.name)).toEqual(['Gold']);
+    });
+
+    it('P19.14-T2 AC-5 lays a write over what is stored: one calculation field changed, the rest kept', () => {
+      const stored = check({ calcType: 'up_premium', smokerRated: true, payTerms: [term('y5', { years: 5 })] });
+      const next = checkProposalSettings({ smokerRated: false }, stored, FACTS);
+      expect(next).toMatchObject({ calcType: 'up_premium', smokerRated: false, payTerms: [{ key: 'y5' }] });
+    });
+
+    it('P19.14-T2 AC-3 reads Cara bayar, the need tile and the syariah flag where the catalogue sets none', () => {
+      expect(frequenciesOf({ frequencies: [] })).toEqual(['monthly', 'quarterly', 'semiannual', 'annual']);
+      expect(frequenciesOf({ frequencies: ['annual', 'nope'] })).toEqual(['annual']);
+      expect(needTagOf({ category: 'ci', needTag: null })).toBe('CRITICAL_INCOME');
+      expect(needTagOf({ category: 'ci', needTag: 'FAMILY' })).toBe('FAMILY');
+      expect(needTagOf({ category: 'life', primaryNeeds: ['retirement'] })).toBe('FUTURE');
+      expect([isSyariahProduct({ channel: 'syariah' }), isSyariahProduct({ channel: 'conventional' })]).toEqual([true, false]);
     });
   });
 

@@ -17,13 +17,15 @@ export interface MemberPhone {
 }
 
 /**
- * **A leader saves an agent's WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, the owner's D-22: *a leader may
- * set it for their agents*). The *Isi nomor WhatsApp* sheet on a person's row — the Home team list, the Unit
+ * **A leader, or the office, saves a member's missing WhatsApp number** (UI V1, 2026-10-30; UI-081, UI-101, the owner's
+ * D-22: *a leader may set it for their agents*; widened by ADR-0263). The *Isi nomor WhatsApp* sheet on a person's row — the Home team list, the Unit
  * Dashboard, New Hires — when the person has none yet.
  *
- * - **Who**: `member:update_phone`, the AB's and the AAB's at `own-downline`, resolved by `COACH` (`CoachResolver.subject`):
- *   somebody they coach now, active, in this office. Anybody else — a peer's agent, another office's member, somebody who
- *   has left — is `404`, never `403`. A leader naming themselves fills their own missing number, as `PATCH /auth/me` would.
+ * - **Who**: `member:update_phone`, every leader at `own-downline` (an AB, an AAB, an Agent who leads somebody), resolved
+ *   by `COACH` (`CoachResolver.subject`): somebody they coach now, active, in this office; and **the Owner and the
+ *   Admins at `own-kpm`** (P19.16-T1, ADR-0263): any active member of the office. Anybody else — a peer's agent, another
+ *   office's member, somebody who has left — is `404`, never `403`. A reader naming themselves fills their own missing
+ *   number, as `PATCH /auth/me` would.
  * - **What**: `users.phone`, the person's account (identity is global, ADR-0002), as `+62` and its digits — the DTO has
  *   already read what was typed (`phoneFromBody`). The same number the person sees on *Profil saya*.
  * - **Only a missing number** (the Phase 18.11 exit review, M1): a number already on file is `409 MEMBER_PHONE_ON_FILE`

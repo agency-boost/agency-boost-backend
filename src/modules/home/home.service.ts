@@ -6,9 +6,9 @@ import { RequestContext } from '@/common/context/request-context';
 import { NoMembershipException } from '@/common/errors/domain.exception';
 import { addDays, rollingWindow, type LocalDate } from '@/common/time/local-day';
 import { HOME, quoteOfTheDay, type HomeQuotePose } from '@/domain/constants/home';
+import type { UnitView } from '@/domain/constants';
+import type { ViewsOffered } from '@/domain/metrics/unit-view';
 import { coachingCoverage } from '@/domain/metrics/coaching-coverage';
-import { newHireBeforeFirstSale, type ProductionStanding } from '@/domain/metrics/counts-for-production';
-import { activeAgentSplit, type ProductionRow } from '@/domain/metrics/unit-rollup';
 import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
@@ -16,7 +16,6 @@ import type { CalendarTaskView } from '@/modules/calendar/calendar-auto-items';
 import { officeClockOf } from '@/modules/calendar/calendar-time';
 import { CalendarService, type CalendarTodayItem } from '@/modules/calendar/calendar.service';
 import { CoachingReadings } from '@/modules/coaching/coaching-readings';
-import { PaceStatusReadings } from '@/modules/coaching/pace-status';
 import { LeadReadings } from '@/modules/leads/lead-readings';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
@@ -59,6 +58,34 @@ export interface HomeTeamPerson extends HomePerson {
   /** The day's saved total (`ActivityReadings.perPersonPerDay`), `null` for no saved day. */
   yesterday: number | null;
   today: number | null;
+  /**
+   * ***The unit they are listed under*** (P19.18-T4 AC-2; ADR-0271 §7): for the Owner or an Admin, the key of their unit in
+   * `leader.office.units` — the roster's top-level unit, an AB's — and `null` for a leader's list, which is not grouped.
+   */
+  unitKey: string | null;
+}
+
+/** One unit line of the whole office's *Laporan aktivitas tim* (P19.18-T4 AC-2): an AB's unit, the reader's, or nobody's. */
+export interface HomeTeamUnit {
+  /** The unit leader's membership; `unled` for *Belum punya leader*. */
+  key: string;
+  /** The unit's leader, with their photo; `null` for *Belum punya leader*. */
+  leader: { membershipId: string; name: string; photoUrl: string | null } | null;
+  /** The reader's own unit: *Unit Anda*. */
+  isReader: boolean;
+  /** Its people on the list, the reader left out: *n orang*. */
+  count: number;
+}
+
+/**
+ * **The whole office, for its Owner or an Admin** (P19.18-T4; ADR-0271 §7; the brief's part B, gap 1): the view the team
+ * parts are over — *Semua downline* unless the reader narrows it — the views offered, and the unit lines the list is
+ * grouped by, in the roster's order.
+ */
+export interface HomeOfficeTeam {
+  scope: UnitView;
+  scopes: ViewsOffered;
+  units: HomeTeamUnit[];
 }
 
 export interface HomeView {
@@ -109,9 +136,16 @@ export interface HomeView {
  * and `recruitmentPipeline` left with *Tim saya*, which alone read them; `newHires` is every reader's now (`HomeView`).*
  */
 export interface HomeLeader {
-  activeAgent: SplitFigure;
+  /**
+   * ***Active Agent*** (P19.18-T4 AC-1; ADR-0267 §2): `MAA_COUNT_IN_UNIT` from the uploaded production for the office's
+   * month, out of everybody in the scope — the Unit Dashboard's number. `held` false while the month is not uploaded: the
+   * count is then 0 and the tile reads *–*. It was `POTENTIAL_MAA_COUNT_IN_UNIT` (on pace).
+   */
+  activeAgent: SplitFigure & { held: boolean };
   coached7d: SplitFigure;
   team: HomeTeamPerson[];
+  /** The whole office for the Owner or an Admin (P19.18-T4); `null` for every other leader, whose list is *Unit | Group*. */
+  office: HomeOfficeTeam | null;
 }
 
 /**
@@ -151,7 +185,6 @@ export class HomeService {
   constructor(
     private readonly days: TenantDay,
     private readonly unit: UnitDashboardService,
-    private readonly paces: PaceStatusReadings,
     private readonly coaching: CoachingReadings,
     private readonly activity: ActivityReadings,
     private readonly memberships: MembershipRepository,
@@ -168,7 +201,7 @@ export class HomeService {
     private readonly newHires: NewHiresService,
   ) {}
 
-  async read(ctx: RequestContext): Promise<HomeView> {
+  async read(ctx: RequestContext, query: { scope?: UnitView } = {}): Promise<HomeView> {
     const me = ctx.membershipId;
     if (!me) throw new NoMembershipException();
     const office = await this.days.office(ctx);
@@ -178,7 +211,12 @@ export class HomeService {
 
     const [mine, people, schedule, own, newHires] = await Promise.all([
       this.activity.perPersonPerDay(ctx, [me], chartDays),
-      this.unit.people(ctx),
+      /*
+       * P19.18-T4 (ADR-0271 §7; the brief's part B, gap 1): the KPM Owner and an Admin read **the whole office** — *Semua
+       * downline*, or the view they narrow it to — where they read their own direct group, which stops at every AB below
+       * them, and so read nobody. Every other leader reads their *Grup langsung*, as before.
+       */
+      this.unit.people(ctx, undefined, { office: true, scope: query.scope }),
       this.scheduleOf(ctx),
       // *Leads* (P19.9-T1 AC-5): every open lead the reader owns, as `/leads` opens on them — one count.
       this.leadCounts.ownOpenOf(ctx, me),
@@ -187,7 +225,12 @@ export class HomeService {
     ]);
     const days = daysWithCounts(chartDays, mine.get(me));
     // By role, never by the data (ADR-0189 §4): a leader who leads nobody yet gets the block at zero, not `null`.
-    const group = !people.empty ? await this.leaderOf(ctx, me, office, people, yesterday) : null;
+    /*
+     * The Owner or an Admin keeps the block — and the view picker in it — over a view that holds nobody but them (P19.18-T4:
+     * *Direct Unit* narrowed to themselves), so they can widen it again.
+     */
+    const officeView = isOfficeReader(ctx) && people.head.isReader && people.scopes.offered.length > 1;
+    const group = !people.empty || officeView ? await this.leaderOf(ctx, me, office, people, yesterday) : null;
     const leader = group?.leader ?? (leadsByRole(ctx) ? zeroLeader() : null);
 
     const view: HomeView = {
@@ -225,12 +268,12 @@ export class HomeService {
     const inUnit = new Set(unitIds);
     const aabIds = people.group.filter((id) => !inUnit.has(id));
     const team = people.group.filter((id) => id !== me);
+    // P19.18-T4: the whole office, for its Owner or an Admin on their own Home — `people` read it in the views for them alone.
+    const officeWide = isOfficeReader(ctx) && people.head.isReader;
 
-    const [paces, rows, sessions, perDay, named, ladder] = await Promise.all([
-      this.paces.paceOf(ctx, people.group, {
-        today: office.today, month: office.month, onTrackRatio: office.settings.onTrackPaceThreshold,
-      }),
-      this.memberships.find(ctx, { _id: { $in: people.group } }, { projection: { joinedAs: 1, firstSaleDate: 1, userId: 1 } }),
+    const [active, sessions, perDay, named, ladder] = await Promise.all([
+      // P19.18-T4 AC-1 (ADR-0267 §2): *Active Agent* from the uploaded production, the Unit Dashboard's own reading.
+      this.unit.activeAgentsOf(ctx, people.group, office.month),
       this.coaching.countedSince(ctx, people.group, addDays(office.today, -HOME.COACHED_WINDOW_DAYS)),
       this.activity.perPersonPerDay(ctx, team, [yesterday, office.today]),
       this.peopleOf(ctx, team, { photos: true }),
@@ -238,15 +281,9 @@ export class HomeService {
     ]);
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
 
-    // *Active Agent*: the Unit Dashboard's own rollup, row by row. Only `pacingToMaa` and the new-hire standing are
-    // read by `potentialActive`; the goal figure is the paired goal's, which this tile does not show.
-    const standing = new Map(rows.map((m) => [String(m._id), { joinedAs: m.joinedAs ?? null, firstSaleDate: m.firstSaleDate ?? null }]));
-    const rowOf = (id: string): ProductionRow => ({
-      goal: { targetMinor: null, actualMinor: null },
-      pacingToMaa: paces.get(id)?.pacingToMaa ?? null,
-      newHireBeforeFirstSale: newHireBeforeFirstSale(standing.get(id) ?? NO_STANDING, office.today),
-    });
-    const active = activeAgentSplit(unitIds.map(rowOf), aabIds.map(rowOf));
+    // *Active Agent*: the people active this month, split by the two scopes — out of everybody in each (manpower).
+    const activeIds = new Set(active.people.map((p) => p.membershipId));
+    const activeIn = (scope: readonly string[]): CountOf => ({ count: scope.filter((id) => activeIds.has(id)).length, of: scope.length });
 
     // *Coaching 7 hari*: `COACHING_COVERAGE` at `COACHED_7D`, each scope whole — its head included — coached by anyone.
     const between = (from: string, to: string) => this.clock.daysBetween(office.timezone, from, to);
@@ -256,7 +293,9 @@ export class HomeService {
       return { count: window.coached, of: window.members };
     };
 
-    const list = byReport(team.map((id) => {
+    // P19.18-T4 AC-2: the whole office's list is grouped by unit, in the roster's order; a leader's by who reported.
+    const units = officeWide ? unitsOf(people, me) : null;
+    const rows = team.map((id) => {
       const person = named.get(id);
       const counts = perDay.get(id);
       return {
@@ -268,14 +307,33 @@ export class HomeService {
         rung: rungOf(people.rungs.get(id) ?? '', labels),
         yesterday: counts?.get(yesterday) ?? null,
         today: counts?.get(office.today) ?? null,
+        unitKey: units?.keyOf.get(id) ?? null,
       };
-    }));
+    });
+    const list = units ? rows : byReport(rows);
 
     return {
       leader: {
-        activeAgent: splitOf(active.unit, active.aab),
+        activeAgent: { ...splitOf(activeIn(unitIds), activeIn(aabIds)), held: active.held },
         coached7d: splitOf(coached(unitIds), coached(aabIds)),
         team: list,
+        office: units === null ? null : {
+          scope: people.scope,
+          scopes: people.scopes,
+          units: units.lines.map((line) => {
+            const leader = line.key === UNLED ? null : line.key;
+            return {
+              key: line.key,
+              leader: leader === null ? null : {
+                membershipId: leader,
+                name: named.get(leader)?.name ?? people.names.get(leader) ?? '',
+                photoUrl: named.get(leader)?.photoUrl ?? null,
+              },
+              isReader: leader === me,
+              count: line.count,
+            };
+          }).filter((line) => line.count > 0),
+        },
       },
     };
   }
@@ -330,7 +388,44 @@ export class HomeService {
   }
 }
 
-const NO_STANDING: ProductionStanding = { joinedAs: null, firstSaleDate: null };
+/** *Belum punya leader*'s key among the unit lines. */
+const UNLED = 'unled';
+
+/** The Owner's or an Admin's own reading (`UnitDashboardService.people` in `office` mode reads the views for them alone). */
+function isOfficeReader(ctx: RequestContext): boolean {
+  return Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+}
+
+/**
+ * **Each person's unit line, in the roster's order** (P19.18-T4 AC-2; ADR-0271 §7): the top-level unit they sit in — the
+ * reader's own (*Direct Unit*), an AB's (or anybody hung from the head), or *Belum punya leader* — walked up `parentOf`
+ * to the head. The lines in the order their first person appears (`people.group`, the roster's).
+ */
+function unitsOf(people: UnitPeople, me: string): { keyOf: Map<string, string>; lines: { key: string; count: number }[] } {
+  const head = people.head.membershipId;
+  const own = new Set(people.unit);
+  const keyOf = new Map<string, string>();
+  const topOf = (id: string): string => {
+    let at = id;
+    for (let hops = 0; hops < 64; hops += 1) {
+      const parent = people.parentOf.get(at);
+      if (parent === undefined || parent === null) return parent === null ? UNLED : at;
+      if (parent === head) return at;
+      at = parent;
+    }
+    return at;
+  };
+  const lines: { key: string; count: number }[] = [];
+  const counts = new Map<string, number>();
+  for (const id of people.group) {
+    const key = id === head || own.has(id) ? head : topOf(id);
+    keyOf.set(id, key);
+    if (!counts.has(key)) lines.push({ key, count: 0 });
+    if (id !== me) counts.set(key, (counts.get(key) ?? 0) + 1);
+    else if (!counts.has(key)) counts.set(key, 0);
+  }
+  return { keyOf, lines: lines.map((line) => ({ key: line.key, count: counts.get(line.key) ?? 0 })) };
+}
 
 /** A rung as a row names it (P19.9-T2 AC-2): its code and the company's label, the code where the ladder has none. */
 const rungOf = (code: string, labels: ReadonlyMap<string, string>) => ({ code, label: labels.get(code) ?? code });
@@ -353,7 +448,7 @@ export function leadsByRole(ctx: RequestContext): boolean {
  */
 function zeroLeader(): HomeLeader {
   const nobody: CountOf = { count: 0, of: 0 };
-  return { activeAgent: splitOf(nobody, nobody), coached7d: splitOf(nobody, nobody), team: [] };
+  return { activeAgent: { ...splitOf(nobody, nobody), held: false }, coached7d: splitOf(nobody, nobody), team: [], office: null };
 }
 
 /** Every office day of a window, oldest first. */

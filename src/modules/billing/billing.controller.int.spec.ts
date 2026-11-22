@@ -75,19 +75,33 @@ describe('GET /admin/billing/prices (P13.2-T2)', () => {
     expect(BillingController.length).toBe(0);
   });
 
-  it('AC-2 answers the Super Admin the table, in IDR minor units, with the annual discount', async () => {
+  it('P19.23-T5 AC-3 answers the Super Admin the price list of §9 and the calculator’s numbers, in IDR minor units', async () => {
     const res = await request(app.getHttpServer()).get(url).expect(200);
 
     expect(res.body).toEqual({
       currency: 'IDR',
       annualDiscountPct: 5,
       tiers: [
-        { code: 'TIER_1_10', minLeaders: 1, maxLeaders: 10, standardMinor: rp(500_000), sixMonthMinor: rp(400_000), annualMinor: rp(380_000), customPricing: false },
-        { code: 'TIER_11_20', minLeaders: 11, maxLeaders: 20, standardMinor: rp(475_000), sixMonthMinor: rp(375_000), annualMinor: rp(356_250), customPricing: false },
-        { code: 'TIER_21_50', minLeaders: 21, maxLeaders: 50, standardMinor: rp(450_000), sixMonthMinor: rp(350_000), annualMinor: rp(332_500), customPricing: false },
-        { code: 'TIER_51_100', minLeaders: 51, maxLeaders: 100, standardMinor: rp(425_000), sixMonthMinor: rp(300_000), annualMinor: rp(285_000), customPricing: false },
-        { code: 'TIER_101_PLUS', minLeaders: 101, maxLeaders: null, standardMinor: rp(375_000), sixMonthMinor: rp(250_000), annualMinor: rp(237_500), customPricing: true },
+        { code: 'TIER_1_10', minLeaders: 1, maxLeaders: 10, standardMinor: rp(500_000), offerMinor: rp(400_000), customPricing: false },
+        { code: 'TIER_11_20', minLeaders: 11, maxLeaders: 20, standardMinor: rp(475_000), offerMinor: rp(375_000), customPricing: false },
+        { code: 'TIER_21_50', minLeaders: 21, maxLeaders: 50, standardMinor: rp(450_000), offerMinor: rp(350_000), customPricing: false },
+        { code: 'TIER_51_100', minLeaders: 51, maxLeaders: 100, standardMinor: rp(425_000), offerMinor: rp(300_000), customPricing: false },
+        // *Harga khusus*: no price is held for 101+ (ADR-0279 §1).
+        { code: 'TIER_101_PLUS', minLeaders: 101, maxLeaders: null, standardMinor: null, offerMinor: null, customPricing: true },
       ],
+      trialDays: 30,
+      graceDays: 7,
+      endingSoonDays: 30,
+      daysPerMonth: 30,
+      perDayRoundingMinor: rp(100),
+      bulkPercentMax: 100,
+      noteMax: 500,
+      kpmNameMax: 120,
+      countMax: 10_000,
+      rateMaxMinor: rp(100_000_000),
+      breakEven: {
+        policyApeMinor: rp(20_000_000), commissionPct: 20, overridingPct: 10, bonusPct: 10, incomePerPolicyMinor: rp(8_000_000),
+      },
     });
   });
 

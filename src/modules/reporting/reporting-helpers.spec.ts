@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
@@ -7,10 +6,8 @@ import { QualificationRule, QualificationRuleSchema } from '@/modules/campaigns/
 import type { OrgLevelRow } from '@/modules/tenants/org-level.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { DirectoryColumns } from './directory-columns';
-import { clubTiers, juniorFirst } from './kpm-analytics.service';
 import { asOfLabel, byName, monthLabel, monthsLabel, shiftMonth, yearToDateLabel } from './office-figures';
 import { OfficePeople, rungsFor } from './office-people';
-import { stateOf, sumOf } from './platform-analytics.service';
 
 const level = (code: string, label: string, displayOrder: number, status: 'active' | 'archived' = 'active'): OrgLevelRow => ({
   orgLevelId: code, companyId: 'c', code, label, displayOrder, leaderTier: null, status, archivedAt: null, version: 1,
@@ -30,6 +27,22 @@ describe('the reporting module’s helpers', () => {
 
   it('P18-T1 AC-1 a reader in no office is TENANT_NO_MEMBERSHIP', () => {
     expect(() => OfficePeople.require(RequestContext.platform('root'))).toThrow(/not joined a KPM/);
+  });
+
+  it('ADR-0268 §1, §3 the KPM’s readers are its stewards: the Super Admin inside it is nobody in it', () => {
+    const inside = RequestContext.superAdminInKpm(RequestContext.platform('root'), 'kpm-a');
+    expect(OfficePeople.require(inside)).toBeNull();
+    expect(OfficePeople.requireAnalyticsReader(inside)).toBeNull();
+    const member = (over: Record<string, unknown>) => new RequestContext('u1', 'none', {
+      membershipId: 'm1', kpmId: 'kpm-a', orgLevelCode: 'AB', hierarchyRole: 'ab', status: 'active',
+      isKpmOwner: false, isKpmAdmin: false, directCount: 0, ...over,
+    });
+    expect(OfficePeople.requireAnalyticsReader(member({ isKpmOwner: true }))).toBe('m1');
+    expect(OfficePeople.requireAnalyticsReader(member({ isKpmAdmin: true }))).toBe('m1');
+    expect(OfficePeople.requireAnalyticsReader(member({ isCoreLeader: true }))).toBe('m1');
+    expect(() => OfficePeople.requireAnalyticsReader(member({}))).toThrow(expect.objectContaining({ code: 'NOT_FOUND' }));
+    expect(() => OfficePeople.requireAnalyticsReader(RequestContext.platform('root')))
+      .toThrow(expect.objectContaining({ code: 'TENANT_NO_MEMBERSHIP' }));
   });
 
   it('P18-T2 AC-4, P18.7-T1 AC-4 the labels a period is read over, the Indonesian way', () => {
@@ -60,24 +73,6 @@ describe('the reporting module’s helpers', () => {
     expect(yearToDateLabel('2026-08', en)).toBe('Jan – Aug 2026');
   });
 
-  it('P18-T2 AC-5 the club tiers from the company’s production_club rules, a rule with no APE threshold none', () => {
-    expect(clubTiers([
-      { kind: 'production_club', code: 'STAR', name: 'Star Club', appliesToOrgLevelCodes: [], groupMode: 'all', rank: 1,
-        criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'APE_ACHIEVED', comparator: 'gte', value: 9 }] }] },
-      { kind: 'production_club', code: 'ODD', name: 'Odd', appliesToOrgLevelCodes: [], groupMode: 'all', rank: 2,
-        criteriaGroups: [{ mode: 'all', criteria: [{ metricKey: 'NET_APE', comparator: 'gte', value: 9 }] }] },
-      { kind: 'moc', code: 'MOC_AB', name: 'MOC', appliesToOrgLevelCodes: ['AB'], groupMode: 'any', rank: 1, criteriaGroups: [] },
-    ])).toEqual([{ code: 'STAR', label: 'Star Club', minAnnualApeMinor: 9 }]);
-  });
-
-  it('P18-T2 AC-4 item 8 the tooltip’s lines, the junior rung first; a rule for a rung the ladder does not name last', () => {
-    const rule = (code: string, rung: string) => ({
-      kind: 'moc' as const, code, name: code, appliesToOrgLevelCodes: [rung], groupMode: 'any', rank: 1, criteriaGroups: [],
-    });
-    expect(juniorFirst([rule('X', 'MENTOR'), rule('AB', 'AB'), rule('AAB', 'AAB')], LADDER).map((r) => r.code))
-      .toEqual(['AAB', 'AB', 'X']);
-  });
-
   it('P18-T1 AC-8 B1 a page of active and removed rows (defensive: the tabs never mix): only the active are read and recorded', async () => {
     const recordMany = jest.fn(async () => undefined);
     const columns = new DirectoryColumns(
@@ -93,41 +88,14 @@ describe('the reporting module’s helpers', () => {
     };
     const read = await columns.decorate(RequestContext.platform('root'), page);
     expect(read.members).toEqual([
-      { membershipId: 'a', status: 'active', lastActivityOn: '2026-10-08', lastActivityDays: 1, lastCoachedDays: 3 },
+      // P19.20-T1 AC-2 (ADR-0273 §2): and the two pills' buckets, the server's.
+      {
+        membershipId: 'a', status: 'active', lastActivityOn: '2026-10-08', lastActivityDays: 1, lastCoachedDays: 3,
+        lastActivityStatus: 'recent', lastCoachedStatus: 'recent',
+      },
       { membershipId: 'r', status: 'removed' },
     ]);
     expect(recordMany).toHaveBeenCalledWith(expect.anything(), [{ membershipId: 'a', status: 'active' }], 'directory', { from: null, to: '2026-10-09' });
-  });
-
-  it('P18-T8 AC-2 an office’s state as All KPMs reads it', () => {
-    const clock = new FixedClock(new Date('2026-09-14T03:00:00Z'));
-    const sub = (endDate: string, keepActiveAfterEnd: boolean) => ({
-      startDate: '2025-01-01', endDate, pricePerLeaderMinor: null, maxLeaders: null, keepActiveAfterEnd,
-    });
-    expect(stateOf({ status: 'suspended', subscription: null, timezone: 'Asia/Jakarta' } as never, clock)).toBe('suspended');
-    expect(stateOf({ status: 'active', subscription: null, timezone: 'Asia/Jakarta' } as never, clock)).toBe('active');
-    expect(stateOf({ status: 'active', subscription: sub('2026-09-01', false), timezone: 'Asia/Jakarta' } as never, clock)).toBe('ended');
-    expect(stateOf({ status: 'active', subscription: sub('2026-09-01', true), timezone: 'Asia/Jakarta' } as never, clock))
-      .toBe('ended_kept_active');
-  });
-
-  it('P18-T8 AC-2 the platform’s rungs: the shared label, or the code where two companies label it differently', () => {
-    const office = (rungs: [string, string, number][]) => ({
-      members: rungs.reduce((n, [, , c]) => n + c, 0), byRung: rungs.map(([code, label, count]) => ({ code, label, count })),
-      joinedThisMonth: 1, leftThisMonth: 0, signedIn7d: 1, signedIn30d: 2,
-    });
-    const sum = sumOf(
-      [office([['AB', 'AB', 2], ['AGENT', 'Agent', 3]]), office([['AB', 'Agency Builder', 1], ['AGENT', 'Agent', 4], ['XX', 'XX', 1]])],
-      [...LADDER, { ...level('AB', 'Agency Builder', 3), companyId: 'd' }],
-    );
-    expect(sum).toEqual({
-      members: 11,
-      byRung: [
-        { code: 'AB', label: 'AB', count: 3 }, { code: 'AAB', label: 'AAB', count: 0 }, { code: 'AGENT', label: 'Agent', count: 7 },
-        { code: 'XX', label: 'XX', count: 1 },
-      ],
-      joinedThisMonth: 2, leftThisMonth: 0, signedIn7d: 2, signedIn30d: 4,
-    });
   });
 
   describe('against the database', () => {

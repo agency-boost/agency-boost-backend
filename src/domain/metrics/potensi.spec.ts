@@ -1,6 +1,6 @@
 import { SystemClock } from '@/common/clock/clock.port';
 import {
-  aaThisMonth, leadPotensiThisMonth, openAtEndOf, personPotensi, rekrutThisMonth, wonIn, type PotensiLead, type PotensiMonth,
+  leadPotensiThisMonth, openAtEndOf, personPotensi, wonIn, type PotensiLead, type PotensiMonth,
 } from './potensi';
 
 const clock = new SystemClock();
@@ -61,7 +61,6 @@ describe('the Potensi tab’s figures (P19.1-T6, ADR-0193)', () => {
       lead({ type: null, commitments: [{ month: '2026-11' }] }),
     ], NOV);
     expect(p.recruitment).toEqual({ potensi: 1, switched: 2, won: 2 });
-    expect(rekrutThisMonth(p)).toBe(2);
     expect(p.sales.switched).toBe(0);
   });
 
@@ -75,11 +74,9 @@ describe('the Potensi tab’s figures (P19.1-T6, ADR-0193)', () => {
     expect(personPotensi(leads, monthOf('2026-12')).sales).toEqual({ potensi: 0, switched: 0, won: 0 });
   });
 
-  it('P19.1-T6 AC-12 AA_THIS_MONTH by each path of OD-249: a sales lead marked Berhasil, or policies on the month’s row', () => {
-    expect(aaThisMonth(1, null)).toBe(true);
-    expect(aaThisMonth(0, 2)).toBe(true);
-    expect(aaThisMonth(0, 0)).toBe(false);
-    // A month the office holds no figure for is not a case.
-    expect(aaThisMonth(0, null)).toBe(false);
-  });
+  /*
+   * `AA_THIS_MONTH` and `REKRUT_THIS_MONTH` were pinned here: retired by ADR-0271 §8 (P19.18-T3). The ✓ and the green
+   * number read `MONTHLY_ACTIVE_AGENT` and `RECRUITS_JOINED`, pinned by `active-agents.tenancy.spec.ts` and
+   * `registered-by.tenancy.spec.ts`, and on the tab by `unit-potensi.tenancy.spec.ts`.
+   */
 });

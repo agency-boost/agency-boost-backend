@@ -20,11 +20,10 @@ import { configModule, provisionOffice } from '../../../test/config-module';
 import { declaredPermissions, productionPipe, session, StubAuth, SUPER_ADMIN } from '../../../test/http-permissions';
 import { listenOnLoopback } from '../../../test/listen';
 import { KpmSetupController } from './kpm-setup.controller';
+import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { KpmSetup, SETUP_STEPS } from './kpm-setup.service';
 import { KpmOverviewController } from './reporting.controller';
 import { KpmOverviewService } from './kpm-overview.service';
-import { KpmAnalyticsService } from './kpm-analytics.service';
-import { PlatformAnalyticsService } from './platform-analytics.service';
 import { SETUP_STEP_SAVED, touchesActivityTypes, type SetupStepSaved } from './setup-step-saved';
 import { SetupStepSavedInterceptor } from './setup-step-saved.interceptor';
 
@@ -89,6 +88,13 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
   const runningOwner = () => as(RUNNING, 'WILSON', { owner: true });
   const otherOwner = () => as(OTHER, 'OLGA', { owner: true });
   const overviewOf = (ctx: RequestContext) => wired.kpmOverview.read(ctx);
+  /** The setup card's own read, with the facts the Overview hands it: the months still open for upload (`missing`). */
+  const setupOf = async (ctx: RequestContext) => {
+    const office = await new TenantDay(wired.kpms as never, wired.clock).office(ctx);
+    const held = (await db().collection('monthlyAgentData').distinct('month', { kpmId: ctx.kpmId, deletedAt: null }) as string[])
+      .filter((m) => m.startsWith(office.today.slice(0, 4))).sort();
+    return wired.kpmSetup.read(ctx, { today: office.today, month: office.month, timezone: office.timezone, headcount: 1, target: null, held });
+  };
   const put = (page: string) => http().put(`/kpm/settings/${page}/reviewed`);
 
   beforeAll(async () => {
@@ -125,7 +131,10 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
     await db().collection('dataUploadBatches').insertOne({
       kpmId: RUNNING, month: '2026-09', status: 'committed', deletedAt: null, startedAt: NOW, committedAt: NOW,
     });
-    await db().collection('kpmRecruitTargets').insertOne({ kpmId: RUNNING, month: '2026-09', target: 15, deletedAt: null });
+    // P19.19 (ADR-0272 §7): step 7 is the AB groups' monthly targets — Agus's, saved in September and carried since.
+    await db().collection('abGroupTargets').insertOne({
+      kpmId: RUNNING, abMembershipId: ids.AGUS.membershipId, month: '2026-09', activeAgentTarget: 4, rekrutTarget: 2, deletedAt: null,
+    });
     // What waits for 0417's Owner (UI-148, Appendix D): two products' scripts, and a checklist draft of version 2.
     await db().collection('kpmProductConfigs').insertMany(['p-1', 'p-2', 'p-3'].map((productId, i) => ({
       kpmId: RUNNING, productId, reviewState: i < 2 ? 'pending' : 'approved', deletedAt: null,
@@ -143,8 +152,6 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       providers: [
         { provide: KpmSetup, useValue: wired.kpmSetup },
         { provide: KpmOverviewService, useValue: wired.kpmOverview },
-        { provide: KpmAnalyticsService, useValue: {} },
-        { provide: PlatformAnalyticsService, useValue: {} },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -182,15 +189,10 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
     });
 
     it('P19.3-T2 AC-7 UI-150: KaiZen names only Nov 2026 — January to October appear nowhere, and "this year" starts in November', async () => {
+      expect(await setupOf(kaizenOwner())).toMatchObject({ missing: [{ month: '2026-11' }], from: '2026-11' });
+      // P19.19-T3 AC-1: Produksi 6 bulan reads no file in any of its six months.
       const view = await overviewOf(kaizenOwner());
-      expect(view.production.ytd).toMatchObject({ achievedMinor: null, missingMonths: ['2026-11'], from: '2026-11' });
-      expect(JSON.stringify(view.production)).not.toMatch(/2026-(0\d|10)/);
-    });
-
-    it('P19.3-T2 AC-6 Overview case 1: nobody to rank — the Owner leads nobody and no unit has a target', async () => {
-      const view = await overviewOf(kaizenOwner());
-      expect(view.coaching.leaderboard.every((row) => !row.leads)).toBe(true);
-      expect(view.production.agencies.every((a) => a.targetMinor === null)).toBe(true);
+      expect(view.production.months.every((m) => m.apeMinor === null)).toBe(true);
     });
   });
 
@@ -234,6 +236,21 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       session.current = as(RUNNING, over.role === 'aab' ? 'SARI' : over.role === 'agent' ? 'INDAH' : 'AGUS', over);
       const res = await put('branch-info').expect(403);
       expect(res.body.error).toMatchObject({ code: 'PERM_DENIED', details: { permission: 'tenant_config:mark_reviewed' } });
+    });
+
+    it('ADR-0268 §3 the Super Admin inside the KPM marks a page as its Owner: the mark names no membership, the audit names them', async () => {
+      session.current = RequestContext.superAdminInKpm(SUPER_ADMIN, OTHER);
+      const written = { kpmId: OTHER, mark: 'activity-types' };
+      const audited = { action: 'kpm_setup.page_reviewed', kpmId: OTHER, 'after.page': 'activity-types' };
+      try {
+        expect((await put('activity-types').expect(200)).body).toMatchObject({ page: 'activity-types', reviewed: true, via: 'reviewed' });
+        expect(await db().collection('kpmSetupMarks').findOne(written)).toMatchObject({ via: 'reviewed', by: null, createdBy: null, updatedBy: null });
+        expect(await db().collection('auditLog').findOne(audited)).toMatchObject({ actorUserId: SUPER_ADMIN.userId, actorMembershipId: null });
+      } finally {
+        // KPM B's card as the later cases expect it: no Activity types mark, no review audited.
+        await db().collection('kpmSetupMarks').deleteMany(written);
+        await db().collection('auditLog').deleteMany(audited);
+      }
     });
 
     it('P19.3-T2 AC-10 negative: a Super Admin outside a session is refused 403', async () => {
@@ -304,20 +321,21 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       const view = await overviewOf(kaizenOwner());
       expect(view.setup!.steps.find((s) => s.key === 'import')!.done).toBe(true);
       expect(view.setup!.members).toBe(2);
-      expect(view.composition.total).toBe(2);
+      expect(view.usage.total.of).toBe(2);
     });
 
     it('P19.3-T2 AC-5 AC-7 Overview case 3: uploading Nov ticks step 6, production shows Nov, and no month is missing', async () => {
       await importNovember('BUDI');
       const view = await overviewOf(kaizenOwner());
       expect(view.setup!.steps.find((s) => s.key === 'upload')!.done).toBe(true);
-      expect(view.production.ytd).toMatchObject({ achievedMinor: 12 * M, missingMonths: [] });
+      expect(view.production.months[5]).toEqual({ month: '2026-11', apeMinor: 12 * M });
+      expect((await setupOf(kaizenOwner())).missing).toEqual([]);
     });
 
-    it('P19.3-T2 AC-5 a recruitment target ticks step 7', async () => {
-      await wired.kpmOverview.setRecruitTarget(kaizenOwner(), { month: '2026-11', target: 3 });
+    it('P19.19-T4 AC-2 an AB group’s monthly target ticks step 7, where the office’s recruitment target did', async () => {
+      await wired.abGroupTargets.set(kaizenOwner(), ids.VICTOR.membershipId, { month: '2026-11', activeAgentTarget: 2, rekrutTarget: 1 });
       const view = await overviewOf(kaizenOwner());
-      expect(view.setup).toMatchObject({ target: 3 });
+      expect(view.setup).toMatchObject({ target: 1 });
       expect(view.setup!.steps.find((s) => s.key === 'recruit-target')!.done).toBe(true);
     });
 
@@ -347,14 +365,15 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
     });
 
     it('P19.3-T2 AC-7 Overview case 8: on 3 Nov, October — missed, open until 7 Nov — and November are named; "this year" from January', async () => {
-      const { ytd } = (await overviewOf(runningOwner())).production;
-      expect(ytd).toMatchObject({ missingMonths: ['2026-10', '2026-11'], from: '2026-01' });
+      const setup = await setupOf(runningOwner());
+      expect(setup).toMatchObject({ from: '2026-01' });
+      expect(setup.missing.map((m) => m.month)).toEqual(['2026-10', '2026-11']);
     });
 
     it('P19.3-T2 AC-7 a month locked by hand is not named: only months still open for upload', async () => {
       await wired.productionMonths.lock(runningOwner(), '2026-10');
       try {
-        expect((await overviewOf(runningOwner())).production.ytd.missingMonths).toEqual(['2026-11']);
+        expect((await setupOf(runningOwner())).missing.map((m) => m.month)).toEqual(['2026-11']);
       } finally {
         await db().collection('productionMonths').deleteMany({ kpmId: RUNNING, month: '2026-10' });
       }
@@ -368,8 +387,7 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
     it('P19.5-T3 ADR-0214 §11 once 7 November has passed, a never-written October stays named, as Data upload keeps it open', async () => {
       (wired.clock as FixedClock).set(new Date('2026-11-08T03:00:00Z'));
       try {
-        const { missingMonths } = (await overviewOf(runningOwner())).production.ytd;
-        expect(missingMonths).toEqual(['2026-10', '2026-11']);
+        expect((await setupOf(runningOwner())).missing.map((m) => m.month)).toEqual(['2026-10', '2026-11']);
         expect((await wired.productionMonths.state(runningOwner(), '2026-10')).reason).toBe('history');
       } finally {
         (wired.clock as FixedClock).set(NOW);
@@ -383,9 +401,9 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       try {
         // October's schedule closed on 7 November; its first write, on the 10th, opened it until the 17th.
         (wired.clock as FixedClock).set(new Date('2026-11-15T03:00:00Z'));
-        expect((await overviewOf(runningOwner())).production.ytd.missingMonths).toContain('2026-10');
+        expect((await setupOf(runningOwner())).missing.map((m) => m.month)).toContain('2026-10');
         (wired.clock as FixedClock).set(new Date('2026-11-20T03:00:00Z'));
-        expect((await overviewOf(runningOwner())).production.ytd.missingMonths).not.toContain('2026-10');
+        expect((await setupOf(runningOwner())).missing.map((m) => m.month)).not.toContain('2026-10');
       } finally {
         (wired.clock as FixedClock).set(NOW);
         await db().collection('productionMonths').deleteMany({ kpmId: RUNNING, month: '2026-10' });
@@ -402,21 +420,16 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       const withGoal = (await overviewOf(runningOwner())).production;
       await wired.goals.saveEstimate(indah, '2026', { apeAchievedMinor: 120 * M });
       expect((await overviewOf(runningOwner())).production).toEqual(withGoal);
-      expect(withGoal.ytd.achievedMinor).toBe(before.ytd.achievedMinor);
+      expect(withGoal).toEqual(before);
     });
 
-    it('P19.3-T2 AC-9 OWN R3: the Overview serves no month-to-date logging figure, so nothing is set against a whole last month', async () => {
-      const view = await overviewOf(runningOwner());
-      expect(view.engagement).not.toHaveProperty('loggedThisMonth');
-      expect(JSON.stringify(view)).not.toContain('lastMonthToDate');
-    });
-
-    it('P19.3-T2 AC-2 Overview case 5: the not-logged rows carry the role, the leader and the WhatsApp number', async () => {
-      const list = await wired.kpmOverview.notLogged(runningOwner());
-      const indah = list.members.find((m) => m.membershipId === ids.INDAH.membershipId)!;
-      expect(indah).toMatchObject({ rung: { code: 'AGENT' }, leader: { membershipId: ids.SARI.membershipId, name: 'SARI' }, phone: '+6281211112222' });
-      const wilson = list.members.find((m) => m.membershipId === ids.WILSON.membershipId)!;
-      expect(wilson).toMatchObject({ leader: null, phone: null });
+    it('P19.19-T1 AC-3 the people carry the role, their place in the tree and the WhatsApp number', async () => {
+      const { people } = await overviewOf(runningOwner());
+      const indah = people.find((m) => m.membershipId === ids.INDAH.membershipId)!;
+      // This office's rows carry only the leader above in `ancestorIds`, so Indah's AB is not on her line: she sits under no AB.
+      expect(indah).toMatchObject({ role: 'agent', phone: '+6281211112222' });
+      expect(people.find((m) => m.membershipId === ids.SARI.membershipId)).toMatchObject({ role: 'aab', abMembershipId: ids.AGUS.membershipId, depth: 1 });
+      expect(people.find((m) => m.membershipId === ids.WILSON.membershipId)).toMatchObject({ depth: 0, phone: null });
     });
   });
 

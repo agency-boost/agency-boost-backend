@@ -8,18 +8,22 @@ import { ErrorCode } from '@/common/errors/error-codes';
 import { calendarMonth, localDayOf, type LocalDate } from '@/common/time/local-day';
 import type { UnitView } from '@/domain/constants';
 import type { ViewsOffered } from '@/domain/metrics/unit-view';
-import { aaThisMonth, rekrutThisMonth, type PersonPotensi, type PotensiMonth } from '@/domain/metrics/potensi';
+import type { PersonPotensi, PotensiMonth } from '@/domain/metrics/potensi';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
 import { LeadReadings, type PotensiOpenLead } from '@/modules/leads/lead-readings';
 import { CoachResolver } from '@/modules/org/coach-resolver';
 import { MemberNames } from '@/modules/org/member-names.service';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
+import { recruitCountsByRecruiter, recruitsJoined } from '@/modules/org/recruits';
+import { activeAgentsIn } from '@/modules/production/active-agents';
 import { OfficialApe } from '@/modules/production/official-ape';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { TenantDay, type Office } from '@/modules/tenants/tenant-day.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { UNIT_DASHBOARD_REFUSALS } from './unit-dashboard.messages';
 import { UnitDashboardService, type UnitInformal } from './unit-dashboard.service';
+import { classRank, officialCells } from './unit-figures';
 
 /** A rung, as the company's ladder names it (BP and SBP at Manulife). */
 export interface PotensiRung {
@@ -27,11 +31,14 @@ export interface PotensiRung {
   label: string;
 }
 
-/** One person's *AA* view (ADR-0193 §1–§2). */
+/** One person's *Active Agent* view (ADR-0193 §1; ADR-0271 §8). */
 export interface PotensiAaCell {
   /** *n potensi*: sales leads switched on for the month and still open at its end. */
   potensi: number;
-  /** `AA_THIS_MONTH`: a sales lead marked *Berhasil* in the month, or the month's row shows policies > 0. */
+  /**
+   * **Active Agent in the month** (P19.18-T3; ADR-0267 §2, `MONTHLY_ACTIVE_AGENT`): the uploaded production shows APE > 0
+   * or a policy that month — the ✓. It was `AA_THIS_MONTH` (a sales lead won, or policies > 0), retired (ADR-0271 §8).
+   */
   aa: boolean;
   /** Sales leads switched on for the month, whatever became of them: a past month's *y* counts the people with one. */
   switched: number;
@@ -41,7 +48,10 @@ export interface PotensiAaCell {
 export interface PotensiRekrutCell {
   /** *n potensi*: recruitment leads switched on for the month and still open at its end. */
   potensi: number;
-  /** *n rekrut ✓*, `REKRUT_THIS_MONTH`: recruitment leads marked *Berhasil* in the month, switched on or not. */
+  /**
+   * **The green number** (P19.18-T3 AC-2; ADR-0267 §3, `RECRUITS_JOINED`): the new hires they registered who joined in the
+   * month — New Hires' rule. It was `REKRUT_THIS_MONTH` (recruitment leads marked *Berhasil*), retired (ADR-0271 §8).
+   */
   rekrut: number;
   /** Recruitment leads switched on for the month, whatever became of them: a person with one is in a past month's *y*. */
   switched: number;
@@ -62,7 +72,11 @@ export interface PotensiPerson {
   rekrut: PotensiRekrutCell;
 }
 
-/** A card's sums: its header (*n potensi · n AA*) and an earlier month's row (*potensi x/y · n AA*). */
+/**
+ * A card's sums: its header and an earlier month's row (*potensi x/y · n AA*). **`aa.potensi` counts people** — those with a
+ * sales potensi, who can become Active Agent (P19.18-T3 AC-1: *Indah 3 + Lukman 1 → 2 potensi*); `rekrut.potensi` and
+ * `rekrut.rekrut` are sums (*n rekrut · potensi m*, AC-2).
+ */
 export interface PotensiTotals {
   aa: { potensi: number; aa: number; switchedPeople: number; switchedPeopleAa: number };
   rekrut: { potensi: number; rekrut: number; switchedPeople: number; switchedPeopleRekrut: number };
@@ -186,14 +200,19 @@ export class UnitPotensiService {
     const people = await this.dashboard.people(ctx, query.for, { views: true, scope: query.scope });
     const ids = people.group;
 
-    const [placed, figures, cells, ladder, pictured, leadReach] = await Promise.all([
+    const [placed, figures, active, recruits, ladder, pictured, leadReach] = await Promise.all([
       this.placed(ctx, ids),
       this.leads.potensiOfMany(ctx, ids, m),
-      this.production.monthCellsAndYearToDateFor(ctx, ids, { from: m.month, to: m.month }),
+      // P19.18-T3 AC-1 (ADR-0267 §2): the ✓ is *Active Agent* from the uploaded production, through the official port.
+      activeAgentsIn(officialCells(this.production), ctx, ids, m.month),
+      // P19.18-T3 AC-2 (ADR-0267 §3): the green number is the new hires each person registered who joined in the month.
+      recruitsJoined(this.memberships, ctx, calendarMonth(`${m.month}-01`), { creditedTo: ids }),
       office.companyId ? this.orgLevels.list(ctx, office.companyId) : Promise.resolve([]),
       this.names.pictured(ctx, ids),
       this.coach.reach(ctx, 'lead:read'),
     ]);
+    const activeIds = new Set(active.people.map((p) => p.membershipId));
+    const recruited = recruitCountsByRecruiter(recruits);
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
     const rungOf = (id: string): PotensiRung => {
       const code = placed.get(id)?.orgLevelCode ?? '';
@@ -203,7 +222,6 @@ export class UnitPotensiService {
 
     const personOf = (id: string, isLeader: boolean): PotensiPerson => {
       const counted = figures.get(id) as PersonPotensi;
-      const policies = cells.cells.get(id)?.get(m.month)?.policyCountMonthly ?? null;
       return {
         membershipId: id,
         name: nameOf(id),
@@ -214,12 +232,12 @@ export class UnitPotensiService {
         opens: id === me || leadReach === null || leadReach.includes(id),
         aa: {
           potensi: counted.sales.potensi,
-          aa: aaThisMonth(counted.sales.won, policies),
+          aa: activeIds.has(id),
           switched: counted.sales.switched,
         },
         rekrut: {
           potensi: counted.recruitment.potensi,
-          rekrut: rekrutThisMonth(counted),
+          rekrut: recruited.get(id) ?? 0,
           switched: counted.recruitment.switched,
         },
       };
@@ -248,10 +266,15 @@ export class UnitPotensiService {
         ...children.filter(leadsSomebody).flatMap(unitsOf),
       ];
     };
-    // The head's level splits as the dashboard's does: its agents who lead nobody are *direct*, anybody else a unit —
-    // somebody hung from the head always a unit (ADR-0249 §2).
+    /*
+     * The head's level splits as the dashboard's does (P19.18-T3 AC-3; ADR-0271 §2, `DIRECT_UNIT`): its direct reports
+     * who lead nobody and are no AB — an AAB with no team sits in *Unit Anda* after the head — are *direct*; an AB, anybody
+     * who leads, and somebody hung from the head (ADR-0249 §2) a unit. Each level AB → AAB → the rest (`people.group`).
+     */
     const direct = below.get(people.head.membershipId) ?? [];
-    const isUnitHead = (id: string) => people.attached.has(id) || placed.get(id)?.role !== 'agent' || leadsSomebody(id);
+    const isUnitHead = (id: string) => people.attached.has(id) || placed.get(id)?.role === 'ab' || leadsSomebody(id);
+    const byClass = (a: string, b: string) => classRank(placed.get(a)?.role ?? '') - classRank(placed.get(b)?.role ?? '');
+    for (const level of below.values()) level.sort(byClass);
     const unledCard = (): PotensiUnit => {
       const rows = unled.map((id) => personOf(id, false));
       return { kind: 'unled', leader: null, people: rows, totals: totalsOf(rows) };
@@ -272,10 +295,13 @@ export class UnitPotensiService {
       tiles: {
         aa: everybody.filter((p) => p.aa.aa).length,
         rekrut: everybody.reduce((sum, p) => sum + p.rekrut.rekrut, 0),
-        // *potensi x*: the cards' *y* summed — people, never leads (ADR-0229 §8).
+        /*
+         * P19.18-T3 AC-1, AC-2 (ADR-0271 §8): *Active Agent · potensi n* counts **people** who can become Active Agent —
+         * the cards' headers summed; *Rekrut n · potensi m* is a **sum** of the kandidat, as its header is.
+         */
         potensi: {
-          aa: units.reduce((sum, u) => sum + u.totals.aa.switchedPeople, 0),
-          rekrut: units.reduce((sum, u) => sum + u.totals.rekrut.switchedPeople, 0),
+          aa: units.reduce((sum, u) => sum + u.totals.aa.potensi, 0),
+          rekrut: units.reduce((sum, u) => sum + u.totals.rekrut.potensi, 0),
         },
       },
       units,
@@ -370,8 +396,9 @@ export class UnitPotensiService {
 
   /** Each person's leader, role and rung, read once for the whole unit — never empty: the head is always in it. */
   private async placed(ctx: RequestContext, ids: readonly string[]): Promise<Map<string, Placed>> {
+    // ADR-0267 §1: never a test account — the ids come from the roster, which leaves them out; this read says so too.
     const rows = await this.memberships.find(
-      ctx, { _id: { $in: [...ids] } }, { projection: { leaderId: 1, role: 1, orgLevelCode: 1 } },
+      ctx, withoutTestAccounts({ _id: { $in: [...ids] } }), { projection: { leaderId: 1, role: 1, orgLevelCode: 1 } },
     );
     return new Map(rows.map((row) => [String(row._id), {
       membershipId: String(row._id), leaderId: row.leaderId ?? null, role: row.role, orgLevelCode: row.orgLevelCode,
@@ -393,7 +420,8 @@ function totalsOf(rows: readonly PotensiPerson[]): PotensiTotals {
   const recruitSwitched = rows.filter((p) => p.rekrut.switched > 0);
   return {
     aa: {
-      potensi: sum((p) => p.aa.potensi),
+      // P19.18-T3 AC-1: people who can become Active Agent — *Indah 3 + Lukman 1 → 2 potensi* — never the sum.
+      potensi: rows.filter((p) => p.aa.potensi > 0).length,
       aa: rows.filter((p) => p.aa.aa).length,
       switchedPeople: salesSwitched.length,
       switchedPeopleAa: salesSwitched.filter((p) => p.aa.aa).length,

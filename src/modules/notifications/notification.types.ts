@@ -161,6 +161,25 @@ export const NotificationTemplate = {
    * total. The recipient's choices apply as to any notice.
    */
   BILLING_QUOTE_RECEIVED: 'billing.quote_received',
+  /*
+   * **A premium table ends in 15 days and nothing is scheduled after it** (ADR-0261 §2; P19.15-T4 AC-4; the P1b spec's
+   * *Notifications*), to every Super Admin — `userId` with no KPM: the platform's own inbox. *"Tabel tarif {produk}
+   * berakhir {date}. Unggah tarif baru."*, opening the company's *Proposal* tab. Sent once per table version by the daily
+   * run (`rateTables.expiryNoticeSentAt`). In-app only (ADR-0261 §4).
+   */
+  PREMIUM_TABLE_ENDING: 'premium_table.ending',
+  /*
+   * **A premium table version came into force** (ADR-0261 §3; P19.15-T4 AC-4), to the KPM Owner of every active KPM of
+   * the company: *"Tarif {produk} diperbarui mulai {date}"* — an announcement, nothing to do, opening nothing. Sent once
+   * per version by the daily run (`rateTables.activationNoticeSentAt`). In-app only (ADR-0261 §4).
+   */
+  PREMIUM_TABLE_STARTED: 'premium_table.started',
+  /*
+   * ***Pengumuman*** (P19.23-T6 AC-4; ADR-0279): the Super Admin's message to every Owner, every member, or the members of
+   * chosen companies and KPMs — one row per person, `payload.message` as written. In-app only: an announcement asks
+   * nothing urgent, and the bell is the product's authoritative channel (ADR-0010).
+   */
+  PLATFORM_ANNOUNCEMENT: 'platform.announcement',
 } as const;
 
 export type NotificationTemplateId =
@@ -210,6 +229,10 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.TEMPLATE_APPLIED]: ['in_app'],
   [NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED]: ['in_app'],
   [NotificationTemplate.BILLING_QUOTE_RECEIVED]: ['in_app', 'email'],
+  // ADR-0261 §4: the bell alone — the expiry has fifteen days of runway, and the announcement asks nothing of anybody.
+  [NotificationTemplate.PREMIUM_TABLE_ENDING]: ['in_app'],
+  [NotificationTemplate.PREMIUM_TABLE_STARTED]: ['in_app'],
+  [NotificationTemplate.PLATFORM_ANNOUNCEMENT]: ['in_app'],
 };
 
 /**

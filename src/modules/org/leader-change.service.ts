@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, isValidObjectId } from 'mongoose';
+import { canManageMember, officeStewardKind, stewardsWholeOffice } from '@/common/auth/office-steward';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -80,8 +81,12 @@ export class LeaderChangeService {
     private readonly clock: Clock,
   ) {}
 
-  /** The reader's membership; a reader in no office has nobody to move. */
+  /**
+   * The reader's membership; a reader in no office has nobody to move. **The Super Admin inside a KPM** (ADR-0268 §3) is
+   * its Owner and nobody in it: answered `''`, which the office's path never compares — only a leader's reads `me`.
+   */
   private requireMember(ctx: RequestContext): string {
+    if (ctx.isSuperAdminInKpm) return '';
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
@@ -92,8 +97,18 @@ export class LeaderChangeService {
     return ctx.membershipId;
   }
 
+  /** The Owner, an Admin, or the Super Admin inside the KPM (ADR-0268 §3): anybody in it. */
   private isOffice(ctx: RequestContext): boolean {
-    return Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    return stewardsWholeOffice(ctx);
+  }
+
+  /**
+   * **A core leader moves somebody below them as the office would** (ADR-0268 §1, amending ADR-0247 §2): anybody in
+   * their downline, at any depth, under any leader of the KPM, at once. Anybody else is the leader's rule.
+   */
+  private coreLeaderOver(ctx: RequestContext, member: MembershipDocument): boolean {
+    return officeStewardKind(ctx) === 'core_leader'
+      && canManageMember(ctx, { membershipId: String(member._id), ancestorIds: member.ancestorIds });
   }
 
   /**
@@ -121,7 +136,7 @@ export class LeaderChangeService {
         { membershipId },
       );
     }
-    if (!office && member.leaderId !== me) {
+    if (!office && !this.coreLeaderOver(ctx, member) && member.leaderId !== me) {
       throw new DomainException(
         ErrorCode.ORG_LEADER_CHANGE_NOT_PERMITTED, SAY.ORG_LEADER_CHANGE_NOT_PERMITTED.directReportsOnly,
         HttpStatus.FORBIDDEN, { membershipId },
@@ -173,8 +188,8 @@ export class LeaderChangeService {
    */
   async choices(ctx: RequestContext, membershipId: string, q?: string): Promise<LeaderMoveChoice[]> {
     const me = this.requireMember(ctx);
-    const office = this.isOffice(ctx);
-    const member = await this.subject(ctx, membershipId, me, office);
+    const member = await this.subject(ctx, membershipId, me, this.isOffice(ctx));
+    const office = this.isOffice(ctx) || this.coreLeaderOver(ctx, member);
 
     const filter: FilterQuery<MembershipDocument> = {
       $and: [
@@ -236,7 +251,7 @@ export class LeaderChangeService {
       const member = await this.subject(ctx, membershipId, me, office);
       const leader = await this.destination(ctx, member, leaderId);
       if (!leader) return null;
-      if (!office && !this.inTree(leader, me)) {
+      if (!office && !this.coreLeaderOver(ctx, member) && !this.inTree(leader, me)) {
         throw new DomainException(
           ErrorCode.ORG_LEADER_CHANGE_NOT_PERMITTED, SAY.ORG_LEADER_CHANGE_NOT_PERMITTED.outsideYourTree,
           HttpStatus.FORBIDDEN,
@@ -248,8 +263,13 @@ export class LeaderChangeService {
       return { member, leader, subtreeSize };
     });
 
-    if (moved) await this.afterMove(ctx, moved, why, office ? 'office' : 'leader');
-    return this.directory.read(ctx, membershipId);
+    if (moved) await this.afterMove(ctx, moved, why, office || this.coreLeaderOver(ctx, moved.member) ? 'office' : 'leader');
+    if (officeStewardKind(ctx) !== 'core_leader') return this.directory.read(ctx, membershipId);
+    // ADR-0268 §1: a core leader may move somebody out of their downline — answered as the roster now shows them.
+    return this.directory.read(ctx, membershipId).catch((err: unknown) => {
+      if (!(err instanceof NotFoundException)) throw err;
+      return this.directory.readListed(ctx, membershipId);
+    });
   }
 
   /** What a move leaves behind it: a request it overtook closed, the audit row, and the three notices. */
@@ -313,6 +333,12 @@ export class LeaderChangeService {
       );
     }
     const member = await this.subject(ctx, membershipId, me, false);
+    // A core leader moves anybody below them directly (ADR-0268 §1): nothing to ask for.
+    if (this.coreLeaderOver(ctx, member)) {
+      throw new DomainException(
+        ErrorCode.VALIDATION_FAILED, SAY.VALIDATION_FAILED.officeMovesDirectly, HttpStatus.BAD_REQUEST, { membershipId },
+      );
+    }
     const leader = await this.destination(ctx, member, leaderId);
     if (!leader || this.inTree(leader, me)) {
       throw new DomainException(

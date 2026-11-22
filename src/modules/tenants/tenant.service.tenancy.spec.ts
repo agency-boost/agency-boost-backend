@@ -415,6 +415,13 @@ describe('TenantService', () => {
       expect(kpm.ownerUserId).toBeNull();
     });
 
+    it('P19.23-T5 AC-3 starts every new KPM on a 30-day trial from its own today (ADR-0279 §4)', async () => {
+      const kpm = await service.createKpm(ctx({ superAdmin: true }), input());
+      const row = await mongoose.model(Kpm.name).findById(kpm._id).lean<{ subscription: Record<string, unknown> }>();
+      // 09:00 on 5 September 2026 in Jakarta: the trial's first day, and its thirtieth on 4 October.
+      expect(row?.subscription).toMatchObject({ startDate: '2026-09-05', endDate: '2026-10-04', trial: true, plan: null });
+    });
+
     it.each([
       ['a KPM Owner', ctx({ owner: true })],
       ['a KPM Admin', ctx({ admin: true })],

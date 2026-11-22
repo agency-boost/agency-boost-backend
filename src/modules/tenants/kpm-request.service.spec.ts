@@ -621,4 +621,43 @@ describe('KpmRequestService (P3.1-T2)', () => {
       await expect(service.approve(owner, 'x', { code: '0629', companyId })).rejects.toMatchObject({ code: 'PERM_DENIED' });
     });
   });
+
+  describe('P19.23-T3 Persetujuan: one press, and who decided (ADR-0277)', () => {
+    it('P19.23-T3 AC-2 Setujui with no code makes the company’s first code, 0001', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), requestId, {});
+      expect(after).toMatchObject({ status: 'approved', createdKpm: { code: '0001', branchName: 'Surabaya Branch' } });
+      expect((await offices())[0]).toMatchObject({ code: '0001', ownerUserId: requesterId });
+    });
+
+    it('P19.23-T3 AC-2 the code made is one more than the highest all-digit code the company holds, past any taken', async () => {
+      await mongoose.model(Kpm.name).insertMany([
+        { companyId, code: '0417', branchName: 'BSD', timezone: 'Asia/Jakarta', status: 'active', deletedAt: null },
+        { companyId, code: '0418', branchName: 'Serpong', timezone: 'Asia/Jakarta', status: 'active', deletedAt: null },
+        { companyId, code: 'JKT-1', branchName: 'Jakarta', timezone: 'Asia/Jakarta', status: 'active', deletedAt: null },
+      ]);
+      expect(await tenants.autoCode(companyId)).toBe('0419');
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), requestId, {});
+      expect(after.createdKpm).toMatchObject({ code: '0419' });
+    });
+
+    it('P19.23-T3 AC-2 a code typed in the dialog still wins over the one that would be made', async () => {
+      const { requestId } = await service.create(asker(requesterId), ask());
+      const [after] = await service.approve(platform(), requestId, { code: '0629' });
+      expect(after.createdKpm).toMatchObject({ code: '0629' });
+    });
+
+    it('P19.23-T3 AC-2 Sudah diputuskan names who decided, and a pending request names nobody', async () => {
+      const root = await mongoose.model(User.name).create({
+        email: 'dina@agencyboost.test', fullName: 'Dina Kusuma', passwordHash: 'x', platformRole: 'super_admin',
+      });
+      const pending = await service.create(asker(requesterId), ask());
+      expect((await service.queue(platform()))[0]).toMatchObject({ status: 'pending', decidedByName: null });
+      await service.decline(RequestContext.platform(String(root._id)), pending.requestId, { reason: 'duplikat' });
+      expect((await service.queue(platform()))[0]).toMatchObject({
+        status: 'declined', decidedByName: 'Dina Kusuma', decidedAt: NOW.toISOString(),
+      });
+    });
+  });
 });

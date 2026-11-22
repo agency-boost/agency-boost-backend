@@ -7,19 +7,12 @@ import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
+import { BILLING_LAPSE_SUSPENSION_REASON } from '@/domain/constants';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { AuditService } from '@/modules/audit/audit.service';
-import { EmailTemplateRenderer } from '@/modules/notifications/email-renderer';
-import { NotificationRepository } from '@/modules/notifications/notification.repository';
-import {
-  Notification, NotificationPreferences, NotificationPreferencesSchema, NotificationSchema,
-} from '@/modules/notifications/notification.schema';
-import { NotificationService } from '@/modules/notifications/notification.service';
-import {
-  NotificationChannelAdapter, NotificationTemplate, type NotificationChannel, type RenderedMessage, type SendRequest,
-} from '@/modules/notifications/notification.types';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
+import type { PlatformSettingsService } from '@/modules/platform-settings/platform-settings.service';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -31,40 +24,45 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { BillingService } from './billing.service';
 import { KpmBillingController } from './kpm-billing.controller';
 
-/** 10:00 on 5 November 2026 in Jakarta. */
-const NOW = new Date('2026-11-05T03:00:00Z');
-
-/** Records what a channel was asked to send. */
-class RecordingAdapter extends NotificationChannelAdapter {
-  sent: { to: SendRequest; rendered: RenderedMessage }[] = [];
-  constructor(readonly channel: NotificationChannel) {
-    super();
-  }
-  async send(to: SendRequest, rendered: RenderedMessage): Promise<void> {
-    this.sent.push({ to, rendered });
-  }
-}
+/** 10:00 on 20 November 2026 in Jakarta. */
+const NOW = new Date('2026-11-20T03:00:00Z');
+const TODAY = '2026-11-20';
+const rp = (major: number) => major * 100;
 
 /** A support session as the Owner: it acts as its member, so it holds no platform grant. */
 const SUPPORT_SESSION = new RequestContext('u-owner', 'none', OWNER.membership, 'root', null, false, true);
 
+/** A binary body, read whole: supertest leaves `application/pdf` unparsed otherwise. */
+const binary = (res: request.Response, done: (err: Error | null, body: Buffer) => void) => {
+  const chunks: Buffer[] = [];
+  res.on('data', (chunk: Buffer) => chunks.push(chunk));
+  res.on('end', () => done(null, Buffer.concat(chunks)));
+};
+
+const TENANT_ROLES: [string, RequestContext][] = [
+  ['the KPM Owner', OWNER], ['a KPM Admin', ADMIN], ['an AB', AB], ['an AAB', AAB], ['an Agent', AGENT],
+  ['a support session', SUPPORT_SESSION],
+];
+
+/** Frame 50's inputs: 11 leaders, Tahunan, Rp 375.000 — Rp 47.025.000. */
+const PACKAGE = {
+  leaders: 11, agents: null, plan: 'annual', price: { mode: 'per_leader', rateMinor: rp(375_000) }, bulk: null,
+  startDate: '2026-11-20', endDate: '2027-11-19', note: '  KPM baru, komitmen 1 tahun  ',
+};
+
 /**
- * **Billing per KPM over HTTP** (ADR-0211; P19.4-T3 AC-10; SA case 8): `GET /admin/billing/kpms` and
- * `POST /admin/tenants/:kpmId/quote` — who may call them, what they answer, who receives the quote, what is recorded.
- * `BillingService` is real over a real database, and so is the notification service, with recording channels and the
- * real email renderer.
+ * **Langganan & akses over HTTP** (P19.23-T5 AC-2, AC-4; ADR-0279 §3, §6, §7): `GET /admin/billing/kpms`,
+ * `PUT /admin/billing/kpms/:kpmId/subscription` and `POST /admin/billing/offer` — who may call them, what they answer,
+ * what is stored and what is recorded. `BillingService` is real over a real database; the platform's WhatsApp number is
+ * a stub.
  */
-describe('Billing per KPM (P19.4-T3 AC-10)', () => {
+describe('Langganan & akses per KPM (P19.23-T5)', () => {
   let app: INestApplication;
   let kpms: mongoose.Model<Kpm>;
   let companies: mongoose.Model<Company>;
   let users: mongoose.Model<User>;
   let memberships: mongoose.Model<Membership>;
   let audit: mongoose.Model<AuditLog>;
-  let rows: mongoose.Model<Notification>;
-  let notifications: NotificationService;
-  let inApp: RecordingAdapter;
-  let email: RecordingAdapter;
   let seq = 0;
 
   beforeAll(async () => {
@@ -75,21 +73,10 @@ describe('Billing per KPM (P19.4-T3 AC-10)', () => {
     users = mongoose.model(User.name, UserSchema) as never;
     memberships = mongoose.model(Membership.name, MembershipSchema) as never;
     audit = mongoose.model(AuditLog.name, AuditLogSchema) as never;
-    rows = mongoose.model(Notification.name, NotificationSchema) as never;
-    inApp = new RecordingAdapter('in_app');
-    email = new RecordingAdapter('email');
-    notifications = new NotificationService(
-      rows as never,
-      new NotificationRepository(rows as never),
-      mongoose.model(NotificationPreferences.name, NotificationPreferencesSchema) as never,
-      new EmailTemplateRenderer({ getOrThrow: () => 'https://app.agencyboost.test' } as never),
-      clock,
-      new AuditService(audit as never),
-      [inApp, email],
-    );
+    const platform = { whatsappNumber: async () => '0811 2000 300' } as unknown as PlatformSettingsService;
     const billing = new BillingService(
       kpms as never, companies as never, users as never, new MembershipRepository(memberships as never), clock,
-      new AuditService(audit as never), notifications,
+      new AuditService(audit as never), platform,
     );
 
     const moduleRef = await Test.createTestingModule({
@@ -112,21 +99,13 @@ describe('Billing per KPM (P19.4-T3 AC-10)', () => {
 
   beforeEach(async () => {
     await clearCollections();
-    inApp.sent = [];
-    email.sent = [];
     session.current = SUPER_ADMIN;
   });
 
+  const http = () => request(app.getHttpServer());
+
   async function company(name: string) {
     return companies.create({ name, slug: `${name.toLowerCase()}-${seq += 1}` });
-  }
-
-  async function owner(over: Record<string, unknown> = {}) {
-    seq += 1;
-    return users.create({
-      email: `owner${seq}@kpm.test`, fullName: `Owner ${seq}`, passwordHash: 'x', status: 'active',
-      emailVerifiedAt: NOW, ...over,
-    });
   }
 
   async function office(companyId: string, over: Record<string, unknown> = {}) {
@@ -136,242 +115,249 @@ describe('Billing per KPM (P19.4-T3 AC-10)', () => {
     });
   }
 
-  async function leader(kpmId: string, userId: string, role: 'ab' | 'aab' = 'ab') {
-    seq += 1;
-    return memberships.create({
-      kpmId, userId, agentCode: `PRU-${seq}`, agentSeq: seq, leaderCode: `LC${seq}`,
-      orgLevelId: `lvl-${role}`, orgLevelCode: role.toUpperCase(), role, status: 'active',
-    });
+  async function leaders(kpmId: string, n: number, over: Record<string, unknown> = {}) {
+    for (let i = 0; i < n; i += 1) {
+      seq += 1;
+      await memberships.create({
+        kpmId, userId: `u-${seq}`, agentCode: `PRU-${seq}`, agentSeq: seq, leaderCode: `LC${seq}`,
+        orgLevelId: 'lvl-ab', orgLevelCode: 'AB', role: i % 2 ? 'aab' : 'ab', status: 'active', ...over,
+      });
+    }
   }
 
-  const QUOTE = {
-    leaders: 13, plan: 'annual', discount: { type: 'percent', percent: '7' },
-    startDate: '2026-11-12', endDate: '2027-11-11', pic: 'Wulan Kartika', salesBy: 'Maya',
-  };
-  const send = (kpmId: string, body: unknown = QUOTE) =>
-    request(app.getHttpServer()).post(`/api/admin/tenants/${kpmId}/quote`).send(body as object);
+  const sub = (over: Record<string, unknown>) => ({
+    startDate: '2026-01-01', endDate: '2027-01-31', pricePerLeaderMinor: rp(400_000), currency: 'IDR',
+    maxLeaders: 10, keepActiveAfterEnd: false, plan: 'six_months', ...over,
+  });
 
-  describe('GET /admin/billing/kpms (ADR-0211 §3; SA case 8)', () => {
-    it('P19.4-T3 AC-10 lists each KPM: company, leaders, tier, plan, renewal and status — and nothing else', async () => {
+  describe('GET /admin/billing/kpms (AC-4)', () => {
+    it('P19.23-T5 AC-4 a row per KPM: leaders used / limit, price, per bulan, per periode, berlaku hingga, the one pill', async () => {
       const pru = await company('Prudential');
-      const a = await office(String(pru._id), {
-        subscription: {
-          startDate: '2026-05-01', endDate: '2027-04-30', pricePerLeaderMinor: 380_000_00, currency: 'IDR',
-          maxLeaders: 20, keepActiveAfterEnd: false, plan: 'annual',
-        },
+      const owner = await users.create({
+        email: 'o@kpm.test', fullName: 'Hendra Gunawan', passwordHash: 'x', status: 'active', phone: '+6281111111111',
       });
-      await office(String(pru._id), {
-        subscription: {
-          startDate: '2026-01-01', endDate: '2026-06-30', pricePerLeaderMinor: null, currency: 'IDR',
-          maxLeaders: null, keepActiveAfterEnd: true, plan: 'six_months',
-        },
+      const over = await office(String(pru._id), {
+        branchName: 'Tangerang Branch', ownerUserId: String(owner._id),
+        subscription: sub({ endDate: '2027-03-15', plan: 'annual', periodTotalMinor: rp(50_160_000) }),
       });
-      await office(String(pru._id));
-      for (let i = 0; i < 12; i += 1) await leader(String(a._id), `u-${i}`, i % 2 ? 'aab' : 'ab');
+      await leaders(String(over._id), 11);
+      // A test account at a leader rung is never counted (ADR-0267 §1).
+      await leaders(String(over._id), 1, { testAccount: true });
 
-      const res = await request(app.getHttpServer()).get('/api/admin/billing/kpms').expect(200);
-      expect(res.body).toHaveLength(3);
-      const [first, second, third] = res.body;
-      // Exactly ADR-0211 §3's columns, as counts and codes: no member is named.
-      expect(Object.keys(first).sort()).toEqual(
-        ['branch', 'code', 'company', 'kpmId', 'leadersUsed', 'plan', 'renewalDate', 'status', 'tier'],
-      );
-      expect(first).toEqual({
-        kpmId: String(a._id), code: a.code, branch: a.branchName,
+      const res = await http().get('/api/admin/billing/kpms').expect(200);
+      expect(res.body.rows).toHaveLength(1);
+      expect(res.body.rows[0]).toEqual({
+        kpmId: String(over._id), code: over.code, branch: 'Tangerang Branch',
         company: { id: String(pru._id), name: 'Prudential' },
-        leadersUsed: 12, tier: { code: 'TIER_11_20', minLeaders: 11, maxLeaders: 20 },
-        plan: 'annual', renewalDate: '2027-04-30', status: 'active',
+        kpmStatus: 'active', owner: { fullName: 'Hendra Gunawan', phone: '+6281111111111' },
+        leadersUsed: 11, maxLeaders: 10, tier: { code: 'TIER_1_10', minLeaders: 1, maxLeaders: 10 },
+        rateMinor: rp(400_000), customPrice: false, plan: 'annual', trial: false,
+        startDate: '2026-01-01', endDate: '2027-03-15',
+        perMonthMinor: rp(4_180_000), periodTotalMinor: rp(50_160_000),
+        graceEndsOn: null, attention: 'over', needsAction: true, agents: null, bulkDiscount: null, note: null,
       });
-      expect(second).toMatchObject({ plan: 'six_months', renewalDate: '2026-06-30', status: 'ended_kept_active' });
-      // No subscription: no plan, no renewal, *Belum ada langganan*; under one leader, the first tier.
-      expect(third).toMatchObject({ plan: null, renewalDate: null, status: 'none', leadersUsed: 0, tier: { code: 'TIER_1_10' } });
     });
 
-    it('P19.4-T3 AC-10 filters by company and sorts by a column, an empty renewal last', async () => {
+    it('P19.23-T5 AC-4 each state reads its pill, and Perlu tindakan counts the four that need an action', async () => {
       const pru = await company('Prudential');
-      const man = await company('Manulife');
-      await office(String(pru._id), { code: '0417', subscription: { startDate: '2026-01-01', endDate: '2027-01-31', pricePerLeaderMinor: null, currency: 'IDR', maxLeaders: null, keepActiveAfterEnd: false } });
-      await office(String(pru._id), { code: '0233', subscription: { startDate: '2026-01-01', endDate: '2026-12-31', pricePerLeaderMinor: null, currency: 'IDR', maxLeaders: null, keepActiveAfterEnd: false } });
-      await office(String(pru._id), { code: '0581' });
-      await office(String(man._id), { code: '0100' });
+      const running = await office(String(pru._id), { branchName: 'A Running', subscription: sub({}) });
+      await leaders(String(running._id), 9);
+      await office(String(pru._id), { branchName: 'B Soon', subscription: sub({ endDate: '2026-12-10' }) });
+      await office(String(pru._id), {
+        branchName: 'C Trial',
+        subscription: sub({ startDate: '2026-11-10', endDate: '2026-12-09', pricePerLeaderMinor: null, maxLeaders: null, plan: null, trial: true }),
+      });
+      await office(String(pru._id), { branchName: 'D Ended', subscription: sub({ endDate: '2026-11-15' }) });
+      await office(String(pru._id), {
+        branchName: 'E Suspended', status: 'suspended', suspendedReason: BILLING_LAPSE_SUSPENSION_REASON,
+        subscription: sub({ endDate: '2026-11-01' }),
+      });
+      await office(String(pru._id), { branchName: 'F Archived', status: 'archived', subscription: sub({}) });
+      await office(String(pru._id), { branchName: 'G None' });
 
-      const pruOnly = await request(app.getHttpServer()).get(`/api/admin/billing/kpms?companyId=${pru._id}`).expect(200);
-      expect(pruOnly.body.map((r: { code: string }) => r.code)).toEqual(['0233', '0417', '0581']);
+      const all = await http().get('/api/admin/billing/kpms').expect(200);
+      const pills = Object.fromEntries(all.body.rows.map((r: { branch: string; attention: string | null }) => [r.branch, r.attention]));
+      // An archived KPM is not listed.
+      expect(pills).toEqual({
+        'A Running': null, 'B Soon': 'ending_soon', 'C Trial': 'trial', 'D Ended': 'ended', 'E Suspended': 'suspended', 'G None': null,
+      });
+      expect(all.body.rows.find((r: { branch: string }) => r.branch === 'D Ended').graceEndsOn).toBe('2026-11-22');
+      expect(all.body.summary).toEqual({
+        // Two paying: A and B, each 10 × Rp 400.000 a month.
+        monthlyRevenueMinor: rp(8_000_000), payingKpms: 2, leadersBilled: 20, endingSoon: 2, needsAction: 3, kpms: 6,
+      });
+      expect(all.body.total).toEqual({
+        kpms: 6, leadersUsed: 9, weightedRateMinor: rp(400_000), perMonthMinor: rp(8_000_000),
+        periodTotalMinor: rp(48_000_000), needsAction: 3,
+      });
 
-      const byRenewal = await request(app.getHttpServer())
-        .get(`/api/admin/billing/kpms?companyId=${pru._id}&sort=renewal&dir=desc`).expect(200);
-      expect(byRenewal.body.map((r: { code: string }) => r.code)).toEqual(['0417', '0233', '0581']);
-
-      const byCompany = await request(app.getHttpServer()).get('/api/admin/billing/kpms?sort=company').expect(200);
-      expect(byCompany.body[0].company.name).toBe('Manulife');
+      const action = await http().get('/api/admin/billing/kpms?filter=needs_action').expect(200);
+      expect(action.body.rows.map((r: { branch: string }) => r.branch)).toEqual(['B Soon', 'C Trial', 'D Ended']);
+      // The Total row follows the filter; the summary never does.
+      expect(action.body.total).toMatchObject({ kpms: 3, needsAction: 3, perMonthMinor: rp(4_000_000) });
+      expect(action.body.summary.kpms).toBe(6);
     });
 
-    it('P19.4-T3 AC-10 refuses an unknown sort, a malformed company and any other parameter (400)', async () => {
-      for (const query of ['sort=price', 'dir=up', 'companyId=nope', 'page=2']) {
-        const res = await request(app.getHttpServer()).get(`/api/admin/billing/kpms?${query}`).expect(400);
-        expect(res.body.error.code).toBe('VALIDATION_FAILED');
-      }
+    it('P19.23-T5 AC-4 refuses a filter it does not know, and a parameter of any other name', async () => {
+      await http().get('/api/admin/billing/kpms?filter=soon').expect(400);
+      await http().get('/api/admin/billing/kpms?sort=kpm').expect(400);
     });
 
-    it.each([
-      ['the Owner', OWNER], ['an Admin', ADMIN], ['an AB', AB], ['an AAB', AAB], ['an Agent', AGENT],
-      ['a support session', SUPPORT_SESSION],
-    ])('P19.4-T3 AC-10 refuses %s the list (403)', async (_who, who) => {
-      session.current = who;
-      const res = await request(app.getHttpServer()).get('/api/admin/billing/kpms').expect(403);
-      expect(res.body.error.code).toBe('PERM_DENIED');
+    it.each(TENANT_ROLES)('P19.23-T5 AC-4 refuses %s', async (_who, ctx) => {
+      session.current = ctx;
+      await http().get('/api/admin/billing/kpms').expect(403);
     });
   });
 
-  describe('POST /admin/tenants/:kpmId/quote (ADR-0211 §5)', () => {
-    it('P19.4-T3 AC-10 prices the quote on the server and sends it to the KPM’s Owner, by email and in the app', async () => {
+  describe('PUT /admin/billing/kpms/:kpmId/subscription — Konfirmasi paket (AC-2, AC-4)', () => {
+    const confirm = (kpmId: string, body: unknown = PACKAGE) =>
+      http().put(`/api/admin/billing/kpms/${kpmId}/subscription`).send(body as object);
+
+    it('P19.23-T5 AC-2 prices the inputs on the server and writes them as the subscription; the trial ends', async () => {
       const pru = await company('Prudential');
-      const who = await owner({ fullName: 'Wulan Kartika' });
-      const kpm = await office(String(pru._id), { code: '0602', branchName: 'Bandung Dago', ownerUserId: String(who._id) });
-      const ownerMembership = await leader(String(kpm._id), String(who._id));
-
-      // Figures sent with the inputs are not trusted: the DTO refuses an unknown field, so none can be sent at all.
-      await send(String(kpm._id), { ...QUOTE, periodTotalMinor: 1 }).expect(400);
-
-      const res = await send(String(kpm._id)).expect(200);
-      // 13 leaders, annual, 7%: the 13-leader Fix of the shared fixture — Rp 331.313 a leader, exact totals.
-      expect(res.body).toEqual({
-        kpmId: String(kpm._id),
-        recipient: { fullName: 'Wulan Kartika' },
-        pricing: expect.objectContaining({
-          leaders: 13, plan: 'annual', months: 12, tierCode: 'TIER_11_20',
-          finalMinor: 331_313_00, monthlyTotalMinor: 4_307_069_00, periodTotalMinor: 51_684_828_00,
-          annualDiscountMinor: 18_750_00, manualDiscountMinor: 24_937_00,
-        }),
+      const kpm = await office(String(pru._id), {
+        subscription: sub({ startDate: '2026-11-01', endDate: '2026-11-30', pricePerLeaderMinor: null, maxLeaders: null, plan: null, trial: true }),
       });
-      await notifications.drain();
+      await leaders(String(kpm._id), 11);
 
-      // The Owner alone, on both channels.
-      const stored = await rows.find({ templateId: NotificationTemplate.BILLING_QUOTE_RECEIVED }).lean();
-      expect(stored).toHaveLength(1);
-      expect(stored[0]).toMatchObject({
-        userId: String(who._id), kpmId: String(kpm._id), membershipId: String(ownerMembership._id),
+      const res = await confirm(String(kpm._id)).expect(200);
+      expect(res.body).toMatchObject({
+        kpmId: String(kpm._id), rateMinor: rp(375_000), maxLeaders: 11, plan: 'annual', trial: false,
+        periodTotalMinor: rp(47_025_000), perMonthMinor: rp(3_918_750), endDate: '2027-11-19', attention: null,
+        note: 'KPM baru, komitmen 1 tahun',
       });
-      expect(inApp.sent.map((s) => s.to.userId)).toEqual([String(who._id)]);
-      expect(email.sent.map((s) => s.to.userId)).toEqual([String(who._id)]);
-      // The email is the printable quote's content, every figure the server's — in Indonesian, the language of an
-      // Owner who has chosen none.
-      const mail = email.sent[0].rendered;
-      expect(mail.subject).toContain('Penawaran langganan untuk KPM 0602 · Bandung Dago');
-      expect(mail.body).toContain('Wulan Kartika');
-      expect(mail.body).toContain('Paket tahunan');
-      expect(mail.body).toContain('Tingkat: 11–20 leaders');
-      expect(mail.body).toMatch(/Harga akhir \/ leader \/ bln: Rp\s?331\.313/);
-      expect(mail.body).toMatch(/Total tahunan \(semua leader\): Rp\s?51\.684\.828/);
-      expect(mail.body).toMatch(/Diskon tahunan: -Rp\s?18\.750/);
-      expect(mail.body).toContain('Diisi oleh sales: Maya');
-      expect(mail.body).toContain('12 Nov 2026');
+      const saved = await kpms.findById(kpm._id).lean();
+      expect(saved?.subscription).toEqual({
+        startDate: '2026-11-20', endDate: '2027-11-19', pricePerLeaderMinor: rp(375_000), currency: 'IDR', maxLeaders: 11,
+        keepActiveAfterEnd: false, plan: 'annual', trial: false, periodTotalMinor: rp(47_025_000), bulkDiscount: null,
+        agents: null, note: 'KPM baru, komitmen 1 tahun',
+      });
     });
 
-    it('P19.4-T3 AC-10 records billing.quote_sent in the platform’s log and the KPM’s, and stores no quote', async () => {
+    it('P19.23-T5 AC-2 the total typed (isi total) and a bulk discount are the server’s arithmetic too', async () => {
+      const kpm = await office(String((await company('Prudential'))._id));
+      const res = await confirm(String(kpm._id), {
+        ...PACKAGE, plan: 'six_months', endDate: '2027-05-19', price: { mode: 'total', totalMinor: rp(24_750_000) },
+        bulk: { type: 'amount', amountMinor: rp(750_000) },
+      }).expect(200);
+      expect(res.body).toMatchObject({
+        rateMinor: rp(375_000), periodTotalMinor: rp(24_000_000), bulkDiscount: { type: 'amount', amountMinor: rp(750_000) },
+      });
+    });
+
+    it('P19.23-T5 AC-4 audits the subscription before and after', async () => {
+      const kpm = await office(String((await company('Prudential'))._id), { subscription: sub({}) });
+      await confirm(String(kpm._id)).expect(200);
+      const rows = await audit.find({ action: 'kpm.subscription_updated' }).lean();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ targetCollection: 'kpms', targetId: String(kpm._id), actorUserId: 'root' });
+      expect((rows[0].before as { subscription: { endDate: string } }).subscription.endDate).toBe('2027-01-31');
+      expect((rows[0].after as { subscription: { endDate: string } }).subscription.endDate).toBe('2027-11-19');
+    });
+
+    it('P19.23-T5 AC-5 reactivates a KPM the daily run suspended, and audits it; a Super Admin’s own suspension stays', async () => {
       const pru = await company('Prudential');
-      const who = await owner();
-      const kpm = await office(String(pru._id), { ownerUserId: String(who._id) });
-      await send(String(kpm._id)).expect(200);
+      const lapsed = await office(String(pru._id), {
+        status: 'suspended', suspendedReason: BILLING_LAPSE_SUSPENSION_REASON, suspendedAt: NOW,
+        subscription: sub({ endDate: '2026-11-01' }),
+      });
+      const manual = await office(String(pru._id), {
+        status: 'suspended', suspendedReason: 'Tidak membayar', suspendedAt: NOW, subscription: sub({ endDate: '2026-11-01' }),
+      });
 
-      const entries = await audit.find({ action: 'billing.quote_sent' }).lean();
-      expect(entries.map((e) => e.kpmId).sort()).toEqual([null, String(kpm._id)].sort());
-      for (const entry of entries) {
-        expect(entry).toMatchObject({ actorUserId: 'root', targetCollection: 'kpms', targetId: String(kpm._id) });
-        expect(entry.after).toEqual({
-          recipientUserId: String(who._id), leaders: 13, plan: 'annual', tierCode: 'TIER_11_20',
-          rateMinor: 331_313_00, totalMinor: 51_684_828_00,
-          discount: { type: 'percent', percent: '7', perLeaderMinor: 24_937_00 },
-          startDate: '2026-11-12', endDate: '2027-11-11',
-        });
-      }
-      // No quote collection: the only rows written are the notice and the two entries.
-      const names = (await mongoose.connection.db!.listCollections().toArray()).map((c) => c.name);
-      expect(names.some((n) => /quote/i.test(n))).toBe(false);
+      const back = await confirm(String(lapsed._id)).expect(200);
+      expect(back.body).toMatchObject({ kpmStatus: 'active', attention: null });
+      expect(await kpms.findById(lapsed._id).lean()).toMatchObject({ status: 'active', suspendedReason: null, suspendedAt: null });
+      expect(await audit.countDocuments({ action: 'kpm.active', targetId: String(lapsed._id) })).toBe(1);
+
+      const kept = await confirm(String(manual._id)).expect(200);
+      expect(kept.body).toMatchObject({ kpmStatus: 'suspended', attention: 'suspended' });
     });
 
-    it('P19.4-T3 AC-10 a quote for KPM B reaches B’s Owner and never A’s', async () => {
-      const pru = await company('Prudential');
-      const ownerA = await owner();
-      const ownerB = await owner();
-      await office(String(pru._id), { ownerUserId: String(ownerA._id) });
-      const b = await office(String(pru._id), { ownerUserId: String(ownerB._id) });
-      await send(String(b._id)).expect(200);
-      await notifications.drain();
-      expect(await rows.countDocuments({ userId: String(ownerA._id) })).toBe(0);
-      expect(email.sent.map((s) => s.to.userId)).toEqual([String(ownerB._id)]);
-      // And the KPM-scoped entry is B's, so A's Owner never reads it in their log.
-      const kpmEntries = await audit.find({ action: 'billing.quote_sent', kpmId: { $ne: null } }).lean();
-      expect(kpmEntries.map((e) => e.kpmId)).toEqual([String(b._id)]);
-    });
-
-    it('P19.4-T3 AC-10 a KPM with no Owner is 409 BILLING_QUOTE_NO_OWNER, and nothing is sent or recorded', async () => {
-      const pru = await company('Prudential');
-      const kpm = await office(String(pru._id));
-      const res = await send(String(kpm._id)).expect(409);
-      expect(res.body.error).toMatchObject({ code: 'BILLING_QUOTE_NO_OWNER', details: { kpmId: String(kpm._id), reason: 'no_owner' } });
-      expect(res.body.error.message).toMatch(/Print it or save it as a PDF/);
-      await notifications.drain();
-      expect(await rows.countDocuments()).toBe(0);
-      expect(await audit.countDocuments({ action: 'billing.quote_sent' })).toBe(0);
-    });
-
-    it('P19.4-T3 AC-10 an Owner whose address is not verified is 409 too, and is sent nothing', async () => {
-      const pru = await company('Prudential');
-      const who = await owner({ emailVerifiedAt: null });
-      const kpm = await office(String(pru._id), { ownerUserId: String(who._id) });
-      const res = await send(String(kpm._id)).expect(409);
-      expect(res.body.error).toMatchObject({ code: 'BILLING_QUOTE_NO_OWNER', details: { reason: 'unverified' } });
-      await notifications.drain();
-      expect(email.sent).toHaveLength(0);
-      expect(await rows.countDocuments()).toBe(0);
-    });
-
-    it('P19.4-T3 AC-10 a deactivated Owner is no Owner', async () => {
-      const pru = await company('Prudential');
-      const who = await owner({ status: 'deactivated' });
-      const kpm = await office(String(pru._id), { ownerUserId: String(who._id) });
-      const res = await send(String(kpm._id)).expect(409);
-      expect(res.body.error.details.reason).toBe('no_owner');
-    });
-
-    it('P19.4-T3 AC-10 an unknown or malformed KPM is 404', async () => {
-      await send(new mongoose.Types.ObjectId().toString()).expect(404);
-      await send('not-an-id').expect(404);
+    it('P19.23-T5 AC-5 a package already past its own grace reactivates nothing', async () => {
+      const kpm = await office(String((await company('Prudential'))._id), {
+        status: 'suspended', suspendedReason: BILLING_LAPSE_SUSPENSION_REASON, subscription: sub({ endDate: '2026-11-01' }),
+      });
+      await confirm(String(kpm._id), { ...PACKAGE, startDate: '2026-05-01', endDate: '2026-11-01' }).expect(200);
+      expect((await kpms.findById(kpm._id).lean())?.status).toBe('suspended');
     });
 
     it.each([
       ['leaders below 1', { leaders: 0 }, 'leaders'],
-      ['a plan it does not know', { plan: 'monthly' }, 'plan'],
-      ['a percent above 100', { discount: { type: 'percent', percent: '100.5' } }, 'discount.percent'],
-      ['an amount above the rate', { plan: 'six_months', discount: { type: 'flat', amountMinor: 40_000_100 } }, 'discount.amountMinor'],
+      ['a price in a fraction of a rupiah', { price: { mode: 'per_leader', rateMinor: 37_500_050 } }, 'price.rateMinor'],
+      ['a price over the ceiling', { price: { mode: 'per_leader', rateMinor: rp(100_000_001) } }, 'price.rateMinor'],
+      ['a bulk percent over 100', { bulk: { type: 'percent', percent: 101 } }, 'bulk.percent'],
+      ['a bulk amount over the total', { bulk: { type: 'amount', amountMinor: rp(50_000_000) } }, 'bulk.amountMinor'],
       ['a date that is no day', { startDate: '2026-02-30' }, 'startDate'],
-      ['an end before the start', { endDate: '2026-11-01' }, 'endDate'],
-      ['an empty PIC', { pic: '   ' }, 'pic'],
-    ])('P19.4-T3 AC-10 refuses %s (400), sending nothing', async (_what, over, fieldName) => {
-      const pru = await company('Prudential');
-      const who = await owner();
-      const kpm = await office(String(pru._id), { ownerUserId: String(who._id) });
-      const res = await send(String(kpm._id), { ...QUOTE, ...over }).expect(400);
+      ['an end before the start', { endDate: '2026-11-19' }, 'endDate'],
+    ])('P19.23-T5 AC-2 refuses %s, naming the field, and writes nothing', async (_what, change, field) => {
+      const kpm = await office(String((await company('Prudential'))._id));
+      const res = await confirm(String(kpm._id), { ...PACKAGE, ...change }).expect(400);
       expect(res.body.error.code).toBe('VALIDATION_FAILED');
-      expect(JSON.stringify(res.body.error.details)).toContain(fieldName.split('.')[0]);
-      await notifications.drain();
-      expect(await rows.countDocuments()).toBe(0);
+      expect(res.body.error.details?.field ?? JSON.stringify(res.body.error)).toContain(field.split('.')[0]);
+      expect((await kpms.findById(kpm._id).lean())?.subscription ?? null).toBeNull();
+      expect(await audit.countDocuments({})).toBe(0);
     });
 
-    it.each([
-      ['the Owner of the KPM', OWNER], ['an Admin', ADMIN], ['an AB', AB], ['an AAB', AAB], ['an Agent', AGENT],
-      ['a support session as the Owner', SUPPORT_SESSION],
-    ])('P19.4-T3 AC-10 refuses %s (403), sending nothing', async (_who, who) => {
+    it('P19.23-T5 AC-2 refuses a plan it does not know and a note over 500 characters', async () => {
+      const kpm = await office(String((await company('Prudential'))._id));
+      await confirm(String(kpm._id), { ...PACKAGE, plan: 'monthly' }).expect(400);
+      await confirm(String(kpm._id), { ...PACKAGE, note: 'x'.repeat(501) }).expect(400);
+    });
+
+    it('P19.23-T5 AC-4 an unknown, malformed, archived or deleted KPM is 404', async () => {
       const pru = await company('Prudential');
-      const ownerUser = await owner();
-      const kpm = await office(String(pru._id), { ownerUserId: String(ownerUser._id) });
-      session.current = who;
-      const res = await send(String(kpm._id)).expect(403);
-      expect(res.body.error.code).toBe('PERM_DENIED');
-      await notifications.drain();
-      expect(await rows.countDocuments()).toBe(0);
-      expect(await audit.countDocuments({ action: 'billing.quote_sent' })).toBe(0);
+      const archived = await office(String(pru._id), { status: 'archived' });
+      const deleted = await office(String(pru._id), { deletedAt: NOW });
+      await confirm('66f0000000000000000000ff').expect(404);
+      await confirm('not-an-id').expect(404);
+      await confirm(String(archived._id)).expect(404);
+      await confirm(String(deleted._id)).expect(404);
+    });
+
+    it('P19.23-T5 AC-4 writes the KPM named and no other', async () => {
+      const pru = await company('Prudential');
+      const a = await office(String(pru._id), { subscription: sub({}) });
+      const b = await office(String(pru._id), { subscription: sub({ endDate: '2027-02-28' }) });
+      await confirm(String(a._id)).expect(200);
+      expect((await kpms.findById(b._id).lean())?.subscription?.endDate).toBe('2027-02-28');
+    });
+
+    it.each(TENANT_ROLES)('P19.23-T5 AC-4 refuses %s, and writes nothing', async (_who, ctx) => {
+      const kpm = await office(String((await company('Prudential'))._id));
+      session.current = ctx;
+      await confirm(String(kpm._id)).expect(403);
+      expect((await kpms.findById(kpm._id).lean())?.subscription ?? null).toBeNull();
+    });
+  });
+
+  describe('POST /admin/billing/offer — Buat PDF (AC-2)', () => {
+    const offer = (body: unknown) => http().post('/api/admin/billing/offer').send(body as object).buffer(true).parse(binary);
+
+    it('P19.23-T5 AC-2 answers the offer as a PDF, named for the KPM picked', async () => {
+      const kpm = await office(String((await company('Prudential'))._id), { branchName: 'BSD City Branch' });
+      const res = await offer({ ...PACKAGE, kpmId: String(kpm._id) }).expect(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toContain(`Penawaran-BSD-City-Branch-${TODAY}.pdf`);
+      expect((res.body as Buffer).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      // Nothing is stored or audited.
+      expect(await audit.countDocuments({})).toBe(0);
+    });
+
+    it('P19.23-T5 AC-2 for a new KPM, by the name typed', async () => {
+      const res = await offer({ ...PACKAGE, kpmName: 'Serpong Branch' }).expect(200);
+      expect(res.headers['content-disposition']).toContain('Penawaran-Serpong-Branch');
+    });
+
+    it('P19.23-T5 AC-2 refuses an offer for nobody, and a KPM that is not there', async () => {
+      await http().post('/api/admin/billing/offer').send({ ...PACKAGE }).expect(400);
+      await http().post('/api/admin/billing/offer').send({ ...PACKAGE, kpmId: '66f0000000000000000000ff' }).expect(404);
+      await http().post('/api/admin/billing/offer').send({ ...PACKAGE, kpmName: 'x', leaders: 0 }).expect(400);
+    });
+
+    it.each(TENANT_ROLES)('P19.23-T5 AC-2 refuses %s', async (_who, ctx) => {
+      session.current = ctx;
+      await http().post('/api/admin/billing/offer').send({ ...PACKAGE, kpmName: 'Serpong Branch' }).expect(403);
     });
   });
 });

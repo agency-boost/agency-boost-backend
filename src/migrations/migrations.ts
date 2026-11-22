@@ -56,6 +56,16 @@ import { up as advancedAnalyticsV1 } from './0057-advanced-analytics-v1';
 import { up as uploadValuesByKode } from './0058-upload-values-by-kode';
 import { up as trainingTitleSplit } from './0059-training-title-split';
 import { up as activityShortLabels } from './0060-activity-short-labels';
+import { up as groupLeaderIsAMember } from './0061-group-leader-is-a-member';
+import { up as subgroupTargetsByYear } from './0062-subgroup-targets-by-year';
+import { up as proposalItemsCarryCaraBayar } from './0063-proposal-items-carry-cara-bayar';
+import { up as newHireByCompanyYear } from './0064-new-hire-by-company-year';
+import { up as testAccounts } from './0065-test-accounts';
+import { up as membershipRegisteredBy } from './0066-membership-registered-by';
+import { up as successRatesWithoutFollowUps } from './0067-success-rates-without-follow-ups';
+import { up as informalGroupsOnAbs } from './0068-informal-groups-on-abs';
+import { up as abGroupTargetsByMonth } from './0069-ab-group-targets-by-month';
+import { up as forumOneAgendaAndCarriedItems } from './0076-forum-one-agenda-and-carried-items';
 
 /*
  * The list on its own (P18.4-T3), so a spec can run every migration against an empty database without
@@ -167,4 +177,35 @@ export const MIGRATIONS: ReadonlyArray<[string, (db: mongoose.mongo.Db, now: Dat
   // singkat* by code where they hold none — the working copy and the newest snapshot, no version moved, an office's own
   // kept. Templates are not written: a type without the key gives the seed's words by code (`shortLabelOf`).
   ['0060-activity-short-labels', activityShortLabels],
+  // P19.13-T3 (ADR-0253 §2): a group's owner is its ★ group leader, a leader who is a member of it — an active leader
+  // owner tagged into the group, anybody else cleared; a leader owning several keeps the first by name. Audited.
+  ['0061-group-leader-is-a-member', groupLeaderIsAMember],
+  // P19.13-T3 (ADR-0253 §4): sub-group targets per leader per year — each row given the current year on its office's
+  // clock; the one-per-leader-and-year index built, the one-per-head index dropped.
+  ['0062-subgroup-targets-by-year', subgroupTargetsByYear],
+  // P19.14-T1, T2 (ADR-0254 §1, ADR-0255 §1, §2): each proposal's `channel` and `payFrequency` moved onto its items, a
+  // Syariah proposal's items syariah under the name they showed; the client given `ageSetOn` and empty `details`; the
+  // removed values kept as `migrated0063` for `down`. No lead is touched.
+  ['0063-proposal-items-carry-cara-bayar', proposalItemsCarryCaraBayar],
+  // P19.16-T2 (ADR-0264): a new hire who joined the company in an earlier year than the office is an existing agent —
+  // downward only, the value kept as `migrated0064` for `down`; no company month, no change.
+  ['0064-new-hire-by-company-year', newHireByCompanyYear],
+  // P19.17-T1 (ADR-0267 §1; OD-370): every account written before the flag decided once by its name — *FMT …* and *TES
+  // IMPOR …* test accounts, the rest not — and each flagged account's memberships given its flag.
+  ['0065-test-accounts', testAccounts],
+  // P19.17-T1 (ADR-0267 §3): who registered each person written before the field — the invitation's sender, else the
+  // leader they were placed under, else nobody.
+  ['0066-membership-registered-by', membershipRegisteredBy],
+  // P19.17-T1 (ADR-0267 §6; part D): the success rates count no follow-up — every office, newest snapshot and template
+  // still on the standard formula moved, its standard with it; an Owner's own formula kept.
+  ['0067-success-rates-without-follow-ups', successRatesWithoutFollowUps],
+  // P19.17-T4 (ADR-0270 §1, §2): only an AB carries a group, one live group or none; an AAB's and an agent's tags removed;
+  // a group's ★ its one Group Leader while an active AB in it, anybody else dropped. Kept as `migrated0068`; audited.
+  ['0068-informal-groups-on-abs', informalGroupsOnAbs],
+  // P19.17-T4 (ADR-0270 §4; OD-387): an active AB's yearly sub-group targets carried into the months of the year — Active
+  // Agent as it was, Rekrut spread to add up; a saved month kept; an AAB's dropped; the yearly rows left in place.
+  ['0069-ab-group-targets-by-month', abGroupTargetsByMonth],
+  // P19.22-T8 (ADR-0276): the forum's three agenda sections one checklist, its rows the new action items — text, state
+  // mapped, a typed PIC matched to one member or none (OD-418), each its own lineage; the old minutes kept; audited.
+  ['0076-forum-one-agenda-and-carried-items', forumOneAgendaAndCarriedItems],
 ];

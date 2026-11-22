@@ -1,4 +1,4 @@
-import { formatDateTime, formatMonth } from '@/common/format/format';
+import { formatDate, formatDateTime, formatMonth } from '@/common/format/format';
 import { readerOf, type Reader } from '@/common/i18n/reader';
 import { render, type Sentence } from '@/common/i18n/sentence';
 import { quoteNotice } from './billing-quote.messages';
@@ -252,6 +252,27 @@ export function describeNotification(
         detail: say(SAY.analyticsFollows({ name: name(payload, 'templateName', say(SAY.aTemplate)), version })),
       };
     }
+    // P19.15-T4 (ADR-0261 §2): to every Super Admin, the table's last day in the reader's figures.
+    case NotificationTemplate.PREMIUM_TABLE_ENDING:
+      return {
+        title: say(SAY.premiumTableEnding({
+          product: name(payload, 'productName', say(SAY.aProduct)), date: dayOf(payload.effectiveTo, reader),
+        })),
+        detail: say(SAY.premiumTableEndingDetail({
+          company: name(payload, 'companyName', ''), version: typeof payload.version === 'number' ? payload.version : 0,
+        })),
+      };
+    // ADR-0261 §3: to the KPM Owners of the company, the day the version came into force.
+    case NotificationTemplate.PREMIUM_TABLE_STARTED:
+      return {
+        title: say(SAY.premiumTableStarted({
+          product: name(payload, 'productName', say(SAY.aProduct)), date: dayOf(payload.effectiveFrom, reader),
+        })),
+        detail: say(SAY.premiumTableStartedDetail({ company: name(payload, 'companyName', '') })),
+      };
+    // P19.23-T6 AC-4 (ADR-0279): the Super Admin's announcement, its words as written.
+    case NotificationTemplate.PLATFORM_ANNOUNCEMENT:
+      return { title: say(SAY.platformAnnouncement), detail: name(payload, 'message', '') || null };
     case NotificationTemplate.EVENT_REMINDER:
       return {
         title: say(SAY.eventComingUp({ title: name(payload, 'title', say(SAY.anEvent)) })),
@@ -262,6 +283,11 @@ export function describeNotification(
       // reached — so this is genuinely for a template nobody has written copy for yet.
       return { title: say(SAY.somethingHappened), detail: null };
   }
+}
+
+/** **An office day a notice carries** (`YYYY-MM-DD`), in the reader's figures — *30 Nov 2026* — or as stored. */
+function dayOf(value: unknown, reader: Reader): string {
+  return typeof value === 'string' ? formatDate(value, reader.figures) : '';
 }
 
 /** **A transfer request's decision** (ADR-0170 §4), in the words of whoever it is addressed to. */
@@ -381,6 +407,10 @@ export function inboxAddress(templateId: string, payload: Record<string, unknown
     // P19.5-T1 AC-17: the Data upload, whose banner names the template and its version.
     case NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED:
       return '/kpm/data-upload';
+    // P19.15-T4 (ADR-0261 §2): the company's *Proposal* tab, where the new rates are uploaded. The announcement opens
+    // nothing: it asks nothing of anybody (`null`, below).
+    case NotificationTemplate.PREMIUM_TABLE_ENDING:
+      return wellFormed(payload.companyId, OBJECT_ID) ? `/admin/companies/${payload.companyId}/proposal` : '/admin/companies';
     case NotificationTemplate.TEMPLATE_APPLIED: {
       const kinds = Array.isArray(payload.kinds) ? (payload.kinds as unknown[]).map(String) : [];
       const first = kinds.includes('training_taxonomy') ? 'training_taxonomy' : kinds.find((k) => SETTING_ROUTE[k]);

@@ -33,7 +33,6 @@ import { LeaderCodeService } from '@/modules/org/leader-code.service';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { BrandingReader } from '@/modules/branding/branding-reader';
 import { AuthService } from './auth.service';
-import { AccountLinksService } from './account-links.service';
 import { RateLimiter } from './rate-limiter';
 import {
   ChangeEmailDto, ChangePasswordDto, ForgotPasswordDto, LoginDto, RefreshDto, RegisterDto,
@@ -151,11 +150,6 @@ export class AuthController {
      * a spec that builds this controller for something else reads no photo, `null`, and the initials are drawn.
      */
     @Optional() @Inject(AvatarLinks) private readonly avatarLinks: AvatarLinks | null = null,
-    /*
-     * **The linked login** (UI-169 item 5; ADR-0199 §3): `GET /auth/me`'s `linkedLogin`. Optional, as the readers above
-     * are: a harness that builds this controller for something else answers `null`, no link.
-     */
-    @Optional() @Inject(AccountLinksService) private readonly accountLinks: AccountLinksService | null = null,
     /*
      * **The KPM's branding** (P19.6-T1 AC-12; ADR-0218 §8): `GET /auth/me`'s `branding`, so the colours arrive with the
      * session and no second call is made. Optional, as the readers above: a harness without it answers `null`.
@@ -741,17 +735,19 @@ export class AuthController {
       mustChangePassword: ctx.mustChangePassword,
       permissions,
       /*
+       * **The insurers their *Kelola data produk* ticks** (ADR-0260 §5; P19.15-T4 AC-2): non-empty only for an active KPM
+       * Owner or Admin holding a live grant — the office menu's *Data produk*, in a support session too, where the page
+       * only looks. Resolved with the context on this request, so a grant removed leaves the menu at the next session
+       * read; every route refuses on its own regardless.
+       */
+      productDataCompanyIds: [...ctx.productDataCompanyIds],
+      /*
        * The *New agent* section (P13-T7 AC-5): the reader's own activation — `null` when they have none,
        * `open` false once it is complete or past its six months — and whether they reach anybody's open
        * one. Read once, here, so no page reads them again; every route still refuses on its own.
        */
       activation: nav.activation,
       newHires: nav.newHires,
-      /*
-       * **The caller's other login** (UI-169 item 5; ADR-0199 §3): its address, its name and its views, for the account
-       * menu's switcher — `null` with no link, and always in a support session (§7).
-       */
-      linkedLogin: this.accountLinks ? await this.accountLinks.linkedLoginFor(ctx) : null,
       /*
        * **What the session's KPM shows** (P19.6-T1 AC-12; ADR-0218 §8): its version, its palette (`null`: AgencyBoost's
        * colours), the logo's size, which images and poses it has, and a lesson's colours (ADR-0217 §5) — for the KPM the

@@ -61,7 +61,8 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     wired = configModule(clock.now());
     await Promise.all(mongoose.modelNames().map((name) => mongoose.model(name).init()));
     agus = await as('agus@kpm0417.test');
-    view = await wired.unitDashboard.read(agus);
+    // *Bulan ini*: these cases pin the month's figures (the default is *Tahun ini* since P19.18-T1 AC-1).
+    view = await wired.unitDashboard.read(agus, { period: 'month' });
   }, RUN_MS);
   afterAll(stopMongo);
 
@@ -92,17 +93,17 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(ratios.ratios.find((r) => r.code === 'LEADS_PER_ACTIVITY')).toMatchObject({ benchmark: 1, status: 'success' });
   });
 
-  it('P15-T1 AC-12 Agus reads the roster the phase file draws: Your Unit · 4, then Arief’s, Dewi’s and Sari’s units', () => {
+  it('P19.18-T1 AC-6 Agus reads his roster: Direct Unit — him, Dewi (an AAB with no team), his agents — then Arief’s and Sari’s units', () => {
     // P18.8-T6 adds Lukman, Agus's own new hire (`activation-3m-fixture.ts`); Tari, Arief's, was marked left — removed.
-    expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dimas', 'Indah', 'Lukman', 'Siti']);
+    expect(view.yourUnit.rows.map((r) => first(r.name))).toEqual(['Agus', 'Dewi', 'Dimas', 'Indah', 'Lukman', 'Siti']);
     expect(view.units.map((u) => [first(u.head.name), ...rowsOf(u).slice(1).map((r) => first(r.name))]))
-      .toEqual([['Arief', 'Novi', 'Wahyu'], ['Dewi'], ['Sari', 'Budi', 'Rina', 'Yanti']]);
-    expect(view.tiles.team).toMatchObject({ total: 13, direct: 5, units: 3, underUnits: 5 });
+      .toEqual([['Arief', 'Novi', 'Wahyu'], ['Sari', 'Budi', 'Rina', 'Yanti']]);
+    expect(view.tiles.team).toMatchObject({ total: 13, direct: 6, units: 2, underUnits: 5 });
   });
 
   it('P15-T1 AC-12 every status shows, as the coaching fixture plans it', async () => {
     const roster = await wired.coachingRoster.read(agus);
-    const coached = [...roster.directAgents, ...roster.units.flatMap((u) => [u.head, ...u.members])];
+    const coached = roster.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]);
     for (const r of everyRow(view).filter((x) => !x.isReader)) {
       const key = first(r.name).toLowerCase() as keyof typeof ROSTER_PLAN;
       expect({ who: key, status: r.status, last: r.lastOneOnOne })
@@ -117,7 +118,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect({ month: row('Yanti').production.monthly.valueMinor, goal: row('Yanti').goal.actualMinor }).toEqual({ month: null, goal: null });
     // P19.5-T2 (R4): Sari corrects Budi's month, not a year to date — so his month holds her figure.
     expect(row('Budi').production.monthly.valueMinor).toBe(UNIT_DASHBOARD_BUDI_THIS_MONTH);
-    const sari = view.units[2];
+    const sari = view.units[1];
     // *Changed 2026-10-27 (P18.8-T5, ADR-0172 §2):* 2 until then. *Changed P19.5-T2:* Budi's month is held now, so none
     // is missing; Yanti, a new hire with no first sale yet, is left out as one — counted in `newHires`.
     expect(sari.total.goal.missing).toBe(0);
@@ -152,19 +153,17 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(view.tiles.team.newHires).toBeGreaterThanOrEqual(1);
   });
 
-  it('UI-013 Yanti, on pace, is in Active Agent’s of — manpower — and never its count, nor the target', () => {
+  it('UI-013 Yanti, on pace, is in her unit’s On pace’s of — manpower — and never its count, nor the target', () => {
     expect(row('Yanti').pacingToMaa).toBe(true);
-    const sari = view.units[2];
+    const sari = view.units[1];
     const selling = rowsOf(sari).filter((r) => !r.newHireBeforeFirstSale);
     expect(selling.map((r) => first(r.name))).toEqual(['Sari', 'Budi', 'Rina']);
     expect(sari.total.potentialActive).toEqual({ count: selling.filter((r) => r.pacingToMaa === true).length, of: 4 });
     const all = everyRow(view).filter((r) => !r.newHireBeforeFirstSale);
-    expect(view.tiles.potentialActive).toMatchObject({ count: all.filter((r) => r.pacingToMaa === true).length, of: everyRow(view).length });
-    // The same number as *Your team*, and the Unit / AAB split adds up to it.
-    expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
-    const { unit, aab } = view.tiles.potentialActive;
-    expect([unit.of, aab.of]).toEqual([view.yourUnit.rows.length, view.tiles.team.total - view.yourUnit.rows.length]);
-    expect(unit.count + aab.count).toBe(view.tiles.potentialActive.count);
+    // P19.18-T1 AC-3 (ADR-0267 §2): the tile is *Active Agent* from the month's upload — the people behind it on the roster.
+    const ids = new Set(everyRow(view).map((r) => r.membershipId));
+    expect(view.tiles.activeAgent.people.every((p) => ids.has(p.membershipId))).toBe(true);
+    if (view.tiles.activeAgent.held) expect(view.tiles.activeAgent.count).toBe(view.tiles.activeAgent.people.length);
     // Her target is out of the group's production: the paired target is the selling rows' with production held.
     const held = all.filter((r) => r.goal.actualMinor !== null);
     expect(view.tiles.directGroupProduction.targetMinor).toBe(held.reduce((s, r) => s + (r.goal.targetMinor ?? 0), 0));
@@ -197,8 +196,10 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(summary.yearly.source).toEqual(row('Budi', year).goal.source);
   });
 
-  it('P15-T1 AC-12 Potential Recruits: Indah’s new candidate in Agus’s unit, Budi’s in Sari’s', async () => {
-    expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1, abs: 0 });
+  it('P15-T1 AC-12 Indah’s new candidate in Agus’s unit, Budi’s in Sari’s — candidates, never Recruitment (P19.18-T1 AC-3)', async () => {
+    // Recruitment counts new hires who joined this month credited to the roster: nobody of Agus's (the whole office's two
+    // joined under Maya, `whole-office-fixture.ts`).
+    expect(view.tiles.recruitment.people.every((p) => p.recruitedBy?.membershipId !== agus.membershipId)).toBe(true);
     expect(row('Indah').leadsCounts.recruitNominated).toBe(1);
     expect(row('Budi').leadsCounts.recruitNominated).toBe(1);
     expect(await col('leads').findOne({ _id: new mongoose.Types.ObjectId(unitDashboardLeadId(agus.kpmId!)) }))
@@ -257,8 +258,8 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     const table = await wired.production.readMonth(owner, MONTH);
     for (const email of ['agus@kpm0417.test', 'sari@kpm0417.test', 'arief@kpm0417.test', 'owner@kpm0417.test']) {
       const reader = await as(email, { owner: email.startsWith('owner') });
-      const [month, roster] = await Promise.all([wired.unitDashboard.read(reader), wired.coachingRoster.read(reader)]);
-      const coached = [...roster.directAgents, ...roster.units.flatMap((u) => [u.head, ...u.members])];
+      const [month, roster] = await Promise.all([wired.unitDashboard.read(reader, { period: 'month' }), wired.coachingRoster.read(reader)]);
+      const coached = roster.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]);
       for (const r of everyRow(month)) {
         const summary = await wired.summary.read(owner, r.membershipId === owner.membershipId ? undefined : r.membershipId);
         /*
@@ -349,7 +350,7 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
   it('P19.12-T6 AC-2 Wilson opens on Semua downline; Grup informal brings Agus’s group and names the ABs not in it', async () => {
     const wilson = await as('owner@kpm0417.test', { owner: true });
     const office = await wired.unitDashboard.read(wilson);
-    expect(office).toMatchObject({ scope: 'downline', scopes: { offered: ['direct', 'informal', 'downline'], default: 'downline' } });
+    expect(office).toMatchObject({ scope: 'downline', scopes: { offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' } });
     expect(office.tiles.team.direct).toBe(1);
     expect(office.tiles.team.ab).toBe(office.tiles.team.total - 1);
     const informal = await wired.unitDashboard.read(wilson, { scope: 'informal' });
@@ -359,10 +360,16 @@ describe('Phase 15 the Unit Dashboard seed — a run at 10:00 on 8 October 2026 
     expect(everyRow(informal).map((r) => first(r.name))).toEqual(expect.arrayContaining(['Wilson', 'Agus', 'Sari', 'Arief']));
     expect(everyRow(informal).length).toBeLessThan(everyRow(office).length);
     expect(await wired.unitDashboard.read(wilson, { scope: 'direct' })).toMatchObject({ scope: 'direct', empty: true });
+    // P19.18-T1 AC-3 (`whole-office-fixture.ts`): this month's two new hires under Maya, registered by her.
+    expect(office.tiles.recruitment.count).toBe(2);
+    expect(office.tiles.recruitment.people.map((p) => [first(p.name), first(p.recruitedBy?.name ?? '')]))
+      .toEqual([['Zahra', 'Maya'], ['Hilmy', 'Maya']]);
+    expect(office.personCard).toBe(true);
   });
 
-  it('P19.12-T6 AC-2 Agus, no AB below him, is offered Grup langsung alone — the picker hidden — and reads as before', async () => {
-    expect(view).toMatchObject({ scope: 'direct', scopes: { offered: ['direct'], default: 'direct' }, informal: null, unled: null });
+  it('P19.18-T1 AC-2 Agus, no AB below him and Arief’s and Sari’s teams under him, opens on Grup langsung beside Direct Unit', async () => {
+    expect(view).toMatchObject({ scope: 'direct', scopes: { offered: ['unit', 'direct'], default: 'direct' }, informal: null, unled: null });
+    expect(view.personCard).toBe(false);
     expect(view.tiles.team.ab).toBe(0);
   });
 

@@ -61,6 +61,28 @@ describe('the readings the Owner’s reporting reads through', () => {
     expect([...roster.names.keys()].sort()).toEqual(roster.active.map((p) => p.membershipId).sort());
   });
 
+  it('OD-24 the office’s people with no zone given read the office’s own; a row with no system stamp keeps its join date', async () => {
+    const ctx = office.as('OWNER');
+    const db = mongoose.connection.db!;
+    const dewi = { _id: new mongoose.Types.ObjectId(office.id.DEWI) };
+    const kpm = { _id: new mongoose.Types.ObjectId(KPM_A) };
+    // Dewi's row predates the system's join stamp, and carries the join date the office keeps.
+    const before = (await db.collection('memberships').findOne(dewi))!;
+    await db.collection('memberships').updateOne(dewi, { $unset: { joinedAt: '' }, $set: { joinDate: '2024-03-01' } });
+    try {
+      const of = (people: Awaited<ReturnType<typeof wired.officePeople.everyone>>) => people.find((p) => p.membershipId === office.id.DEWI)!;
+      // The zone read from the office's row: the day starts at 00:00 in Jakarta, 17:00 UTC the day before.
+      const jakarta = of(await wired.officePeople.everyone(ctx, null));
+      expect(jakarta).toMatchObject({ joinedAt: null, joinDate: '2024-03-01', joinDateStart: new Date('2024-02-29T17:00:00Z') });
+      // An office row naming no zone reads the platform's — Jakarta, ADR-0016 — and never the server's.
+      await db.collection('kpms').updateOne(kpm, { $unset: { timezone: '' } });
+      expect(of(await wired.officePeople.everyone(ctx, null)).joinDateStart).toEqual(new Date('2024-02-29T17:00:00Z'));
+    } finally {
+      await db.collection('kpms').updateOne(kpm, { $set: { timezone: 'Asia/Jakarta' } });
+      await db.collection('memberships').updateOne(dewi, { $set: { joinedAt: before.joinedAt ?? null, joinDate: before.joinDate ?? null } });
+    }
+  });
+
   it('P18-T2 AC-3 a lead with no registration date stood from its creation; a month’s cells read as the table reads them', async () => {
     const ctx = office.as('OWNER');
     await mongoose.connection.db!.collection('leads').insertOne({
@@ -93,11 +115,10 @@ describe('the readings the Owner’s reporting reads through', () => {
   });
 
   /*
-   * *Changed 2026-11-05 (P19.3-T2; ADR-0200 §3):* the month's logging and its comparison with last month are gone, so the
-   * Overview makes **one** engagement read, bounded from the week's first day — 8 to 14 September — where it made two
-   * from last month's first.
+   * *Changed 2026-11-20 (P19.19; ADR-0272 §2):* the Overview's second version reads *Pakai* over the last 30 days through
+   * `usageOf`, whose latest-day read runs to today and whose days are the power-user window's — no not-logged list.
    */
-  it('P18-T1 AC-4 item 5, P19.3-T2 the Overview bounds its one engagement read from the week’s first day; the not-logged list reads all history', async () => {
+  it('P19.19-T1 AC-2 the Overview reads the latest day logged up to today, and the last 30 days’ days once', async () => {
     const ctx = office.as('OWNER');
     const matches: Record<string, unknown>[] = [];
     mongoose.set('debug', (collection: string, method: string, pipeline: unknown) => {
@@ -105,10 +126,7 @@ describe('the readings the Owner’s reporting reads through', () => {
     });
     try {
       await wired.kpmOverview.read(ctx);
-      expect(matches.map((m) => m.localDate)).toEqual([{ $gte: '2026-09-08' }]);
-      matches.length = 0;
-      await wired.kpmOverview.notLogged(ctx);
-      expect(matches.map((m) => m.localDate)).toEqual([undefined]);
+      expect(matches.map((m) => m.localDate)).toEqual([{ $lte: '2026-09-14' }]);
     } finally {
       mongoose.set('debug', false);
     }

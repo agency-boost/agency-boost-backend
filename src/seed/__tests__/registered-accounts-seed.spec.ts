@@ -35,8 +35,8 @@ describe('P19.12-T2 the registered-accounts seed', () => {
     reads = new PlatformReads(
       model(Kpm.name, KpmSchema) as never, model(Company.name, CompanySchema) as never, model(User.name, UserSchema) as never,
       new MembershipRepository(model(Membership.name, MembershipSchema) as never),
-      null as never, null as never, null as never, null as never, null as never, null as never, null as never,
-      null as never, null as never, new AuditService(model(AuditLog.name, AuditLogSchema) as never), clock,
+      null as never, null as never, null as never, null as never,
+      new AuditService(model(AuditLog.name, AuditLogSchema) as never), clock,
     );
   }, RUN_MS);
   afterAll(stopMongo);

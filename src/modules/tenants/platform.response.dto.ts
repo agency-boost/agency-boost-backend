@@ -58,6 +58,15 @@ export class CompanyResponseDto {
   kind!: 'insurer' | 'template';
 }
 
+/**
+ * *Perusahaan baru*'s answer (`POST /admin/companies/setup`, ADR-0278 §3): the company as the list reads it, and the
+ * default template it was given — a copy of the source's.
+ */
+export class SetUpCompanyResultDto extends CompanyResponseDto {
+  @ApiProperty({ type: String, description: 'The company’s default template, which *Pengaturan template* edits.' })
+  templateId!: string;
+}
+
 /** One row of the append-only platform log. Read-only by construction — there is no edit. */
 export class AuditEntryResponseDto {
   @ApiProperty({ type: String })

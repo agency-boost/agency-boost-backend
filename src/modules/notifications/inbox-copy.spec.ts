@@ -250,6 +250,8 @@ describe('inbox copy', () => {
         NotificationTemplate.TEMPLATE_APPLIED,
         // P19.5-T1 (AA UI-019): the template's Data upload changed opens the Data upload.
         NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED,
+        // P19.15-T4 (ADR-0261 §2): a premium table ending opens the company's Proposal tab.
+        NotificationTemplate.PREMIUM_TABLE_ENDING,
       ];
       for (const id of IN_APP_TEMPLATES.filter((t) => !ADDRESSED.includes(t))) {
         expect([id, inboxAddress(id, { sessionId: SESSION, entryId: SESSION, date: '2026-10-05' })]).toEqual([id, null]);
@@ -605,5 +607,51 @@ describe('P19.5-T1 the template’s Data upload changed, told to the Owner and t
     expect(TEMPLATE_CHANNELS[NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED]).toEqual(['in_app']);
     expect(IN_APP_TEMPLATES).toContain(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED);
     expect(inboxAddress(NotificationTemplate.ANALYTICS_TEMPLATE_PUBLISHED, payload)).toBe('/kpm/data-upload');
+  });
+});
+
+/**
+ * **The premium table notices** (P19.15-T4 AC-4; ADR-0261 §2, §3; the P1b spec's *Notifications*, its own words): the
+ * Super Admins' *"Tabel tarif {produk} berakhir {date}. Unggah tarif baru."*, opening the company's *Proposal* tab, and
+ * the KPM Owners' announcement *"Tarif {produk} diperbarui mulai {date}"*, which opens nothing. In-app only.
+ */
+describe('P19.15-T4 AC-4 the premium table notices', () => {
+  const COMPANY = '66f0000000000000000000c1';
+  const ID = readerIn('id');
+
+  it('P19.15-T4 AC-4 the ending notice says the spec\'s sentence, the day in the reader\'s figures, and names the company', () => {
+    const words = describeNotification(NotificationTemplate.PREMIUM_TABLE_ENDING, {
+      productName: 'PRUCritical Benefit 88', effectiveTo: '2026-11-30', companyName: 'Prudential', version: 2,
+    }, ID);
+    expect(words.title).toBe('Tabel tarif PRUCritical Benefit 88 berakhir 30 Nov 2026. Unggah tarif baru.');
+    expect(words.detail).toContain('Prudential · versi 2');
+    expect(describeNotification(NotificationTemplate.PREMIUM_TABLE_ENDING, {
+      productName: 'PRUCritical Benefit 88', effectiveTo: '2026-11-30', companyName: 'Prudential', version: 2,
+    }).title).toBe('PRUCritical Benefit 88 premium table ends 30 Nov 2026. Upload new rates.');
+  });
+
+  it('P19.15-T4 AC-4 the announcement says the spec\'s sentence and that nothing is asked', () => {
+    const words = describeNotification(NotificationTemplate.PREMIUM_TABLE_STARTED, {
+      productName: 'PRULink NextGen', effectiveFrom: '2026-12-01', companyName: 'Prudential',
+    }, ID);
+    expect(words.title).toBe('Tarif PRULink NextGen diperbarui mulai 1 Des 2026');
+    expect(words.detail).toBe('Prudential. Pengumuman, tidak perlu tindakan. Proposal baru memakai tarif ini.');
+  });
+
+  it('P19.15-T4 AC-4 a payload with no product still says something true', () => {
+    expect(describeNotification(NotificationTemplate.PREMIUM_TABLE_ENDING, {}, ID).title).toContain('sebuah produk');
+    expect(describeNotification(NotificationTemplate.PREMIUM_TABLE_STARTED, {}, ID).title).toContain('sebuah produk');
+  });
+
+  it('P19.15-T4 AC-4 the ending notice opens the company\'s Proposal tab; the announcement opens nothing', () => {
+    expect(inboxAddress(NotificationTemplate.PREMIUM_TABLE_ENDING, { companyId: COMPANY }))
+      .toBe(`/admin/companies/${COMPANY}/proposal`);
+    expect(inboxAddress(NotificationTemplate.PREMIUM_TABLE_ENDING, { companyId: 'not-an-id' })).toBe('/admin/companies');
+    expect(inboxAddress(NotificationTemplate.PREMIUM_TABLE_STARTED, { companyId: COMPANY })).toBeNull();
+  });
+
+  it('P19.15-T4 AC-4 both are in-app only (ADR-0261 §4)', () => {
+    expect(TEMPLATE_CHANNELS[NotificationTemplate.PREMIUM_TABLE_ENDING]).toEqual(['in_app']);
+    expect(TEMPLATE_CHANNELS[NotificationTemplate.PREMIUM_TABLE_STARTED]).toEqual(['in_app']);
   });
 });

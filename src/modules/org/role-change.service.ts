@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
@@ -91,10 +91,13 @@ export class RoleChangeService {
      * The moves this reader asked the office for, for *Tim Anda*'s rows (P19.12-T4, ADR-0247 §3). Optional so the specs
      * that build this service by hand need not say it; without it no row has one waiting.
      */
-    @Optional() private readonly transfers: TransfersService | null = null,
+    @Optional() @Inject(TransfersService) private readonly transfers: TransfersService | null = null,
   ) {}
 
   private requireMember(ctx: RequestContext): string {
+    // A Super Admin inside the KPM changes a rung as its Owner, nobody's member (OD-377; ADR-0268 §3, ADR-0277 §3), as
+    // `LeaderChangeService` lets them move a leader: no unit of their own, the audit naming them.
+    if (ctx.isSuperAdminInKpm) return '';
     if (!ctx.kpmId || !ctx.membershipId) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
@@ -222,7 +225,8 @@ export class RoleChangeService {
   ): Promise<{ target: MembershipDocument; toClass: HierarchyRole; levelCode: string } | null> {
     const target = await this.members.findById(ctx, membershipId);
     if (!target || target.status === 'removed') throw new NotFoundException('Membership');
-    const reader = roleReaderOf(ctx);
+    // ADR-0268 §1: a core leader decides as the office for somebody below them, so the reader is read against the target.
+    const reader = roleReaderOf(ctx, { membershipId: String(target._id), ancestorIds: target.ancestorIds });
     // 404, not 403, for somebody outside a leader's own downline (P19.12's permission review): a refusal would confirm
     // the id exists. The reader's own membership is theirs to know of, and the rules below refuse it.
     const inReach = reader.office || String(target._id) === reader.membershipId

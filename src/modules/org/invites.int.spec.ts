@@ -561,11 +561,18 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
       await register(token).expect(201);
     });
 
-    it('P18.8-T3 AC-4 an existing agent joins as an existing agent: a join date over 90 days back classifies them so', async () => {
+    it('P18.8-T3 AC-4, P19.16-T2 AC-1 an existing agent joins as an existing agent: they joined the company before the year of their join date', async () => {
       const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-01-05' }).expect(200)).body.link);
-      await register(token).expect(201);
+      await register(token, { companyJoinMonth: '2019-03' }).expect(201);
       const account = (await col('users').findOne({ email: 'hendra@new.test' }))!;
       expect(await membershipOf(String(account._id))).toMatchObject({ joinDate: '2026-01-05', joinedAs: 'existing_agent' });
+    });
+
+    it('P19.16-T2 AC-1 a join date over 90 days back is still a new hire when they joined the company that year (ADR-0264)', async () => {
+      const token = tokenOf((await add({ agentCode: '80777', joinDate: '2026-01-05' }).expect(200)).body.link);
+      await register(token, { companyJoinMonth: '2026-01' }).expect(201);
+      const account = (await col('users').findOne({ email: 'hendra@new.test' }))!;
+      expect(await membershipOf(String(account._id))).toMatchObject({ joinDate: '2026-01-05', joinedAs: 'new_hire' });
     });
 
     it('P18.8-T3 AC-4 registering on a link with an address that already exists joins nobody to anything', async () => {

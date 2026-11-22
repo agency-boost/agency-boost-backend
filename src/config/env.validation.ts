@@ -65,6 +65,27 @@ export const envSchema = z.object({
    * (below, in `superRefine`). A *Sending access* key, each environment its own. Never logged and never printed.
    */
   RESEND_API_KEY: z.preprocess(blankIsUnset, z.string().trim().optional()),
+  /**
+   * **Anthropic's API key, for reading uploads and illustrations with Claude** (P19.15-T2, T3; ADR-0259 §6). Optional in
+   * every environment: unset, *Unggah file* and the illustration's reading say plainly that reading is not switched on,
+   * and the premium table's own Excel/CSV upload still works. Written, it must look like one (`sk-ant-…`), so a key
+   * pasted with its quotes or the wrong secret is refused at boot rather than at the first upload. Never logged and never
+   * printed; read only by `product-data/ai/claude-reader.ts`.
+   */
+  ANTHROPIC_API_KEY: z.preprocess(
+    blankIsUnset,
+    z.string().trim()
+      .refine((v) => /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(v), {
+        message: 'is not an Anthropic API key: every one starts sk-ant- (console.anthropic.com, API Keys). Paste the '
+          + 'key itself, with no quotes around it: the env file is read raw.',
+      })
+      .optional(),
+  ),
+  /** The model that reads them (ADR-0259 §6): `claude-opus-5-5` unless written. A model id, never a date-suffixed one. */
+  ANTHROPIC_MODEL: z.preprocess(
+    blankIsUnset,
+    z.string().trim().regex(/^claude-[a-z0-9-]+$/, 'must be a Claude model id, such as claude-opus-5-5').default('claude-opus-5-5'),
+  ),
   /** The key `MAIL_PROVIDER` replaces, read only when that is unset: `smtp` or `log`. */
   MAIL_TRANSPORT: z.preprocess(blankIsUnset, z.enum(LEGACY_MAIL_TRANSPORTS).optional()),
   /** Required for `smtp` alone (below); a preset has its own host. */

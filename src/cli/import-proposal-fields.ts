@@ -6,11 +6,14 @@ import { MongoTarget, mongoTargetFrom } from '@/config/mongo-target';
 import { AuditLog, AuditLogSchema } from '@/modules/audit/audit-log.schema';
 import { Product, ProductDocument, ProductSchema } from '@/modules/products/product.schema';
 import { importProposalFields, type ProposalFieldsImportReport } from '@/modules/products/proposal-fields-import';
-import { PRUDENTIAL_PROPOSAL_IMPORT, PRUDENTIAL_PROPOSAL_ROWS } from '@/modules/products/proposal-fields-prudential';
+import {
+  PRUDENTIAL_PROPOSAL_IMPORT, PRUDENTIAL_PROPOSAL_ROWS, PRUDENTIAL_PROPOSAL_SUPERSEDES,
+} from '@/modules/products/proposal-fields-prudential';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 
 /**
- * **The Prudential proposal fields, imported into one company's catalogue** (P19.7-T1 AC-4; ADR-0225 §10). The operator
+ * **The Prudential proposal fields, imported into one company's catalogue** (P19.7-T1 AC-4; ADR-0225 §10; *since
+ * 2026-11-12, P19.14-T2 AC-5, ADR-0255 §9:* the list of 11 November, with each product's calculation fields). The operator
  * runs it for production, once the company exists, over IAP SSH:
  *
  *   sudo /opt/agencyboost/bin/import-proposal-fields.sh prod <company id or slug>
@@ -20,7 +23,7 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
  *
  * - **Matched by code**; a row naming a code the company lacks is reported, and nothing is created.
  * - **Never over a Super Admin's edit**: a product whose fields are not empty and are no longer exactly this import's
- *   own is reported *skipped* and left alone.
+ *   own — or the draft of 3 November's, which this one replaces — is reported *skipped* and left alone.
  * - **Running it twice changes nothing**: the second run reports every product *unchanged*.
  * - Each write is a new product version, audited `product.updated` with `reason: 'proposal_fields_import'`, its actor
  *   the job's name.
@@ -28,7 +31,8 @@ import { Company, CompanySchema } from '@/modules/tenants/company.schema';
  * - Exits `0` when it ran (whatever it wrote), `2` on a usage error and `1` on any other failure.
  */
 export const USAGE = 'Usage: node dist/cli/import-proposal-fields.js <company id or slug>\n'
-  + '       Writes the Prudential proposal fields draft of 3 November 2026 onto that company\'s products, by code.';
+  + '       Writes the Prudential proposal fields of 11 November 2026 (and their calculation fields) onto that company\'s\n'
+  + '       products, by code, over the draft of 3 November wherever nobody has edited it since.';
 
 /** Who the audit rows name: a job, as `RequestContext.forJob` names one. */
 export const IMPORT_ACTOR = `job:import-proposal-fields:${PRUDENTIAL_PROPOSAL_IMPORT}`;
@@ -97,7 +101,7 @@ export async function run(argv: readonly string[], io: Io): Promise<number> {
         },
       },
       String(found._id),
-      { name: PRUDENTIAL_PROPOSAL_IMPORT, rows: PRUDENTIAL_PROPOSAL_ROWS },
+      { name: PRUDENTIAL_PROPOSAL_IMPORT, rows: PRUDENTIAL_PROPOSAL_ROWS, supersedes: PRUDENTIAL_PROPOSAL_SUPERSEDES },
     );
     io.stdout.write(describeReport(found.name, report));
     return 0;

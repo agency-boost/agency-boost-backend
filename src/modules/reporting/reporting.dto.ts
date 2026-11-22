@@ -1,51 +1,22 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { field } from '@/common/validation/violations';
-import { KPM_REPORTING, type KpmAnalyticsPeriod } from '@/domain/constants';
 import { REPORTING_REFUSALS } from './reporting.messages';
 
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 /**
- * **Empty on purpose**: the Overview is the reader's office, with nothing to filter, page or name. A class with no
- * fields is how the validation pipe refuses a query parameter by name rather than ignoring it (P18-T1 AC-11).
+ * **The KPM Overview's one filter** (P19.19-T1 AC-1, AC-2): *Semua group ⌄* — an informal group by id, `none` for *Tanpa
+ * group*, absent for the whole KPM. No page-wide period: sections 1 to 3 read the last 30 days and today, section 6 the
+ * six months ending with this one. Any other parameter is 400, by name (the validation pipe refuses an unknown field).
  */
-export class KpmOverviewQueryDto {}
-
-/** The not-logged list takes no parameter either: the last 7 days, the office's whole membership. */
-export class NotLoggedQueryDto {}
-
-/** *Target* (`KPM_Owner.html:1060-1062`): the office's current month, and a whole number from 0. */
-export class SetRecruitTargetDto {
-  @ApiProperty({ example: '2026-10', description: 'The agency’s current month, `YYYY-MM`. No other month is accepted.' })
-  @IsString()
-  @Matches(/^\d{4}-\d{2}$/, { message: field(REPORTING_REFUSALS.VALIDATION_FAILED.monthShape) })
-  month!: string;
-
-  @ApiProperty({ minimum: 0, example: 15, description: 'Recruits to close in the month: a whole number from 0.' })
-  @IsInt()
-  @Min(0)
-  target!: number;
-}
-
-/** `period` and `group`, and nothing else (P18-T2 AC-10): a period it does not know, or a parameter of any other name, is 400. */
-export class KpmAnalyticsQueryDto {
-  @ApiPropertyOptional({
-    enum: KPM_REPORTING.ANALYTICS_PERIODS,
-    default: KPM_REPORTING.ANALYTICS_DEFAULT_PERIOD,
-    description:
-      'Which month the month-bound columns read: *APE — This Month* and its target as fixed when that month '
-      + 'began, *Active this month* / *Active last month*, and *Total leads* now or as they stood at last month’s '
-      + 'end. *APE — Annual*, *Coached (7d)*, *Manpower*, MOC and the clubs are today’s whatever the period.',
-  })
-  @IsOptional()
-  @IsIn(KPM_REPORTING.ANALYTICS_PERIODS)
-  period?: KpmAnalyticsPeriod;
-
+export class KpmOverviewQueryDto {
   @ApiPropertyOptional({
     maxLength: 64,
+    example: 'none',
     description:
-      '*Lihat untuk* (UI-152, OD-258): one of the office’s custom groups (*All members → Groups*), by id. Every '
-      + 'figure and list is then over that group’s members today. Omitted, the whole KPM. An unknown or archived group, '
-      + 'or another office’s, is 404.',
+      'An informal group’s id, or `none` for *Tanpa group*: every section is then over its people today. An unknown or '
+      + 'archived group, or another office’s, is 404.',
   })
   @IsOptional()
   @IsString()
@@ -53,5 +24,14 @@ export class KpmAnalyticsQueryDto {
   group?: string;
 }
 
-/** Cross-platform analytics takes no parameter: every office, this month. */
-export class PlatformAnalyticsQueryDto {}
+/** **Performa vs target**'s month and the page's group (P19.19-T2 AC-1): *‹ November 2026 ›*. */
+export class OverviewPerformanceQueryDto extends KpmOverviewQueryDto {
+  @ApiPropertyOptional({
+    example: '2026-11',
+    description: '`YYYY-MM`. Absent: the office’s month. From January 2024 to the office’s month; outside it `422 '
+      + 'AB_GROUP_TARGET_MONTH_CLOSED`, as the targets’ own read.',
+  })
+  @IsOptional()
+  @Matches(MONTH, { message: field(REPORTING_REFUSALS.VALIDATION_FAILED.monthShape) })
+  month?: string;
+}

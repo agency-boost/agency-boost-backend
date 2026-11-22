@@ -300,12 +300,21 @@ describe('reading one campaign (P5-T7)', () => {
       }), JKT)).not.toThrow();
     });
 
-    it('P18.2-T7 AC-9 refuses a seasonal campaign with no end, another window or a subtype; a structural one without a section or with its dates', () => {
+    it('P18.2-T7 AC-9 refuses a seasonal campaign with no end, another window or a subtype; a structural one with its dates', () => {
       expect(refused(shape({ endsAt: null }))).toMatch(/A seasonal campaign needs an end/);
       expect(refused(shape({ window: 'calendar_year' }))).toMatch(/window is campaign_dates/);
       expect(refused(shape({ subtype: 'ongoing' }))).toMatch(/Only a structural campaign has a subtype/);
-      expect(refused(shape({ kind: 'structural', window: 'calendar_year', endsAt: null }))).toMatch(/subtype is required/);
       expect(refused(shape({ kind: 'structural', subtype: 'ongoing' }))).toMatch(/read over calendar_year or rolling_12m/);
+    });
+
+    it('P19.25-T5 AC-1 takes a structural campaign with no subtype: Struktural is the whole tag (ADR-0282 §5)', () => {
+      expect(() => checkCampaignShape(shape({
+        kind: 'structural', subtype: null, window: 'calendar_year', endsAt: null, appliesToOrgLevelCodes: [],
+      }), JKT)).not.toThrow();
+      // A stored one keeps its own, and an old client that sends one is still taken.
+      expect(() => checkCampaignShape(shape({
+        kind: 'structural', subtype: 'promotion', window: 'rolling_12m', endsAt: null, appliesToOrgLevelCodes: [],
+      }), JKT)).not.toThrow();
     });
 
     it('P18.2-T7 AC-9 names a rung the company’s ladder does not have', () => {
@@ -402,7 +411,6 @@ describe('P18.10-T5 AC-3 a campaign’s violations, in both languages', () => {
       kind: 'structural', startsAt: wib('2026-07-01T00:00:00'), endsAt: wib('2026-09-30T23:59:00'), appliesToOrgLevelCodes: [],
     }), JKT)))
       .toEqual([
-        'Campaign struktural adalah jalur promosi atau insentif berkelanjutan: subtype wajib diisi.',
         'Campaign struktural dinilai berdasarkan calendar_year atau rolling_12m.',
       ]);
   });

@@ -1,225 +1,237 @@
-import { PROPOSAL, PROPOSAL_TEXT_MAX } from '@/domain/constants';
-import type { ProposalField } from '@/modules/products/proposal-fields';
+import { PROPOSAL, PROPOSAL_CLIENT_TEXT_MAX, PROPOSAL_TEXT_MAX } from '@/domain/constants';
 import { AGENCYBOOST_PDF_BRANDING, type PdfBranding } from '@/modules/proposals/proposal-branding';
-import { totalPaidOf, totalsOf, type SnapshotBlock, type StoredItem } from '@/modules/proposals/proposal-items';
-import type { PdfInput } from '@/modules/proposals/proposal-pdf.layout';
-import type { ProposalItemView, ProposalView } from '@/modules/proposals/proposal.service';
+import type {
+  PdfClientSource, PdfDetailBlockSource, PdfFieldSource, PdfItemSource, PdfModelInput, PdfPayTermSource, PdfProposalSource,
+} from '@/modules/proposals/proposal-pdf.model';
 
 /**
- * **Proposals for the PDF's specs** (P19.7-T3): the proposal as every route answers it, built without a database —
- * ordinary ones, and the worst case ADR-0223 §5 asks for: every bound at its maximum, the longest names.
+ * **Proposals for the PDF's specs** (P19.14-T3): the stored shapes the file is built from (ADR-0254, ADR-0255), without a
+ * database — the four products of the approved mockup (`revisions/2026-11-13/files/proposal/mockups/`), a syariah and a
+ * USD product, and the worst case the catalogue allows: every bound at its maximum, the longest names.
  */
 
-type Field = Omit<ProposalField, 'draft'>;
-
-export const field = (over: Partial<Field> & Pick<Field, 'key' | 'label' | 'type'>): Field => ({
-  labelSyariah: null, options: [], default: null, quickAmounts: [], minMinor: null, showOnPdf: true,
-  showOnSummary: false, paymentYears: false, plan: false, currency: false, ...over,
+export const field = (over: Partial<PdfFieldSource> & Pick<PdfFieldSource, 'key' | 'label' | 'type'>): PdfFieldSource => ({
+  labelSyariah: null, options: [], showOnPdf: true, showOnSummary: false, paymentYears: false, plan: false, ...over,
 });
-export const option = (label: string, years: number | null = null) => ({ label, years, currency: null });
+export const option = (label: string, years: number | null = null) => ({ label, years });
+export const term = (key: string, label: string, over: Partial<PdfPayTermSource> = {}): PdfPayTermSource => ({
+  key, label, years: null, toAge: null, single: false, ...over,
+});
+const text = (label: string, value: string, note: string | null = null) => ({ label, note, formula: null, text: value });
+const rupiah = (whole: number) => whole * 100;
 
-/** One item as the API answers it, from a stored one. */
-export function itemView(stored: StoredItem, channel: 'conventional' | 'syariah', pay: ProposalView['payFrequency'], plan: string | null = null): ProposalItemView {
+export function item(over: Partial<Omit<PdfItemSource, 'snapshot'>> & { snapshot?: Partial<PdfItemSource['snapshot']> } = {}): PdfItemSource {
+  const { snapshot, ...rest } = over;
   return {
-    itemId: stored.itemId,
-    productId: stored.productId,
-    productCode: stored.productCode,
-    productVersion: stored.productVersion,
-    name: channel === 'syariah' && stored.snapshot.syariahName ? stored.snapshot.syariahName : stored.snapshot.name,
-    plan,
-    currency: stored.premium.currency,
-    snapshot: stored.snapshot,
-    insured: stored.insured,
-    fieldValues: stored.fieldValues,
-    premium: stored.premium,
-    totalPaid: totalPaidOf(stored, pay),
-    choice: null,
-  };
-}
-
-export interface ItemSpec {
-  name: string;
-  typeLabel?: string;
-  category?: string;
-  syariahName?: string | null;
-  fields?: Field[];
-  values?: Record<string, string | number>;
-  premium?: number | null;
-  currency?: 'IDR' | 'USD';
-  insured?: StoredItem['insured'];
-  benefits?: string[];
-  pdfDetail?: SnapshotBlock[];
-  plan?: string | null;
-}
-
-export function stored(spec: ItemSpec, at: number): StoredItem {
-  return {
-    itemId: `item-${at}`,
-    productId: `product-${at}`,
-    productCode: `P${at}`,
-    productVersion: 1,
+    insured: { relation: 'client', name: null, age: null },
+    fieldValues: {},
+    payFrequency: 'monthly',
+    payTerm: null,
+    up: null,
+    premium: { amountMinor: rupiah(1_250_000), currency: 'IDR' },
+    rateTableVersionId: null,
+    rateTableEffectiveFrom: null,
+    ...rest,
     snapshot: {
-      name: spec.name,
-      syariahName: spec.syariahName ?? null,
-      typeLabel: spec.typeLabel ?? 'KESEHATAN',
-      category: spec.category ?? 'health',
-      currencies: [spec.currency ?? 'IDR'],
-      fields: spec.fields ?? [],
-      benefits: spec.benefits ?? [],
-      pdfDetail: spec.pdfDetail ?? [],
+      name: 'PRUlink', typeLabel: 'JIWA', category: 'life', fields: [], benefits: [], pdfDetail: [], currencies: ['IDR'],
+      isSyariah: false, needTag: null, payTerms: [], ...snapshot,
     },
-    insured: spec.insured ?? { relation: 'client', name: null, age: null },
-    fieldValues: spec.values ?? {},
-    premium: { amountMinor: spec.premium === undefined ? 1_250_000_00 : spec.premium, currency: spec.currency ?? 'IDR' },
-    choice: null,
   };
 }
 
-export interface ProposalSpec {
-  client?: { name: string; age: number; gender: 'male' | 'female' };
-  channel?: 'conventional' | 'syariah';
-  payFrequency?: ProposalView['payFrequency'];
-  showTotal?: boolean;
-  status?: 'draft' | 'done';
-  date?: string;
-  items: ItemSpec[];
+/** **PRUWell Medical · Silver A**, as the mockup draws it: a derived plan, the region and the room, page 2's rows. */
+export const HEALTH: PdfItemSource = item({
+  snapshot: {
+    name: 'PRUWell Medical', typeLabel: 'KESEHATAN', category: 'health', needTag: 'HOSPITAL',
+    fields: [
+      field({ key: 'wilayah', label: 'Wilayah', type: 'chips', options: [option('Indonesia'), option('Asia kec. JPN, HK, SGP')], showOnSummary: true }),
+      field({ key: 'kamar', label: 'Jenis kamar', type: 'chips', options: [option('2 tempat tidur'), option('1 tempat tidur')], showOnSummary: true }),
+      field({ key: 'plan', label: 'Plan', type: 'derived', options: [option('Silver A')], plan: true }),
+    ],
+    payTerms: [term('renew', 'Diperbarui tiap tahun s/d usia 99', { toAge: 99 })],
+    benefits: ['Rawat inap sesuai tagihan', 'Pembedahan', 'Perawatan intensif'],
+    pdfDetail: [
+      { block: 'manfaat', rows: [
+        text('Rawat inap, bedah, ICU', 'sesuai tagihan'), text('Dokter dan obat', 'sesuai tagihan'),
+        text('Kamar per hari', 'maks Rp600 ribu'), text('Limit per tahun', 'Rp4 miliar'), text('Cadangan limit', 'Rp8 miliar'),
+        text('Total maksimal', 'Rp12 miliar'), text('Perawatan kanker', 'sesuai tagihan'), text('Cuci darah', 'sesuai tagihan'),
+      ] },
+      { block: 'masa', rows: [
+        text('Masa tunggu', '30 hari', 'Kecelakaan ditanggung sejak hari pertama.'),
+        text('Premi', 'naik sesuai usia', 'Premi kesehatan disesuaikan tiap tahun.'),
+      ] },
+    ] as PdfDetailBlockSource[],
+  },
+  fieldValues: { wilayah: 'Asia kec. JPN, HK, SGP', kamar: '2 tempat tidur', plan: 'Silver A' },
+  payTerm: 'renew',
+  premium: { amountMinor: rupiah(828_000), currency: 'IDR' },
+});
+
+/** **PCB88**: a sum assured, ten years of paying, *Total dibayar*, its benefits. */
+export const CRITICAL: PdfItemSource = item({
+  snapshot: {
+    name: 'PCB88', typeLabel: 'PENYAKIT KRITIS', category: 'ci', needTag: 'CRITICAL_INCOME',
+    fields: [field({ key: 'up', label: 'Uang pertanggungan', labelSyariah: 'Santunan asuransi', type: 'money', showOnSummary: true })],
+    payTerms: [term('t5', '5 tahun', { years: 5 }), term('t10', '10 tahun', { years: 10 }), term('single', 'Sekali bayar', { single: true })],
+    benefits: ['Santunan 88 kondisi kritis', 'Manfaat meninggal dunia'],
+  },
+  fieldValues: { up: rupiah(500_000_000) },
+  payTerm: 't10',
+  up: { amountMinor: rupiah(500_000_000), currency: 'IDR' },
+  premium: { amountMinor: rupiah(1_690_000), currency: 'IDR' },
+});
+
+/** **PRUTahapan Cemerlang · PRO**: a child insured, a target, paid yearly, and the school-stage timeline. */
+export const EDUCATION: PdfItemSource = item({
+  snapshot: {
+    name: 'PRUTahapan Cemerlang', typeLabel: 'DANA PENDIDIKAN', category: 'education', needTag: 'EDUCATION',
+    fields: [
+      field({ key: 'plan', label: 'Plan', type: 'chips', options: [option('PRO'), option('MAX')], plan: true, showOnSummary: true }),
+      field({ key: 'target_dana', label: 'Target dana', type: 'money', showOnSummary: true }),
+      field({ key: 'mpa', label: 'Masa asuransi', type: 'chips', options: [option('18 tahun')] }),
+    ],
+    payTerms: [term('t10', '10 tahun', { years: 10 })],
+    pdfDetail: [{ block: 'jadwal', rows: [text('SD', '10%'), text('SMP', '15%'), text('SMA', '25%'), text('Kuliah', '50%')] }],
+  },
+  insured: { relation: 'child', name: 'Raka', age: 5 },
+  fieldValues: { plan: 'PRO', target_dana: rupiah(300_000_000), mpa: '18 tahun' },
+  payFrequency: 'annual',
+  payTerm: 't10',
+  premium: { amountMinor: rupiah(24_000_000), currency: 'IDR' },
+});
+
+/** **PRUSmart Plan · 6-Pay**: the future; six years of paying. */
+export const FUTURE: PdfItemSource = item({
+  snapshot: {
+    name: 'PRUSmart Plan', typeLabel: 'DANA MASA DEPAN', category: 'investment', needTag: 'FUTURE',
+    fields: [
+      field({ key: 'plan', label: 'Plan', type: 'chips', options: [option('6-Pay'), option('8-Pay')], plan: true, showOnSummary: true }),
+      field({ key: 'masa', label: 'Masa asuransi', type: 'fixed', options: [option('20 tahun')] }),
+    ],
+    payTerms: [term('six', '6 tahun', { years: 6 })],
+    benefits: ['Dana di akhir masa asuransi', 'Santunan meninggal dunia'],
+  },
+  fieldValues: { plan: '6-Pay' },
+  payTerm: 'six',
+  premium: { amountMinor: rupiah(2_000_000), currency: 'IDR' },
+});
+
+/** **PRU Anugerah Syariah**: a syariah product — *Santunan asuransi*, *Kontribusi*. */
+export const SYARIAH: PdfItemSource = item({
+  snapshot: {
+    name: 'PRU Anugerah Syariah', typeLabel: 'JIWA', category: 'life', needTag: 'FAMILY', isSyariah: true,
+    fields: [field({ key: 'up', label: 'Uang pertanggungan', labelSyariah: 'Santunan asuransi', type: 'money', showOnSummary: true })],
+    payTerms: [term('t10', '10 tahun', { years: 10 })],
+  },
+  fieldValues: { up: rupiah(250_000_000) },
+  payTerm: 't10',
+  up: { amountMinor: rupiah(250_000_000), currency: 'IDR' },
+  premium: { amountMinor: rupiah(450_000), currency: 'IDR' },
+});
+
+/** **PRU Prosper**: in USD, paid yearly. */
+export const DOLLAR: PdfItemSource = item({
+  snapshot: { name: 'PRU Prosper', typeLabel: 'DANA MASA DEPAN', category: 'investment', needTag: 'FUTURE', currencies: ['USD'] },
+  payFrequency: 'annual',
+  premium: { amountMinor: 250_000, currency: 'USD' },
+});
+
+/** The mockup's client: married, a child, a job and a city, four needs discussed. */
+export const BUDI: PdfClientSource = {
+  name: 'Budi Contoh', age: 35, gender: 'male',
+  details: {
+    status: 'married', dependants: 'Istri, 1 anak (5 th)', occupation: 'Karyawan swasta', city: 'Tangerang Selatan',
+    needs: ['HOSPITAL', 'CRITICAL_INCOME', 'EDUCATION', 'FUTURE'], needsOther: null,
+  },
+};
+
+export function proposal(items: PdfItemSource[], over: Partial<PdfProposalSource> = {}): PdfProposalSource {
+  return { client: BUDI, showTotal: false, date: '2026-11-11', items, ...over };
 }
 
-export function proposalView(spec: ProposalSpec): ProposalView {
-  const channel = spec.channel ?? 'conventional';
-  const pay = spec.payFrequency ?? 'monthly';
-  const items = spec.items.map((item, at) => stored(item, at));
+export function input(p: PdfProposalSource, over: Partial<PdfModelInput> = {}): PdfModelInput {
   return {
-    id: '66f0000000000000000009a1',
-    version: 3,
-    leadId: '66f0000000000000000009b1',
-    leadDeleted: false,
-    client: spec.client ?? { name: 'Pak Budi Santoso', age: 36, gender: 'male' },
-    channel,
-    payFrequency: pay,
-    showTotal: spec.showTotal ?? false,
-    status: spec.status ?? 'draft',
-    doneAt: null,
-    firstDoneAt: null,
-    date: spec.date ?? '2026-11-05',
-    items: items.map((s, at) => itemView(s, channel, pay, spec.items[at].plan ?? null)),
-    totals: totalsOf(items),
-    duplicatedFrom: null,
-    createdAt: '2026-11-05T03:00:00.000Z',
-    updatedAt: '2026-11-05T03:00:00.000Z',
-    fileName: '',
-  } as ProposalView;
-}
-
-export function pdfInput(proposal: ProposalView, over: Partial<PdfInput> = {}): PdfInput {
-  return {
-    proposal,
-    agent: { name: 'Rina Wijaya', code: 'AG-0417-001', phone: '0812 3456 7890' },
-    insurer: 'PT Prudential Life Assurance',
-    kpmName: 'KPM Cahaya Jakarta',
+    proposal: p,
+    agent: { name: 'Rina Wijaya', code: '80008', phone: '0812 3456 7890' },
+    insurer: 'Prudential',
+    kpmName: 'BSD City',
     branding: AGENCYBOOST_PDF_BRANDING,
     ...over,
   };
 }
 
-/** **PRUWell Medical**, as the demo seed has it: a plan, a term in years, a sum assured, benefits and detail blocks. */
-export const HEALTH: ItemSpec = {
-  name: 'PRUWell Medical',
-  typeLabel: 'KESEHATAN',
-  plan: 'Gold',
-  fields: [
-    field({ key: 'plan', label: 'Plan', type: 'chips', options: [option('Silver'), option('Gold')], default: 'Gold', plan: true, showOnSummary: true }),
-    field({ key: 'masa_bayar', label: 'Masa bayar', type: 'chips', options: [option('10 tahun', 10)], default: '10 tahun', paymentYears: true, showOnSummary: true }),
-    field({ key: 'up', label: 'Uang pertanggungan', labelSyariah: 'Santunan asuransi', type: 'money', showOnSummary: true }),
-    field({ key: 'wilayah', label: 'Wilayah', type: 'fixed', options: [option('Indonesia')], default: 'Indonesia' }),
-  ],
-  values: { plan: 'Gold', masa_bayar: '10 tahun', up: 100_000_000_000 },
-  benefits: ['Rawat inap sesuai tagihan', 'Pembedahan', 'Perawatan intensif', 'Rawat jalan kanker', 'Manfaat kelima'],
-  pdfDetail: [
-    { block: 'manfaat', rows: [{ label: 'Batas tahunan', note: null, formula: '2 × up', text: null }, { label: 'Kamar', note: 'per hari', formula: null, text: 'Rp 1,5 jt' }], notGuaranteed: false },
-    { block: 'jadwal', rows: [{ label: 'Pembayaran premi', note: null, formula: null, text: '10 tahun' }], notGuaranteed: false },
-    { block: 'pengecualian', rows: [{ label: 'Kondisi yang sudah ada', note: null, formula: null, text: '12 bulan' }], notGuaranteed: false },
-    { block: 'nilai_tunai', rows: [{ label: 'Tahun ke-10', note: 'contoh', formula: '10% × up', text: null }], notGuaranteed: true },
-  ],
-};
+/** The mockup's KPM: *KPM 0417 · BSD City*, dark green and light green, no logo. */
+export const KPM_GREEN: PdfBranding = { branded: true, name: 'KPM 0417 · BSD City', logo: null, main: '#0F6E56', second: '#5DCAA5' };
 
-/** A product with no fields at all: *Tertanggung* and the premium. */
-export const PLAIN: ItemSpec = { name: 'PRUlink', typeLabel: 'JIWA', category: 'life', benefits: ['Santunan meninggal'] };
+/** A KPM whose main colour is too light for white words. */
+export const KPM_LIGHT: PdfBranding = { branded: true, name: 'KPM Cahaya', logo: null, main: '#FFD84D', second: '#7FD3F7' };
 
-/** A USD product. */
-export const DOLLAR: ItemSpec = { name: 'PRU Prosper', typeLabel: 'INVESTASI', category: 'investment', currency: 'USD', premium: 125_000 };
-
-/** An education product insuring a child. */
-export const EDUCATION: ItemSpec = {
-  name: 'PRUCerah',
-  typeLabel: 'DANA PENDIDIKAN',
-  category: 'education',
-  insured: { relation: 'child', name: 'Adik Raka', age: 8 },
-  fields: [
-    field({ key: 'target_dana', label: 'Target dana', type: 'money', showOnSummary: true }),
-    field({ key: 'masa', label: 'Masa tunggu', type: 'fixed', options: [option('Dilindungi sampai usia 88', 18)], default: 'Dilindungi sampai usia 88', paymentYears: true }),
-  ],
-  values: { target_dana: 50_000_000_000 },
-  pdfDetail: [{ block: 'manfaat', rows: [{ label: 'Tahapan dana', note: null, formula: '5% × target_dana', text: null }], notGuaranteed: false }],
-};
-
-const longText = (n: number, seed: string) => (seed.repeat(Math.ceil(n / seed.length))).slice(0, n);
+const long = (n: number, seed: string) => seed.repeat(Math.ceil(n / seed.length)).slice(0, n);
 
 /**
- * **The worst case** (ADR-0223 §5): `PROPOSAL.ITEMS_MAX` products, each with `PROPOSAL.FIELDS_MAX` fields at their
- * longest labels and values, `SUMMARY_FIELDS_MAX` of them on page 1, four benefits, every block at its most rows, the
- * longest names an agent can give, and the client's and the insured's at their bounds.
+ * **The worst case** (ADR-0256 §1): `PROPOSAL.ITEMS_MAX` products, each with `FIELDS_MAX` fields at their longest labels
+ * and values, every `pdfDetail` block at its most rows, four benefits, the longest names an agent can give, a child's
+ * timeline, the client's every detail at its bound and every need, the total on — and the longest agent and insurer.
  */
-export function worstCase(): ProposalSpec {
+export function worstCase(): PdfModelInput {
   const words = 'Manfaat perlindungan menyeluruh ';
-  const fields: Field[] = Array.from({ length: PROPOSAL.FIELDS_MAX }, (_, i) => field({
+  const fields = Array.from({ length: PROPOSAL.FIELDS_MAX }, (_, i) => field({
     key: `f${i}`,
-    label: longText(PROPOSAL_TEXT_MAX.FIELD_LABEL, `Kolom ${i} `),
+    label: long(PROPOSAL_TEXT_MAX.FIELD_LABEL, `Kolom ${i} `),
     type: 'chips',
-    // The second field is the term: 99 years, so *Total dibayar* is printed at its longest.
-    options: [option(longText(PROPOSAL_TEXT_MAX.OPTION_LABEL, 'Pilihan panjang '), i === 1 ? PROPOSAL.PAYMENT_YEARS_MAX : null)],
-    default: longText(PROPOSAL_TEXT_MAX.OPTION_LABEL, 'Pilihan panjang '),
+    options: [option(long(PROPOSAL_TEXT_MAX.OPTION_LABEL, 'Pilihan panjang '))],
     showOnSummary: i < PROPOSAL.SUMMARY_FIELDS_MAX,
     plan: i === 0,
-    paymentYears: i === 1,
   }));
-  const values = Object.fromEntries(fields.map((f) => [f.key, f.default!]));
-  const row = {
-    label: longText(PROPOSAL_TEXT_MAX.DETAIL_LABEL, words), note: longText(PROPOSAL_TEXT_MAX.DETAIL_NOTE, 'catatan '),
-    formula: null, text: longText(PROPOSAL_TEXT_MAX.DETAIL_NOTE, 'teks '),
-  };
-  const item = (i: number): ItemSpec => ({
-    // An office's display name may be 200 characters (`SaveProductOverridesDto`).
-    name: longText(200, `Produk Asuransi ${i} `),
-    typeLabel: longText(PROPOSAL_TEXT_MAX.TYPE_LABEL, 'PERLINDUNGAN '),
-    plan: values.f0 as string,
-    fields,
-    values,
-    premium: PROPOSAL.PREMIUM_MAX_MINOR,
-    insured: { relation: 'spouse', name: longText(PROPOSAL.INSURED_NAME_MAX, 'Nama Pasangan Panjang '), age: 100 },
-    benefits: Array.from({ length: 4 }, () => longText(200, words)),
-    pdfDetail: (['manfaat', 'jadwal', 'masa', 'pengecualian', 'nilai_tunai'] as const).map((block) => ({
-      block,
-      rows: Array.from({ length: block === 'pengecualian' ? PROPOSAL.EXCLUSIONS_MAX : PROPOSAL.PDF_DETAIL_ROWS_MAX }, () => ({ ...row })),
-      notGuaranteed: block === 'nilai_tunai',
-    })),
-  });
-  return {
-    client: { name: longText(PROPOSAL.INSURED_NAME_MAX, 'Nama Klien Sangat Panjang '), age: 100, gender: 'female' },
+  const values = Object.fromEntries(fields.map((f) => [f.key, f.options[0].label]));
+  const row = { label: long(PROPOSAL_TEXT_MAX.DETAIL_LABEL, words), note: long(PROPOSAL_TEXT_MAX.DETAIL_NOTE, 'catatan '), formula: null, text: long(PROPOSAL_TEXT_MAX.DETAIL_NOTE, 'teks ') };
+  const one = (i: number): PdfItemSource => item({
+    snapshot: {
+      // An office's display name may be 200 characters (`SaveProductOverridesDto`).
+      name: long(200, `Produk Asuransi ${i} `),
+      typeLabel: long(PROPOSAL_TEXT_MAX.TYPE_LABEL, 'PERLINDUNGAN '),
+      category: ['health', 'ci', 'life', 'education', 'investment'][i % 5],
+      fields,
+      benefits: Array.from({ length: PROPOSAL.BENEFITS_ON_PDF_MAX }, () => long(200, words)),
+      payTerms: [term('t', long(60, 'Masa bayar panjang '), { years: PROPOSAL.PAYMENT_YEARS_MAX })],
+      pdfDetail: [
+        ...(['manfaat', 'masa', 'pengecualian', 'nilai_tunai'] as const).map((block) => ({
+          block,
+          rows: Array.from({ length: block === 'pengecualian' ? PROPOSAL.EXCLUSIONS_MAX : PROPOSAL.PDF_DETAIL_ROWS_MAX }, () => ({ ...row })),
+          notGuaranteed: block === 'nilai_tunai',
+        })),
+        { block: 'jadwal' as const, rows: ['SD', 'SMP', 'SMA', 'Kuliah'].map((s) => text(s, long(PROPOSAL_TEXT_MAX.DETAIL_NOTE, '99% '))) },
+      ],
+    },
+    insured: { relation: 'spouse', name: long(PROPOSAL.INSURED_NAME_MAX, 'Nama Pasangan Panjang '), age: 100 },
+    fieldValues: values,
     payFrequency: 'semiannual',
-    showTotal: true,
-    items: Array.from({ length: PROPOSAL.ITEMS_MAX }, (_, i) => item(i)),
-  };
+    payTerm: 't',
+    up: { amountMinor: PROPOSAL.MONEY_MAX_MINOR, currency: 'IDR' },
+    premium: { amountMinor: PROPOSAL.PREMIUM_MAX_MINOR, currency: i === 4 ? 'USD' : 'IDR' },
+  });
+  return input(
+    {
+      client: {
+        name: long(PROPOSAL.INSURED_NAME_MAX, 'Nama Klien Sangat Panjang '), age: 100, gender: 'female',
+        details: {
+          status: 'married',
+          dependants: long(PROPOSAL_CLIENT_TEXT_MAX.DEPENDANTS, 'Suami dan anak '),
+          occupation: long(PROPOSAL_CLIENT_TEXT_MAX.OCCUPATION, 'Pekerjaan panjang '),
+          city: long(PROPOSAL_CLIENT_TEXT_MAX.CITY, 'Kota panjang '),
+          needs: ['HOSPITAL', 'CRITICAL_INCOME', 'FAMILY', 'EDUCATION', 'FUTURE', 'OTHER'],
+          needsOther: long(PROPOSAL_CLIENT_TEXT_MAX.NEEDS_OTHER, 'Kebutuhan lain '),
+        },
+      },
+      showTotal: true,
+      date: '2026-11-11',
+      items: Array.from({ length: PROPOSAL.ITEMS_MAX }, (_, i) => one(i)),
+    },
+    {
+      agent: { name: long(160, 'Nama Agen Yang Panjang '), code: 'AG-0417-0000000001', phone: '+62 812 3456 7890 1234' },
+      insurer: long(200, 'PT Asuransi Jiwa Nama Panjang '),
+      kpmName: long(120, 'Nama KPM Panjang '),
+      branding: { branded: true, name: long(120, 'Nama KPM Panjang '), logo: null, main: '#FFFF00', second: '#FFFFFF' },
+    },
+  );
 }
-
-/** The longest agent and insurer the worst case prints. */
-export const WORST_AGENT = { name: longText(160, 'Nama Agen Yang Panjang '), code: 'AG-0417-0000000001', phone: '+62 812 3456 7890 1234' };
-export const WORST_INSURER = longText(200, 'PT Asuransi Jiwa Nama Panjang ');
-
-/**
- * **A KPM's branding**, as P19.6-T1's palette would hand it: a violet primary whose ink is itself (it reads 5.7:1), a
- * light blue secondary whose ink is darkened to read 4.5:1 — and a 480 × 96 logo, the size ADR-0218 §2 keeps.
- */
-export const KPM_BRANDING: PdfBranding = {
-  logo: null, primary: '#7C3AED', primaryInk: '#7C3AED', secondary: '#38BDF8', secondaryInk: '#0369A1',
-};

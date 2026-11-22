@@ -300,10 +300,9 @@ describe('the metric registry (P4-T4)', () => {
       ACTIVATION_3M_PCT: '18.8',
       // P18.9-T1 AC-5 (ADR-0175 §2): the reference slide's *Cases/producing agents*.
       CASES_PER_PRODUCING_AGENT: '18.9',
-      // P19.1-T6 (ADR-0193): the Unit Dashboard's *Potensi* tab — a lead's switch, the tab's AA, a kandidat's rekrut.
+      // P19.1-T6 (ADR-0193): the Unit Dashboard's *Potensi* tab — a lead's switch. Its AA and rekrut were retired by
+      // ADR-0271 §8 (P19.18-T3).
       LEAD_POTENSI_THIS_MONTH: '19.1',
-      AA_THIS_MONTH: '19.1',
-      REKRUT_THIS_MONTH: '19.1',
       // P19.3-T1 (ADR-0201 to ADR-0203): a leader row's uploaded unit persistency, and the forum's D7 and recruitment rows.
       UNIT_PERSISTENCY: '19.3',
       NEW_AGENT_ACTIVATION_3M_PCT: '19.3',
@@ -344,6 +343,22 @@ describe('the metric registry (P4-T4)', () => {
       OWN_OPEN_LEADS: '19.8',
       // P19.12-T6 (ADR-0249 §4): *Grup informal*'s line.
       ABS_NOT_IN_INFORMAL_GROUP: '19.12',
+      // P19.17-T1 (ADR-0267 §3 to §5): *Recruitment*, the usage of the app per person, and the coaching status tile.
+      RECRUITS_JOINED: '19.17',
+      APP_USE_IN_PERIOD: '19.17',
+      APP_EVER_USED: '19.17',
+      APP_USED_LAST_14D: '19.17',
+      POWER_USER: '19.17',
+      COACHING_STATUS: '19.17',
+      // P19.19-T3 (ADR-0272 §6): the KPM Overview's *Leads Mgmt* card.
+      MANAGED_LEADS_RATE: '19.19',
+      // P19.22-T6, T7 (ADR-0276 §1, §5): NPS's headline, and *Per orang*'s *n item*.
+      NPS_KPM_OVERALL: '19.22',
+      QUAL_PERSON_ISSUE_ITEMS: '19.22',
+      // P19.25-T4 (ADR-0282 §2): Pengaturan › Training's *"n dari 30 selesai"*.
+      TRAINING_MODULE_DONE_COUNT: '19.25',
+      // P19.25-T1, T2 (ADR-0281): Advanced analytics › *Event*'s *hadir* or *tidak hadir*.
+      EVENT_KEHADIRAN: '19.25',
     };
     const existedBefore = (id: string) => !(id in REGISTERED_SINCE);
 
@@ -388,8 +403,9 @@ describe('the metric registry (P4-T4)', () => {
       // (`SALES_LEADS_CLOSED_IN_PERIOD`); 19.1 since P19.1-T6 (the *Potensi* tab's three, ADR-0193); 19.3 since P19.3-T1
       // (the data sources' three of 3 November, ADR-0201 to ADR-0203); 19.5 since P19.5-T4 (the surveys' six, ADR-0216).
       // 19.8 since P19.8-T2 (Home's *Leads*, `OWN_OPEN_LEADS`, ADR-0228 §4). 19.12 since P19.12-T6 (*Grup informal*'s line,
-      // `ABS_NOT_IN_INFORMAL_GROUP`, ADR-0249 §4).
-      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12']);
+      // `ABS_NOT_IN_INFORMAL_GROUP`, ADR-0249 §4). 19.17 since P19.17-T1 (one definition per number, ADR-0267). 19.19 since
+      // P19.19-T3 (*Leads Mgmt*, ADR-0272 §6). 19.22 since P19.22-T6, T7 (NPS's headline, *Per orang*; ADR-0276).
+      expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '14', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25']);
     });
 
     it('evaluated campaigns in Phase 14 under that plan, the old plan’s 12: where campaign qualification is computed', () => {
@@ -431,8 +447,8 @@ describe('the metric registry (P4-T4)', () => {
         'ACTIVATION_3M', 'ACTIVATION_3M_PCT',
         // And UI V1's *Closing*, a roster column registered after campaign evaluation (Phase 18.11 T4, UI-028).
         'SALES_LEADS_CLOSED_IN_PERIOD',
-        // And the *Potensi* tab's three, registered after campaign evaluation (P19.1-T6, ADR-0193).
-        'AA_THIS_MONTH', 'LEAD_POTENSI_THIS_MONTH', 'REKRUT_THIS_MONTH',
+        // And the *Potensi* tab's switch, registered after campaign evaluation (P19.1-T6, ADR-0193; ADR-0271 §8).
+        'LEAD_POTENSI_THIS_MONTH',
         // And the data sources' three: a leader row's figure and two of the forum's rows (P19.3-T1, ADR-0201 to ADR-0203).
         'NEW_AGENT_ACTIVATION_3M_PCT', 'RECRUITMENT_MONTHLY_AVG', 'UNIT_PERSISTENCY',
         // And the surveys' six, each a run's figure or one person's answers (P19.5-T4, ADR-0216 §4).
@@ -452,6 +468,16 @@ describe('the metric registry (P4-T4)', () => {
         'OWN_OPEN_LEADS',
         // And *Grup informal*'s line, a count about a leader's tags (P19.12-T6, ADR-0249 §4).
         'ABS_NOT_IN_INFORMAL_GROUP',
+        // And the 19 November definitions: recruits, the app's use and the coaching tile, about people (P19.17-T1, ADR-0267).
+        'RECRUITS_JOINED', 'APP_USE_IN_PERIOD', 'APP_EVER_USED', 'APP_USED_LAST_14D', 'POWER_USER', 'COACHING_STATUS',
+        // And the Overview's *Leads Mgmt*, a share of members (P19.19-T3, ADR-0272 §6).
+        'MANAGED_LEADS_RATE',
+        // And NPS's headline and *Per orang*'s count, over a survey run (P19.22-T6, T7, ADR-0276 §1, §5).
+        'NPS_KPM_OVERALL', 'QUAL_PERSON_ISSUE_ITEMS',
+        // And a module's *"n dari 30 selesai"*, about one module across the KPM (P19.25-T4, ADR-0282 §2).
+        'TRAINING_MODULE_DONE_COUNT',
+        // And Advanced analytics › *Event*'s *hadir* or *tidak hadir*, a share over events (P19.25-T1, T2, ADR-0281).
+        'EVENT_KEHADIRAN',
       ].sort());
     });
 
@@ -496,8 +522,9 @@ describe('the metric registry (P4-T4)', () => {
         // 18.11 since UI V1: the roster's *Closing*, no requirement's. 19.1 since P19.1-T6: the *Potensi* tab's three. 19.3
         // since P19.3-T1: a leader row's unit persistency and two of the forum's rows, no requirement's.
         // 19.5 since P19.5-T4: the surveys' six, no requirement's. 19.8 since P19.8-T2: Home's *Leads*, no requirement's.
-        // 19.12 since P19.12-T6: *Grup informal*'s line, no requirement's.
-        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12']);
+        // 19.12 since P19.12-T6: *Grup informal*'s line, no requirement's. 19.17 since P19.17-T1: the 19 November
+        // definitions (ADR-0267), no requirement's.
+        expect(phases).toEqual(['6', '7', '8', '9', '10', '11', '13', '13.1', '13.2', '15', '18', '18.1', '18.2', '18.3', '18.8', '18.9', '18.11', '19.1', '19.3', '19.5', '19.7', '19.8', '19.12', '19.17', '19.19', '19.22', '19.25']);
       });
 
       it('pins, by key, every metric measured by the time a campaign is evaluated: all of them', () => {
@@ -542,8 +569,8 @@ describe('the metric registry (P4-T4)', () => {
         expect(METRIC_IDS.filter((id) => comparePhases(metric(id).phase, CAMPAIGN_EVALUATION_PHASE) > 0).sort()).toEqual([
           'ACTIVATION_3M', 'ACTIVATION_3M_PCT', 'ACTIVATION_COMPLETION_RATE', 'CASES_PER_PRODUCING_AGENT', 'COUNTS_FOR_PRODUCTION',
           'FIRST_SALE_DATE', 'GOAL_SET_RATE', 'SALES_LEADS_CLOSED_IN_PERIOD',
-          // P19.1-T6 (ADR-0193): the *Potensi* tab's three, no requirement's.
-          'AA_THIS_MONTH', 'LEAD_POTENSI_THIS_MONTH', 'REKRUT_THIS_MONTH',
+          // P19.1-T6 (ADR-0193): the *Potensi* tab's switch, no requirement's (its AA and rekrut retired, ADR-0271 §8).
+          'LEAD_POTENSI_THIS_MONTH',
           // P19.3-T1 (ADR-0201 to ADR-0203): the data sources' three, no requirement's.
           'NEW_AGENT_ACTIVATION_3M_PCT', 'RECRUITMENT_MONTHLY_AVG', 'UNIT_PERSISTENCY',
           // P19.5-T4 (ADR-0216 §4): the surveys' six, no requirement's.
@@ -563,6 +590,16 @@ describe('the metric registry (P4-T4)', () => {
           'OWN_OPEN_LEADS',
           // P19.12-T6 (ADR-0249 §4): *Grup informal*'s line, no requirement's.
           'ABS_NOT_IN_INFORMAL_GROUP',
+          // P19.17-T1 (ADR-0267): the 19 November definitions, no requirement's.
+          'RECRUITS_JOINED', 'APP_USE_IN_PERIOD', 'APP_EVER_USED', 'APP_USED_LAST_14D', 'POWER_USER', 'COACHING_STATUS',
+          // P19.19-T3 (ADR-0272 §6): *Leads Mgmt*, no requirement's.
+          'MANAGED_LEADS_RATE',
+          // P19.22-T6, T7 (ADR-0276): NPS's headline and *Per orang*'s count, no requirement's.
+          'NPS_KPM_OVERALL', 'QUAL_PERSON_ISSUE_ITEMS',
+          // P19.25-T4 (ADR-0282 §2): a module's *"n dari 30 selesai"*, no requirement's.
+          'TRAINING_MODULE_DONE_COUNT',
+          // P19.25-T1, T2 (ADR-0281): *hadir* or *tidak hadir* over events, no requirement's.
+          'EVENT_KEHADIRAN',
         ].sort());
       });
 

@@ -7,7 +7,47 @@ import { AuditEntryResponseDto } from '@/modules/tenants/platform.response.dto';
  * identical rows — the same actor, action and target, each within the window of the newest — with how many it stands
  * for. A row nothing repeats is a group of one.
  */
+export class AuditKpmRefDto {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String, example: '0417' })
+  code!: string;
+
+  @ApiProperty({ type: String, example: 'BSD City Branch' })
+  branch!: string;
+}
+
+export class AuditCompanyRefDto {
+  @ApiProperty({ type: String })
+  id!: string;
+
+  @ApiProperty({ type: String, example: 'Prudential' })
+  name!: string;
+}
+
 export class AuditGroupDto extends AuditEntryResponseDto {
+  @ApiProperty({
+    type: String, nullable: true, example: '6 → 8',
+    description: '**What changed, before → after, in words**: the plain fields both sides name that '
+      + 'differ — one as *"6 → 8"*, several as *"field: a → b · …"* (at most three); money in rupiah. Null when the row '
+      + 'records no such pair.',
+  })
+  change!: string | null;
+
+  @ApiProperty({
+    type: () => AuditKpmRefDto, nullable: true,
+    description: 'The KPM the row is in or about (*KPM · company*); null for a platform row about none.',
+  })
+  kpm!: AuditKpmRefDto | null;
+
+  @ApiProperty({
+    type: () => AuditCompanyRefDto, nullable: true,
+    description: 'Its company — the KPM’s, the company the row is about, or the one its change names; null when none.',
+  })
+  company!: AuditCompanyRefDto | null;
+
+
   @ApiProperty({
     type: Number, minimum: 1, example: 28,
     description: 'How many rows this line stands for — the page’s *×28*. `1` for a row nothing repeated.',

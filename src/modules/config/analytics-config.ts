@@ -437,7 +437,9 @@ export function analyticsConfigV1(
     uploadRules: {
       agentCodePattern,
       agentCodeExample,
-      unknownAgent: 'reject',
+      // ADR-0274 §2 (P19.21-T1 AC-5): nothing in a file is skipped — the Data upload keeps every unknown code and no longer
+      // reads this; the default says so.
+      unknownAgent: 'flag',
       historyMonthsBeforeJoin: ANALYTICS.HISTORY_MONTHS_BEFORE_JOIN,
       completePct: ANALYTICS.COMPLETE_PCT_DEFAULT,
       ytdTolerancePct: ANALYTICS.YTD_TOLERANCE_PCT_DEFAULT,

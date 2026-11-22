@@ -268,6 +268,26 @@ export const NOTICE_MESSAGES = messages('modules/notifications: notices', {
     en: `Columns follow ${name} v${version}.`,
     id: `Kolom mengikuti ${name} v${version}.`,
   }),
+  // P19.15-T4 (ADR-0261 §2, §3): the premium table notices, the P1b spec's own words.
+  aProduct: { en: 'a product', id: 'sebuah produk' },
+  premiumTableEnding: ({ product, date }: { product: string; date: string }) => ({
+    en: `${product} premium table ends ${date}. Upload new rates.`,
+    id: `Tabel tarif ${product} berakhir ${date}. Unggah tarif baru.`,
+  }),
+  premiumTableEndingDetail: ({ company, version }: { company: string; version: number }) => ({
+    en: `${company} · version ${version}. Nothing newer is scheduled; after that day agents type the premium.`,
+    id: `${company} · versi ${version}. Belum ada versi baru terjadwal; setelah tanggal itu agen mengetik preminya.`,
+  }),
+  premiumTableStarted: ({ product, date }: { product: string; date: string }) => ({
+    en: `${product} rates updated from ${date}`,
+    id: `Tarif ${product} diperbarui mulai ${date}`,
+  }),
+  premiumTableStartedDetail: ({ company }: { company: string }) => ({
+    en: `${company}. An announcement: nothing to do. New proposals use the new rates.`,
+    id: `${company}. Pengumuman, tidak perlu tindakan. Proposal baru memakai tarif ini.`,
+  }),
+  // P19.23-T6 AC-4 (ADR-0279): *Pengumuman*'s inbox line; its detail is the message as the Super Admin wrote it.
+  platformAnnouncement: { en: 'Announcement from AgencyBoost', id: 'Pengumuman dari AgencyBoost' },
   somethingHappened: { en: 'Something happened', id: 'Ada sesuatu yang terjadi' },
 });
 

@@ -1,18 +1,17 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { requireOfficeSteward } from '@/common/auth/office-steward';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { NotFoundException } from '@/common/errors/domain.exception';
 import type { LocalDate } from '@/common/time/local-day';
 import { refuseWith } from '@/common/validation/fields';
 import { KPM_REPORTING } from '@/domain/constants';
-import { memberAt } from '@/domain/metrics/office-headcount';
+import { rateOver } from '@/domain/metrics/rate';
 import { SubjectReadAudit } from '@/modules/audit/subject-read-audit';
+import { MemberNames } from '@/modules/org/member-names.service';
 import { can } from '@/modules/rbac/permissions';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
-import { partitionAgencies } from '../agency-partition';
-import { byName } from '../office-figures';
-import { OfficeGroups, type OfficeGroup } from '../office-groups';
-import { OfficePeople } from '../office-people';
+import { OfficeGroups } from '../office-groups';
+import { overviewTree, scopeOf, type OverviewGroupRef } from '../overview-tree';
 import { REPORTING_REFUSALS } from '../reporting.messages';
 import { ActivationComplianceCategory } from './activation.category';
 import { ActivityComplianceCategory } from './activity.category';
@@ -22,260 +21,202 @@ import {
   type ComplianceCategoryRead, type ComplianceCell, type ComplianceScope,
 } from './compliance-category';
 import { EventsComplianceCategory, type EventsComplianceCatalog } from './events.category';
-import { GoalsComplianceCategory, type GoalsComplianceCatalog } from './goals.category';
+import { GoalsComplianceCategory } from './goals.category';
+import { LeadsComplianceCategory } from './leads.category';
 import { TrainingComplianceCategory, type TrainingComplianceCatalog } from './training.category';
 
-/** A person the tree names: a card's or a section's head. `leads`: heads anybody now — their name opens the Unit Dashboard. */
-export interface CompliancePerson {
+/** One card: *"Leads Mgmt 47% · 14 dari 30 anggota"*. `pct` is `null` when the item applies to nobody (`of: 0`). */
+export interface ComplianceCard {
+  category: ComplianceCategoryKey;
+  count: number;
+  of: number;
+  pct: number | null;
+}
+
+/** One person's cell for the card opened, keyed by their membership: the Overview's tree draws the rows. */
+export interface ComplianceCellRow extends ComplianceCell {
   membershipId: string;
-  name: string;
-  leads: boolean;
 }
 
-/** One member's row: their own row on the card they head is `personal` (*Personal*, always first). */
-export interface ComplianceRow extends CompliancePerson {
-  personal: boolean;
-  cell: ComplianceCell;
-}
-
-/**
- * A unit card: the AB's own (*(Direct)*) or an AAB's. `done / of` count the rows the item applies to. `rung` names
- * the **class** of the card's head, as `partitionAgencies` placed them (ADR-0156): a *Senior Leader* rung's agency
- * is an `AB` card whatever the rung is called.
- */
-export interface ComplianceUnit {
-  head: CompliancePerson;
-  rung: 'AB' | 'AAB';
-  done: number;
-  of: number;
-  rows: ComplianceRow[];
-}
-
-/** One AB agency: its cards, and *"{n} / {m} done overall"* — the sum of theirs. */
-export interface ComplianceSection {
-  head: CompliancePerson;
-  done: number;
-  of: number;
-  units: ComplianceUnit[];
-}
-
-/** `GET /kpm/analytics/compliance`: the summary, the catalog, the selection and the tree (contract-tree.md). */
+/** `GET /kpm/overview/compliance`: the seven cards, the pickers, and — with `category` — the card's people. */
 export interface ComplianceView {
   today: LocalDate;
-  /** The sub-line's *"{people} people across {units} units"*: the rows, and the AB agencies. */
-  people: number;
-  units: number;
-  summary: { category: ComplianceCategoryKey; count: number; of: number }[];
+  /** Where a card turns yellow and green (`KPM_REPORTING`, 34 / 67), so no screen re-declares them. */
+  thresholds: { lowBelowPct: number; highFromPct: number };
+  /** The informal group the cards are over (`?group=`), `null` for the whole KPM; `groupId: null` is *Tanpa group*. */
+  group: OverviewGroupRef | null;
+  /** The seven cards, **lowest % first**, a card that applies to nobody last, the brief's order within a tie. */
+  cards: ComplianceCard[];
+  /** What the opened card's picker lists: Training's modules (*Modul: … ⌄*), the events and the campaigns. */
   catalog: {
     training: TrainingComplianceCatalog;
-    goals: GoalsComplianceCatalog;
     events: EventsComplianceCatalog;
     campaigns: CampaignsComplianceCatalog;
   };
-  selected: { category: ComplianceCategoryKey; item: string | null };
-  tree: ComplianceSection[];
+  /**
+   * The card asked about (`?category=`): its item — the module, the event, the campaign, or `null` for a single-item card
+   * and for *Semua event* / *Semua campaign* — *"x dari y"* over it, and every person's cell, in the tree's order.
+   * `null` when no card was asked about, and nothing is disclosed.
+   */
+  selected: {
+    category: ComplianceCategoryKey;
+    item: string | null;
+    done: number;
+    of: number;
+    cells: ComplianceCellRow[];
+  } | null;
+  /** The reader may override a campaign's final standing (`campaign_qualification:override`), never in a view-only session. */
   can: { override: boolean };
-  /** UI V1 (UI-109): where a bar turns red and green, `KPM_REPORTING`'s, so no screen re-declares them. */
-  thresholds: { lowBelowPct: number; highFromPct: number };
-  /** The office's custom groups for *Lihat untuk* (OD-258; P19.3-T3 AC-15), as the Overview tab's read serves them. */
-  groups: OfficeGroup[];
-  /** The group the tree and the six counts are over (`?group=`), or `null` for the whole KPM. */
-  group: OfficeGroup | null;
 }
 
-/** What the read takes: a category, and — on the three categories that hold several — an item; and a custom group. */
+/** What the read takes: a card, an item on the three cards that hold several, and an informal group. */
 export interface ComplianceQuery {
   category?: ComplianceCategoryKey;
   item?: string;
   group?: string;
 }
 
-/** The cell of a row whose category has no item to read: *—*, out of every count. */
-const NO_ITEM: ComplianceCell = { status: null, done: null, on: null };
-
 /**
- * **The Owner's compliance tree** (Phase 18.3, P18.3-T1; `functional/kpm-analytics.md`, *Compliance, Events, and
- * Campaigns*): `KPM_Owner.html:1262-1286`, `:3449-4118` — one read per screen, computed on each read, not paginated.
+ * **The KPM Overview's *Compliance*** (P19.19-T3 AC-2, AC-3; ADR-0272 §6; `functional/kpm-overview.md`, section 4) —
+ * where KPM Analytics' compliance tree went when that page was removed (the brief's *KPM Analytics: remove the page*,
+ * §6). One read for the cards, one for the card a reader opens; computed on each read, not paginated.
  *
- * - **Who is in it** (D-units, ADR-0135, ADR-0136): the office's active members at the end of its day — the
- *   Overview's own headcount — placed by `partitionAgencies`. A member under no active AB is in no row and no chip.
- * - **The tree**: one section per AB agency, A to Z by the head's name; in each, the AB's own card (the AB and those
- *   in no AAB's unit), then one card per AAB who leads somebody, A to Z; every card's head first, *Personal*.
- * - **Six categories, every chip on every read** (D-chips, T1 AC-3): each category reads its facts through the module
- *   that owns them — `training.category.ts`, `goals.category.ts`, `activity.category.ts`, `activation.category.ts`,
- *   `events.category.ts`, `campaigns.category.ts` — the chosen one first, with its cells, then the other five in
- *   parallel. A fixed number of queries for any office (`compliance.performance.spec.ts`), none per member.
- * - **The audit** (D-audit-tree): the chosen category's disclosure, written here and only here, once the answer
- *   exists, in one insert, failing open — the reader skipped, both actors in a support session. A refused read —
- *   403, 400, 404 — has thrown before it and writes no entry.
- * - **`can.override`**: the reader holds `campaign_qualification:override` and may write with it — a read-only
- *   support session may not (its verb).
+ * - **Who** (ADR-0268 §1): the KPM's stewards — the Super Admin inside the KPM, the Owner, an Admin, a core leader
+ *   (`requireOfficeSteward`); the route's `kpm_overview:read` asks first.
+ * - **Who is counted**: the Overview's scope — every active member of the KPM or of one informal group (`?group=`, `none`
+ *   for *Tanpa group*), **test accounts never** (`OfficeGroups.partition`, ADR-0267 §1) — so the cards' *"dari 30
+ *   anggota"* is section 1's *"dari 30 anggota"*.
+ * - **Seven cards** (the brief's §6), each through the module that owns its facts — `training.category.ts` (per module,
+ *   the first when none is asked), `goals.category.ts`, `activity.category.ts`, **`leads.category.ts`** (new),
+ *   `activation.category.ts` (of *agent baru*), `events.category.ts` (of *yang diundang*), `campaigns.category.ts` —
+ *   lowest % first. Red below 34%, yellow below 67%, green from 67% (`KPM_REPORTING`).
+ * - **A card opened** (`?category=`, and `?item=` on Training, Events and Campaigns): that category first, with its cells
+ *   — an item it does not list is 404 before any other reads — then the other six in parallel. No per-AB line: the
+ *   screen draws the Overview's tree with each person's cell.
+ * - **The audit** (D-audit-tree): the opened card's disclosure, written once the answer exists, in one insert.
  */
 @Injectable()
 export class ComplianceService {
   private readonly logger = new Logger(ComplianceService.name);
 
   constructor(
-    private readonly people: OfficePeople,
     private readonly days: TenantDay,
     private readonly clock: Clock,
     private readonly subjectReads: SubjectReadAudit,
+    private readonly officeGroups: OfficeGroups,
+    private readonly names: MemberNames,
     private readonly training: TrainingComplianceCategory,
     private readonly goals: GoalsComplianceCategory,
     private readonly activity: ActivityComplianceCategory,
     private readonly activation: ActivationComplianceCategory,
     private readonly events: EventsComplianceCategory,
     private readonly campaigns: CampaignsComplianceCategory,
-    /** The group filter (OD-258), optional as the analytics' is: a `group` asked without it is 404, as an unknown one. */
-    @Optional() @Inject(OfficeGroups) private readonly officeGroups: OfficeGroups | null = null,
+    /** *Leads Mgmt* (P19.19-T3). Optional only so a harness built before it still constructs; the app always provides it. */
+    @Optional() @Inject(LeadsComplianceCategory) private readonly leads: LeadsComplianceCategory | null = null,
   ) {}
 
   async read(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
-    // The Owner, an Admin, or a Core Leader (ADR-0159 §2); any other field member 404, before anything is read.
-    OfficePeople.requireAnalyticsReader(ctx);
-    return this.compute(ctx, query);
-  }
-
-  /**
-   * ***Lihat sebagai KPM*'s *Compliance*** (ADR-0207 §2, §3; P19.4-T3 AC-4): exactly what `read` answers the KPM's
-   * Owner, through the same code over the named office — a platform read's context (`RequestContext.platformRead`: no
-   * membership, read-only, so no category's read-time write happens and `can.override` is `false`). The chosen
-   * category's disclosure entries are written as `read` writes them, the Super Admin the actor, in the KPM's own log.
-   * Anything but a platform read is `TENANT_NO_MEMBERSHIP`.
-   */
-  async complianceForOffice(ctx: RequestContext, query: ComplianceQuery = {}): Promise<ComplianceView> {
-    OfficePeople.requirePlatformRead(ctx);
-    return this.compute(ctx, query);
-  }
-
-  /** The tree over the context's office: what `read` and `readForOffice` both serve. */
-  private async compute(ctx: RequestContext, query: ComplianceQuery): Promise<ComplianceView> {
-    const category = query.category ?? 'training';
+    requireOfficeSteward(ctx, 'KPM');
+    const category = query.category ?? null;
     const asked = query.item ?? null;
-    if (asked !== null && SINGLE_ITEM_CATEGORIES.includes(category)) {
-      refuseWith([REPORTING_REFUSALS.VALIDATION_FAILED.itemNotTaken({ category })]);
+    if (asked !== null && (category === null || SINGLE_ITEM_CATEGORIES.includes(category))) {
+      refuseWith([REPORTING_REFUSALS.VALIDATION_FAILED.itemNotTaken({ category: category ?? 'none' })]);
     }
 
-    // The group first (ADR-0204 §4): another office's, an archived or an unknown one is 404 before anything is read.
-    const [inGroup, offered] = await Promise.all([
-      query.group === undefined ? Promise.resolve(null)
-        : this.officeGroups ? this.officeGroups.membersOf(ctx, query.group) : Promise.reject(new NotFoundException('Group')),
-      this.officeGroups ? this.officeGroups.list(ctx) : Promise.resolve([] as OfficeGroup[]),
-    ]);
+    // The scope first: another office's, an archived or an unknown group is 404 before anything else is read.
+    const partition = await this.officeGroups.partition(ctx);
+    const named = await this.names.byMembershipId(ctx, [...partition.members.keys()]);
+    const scope = scopeOf(overviewTree(partition, (id) => named.get(id) ?? ''), query.group);
     const office = await this.days.office(ctx);
     const { today, timezone } = office;
     const year = today.slice(0, 4);
-    const roster = await this.people.read(ctx, null, timezone);
-    const endOfToday = this.clock.endOfLocalDay(timezone, today);
-    // Over a group, its members today alone: the tree, the six counts and the sub-line (P19.3-T3 AC-15).
-    const members = roster.active
-      .filter((p) => memberAt(p, endOfToday))
-      .filter((p) => inGroup === null || inGroup.memberIds.has(p.membershipId));
-    const names = roster.names;
-    const order = byName(names);
-    const leaders = new Set(members.flatMap((p) => (p.leaderId === null ? [] : [p.leaderId])));
-    const person = (membershipId: string): CompliancePerson => ({
-      membershipId, name: names.get(membershipId) ?? '', leads: leaders.has(membershipId),
-    });
-
-    // D-units: the agencies, A to Z; the AB's own card, then each AAB's; a card's head first, the rest A to Z.
-    const headFirst = (headId: string, ids: readonly string[]) => [headId, ...ids.filter((id) => id !== headId).sort(order)];
-    const skeleton = partitionAgencies(members.map((p) => ({ ...p, active: true })))
-      .agencies
-      .sort((a, b) => order(a.headId, b.headId))
-      .map((agency) => ({
-        headId: agency.headId,
-        units: [
-          { headId: agency.headId, rung: 'AB' as const, memberIds: headFirst(agency.headId, agency.directIds) },
-          ...[...agency.units].sort((a, b) => order(a.headId, b.headId))
-            .map((unit) => ({ headId: unit.headId, rung: 'AAB' as const, memberIds: headFirst(unit.headId, unit.memberIds) })),
-        ],
-      }));
-    const memberIds = skeleton.flatMap((agency) => agency.units.flatMap((unit) => unit.memberIds));
-
     const from = `${year}-01-01`;
     const to = `${year}-12-31`;
-    const scope: ComplianceScope = {
+    const read: ComplianceScope = {
       ctx,
       office,
       today,
       // D-window: the office's calendar year, `[start, end)`.
       year: { from, to, start: this.clock.startOfLocalDay(timezone, from), end: this.clock.endOfLocalDay(timezone, to) },
-      memberIds,
+      memberIds: scope.memberIds,
     };
-    const readers: Record<ComplianceCategoryKey, ComplianceCategory<unknown>> = {
+    const readers: Record<ComplianceCategoryKey, ComplianceCategory<unknown> | null> = {
       training: this.training,
       goals: this.goals,
       activity: this.activity,
+      leads: this.leads,
       activation: this.activation,
       events: this.events,
       campaigns: this.campaigns,
     };
+    const readOf = (key: ComplianceCategoryKey, selection: { selected: boolean; item: string | null }) => {
+      const reader = readers[key];
+      if (reader) return reader.read(read, selection);
+      return Promise.resolve<ComplianceCategoryRead<unknown>>({ catalog: null, chip: { count: 0, of: 0 }, item: null, cells: null });
+    };
     /*
-     * **The chosen category first** (the exit review, round 1, 5): an item it does not list is refused — 404 — before
-     * any other category reads, so a refused read writes nothing: no activation link completed, no campaign window
-     * frozen by another chip. Then every other chip (T1 AC-3), settled together so nothing is still reading when an
-     * error is answered. **A failure there is the server's, never the chosen tab's**: it answers 500, logged, so an
-     * unexpected refusal from another chip can never read as *this item is not listed*.
+     * **The opened card first** (the exit review, round 1, 5): an item it does not list is refused — 404 — before any
+     * other category reads, so a refused read writes nothing. Then every other card, settled together. **A failure there
+     * is the server's, never the opened card's**: it answers 500, logged.
      */
-    const chosen = await readers[category].read(scope, { selected: true, item: asked });
+    const chosen = category === null ? null : await readOf(category, { selected: true, item: asked });
     const others = COMPLIANCE_CATEGORIES.filter((key) => key !== category);
-    const settled = await Promise.allSettled(others.map((key) => readers[key].read(scope, { selected: false, item: null })));
+    const settled = await Promise.allSettled(others.map((key) => readOf(key, { selected: false, item: null })));
     const failed = settled.findIndex((s) => s.status === 'rejected');
     if (failed !== -1) {
       const reason = (settled[failed] as PromiseRejectedResult).reason;
-      this.logger.error({ err: reason, category: others[failed] }, 'a compliance chip could not be read');
-      throw new Error(`The ${others[failed]} chip could not be read.`, { cause: reason });
+      this.logger.error({ err: reason, category: others[failed] }, 'a compliance card could not be read');
+      throw new Error(`The ${others[failed]} card could not be read.`, { cause: reason });
     }
-    const reads = new Map<ComplianceCategoryKey, ComplianceCategoryRead<unknown>>([
-      [category, chosen],
-      ...others.map((key, i) => [key, (settled[i] as PromiseFulfilledResult<ComplianceCategoryRead<unknown>>).value] as const),
-    ]);
+    const reads = new Map<ComplianceCategoryKey, ComplianceCategoryRead<unknown>>(
+      others.map((key, i) => [key, (settled[i] as PromiseFulfilledResult<ComplianceCategoryRead<unknown>>).value] as const),
+    );
+    if (category !== null && chosen !== null) reads.set(category, chosen);
 
-    const cellOf = (id: string): ComplianceCell => chosen.cells?.get(id) ?? NO_ITEM;
-    const tree = skeleton.map((agency): ComplianceSection => {
-      const units = agency.units.map((unit): ComplianceUnit => {
-        const rows = unit.memberIds.map((id): ComplianceRow => ({ ...person(id), personal: id === unit.headId, cell: cellOf(id) }));
-        return {
-          head: person(unit.headId),
-          rung: unit.rung,
-          done: rows.filter((row) => row.cell.done === true).length,
-          of: rows.filter((row) => row.cell.done !== null).length,
-          rows,
-        };
+    const order = (key: ComplianceCategoryKey) => COMPLIANCE_CATEGORIES.indexOf(key);
+    const cards = COMPLIANCE_CATEGORIES
+      .map((key): ComplianceCard => {
+        const { count, of } = reads.get(key)!.chip;
+        return { category: key, count, of, pct: rateOver(count, of).pct };
+      })
+      .sort((a, b) => {
+        if (a.pct === null || b.pct === null) return a.pct === b.pct ? order(a.category) - order(b.category) : a.pct === null ? 1 : -1;
+        return a.pct - b.pct || order(a.category) - order(b.category);
       });
-      return {
-        head: person(agency.headId),
-        done: units.reduce((n, unit) => n + unit.done, 0),
-        of: units.reduce((n, unit) => n + unit.of, 0),
-        units,
+
+    let selected: ComplianceView['selected'] = null;
+    if (category !== null && chosen !== null) {
+      const cells = scope.memberIds.map((membershipId): ComplianceCellRow => ({
+        membershipId, ...(chosen.cells?.get(membershipId) ?? { status: null, done: null, on: null }),
+      }));
+      selected = {
+        category,
+        item: chosen.item,
+        done: cells.filter((c) => c.done === true).length,
+        of: cells.filter((c) => c.done !== null).length,
+        cells,
       };
-    });
+    }
 
     const view: ComplianceView = {
       today,
-      people: memberIds.length,
-      units: tree.length,
-      summary: COMPLIANCE_CATEGORIES.map((key) => ({ category: key, ...reads.get(key)!.chip })),
-      catalog: {
-        training: reads.get('training')!.catalog as TrainingComplianceCatalog,
-        goals: reads.get('goals')!.catalog as GoalsComplianceCatalog,
-        events: reads.get('events')!.catalog as EventsComplianceCatalog,
-        campaigns: reads.get('campaigns')!.catalog as CampaignsComplianceCatalog,
-      },
-      selected: { category, item: chosen.item },
-      tree,
-      can: { override: can(ctx, 'campaign_qualification:override') },
       thresholds: {
         lowBelowPct: KPM_REPORTING.COMPLIANCE_LOW_BELOW_PCT,
         highFromPct: KPM_REPORTING.COMPLIANCE_HIGH_FROM_PCT,
       },
-      groups: offered,
-      group: inGroup?.group ?? null,
+      group: scope.selected,
+      cards,
+      catalog: {
+        training: reads.get('training')!.catalog as TrainingComplianceCatalog,
+        events: (reads.get('events')!.catalog ?? []) as EventsComplianceCatalog,
+        campaigns: (reads.get('campaigns')!.catalog ?? []) as CampaignsComplianceCatalog,
+      },
+      selected,
+      can: { override: can(ctx, 'campaign_qualification:override') },
     };
 
-    // Last, once the answer exists: what the chosen category's cells disclosed (D-audit-tree), in one insert.
-    if (chosen.disclosure) {
+    // Last, once the answer exists: what the opened card's cells disclosed (D-audit-tree), in one insert.
+    if (chosen?.disclosure) {
       const starts = new Map(chosen.disclosure.subjects.map((s) => [s.membershipId, s.from]));
       await this.subjectReads.recordMany(
         ctx, chosen.disclosure.subjects, chosen.disclosure.surface,

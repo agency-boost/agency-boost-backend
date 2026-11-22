@@ -16,6 +16,8 @@ import { MonthlyAgentData } from '../production/monthly-agent-data.schema';
 const VALUE_COLUMNS = (['monthly', 'ytd'] as const).flatMap((cadence) =>
   (['ape', 'persistency', 'recruitment', 'newActiveAgents', 'fyp', 'policyCount'] as const).map((metric) => ({ metric, cadence })));
 import { TEMPLATE_HEADER_V1 } from '../production/production-template';
+import { rollUpProduction } from '@/domain/metrics/unit-rollup';
+import type { CoachingRosterView } from '../coaching/coaching-roster.service';
 import type { UnitDashboardView, UnitGroup, UnitRow } from './unit-dashboard.service';
 
 const M = 1_000_000 * 100;
@@ -44,8 +46,14 @@ describe('the Unit Dashboard (Phase 15)', () => {
   }, 120_000);
   afterAll(stopMongo);
 
+  /*
+   * Read on *Bulan ini* unless a period is named: these cases pin the month's figures. The default, *Tahun ini* since
+   * P19.18-T1 AC-1, is pinned by `unit-dashboard-whole-office.tenancy.spec.ts`.
+   */
   const read = (who: Who, query: Parameters<typeof wired.unitDashboard.read>[1] = {}) =>
-    wired.unitDashboard.read(office.as(who), query);
+    wired.unitDashboard.read(office.as(who), { period: 'month', ...query });
+  /** Every row of the coaching roster (P19.18-T5): each section's, then its team lines'. */
+  const rosterRows = (roster: CoachingRosterView) => roster.sections.flatMap((s) => [...s.rows, ...s.teams.flatMap((t) => t.rows)]);
   const rowFor = (view: UnitDashboardView, who: Who) => everyRow(view).find((r) => r.membershipId === office.id[who])!;
   const names = (rows: UnitRow[]) => rows.map((r) => r.name);
   const reads = () => db().collection('auditLog').countDocuments({ action: 'activity_log.read_raw', 'after.surface': 'unit_dashboard' });
@@ -66,46 +74,51 @@ describe('the Unit Dashboard (Phase 15)', () => {
   });
 
   describe('P15-T1 AC-1, AC-2 — the reach and the groups', () => {
-    it('P15-T1 AC-2 an AB: Your Unit is the reader and their agents who lead nobody; every other direct report heads a unit, nested two deep', async () => {
+    it('P19.18-T1 AC-6 an AB: Your Unit is Direct Unit — the reader, an AAB with no team, then their agents; every other direct report heads a unit, AB → AAB → agents, nested two deep', async () => {
       const view = await read('AGUS');
 
       expect(view.head).toEqual({ membershipId: office.id.AGUS, name: 'Agus Salim', isReader: true });
       expect(view.empty).toBe(false);
-      expect(names(view.yourUnit.rows)).toEqual(['Agus Salim', 'Dimas Pratama', 'Indah Permatasari']);
-      expect(view.units.map((u) => u.head.name)).toEqual(['Dewi Lestari', 'Lukas Hartono', 'Sari Puspita']);
-      const sari = view.units[2];
-      // The head's direct reports who lead nobody, A to Z; then each who leads, with their own unit.
+      // ADR-0271 §2: Dewi, an AAB who leads nobody, sits in his unit after him — no longer a unit of one.
+      expect(names(view.yourUnit.rows)).toEqual(['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']);
+      // ADR-0271 §4: Sari, an AAB, before Lukas, an agent who leads.
+      expect(view.units.map((u) => u.head.name)).toEqual(['Sari Puspita', 'Lukas Hartono']);
+      const sari = view.units[0];
+      // The head's direct reports who lead nobody, AB → AAB → agents then A to Z; then each who leads, with their own unit.
       expect(names(sari.members)).toEqual(['Budi Santoso', 'Rina Wijaya']);
       expect(sari.units.map((u) => [u.head.name, ...names(u.members)])).toEqual([['Nina Lestari', 'Dodi Kurniawan']]);
       expect(sari.units[0].units).toEqual([]);
-      // A unit head nobody reports to stands alone; an Agent who leads heads a unit, as on the coaching roster.
-      expect(view.units[0]).toMatchObject({ members: [], units: [] });
+      // An Agent who leads heads a unit, as on the coaching roster.
       expect(names(view.units[1].members)).toEqual(['Tari Anggraini']);
     });
 
     it('P15-T1 AC-2 depth counts the edges from the head; leads says who heads somebody; the rung is the ladder’s', async () => {
       const view = await read('AGUS');
       expect(view.yourUnit.rows.map((r) => [r.name, r.depth, r.leads, r.isReader])).toEqual([
-        ['Agus Salim', 0, true, true], ['Dimas Pratama', 1, false, false], ['Indah Permatasari', 1, false, false],
+        ['Agus Salim', 0, true, true], ['Dewi Lestari', 1, false, false], ['Dimas Pratama', 1, false, false],
+        ['Indah Permatasari', 1, false, false],
       ]);
-      const sari = view.units[2];
+      const sari = view.units[0];
       expect([sari.head.depth, sari.head.leads, sari.head.rung]).toEqual([1, true, { code: 'AAB', label: 'AAB' }]);
       expect(sari.units[0].members[0]).toMatchObject({ name: 'Dodi Kurniawan', depth: 3, leads: false });
-      expect(view.units[0].head).toMatchObject({ name: 'Dewi Lestari', leads: false });
+      expect(view.yourUnit.rows[1]).toMatchObject({ name: 'Dewi Lestari', leads: false, rung: { code: 'AAB' } });
     });
 
     it('P15-T1 AC-2 the rows are the reader and exactly whom the coaching roster lists, in the same groups', async () => {
       for (const who of ['AGUS', 'SARI', 'NINA', 'LUKAS', 'OWNER', 'PEER_AB', 'PEER_AAB', 'B_AB'] as const) {
-        const [view, roster] = await Promise.all([read(who), wired.coachingRoster.read(office.as(who))]);
-        expect({ who, ids: everyRow(view).slice(1).map((r) => r.membershipId).sort() }).toEqual({
-          who, ids: [...roster.directAgents, ...roster.units.flatMap((u) => [u.head, ...u.members])].map((r) => r.membershipId).sort(),
+        // The widest view on both: the dashboard's Semua downline where offered, the roster's everybody coached (P19.18-T5).
+        const [view, roster] = await Promise.all([read(who, { scope: 'downline' }), wired.coachingRoster.read(office.as(who))]);
+        expect({ who, ids: everyRow(view).map((r) => r.membershipId).sort() }).toEqual({
+          who, ids: rosterRows(roster).map((r) => r.membershipId).sort(),
         });
-        // Your Unit adds only the reader to the roster's direct agents, in the same order.
-        expect({ who, direct: view.yourUnit.rows.slice(1).map((r) => r.membershipId) })
-          .toEqual({ who, direct: roster.directAgents.map((r) => r.membershipId) });
-        // Each unit holds the same people as the roster's, its head first.
+        // *Unit Anda* is the same people in the same order — the reader first (P19.18-T5 AC-2).
+        const own = roster.sections.find((x) => x.kind === 'own');
+        expect({ who, direct: view.yourUnit.rows.map((r) => r.membershipId) })
+          .toEqual({ who, direct: own ? own.rows.map((r) => r.membershipId) : [] });
+        // Each unit holds the same people as the roster's section, its head first.
+        const sections = roster.sections.filter((x) => x.kind === 'unit');
         expect({ who, units: view.units.map((u) => [u.head.membershipId, ...rowsOf(u).slice(1).map((r) => r.membershipId).sort()]) })
-          .toEqual({ who, units: roster.units.map((u) => [u.head.membershipId, ...u.members.map((r) => r.membershipId).sort()]) });
+          .toEqual({ who, units: sections.map((x) => [x.rows[0].membershipId, ...[...x.rows.slice(1), ...x.teams.flatMap((t) => t.rows)].map((r) => r.membershipId).sort()]) });
       }
     });
 
@@ -129,8 +142,9 @@ describe('the Unit Dashboard (Phase 15)', () => {
           directGroupProduction: {
             targetMinor: null, actualMinor: null, attainmentPct: null, missing: 0, gapMinor: null, overMinor: null, period: 'month',
           },
-          potentialActive: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 }, ab: { count: 0, of: 0 } },
-          potentialRecruits: { yourUnit: 0, aabs: 0, abs: 0 },
+          // P19.18-T1 AC-3: nobody to count — no read of the month, *0 dari –*.
+          activeAgent: { month: UNIT_MONTH, held: false, count: null, people: [] },
+          recruitment: { month: UNIT_MONTH, count: 0, people: [] },
         });
         expect(view.production.canUpdate).toBe(false);
       }
@@ -313,11 +327,11 @@ describe('the Unit Dashboard (Phase 15)', () => {
 
     it('P15-T1 AC-3 status, the pacing mark and the last 1:1 are coaching’s, for the calendar month whatever the period', async () => {
       const roster = await wired.coachingRoster.read(office.as('AGUS'));
-      const rosterRows = [...roster.directAgents, ...roster.units.flatMap((u) => [u.head, ...u.members])];
+      const listed = rosterRows(roster);
       for (const period of ['7d', 'month', 'year'] as const) {
         const view = await read('AGUS', { period });
         for (const row of everyRow(view).filter((r) => !r.isReader)) {
-          const coached = rosterRows.find((r) => r.membershipId === row.membershipId)!;
+          const coached = listed.find((r) => r.membershipId === row.membershipId)!;
           expect({ period, who: row.name, status: row.status, last: row.lastOneOnOne })
             .toEqual({ period, who: row.name, status: coached.status, last: coached.lastOneOnOne });
         }
@@ -417,34 +431,31 @@ describe('the Unit Dashboard (Phase 15)', () => {
         const { period: tilePeriod, ...production } = view.tiles.directGroupProduction;
         expect(tilePeriod).toBe(period === 'year' ? 'year' : 'month');
         check(all, {
-          goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all), potentialActive: view.tiles.potentialActive,
+          goal: production, leadsCounts: sumLeads(all), touches: sumTouches(all),
+          potentialActive: rollUpProduction(all).potentialActive,
           newHires: view.tiles.team.newHires, closings: all.reduce((s, r) => s + r.closings, 0),
           proposalsMade: all.reduce((s, r) => s + r.proposalsMade, 0),
         });
-        // UI-013: Active Agent's of is Your team's number, and its Unit / AAB / AB split adds up to it — Unit is Your Unit
-        // (ADR-0249 §3: AB the rows outside the head's direct group — the Owner's whole office here, every report an AB).
-        const { unit, aab, ab, of } = view.tiles.potentialActive;
-        expect(of).toBe(view.tiles.team.total);
-        expect(unit).toEqual(view.yourUnit.total.potentialActive);
-        expect([unit.count + aab.count + ab.count, unit.of + aab.of + ab.of]).toEqual([view.tiles.potentialActive.count, of]);
-        expect(aab.of + ab.of).toBe(view.units.reduce((n, g) => n + rowsOf(g).length, 0));
-        expect(view.tiles.team).toEqual({
+        expect(view.tiles.team).toMatchObject({
           total: all.length, direct: view.yourUnit.rows.length, units: view.units.length,
           underUnits: all.length - view.yourUnit.rows.length - view.units.length,
-          aab: aab.of, ab: ab.of,
           newHires: all.filter((r) => r.newHireBeforeFirstSale).length,
         });
         expect(view.tiles.team.direct + view.tiles.team.aab + view.tiles.team.ab).toBe(all.length);
-        const recruits = (rows: UnitRow[]) => rows.reduce((s, r) => s + r.leadsCounts.recruitNominated, 0);
-        expect(view.tiles.potentialRecruits.yourUnit).toBe(recruits(view.yourUnit.rows));
-        expect(view.tiles.potentialRecruits.aabs + view.tiles.potentialRecruits.abs).toBe(recruits(view.units.flatMap(rowsOf)));
+        // P19.18-T1 AC-3 (ADR-0267 §2–3): the navy tiles' people are the roster's, and their number is how many.
+        const ids = new Set(all.map((r) => r.membershipId));
+        expect(view.tiles.activeAgent.people.every((p) => ids.has(p.membershipId))).toBe(true);
+        if (view.tiles.activeAgent.held) expect(view.tiles.activeAgent.count).toBe(view.tiles.activeAgent.people.length);
+        expect(view.tiles.recruitment.count).toBe(view.tiles.recruitment.people.length);
       }
     });
 
     it('P15-T1 AC-4 Agus’s tiles, worked: eleven people; Indah’s nomination in his unit, Rina’s in Sari’s', async () => {
       const view = await read('AGUS');
-      expect(view.tiles.team).toEqual({ total: 11, direct: 3, units: 3, underUnits: 5, aab: 8, ab: 0, newHires: 0 });
-      expect(view.tiles.potentialRecruits).toEqual({ yourUnit: 1, aabs: 1, abs: 0 });
+      // P19.18-T1 AC-6: Dewi in his unit — four there, Sari's and Lukas's units below.
+      expect(view.tiles.team).toEqual({ total: 11, direct: 4, units: 2, underUnits: 5, aab: 7, ab: 0, newHires: 0 });
+      // P19.18-T1 AC-3: Recruitment counts new hires who joined, never a nomination — nobody joined this month here.
+      expect(view.tiles.recruitment).toEqual({ month: UNIT_MONTH, count: 0, people: [] });
       // Four rows hold this month's APE — Indah, Dimas, Rina and Sari — and seven hold none.
       expect(view.tiles.directGroupProduction).toMatchObject({ actualMinor: 270 * M, missing: 7, period: 'month' });
     });
@@ -462,7 +473,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
     });
 
     it('P15-T1 AC-4 the nested unit, two deep, has its own total inside its parent’s', async () => {
-      const sari = (await read('AGUS')).units[2];
+      const sari = (await read('AGUS')).units[0];
       const nina = sari.units[0];
       expect(nina.total.leadsCounts.recruitOpen).toBe(1);
       expect(nina.total.potentialActive.of).toBe(2);
@@ -500,13 +511,8 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(view.yourUnit.total).toMatchObject({ newHires: 1, goal: { actualMinor: actual, missing: before.yourUnit.total.goal.missing } });
       expect(view.tiles.directGroupProduction.actualMinor).toBe(before.tiles.directGroupProduction.actualMinor! - dimas.goal.actualMinor!);
       expect(view.tiles.directGroupProduction.targetMinor).toBe(before.tiles.directGroupProduction.targetMinor! - dimas.goal.targetMinor!);
-      // UI-013 Active Agent: out of the count, never out of `of` — manpower, the same number as Your team.
-      const pacing = dimas.pacingToMaa === true ? 1 : 0;
-      expect(view.tiles.potentialActive).toMatchObject({
-        count: before.tiles.potentialActive.count - pacing, of: before.tiles.potentialActive.of,
-        unit: { count: before.tiles.potentialActive.unit.count - pacing, of: before.tiles.potentialActive.unit.of },
-      });
-      expect(view.tiles.potentialActive.of).toBe(view.tiles.team.total);
+      // P19.18-T1 AC-3 (ADR-0267 §2): Active Agent reads the upload, a new hire's included — the new-hire rule is production's.
+      expect(view.tiles.activeAgent).toEqual(before.tiles.activeAgent);
       expect(view.yourUnit.total.potentialActive.of).toBe(before.yourUnit.total.potentialActive.of);
       // The leads and the goal activities are still everybody's.
       expect(view.yourUnit.total.leadsCounts).toEqual(before.yourUnit.total.leadsCounts);
@@ -517,7 +523,7 @@ describe('the Unit Dashboard (Phase 15)', () => {
       const counted = async (firstSaleDate: string) => {
         await mark('DIMAS', { joinedAs: 'new_hire', firstSaleDate });
         const view = await read('AGUS');
-        return { tag: rowFor(view, 'DIMAS').newHireBeforeFirstSale, newHires: view.tiles.team.newHires, of: view.tiles.potentialActive.of };
+        return { tag: rowFor(view, 'DIMAS').newHireBeforeFirstSale, newHires: view.tiles.team.newHires, of: view.tiles.team.total };
       };
       const all = everyRow(await read('AGUS')).length;
       // UI-013: `of` is manpower whatever the first sale — the tag and the production's left-out count move.
@@ -531,28 +537,28 @@ describe('the Unit Dashboard (Phase 15)', () => {
       await mark('DIMAS', { joinedAs: 'existing_agent', firstSaleDate: null });
       const view = await read('AGUS');
       expect(rowFor(view, 'DIMAS').newHireBeforeFirstSale).toBe(false);
-      expect([view.tiles.directGroupProduction, view.tiles.potentialActive, view.yourUnit.total])
-        .toEqual([before.tiles.directGroupProduction, before.tiles.potentialActive, before.yourUnit.total]);
+      expect([view.tiles.directGroupProduction, view.tiles.activeAgent, view.yourUnit.total])
+        .toEqual([before.tiles.directGroupProduction, before.tiles.activeAgent, before.yourUnit.total]);
     });
 
     it('UI-013 every total above a new hire leaves them out of production, never of on pace’s of — Rina in Sari’s unit', async () => {
       await mark('RINA', { joinedAs: 'new_hire', firstSaleDate: null });
       const agus = await read('AGUS');
-      const sari = agus.units[2];
+      const sari = agus.units[0];
       expect(sari.total.newHires).toBe(1);
       expect(sari.total.potentialActive.of).toBe(rowsOf(sari).length);
       expect(sari.units[0].total.newHires).toBe(0);
       const own = await read('SARI');
       expect(own.yourUnit.total.newHires).toBe(1);
       expect(own.tiles.team.newHires).toBe(1);
-      expect(own.tiles.potentialActive.of).toBe(everyRow(own).length);
+      expect(own.tiles.team.total).toBe(everyRow(own).length);
     });
 
     it('P18.8-T5 AC-3 the head is read too: a new-hire leader before a first sale is tagged on their own dashboard', async () => {
       await mark('SARI', { joinedAs: 'new_hire', firstSaleDate: null });
       const own = await read('SARI');
       expect(own.yourUnit.rows[0]).toMatchObject({ isReader: true, newHireBeforeFirstSale: true });
-      expect((await read('AGUS')).units[2].head.newHireBeforeFirstSale).toBe(true);
+      expect((await read('AGUS')).units[0].head.newHireBeforeFirstSale).toBe(true);
       expect((await read('AGUS', { for: office.id.SARI })).yourUnit.rows[0].newHireBeforeFirstSale).toBe(true);
     });
   });
@@ -688,7 +694,8 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect(yearly.goal.source).toMatchObject({ provenance: 'corrected', correctedBy: { name: 'Sari Puspita' } });
       const table = await wired.production.readMonth(office.as('OWNER'), UNIT_MONTH);
       expect(table.rows.find((r) => r.membershipId === office.id.RINA)!.values.APE)
-        .toEqual({ value: 85 * M, provenance: 'corrected', correction: { by: 'Sari Puspita', at: ROSTER_NOW.toISOString(), reason: UNIT_DASHBOARD_CORRECTION_REASON }, outOfBounds: null });
+        // `fileValue` (P19.21-T1; ADR-0274 §1): the file's number behind the correction, `null` where no upload holds one.
+        .toEqual({ value: 85 * M, provenance: 'corrected', correction: { by: 'Sari Puspita', at: ROSTER_NOW.toISOString(), reason: UNIT_DASHBOARD_CORRECTION_REASON, fileValue: null }, outOfBounds: null });
       // The member's own Summary, and a leader's copy of it, name the leader who corrected it (option 2).
       const corrected = {
         provenance: 'corrected', month: UNIT_MONTH,
@@ -715,6 +722,27 @@ describe('the Unit Dashboard (Phase 15)', () => {
       expect((await save('ADMIN', [{ membershipId: office.id.PEER_AGENT, apeMonthlyMinor: 3 * M }])).updated).toBe(1);
       expect((await save('AGUS', [{ membershipId: office.id.AGUS, apeMonthlyMinor: 2 * M }])).updated).toBe(1);
       expect((await cell('AGUS'))).toMatchObject({ correctedBy: office.id.AGUS });
+    });
+
+    it('P19.3-T3 AC-3 the office’s read-only view of a leader’s unit writes nothing; the Owner’s own, and a leader’s view of their unit, keep their corrections', async () => {
+      const saveFor = async (who: Who, unitOf: Who, rows: { membershipId: string; apeMonthlyMinor: number }[]) =>
+        wired.unitDashboard.updateProduction(office.as(who).withReader(SOURCE_READER), {
+          month: UNIT_MONTH, revision: (await state()).revision, for: office.id[unitOf], rows,
+        });
+      const before = await snapshot();
+      // UI-152: the Owner and an Admin reading Agus's unit — from KPM Analytics, the member page or the tree — read only.
+      for (const who of ['OWNER', 'ADMIN'] as const) {
+        await expect(saveFor(who, 'AGUS', [{ membershipId: office.id.RINA, apeMonthlyMinor: 71 * M }])).rejects.toMatchObject({
+          code: 'PERM_DENIED', status: 403,
+          details: { permission: 'unit_dashboard:update_production', readOnly: true, for: office.id.AGUS },
+        });
+      }
+      expect(await snapshot()).toEqual(before);
+      // `for` naming the reader is their own dashboard: the office's correction stands.
+      expect((await saveFor('OWNER', 'OWNER', [{ membershipId: office.id.ADMIN, apeMonthlyMinor: 4 * M }])).updated).toBe(1);
+      // A leader reading a unit beneath them is no read-only view: Agus, on Sari's unit, still corrects anybody he reaches.
+      expect((await saveFor('AGUS', 'SARI', [{ membershipId: office.id.INDAH, apeMonthlyMinor: 72 * M }])).updated).toBe(1);
+      expect(await cell('INDAH')).toMatchObject({ value: 72 * M, correctedBy: office.id.AGUS });
     });
 
     it.each([

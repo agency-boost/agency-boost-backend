@@ -368,14 +368,16 @@ describe('template copies (P13.2-T7)', () => {
 
         const saved = await wired.templateCopies.saveOffice(sa, KPM, { name: 'After archiving', companyId: PRUDENTIAL });
 
-        expect(saved.dropped).toHaveLength(3);
+        // Two, where it was three: since ADR-0267 §6 (part D) *Selling success rate* is Submission polis ÷ Presentasi
+        // penjualan and never named SELL_FOLLOWUP, so archiving it leaves that ratio whole.
+        expect(saved.dropped).toHaveLength(2);
         expect(saved.dropped).toEqual(expect.arrayContaining([
           { kind: 'ratio_set', code: 'SELLING_VS_RECRUITMENT', reason: expect.stringContaining('no longer counts SELL_FOLLOWUP') },
-          { kind: 'ratio_set', code: 'SELLING_SUCCESS_RATE', reason: expect.stringContaining('no longer counts SELL_FOLLOWUP') },
           { kind: 'ratio_set', code: 'LEADS_PER_ACTIVITY', reason: expect.stringContaining('Ratio LEADS_PER_ACTIVITY was left out') },
         ]));
         const ratios = (await read(PRUDENTIAL, 'ratio_set', saved.id)).ratios as Payload[];
         expect(ratios.map((r) => r.code)).not.toContain('LEADS_PER_ACTIVITY');
+        expect(ratios.map((r) => r.code)).toContain('SELLING_SUCCESS_RATE');
         expect(JSON.stringify(ratios)).not.toContain('SELL_FOLLOWUP');
         // Recorded where the audit log can answer for it.
         expect((await templateCreated(saved.id))[0].after.dropped).toEqual(saved.dropped);

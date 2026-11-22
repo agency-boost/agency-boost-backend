@@ -58,6 +58,12 @@ const everyRow = (view: View): Row[] => [...view.yourUnit.rows, ...view.units.fl
  * the person's own reads — `GET /summary?for=`, `GET /coaching/coachees`, `GET /kpm/data-upload/:month` —
  * through an import, a correction from the dashboard, the same file again, a restated file ticked and a revert.
  */
+/** Every row of the coaching roster (P19.18-T5, ADR-0271 §9): each section's rows, then its team lines' rows. */
+const rosterRows = (roster: {
+  sections: { rows: RosterRowLite[]; teams: { rows: RosterRowLite[] }[] }[];
+}): RosterRowLite[] => roster.sections.flatMap((s) => [...s.rows, ...s.teams.flatMap((t) => t.rows)]);
+interface RosterRowLite { membershipId: string; photoUrl: string | null; isReader: boolean; status: string; lastOneOnOne: unknown }
+
 describe('the Unit Dashboard over HTTP (Phase 15)', () => {
   let app: INestApplication;
   let wired: ReturnType<typeof configModule>;
@@ -206,10 +212,10 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
   });
 
   describe('P15-T1 AC-1 — the read, a positive and a negative per role', () => {
-    it('P15-T1 AC-1 positive: an AB is answered their unit, the period defaulting to this month', async () => {
+    it('P15-T1 AC-1 positive: an AB is answered their unit, the period defaulting to this year (P19.18-T1 AC-1)', async () => {
       as('AGUS');
       const res = await dashboard().expect(200);
-      expect(res.body).toMatchObject({ period: 'month', month: UNIT_MONTH, empty: false, head: { name: 'Agus Salim', isReader: true } });
+      expect(res.body).toMatchObject({ period: 'year', month: UNIT_MONTH, empty: false, head: { name: 'Agus Salim', isReader: true } });
       expect(everyRow(res.body)).toHaveLength(11);
       expect(res.body.production).toMatchObject({ month: UNIT_MONTH, locked: false, canUpdate: true });
     });
@@ -282,13 +288,19 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       }
     });
 
-    it('P19.12-T6 AC-2 an AB, an AAB and an Agent who leads: Grup langsung, the only view their units offer', async () => {
-      for (const [who, rows] of [['AGUS', 11], ['SARI', 5], ['LUKAS', 2]] as const) {
+    it('P19.18-T1 AC-2 an AB and an AAB with a team open on Grup langsung beside Direct Unit; an Agent who leads only a unit on Direct Unit alone', async () => {
+      for (const [who, scope, offered, rows] of [
+        ['AGUS', 'direct', ['unit', 'direct'], 11], ['SARI', 'direct', ['unit', 'direct'], 5], ['LUKAS', 'unit', ['unit'], 2],
+      ] as const) {
         as(who);
         const body = (await dashboard().expect(200)).body;
         expect({ who, scope: body.scope, scopes: body.scopes, informal: body.informal, rows: everyRow(body).length })
-          .toEqual({ who, scope: 'direct', scopes: { offered: ['direct'], default: 'direct' }, informal: null, rows });
+          .toEqual({ who, scope, scopes: { offered, default: scope }, informal: null, rows });
       }
+      // Direct Unit: Agus, then Dewi — an AAB with no team — then his two agents (ADR-0271 §2).
+      as('AGUS');
+      const unit = (await dashboard({ scope: 'unit' }).expect(200)).body;
+      expect(everyRow(unit).map((r: { name: string }) => r.name)).toEqual(['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']);
     });
 
     it('P19.12-T6 AC-2 a view not offered falls back to the default, never a refusal', async () => {
@@ -301,22 +313,23 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     it('P19.12-T6 AC-2 the Owner opens on Semua downline; his Grup langsung, every report an AB, is himself alone', async () => {
       as('OWNER');
       expect((await dashboard().expect(200)).body).toMatchObject({
-        scope: 'downline', scopes: { offered: ['direct', 'informal', 'downline'], default: 'downline' },
+        scope: 'downline', scopes: { offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' },
       });
       expect((await dashboard({ scope: 'direct' }).expect(200)).body).toMatchObject({ scope: 'direct', empty: true });
+      expect((await dashboard({ scope: 'unit' }).expect(200)).body).toMatchObject({ scope: 'unit', empty: true });
       const informal = (await dashboard({ scope: 'informal' }).expect(200)).body;
       // Three ABs below him, none tagged: named, for the Owner may tag them.
       expect(informal.informal).toMatchObject({ groups: [], absNotInGroup: 3, canTag: true });
       expect(informal.informal.abs.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Hendra Gunawan', 'Maya Kusuma']);
     });
 
-    it('P19.12-T6 AC-2 an Admin who leads somebody opens on Grup langsung, Semua downline the office', async () => {
+    it('P19.18-T1 AC-2 an Admin who leads somebody opens on Semua downline, the office, as the Owner does (ADR-0268)', async () => {
       const agus = office.as('AGUS');
       session.current = new RequestContext(agus.userId, 'none', { ...agus.membership!, isKpmAdmin: true });
       const body = (await dashboard().expect(200)).body;
-      expect(body).toMatchObject({ scope: 'direct', scopes: { offered: ['direct', 'informal', 'downline'], default: 'direct' } });
-      expect(everyRow(body)).toHaveLength(11);
-      expect(everyRow((await dashboard({ scope: 'downline' }).expect(200)).body)).toHaveLength(16);
+      expect(body).toMatchObject({ scope: 'downline', scopes: { offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' } });
+      expect(everyRow(body)).toHaveLength(16);
+      expect(everyRow((await dashboard({ scope: 'direct' }).expect(200)).body)).toHaveLength(11);
     });
 
     it('P19.12-T6 AC-2 a `for` view opens on Grup langsung, read-only, for the Owner too', async () => {
@@ -518,12 +531,12 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     async function agrees(leader: Who) {
       as(leader);
       const [month, year] = await Promise.all([
-        dashboard().expect(200).then((r) => r.body as View),
+        dashboard({ period: 'month' }).expect(200).then((r) => r.body as View),
         dashboard({ period: 'year' }).expect(200).then((r) => r.body as View),
       ]);
       as(leader);
       const roster = (await http().get('/coaching/coachees').expect(200)).body;
-      const coached = [...roster.directAgents, ...roster.units.flatMap((u: { head: Row; members: Row[] }) => [u.head, ...u.members])] as Row[];
+      const coached = rosterRows(roster) as unknown as Row[];
       session.current = ownerFor(office.id[leader]);
       const table = (await http().get(`/kpm/data-upload/${UNIT_MONTH}`).expect(200)).body as {
         rows: { membershipId: string; values: { APE: { value: number | null; provenance: string | null } }; ytd: { APE: { value: number | null; provenance: string | null } } }[];
@@ -582,9 +595,9 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
     });
     const agentCodeOf = {} as Record<Who, string>;
     const owner = () => office.as('OWNER');
-    const importFile = async (f: ReturnType<typeof file>, replace?: string) => {
+    const importFile = async (f: ReturnType<typeof file>) => {
       const preview = await wired.production.preview(owner(), UNIT_MONTH, f);
-      return wired.productionImport.commit(owner(), UNIT_MONTH, String(preview.revision), f, replace);
+      return wired.productionImport.commit(owner(), UNIT_MONTH, String(preview.revision), f);
     };
 
     beforeAll(async () => {
@@ -595,12 +608,12 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
 
     it('P15-T1 AC-5, P15-T4 AC-1 as the office stands: every leader, every row', all, 60_000);
 
-    it('P15-T3 AC-2 through a file, a correction from the dashboard, the same file again, a restated file ticked, and a revert', async () => {
-      // 1. A file: Nina's, Dodi's and Budi's first figures; Rina restated by the carrier.
+    it('P15-T3 AC-2, P19.21-T1 through a file, a correction from the dashboard, the same file again, a revert, and a restated file', async () => {
+      // 1. A file: Nina's, Dodi's and Budi's first figures; Rina's month and year.
       await importFile(file(
         ['RINA', { 'ape.monthly': '70', 'ape.ytd': '230' }], ['NINA', { 'ape.monthly': '12', 'ape.ytd': '40' }],
         ['DODI', { 'ape.monthly': '5', 'ape.ytd': '5' }], ['BUDI', { 'ape.ytd': '60' }],
-      ), `${office.id.RINA}:APE`);
+      ));
       await all();
 
       // 2. Sari corrects Rina's month and Dodi's from the dashboard (the year is the months' sum since P19.5-T2).
@@ -611,27 +624,31 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
       }).expect(200);
       await all();
 
-      // 3. The same file again, unticked: the corrections stand (ADR-0053).
-      const kept = await importFile(file(
+      // 3. The same file again: since ADR-0274 §1 an upload replaces the corrections it changes — nothing is ticked any
+      //    more, and nothing is kept (ADR-0053's corrections that stood are superseded).
+      const again = await importFile(file(
         ['RINA', { 'ape.monthly': '70', 'ape.ytd': '230' }], ['NINA', { 'ape.monthly': '12', 'ape.ytd': '40' }],
         ['DODI', { 'ape.monthly': '5', 'ape.ytd': '5' }], ['BUDI', { 'ape.ytd': '60', 'fyp.monthly': '1' }],
       ));
-      expect(kept.batch).toMatchObject({ keptCorrectionCount: 2 });
-      await all();
-
-      // 4. The carrier restates Rina's month, and the importer ticks it: the file's figure wins.
-      const replaced = await importFile(file(['RINA', { 'ape.monthly': '72' }]), `${office.id.RINA}:APE`);
+      expect(again.batch).toMatchObject({ keptCorrectionCount: 0, replacedCorrectionCount: 2 });
       as('AGUS');
-      const rina = everyRow((await dashboard().expect(200)).body).find((r) => r.membershipId === office.id.RINA)!;
-      expect(rina.production.monthly).toMatchObject({ valueMinor: 72 * M, provenance: 'imported' });
+      const replaced = everyRow((await dashboard().expect(200)).body).find((r) => r.membershipId === office.id.RINA)!;
+      expect(replaced.production.monthly).toMatchObject({ valueMinor: 70 * M, provenance: 'imported' });
       await all();
 
-      // 5. Reverting that import brings Sari's correction back, whole.
-      await wired.productionImport.revert(owner(), replaced.batch.id);
+      // 4. Reverting that upload brings Sari's correction back, whole, as it brings back every figure it wrote over.
+      await wired.productionImport.revert(owner(), again.batch.id);
       as('AGUS');
       const back = everyRow((await dashboard().expect(200)).body).find((r) => r.membershipId === office.id.RINA)!;
       expect(back.production.monthly).toMatchObject({ valueMinor: 75 * M, provenance: 'corrected', correctedBy: { name: 'Sari Puspita' } });
       expect(back.goal.source).toMatchObject({ provenance: 'corrected', correctedBy: { name: 'Sari Puspita' } });
+      await all();
+
+      // 5. The carrier restates Rina's month: the file's figure wins over the correction (ADR-0274 §1).
+      await importFile(file(['RINA', { 'ape.monthly': '72' }]));
+      as('AGUS');
+      const rina = everyRow((await dashboard().expect(200)).body).find((r) => r.membershipId === office.id.RINA)!;
+      expect(rina.production.monthly).toMatchObject({ valueMinor: 72 * M, provenance: 'imported' });
       await all();
     }, 120_000);
   });
@@ -667,11 +684,7 @@ describe('the Unit Dashboard over HTTP (Phase 15)', () => {
 
     it('UI-111 GET /coaching/coachees: the same person’s row carries the link, everybody else null', async () => {
       as('SARI');
-      const body = (await http().get('/coaching/coachees').expect(200)).body as {
-        directAgents: { membershipId: string; photoUrl: string | null }[];
-        units: { head: { membershipId: string; photoUrl: string | null }; members: { membershipId: string; photoUrl: string | null }[] }[];
-      };
-      const rows = [...body.directAgents, ...body.units.flatMap((u) => [u.head, ...u.members])];
+      const rows = rosterRows((await http().get('/coaching/coachees').expect(200)).body).filter((r) => !r.isReader);
       expect(rows.find((r) => r.membershipId === office.id.RINA)!.photoUrl).toBe(SIGNED);
       expect(rows.filter((r) => r.membershipId !== office.id.RINA).every((r) => r.photoUrl === null)).toBe(true);
     });

@@ -12,6 +12,10 @@ export type GroupStatus = 'active' | 'archived';
  * (`KPM_Owner.html:4373-4375`) — and P3-T9 AC-1 makes it a rule: a group never
  * participates in scope resolution. Nothing in `visibleTo` may ever read this.
  *
+ * **Only an AB carries one** (P19.17-T4; ADR-0270 §1): `memberships.groupIds` on an AB holds their one group or none, and
+ * their AABs and agents follow them — the AB group (`domain/metrics/leader-groups.ts`). Nothing is copied onto the team,
+ * so moving an AB moves everybody with them.
+ *
  * It is not published configuration, so it carries no semantic `code` and no `version`:
  * nothing references a group by code, no formula binds to one, and renaming one is
  * exactly what a KPM Owner should be able to do. It is still never hard-deleted —
@@ -26,14 +30,17 @@ export class Group {
   name!: string;
 
   /**
-   * The membership that owns it — never a display name.
+   * **The Group Leaders** (P19.17-T4; ADR-0270 §2): memberships, never names — **ABs only, any number, `[]` for none**,
+   * in the order they were appointed. A group is made with none (*Group baru* is a name only); *Jadikan group leader ·
+   * <group>* adds an AB who is in the group, *Hapus sebagai group leader* takes one off. An AB moved out of the group, or
+   * the group deleted, comes off in the same write; somebody who has since left or stopped being an AB is not shown
+   * (`placeInformalGroups`, `domain/metrics/leader-groups.ts`) though their id stays until the next write.
    *
-   * The prototype stores `ownerName` and keys member tags by name too, which breaks the
-   * moment two people share one or anybody marries. Names are mutable attributes; the
-   * membership id is the foreign key (`.claude/rules/domain-invariants.md` §2).
+   * *Changed 2026-11-20 (P19.17-T4; ADR-0270, superseding ADR-0253 §2):* it was `ownerMembershipId`, one ★ — an AB or an
+   * AAB. Migration `0068-informal-groups-on-abs` carried an AB owner into this list and dropped any other.
    */
-  @Prop({ type: String, required: true })
-  ownerMembershipId!: string;
+  @Prop({ type: [String], default: [] })
+  leaderMembershipIds!: string[];
 
   @Prop({ type: String, enum: ['active', 'archived'], default: 'active', index: true })
   status!: GroupStatus;

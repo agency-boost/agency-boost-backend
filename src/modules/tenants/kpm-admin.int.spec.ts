@@ -353,6 +353,21 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
       });
     });
 
+    it('P19.23-T3 AC-2 Persetujuan’s Setujui with no code: the code is made, and a malformed one is still refused at the door', async () => {
+      const victor = await account('Victor Gunawan', manulife);
+      const requestId = String((await col('kpmRequests').insertOne({
+        companyId: manulife, branchName: 'Kemang Branch', requestedByUserId: victor, note: null, status: 'pending',
+        decidedAt: null, decidedByUserId: null, reason: null, createdKpmId: null, approvingSince: null, deletedAt: null,
+        createdAt: NOW, updatedAt: NOW,
+      })).insertedId);
+
+      const bad = await api().post(`/api/admin/kpm-requests/${requestId}/approve`).send({ code: '12' }).expect(400);
+      expect(bad.body.error).toMatchObject({ code: 'VALIDATION_FAILED' });
+      const res = await api().post(`/api/admin/kpm-requests/${requestId}/approve`).send({}).expect(200);
+      expect(res.body[0]).toMatchObject({ status: 'approved', createdKpm: { branchName: 'Kemang Branch', deleted: false } });
+      expect(res.body[0].createdKpm.code).toMatch(/^\d{4}$/);
+    });
+
     it('P19-T3 AC-7 removes a request', async () => {
       const victor = await account('Victor Gunawan', manulife);
       const requestId = String((await col('kpmRequests').insertOne({

@@ -20,6 +20,29 @@ describe('the join date and its classification (ADR-0169)', () => {
     expect(joinedAsFor('2015-03-01', today)).toBe('existing_agent');
   });
 
+  it('P19.16-T2 AC-1 with a company join month on file: a new hire when it is in the join date’s year, whatever the 90 days say', () => {
+    const today = '2026-11-17';
+    // Joined Prudential this year, the office today: a new hire.
+    expect(joinedAsFor('2026-11-17', today, '2026-03')).toBe('new_hire');
+    expect(joinedAsFor('2026-11-17', today, '2026-01')).toBe('new_hire');
+    // Joined the office today, Prudential years ago: an existing agent — the 90-day rule would have said new hire.
+    expect(joinedAsFor('2026-11-17', today, '2019-06')).toBe('existing_agent');
+    expect(joinedAsFor('2026-11-17', today, '2025-12')).toBe('existing_agent');
+    // A join date a leader set back: its own year is the one compared, so a December arrival stays a new hire.
+    expect(joinedAsFor('2025-12-15', today, '2025-12')).toBe('new_hire');
+    // A join date a leader set years before the month: their word that the person has been with them that long.
+    expect(joinedAsFor('2009-03-01', today, '2021-07')).toBe('existing_agent');
+    expect(joinedAsFor('2025-12-15', today, '2026-01')).toBe('existing_agent');
+  });
+
+  it('P19.16-T2 AC-1 with no month on file (or none readable): the 90-day rule', () => {
+    const today = '2026-11-17';
+    expect(joinedAsFor('2026-11-17', today, null)).toBe('new_hire');
+    expect(joinedAsFor('2026-11-17', today, '2026-3')).toBe('new_hire');
+    expect(joinedAsFor('2015-03-01', today, '')).toBe('existing_agent');
+    expect(joinedAsFor('2026-07-28', today, null)).toBe('existing_agent');
+  });
+
   it('P18.8-T2 AC-1 counts across a month and a leap day by the calendar, not by milliseconds', () => {
     // 2028 is a leap year: 90 days before 2028-05-29 is 2028-02-29.
     expect(joinedAsFor('2028-02-29', '2028-05-29')).toBe('new_hire');

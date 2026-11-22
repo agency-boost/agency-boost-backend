@@ -118,6 +118,15 @@ export class PitchFileDto {
   mimeType!: string;
 }
 
+/** A material given as a link (P19.21-T3 AC-6, ADR-0274). */
+export class PitchLinkDto {
+  @ApiProperty({ type: String, example: 'https://www.youtube.com/watch?v=abc123', description: 'An `https://` address.' })
+  url!: string;
+
+  @ApiProperty({ type: String, format: 'date', example: '2026-11-18', description: 'The day it was set, in the office’s calendar.' })
+  addedOn!: string;
+}
+
 export class PitchChecklistItemDto {
   @ApiProperty({ type: String, example: 'career-path' })
   code!: string;
@@ -150,8 +159,14 @@ export class PitchSlotDto {
   @ApiProperty({ enum: RECRUITMENT_PITCH_STATES })
   state!: string;
 
-  @ApiProperty({ type: PitchFileDto, nullable: true, description: 'Null where the slot holds nothing.' })
+  @ApiProperty({ type: PitchFileDto, nullable: true, description: 'Null where the slot holds nothing, or a link.' })
   file!: PitchFileDto | null;
+
+  @ApiProperty({
+    type: PitchLinkDto, nullable: true,
+    description: 'The material given as a link; null where the slot holds a file or nothing.',
+  })
+  link!: PitchLinkDto | null;
 
   @ApiProperty({ type: [PitchChecklistItemDto], description: 'Empty for a slot with no checklist. Never who ticked.' })
   checklist!: PitchChecklistItemDto[];
@@ -173,6 +188,14 @@ export class PitchSummaryDto {
 
   @ApiProperty({ type: Number, description: 'Required slots with a file and an item still open.' })
   unconfirmed!: number;
+
+  @ApiProperty({
+    type: Object,
+    example: { ready: 2, total: 6, missing: 3, unconfirmed: 1 },
+    description: 'ADR-0274: the same counts over all six, no split — *2/6 materi siap*, the hub’s '
+      + '*3 belum ada*.',
+  })
+  all!: { ready: number; total: number; missing: number; unconfirmed: number };
 }
 
 export class PitchMaterialsDto {

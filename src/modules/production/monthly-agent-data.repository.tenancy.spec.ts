@@ -131,4 +131,21 @@ describe('month rows read lean, by kode (MonthlyAgentDataRepository.findByKode)'
     expect(Object.fromEntries(held)).toEqual({ APE: '2026-01', KOMISI: '2025-02' });
     await expect(rows.kodesHeldInOfficesAcrossTenants(office(), [KPM_A], {})).rejects.toThrow(MissingTenantContextError);
   });
+
+  it('P19.5-T1 AC-7 no office named is no kode held, for the Super Admin too — never every office’s', async () => {
+    // An absent filter would be every office on the platform; an empty list names none, and nothing is read.
+    const aggregate = jest.spyOn(mongoose.model(MonthlyAgentData.name), 'aggregate');
+    expect(await rows.kodesHeldInOfficesAcrossTenants(RequestContext.platform('root'), [], { apeMonthly: 'APE' })).toEqual(new Map());
+    expect(aggregate).not.toHaveBeenCalled();
+    aggregate.mockRestore();
+  });
+
+  it('Phase 15 upsertMonthRows: a save of no member writes nothing and answers no row', async () => {
+    const bulkWrite = jest.spyOn(mongoose.model(MonthlyAgentData.name), 'bulkWrite');
+    const before = await mongoose.connection.db!.collection('monthlyAgentData').countDocuments({});
+    expect(await rows.upsertMonthRows(office(), '2026-09', [])).toEqual(new Map());
+    expect(bulkWrite).not.toHaveBeenCalled();
+    expect(await mongoose.connection.db!.collection('monthlyAgentData').countDocuments({})).toBe(before);
+    bulkWrite.mockRestore();
+  });
 });

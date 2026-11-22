@@ -46,6 +46,7 @@ import { SurveyOpening } from '@/modules/surveys/survey-opening';
 import { SurveysService } from '@/modules/surveys/surveys.service';
 import { SurveyRunsService } from '@/modules/surveys/survey-runs.service';
 import { CoachingSurveyService } from '@/modules/surveys/coaching-survey.service';
+import { SurveyPeopleService } from '@/modules/surveys/survey-people.service';
 import { SurveyOpenRuns } from '@/modules/surveys/survey-open-runs';
 import { OfficeSettingsSource } from '@/modules/config/office-settings.source';
 import { TemplateCopyService } from '@/modules/config/template-copy.service';
@@ -157,6 +158,9 @@ import { UnregisteredAgentDataRepository } from '@/modules/production/unregister
 import { UploadCompleteness } from '@/modules/production/upload-completeness';
 import { HeldProductionRows } from '@/modules/production/held-production-rows.service';
 import { GoalRepository } from '@/modules/goals/goal.repository';
+import { AbGroupTarget, AbGroupTargetSchema } from '@/modules/reporting/ab-group-targets/ab-group-target.schema';
+import { AbGroupTargetRepository } from '@/modules/reporting/ab-group-targets/ab-group-target.repository';
+import { AbGroupTargetsService } from '@/modules/reporting/ab-group-targets/ab-group-targets.service';
 import { GoalService } from '@/modules/goals/goal.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { NotificationService } from '@/modules/notifications/notification.service';
@@ -203,8 +207,6 @@ import { RecruitmentPlaybookService } from '@/modules/recruitment/recruitment-pl
 import { RecruitmentPlanService } from '@/modules/recruitment/recruitment-plan.service';
 import { RecruitmentPitchService } from '@/modules/recruitment/recruitment-pitch.service';
 import { CarrierRules } from '@/modules/campaigns/carrier-rules';
-import { KpmRecruitTarget, KpmRecruitTargetSchema } from '@/modules/reporting/kpm-recruit-target.schema';
-import { KpmRecruitTargetRepository } from '@/modules/reporting/kpm-recruit-target.repository';
 import { OfficeGroups } from '@/modules/reporting/office-groups';
 import { OfficePeople } from '@/modules/reporting/office-people';
 import { AdvancedAnalyticsService } from '@/modules/reporting/advanced-analytics/advanced-analytics.service';
@@ -218,9 +220,6 @@ import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
 import { KpmSetupMark, KpmSetupMarkSchema } from '@/modules/reporting/kpm-setup-mark.schema';
 import { KpmSetupMarkRepository } from '@/modules/reporting/kpm-setup-mark.repository';
 import { KpmSetup } from '@/modules/reporting/kpm-setup.service';
-import { OfficePhones } from '@/modules/reporting/office-phones';
-import { KpmAnalyticsService } from '@/modules/reporting/kpm-analytics.service';
-import { PlatformAnalyticsService } from '@/modules/reporting/platform-analytics.service';
 import { DirectoryColumns } from '@/modules/reporting/directory-columns';
 
 /**
@@ -580,6 +579,8 @@ export function configModule(
     new MemberNames(memberships, users as never, avatarLinks),
     orgLevels,
     new TenantDay(kpms as never, clock),
+    // P19.18-T5 (ADR-0271 §9): the Unit Dashboard's views, built below — read only when the roster is.
+    { people: (...args: Parameters<UnitDashboardService['people']>) => unitDashboard.people(...args) } as never,
   );
   // P11-T7: the person a coaching page opens on.
   const coachee = new CoacheeService(
@@ -626,6 +627,9 @@ export function configModule(
   const production = new ProductionService(
     monthRows, memberships, productionNames, kpms as never, productionMonths, analyticsConfig, uploadCompleteness,
     unregisteredRows, clock,
+    // P19.21-T1 AC-4: the standing uploads' figures — a corrected cell's *dari file*.
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
+    new DataUploadRowRepository(model(DataUploadRow.name, DataUploadRowSchema) as never),
   );
   const productionImport = new ProductionImportService(
     production,
@@ -647,6 +651,9 @@ export function configModule(
   // P9-T5: one figure by hand — by kode, against the KPM's template (P19.5-T2).
   const productionCorrections = new ProductionCorrections(
     productionMonths, monthRows, memberships, audit, clock, firstSale, analyticsConfig, quantRuns,
+    // P19.21-T1 AC-4: *Kembalikan ke angka dari file* reads the standing uploads.
+    new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
+    new DataUploadRowRepository(model(DataUploadRow.name, DataUploadRowSchema) as never),
   );
   // P5-T7: the office's campaigns, and the carrier rules it is measured against.
   const campaigns = new CampaignService(
@@ -794,6 +801,13 @@ export function configModule(
     ),
     kpm: new SurveyRunsService(
       surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, analyticsConfig, audit, clock,
+      memberships, new MemberNames(memberships, users as never),
+    ),
+    // P19.22-T7 (ADR-0276 §5): *Analisa kualitatif › Per orang*, over the same office's informal groups.
+    people: new SurveyPeopleService(
+      surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, memberships,
+      new MemberNames(memberships, users as never),
+      new OfficeGroups(new GroupRepository(model(Group.name, GroupSchema) as never), memberships), subjectReads, users as never,
     ),
     coaching: new CoachingSurveyService(
       surveyRunRows, surveyParticipationRows, surveyResponseRows, surveyOpening, surveyOffice, memberships, coach,
@@ -995,7 +1009,6 @@ export function configModule(
     new LeadStatusRepository(leadStatuses as never),
     clock,
   );
-  const recruitTargets = new KpmRecruitTargetRepository(model(KpmRecruitTarget.name, KpmRecruitTargetSchema) as never);
   const officePeople = new OfficePeople(
     memberships, new MemberNames(memberships, users as never), kpms as never,
     model('CompanyModelForConfig', CompanySchema) as never, orgLevels, clock,
@@ -1011,19 +1024,19 @@ export function configModule(
     new ActivationTemplateRepository(activationTemplates as never),
     audit, clock,
   );
-  const kpmOverview = new KpmOverviewService(
-    officePeople, new TenantDay(kpms as never, clock), clock, activityReadings, coachingReadings,
-    leadReadings, recruitTargets, productionReadings, goals, subjectReads, audit,
-    kpmSetup, new OfficePhones(memberships, users as never),
-  );
   // P19.3-T3 (OD-258): the office's custom groups, through the two tenant repositories.
   const officeGroups = new OfficeGroups(new GroupRepository(model(Group.name, GroupSchema) as never), memberships);
-  const kpmAnalytics = new KpmAnalyticsService(
-    officePeople, new TenantDay(kpms as never, clock), clock, coachingReadings, leadReadings,
-    productionReadings, goals, carrierRules, officeGroups,
+  // P19.17-T4 (ADR-0270 §4): the monthly targets per AB group, over the same partition.
+  const abGroupTargets = new AbGroupTargetsService(
+    new AbGroupTargetRepository(model(AbGroupTarget.name, AbGroupTargetSchema) as never), officeGroups, memberships,
+    new GoalRepository(model(Goal.name, GoalSchema) as never), users as never, new TenantDay(kpms as never, clock), audit,
   );
-  const platformAnalytics = new PlatformAnalyticsService(
-    kpms as never, model('CompanyModelForConfig', CompanySchema) as never, memberships, orgLevels, clock,
+  // P19.19 (ADR-0272): the Overview's second version over the partition, the targets and the 19 November readings.
+  // KPM analytics and the office's recruitment target are gone with it.
+  const kpmOverview = new KpmOverviewService(
+    officePeople, new TenantDay(kpms as never, clock), activityReadings, coachingReadings,
+    productionReadings, subjectReads, kpmSetup, officeGroups, abGroupTargets,
+    new MemberNames(memberships, users as never, avatarLinks), memberships,
   );
   // P19.5-T3 (ADR-0215): the KPM's *Advanced analytics* page over the same readings, and the Super Admin's tab on it.
   const analyticsTargets = new AnalyticsTargetRepository(model(AnalyticsTarget.name, AnalyticsTargetSchema) as never);
@@ -1035,7 +1048,7 @@ export function configModule(
       officePeople, productionReadings, monthRows, memberships, clock,
       new DataUploadBatchRepository(model(DataUploadBatch.name, DataUploadBatchSchema) as never),
     ),
-    analyticsTargets, quantRuns, surveyRunRows, audit, clock,
+    analyticsTargets, quantRuns, surveyRunRows, audit, clock, officeGroups, abGroupTargets,
   );
   const adminAdvancedAnalytics = new AdminAdvancedAnalytics(kpms as never, advancedAnalytics, surveys.kpm, audit);
   const directoryColumns = new DirectoryColumns(
@@ -1066,7 +1079,7 @@ export function configModule(
     campaignRows, campaignChases, campaignStandings, campaignChaseReadings, campaignEvaluation, campaignAgent,
     campaignStandingsReader, campaignDeparture, campaignStandingOverrides,
     recruitmentPlaybookRows, recruitmentPlaybooks, recruitmentPlans, recruitmentPitch,
-    leadReadings, recruitTargets, officePeople, officeGroups, carrierRules, kpmOverview, kpmAnalytics, platformAnalytics,
+    leadReadings, officePeople, officeGroups, carrierRules, kpmOverview,
     setupMarks, kpmSetup,
     directoryColumns, memberships, users,
     eventRsvps, eventFeedback, eventAudiences, eventReadings, eventGuests, eventRollCalls,
@@ -1074,7 +1087,7 @@ export function configModule(
     analyticsConfig, analyticsTemplates,
     surveys,
     proposals, proposalRows, proposalReadings,
-    quantRunRows, quantRuns, analyticsTargets, advancedAnalytics, adminAdvancedAnalytics,
+    quantRunRows, quantRuns, analyticsTargets, advancedAnalytics, adminAdvancedAnalytics, abGroupTargets,
   };
 }
 

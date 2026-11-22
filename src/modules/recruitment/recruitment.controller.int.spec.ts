@@ -6,7 +6,9 @@ import request from 'supertest';
 import { PermissionsGuard } from '@/common/auth/permissions.guard';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
-import { RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_PITCH_SLOTS, SEED_RECRUITMENT_PLAYBOOK } from '@/domain/constants';
+import {
+  RECRUITMENT, RECRUITMENT_CANDIDATE_TYPES, RECRUITMENT_PITCH_SLOTS, SEED_RECRUITMENT_PLAYBOOK,
+} from '@/domain/constants';
 import { SEED_RECRUITMENT_PLAYBOOK_ID } from '@/domain/constants/recruitment-words-id';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
@@ -116,6 +118,8 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       });
       expect(declaredPermissions(RecruitmentPitchController)).toEqual({
         requestUpload: 'tenant_config:write', attach: 'tenant_config:write', setConfirmation: 'tenant_config:write',
+        // P19.21-T3 AC-6 (ADR-0274): a material given as a link.
+        setLink: 'tenant_config:write',
       });
     });
   });
@@ -261,7 +265,7 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       expect(res.body.slots.map((s: { slot: string; required: boolean }) => [s.slot, s.required])).toEqual([
         ['opportunity', true], ['proof', true], ['faq', true], ['howtojoin', true], ['company', false], ['agency', false],
       ]);
-      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'required', 'state', 'file', 'checklist', 'version']);
+      expect(Object.keys(res.body.slots[1])).toEqual(['slot', 'title', 'line', 'required', 'state', 'file', 'link', 'checklist', 'version']);
       expect(res.body.slots[1]).toMatchObject({ state: 'uploaded', file: { name: 'proof.pdf', bytes: 1024, uploadedOn: '2026-10-09' }, version: 1 });
       expect(res.body.slots[4]).toMatchObject({
         slot: 'company', title: 'Company Profile', required: false, state: 'uploaded', checklist: [], version: 1,
@@ -269,7 +273,11 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       });
       expect(res.body.slots[5]).toMatchObject({ slot: 'agency', title: 'Agency Profile', required: false, state: 'missing', file: null, version: 0 });
       // The optional Company Profile counts in nothing: one of four done, three missing (ADR-0177 §3).
-      expect(res.body.summary).toEqual({ done: 1, total: 4, missing: 3, unconfirmed: 0 });
+      expect(res.body.summary).toEqual({
+        done: 1, total: 4, missing: 3, unconfirmed: 0,
+        // P19.21-T3 AC-6 (ADR-0274): the settings page's *2/6 materi siap*, over all six.
+        all: { ready: 2, total: 6, missing: 4, unconfirmed: 0 },
+      });
     });
 
     it('answers a link as { url, expiresAt }, 300 seconds out', async () => {
@@ -284,9 +292,9 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
       const res = await http().post(`${PITCH}/uploads`).send({ filename: 'o.pdf', mimeType: 'application/pdf', bytes: 1024 }).expect(201);
       expect(Object.keys(res.body).sort()).toEqual(['expiresAt', 'fields', 'signature', 'storageKey', 'uploadUrl']);
       expect(res.body.storageKey).toMatch(new RegExp(`^dev/${FIXTURE_KPM}/recruitment-pitch/`));
-      // P19.6-T2 (ADR-0217 §1): an HTML page joins the PDF.
+      // P19.6-T2 (ADR-0217 §1): an HTML page joins the PDF; P19.21-T3 AC-6 (ADR-0274): and any pitch format.
       expect(wired.storage.signedWith.at(-1)).toEqual({
-        folder: 'recruitment-pitch', mimeType: 'application/pdf', allowedMimeTypes: ['application/pdf', 'text/html'],
+        folder: 'recruitment-pitch', mimeType: 'application/pdf', allowedMimeTypes: RECRUITMENT.PITCH_MIME_TYPES,
       });
       // P18.4-T2: one fresh key, and the Content-Type pinned to PDF by the V4 POST policy.
       expect(res.body.fields).toMatchObject({ key: res.body.storageKey, 'Content-Type': 'application/pdf' });
@@ -312,7 +320,8 @@ describe('recruitment tools over HTTP (Phase 17)', () => {
     });
 
     it.each([
-      ['not a PDF', { filename: 'x.png', mimeType: 'image/png', bytes: 10 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
+      // P19.21-T3 AC-6 (ADR-0274): an image is a pitch format now; a spreadsheet is still none.
+      ['no pitch format', { filename: 'x.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: 10 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
       ['a type no route accepts', { filename: 'x.exe', mimeType: 'application/x-msdownload', bytes: 10 }, 415, 'ASSET_TYPE_NOT_ALLOWED'],
       ['over 25 MB', { filename: 'x.pdf', mimeType: 'application/pdf', bytes: 26_214_401 }, 413, 'ASSET_TOO_LARGE'],
       ['no size', { filename: 'x.pdf', mimeType: 'application/pdf' }, 400, 'VALIDATION_FAILED'],

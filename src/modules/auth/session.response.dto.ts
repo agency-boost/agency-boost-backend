@@ -67,6 +67,27 @@ export class ImpersonationSessionDto {
 }
 
 /**
+ * A support session started for a new window (`handoff: true`, ADR-0277): **no access token** — the window redeems
+ * `handoffCode` once, at `POST /admin/impersonate/handoff`, for one.
+ */
+export class ImpersonationWindowDto {
+  @ApiProperty({ type: String, description: 'Single use, and only by the Super Admin who started the session.' })
+  handoffCode!: string;
+
+  @ApiProperty({ type: String, format: 'date-time', description: 'The code is spent after this.' })
+  handoffExpiresAt!: Date;
+
+  @ApiProperty({ type: String, format: 'date-time', description: 'Time-boxed. The session cannot outlive this.' })
+  expiresAt!: Date;
+
+  @ApiProperty({ type: String, description: 'The session\'s id, named on its `impersonation.started` audit entry.' })
+  sessionId!: string;
+
+  @ApiProperty({ type: Boolean, enum: [true], description: 'Always `true`: a session only looks (ADR-0206 §3).' })
+  readOnly!: true;
+}
+
+/**
  * The one-word acknowledgements: `verification_sent`, `verified`, `accepted`, `reset`,
  * `changed`, `ended`. A body rather than a bare 204 because the client shows a different
  * sentence for each, and `accepted` in particular does **not** mean an email was sent —
@@ -75,7 +96,7 @@ export class ImpersonationSessionDto {
 export class StatusAckDto {
   @ApiProperty({
     type: String,
-    enum: ['verification_sent', 'verified', 'accepted', 'reset', 'changed', 'ended', 'linked'],
+    enum: ['verification_sent', 'verified', 'accepted', 'reset', 'changed', 'ended'],
   })
   status!: string;
 }
@@ -258,39 +279,6 @@ export class MeActivationDto {
  * therefore disappears on the next call rather than at the next refresh, which is why the
  * client reads this rather than decoding the JWT.
  */
-/** One view of a linked login (ADR-0198 §1, ADR-0199 §3), in the switcher's order. */
-export class LinkedViewDto {
-  @ApiProperty({
-    type: String, enum: ['self', 'kpm_owner', 'kpm_admin', 'super_admin'],
-    description: '*Akun saya*, the office entry as Owner or Admin, or *Superadmin*.',
-  })
-  kind!: string;
-
-  @ApiProperty({
-    type: String, nullable: true,
-    description: 'The office as it typed its name — its branch, else its code — on the office entry; `null` otherwise.',
-  })
-  officeName!: string | null;
-}
-
-/** The caller's other login (ADR-0199 §3): its address, its name and its views. Nothing else of it is read. */
-export class LinkedLoginDto {
-  @ApiProperty({ type: String, description: 'The link, for `DELETE /auth/links/:linkId`.' })
-  linkId!: string;
-
-  @ApiProperty({ type: String, description: 'The other login, for `POST /auth/links/switch`.' })
-  userId!: string;
-
-  @ApiProperty({ type: String })
-  email!: string;
-
-  @ApiProperty({ type: String })
-  fullName!: string;
-
-  @ApiProperty({ type: () => LinkedViewDto, isArray: true })
-  views!: LinkedViewDto[];
-}
-
 export class MeDto {
   @ApiProperty({ type: () => MeUserDto })
   user!: MeUserDto;
@@ -323,6 +311,14 @@ export class MeDto {
   permissions!: string[];
 
   @ApiProperty({
+    type: String, isArray: true,
+    description: 'ADR-0260 §5: the insurer companies the reader\'s *Kelola data produk* ticks — non-empty '
+      + 'only for an active KPM Owner or Admin holding a live grant (in a support session too, where the page only '
+      + 'looks). The office menu\'s *Data produk* reads it. Resolved on every request.',
+  })
+  productDataCompanyIds!: string[];
+
+  @ApiProperty({
     type: () => MeActivationDto, nullable: true,
     description: 'Your 90-day activation, for the *New agent* section: `null` when you have none.',
   })
@@ -333,13 +329,6 @@ export class MeDto {
     description: 'You coach a new hire who joined in the last twelve months: the *New hires* menu item.',
   })
   newHires!: boolean;
-
-  @ApiProperty({
-    type: () => LinkedLoginDto, nullable: true,
-    description: 'Your other login, linked with *Tambah akun*, and its views for the account menu — `null` with no link, '
-      + 'and always `null` in a support session.',
-  })
-  linkedLogin!: LinkedLoginDto | null;
 
   @ApiProperty({
     type: () => SessionBrandingDto, nullable: true,

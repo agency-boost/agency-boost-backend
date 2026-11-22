@@ -139,14 +139,18 @@ export class SurveyResponseRepository extends TenantScopedRepository<SurveyRespo
   /** **An anonymous run's form**: no person on it anywhere (ADR-0216 §3). */
   async insertAnonymous(
     ctx: RequestContext,
-    row: { runId: string; answers: SurveyAnswer[]; roleClass: SurveyResponse['roleClass']; tenureBand: number | null; ageBand: number | null },
+    row: {
+      runId: string; answers: SurveyAnswer[]; roleClass: SurveyResponse['roleClass']; tenureBand: number | null;
+      ageBand: number | null; workStatus?: SurveyResponse['workStatus'];
+    },
   ): Promise<void> {
     const kpmId = this.scope(ctx, 'insertAnonymous').kpmId as string;
     await this.model.create({
       // Twelve random bytes: an ObjectId's first four are the second it was made.
       _id: new Types.ObjectId(randomBytes(12).toString('hex')),
       kpmId, runId: row.runId, membershipId: null, submittedAt: null, answers: row.answers,
-      roleClass: row.roleClass, tenureBand: row.tenureBand, ageBand: row.ageBand, noticeShown: false,
+      roleClass: row.roleClass, tenureBand: row.tenureBand, ageBand: row.ageBand, workStatus: row.workStatus ?? null,
+      noticeShown: false,
       deletedAt: null, createdBy: null, updatedBy: null,
     });
   }
@@ -156,7 +160,7 @@ export class SurveyResponseRepository extends TenantScopedRepository<SurveyRespo
     ctx: RequestContext,
     row: {
       runId: string; answers: SurveyAnswer[]; roleClass: SurveyResponse['roleClass']; tenureBand: number | null;
-      ageBand: number | null; submittedAt: Date; noticeShown: boolean;
+      ageBand: number | null; workStatus?: SurveyResponse['workStatus']; submittedAt: Date; noticeShown: boolean;
     },
   ): Promise<void> {
     await this.create(ctx, { ...row, membershipId: ctx.membershipId } as Partial<SurveyResponseDocument>);

@@ -1,0 +1,10 @@
+# Reports a failed agencyboost-daily.service (P19.15-T4, ADR-0261), as one line nobody can mistake, as
+# agencyboost-backup-failed.service reports a backup: search the journal for it —
+# journalctl -t agencyboost-daily -p err
+
+[Unit]
+Description=Report a failed AgencyBoost daily run
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger --priority user.err --tag agencyboost-daily "AGENCYBOOST_DAILY_FAILED on %H: agencyboost-daily.service failed, journalctl -u agencyboost-daily says why"

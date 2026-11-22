@@ -16,6 +16,9 @@ import { NewHiresService } from '@/modules/activation/new-hires.service';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { ActivationComplianceCategory } from '@/modules/reporting/compliance/activation.category';
 import { ActivityComplianceCategory } from '@/modules/reporting/compliance/activity.category';
+import { LeadsComplianceCategory } from '@/modules/reporting/compliance/leads.category';
+import { KpmOverviewService } from '@/modules/reporting/kpm-overview.service';
+import { KpmOverviewController } from '@/modules/reporting/reporting.controller';
 import { CampaignsComplianceCategory } from '@/modules/reporting/compliance/campaigns.category';
 import { ComplianceController } from '@/modules/reporting/compliance/compliance.controller';
 import { ComplianceService } from '@/modules/reporting/compliance/compliance.service';
@@ -122,7 +125,9 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
 
   const activationReadings = new ActivationReadings(wired.activationRows, wired.activationProgress, wired.clock);
   const compliance = new ComplianceService(
-    wired.officePeople, new TenantDay(wired.kpms as never, wired.clock), wired.clock, wired.subjectReads,
+    new TenantDay(wired.kpms as never, wired.clock), wired.clock, wired.subjectReads,
+    // P19.19-T3 (ADR-0272 §6): the KPM Overview's scope — the informal groups' partition, test accounts never — and names.
+    wired.officeGroups, new MemberNames(wired.memberships, wired.users as never),
     new TrainingComplianceCategory(wired.offeredTraining, wired.trainingReadings, wired.clock),
     new GoalsComplianceCategory(wired.goals, wired.clock),
     new ActivityComplianceCategory(wired.activityReadings),
@@ -130,14 +135,16 @@ export async function startComplianceHarness(): Promise<ComplianceHarness> {
     // P18.3-T2's two (BE-ec), over the readers their contract names.
     new EventsComplianceCategory(wired.eventReadings),
     new CampaignsComplianceCategory(wired.campaignStandingsReader, new MemberNames(wired.memberships, wired.users as never)),
-    // P19.3-T3 (OD-258): *Lihat untuk*'s custom groups.
-    wired.officeGroups,
+    // P19.19-T3: *Leads Mgmt*.
+    new LeadsComplianceCategory(wired.leadReadings),
   );
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [ComplianceController, NewHiresController],
+    // P19.19: the KPM Overview's own two reads beside its compliance cards, over the same office.
+    controllers: [ComplianceController, KpmOverviewController, NewHiresController],
     providers: [
       { provide: ComplianceService, useValue: compliance },
+      { provide: KpmOverviewService, useValue: wired.kpmOverview },
       { provide: NewHiresService, useValue: wired.newHires },
     ],
   }).compile();

@@ -220,8 +220,9 @@ describe('P19.11-T4 a month’s APE typed over the upload (UX-12)', () => {
       roster: await wired.coachingRoster.read(office.as('SARI')),
       pace: await wired.paceStatus.paceOf(office.as('SARI'), [office.id.BUDI], { today: '2026-09-14', month: MONTH, onTrackRatio: 0.7 }),
       overview: await wired.kpmOverview.read(office.as('OWNER')),
-      analyticsThisMonth: await wired.kpmAnalytics.read(office.as('OWNER'), { period: 'this_month' }),
-      analyticsPreviousMonth: await wired.kpmAnalytics.read(office.as('OWNER'), { period: 'previous_month' }),
+      // P19.19 (ADR-0272): KPM analytics is gone; the Overview's *Performa vs target*, this month and the one before.
+      performanceThisMonth: await wired.kpmOverview.performance(office.as('OWNER')),
+      performancePreviousMonth: await wired.kpmOverview.performance(office.as('OWNER'), { month: '2026-08' }),
       scorecard: await scorecardServiceOf(wired).compute({ kpmId: KPM_A, timezone: 'Asia/Jakarta', meetingDate: '2026-09-14' }),
     });
 

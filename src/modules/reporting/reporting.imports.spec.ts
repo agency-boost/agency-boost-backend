@@ -46,18 +46,19 @@ describe('P18-T1 AC-12, P18-T2 AC-5 the reporting module reads no training, even
 
   it('P18-T1 AC-12 the module has code to check', () => {
     expect(code.map((f) => f.slice(MODULE.length + 1)).sort()).toEqual([
-      'agency-partition.ts', 'directory-columns.ts', 'kpm-analytics.service.ts', 'kpm-overview.service.ts',
-      'kpm-recruit-target.repository.ts', 'kpm-recruit-target.schema.ts',
-      // P19.3-T2: the KPM setup card's marks, *Sudah sesuai*'s route and the not-logged list's phones.
+      'agency-partition.ts', 'directory-columns.ts', 'kpm-overview.service.ts',
+      // P19.19 (ADR-0272 §7): the retired recruitment target's collection, kept and unread; its repository is gone.
+      'kpm-recruit-target.schema.ts',
+      // P19.3-T2: the KPM setup card's marks and *Sudah sesuai*'s route.
       'kpm-setup-mark.repository.ts', 'kpm-setup-mark.schema.ts', 'kpm-setup.controller.ts', 'kpm-setup.service.ts',
-      // P19.3-T3 (OD-258): the office's custom groups, for *Lihat untuk*.
-      'office-figures.ts', 'office-groups.ts', 'office-people.ts', 'office-phones.ts',
-      'platform-analytics.service.ts', 'reporting.controller.ts', 'reporting.dto.ts', 'reporting.messages.ts',
+      // P19.3-T3 (OD-258): the office's custom groups; P19.19: the Overview's tree over them.
+      'office-figures.ts', 'office-groups.ts', 'office-people.ts', 'overview-tree.ts',
+      'reporting.controller.ts', 'reporting.dto.ts', 'reporting.messages.ts',
       'reporting.response.dto.ts', 'setup-step-saved.interceptor.ts', 'setup-step-saved.ts',
     ]);
   });
 
-  it('P18-T1 AC-12, P18-T2 AC-5 reaches the carrier rules’ one reader and nothing else of those three modules', () => {
+  it('P18-T1 AC-12, P18-T2 AC-5, P19.19-T4 AC-1 reaches nothing of those three modules — the carrier rules went with KPM Analytics', () => {
     const files = reached(code);
     // The walk reaches the readings the reports are built on: proof that it walks at all.
     expect([...files].some((f) => f.endsWith('modules/coaching/coaching-readings.ts'))).toBe(true);
@@ -65,7 +66,8 @@ describe('P18-T1 AC-12, P18-T2 AC-5 the reporting module reads no training, even
       .map((f) => f.slice(SRC.length + 1))
       .filter((f) => /^modules\/(training|events|campaigns)\//.test(f))
       .sort();
-    expect(touched).toEqual(['modules/campaigns/campaign.schema.ts', 'modules/campaigns/carrier-rules.ts']);
+    // KPM Analytics' MOC and clubs read the carrier rules until P19.19 (ADR-0272 §1): with it gone, nothing does here.
+    expect(touched).toEqual([]);
   });
 
   it('P18-T2 AC-5 the carrier rules’ reader injects the rules’ model and the office’s own row: no campaign, chase or standing', () => {

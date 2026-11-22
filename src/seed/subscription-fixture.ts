@@ -2,7 +2,9 @@ import { DateTime } from 'luxon';
 import type mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { DEFAULT_TENANT_TIMEZONE, MINOR_UNITS_PER_MAJOR } from '@/domain/constants';
+import { priceOffer } from '@/modules/billing/price-offer';
 import type { KpmSubscription } from '@/modules/tenants/kpm.schema';
+import { trialSubscription } from '@/modules/tenants/subscription';
 import { seedObjectId } from './coaching-fixture';
 
 /**
@@ -46,12 +48,24 @@ function ending(
   period: { years?: number; months?: number },
   rest: Pick<KpmSubscription, 'pricePerLeaderMinor' | 'maxLeaders' | 'keepActiveAfterEnd'>,
 ): KpmSubscription {
+  const plan = period.years ? 'annual' : 'six_months';
   return {
     startDate: shift(shift(endDate, { years: -(period.years ?? 0), months: -(period.months ?? 0) }), { days: 1 }),
     endDate,
     currency: 'IDR',
     ...rest,
-    plan: period.years ? 'annual' : 'six_months',
+    plan,
+    /*
+     * **The period's total, as *Konfirmasi paket* stores it** (P19.23-T5; ADR-0279 §3): the leaders the limit prices, at
+     * the price, through the calculator's own arithmetic. An office with no limit keeps none, and *Langganan per KPM*
+     * works its total out from the leaders it uses.
+     */
+    ...(rest.maxLeaders !== null && rest.pricePerLeaderMinor !== null ? {
+      periodTotalMinor: priceOffer({
+        leaders: rest.maxLeaders, agents: null, plan,
+        price: { mode: 'per_leader', rateMinor: rest.pricePerLeaderMinor }, bulk: null,
+      }).totalMinor,
+    } : {}),
   };
 }
 
@@ -232,7 +246,8 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
     KPM 0417 · BSD City          ends ${plan['0417'].endDate}, Rp 350,000 a leader, Leaders 9 / 10 — the Owner,
                                  the Admin, Agus, Sari, Dewi, Arief, Yosef, Winda and Satria
     KPM 0555 · Kelapa Gading     ends ${plan['0555'].endDate}, five days on; no limit, so Leaders reads the count
-    KPM 0601 · Cikarang          Ended ${plan['0601'].endDate}, not kept active:
+    KPM 0601 · Cikarang          Ended ${plan['0601'].endDate}, not kept active, past its seven days of grace
+                                 (the next daily run suspends it: subscription-lapses):
       owner@kpm0601.test         Rudi, the Owner — the page, "contact AgencyBoost", at any address
       agent@kpm0601.test         Fitri, an Agent — the same page
     KPM 0602 · Bekasi Barat      Ended — kept active ${plan['0602'].endDate}; Leaders 2 / 2:
@@ -248,6 +263,32 @@ export async function seedSubscriptionFixture(deps: SubscriptionFixtureDeps): Pr
 `;
 
   return { today, plan, guide };
+}
+
+/**
+ * **Two KPMs on their 30-day trial** (P19.23-T5 AC-3; ADR-0279 §4): the two newest offices, 0418 · Serpong and 0419 ·
+ * Alam Sutera (`owner-whatsapp-invite-fixture.ts`), started three and twenty days before the seed's today — so
+ * *Langganan per KPM* reads *Trial* on both, 0419's ending ten days on. By code, and **only where an office has no
+ * subscription**, like the rest.
+ */
+export const TRIAL_OFFICES = { '0418': 3, '0419': 20 } as const;
+
+export async function seedTrialSubscriptions(deps: { clock: Clock; Kpms: mongoose.Model<never> }): Promise<{ guide: string }> {
+  const today = deps.clock.localDateFor(ZONE);
+  const lines: string[] = [];
+  for (const [code, startedDaysAgo] of Object.entries(TRIAL_OFFICES)) {
+    const trial = trialSubscription(shift(today, { days: -startedDaysAgo }));
+    await deps.Kpms.updateOne(
+      { code, deletedAt: null, subscription: null } as never, { $set: { subscription: trial } } as never,
+    ).exec();
+    lines.push(`    KPM ${code}                     Trial from ${trial.startDate} to ${trial.endDate}`);
+  }
+  return {
+    guide: `
+  TRIALS at /admin/billing › Langganan per KPM (P19.23-T5; src/seed/subscription-fixture.ts)
+${lines.join('\n')}
+`,
+  };
 }
 
 /**

@@ -29,6 +29,8 @@ jobs:
           SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref || github.ref_name }}
+          # Its call to api.github.com/meta counts against this repository's limit, not the runner's address.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
@@ -107,6 +109,8 @@ jobs:
           SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref || github.ref_name }}
+          # Its call to api.github.com/meta counts against this repository's limit, not the runner's address.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel
@@ -142,6 +146,8 @@ jobs:
           SUPERPROJECT_REPOSITORY: ${{ vars.SUPERPROJECT_REPOSITORY || format('{0}/agency-boost', github.repository_owner) }}
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref || github.ref_name }}
+          # Its call to api.github.com/meta counts against this repository's limit, not the runner's address.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/ci/superproject-beside.sh
       # No version pinned here on purpose: the action reads package.json#packageManager,
       # which is the same pnpm the lockfile was generated with and the same one Vercel

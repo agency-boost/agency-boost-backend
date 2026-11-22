@@ -217,10 +217,10 @@ describe('correcting one figure by hand (P9-T5)', () => {
     });
   });
 
-  describe('AC-3 — a later import keeps a correction unless it is ticked (ADR-0053)', () => {
-    const importWith = async (f: ReturnType<typeof file>, replace?: string) => {
+  describe('P19.21-T1 AC-5 — a later upload replaces a correction (ADR-0274 §1, superseding ADR-0053)', () => {
+    const importWith = async (f: ReturnType<typeof file>) => {
       const p = await wired.production.preview(A, '2026-09', f);
-      return wired.productionImport.commit(A, '2026-09', String(p.revision), f, replace);
+      return wired.productionImport.commit(A, '2026-09', String(p.revision), f);
     };
 
     it('remembers the figure a chain of corrections replaced — the first, not the last hand’s', async () => {
@@ -274,25 +274,25 @@ describe('correcting one figure by hand (P9-T5)', () => {
       expect(p.rows[0].cells[0]).toMatchObject({ status: 'new', correction: { reason: 'Belongs to August', replacedValue: 150_000_000 } });
     });
 
-    it('keeps an unticked correction and writes the rest of the file', async () => {
+    it('P19.21-T1 AC-5 replaces a correction with the file’s figure and writes the rest of the file', async () => {
       await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
       await correct({ value: 200_000_000 });
 
       const { batch } = await importWith(file(['PRU-001', { 'ape.monthly': '1.5', 'fyp.monthly': '1' }]));
 
-      expect(batch).toMatchObject({ cellCount: 1, keptCorrectionCount: 1, replacedCorrectionCount: 0 });
+      expect(batch).toMatchObject({ cellCount: 2, keptCorrectionCount: 0, replacedCorrectionCount: 1 });
       const row = await monthRow(A1);
-      expect(row!.values.APE).toMatchObject({ value: 200_000_000, provenance: 'corrected', reason: 'The carrier restated it by email' });
+      expect(row!.values.APE).toMatchObject({ value: 150_000_000, provenance: 'imported', reason: null, replacedValue: null });
       expect(row!.values.FYP).toMatchObject({ value: 100_000_000, provenance: 'imported' });
-      expect(await db().collection('auditLog').findOne({ action: 'upload.commit', 'after.keptCorrectionCount': 1 })).toBeTruthy();
+      expect(await db().collection('auditLog').findOne({ action: 'upload.commit', 'after.replacedCorrectionCount': 1 })).toBeTruthy();
     });
 
-    it('replaces a ticked one with the file’s figure — and a revert of that import brings the correction back whole', async () => {
+    it('P19.21-T1 AC-5 a revert of that upload brings the correction back whole', async () => {
       await importFile(file(['PRU-001', { 'ape.monthly': '1.5' }]));
       await correct({ value: 200_000_000 });
       const corrected = (await monthRow(A1))!.values.APE;
 
-      const { batch } = await importWith(file(['PRU-001', { 'ape.monthly': '1.7' }]), `${A1}:APE`);
+      const { batch } = await importWith(file(['PRU-001', { 'ape.monthly': '1.7' }]));
 
       expect(batch).toMatchObject({ keptCorrectionCount: 0, replacedCorrectionCount: 1 });
       expect((await monthRow(A1))!.values.APE).toMatchObject({
@@ -303,17 +303,74 @@ describe('correcting one figure by hand (P9-T5)', () => {
       expect((await monthRow(A1))!.values.APE).toEqual(corrected);
     });
 
-    it('refuses a correction named to be replaced that the file would not change', async () => {
+    it('a file that agrees with a correction changes nothing, and the correction stays', async () => {
       await correct({ value: 200_000_000 });
-      await expect(importWith(file(['PRU-001', { 'fyp.monthly': '1' }]), `${A1}:APE`)).rejects.toMatchObject({
-        code: 'VALIDATION_FAILED', details: { field: 'replace', key: `${A1}:APE` },
-      });
+      await expect(importWith(file(['PRU-001', { 'ape.monthly': '2' }]))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect((await monthRow(A1))!.values.APE).toMatchObject({ value: 200_000_000, provenance: 'corrected' });
+    });
+  });
+
+  describe('P19.21-T1 AC-4 — back to the file’s number', () => {
+    const restore = (over: Partial<{ membershipId: string; kode: string; ytd: boolean; revision: number; month: string }> = {}, ctx = A) =>
+      wired.production.readMonth(ctx, '2026-09').then((m) => wired.productionCorrections.restore(ctx, {
+        month: '2026-09', membershipId: A1, kode: 'APE', ytd: false, revision: m.state.revision, ...over,
+      }));
+
+    it('P19.21-T1 AC-4 the month read names the file’s number behind a correction: “dari file”', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.412' }]));
+      await correct({ value: 161_200_000 });
+      const month = await wired.production.readMonth(A, '2026-09');
+      const ape = month.rows.find((r) => r.membershipId === A1)!.values.APE;
+      expect(ape).toMatchObject({ value: 161_200_000, provenance: 'corrected', correction: { fileValue: 141_200_000 } });
     });
 
-    it('refuses a file whose only change is a correction left unticked — it would change nothing', async () => {
-      await correct({ value: 200_000_000 });
-      await expect(importWith(file(['PRU-001', { 'ape.monthly': '1.5' }]))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-      expect((await monthRow(A1))!.values.APE.value).toBe(200_000_000);
+    it('P19.21-T1 AC-4 puts a corrected figure back to the file’s, as the upload’s, audited', async () => {
+      const { batch } = await importFile(file(['PRU-001', { 'ape.monthly': '1.412' }]));
+      await correct({ value: 161_200_000 });
+
+      const result = await restore();
+
+      expect(result).toMatchObject({
+        changed: true, before: { value: 161_200_000, provenance: 'corrected' }, after: { value: 141_200_000, provenance: 'imported' },
+      });
+      expect((await monthRow(A1))!.values.APE).toMatchObject({
+        value: 141_200_000, provenance: 'imported', sourceBatchId: batch.id, correctedBy: null, reason: null,
+      });
+      const entry = await db().collection('auditLog').findOne({ action: 'upload.cell_restored' });
+      expect(entry).toMatchObject({ before: { value: 161_200_000, provenance: 'corrected' }, after: { value: 141_200_000 } });
+      // The upload owns the figure again: reverting it empties the cell, as it would have before the correction.
+      await wired.productionImport.revert(A, batch.id);
+      expect((await monthRow(A1))!.values.APE.value).toBeNull();
+    });
+
+    it('P19.21-T1 AC-4 refuses a figure nobody corrected, and one no upload gave', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.412' }]));
+      await expect(restore()).rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'kode' } });
+      await correct({ kode: 'FYP', value: 1_000_000 } as never);
+      await expect(restore({ kode: 'FYP' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'kode' } });
+    });
+
+    it('P19.21-T1 AC-4 KPM B cannot put back KPM A’s figure: 404, and nothing changes', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.412' }]));
+      await correct({ value: 161_200_000 });
+      await expect(wired.productionCorrections.restore(B, {
+        month: '2026-09', membershipId: A1, kode: 'APE', ytd: false, revision: 0,
+      })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect((await monthRow(A1))!.values.APE.value).toBe(161_200_000);
+    });
+
+    it('P19.21-T1 AC-3 a test account is nobody’s figure here: not listed, not corrected (404), not put back', async () => {
+      const TEST = '66f000000000000000000109';
+      await db().collection('memberships').insertOne({ ...person(TEST, KPM_A, 'FMT-01'), testAccount: true } as never);
+      expect((await wired.production.readMonth(A, '2026-09')).rows.map((r) => r.membershipId)).not.toContain(TEST);
+      await expect(correct({ membershipId: TEST })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(restore({ membershipId: TEST })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('P19.21-T1 AC-4 refuses a stale revision', async () => {
+      await importFile(file(['PRU-001', { 'ape.monthly': '1.412' }]));
+      await correct({ value: 161_200_000 });
+      await expect(restore({ revision: 0 })).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
     });
   });
 

@@ -78,11 +78,34 @@ const EXEMPT: Record<string, string> = {
   KpmRequest: 'an office that does not exist yet, so there is no tenant to scope to.',
   AuthToken: 'platform-global. A session belongs to a user, not to an office.',
   AccountLink: 'platform-global (ADR-0199 §3): two logins of one person, linked; logins belong to no office.',
+  RateTable:
+    'company-partitioned (ADR-0258), for the same reason as Product above: a premium table version belongs to the '
+    + 'insurer. Every write of `RateTableService` filters by `companyId` and the version\'s id; `PremiumCalculator`\'s '
+    + 'one write marks a version used by its id, found as the version in force for a product of the office\'s shelf.',
+  RateRow:
+    'the rows of a premium table version (ADR-0258 §1): written and soft-deleted only by their version\'s id, inside '
+    + '`RateTableService`, after the version was found under its company.',
+  UploadIntake:
+    'company-partitioned (ADR-0259), for the same reason as Product above: *Unggah file*\'s uploads of an insurer\'s '
+    + 'product data, `companyId` the insurer or `null` for the Super Admin\'s *Perusahaan* upload. Every write of '
+    + '`IntakeService` and `IntakeReading` filters by the intake\'s id, found after `ProductDataAccess` checked its company.',
+  IntakeItem:
+    'the cards of one upload (ADR-0259 §4): written only by their id under their intake\'s id, after the intake was '
+    + 'found and its company checked; no office owns an insurer\'s product data.',
+  Illustration:
+    'company-partitioned (ADR-0259 §8), for the same reason as Product above: a product\'s official illustration. Every '
+    + 'write of `IllustrationService` filters by `companyId` and the illustration\'s id, or by the company and the product.',
+  ProductDataGrant:
+    'per-person and platform-global (ADR-0260 §1): *Kelola data produk*, a grant to manage insurers\' data, keyed by '
+    + 'the global userId. Written only by the Super Admin, filtered by the person\'s userId and the live row.',
   ImpersonationSession:
     'a platform record of a platform action. `kpmId` is nullable because a target may be '
     + 'in no office at all, and ending every session an operator has open is keyed by the '
     + 'person, not by a tenant. An Owner\'s read is narrowed in the service, which refuses '
     + 'another office as a 404.',
+  PlatformSettings:
+    'platform-global (P19.23-T6, ADR-0279): the platform\'s one settings document, keyed `platform`, which no KPM owns. '
+    + 'Written by the Super Admin alone, filtered by that key, every change audited.',
   AuditLog: 'written through AuditService, which stamps the tenant itself.',
   NotificationPreferences: 'per-user, for the same reason as Notification below.',
   Notification:

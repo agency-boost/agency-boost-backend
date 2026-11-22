@@ -22,10 +22,11 @@ export class MemberPhoneController {
   @RequirePermission('member:update_phone')
   @RefuseInSupportSession()
   @ApiOperation({
-    summary: 'Save the WhatsApp number of somebody you coach',
+    summary: 'Save the missing WhatsApp number of somebody you coach, or of a member of your office',
     description:
-      '*Isi nomor WhatsApp* on a person in your unit (UI-081, D-22): an AB for their downline, an AAB for their own '
-      + 'unit — anybody else, another office\'s member or somebody who has left is `404 NOT_FOUND`. Typed as people type '
+      '*Isi nomor WhatsApp* on a person\'s row (UI-081, D-22; ADR-0263): a leader — an AB, an AAB, an Agent who leads — '
+      + 'for somebody they coach, the KPM Owner and an Admin for any active member of the office — anybody else, another '
+      + 'office\'s member or somebody who has left is `404 NOT_FOUND`. Typed as people type '
       + 'it and stored as `+62` and 9 to 13 digits, else `400 VALIDATION_FAILED` naming `phone`; not clearable here. '
       + '**Only a missing number is filled**: a person who already has one is `409 MEMBER_PHONE_ON_FILE` and keeps it '
       + '(they change their own, `PATCH /auth/me`); the condition is part of the write, so a race cannot overwrite. '

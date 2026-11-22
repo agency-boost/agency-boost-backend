@@ -19,16 +19,14 @@ export const PROPOSAL_REFUSALS = refusals('modules/proposals', {
         closed: 'This product is closed to new business, so it cannot be added to a proposal.',
         rider: 'A rider is added with its base product in the official illustration, not to a proposal on its own.',
         not_on_shelf: 'This product is not offered by your KPM.',
-        channel: 'This product is not offered on this channel. Switch Konvensional / Syariah first.',
-        age: 'This product is not offered at the client’s age.',
+        age: 'The client’s age is outside this product’s entry ages.',
       }[reason] ?? 'This product cannot be added to a proposal.',
       id: {
         withdrawn: 'Produk ini sudah ditarik, jadi tidak bisa ditambahkan ke proposal.',
         closed: 'Produk ini sudah tidak menerima nasabah baru, jadi tidak bisa ditambahkan ke proposal.',
         rider: 'Rider ditambahkan bersama produk dasarnya di ilustrasi resmi, tidak sendiri ke proposal.',
         not_on_shelf: 'Produk ini tidak dijual oleh KPM Anda.',
-        channel: 'Produk ini tidak tersedia untuk pilihan ini. Ganti Konvensional / Syariah dulu.',
-        age: 'Produk ini tidak tersedia untuk umur klien.',
+        age: 'Usia klien di luar batas usia masuk produk ini.',
       }[reason] ?? 'Produk ini tidak bisa ditambahkan ke proposal.',
     }),
     noLongerOffered: ({ count }: { count: number }) => ({
@@ -52,9 +50,39 @@ export const PROPOSAL_REFUSALS = refusals('modules/proposals', {
       en: 'A proposal is made for a Sales lead. Set this lead’s type to Sales first.',
       id: 'Proposal dibuat untuk lead Sales. Ubah jenis lead ini menjadi Sales dulu.',
     },
-    leadNeedsAgeAndGender: {
-      en: 'Save the client’s age and gender on the lead first.',
-      id: 'Simpan umur dan jenis kelamin klien di lead dulu.',
+    // P19.14-T1 (ADR-0254 §2): the client's age and gender are the proposal's, asked at step 1, never the lead's.
+    clientNeedsAgeAndGender: {
+      en: 'A proposal needs the client’s age at the next birthday and gender.',
+      id: 'Proposal memerlukan umur ulang tahun berikutnya dan jenis kelamin klien.',
+    },
+    clientShape: ({ field }: { field: string }) => ({
+      en: `${field} has a value it cannot take.`,
+      id: `${field} berisi nilai yang tidak bisa diterima.`,
+    }),
+    clientText: ({ field, max }: { field: string; max: number }) => ({
+      en: `${field} must be text of at most ${max} characters, or null.`,
+      id: `${field} harus berupa teks paling banyak ${max} karakter, atau null.`,
+    }),
+    // P19.14-T2 (ADR-0255 §2): pay term, cara bayar, smoker and the sum assured, each per product.
+    payTermValue: {
+      en: 'payTerm must be one of this product’s pay terms that the insured’s age allows.',
+      id: 'payTerm harus salah satu masa bayar produk ini yang diizinkan untuk usia tertanggung.',
+    },
+    payFrequencyValue: {
+      en: 'payFrequency must be one of the cara bayar this product offers; a single pay term is paid once.',
+      id: 'payFrequency harus salah satu cara bayar produk ini; masa bayar sekali bayar dibayar sekali.',
+    },
+    smokerValue: {
+      en: 'smoker is true or false, and only for a product whose premium differs for smokers.',
+      id: 'smoker berisi true atau false, dan hanya untuk produk yang preminya berbeda bagi perokok.',
+    },
+    upValue: ({ max }: { max: number }) => ({
+      en: `up.amountMinor must be a whole amount from 0 to ${max} minor units, or null, on a product with a sum assured.`,
+      id: `up.amountMinor harus berupa jumlah bulat dari 0 sampai ${max} (satuan terkecil), atau null, pada produk dengan uang pertanggungan.`,
+    }),
+    insuredGender: {
+      en: 'insured.gender must be male, female or null.',
+      id: 'insured.gender harus male, female, atau null.',
     },
     alreadyAdded: {
       en: 'This product is already in the proposal.',
@@ -101,8 +129,8 @@ export const PROPOSAL_REFUSALS = refusals('modules/proposals', {
       id: 'insured.age harus berupa bilangan bulat (tahun), atau null.',
     },
     clientTakesNoName: {
-      en: 'The client is insured: insured.name and insured.age come from the client and are not sent.',
-      id: 'Klien adalah tertanggung: insured.name dan insured.age diambil dari klien dan tidak dikirim.',
+      en: 'The client is insured: insured.name, insured.age and insured.gender come from the client and are not sent.',
+      id: 'Klien adalah tertanggung: insured.name, insured.age, dan insured.gender diambil dari klien dan tidak dikirim.',
     },
   },
 });

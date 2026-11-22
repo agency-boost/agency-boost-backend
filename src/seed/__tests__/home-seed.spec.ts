@@ -43,7 +43,6 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
     home = new HomeService(
       new TenantDay(wired.kpms as never, wired.clock),
       wired.unitDashboard,
-      wired.paceStatus,
       wired.coachingReadings,
       wired.activityReadings,
       wired.memberships,
@@ -141,9 +140,10 @@ describe('P19.8-T2 AC-11 the Home seed — a run at 10:00 on Saturday 7 November
   it('P19.8-T2 AC-11 Dewi, an AAB who leads nobody, gets the leader block at zero; Rina, an Agent, none', async () => {
     const dewi = await read('dewi@kpm0417.test');
     expect(dewi.leader).toEqual({
-      activeAgent: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 } },
+      activeAgent: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 }, held: false },
       coached7d: { count: 0, of: 0, unit: { count: 0, of: 0 }, aab: { count: 0, of: 0 } },
       team: [],
+      office: null,
     });
     expect(dewi.newHires).toBe(0);
     const rina = await read('rina@kpm0417.test');

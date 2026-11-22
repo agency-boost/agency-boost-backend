@@ -43,27 +43,51 @@ export class SetCapabilityStatusDto {
 }
 
 export class AddCapabilityDto {
-  @ApiProperty({ enum: ['milestone', 'item'] })
-  @IsIn(['milestone', 'item'])
+  @ApiProperty({
+    enum: PARTS,
+    description: '`stage` and `grid` (ADR-0274): *+ Tambah tahap* and *+ Tambah kelompok*.',
+  })
+  @IsIn(PARTS as unknown as string[])
   part!: string;
 
-  @ApiProperty({ description: 'Chosen once. Never reused, archived rows included.' })
-  @IsString() @MaxLength(60)
-  code!: string;
+  @ApiPropertyOptional({
+    description: 'Chosen once. Never reused, archived rows included. **Absent, the server makes one from the label** '
+      + '— `Sells policies independently` → `SELLS_POLICIES_INDEPENDENTLY`, `_2` after it if taken.',
+  })
+  @IsOptional() @IsString() @MaxLength(60)
+  code?: string;
 
   @ApiProperty()
   @IsString() @MaxLength(200)
   label!: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Required when `part` is `item`: which grid it goes in.' })
   @IsOptional() @IsString() @MaxLength(60)
   gridCode?: string;
+
+  @ApiPropertyOptional({
+    description: 'A milestone added **under a tahap** — required by that stage and every stage above it, '
+      + 'as the ladder is cumulative. Absent, a milestone joins the list and no stage.',
+  })
+  @IsOptional() @IsString() @MaxLength(60)
+  stageCode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Required when `part` is `stage`: its first milestone’s name. The new stage requires '
+      + 'everything the stage below it does, and this — so it is never a stage everybody is already on.',
+  })
+  @IsOptional() @IsString() @MaxLength(200)
+  firstMilestone?: string;
 }
 
 export class ReorderCapabilityDto {
-  @ApiProperty({ enum: ['stage', 'milestone', 'grid'] })
-  @IsIn(['stage', 'milestone', 'grid'])
+  @ApiProperty({ enum: PARTS, description: '`item`: a kelompok’s skills, with its `gridCode`.' })
+  @IsIn(PARTS as unknown as string[])
   part!: string;
+
+  @ApiPropertyOptional({ description: 'Required when `part` is `item`: the grid whose skills these are.' })
+  @IsOptional() @IsString() @MaxLength(60)
+  gridCode?: string;
 
   @ApiProperty({
     type: [String],

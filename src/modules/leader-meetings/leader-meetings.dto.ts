@@ -1,27 +1,28 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import {
-  ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsString, Max, MaxLength, Min, MinLength, ValidateBy, ValidateIf,
-} from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsString, Matches, MaxLength, Min, MinLength, ValidateBy, ValidateIf } from 'class-validator';
 import { isLocalDate } from '@/common/time/local-day';
 import { field } from '@/common/validation/violations';
-import { LEADER_MEETING_LIMITS, LEADER_MEETING_TARGET_RATE_DECIMALS } from '@/domain/constants';
-import { ACTION_STATUSES, AGENDA_SECTIONS, type ActionStatus, type AgendaSection } from './leader-meeting.schema';
+import { LEADER_MEETING_LIMITS } from '@/domain/constants';
+import { ACTION_STATUSES, type ActionStatus } from './leader-meeting.schema';
 import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 
 /** The DTOs' own sentences, in both languages (P18.10-T5 AC-3): `field` carries them through class-validator. */
 const SAY = LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED;
 
-const { titleMax, textMax, picMax } = LEADER_MEETING_LIMITS;
+const { textMax } = LEADER_MEETING_LIMITS;
 
-/** Leading and trailing spaces are not part of a title: `"  "` is an empty title, refused. */
+/** Leading and trailing spaces are not part of a text: `"  "` is an empty text, refused. */
 const Trimmed = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
 
 /**
  * **Absent is "leave it"; `null` is refused**, 400 (the `unit-dashboard.dto.ts` convention). `@IsOptional()` would
- * let `null` through to the write, storing a meeting with no date or a row with no status.
+ * let `null` through to the write.
  */
 const Sent = () => ValidateIf((_: unknown, value: unknown) => value !== undefined);
+
+/** **Absent is "leave it"; `null` clears it** — a PIC or a *tenggat*. */
+const SentOrCleared = () => ValidateIf((_: unknown, value: unknown) => value !== undefined && value !== null);
 
 /** A real office date, `YYYY-MM-DD`: `2026-02-31` matches the shape and is not a day. */
 function IsOfficeDate() {
@@ -34,37 +35,40 @@ function IsOfficeDate() {
   });
 }
 
-/** **Empty on purpose** (P18.1-T2 AC-9): the list is the reader's office, every meeting; a parameter of any name is 400. */
+/** `HH:MM`, 00:00 to 23:59: a forum's time in the office's day. */
+const TIME_SHAPE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** A member, by membership id: 24 hex characters. */
+const MEMBERSHIP_ID = /^[0-9a-f]{24}$/;
+
+/** *Semua*: an agenda line for everybody at the forum. */
+export const PIC_ALL = 'all';
+
+/** **Empty on purpose** (P18.1-T2 AC-9): the list is the reader's office, every forum; a parameter of any name is 400. */
 export class LeaderMeetingsQueryDto {}
 
-/** *+ New meeting*'s dialog (ADR-0130 §2): the numbered title, already filled, and an office date. */
+/** *+ Forum baru* (P19.22-T8 AC-1; ADR-0276): an office date and a time. No title: every forum is *Forum #n*. */
 export class CreateLeaderMeetingDto {
-  @ApiProperty({ example: 'Strategic Check-in — #15', minLength: 1, maxLength: titleMax, description: 'Plain text, trimmed.' })
-  @Trimmed()
-  @IsString()
-  @MinLength(1, { message: field(SAY.titleNotEmpty) })
-  @MaxLength(titleMax)
-  title!: string;
-
-  @ApiProperty({ example: '2026-10-27', description: 'An office date, `YYYY-MM-DD`, in the agency’s calendar.' })
+  @ApiProperty({ example: '2026-11-27', description: 'An office date, `YYYY-MM-DD`, in the agency’s calendar.' })
   @IsOfficeDate()
   date!: string;
+
+  @ApiProperty({ example: '14:00', description: 'The office time it starts, `HH:MM`.' })
+  @Matches(TIME_SHAPE, { message: field(SAY.timeShape) })
+  time!: string;
 }
 
-/** The same dialog from the head's date (ADR-0130 §4): the title, the date, or both, while the meeting is upcoming. */
+/** The date, the time or both, while the forum is upcoming (ADR-0130 §4). */
 export class RescheduleLeaderMeetingDto {
-  @ApiPropertyOptional({ example: 'Strategic Check-in — #14', minLength: 1, maxLength: titleMax })
-  @Sent()
-  @Trimmed()
-  @IsString()
-  @MinLength(1, { message: field(SAY.titleNotEmpty) })
-  @MaxLength(titleMax)
-  title?: string;
-
-  @ApiPropertyOptional({ example: '2026-10-14', description: 'An office date, `YYYY-MM-DD`.' })
+  @ApiPropertyOptional({ example: '2026-11-28', description: 'An office date, `YYYY-MM-DD`.' })
   @Sent()
   @IsOfficeDate()
   date?: string;
+
+  @ApiPropertyOptional({ example: '15:00', description: '`HH:MM`.' })
+  @Sent()
+  @Matches(TIME_SHAPE, { message: field(SAY.timeShape) })
+  time?: string;
 
   @ApiProperty({ example: 1, description: 'The head’s `version` you read. Refused `409 VERSION_CONFLICT` once it has moved on.' })
   @IsInt()
@@ -81,117 +85,103 @@ export class LeaderMeetingVersionQueryDto {
   version!: number;
 }
 
-/** *+ Add item* (`:2863`), under one of the agenda's three sections. */
+/** *+ Tambah agenda* (AC-3): the line's text, and its PIC if one is chosen. */
 export class AddAgendaItemDto {
-  @ApiProperty({ enum: AGENDA_SECTIONS })
-  @IsIn(AGENDA_SECTIONS)
-  section!: AgendaSection;
+  @ApiProperty({ minLength: 1, maxLength: textMax, example: 'Rencana Closing Clinic Desember' })
+  @Trimmed()
+  @IsString()
+  @MinLength(1, { message: field(SAY.textNotEmpty) })
+  @MaxLength(textMax)
+  text!: string;
+
+  @ApiPropertyOptional({
+    nullable: true, example: 'all',
+    description: 'A member’s membership id — one of the forum’s editors — or `"all"` (*Semua*), or `null` for none.',
+  })
+  @SentOrCleared()
+  @IsString()
+  @Matches(new RegExp(`^(${PIC_ALL}|[0-9a-f]{24})$`))
+  pic?: string | null;
 }
 
 /**
- * **One agenda item's field** — its text, its PIC or its box — with the item's own `version`. One field per write;
- * a text that trims to nothing removes the item.
+ * **One agenda line's field** — its text, its PIC or its box — with the line's own `version`. One field per write; a
+ * text that trims to nothing removes the line.
  */
 export class SaveAgendaItemDto {
-  @ApiPropertyOptional({ maxLength: textMax, description: 'Plain text. Emptied, the item is removed.' })
+  @ApiPropertyOptional({ maxLength: textMax, description: 'Plain text. Emptied, the line is removed.' })
   @Sent()
+  @Trimmed()
   @IsString()
   @MaxLength(textMax)
   text?: string;
 
-  @ApiPropertyOptional({ maxLength: picMax, description: 'A name typed by hand; empty for none.' })
-  @Sent()
+  @ApiPropertyOptional({ nullable: true, description: 'A member’s membership id (an editor), `"all"` (*Semua*), or `null` for none.' })
+  @SentOrCleared()
   @IsString()
-  @MaxLength(picMax)
-  pic?: string;
+  @Matches(new RegExp(`^(${PIC_ALL}|[0-9a-f]{24})$`))
+  pic?: string | null;
 
-  @ApiPropertyOptional({ description: 'The item’s box, in any section (UI V1, UI-110).' })
+  @ApiPropertyOptional({ description: 'Ticked during the forum.' })
   @Sent()
   @IsBoolean()
   done?: boolean;
 
-  @ApiProperty({ example: 1, description: 'The item’s `version` you read.' })
+  @ApiProperty({ example: 1, description: 'The line’s `version` you read.' })
   @IsInt()
   @Min(1)
   version!: number;
 }
 
-/** **One cell of an action row**, with the row's own `version`. One field per write. */
+/** *+ Tambah action item* (AC-4): what is to be done, and its PIC and *tenggat* if chosen. *Belum*. */
+export class AddActionItemDto {
+  @ApiProperty({ minLength: 1, maxLength: textMax, example: 'Siapkan Closing Clinic Desember' })
+  @Trimmed()
+  @IsString()
+  @MinLength(1, { message: field(SAY.textNotEmpty) })
+  @MaxLength(textMax)
+  text!: string;
+
+  @ApiPropertyOptional({ nullable: true, description: 'A member’s membership id — one of the forum’s editors — or `null`.' })
+  @SentOrCleared()
+  @IsString()
+  @Matches(MEMBERSHIP_ID)
+  pic?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '2026-12-02', description: '*Tenggat*, an office date, or `null`.' })
+  @SentOrCleared()
+  @IsOfficeDate()
+  dueOn?: string | null;
+}
+
+/** **One action item's field** — text, PIC, *tenggat* or state — with the item's own `version`. One field per write. */
 export class SaveActionItemDto {
-  @ApiPropertyOptional({ maxLength: textMax, description: '*Key initiative*.' })
+  @ApiPropertyOptional({ minLength: 1, maxLength: textMax, description: 'What is to be done. Never empty: the trash removes an item.' })
   @Sent()
+  @Trimmed()
   @IsString()
+  @MinLength(1, { message: field(SAY.textNotEmpty) })
   @MaxLength(textMax)
-  initiative?: string;
+  text?: string;
 
-  @ApiPropertyOptional({ maxLength: textMax, description: '*Success metric*.' })
-  @Sent()
+  @ApiPropertyOptional({ nullable: true, description: 'A member’s membership id (an editor), or `null` for none.' })
+  @SentOrCleared()
   @IsString()
-  @MaxLength(textMax)
-  metric?: string;
+  @Matches(MEMBERSHIP_ID)
+  pic?: string | null;
 
-  @ApiPropertyOptional({ maxLength: textMax, description: '*Action item*.' })
-  @Sent()
-  @IsString()
-  @MaxLength(textMax)
-  action?: string;
+  @ApiPropertyOptional({ nullable: true, description: '*Tenggat*, `YYYY-MM-DD`, or `null` for none.' })
+  @SentOrCleared()
+  @IsOfficeDate()
+  dueOn?: string | null;
 
-  @ApiPropertyOptional({ maxLength: picMax, description: '*PIC*: a name typed by hand.' })
-  @Sent()
-  @IsString()
-  @MaxLength(picMax)
-  pic?: string;
-
-  @ApiPropertyOptional({ maxLength: textMax, description: '*Remarks / Target*.' })
-  @Sent()
-  @IsString()
-  @MaxLength(textMax)
-  remarks?: string;
-
-  @ApiPropertyOptional({ enum: ACTION_STATUSES, description: '*Not yet planned*, *Planned* or *Implemented*.' })
+  @ApiPropertyOptional({ enum: ACTION_STATUSES, description: '*Belum* (`todo`), *Proses* (`doing`) or *Selesai* (`done`).' })
   @Sent()
   @IsIn(ACTION_STATUSES)
   status?: ActionStatus;
 
-  @ApiProperty({ example: 1, description: 'The row’s `version` you read.' })
+  @ApiProperty({ example: 1, description: 'The item’s `version` you read.' })
   @IsInt()
   @Min(1)
-  version!: number;
-}
-
-/** **The tracker's order, whole**: every row's id, in the new order. */
-export class ReorderActionItemsDto {
-  @ApiProperty({ type: [String], description: 'Every row of the meeting, each once, in their new order.' })
-  @IsArray()
-  @ArrayUnique()
-  @IsString({ each: true })
-  itemIds!: string[];
-}
-
-/**
- * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4): a number from 0 in the row's unit — IDR minor units for
- * `ape`, which the service holds to whole sen, a count to two places for the others (`LEADER_MEETING_TARGET_RATE_DECIMALS`,
- * which bounds every row's rate here) — or `null` to clear it, with the
- * cell's `version`, 0 for a cell never typed. **Anything that is not a number is refused**, a text included: the
- * free-text target is gone (the pipe converts nothing, `VALIDATION_PIPE_OPTIONS`).
- */
-export class SaveMonthlyTargetDto {
-  @ApiProperty({
-    type: Number, nullable: true, minimum: 0, example: 1,
-    description: 'The rate per unit, in the row’s unit: IDR minor units for `ape` (whole sen), a count to two places for '
-      + 'the others. `null` clears the target. Not a number: `400 VALIDATION_FAILED`.',
-  })
-  @ValidateIf((_: unknown, value: unknown) => value !== null)
-  @IsNumber(
-    { allowNaN: false, allowInfinity: false, maxDecimalPlaces: LEADER_MEETING_TARGET_RATE_DECIMALS },
-    { message: field(SAY.rateNumber) },
-  )
-  @Min(0)
-  @Max(Number.MAX_SAFE_INTEGER)
-  rate!: number | null;
-
-  @ApiProperty({ example: 0, description: 'The cell’s `version` you read: 0 for one never typed.' })
-  @IsInt()
-  @Min(0)
   version!: number;
 }

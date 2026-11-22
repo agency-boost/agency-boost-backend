@@ -3,6 +3,31 @@ import { TRAINING_PUBLISH_STATES, TRAINING_TEXT, type TrainingPublishState } fro
 import type {
   ModuleMaterial, TrainingCategoryView, TrainingModuleView, TrainingSkillView,
 } from './training.service';
+import type { ModuleCompletion, ModuleMaterialItem } from './training-module-facts';
+
+/** The item a settings row names beside *Ganti* (P19.25-T4 AC-2, ADR-0282 §2). */
+export class ModuleMaterialItemDto implements ModuleMaterialItem {
+  @ApiProperty({ type: String, example: 'Prospek_list.pdf', description: 'As the office or the template named it.' })
+  label!: string;
+
+  @ApiProperty({ enum: ['file', 'video', 'link'], description: 'The first file, else the first video, else the first link.' })
+  kind!: 'file' | 'video' | 'link';
+
+  @ApiProperty({ type: String, nullable: true, description: 'The type storage confirmed; `null` for a link.' })
+  mimeType!: string | null;
+}
+
+/** *"n dari 30 selesai"* (P19.25-T4 AC-2, ADR-0282 §2; `TRAINING_MODULE_DONE_COUNT`). */
+export class ModuleCompletionDto implements ModuleCompletion {
+  @ApiProperty({ type: Number, description: 'Counted members who marked the module done (their own word, ADR-0139).' })
+  done!: number;
+
+  @ApiProperty({ type: Number, description: 'Counted members who began it: in progress or done. 0 is *Belum ada yang belajar*.' })
+  started!: number;
+
+  @ApiProperty({ type: Number, description: 'The office\'s counted members: active, never a test account (ADR-0267 §1).' })
+  of!: number;
+}
 
 /** The wire shape of one training module. `implements` the view, so the two cannot drift. */
 export class TrainingModuleDto implements TrainingModuleView {
@@ -55,6 +80,19 @@ export class TrainingModuleDto implements TrainingModuleView {
       + '`company`, the template\'s; `none`, no file, video or link. What *x / y modul punya materi* counts.',
   })
   material?: ModuleMaterial;
+
+  @ApiPropertyOptional({
+    type: ModuleMaterialItemDto,
+    nullable: true,
+    description: 'The settings list only: the item its row names beside *Ganti*; `null` is *Unggah materi*.',
+  })
+  materialItem?: ModuleMaterialItemDto | null;
+
+  @ApiPropertyOptional({
+    type: ModuleCompletionDto,
+    description: 'The settings list only: *"n dari 30 selesai"*.',
+  })
+  completion?: ModuleCompletionDto;
 }
 
 export class TrainingSkillDto implements TrainingSkillView {

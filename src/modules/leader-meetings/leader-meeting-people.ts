@@ -4,20 +4,22 @@ import { Model } from 'mongoose';
 import { RequestContext, isEffectiveCoreLeader } from '@/common/context/request-context';
 import { NoMembershipException, NotFoundException } from '@/common/errors/domain.exception';
 import { DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
-import type { EditorStanding, FrozenEditor } from './leader-meeting.schema';
-import type { ForumPerson, MeetingEditors } from './leader-meeting.view';
+import type { EditorStanding, ForumEditor } from './leader-meeting.schema';
+import { firstNameOf, type ForumPerson } from './leader-meeting.view';
 
 /** What a forum route knows about its reader. */
 export interface ForumReader {
-  membershipId: string;
-  /** The Owner or an Admin: an editor of every meeting, whatever their tag (ADR-0028). */
+  /** `null` for the Super Admin inside the KPM, who is no member of it (ADR-0268 §3). */
+  membershipId: string | null;
+  /** The Super Admin inside the KPM, the Owner or an Admin: an editor of every forum, whatever their tag. */
   office: boolean;
   /**
-   * A *Core Leader* **at this request** (roles §1.4, ADR-0159 §1) — tagged, on a leader rung — read from the
+   * A *Core leader* **at this request** (roles §1.4, ADR-0159 §1) — tagged, on a leader rung, active — read from the
    * membership, never the token. A tagged member off a leader rung is not one.
    */
   tagged: boolean;
@@ -26,29 +28,28 @@ export interface ForumReader {
 /** The reader's office, read once per request by its own `_id`. */
 export interface ForumOffice {
   timezone: string;
-  /** *"BSD City Branch"*: the share dialog's hint names it. */
   branch: string;
   ownerUserId: string | null;
   companyId: string | null;
 }
 
 /**
- * **The one answer every refusal of the forum gives** (ADR-0131 §7, roles §3.14 ¶): another office's meeting, a
- * deleted one, an unknown, expired or revoked link, another office's link, and any route for a field member not
- * tagged — the same code and the same words, so nothing tells them apart.
+ * **The one answer every refusal of the forum gives** (ADR-0131 §7, roles §3.14 ¶): another office's forum, a
+ * deleted one, an unknown, expired or revoked link, another office's link, and any route for a field member who is
+ * no core leader — the same code and the same words, so nothing tells them apart.
  */
 export function meetingNotFound(): NotFoundException {
   return new NotFoundException('Meeting');
 }
 
 /**
- * **Who reads the forum, and who may edit it** (D-coeditors, roles §1.4, §3.14).
+ * **Who reads the forum, and who may edit it** (D-coeditors, roles §1.4, §3.14; ADR-0268, ADR-0276).
  *
- * **The tag is the list.** The editors are the Owner, then the Admins (`adminAccess.isKpmAdmin`), then every other
- * active member who is a *Core Leader* — tagged, on a leader rung (ADR-0159 §1) — each person once, read from the
- * memberships on every request, so tagging or untagging somebody changes who may edit every meeting at once. Every read here is a fixed number of queries,
- * whatever the office's size: the reader's row, the office's row, the editors in one read, their names in two
- * (`MemberNames`) and the company's ladder in one.
+ * **The office's stewards are the editors** (`common/auth/office-steward.ts`): the **Super Admin inside the KPM**, the
+ * Owner, the Admins, and every active member who is a *Core leader* — tagged, on a leader rung (ADR-0159 §1) — read
+ * from the memberships on every request, so tagging somebody changes who may edit every forum at once. **Test accounts
+ * are never among them** (ADR-0267 §1): not drawn, not counted, not offered as a PIC. Every read here is a fixed number
+ * of queries, whatever the office's size.
  */
 @Injectable()
 export class LeaderMeetingPeople {
@@ -61,23 +62,25 @@ export class LeaderMeetingPeople {
   ) {}
 
   /**
-   * The reader, by the meeting's address or by a link. A Super Admin outside a support session belongs to no
-   * office: `TENANT_NO_MEMBERSHIP` (roles §3.14 §).
+   * **Any reader of the office** — the Super Admin inside it, or one of its members — as a shared link is opened. A
+   * Super Admin in no KPM, and anybody who has joined none: `TENANT_NO_MEMBERSHIP` (roles §3.14 §).
    */
   async reader(ctx: RequestContext): Promise<ForumReader> {
-    if (!ctx.membership || !ctx.kpmId) throw new NoMembershipException();
+    if (!ctx.kpmId) throw new NoMembershipException();
+    if (ctx.isSuperAdminInKpm) return { membershipId: null, office: true, tagged: false };
+    if (!ctx.membership) throw new NoMembershipException();
+    const office = ctx.membership.isKpmOwner || ctx.membership.isKpmAdmin;
     const row = await this.memberships.findById(ctx, ctx.membership.membershipId);
     return {
       membershipId: ctx.membership.membershipId,
-      office: ctx.membership.isKpmOwner || ctx.membership.isKpmAdmin,
-      tagged: isEffectiveCoreLeader(row),
+      office,
+      tagged: row?.status === 'active' && isEffectiveCoreLeader(row),
     };
   }
 
   /**
-   * **A reader of the forum by its address** — the list, a meeting, every write: the Owner, an Admin, or a member
-   * tagged *Core Leader* now. Anybody else of the office is answered **404 on every route** (¶): a refusal never
-   * confirms that a meeting exists. A shared link is read by `reader` alone.
+   * **A reader of the forum by its address** — the list, a forum, every write: a steward of the office. Anybody else
+   * of it is answered **404 on every route** (¶): a refusal never confirms that a forum exists.
    */
   async editor(ctx: RequestContext): Promise<ForumReader> {
     const reader = await this.reader(ctx);
@@ -97,26 +100,26 @@ export class LeaderMeetingPeople {
   }
 
   /**
-   * **The editors now** (D-coeditors), as the freeze writes them: the Owner — the active membership of the office's
-   * owning account — then the Admins, then every other Core Leader (tagged, on a leader rung), each once, by
-   * membership id and rung.
+   * **The editors now** (D-coeditors): the Owner — the active membership of the office's owning account — then the
+   * Admins, then every other core leader (tagged, on a leader rung), each once, by membership id and rung. No test
+   * account (ADR-0267 §1).
    */
-  async liveEditors(ctx: RequestContext, office: ForumOffice): Promise<FrozenEditor[]> {
+  async liveEditors(ctx: RequestContext, office: ForumOffice): Promise<ForumEditor[]> {
     const rows = await this.memberships.find(
       ctx,
-      {
+      withoutTestAccounts({
         status: 'active',
         $or: [
           ...(office.ownerUserId ? [{ userId: office.ownerUserId }] : []),
           { 'adminAccess.isKpmAdmin': true },
-          // ADR-0159 §1: a Core Leader is tagged **and** a leader by rung; a tagged Agent is nobody's editor.
+          // ADR-0159 §1: a core leader is tagged **and** a leader by rung; a tagged Agent is nobody's editor.
           { isCoreLeader: true, role: { $in: [...LEADER_CLASSES] } },
         ],
-      },
+      }),
       { projection: { userId: 1, orgLevelCode: 1, role: 1, isCoreLeader: 1, adminAccess: 1 } },
     );
     const owner = office.ownerUserId ? rows.find((row) => row.userId === office.ownerUserId) ?? null : null;
-    const editor = (row: (typeof rows)[number], as: EditorStanding): FrozenEditor => ({
+    const editor = (row: (typeof rows)[number], as: EditorStanding): ForumEditor => ({
       membershipId: String(row._id), as, rungCode: row.orgLevelCode, tagged: isEffectiveCoreLeader(row),
     });
     const others = rows.filter((row) => row !== owner);
@@ -129,46 +132,45 @@ export class LeaderMeetingPeople {
   }
 
   /**
-   * **Names, photos and rungs for every list of editors a read serves, in one pass**: the names in two queries — each
-   * photo's key read beside the name and signed in one batch (UI-111) — the
-   * company's ladder in one, however many meetings and people. Each list is then described by the function this
-   * answers — the Owner first, the Admins and the Core Leaders each by name — and `coreLeaderCount` counts every
-   * editor tagged but the Owner. An editor whose membership is gone from the office is left out.
+   * **Every person a read draws, in one pass**: the editors — offered as PICs (`pickable`) — and every other member
+   * `named` as a PIC (an editor since untagged, say), with their names and photos in two queries and the company's
+   * ladder in one. A membership gone from the office is left out: its line reads no PIC. Editors first in their order
+   * (the Owner, the Admins, the core leaders), then the others by name.
    */
-  async describer(
-    ctx: RequestContext, office: ForumOffice, lists: readonly (readonly FrozenEditor[])[],
-  ): Promise<{
-    editors: (list: readonly FrozenEditor[], frozen: boolean) => MeetingEditors;
-    nameOf: (membershipId: string) => string | null;
-  }> {
-    const ids = [...new Set(lists.flatMap((list) => list.map((e) => e.membershipId)))];
-    // Every editor of every list is drawn with an avatar, so each one's photo is signed with the name (UI V1, UI-111).
-    const people = await this.names.pictured(ctx, ids);
-    const names = new Map([...people].map(([id, p]) => [id, p.name]));
+  async people(
+    ctx: RequestContext, office: ForumOffice, editors: readonly ForumEditor[], named: readonly string[] = [],
+  ): Promise<{ people: ForumPerson[]; coreLeaders: ForumPerson[] }> {
+    const editorIds = editors.map((e) => e.membershipId);
+    const others = [...new Set(named.filter((id) => !editorIds.includes(id)))];
+    const otherRows = others.length
+      ? await this.memberships.find(ctx, { _id: { $in: others } }, { projection: { orgLevelCode: 1, role: 1, isCoreLeader: 1 } })
+      : [];
+    const pictured = await this.names.pictured(ctx, [...editorIds, ...otherRows.map((r) => String(r._id))]);
     const ladder = office.companyId ? await this.orgLevels.list(ctx, office.companyId) : [];
     const labels = new Map(ladder.map((level) => [level.code, level.label]));
-    const person = (e: FrozenEditor): ForumPerson => ({
-      membershipId: e.membershipId,
-      name: names.get(e.membershipId)!,
-      photoUrl: people.get(e.membershipId)?.photoUrl ?? null,
-      rung: { code: e.rungCode, label: labels.get(e.rungCode) ?? e.rungCode },
-      isReader: e.membershipId === ctx.membershipId,
-      tagged: e.tagged,
-    });
+    const person = (membershipId: string, rungCode: string, tagged: boolean, pickable: boolean): ForumPerson | null => {
+      const found = pictured.get(membershipId);
+      if (!found) return null;
+      return {
+        membershipId,
+        name: found.name,
+        firstName: firstNameOf(found.name),
+        photoUrl: found.photoUrl ?? null,
+        rung: { code: rungCode, label: labels.get(rungCode) ?? rungCode },
+        isReader: membershipId === ctx.membershipId,
+        tagged,
+        pickable,
+      };
+    };
+    const editorPeople = editors.map((e) => person(e.membershipId, e.rungCode, e.tagged, true)).filter((p): p is ForumPerson => p !== null);
+    const otherPeople = otherRows
+      .map((r) => person(String(r._id), r.orgLevelCode, isEffectiveCoreLeader(r), false))
+      .filter((p): p is ForumPerson => p !== null)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.membershipId.localeCompare(b.membershipId));
     const byName = (a: ForumPerson, b: ForumPerson) => a.name.localeCompare(b.name) || a.membershipId.localeCompare(b.membershipId);
     return {
-      editors: (list, frozen) => {
-        const known = list.filter((e) => names.has(e.membershipId));
-        const owner = known.find((e) => e.as === 'owner');
-        return {
-          owner: owner ? person(owner) : null,
-          admins: known.filter((e) => e.as === 'admin').map(person).sort(byName),
-          coreLeaders: known.filter((e) => e.as === 'core_leader').map(person).sort(byName),
-          coreLeaderCount: known.filter((e) => e.as !== 'owner' && e.tagged).length,
-          frozen,
-        };
-      },
-      nameOf: (membershipId) => names.get(membershipId) ?? null,
+      people: [...editorPeople, ...otherPeople],
+      coreLeaders: editorPeople.filter((p) => p.tagged).sort(byName),
     };
   }
 }

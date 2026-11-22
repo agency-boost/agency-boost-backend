@@ -118,9 +118,10 @@ describe('P19.1-T4 AC-15 the estimate seed — a run at 10:00 on 8 October 2026 
   it('P19.11-T4 AC-6 neither reaches Satria’s or Agus’s Unit Dashboard: their month is the office’s', async () => {
     const dewi = await as('dewi@kpm0417.test');
     const raka = await as('raka@kpm0417.test');
-    const agusMonth = await wired.unitDashboard.read(await as('agus@kpm0417.test'));
+    // *Bulan ini* asked for: the dashboard opens on *Tahun ini* since ADR-0271 §1 (P19.18-T1 AC-1).
+    const agusMonth = await wired.unitDashboard.read(await as('agus@kpm0417.test'), { period: 'month' });
     expect(everyRow(agusMonth).find((r) => r.membershipId === dewi.membershipId)!.goal.actualMinor).toBe(55 * M);
-    const satriaMonth = await wired.unitDashboard.read(await as('satria@kpm0417.test'));
+    const satriaMonth = await wired.unitDashboard.read(await as('satria@kpm0417.test'), { period: 'month' });
     expect(everyRow(satriaMonth).find((r) => r.membershipId === raka.membershipId)!.goal.actualMinor).toBeNull();
     // Two plans hold a month typed over the upload, Dewi's and Raka's — on the plan, never in the office's rows.
     expect(await col('goals').countDocuments({ 'apeByMonth.2026-10': { $exists: true } })).toBe(2);

@@ -15,6 +15,7 @@ import {
   seedRecruitmentFixture, storageFromEnvironment,
 } from '../recruitment-fixture';
 import { BLANK_COMPANY, EMPTY_OFFICE } from '../template-fixture';
+import { SEED_PITCH_LINK } from '../pitch-link-fixture';
 import { TEMPLATE_LIBRARY } from '@/modules/tenants/template-library';
 
 /**
@@ -112,17 +113,22 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
   describe('the pitch documents', () => {
     it('P17-T7 AC-1, P18.9-T5 AC-5 0417 shows the prototype’s pitch — partial, uploaded, two missing, the ring 1/4 — and its Company Profile', async () => {
       const view = await wired.recruitmentPitch.read(await as('rina@kpm0417.test'));
+      // *Amended 2026-11-20 (P19.21-T3 AC-6, ADR-0274 §10):* the Agency Profile is given as a link, no file
+      // (`pitch-link-fixture.ts`).
       expect(view.slots.map((s) => [s.slot, s.state, s.file?.name ?? null])).toEqual([
         ['opportunity', 'partial', 'Opportunity_Overview_v3.pdf'],
         ['proof', 'uploaded', 'Proof_and_Credibility_2026.pdf'],
         ['faq', 'missing', null],
         ['howtojoin', 'missing', null],
         ['company', 'uploaded', 'Company_Profile_2026.pdf'],
-        ['agency', 'missing', null],
+        ['agency', 'uploaded', null],
       ]);
       expect(view.slots[0].checklist.filter((i) => i.ticked).map((i) => i.code)).toEqual(['career-path', 'support']);
-      // The banner counts the four required alone: the Company Profile moves nothing (ADR-0177 §3).
-      expect(view.summary).toEqual({ done: 1, total: 4, missing: 2, unconfirmed: 1 });
+      // The banner counts the four required alone: the Company Profile moves nothing (ADR-0177 §3). *Pengaturan*'s
+      // *"n/6 materi siap"* counts all six (P19.21-T3 AC-6): Proof, the Company Profile and the linked Agency Profile.
+      expect(view.summary).toEqual({
+        done: 1, total: 4, missing: 2, unconfirmed: 1, all: { ready: 3, total: 6, missing: 2, unconfirmed: 1 },
+      });
     });
 
     it('P17-T7 AC-1 the upload days are a few weeks before the run, in the office’s calendar', async () => {
@@ -152,12 +158,16 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
         ['company', 'uploaded', 'Kelapa_Gading_Company_Profile.pdf'],
         ['agency', 'uploaded', 'Kelapa_Gading_Agency_Profile.pdf'],
       ]);
-      expect(view.summary).toEqual({ done: 4, total: 4, missing: 0, unconfirmed: 0 });
+      expect(view.summary).toEqual({
+        done: 4, total: 4, missing: 0, unconfirmed: 0, all: { ready: 6, total: 6, missing: 0, unconfirmed: 0 },
+      });
     });
 
     it('P17-T7 AC-1 0701 has none: 0/4, and its two optional slots empty', async () => {
       const view = await wired.recruitmentPitch.read(await as('agent@kpm0701.test'));
-      expect(view.summary).toEqual({ done: 0, total: 4, missing: 4, unconfirmed: 0 });
+      expect(view.summary).toEqual({
+        done: 0, total: 4, missing: 4, unconfirmed: 0, all: { ready: 0, total: 6, missing: 6, unconfirmed: 0 },
+      });
       expect(view.slots.map((s) => [s.slot, s.required, s.state])).toEqual([
         ['opportunity', true, 'missing'], ['proof', true, 'missing'], ['faq', true, 'missing'], ['howtojoin', true, 'missing'],
         ['company', false, 'missing'], ['agency', false, 'missing'],
@@ -171,13 +181,15 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
       const company = (await wired.recruitmentPitch.read(rina)).slots.find((s) => s.slot === 'company')!;
       expect(company).toMatchObject({ required: false, state: 'uploaded', version: 1, checklist: [] });
       expect(company.file!.uploadedOn).toBe(localDayOf(new Date(clock.now().getTime() - 33 * DAY_MS), 'Asia/Jakarta'));
-      // It opens for every member, as the four do; the empty Agency Profile has nothing to open.
+      // It opens for every member, as the four do; the Agency Profile holds no file to sign — since P19.21-T3 AC-6 a link
+      // (`pitch-link-fixture.ts`), whose address is in the read itself.
       expect((await wired.recruitmentPitch.url(rina, 'company')).url).toContain('/recruitment-pitch/company-demonstration');
       await expect(wired.recruitmentPitch.url(rina, 'agency')).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('P18.9-T5 AC-4 every seeded file is a one-page PDF under 1 KB, its size the one storage reported — which a card reads “< 1 KB”', async () => {
-      const rows = await col('kpmRecruitmentPitchDocuments').find({}).toArray();
+      // A slot given a link holds no file (P19.21-T3 AC-6; `pitch-link-fixture.ts`).
+      const rows = await col('kpmRecruitmentPitchDocuments').find({ storageKey: { $ne: null } }).toArray();
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {
         const stored = await storage.describe(row.storageKey);
@@ -187,7 +199,13 @@ describe('Phase 17 the recruitment seed — a run at 10:00 on 9 October 2026 in 
     });
 
     it('D-seed every file is stored in its office’s own folder, a one-page PDF naming its slot and saying it is a demonstration, registered as the office’s confirmed asset', async () => {
-      const rows = await col('kpmRecruitmentPitchDocuments').find({}).toArray();
+      // *Amended 2026-11-20 (P19.21-T3 AC-6, ADR-0274 §10):* and 0417's Agency Profile, a link with no file
+      // (`pitch-link-fixture.ts`) — beside the files, never one of them.
+      const links = await col('kpmRecruitmentPitchDocuments').find({ storageKey: null }).toArray();
+      expect(links.map((row) => [row.kpmId, row.slot, row.linkUrl, row.fileName])).toEqual([
+        [String((await col('kpms').findOne({ code: '0417' }))!._id), 'agency', SEED_PITCH_LINK, null],
+      ]);
+      const rows = await col('kpmRecruitmentPitchDocuments').find({ storageKey: { $ne: null } }).toArray();
       expect(rows).toHaveLength(RECRUITMENT_SEED_PITCH['0417'].length + RECRUITMENT_SEED_PITCH['0555'].length);
       for (const row of rows) {
         expect(row.storageKey).toMatch(new RegExp(`^dev/${row.kpmId}/recruitment-pitch/${row.slot}-demonstration$`));
@@ -265,7 +283,11 @@ describe('Phase 17 the recruitment seed — storage not configured', () => {
 
   it('D-seed writes the playbooks, and no slot and no brochure without its file — and says so', async () => {
     expect(await col('recruitmentPlaybooks').countDocuments({ companyId: { $ne: TEMPLATE_LIBRARY.companyId } })).toBe(2);
-    expect(await col('kpmRecruitmentPitchDocuments').countDocuments({})).toBe(0);
+    expect(await col('kpmRecruitmentPitchDocuments').countDocuments({ storageKey: { $ne: null } })).toBe(0);
+    // *Amended 2026-11-20 (P19.21-T3 AC-6):* a link needs no storage, so 0417's linked Agency Profile is there all the
+    // same (`pitch-link-fixture.ts`) — a slot that never had a file.
+    expect((await col('kpmRecruitmentPitchDocuments').find({}).toArray()).map((row) => [row.slot, row.storageKey, row.linkUrl]))
+      .toEqual([['agency', null, SEED_PITCH_LINK]]);
     expect(await col('kpmProductConfigs').countDocuments({ 'documents.brochure': { $exists: true } })).toBe(0);
     expect(await col('assets').countDocuments({})).toBe(0);
     const out = logged.join('\n');

@@ -5,25 +5,19 @@ import { DomainException, VersionConflictException } from '@/common/errors/domai
 import { ErrorCode } from '@/common/errors/error-codes';
 import { refuseWith } from '@/common/validation/fields';
 import { AuditService } from '@/modules/audit/audit.service';
-import { newActionItem, newAgendaItemText } from './leader-meeting-agenda';
+import { carriedCopy } from './leader-meeting-agenda';
+import { PIC_ALL } from './leader-meetings.dto';
 import { LEADER_MEETINGS_REFUSALS } from './leader-meetings.messages';
 import { LeaderMeetingPeople, meetingNotFound } from './leader-meeting-people';
-import { LeaderMeetingRepository } from './leader-meeting.repository';
-import {
-  AGENDA_SECTIONS, type ActionStatus, type AgendaSection, type LeaderMeetingActionItem, type LeaderMeetingAgendaItem,
-  type LeaderMeetingDocument,
+import { LeaderMeetingRepository, type ActionItemField, type AgendaItemField } from './leader-meeting.repository';
+import type {
+  ActionStatus, LeaderMeetingActionItem, LeaderMeetingAgendaItem, LeaderMeetingDocument,
 } from './leader-meeting.schema';
-import {
-  actionItemOf, actionItemsInOrder, agendaItemOf, monthlyTargetOf, type ActionItem, type AgendaItem, type MonthlyTarget,
-} from './leader-meeting.view';
+import { actionItemOf, agendaItemOf, type ActionItem, type AgendaItem } from './leader-meeting.view';
 import { MEETINGS, newItemId } from './leader-meetings.service';
-import { frozenRecord } from './scorecard/scorecard-record';
-import { LeaderScorecardService } from './scorecard/scorecard.service';
-import { TARGET_ROW_KEYS } from './scorecard/scorecard.types';
 
-type ActionField = 'initiative' | 'metric' | 'action' | 'pic' | 'remarks' | 'status';
-const ACTION_FIELDS: readonly ActionField[] = ['initiative', 'metric', 'action', 'pic', 'remarks', 'status'];
 const AGENDA_FIELDS = ['text', 'pic', 'done'] as const;
+const ACTION_FIELDS = ['text', 'pic', 'dueOn', 'status'] as const;
 
 /** One field per write (D-forum-model): the name of the one sent, or the refusal. */
 function oneField<K extends string>(input: Partial<Record<K, unknown>>, fields: readonly K[]): K {
@@ -32,29 +26,30 @@ function oneField<K extends string>(input: Partial<Record<K, unknown>>, fields: 
   return sent[0];
 }
 
-/** Where an agenda item sits, by its id. */
-function findAgendaItem(meeting: LeaderMeetingDocument, itemId: string): { section: AgendaSection; item: LeaderMeetingAgendaItem } | null {
-  for (const section of AGENDA_SECTIONS) {
-    const item = meeting.agenda[section].find((i) => i.itemId === itemId);
-    if (item) return { section, item };
-  }
-  return null;
-}
+const findAgendaItem = (meeting: LeaderMeetingDocument, itemId: string) =>
+  (meeting.agendaItems ?? []).find((i) => i.itemId === itemId) ?? null;
 
 const findActionItem = (meeting: LeaderMeetingDocument, itemId: string) =>
-  meeting.actionItems.find((row) => row.itemId === itemId) ?? null;
+  (meeting.actionItems ?? []).find((row) => row.itemId === itemId) ?? null;
+
+/** The next place at the end of a forum's action items. */
+const nextOrder = (meeting: Pick<LeaderMeetingDocument, 'actionItems'>) =>
+  Math.max(-1, ...(meeting.actionItems ?? []).map((row) => row.order)) + 1;
 
 /**
- * **The minutes, written field by field** (D-forum-model, ADR-0132; `functional/leader-forum.md`, *Agenda*, *Action
- * Items*, *Saving*): an agenda item, a row of the tracker, the tracker's order and a *Monthly Target* cell.
+ * **The agenda and the action items, written field by field** (P19.22-T8 AC-3, AC-4; ADR-0276, amending ADR-0132;
+ * `functional/leader-forum.md`, *Agenda*, *Action items*, *Saving*).
  *
- * - **One field per write**, each with the version of the item it changes, refused `409 VERSION_CONFLICT` **only
- *   when that same item changed since** — so two leaders writing two rows both land. An item somebody removed
- *   meanwhile is a conflict too: the page reads the meeting again and it is gone.
- * - **No lock** (ADR-0132): a past meeting is written as an upcoming one is.
- * - **Every write is one audit row** with what it was and what it became; `writtenAt` is set as the first one begins.
- * - Written by the Owner, an Admin or a member tagged *Core Leader* by the meeting's address; anybody else of the
- *   office is answered 404, and nothing is ever written through a link.
+ * - **One field per write**, each with the version of the item it changes, refused `409 VERSION_CONFLICT` **only when
+ *   that same item changed since** — so two leaders writing two lines both land.
+ * - **A PIC is one of the forum's editors** (OD-418): the Owner, an Admin or a core leader, by membership id; an
+ *   agenda line may say *Semua* instead. Anybody else is `400 VALIDATION_FAILED`.
+ * - **The forward sync** (ADR-0276): an action item's write is passed, that field alone, to the copies of the same
+ *   lineage in every **later** forum; an item added, or set back from *Selesai*, is carried into a later forum that
+ *   holds no copy of it; a delete removes the later copies too. **Never backwards**: a later forum's write leaves the
+ *   earlier forums as their leaders left them.
+ * - **Every write is one audit row** with what it was and what it became, and how many later forums it reached;
+ *   `writtenAt` is set as the first one begins. A copy arriving in a later forum writes no `writtenAt` there.
  */
 @Injectable()
 export class LeaderMeetingMinutes {
@@ -63,87 +58,111 @@ export class LeaderMeetingMinutes {
     private readonly people: LeaderMeetingPeople,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    // P18.9-T1 AC-10: a target's write answers its value, `rate × # of units` — the meeting's units, read here.
-    private readonly scorecards: LeaderScorecardService,
   ) {}
 
-  /**
-   * *+ Add item* (`:2863`): *"New agenda item"*, no PIC, unticked, last in its section — in the adder's language,
-   * stored as text (P18.10-T5 AC-6).
-   */
-  async addAgendaItem(ctx: RequestContext, meetingId: string, section: AgendaSection): Promise<AgendaItem> {
+  // ------------------------------------------------------------------------------------------------- the agenda
+
+  /** *+ Tambah agenda* (AC-3): the line typed, its PIC if chosen, unticked, last. */
+  async addAgendaItem(ctx: RequestContext, meetingId: string, input: { text: string; pic?: string | null }): Promise<AgendaItem> {
     const meeting = await this.writable(ctx, meetingId);
-    const item: LeaderMeetingAgendaItem = {
-      itemId: newItemId(), text: newAgendaItemText(ctx.reader), pic: '', done: false, version: 1,
-    };
+    const pic = await this.agendaPic(ctx, input.pic ?? null);
+    const item: LeaderMeetingAgendaItem = { itemId: newItemId(), text: input.text, ...pic, done: false, version: 1 };
     await this.writing(ctx, meeting);
-    if (!(await this.meetings.pushAgendaItem(ctx, meetingId, section, item))) throw meetingNotFound();
-    await this.audited(ctx, meeting, 'leader_meeting.agenda_item_added', null, { section, item: agendaItemOf(item) });
+    if (!(await this.meetings.pushAgendaItem(ctx, meetingId, item))) throw meetingNotFound();
+    await this.audited(ctx, meeting, 'leader_meeting.agenda_item_added', null, { item: agendaItemOf(item) });
     return agendaItemOf(item);
   }
 
   /**
-   * **One agenda field**: its text, its PIC, or its box — in any section since UI V1 (UI-110).
-   * **A text that trims to nothing removes the item** (the prototype draws no remove), answered `{ removed: true }`.
+   * **One agenda field**: its text, its PIC (*Semua*, a member, or none) or its box. **A text that trims to nothing
+   * removes the line**, answered `{ removed: true }`.
    */
   async saveAgendaItem(
     ctx: RequestContext, meetingId: string, itemId: string,
-    input: { text?: string; pic?: string; done?: boolean; version: number },
+    input: { text?: string; pic?: string | null; done?: boolean; version: number },
   ): Promise<AgendaItem | { removed: true }> {
     const meeting = await this.writable(ctx, meetingId);
     const field = oneField(input, AGENDA_FIELDS);
-    // UI V1 (UI-110): every item has its box, in each of the three sections — it was *During*'s alone, as the
-    // prototype drew it, until the owner's mockup of 30 Oct gave each card a done count.
-    const found = findAgendaItem(meeting, itemId);
-    if (!found) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
-    const { section, item: before } = found;
+    const before = findAgendaItem(meeting, itemId);
+    if (!before) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
 
-    await this.writing(ctx, meeting);
     if (field === 'text' && input.text!.trim() === '') {
-      const removed = await this.meetings.pullAgendaItem(ctx, meetingId, section, itemId, input.version);
+      await this.writing(ctx, meeting);
+      const removed = await this.meetings.pullAgendaItem(ctx, meetingId, itemId, input.version);
       if (!removed) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
-      await this.audited(ctx, meeting, 'leader_meeting.agenda_item_removed', { section, item: agendaItemOf(before) }, null);
+      await this.audited(ctx, meeting, 'leader_meeting.agenda_item_removed', { item: agendaItemOf(before) }, null);
       return { removed: true };
     }
 
-    const value = field === 'done' ? input.done! : input[field]!.trim();
-    const saved = await this.meetings.updateAgendaItem(ctx, meetingId, section, itemId, input.version, { [field]: value });
+    const set: AgendaItemField = field === 'done' ? { done: input.done! }
+      : field === 'text' ? { text: input.text!.trim() }
+        : await this.agendaPic(ctx, input.pic ?? null);
+    await this.writing(ctx, meeting);
+    const saved = await this.meetings.updateAgendaItem(ctx, meetingId, itemId, input.version, set);
     if (!saved) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
-    const after = agendaItemOf(findAgendaItem(saved, itemId)!.item);
-    await this.audited(ctx, meeting, 'leader_meeting.agenda_item_saved', { section, item: agendaItemOf(before) }, { section, item: after });
+    const after = agendaItemOf(findAgendaItem(saved, itemId)!);
+    await this.audited(ctx, meeting, 'leader_meeting.agenda_item_saved', { item: agendaItemOf(before) }, { item: after });
     return after;
   }
 
-  /** *+ Add action item* (`:2869`): the prototype's new row, *Not yet planned*, last — its words the adder's (AC-6). */
-  async addActionItem(ctx: RequestContext, meetingId: string): Promise<ActionItem> {
+  // ------------------------------------------------------------------------------------------- the action items
+
+  /**
+   * *+ Tambah action item* (AC-4): what is to be done, its PIC and *tenggat* if chosen, *Belum*, last — **its own
+   * lineage**, and carried at once into every later forum (*dari forum #n*, n this forum's).
+   */
+  async addActionItem(
+    ctx: RequestContext, meetingId: string, input: { text: string; pic?: string | null; dueOn?: string | null },
+  ): Promise<ActionItem> {
     const meeting = await this.writable(ctx, meetingId);
-    const last = Math.max(-1, ...meeting.actionItems.map((row) => row.order));
-    const row: LeaderMeetingActionItem = { itemId: newItemId(), ...newActionItem(ctx.reader), order: last + 1, version: 1 };
+    const picMembershipId = await this.actionPic(ctx, input.pic ?? null);
+    const itemId = newItemId();
+    const row: LeaderMeetingActionItem = {
+      itemId, lineageId: itemId, text: input.text, picMembershipId, dueOn: input.dueOn ?? null, status: 'todo',
+      fromNumber: null, order: nextOrder(meeting), version: 1,
+    };
     await this.writing(ctx, meeting);
     if (!(await this.meetings.pushActionItem(ctx, meetingId, row))) throw meetingNotFound();
-    await this.audited(ctx, meeting, 'leader_meeting.action_item_added', null, { item: actionItemOf(row) });
+    const carriedTo = await this.carryForward(ctx, meeting, row);
+    await this.audited(ctx, meeting, 'leader_meeting.action_item_added', null, { item: actionItemOf(row), carriedTo });
     return actionItemOf(row);
   }
 
-  /** **One cell of a row**, or its status — the button cycling *Not yet planned* → *Planned* → *Implemented*. */
+  /**
+   * **One field of an action item** — its text, PIC, *tenggat* or state (*Belum · Proses · Selesai*, AC-4) — then that
+   * field passed to the copies of its lineage in every later forum; a state set back from *Selesai* carries it into a
+   * later forum that holds no copy.
+   */
   async saveActionItem(
     ctx: RequestContext, meetingId: string, itemId: string,
-    input: Partial<Record<ActionField, string>> & { status?: ActionStatus; version: number },
+    input: { text?: string; pic?: string | null; dueOn?: string | null; status?: ActionStatus; version: number },
   ): Promise<ActionItem> {
     const meeting = await this.writable(ctx, meetingId);
     const field = oneField(input, ACTION_FIELDS);
     const before = findActionItem(meeting, itemId);
     if (!before) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
-    const value = field === 'status' ? input.status! : input[field]!.trim();
+    const set: ActionItemField = field === 'text' ? { text: input.text!.trim() }
+      : field === 'status' ? { status: input.status! }
+        : field === 'dueOn' ? { dueOn: input.dueOn ?? null }
+          : { picMembershipId: await this.actionPic(ctx, input.pic ?? null) };
     await this.writing(ctx, meeting);
-    const saved = await this.meetings.updateActionItem(ctx, meetingId, itemId, input.version, { [field]: value });
+    const saved = await this.meetings.updateActionItem(ctx, meetingId, itemId, input.version, set);
     if (!saved) throw await this.itemConflict(ctx, meetingId, itemId, input.version);
-    const after = actionItemOf(findActionItem(saved, itemId)!);
-    await this.audited(ctx, meeting, 'leader_meeting.action_item_saved', { item: actionItemOf(before) }, { item: after });
+    const row = findActionItem(saved, itemId)!;
+    const later = await this.meetings.after(ctx, meeting.number);
+    const synced = await this.meetings.syncLineage(ctx, later.map((m) => String(m._id)), row.lineageId, set);
+    const carriedTo = field === 'status' && row.status !== 'done' ? await this.carryForward(ctx, meeting, row, later) : 0;
+    const after = actionItemOf(row);
+    await this.audited(ctx, meeting, 'leader_meeting.action_item_saved', { item: actionItemOf(before) }, {
+      item: after, syncedForums: synced, carriedTo,
+    });
     return after;
   }
 
-  /** **×** (`:2867`): the row removed at once, as drawn, pinned to the version read. */
+  /**
+   * **The trash** (AC-4): *Hapus action item?* answered *Hapus* — the item removed, pinned to the version read, **and
+   * its copies in every later forum** (*"Juga hilang dari forum berikutnya"*). An earlier forum keeps its own.
+   */
   async removeActionItem(ctx: RequestContext, meetingId: string, itemId: string, version: number): Promise<void> {
     const meeting = await this.writable(ctx, meetingId);
     const before = findActionItem(meeting, itemId);
@@ -151,74 +170,49 @@ export class LeaderMeetingMinutes {
     await this.writing(ctx, meeting);
     const removed = await this.meetings.pullActionItem(ctx, meetingId, itemId, version);
     if (!removed) throw await this.itemConflict(ctx, meetingId, itemId, version);
-    await this.audited(ctx, meeting, 'leader_meeting.action_item_removed', { item: actionItemOf(before) }, null);
+    const later = await this.meetings.after(ctx, meeting.number);
+    const removedFrom = await this.meetings.pullLineage(ctx, later.map((m) => String(m._id)), before.lineageId);
+    await this.audited(ctx, meeting, 'leader_meeting.action_item_removed', { item: actionItemOf(before) }, {
+      removedFromLaterForums: removedFrom,
+    });
   }
+
+  // --------------------------------------------------------------------------------------------------- parts
 
   /**
-   * **The order, written whole** — by drag or by the keyboard: every row's id in its new place. Refused `409
-   * VERSION_CONFLICT` when the meeting's rows are not exactly those — one added or removed since they were read.
+   * **A not-*Selesai* item carried into every later forum that holds no copy of its lineage** (ADR-0276): a copy
+   * there, last, *dari forum #n* — the number its lineage began in. Answers how many forums it reached.
    */
-  async reorderActionItems(ctx: RequestContext, meetingId: string, itemIds: readonly string[]): Promise<ActionItem[]> {
-    const meeting = await this.writable(ctx, meetingId);
-    const before = actionItemsInOrder(meeting.actionItems).map((row) => row.id);
-    const same = this.sameRows(before, itemIds);
-    if (same) await this.writing(ctx, meeting);
-    const reordered = same ? await this.meetings.reorderActionItems(ctx, meetingId, itemIds) : null;
-    if (!reordered) {
-      if (!(await this.meetings.findById(ctx, meetingId))) throw meetingNotFound();
-      throw new DomainException(
-        ErrorCode.VERSION_CONFLICT,
-        LEADER_MEETINGS_REFUSALS.VERSION_CONFLICT.trackerRowsChanged,
-        HttpStatus.CONFLICT,
-        { itemIds: before },
-      );
+  private async carryForward(
+    ctx: RequestContext, from: LeaderMeetingDocument, row: LeaderMeetingActionItem, known?: LeaderMeetingDocument[],
+  ): Promise<number> {
+    if (row.status === 'done') return 0;
+    const later = known ?? await this.meetings.after(ctx, from.number);
+    let reached = 0;
+    for (const forum of later) {
+      if ((forum.actionItems ?? []).some((r) => r.lineageId === row.lineageId)) continue;
+      const copy = carriedCopy(row, from.number, newItemId(), nextOrder(forum));
+      if (await this.meetings.pushCarried(ctx, String(forum._id), copy)) reached += 1;
     }
-    await this.audited(ctx, meeting, 'leader_meeting.action_items_reordered', { itemIds: before }, { itemIds: [...itemIds] });
-    return actionItemsInOrder(reordered.actionItems);
+    return reached;
   }
 
-  /**
-   * **One *Monthly Target* cell, as a rate per unit** (ADR-0175 §4, reversing ADR-0129 §5's free text; P18.9-T1
-   * AC-10): the five rows that take one — *APE*, *Manpower*, *FLC*, *Avg. monthly AA* and *Case submission* — a number
-   * from 0 in the row's unit, or `null` to clear it. *APE*'s is IDR minor units, held to whole sen (invariant §9); a
-   * count's is checked to two places by the request. Any other row is refused 400 — *New AA*'s included: its targets
-   * stay stored, and none is typed again (AC-6). Never frozen: a past meeting's targets stay editable.
-   *
-   * **The answer is the cell as the table draws it** — its value `rate × # of units`, the meeting's own units: the ones
-   * it froze with once it is over, today's while it is upcoming (`LeaderScorecardService.units`).
-   */
-  async saveMonthlyTarget(
-    ctx: RequestContext, meetingId: string, row: string, input: { rate: number | null; version: number },
-  ): Promise<MonthlyTarget> {
-    const meeting = await this.writable(ctx, meetingId);
-    if (!(TARGET_ROW_KEYS as readonly string[]).includes(row)) {
-      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.targetRow({ rows: TARGET_ROW_KEYS })]);
-    }
-    if (row === 'ape' && input.rate !== null && !Number.isInteger(input.rate)) {
-      refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.apeWholeSen]);
-    }
-    const stored = meeting.monthlyTargets?.[row];
-    const before = stored ?? { rate: null, typed: null, version: 0 };
-    await this.writing(ctx, meeting);
-    const saved = await this.meetings.setMonthlyTarget(ctx, meetingId, row, input.version, input.rate);
-    if (!saved) {
-      const now = await this.meetings.findById(ctx, meetingId);
-      if (!now) throw meetingNotFound();
-      throw new VersionConflictException(input.version, now.monthlyTargets?.[row]?.version ?? 0);
-    }
-    const after = { rate: input.rate, typed: null, version: input.version + 1 };
-    await this.audited(ctx, meeting, 'leader_meeting.monthly_target_saved', { row, ...before }, { row, ...after });
-    return monthlyTargetOf(after, await this.unitsOf(ctx, saved));
+  /** An agenda line's PIC: *Semua*, an editor, or none. */
+  private async agendaPic(ctx: RequestContext, pic: string | null): Promise<{ picMembershipId: string | null; picAll: boolean }> {
+    if (pic === PIC_ALL) return { picMembershipId: null, picAll: true };
+    return { picMembershipId: await this.actionPic(ctx, pic), picAll: false };
   }
 
-  /** The meeting's own *# of units*: as frozen once it is over (AC-19), counted today while it is upcoming. */
-  private async unitsOf(ctx: RequestContext, meeting: LeaderMeetingDocument): Promise<number> {
-    if (meeting.frozenAt) return frozenRecord(meeting.frozenScorecard, meeting.date).chips.units;
+  /** An action item's PIC: one of the forum's editors now (OD-418), or none; `"all"` is an agenda line's alone. */
+  private async actionPic(ctx: RequestContext, pic: string | null): Promise<string | null> {
+    if (pic === null) return null;
     const office = await this.people.office(ctx);
-    return this.scorecards.units({ kpmId: ctx.kpmId!, timezone: office.timezone, meetingDate: meeting.date });
+    const editors = await this.people.liveEditors(ctx, office);
+    if (!editors.some((e) => e.membershipId === pic)) refuseWith([LEADER_MEETINGS_REFUSALS.VALIDATION_FAILED.picNotEditor]);
+    return pic;
   }
 
-  /** A meeting the reader may write, by its address: an editor's, in their office, not deleted. */
+  /** A forum the reader may write, by its address: a steward's, in their office, not deleted. */
   private async writable(ctx: RequestContext, meetingId: string): Promise<LeaderMeetingDocument> {
     await this.people.editor(ctx);
     const meeting = await this.meetings.findById(ctx, meetingId);
@@ -227,10 +221,8 @@ export class LeaderMeetingMinutes {
   }
 
   /**
-   * **`writtenAt`, set before the write it stands for** (ADR-0130 §5; the Phase 18.1 code review): once a write is
-   * about to land, *Delete meeting* is refused. Set after it, a delete landing between the two removed a meeting with
-   * minutes. A write that then meets a newer one leaves it set — which only keeps a delete from removing a meeting
-   * somebody was writing in.
+   * **`writtenAt`, set before the write it stands for** (ADR-0130 §5): once a write is about to land, deleting the
+   * forum is refused. Set after it, a delete landing between the two removed a forum with writing in it.
    */
   private async writing(ctx: RequestContext, meeting: LeaderMeetingDocument): Promise<void> {
     if (!meeting.writtenAt) await this.meetings.markWritten(ctx, String(meeting._id), this.clock.now());
@@ -244,20 +236,14 @@ export class LeaderMeetingMinutes {
     await this.audit.record(ctx, { action, targetCollection: MEETINGS, targetId: String(meeting._id), before, after });
   }
 
-  /** The same rows, each once: the order may differ, the set may not. */
-  private sameRows(current: readonly string[], sent: readonly string[]): boolean {
-    const set = new Set(current);
-    return current.length === sent.length && sent.every((id) => set.has(id));
-  }
-
   /**
-   * Why an item's write did not land: the meeting gone (404), the item moved on since it was read, or the item
-   * gone — removed meanwhile, which is a change since it was read too (409, `actualVersion: null`).
+   * Why an item's write did not land: the forum gone (404), the item moved on since it was read, or the item gone —
+   * removed meanwhile, which is a change since it was read too (409, `actualVersion: null`).
    */
   private async itemConflict(ctx: RequestContext, meetingId: string, itemId: string, version: number): Promise<Error> {
     const now = await this.meetings.findById(ctx, meetingId);
     if (!now) return meetingNotFound();
-    const item = findAgendaItem(now, itemId)?.item ?? findActionItem(now, itemId);
+    const item = findAgendaItem(now, itemId) ?? findActionItem(now, itemId);
     if (item) return new VersionConflictException(version, item.version);
     return new DomainException(
       ErrorCode.VERSION_CONFLICT,

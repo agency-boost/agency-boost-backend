@@ -104,8 +104,13 @@ describe('the compliance tree’s Campaigns category (P18.3-T2)', () => {
       expect(catalog.find((c) => c.code === 'AUGUST_PUSH')).toMatchObject({ phase: 'ended', final: true, subtype: null });
     });
 
-    it('P18.3-T2 AC-4 opens on the picker’s first campaign without an item, as the prototype does (Owner:3497)', async () => {
-      expect((await read(ownerScope())).item).toBe('MDRT');
+    it('P19.19-T3 AC-3 without an item, every campaign at once — Semua campaign, the card’s own figure', async () => {
+      const result = await read(ownerScope());
+      expect(result.item).toBeNull();
+      const cells = [...result.cells!.values()];
+      expect(cells.filter((c) => c.done === true)).toHaveLength(result.chip.count);
+      expect(cells.filter((c) => c.done !== null)).toHaveLength(result.chip.of);
+      expect(cells.every((c) => c.overridable === false)).toBe(true);
     });
 
     it('P18.3-T2 AC-4 404 for a campaign it does not list: archived, last year’s, another office’s, unknown — any case is one code', async () => {
@@ -118,8 +123,10 @@ describe('the compliance tree’s Campaigns category (P18.3-T2)', () => {
     it('P18.3-T2 AC-4 an office with no campaign this year: no item, an empty tree, the chip over nobody', async () => {
       const ofOffice = jest.fn(async () => ({ campaigns: [], standings: [] }));
       const empty = new CampaignsComplianceCategory({ ofOffice } as never, {} as never);
-      expect(await empty.read(ownerScope(), { selected: true, item: null }))
-        .toEqual({ catalog: [], chip: { count: 0, of: 0 }, item: null, cells: new Map() });
+      const none = await empty.read(ownerScope(), { selected: true, item: null });
+      expect({ ...none, cells: null }).toEqual({ catalog: [], chip: { count: 0, of: 0 }, item: null, cells: null });
+      // *Semua campaign* over nobody eligible: every cell *—*, out of every count.
+      expect([...none.cells!.values()].every((c) => c.done === null)).toBe(true);
       // An item is handed to the port, upper-cased, to refuse before it evaluates (round 1, item 7); none, nothing.
       expect(ofOffice).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ requireListed: undefined }));
       await empty.read(ownerScope(), { selected: true, item: 'mdrt' });

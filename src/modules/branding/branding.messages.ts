@@ -56,6 +56,19 @@ export const BRANDING_REFUSALS = refusals('modules/branding', {
       en: 'A pose’s picture goes with the default mascot.',
       id: 'Gambar per pose dipasang bersama maskot utama.',
     },
+    // P19.21-T4 AC-1 (ADR-0274): *Nama sistem*.
+    systemNameBlank: {
+      en: 'Write the system name, or clear the field to use AgencyBoost.',
+      id: 'Isi nama sistem, atau kosongkan untuk memakai AgencyBoost.',
+    },
+    systemNameTooLong: {
+      en: 'The system name is at most 40 characters.',
+      id: 'Nama sistem paling panjang 40 karakter.',
+    },
+    systemNameControl: {
+      en: 'The system name is one line of text, with no tabs or line breaks.',
+      id: 'Nama sistem berupa satu baris teks, tanpa tab atau baris baru.',
+    },
   },
   AUTH_RATE_LIMITED: {
     tooMany: {

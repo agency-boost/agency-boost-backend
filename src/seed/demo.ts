@@ -26,7 +26,6 @@ import { config as loadEnv } from 'dotenv';
 import { Clock, SystemClock } from '@/common/clock/clock.port';
 import { addDays as addLocalDays } from '@/common/time/local-day';
 import { PasswordService } from '@/modules/auth/password.service';
-import { AccountLink, AccountLinkSchema, linkPair } from '@/modules/auth/account-link.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { Company, CompanySchema } from '@/modules/tenants/company.schema';
 import { Product, ProductSchema } from '@/modules/products/product.schema';
@@ -65,8 +64,9 @@ import { LeaderNote, LeaderNoteSchema } from '@/modules/coaching/leader-note.sch
 import { backfillCoachingSnapshots } from './coaching-snapshots';
 import { buildCalendarFixture, CALENDAR_WORDS as CAL, type CalendarFixture } from './calendar-fixture';
 import { buildActivationFixture, type ActivationFixture } from './activation-fixture';
-import { seedSubscriptionFixture } from './subscription-fixture';
+import { seedSubscriptionFixture, seedTrialSubscriptions } from './subscription-fixture';
 import { seedPersonalFor } from './personal-fixture';
+import { seedNewHireMonthsFixture } from './new-hire-months-fixture';
 import { seedTemplateFixture } from './template-fixture';
 import { seedTemplateCopyFixture } from './template-copy-fixture';
 import { seedAnalyticsTemplateFixture } from './analytics-template-fixture';
@@ -74,18 +74,25 @@ import { seedSalesToolsFixture } from './sales-tools-fixture';
 import { seedUnitDashboardFixture } from './unit-dashboard-fixture';
 import { seedPotensiFixture } from './potensi-fixture';
 import { seedProposalFixture } from './proposal-fixture';
+import { seedProductDataAccessFixture } from './product-data-access-fixture';
+import { seedRateTableFixture } from './rate-table-fixture';
+import { seedProductDataIntakeFixture } from './product-data-intake-fixture';
 import { seedAvatarFixture } from './avatar-fixture';
 import { seedBrandingFixture } from './branding-fixture';
 import { seedTugasFixture } from './tugas-fixture';
 import { seedHomeFixture } from './home-fixture';
 import { seedUnitViewsFixture } from './unit-views-fixture';
+import { seedInformalGroupsFixture } from './informal-groups-fixture';
 import { seedSummaryLeadsFixture } from './summary-leads-fixture';
 import { seedRecruitmentFixture, storageFromEnvironment, type RecruitmentFixture } from './recruitment-fixture';
+import { seedPitchLinkFixture } from './pitch-link-fixture';
 import { monthField, seedMonthFigures, seedUnitPersistency } from './production-figures';
 import {
   placeReportingCast, reportingMonthFigures, reportingUnitPersistency, seedReportingFixture, type ReportingKey,
 } from './reporting-fixture';
 import { seedSetupMarks } from './setup-fixture';
+import { seedDataUploadFixture } from './data-upload-fixture';
+import { seedSettingsHubFixture } from './settings-hub-fixture';
 import { seedActivationCohort } from './cohort-fixture';
 import { ACTIVATION_3M_SEED, seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
 import { seedMemberPageFixture } from './member-page-fixture';
@@ -98,12 +105,21 @@ import { seedAdvancedAnalyticsFixture, type AdvancedAnalyticsFixture } from './a
 import { seedTrainingFixture, type TrainingFixture } from './training-fixture';
 import { lessonsFolderFrom, seedLessonsFixture, type LessonsFixture } from './lessons-fixture';
 import { seedTrainingNamesFixture, type TrainingNamesFixture } from './training-names-fixture';
+import { seedTrainingTreeFixture } from './training-tree-fixture';
 import { CONFIGURED_EVENTS, seedEventsFixture, type EventsFixture } from './events-fixture';
+import { seedEventAnalyticsFixture } from './event-analytics-fixture';
 import { seedCampaignsFixture, type CampaignsFixture } from './campaigns-fixture';
 import { seedComplianceFixture, type ComplianceFixture } from './compliance-fixture';
 import { seedJoiningFixture, type JoiningFixture } from './joining-fixture';
 import { seedLeaderChangeFixture } from './leader-change-fixture';
 import { seedRegisteredAccountsFixture } from './registered-accounts-fixture';
+import { seedTestAccountsFixture } from './test-accounts-fixture';
+import { seedWholeOfficeFixture } from './whole-office-fixture';
+import { seedApprovalsFixture } from './approvals-fixture';
+import { seedOwnerWhatsAppFixture } from './owner-whatsapp-invite-fixture';
+import { seedPlatformConsoleFixture } from './platform-console-fixture';
+import { seedCompanyConsoleFixture } from './company-console-fixture';
+import { seedPeopleFixture } from './people-fixture';
 import { planSeed } from './seed-guard';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
@@ -121,7 +137,6 @@ import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import {
   EDGE_EVENTS, MembershipHistory, MembershipHistorySchema,
 } from '@/modules/org/membership-history.schema';
-import { Group, GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequest, JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequest, LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
@@ -261,10 +276,14 @@ const FORMER_REASONS: Readonly<Record<keyof typeof DEMO_REASONS, string>> = {
 const DEMO_EVENTS = CONFIGURED_EVENTS;
 type DemoEventCode = keyof typeof DEMO_EVENTS;
 
-/** The two informal groups in 0417, and the name the first had before P18.10-T7. */
+/**
+ * The informal groups in 0417, and the name the first had before P18.10-T7. *LEADER MUDA* since P19.13-T3: a group with
+ * no ★ yet, so *Core leaders & groups* shows *Belum ada group leader*.
+ */
 export const DEMO_GROUPS = {
   mentoring: { name: 'Mentoring Agen Baru', formerly: 'New Agent Mentoring Circle' },
   topProducers: { name: 'Top Producers 2026' },
+  leaderMuda: { name: 'LEADER MUDA' },
 } as const;
 
 type Role = 'ab' | 'aab' | 'agent';
@@ -337,14 +356,23 @@ const OWNED_COLLECTIONS = [
   'leaderLimitRequests',
   // P18.8-T3, with the writer that fills them (`joining-fixture.ts`): Agus's invites and his transfer request (ADR-0170).
   'memberInvites', 'transferRequests',
-  // P19.2-T1 AC-8, with the writer that fills it: the Owner's two logins, linked (ADR-0199).
+  // P19.2-T1 AC-8: the Owner's two logins were linked here (ADR-0199). Retired (ADR-0269): nothing writes it now; kept
+  // so `--reset` empties the link an earlier run wrote.
   'accountLinks',
   // P19.5-T4, with the writer that fills them (`surveys-fixture.ts`): the survey runs, who was invited, the sent forms.
   'surveyRuns', 'surveyParticipation', 'surveyResponses',
   // P19.5-T3, with the writer that fills them (`advanced-analytics-fixture.ts`): MAPA and sub-group targets, frozen Quant runs.
   'analyticsTargets', 'quantRuns',
+  // P19.23-T6, with the writer that fills them (`platform-console-fixture.ts`): the platform's settings and announcements.
+  'platformSettings', 'announcements',
   // P19.6-T1, with the writer that fills it (`branding-fixture.ts`): 0555's own logo, colours and mascot (ADR-0218).
   'kpmBranding',
+  // P19.15-T4, with the writer that fills it (`product-data-access-fixture.ts`): Maya's *Kelola data produk* (ADR-0260).
+  'productDataGrants',
+  // P19.15-T2, T3, with the writer that fills them (`product-data-intake-fixture.ts`): a demo upload, its cards, an illustration.
+  'uploadIntakes', 'intakeItems', 'illustrations',
+  // P19.15-T1, with the writer that fills them (`rate-table-fixture.ts`): sample premium tables and their rows (ADR-0258).
+  'rateTables', 'rateRows',
 ] as const;
 
 /**
@@ -475,13 +503,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   const CapabilityCatalogs = mongoose.model(CapabilityCatalog.name, CapabilityCatalogSchema, undefined, RECOMPILE);
   const Memberships = mongoose.model(Membership.name, MembershipSchema, undefined, RECOMPILE);
   const History = mongoose.model(MembershipHistory.name, MembershipHistorySchema, undefined, RECOMPILE);
-  const Groups = mongoose.model(Group.name, GroupSchema, undefined, RECOMPILE);
   const JoinRequests = mongoose.model(JoinRequest.name, JoinRequestSchema, undefined, RECOMPILE);
   const LeaderLimitRequests = mongoose.model(LeaderLimitRequest.name, LeaderLimitRequestSchema, undefined, RECOMPILE);
   const KpmRequests = mongoose.model(KpmRequest.name, KpmRequestSchema, undefined, RECOMPILE);
   const Audit = mongoose.model(AuditLog.name, AuditLogSchema, undefined, RECOMPILE);
   const Notifications = mongoose.model(Notification.name, NotificationSchema, undefined, RECOMPILE);
-  const AccountLinks = mongoose.model(AccountLink.name, AccountLinkSchema, undefined, RECOMPILE);
 
   if (options.reset) {
     // Empty the collections rather than drop the database. An Atlas user with ordinary
@@ -1258,6 +1284,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       joinedAs: status === 'pending' ? null : 'existing_agent',
       removedAt: status === 'removed' ? daysAgo(opts.removedDaysAgo ?? 0) : null,
       recruitedByMembershipId: leaderId,
+      // ADR-0267 §3: the leader who placed them registered them — `RECRUITS_JOINED` credits them.
+      registeredByMembershipId: leaderId,
       // Full-time or part-time in this office (ADR-0158 §1), from the same derivation as the person's
       // birth date, so a reseed gives the same answer.
       workStatus: seedPersonalFor(String(account?.get('email') ?? userId)).workStatus,
@@ -1399,7 +1427,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     password: 'demo super admin', platformRole: 'super_admin',
   });
   // A second one, because "a Super Admin cannot be impersonated" needs two to show.
-  await user('root@agencyboost.test', 'Second Operator', { platformRole: 'super_admin' });
+  const secondSuperAdmin = await user('root@agencyboost.test', 'Second Operator', { platformRole: 'super_admin' });
 
   /**
    * Prudential's ladder (P3.1-T7 AC-5), junior first, exactly as the prototype writes it:
@@ -1454,22 +1482,12 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const ownerUser = await user('owner@kpm0417.test', 'Wilson Tanoto', { password: 'demo password 0417', pronoun: 'he' });
   /*
-   * **The Owner's Super Admin login, linked to his field login** (P19.2-T1 AC-8; UI-169 item 5; ADR-0199): the owner's own
-   * case — *"a normal account and the superadmin account"* — so the switcher can be seen. Signed in as
-   * `owner@kpm0417.test`, the avatar menu reads *Akun saya ✓ · KPM Owner · BSD City Branch · Superadmin*; choosing
-   * *Superadmin* asks this login's password once on a browser that holds no session of it, then lands on `/admin`. Signed
-   * in here, the menu reads the same the other way round. **A separate Super Admin login**, not `superadmin@`: a Super
-   * Admin may not start a support session as a login linked to their own (§7), and the fixtures' support sessions into
-   * 0417's Owner are `superadmin@`'s. Linked once: a second run finds the link and writes nothing.
+   * **The Owner's own Super Admin login** (P19.2-T1 AC-8; UI-169 item 5): seeded linked to his field login until the
+   * linked login was retired (ADR-0269). It stays, a Super Admin login of its own, and nothing links it any more.
    */
-  const ownersOperatorLogin = await user('wilson@agencyboost.test', 'Wilson Tanoto', {
+  await user('wilson@agencyboost.test', 'Wilson Tanoto', {
     platformRole: 'super_admin', uncounted: true,
   });
-  {
-    const pair = linkPair(String(ownerUser._id), String(ownersOperatorLogin._id));
-    const linked = await AccountLinks.exists({ userIds: { $in: pair }, deletedAt: null }).exec();
-    if (!linked) await AccountLinks.create({ userIds: pair, requestedBy: String(ownerUser._id) });
-  }
   const kpm0417 = await office(String(prudential._id), '0417', 'BSD City Branch', {
     ownerUserId: String(ownerUser._id),
     address: 'Jl. Raya Serpong, Tangerang Selatan',
@@ -1636,35 +1654,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     place: (kpm, userId, role, leader, opts) => place(kpm, userId, role, leader, opts),
   });
 
-  /**
-   * Informal groups, and the Core Leader tag.
-   *
-   * Seeded so the Groups tab has something to show and the person page has a tag to
-   * render. Deliberately cutting across the hierarchy — Rina reports to Sari, Maya to
-   * the Owner — because that is the whole point of a group: it is not the tree.
-   */
-  const groupSeeds = [
-    { ...DEMO_GROUPS.mentoring, owner: sari.id, members: [rina.id, budi.id] },
-    { ...DEMO_GROUPS.topProducers, owner: owner.id, members: [ab.id, sari.id] },
-  ];
-  for (const seed of groupSeeds) {
-    // Found under the name an earlier run gave it too, so a database seeded before P18.10-T7 gets no second group.
-    const names = 'formerly' in seed ? [seed.name, seed.formerly] : [seed.name];
-    const existing = await Groups.findOne({ kpmId: id0417, name: { $in: names } }).exec();
-    const group =
-      existing ??
-      (await Groups.create({
-        kpmId: id0417,
-        name: seed.name,
-        ownerMembershipId: seed.owner,
-        status: 'active',
-        createdByMembershipId: owner.id,
-      }));
-    await Memberships.updateMany(
-      { _id: { $in: seed.members } },
-      { $addToSet: { groupIds: String(group._id) } },
-    ).exec();
-  }
+  // Informal groups on ABs, their Group Leaders and the monthly targets per AB group (P19.17-T4; ADR-0270).
+  const informalGroups = await seedInformalGroupsFixture({
+    clock, kpmId: id0417, createdBy: owner.id, wilson: owner.id, agus: ab.id, satria: reportingCast.satria.id,
+    maya: admin.id, yosef: reportingCast.yosef.id, groups: DEMO_GROUPS,
+  });
   // Core Leader decides who, besides the Owner and the Admins, may open and write in the Strategic Leader Forum's
   // meetings (built in Phase 18.1, `leader-forum-fixture.ts`), and nothing else.
   await Memberships.updateMany(
@@ -2488,6 +2482,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       });
     }
   }
+  // P19.21-T1 (ADR-0274): two missing months last year and this month's *Belum jadi anggota* — before the year of files.
+  log((await seedDataUploadFixture({ clock, kpmCode: '0417' })).guide);
 
   // ------------------------------------------------- KPM 0555, for cross-tenant checks
 
@@ -2649,6 +2645,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     // ADR-0157: 0603's leaders past its limit, their requests, and the promotions they carried out.
     promote: promotedEarlier, LeaderLimitRequests: LeaderLimitRequests as never, superAdminUserId: String(superAdmin._id),
   });
+  // P19.23-T3 (ADR-0277): *Persetujuan* › *Sudah diputuskan* — a leader-limit request declined (`approvals-fixture.ts`).
+  log((await seedApprovalsFixture({
+    LeaderLimitRequests: LeaderLimitRequests as never, superAdminUserId: String(superAdmin._id), daysAgo,
+  })).guide);
 
   // ------------------- named templates, and an office started Empty (P13.2-T6; `template-fixture.ts`)
 
@@ -2729,6 +2729,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     },
   });
   if (recruitment.files !== 'stored') log(`Recruitment pitch documents and 0417's PRUMapan brochure ${recruitment.files}.`);
+  // P19.21-T3 AC-6 (ADR-0274): 0417's Agency Profile given as a link (`pitch-link-fixture.ts`).
+  await seedPitchLinkFixture({ clock, kpmId: id0417, owner: { membershipId: owner.id, userId: String(ownerUser._id) } });
 
   // ------------------- the Owner's reporting: a year of files, two agencies, sign-ins (Phase 18; `reporting-fixture.ts`)
 
@@ -2755,6 +2757,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // ------------------- the KPM setup card: 0417 running, 0701 two steps in (P19.3-T2; UI-149, `setup-fixture.ts`)
 
   await seedSetupMarks(clock.now());
+
+  // ------------------- the Pengaturan hub: 0417's Activity types changed since its publish (P19.21-T2; `settings-hub-fixture.ts`)
+
+  await seedSettingsHubFixture({ kpmId: id0417, clock });
 
   // ------------------- the member's own estimate of the APE produced (P19.1-T4 AC-15; UI-157, ADR-0195)
 
@@ -3895,6 +3901,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
   // ------------------- P19.6-T4 — short names with a description, and *Sinkron dari template*
   // (`training-names-fixture.ts`): after the lessons, so the template's newer version keeps their material.
   const trainingNames = await seedTrainingNamesFixture({ clock, companyId: String(prudential._id), kpmId: id0417 });
+  // ------------------- P19.25-T4 — Pengaturan › Training as one tree (`training-tree-fixture.ts`): a skill and modules
+  // under 0417's other four categories, some with a link, some for *Unggah materi*, with progress. After the names.
+  await seedTrainingTreeFixture({
+    clock, kpmId: id0417, cast: { agus: ab.id, siti: cast.siti.id, rina: rina.id, dewi: dewi.id },
+  });
   // ------------------- Phase 18.2 — events, as their audience lives them (`events-fixture.ts`): 0417's RSVPs, claims,
   // confirmations and answers over configure()'s three events and four new ones. After the forum; before campaigns.
 
@@ -3910,6 +3921,11 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       indah: cast.indah.id, dimas: cast.dimas.id, siti: cast.siti.id, novi: cast.novi.id, yantiFirst: String(yantiFirst._id),
     },
   });
+  // ------------------- P19.25-T1, T2 — Advanced analytics › Event (`event-analytics-fixture.ts`): twelve more past events
+  // with their roll calls and answers, and two planned ones with the answers to their invitation. After the events.
+  // P19.18 (ADR-0271): two new hires of this month under Maya, before every fixture that reads all of 0417's members.
+  log((await seedWholeOfficeFixture({ clock, maya: admin.id, user, place: (userId, daysAgo) => place(office0417, userId, 'agent', admin, { joinedDaysAgo: daysAgo }) })).guide);
+  const eventAnalytics = await seedEventAnalyticsFixture({ clock, kpmId: id0417, ownerId: owner.id, adminId: admin.id });
   // ------------------- Phase 18.2 — campaigns, as their chasers live them (`campaigns-fixture.ts`): 0417's seasonal and
   // structural campaigns and the chases across the coaching cast, 0555's one. After training and events.
 
@@ -3993,9 +4009,8 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
   PLATFORM
     superadmin@agencyboost.test   demo super admin     Super Admin
     root@agencyboost.test                              Super Admin — a second, so SA-on-SA can be refused
-    wilson@agencyboost.test                            Super Admin — the Owner's own second login, linked
-                                                       to owner@kpm0417.test: both logins' views in one
-                                                       avatar menu (Akun saya · KPM Owner · Superadmin)
+    wilson@agencyboost.test                            Super Admin — the Owner's own Super Admin login,
+                                                       signed in to on its own (no linked logins, ADR-0269)
 
   KPM 0417 · BSD City Branch  (${id0417})
     owner@kpm0417.test           demo password 0417    KPM Owner, AB at the root
@@ -4038,16 +4053,13 @@ Seeded. Every field account uses the password "${FIELD_PASSWORD}" unless noted.
 
   KPM 0999 · Suspended Branch
     owner@kpm0999.test                                 Signing in shows the page: the office is suspended
-${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${summaryLeads.guide}${recruitment.guide}${reporting.guide}${unitViews.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${campaigns.guide}${compliance.guide}
+${subscriptions.guide}${templates.guide}${templateCopies.guide}${analyticsTemplates.guide}${salesTools.guide}${unitDashboard.guide}${potensi.guide}${proposal.guide}${tugas.guide}${home.guide}${summaryLeads.guide}${recruitment.guide}${reporting.guide}${informalGroups.guide}${unitViews.guide}${cohort.guide}${forum.guide}${training.guide}${lessons.guide}${trainingNames.guide}${events.guide}${eventAnalytics.guide}${campaigns.guide}${compliance.guide}
   NO OFFICE
     newcomer@agencyboost.test                          Brand new — starts at Register KPM; every Agent
                                                        item opens its Contoh with Cari / Daftar KPM and
                                                        Cari leader, and Profile opens (P19-T4)
 
-  GROUPS in KPM 0417, at /people/members → Groups
-    ${DEMO_GROUPS.mentoring.name.padEnd(28)} owned by Sari · Rina and Budi tagged
-    ${DEMO_GROUPS.topProducers.name.padEnd(28)} owned by the Owner · Agus and Sari tagged
-    Agus, Sari and Yosef also carry the Core Leader tag
+  CORE LEADERS in KPM 0417: Agus, Sari and Yosef carry the Core Leader tag (informal groups: see above)
 
   KPM REQUESTS at /admin/kpm-requests  (Super Admin)
     Bandung Kota Branch          pending, with a note — ade@agencyboost.test
@@ -4286,10 +4298,15 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   const advancedAnalytics = await seedAdvancedAnalyticsFixture({
     clock,
     companyId: String(prudential._id),
-    office0417: { kpmId: id0417, agus: ab.id, owner: owner.id },
+    office0417: { kpmId: id0417, agus: ab.id, owner: owner.id, sari: sari.id, dewi: dewi.id },
     peers: peerOffices.filter((p): p is { code: string; kpmId: string } => p !== null),
   });
   log(advancedAnalytics.guide);
+  // P19.16-T2 (ADR-0264): every seeded new hire joined Prudential the month they joined the office, every existing agent
+  // before — after every placement, and before *Lengkapi data* blanks one month on purpose (`new-hire-months-fixture.ts`).
+  log((await seedNewHireMonthsFixture({
+    kpmIds: (await Kpms.find({ companyId: String(prudential._id) }, { _id: 1 }).lean().exec()).map((k) => String(k._id)),
+  })).guide);
   // P19.12-T5 (ADR-0248 §3, §4): *Diundang* and *Lengkapi data* on 0417's member page, after every sign-in the seed
   // writes (`member-page-fixture.ts`), sparing the people other walks read.
   log((await seedMemberPageFixture({
@@ -4299,9 +4316,42 @@ Sign in at POST /api/v1/auth/login, then send the access token as
       'owner@kpm0417.test', 'admin@kpm0417.test',
     ]),
   })).guide);
+  // ------------------- P19.15-T1 (ADR-0258): Prudential's premium tables — SAMPLE numbers, never its rates — before the
+  // notices below read them (`rate-table-fixture.ts`).
+  log((await seedRateTableFixture({
+    clock, companyId: String(prudential._id), superAdminUserId: String(superAdmin._id),
+  })).guide);
+  // ------------------- P19.15-T4: *Kelola data produk* for Maya on Prudential, and the premium table notices — the daily
+  // run over the premium tables the demo holds, so last of all (`product-data-access-fixture.ts`; ADR-0260, ADR-0261).
+  log((await seedProductDataAccessFixture({
+    clock, companyId: String(prudential._id), maya: { userId: String(adminUser._id) },
+    superAdminUserId: String(superAdmin._id),
+  })).guide);
+  // P19.15-T2, T3 (ADR-0259): *Unggah file*'s demo upload and *Ilustrasi*'s draft, written as stored data — no AI call.
+  log((await seedProductDataIntakeFixture({
+    clock, companyId: String(prudential._id), superAdminUserId: String(superAdmin._id),
+  })).guide);
+  // P19.17-T1 (ADR-0267 §1): an *FMT …* and a *TES IMPOR …* account under Agus, flagged by 0065 — after every count the
+  // walks above pin, so nothing there moves (`test-accounts-fixture.ts`).
+  log((await seedTestAccountsFixture({ user, place: (userId) => place(office0417, userId, 'agent', ab, { joinedDaysAgo: 20 }) })).guide);
+  // P19.23-T2 AC-3 (OD-420): 0418's Owner waits for a WhatsApp claim link, 0419's has never signed in.
+  log((await seedOwnerWhatsAppFixture({ companyId: String(prudential._id), office, configure, user, placeOwner: (kpm, userId) => place(kpm, userId, 'ab', null, { joinedDaysAgo: 2 }) })).guide);
+  // P19.23-T5 AC-3 (ADR-0279 §4): 0418 and 0419, the newest offices, on their 30-day trial (`subscription-fixture.ts`).
+  log((await seedTrialSubscriptions({ clock, Kpms: Kpms as never })).guide);
+  // P19.23-T6 (ADR-0279): Platform's audit rows, a Super Admin candidate, the WhatsApp number and an announcement.
+  log((await seedPlatformConsoleFixture({
+    clock, superAdminUserId: String(superAdmin._id), secondSuperAdminUserId: String(secondSuperAdmin._id), kpmId: id0417,
+    companyId: String(prudential._id), hash: (password) => passwords.hash(password),
+  })).guide);
+  // P19.20 (ADR-0273): Riwayat's move, a second Admin, Riwayat unggah (`people-fixture.ts`).
+  log((await seedPeopleFixture({ clock, kpmId: id0417, owner: { ...owner, userId: String(ownerUser._id) }, user, placeRemoved: (userId, leader, joinedDaysAgo, removedDaysAgo) => place(office0417, userId, 'agent', leader, { status: 'removed', joinedDaysAgo, removedDaysAgo }) })).guide);
   log(activation3M.guide);
   log(`Profile photos (${avatars.images}, ${avatars.written} written): Agus, Arief and Tari — Tari's not-yet circle on `
     + 'New Hires, Arief\'s group row and Agus\'s own; everybody else initials. Sign in as agus@kpm0417.test.');
+  // P19.23-T4 (ADR-0278): the Default template card, two companies with unpublished changes, a KPM's own setting.
+  log((await seedCompanyConsoleFixture({
+    clock, prudentialId: String(prudential._id), allianzId: String(allianz._id), kpmChangedId: String(kpm0555._id),
+  })).guide);
 
   const after = await countRows();
   const written = Object.fromEntries(COUNTED_COLLECTIONS

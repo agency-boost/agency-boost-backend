@@ -1,21 +1,17 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { configSchemaOptions } from '@/common/schema/base.schema';
-import {
-  PROPOSAL_CHANNELS, PROPOSAL_PAY_FREQUENCIES, PROPOSAL_STATUSES,
-  type ProposalChannel, type ProposalPayFrequency, type ProposalStatus,
-} from '@/domain/constants';
+import { PROPOSAL_STATUSES, type ProposalStatus } from '@/domain/constants';
+import type { ProposalClient } from './proposal-client';
 import type { StoredItem } from './proposal-items';
 
 export type ProposalDocument = HydratedDocument<Proposal>;
 
-/** The client's copy, taken from the lead when step 1 is completed (ADR-0221 §1). */
-export interface ProposalClientCopy {
-  name: string;
-  /** The age at the next birthday on the day it was taken: the premium was quoted for it. */
-  age: number;
-  gender: 'male' | 'female';
-}
+/**
+ * The client, as the proposal holds it (ADR-0221 §1; *since 2026-11-12, P19.14-T1, ADR-0254:* the name copied from the
+ * lead, and the age, its day, the gender and the details entered at step 1 — `proposal-client.ts`).
+ */
+export type ProposalClientCopy = ProposalClient;
 
 /**
  * **A proposal: the agent's own record of what was offered to one of their Sales leads** (P19.7-T2; ADR-0221 §1;
@@ -44,16 +40,19 @@ export class Proposal {
   @Prop({ type: String, required: true })
   leadId!: string;
 
+  /**
+   * **The client: the lead's name, and what step 1 entered** (ADR-0254 §1): `{ name, age, ageSetOn, gender, details }`.
+   * Never written back to the lead.
+   */
   @Prop({ type: Object, required: true })
   client!: ProposalClientCopy;
 
-  @Prop({ type: String, enum: PROPOSAL_CHANNELS, default: 'conventional' })
-  channel!: ProposalChannel;
+  /*
+   * *Removed 2026-11-12 (P19.14-T2; ADR-0255 §1, §2; migration `0063-proposal-items-carry-cara-bayar`):* the proposal-wide
+   * `channel` and `payFrequency`. Each item carries its own *Cara bayar*; a syariah product is a product of its own.
+   */
 
-  @Prop({ type: String, enum: PROPOSAL_PAY_FREQUENCIES, default: 'monthly' })
-  payFrequency!: ProposalPayFrequency;
-
-  /** *Tampilkan total premi*, off by default (Acc. 19's sibling; T3's switch). */
+  /** *Tampilkan total*, off by default (the result screen's switch). */
   @Prop({ type: Boolean, default: false })
   showTotal!: boolean;
 

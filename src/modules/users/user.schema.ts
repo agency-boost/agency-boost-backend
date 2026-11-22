@@ -150,6 +150,23 @@ export class User {
   @Prop({ type: Date, default: null })
   lastLoginAt!: Date | null;
 
+  /**
+   * ***Akun tes*: a test account, never shown or counted anywhere** (ADR-0267 §1; P19.17-T1 AC-1;
+   * `revisions/2026-11-19/DATA-DEFINITIONS.md`, *Who is counted*). On the global identity, because a test account is a
+   * fact about the person, whichever office they sit in. `isTestAccount` is the one predicate.
+   *
+   * **Stored, never worked out at read time**: every demo address ends in `.test` and a one-word name may be a real
+   * person in production, so neither decides it (OD-370). Migration `0065` decided every account written before the field
+   * once — `true` for a full name beginning *FMT* or *TES IMPOR* (`isTestAccountName`), `false` for the rest — and never
+   * looks again at an account that holds a value; anybody else is flagged by hand (the Super Admin, a later phase).
+   *
+   * **Copied onto every membership of the person** (`memberships.testAccount`), which is what the reads of a KPM's members
+   * filter on (`NOT_A_TEST_ACCOUNT`); the two are written together, by `0065`, by `HierarchyService` when a membership is
+   * made, and by whatever later sets the flag.
+   */
+  @Prop({ type: Boolean, default: false })
+  testAccount!: boolean;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }

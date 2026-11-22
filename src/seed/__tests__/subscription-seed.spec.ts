@@ -19,7 +19,7 @@ import { subscriptionStateOf } from '@/modules/tenants/subscription';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { seedDemo, type SeedResult } from '../demo';
-import { planSubscriptions, SUBSCRIPTION_OFFICES, SUBSCRIPTION_PROMOTION_REASON } from '../subscription-fixture';
+import { planSubscriptions, SUBSCRIPTION_OFFICES, SUBSCRIPTION_PROMOTION_REASON, TRIAL_OFFICES } from '../subscription-fixture';
 import { COHORT_HIRES } from '../cohort-fixture';
 
 /**
@@ -142,7 +142,10 @@ describe('the subscription seed', () => {
     expect(kpm.subscription).toMatchObject({ maxLeaders: 10, pricePerLeaderMinor: 350_000_00 });
     expect(await used('0603')).toBe(13);
 
-    const requests = await col('leaderLimitRequests').find({ kpmId: String(kpm._id) }).sort({ createdAt: 1 }).toArray();
+    // Rizky's earlier request, declined three weeks ago, is *Persetujuan*'s *Ditolak* row (`approvals-fixture.ts`, P19.23-T3):
+    // what this office's subscription seeds is the rest.
+    const requests = await col('leaderLimitRequests')
+      .find({ kpmId: String(kpm._id), status: { $ne: 'declined' } }).sort({ createdAt: 1 }).toArray();
     const nameOf = async (membershipId: string) => {
       const m = await col('memberships').findOne({ _id: new mongoose.Types.ObjectId(membershipId) });
       return (await col('users').findOne({ _id: new mongoose.Types.ObjectId(m!.userId as string) }))!.fullName;
@@ -165,16 +168,32 @@ describe('the subscription seed', () => {
     expect(requests.at(-1)).toMatchObject({ subjectMembershipId: String(rizky!._id), toOrgLevelCode: 'AAB' });
   });
 
+  it('P19.23-T5 AC-3 the two newest offices are on their 30-day trial (ADR-0279 §4)', async () => {
+    for (const [code, startedDaysAgo] of Object.entries(TRIAL_OFFICES)) {
+      const kpm = await col('kpms').findOne({ code });
+      expect(kpm?.subscription).toMatchObject({ trial: true, plan: null, maxLeaders: null });
+      expect(subscriptionStateOf(kpm as never, clock)).toBe('active');
+      expect(kpm?.subscription.startDate < today).toBe(startedDaysAgo > 0);
+    }
+  });
+
+  it('P19.23-T5 AC-4 each priced subscription carries its period total, as Konfirmasi paket stores it', () => {
+    // 0417: 10 leaders × Rp 350.000 × 12, less 5% — Rp 39.900.000.
+    expect(plan['0417'].periodTotalMinor).toBe(39_900_000_00);
+    expect(plan['0555'].periodTotalMinor).toBeUndefined();
+  });
+
   it('every other office has no subscription and behaves as before (T3 AC-10)', async () => {
-    const rest = await col('kpms').find({ code: { $nin: ['0417', '0555', '0601', '0602', '0603'] } }).toArray();
+    const rest = await col('kpms').find({ code: { $nin: ['0417', '0555', '0601', '0602', '0603', ...Object.keys(TRIAL_OFFICES)] } }).toArray();
     expect(rest.length).toBeGreaterThan(0);
     for (const kpm of rest) expect(kpm.subscription ?? null).toBeNull();
   });
 
   it('the new offices add no hire to the activation demo: everybody in them joined over six months ago', () => {
     // The activation fixture's nine, and Phase 18.1's cohort of 0417's graduated hires (`cohort-fixture.ts`).
-    // And P18.8-T6's two new hires (`activation-3m-fixture.ts`), Lukman and Tari, in 0417.
-    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2);
+    // And P18.8-T6's two new hires (`activation-3m-fixture.ts`), Lukman and Tari, in 0417 — and P19.18's two (ADR-0271),
+    // Hilmy and Zahra under Maya, in 0417 too (`whole-office-fixture.ts`).
+    expect(first.written.activationProgress).toBe(9 + COHORT_HIRES.length + 2 + 2);
   });
 
   it('a second run on the same day writes nothing, and keeps a subscription a walk edited', async () => {

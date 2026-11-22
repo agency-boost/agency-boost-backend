@@ -254,17 +254,17 @@ describe('P19.5-T4 surveys, on real rows', () => {
 
     it('P19.5-T4 ADR-0216 §3 an anonymous run under three respondents shows no score and no open answer; at three it does', async () => {
       const one = (await s().kpm.results(as('OWNER'), 'nps', npsId)).selected!.nps!;
-      expect(one).toMatchObject({ respondents: 1, overall: null, change: null, openAnswers: null });
-      expect(one.questions.map((q) => q.score)).toEqual([null, null, null, null, null]);
-      expect(one.aspects.every((a) => a.score === null)).toBe(true);
+      expect(one).toMatchObject({ respondents: 1, improve: null, headline: { score: null, change: null, shares: null, reasons: null } });
+      expect(one.questions.map((q) => q.score)).toEqual([null, null, null, null]);
       expect(JSON.stringify(one)).not.toContain('Lebih banyak pelatihan closing');
       await answerNps('RINA', npsId, [9, 9, 9, 9, 9]);
-      expect((await s().kpm.results(as('OWNER'), 'nps', npsId)).selected!.nps!).toMatchObject({ respondents: 2, overall: null });
+      expect((await s().kpm.results(as('OWNER'), 'nps', npsId)).selected!.nps!).toMatchObject({ respondents: 2, headline: { score: null } });
       await answerNps('BUDI', npsId, [6, 6, 6, 6, 6]);
       const three = (await s().kpm.results(as('OWNER'), 'nps', npsId)).selected!.nps!;
-      // Indah 8 then four 9s, Rina five 9s, Budi five 6s: 9 promoters, 5 detractors of 15 — round(100 · 4 / 15) = 27.
-      expect(three).toMatchObject({ respondents: 3, overall: { score: 27, n: 15, promoters: 9, detractors: 5 } });
-      expect(three.openAnswers).toEqual(['Lebih banyak pelatihan closing.']);
+      // P19.22-T6 AC-2 (ADR-0276 §1): *Keseluruhan KPM* is P1 — Indah 8, Rina 9, Budi 6: one promoter, one detractor of 3.
+      expect(three).toMatchObject({ respondents: 3, headline: { kode: 'P1', score: 0, n: 3, shares: { promoterPct: 33, detractorPct: 33 } } });
+      // Three agents sent it: the quote may say *Agent* (ADR-0276 §3).
+      expect(three.improve).toEqual([{ text: 'Lebih banyak pelatihan closing.', who: 'agent' }]);
     });
 
     it('C-R5 after the run closes: no popup, no card, and a write is 409 closed', async () => {
@@ -293,14 +293,14 @@ describe('P19.5-T4 surveys, on real rows', () => {
       });
       const after = (await s().kpm.results(as('OWNER'), 'nps', q4)).selected!.nps!;
       expect(after.cutoffs).toMatchObject({ promoterMin: 9, passiveMin: 7 });
-      expect(after.overall).toEqual(before.overall);
+      expect(after.headline).toEqual(before.headline);
       at('2027-01-04');
       q1 = (await s().kpm.create(as('OWNER'), 'nps', {
         opensOn: '2027-01-05', closesOn: '2027-01-20', invitedRoleClasses: ['agent', 'aab', 'ab'], anonymous: true, remindHalfway: false,
       })).runId;
       at('2027-01-05');
       const next = await s().kpm.results(as('OWNER'), 'nps', q1);
-      expect(next.selected!.nps!.cutoffs).toMatchObject({ promoterMin: 8, passiveMin: 7, tenureBands: [3, 7, 10] });
+      expect(next.selected!.nps!.cutoffs).toMatchObject({ promoterMin: 8, passiveMin: 7 });
     });
 
     it('AC-3 overall, per aspect and per question, the change from Q4 by kode, and the open answers with no names', async () => {
@@ -309,14 +309,35 @@ describe('P19.5-T4 surveys, on real rows', () => {
       await answerNps('SARI', q1, [3, 5, 6, 6, 7]);
       const { selected } = await s().kpm.results(as('OWNER'), 'nps', q1);
       const nps = selected!.nps!;
-      // 15 scores at 8: 10 promoters (8, 9, 10), 4 detractors (3, 5, 6, 6), so round(100 · 6 / 15) = 40.
-      expect(nps.overall).toMatchObject({ score: 40, n: 15, promoters: 10, detractors: 4 });
-      expect(nps.aspects.find((a) => a.aspect === 'Keseluruhan')).toMatchObject({ n: 3 });
+      // P1 at a cut-off of 8: Dimas 8 and Rina 10 promoters, Sari 3 a detractor of 3 — round(100 · 1 / 3) = 33.
+      expect(nps.headline).toMatchObject({ kode: 'P1', score: 33, n: 3 });
       expect(selected!.previousRunId).toBe(q4);
-      expect(nps.questions[0].change).not.toBeNull();
-      expect(nps.openAnswers).toEqual(['Jadwal training lebih jelas.']);
+      // Q4's P1 was 0: +33 poin, and the trend runs Q4 → Q1 (P19.22-T6 AC-2).
+      expect(nps.headline!.change).toBe(33);
+      expect(nps.trendPeriods).toEqual(['2026-Q4', '2027-Q1']);
+      expect(nps.headline!.trend).toEqual([0, 33]);
+      // Two agents and an AAB: neither class has three, so the quote names no class (ADR-0276 §3).
+      expect(nps.improve).toEqual([{ text: 'Jadwal training lebih jelas.', who: null }]);
       expect(JSON.stringify(nps)).not.toMatch(/Dimas|Rina|Sari/);
-      expect(selected!.responses).toMatchObject({ sent: 3, invited: 16 });
+      expect(selected!.responses).toMatchObject({ sent: 3, invited: 16, leaders: 1, agents: 2 });
+    });
+
+    it('P19.22-T6 AC-3 Survei baru: the quarter’s run, its live progress and who has not answered; the preview; no names for a summary', async () => {
+      const { send, canWrite } = await s().kpm.results(as('OWNER'), 'nps');
+      expect(canWrite).toBe(true);
+      expect(send).toMatchObject({ periodKey: '2027-Q1', closesOnMax: '2027-03-31', invitable: 16, run: { runId: q1, responses: { sent: 3, invited: 16 } } });
+      expect(send.preview.map((p) => p.kodes[0])).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'OPEN']);
+      expect(send.minutes).toBeGreaterThan(0);
+      expect(send.notAnswered).toHaveLength(13);
+      const names = send.notAnswered!.map((p) => p.name);
+      expect(names).toContain('Indah Permatasari');
+      expect(names).not.toContain('Dimas Pratama');
+      expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+      const summary = await s().kpm.results(session('OWNER'), 'nps');
+      expect(summary.send.notAnswered).toBeNull();
+      expect(summary.canWrite).toBe(false);
+      // *Survei sebelumnya*'s *NPS x%*: Q4's headline over its three forms.
+      expect((await s().kpm.results(as('OWNER'), 'nps')).runs.find((r) => r.runId === q4)!.headlineScore).toBe(0);
     });
 
     it('AC-3 a question whose text changed under the same kode says so', async () => {
@@ -330,21 +351,24 @@ describe('P19.5-T4 surveys, on real rows', () => {
       })).runId;
       at('2027-04-02');
       const nps = (await s().kpm.results(as('OWNER'), 'nps', q2)).selected!.nps!;
+      expect([nps.headline!.kode, nps.headline!.textChanged]).toEqual(['P1', false]);
       expect(nps.questions.map((q) => [q.kode, q.textChanged])).toEqual([
-        ['P1', false], ['P2', true], ['P3', false], ['P4', false], ['P5', false],
+        ['P2', true], ['P3', false], ['P4', false], ['P5', false],
       ]);
     });
 
-    it('ADR-0216 §3 breakdowns read the stored bands; a cell under three respondents is null', async () => {
-      const nps = (await s().kpm.results(as('OWNER'), 'nps', q1)).selected!.nps!;
-      // Two agents and one AAB answered: the agents' cell has two, the AAB's one — both null.
-      expect(nps.breakdowns.roleClass).toEqual([
-        { key: 'aab', respondents: 1, score: null }, { key: 'agent', respondents: 2, score: null },
-      ]);
+    it('P19.22-T6 AC-1 ADR-0276 §3 Semua | Leader | Agent: an anonymous run’s class view is hidden while a class has under three', async () => {
+      // Two agents and one AAB answered: the leaders' view would be Sari's own answer, the agents' the rest of it.
+      for (const who of ['leader', 'agent'] as const) {
+        const view = (await s().kpm.results(as('OWNER'), 'nps', q1, who)).selected!.nps!;
+        expect(view).toMatchObject({ who, whoShown: false, improve: null, headline: { score: null, reasons: null } });
+      }
+      expect((await s().kpm.results(as('OWNER'), 'nps', q1, 'leader')).selected!.nps!.respondents).toBe(1);
+      expect((await s().kpm.results(as('OWNER'), 'nps', q1, 'all')).selected!.nps!.whoShown).toBe(true);
     });
 
     it('A-R9 a view-as session reads a summary: no open answers; a non-Core leader is 404; a Core Leader reads', async () => {
-      expect((await s().kpm.results(session('OWNER'), 'nps', q1)).selected!.nps!.openAnswers).toBeNull();
+      expect((await s().kpm.results(session('OWNER'), 'nps', q1)).selected!.nps!.improve).toBeNull();
       expect((await s().kpm.results(session('OWNER'), 'nps', q1)).canWrite).toBe(false);
       expect(await refusal(s().kpm.results(as('AGUS'), 'nps'))).toMatchObject({ status: 404 });
       expect((await s().kpm.results(coreLeader('AGUS'), 'nps', q1)).audience).toBe('core_leader');
@@ -488,16 +512,91 @@ describe('P19.5-T4 surveys, on real rows', () => {
       expect(entries[0].after).toEqual({ surface: 'survey', from: '2027-06-01', to: '2027-06-30' });
     });
 
-    it('AC-4 the qualitative results: issue % per item, Dukungan leader to the Owner only, never to a Core Leader', async () => {
+    it('P19.22-T7 AC-2 the qualitative results: issue % per item, Dukungan leader by who rated, the downline table, notes on tap', async () => {
       const office0417 = await s().kpm.results(as('OWNER'), 'qual', june);
       const qual = office0417.selected!.qual!;
-      const pipeline = qual.blocks.find((b) => b.kode === 'SALES')!.items.find((i) => i.itemKode === 'PIPELINE')!;
-      expect(pipeline).toMatchObject({ answers: 2, issues: 1, issuePct: 50, severity: 'watch' });
-      expect(qual.support).toEqual({ n: 2, satisfiedPct: 50, fairPct: 0, poorPct: 50 });
-      expect(qual.coachingDownline).toMatchObject({ n: 1, pct: 100, good: true });
-      expect((await s().kpm.results(coreLeader('AGUS'), 'qual', june)).selected!.qual!.support).toBeNull();
-      expect((await s().kpm.results(session('OWNER'), 'qual', june)).selected!.qual!.support).toBeNull();
-      expect(JSON.stringify(qual)).not.toMatch(/MDRT|jarang/);
+      const pipeline = qual.blocks.find((b) => b.kode === 'SALES')!.rows.find((i) => i.itemKode === 'PIPELINE')!;
+      expect(pipeline).toMatchObject({ answers: 2, issuePct: 50, severity: 'watch', previousPct: null, trend: null });
+      // ADR-0276 §5: *Agent menilai leader* (Indah, 4) and *Leader menilai upline* (Sari, 9) — a named run keeps both.
+      expect(qual.support).toEqual([
+        { rater: 'agent', n: 1, average: 4, satisfiedPct: 0, fairPct: 0, poorPct: 100 },
+        { rater: 'leader', n: 1, average: 9, satisfiedPct: 100, fairPct: 0, poorPct: 0 },
+      ]);
+      expect(qual.coachingDownline).toMatchObject({
+        asked: true, n: 1, yes: 1, pct: 100, good: true,
+        rows: [{ leaderId: office.id.NINA, uplineId: office.id.SARI, areas: ['SALES', 'ACTIVATION'], independent: false }],
+      });
+      expect(qual.aspirationNotes).toEqual([{ text: 'Target saya MDRT dalam 2 tahun.', who: 'agent' }]);
+      expect(qual.profile.workStatus).toMatchObject({ fullTime: 1 });
+      // One reason with Q12: *Suara responden* waits for three, and Q12's reason never crosses under it.
+      expect(qual.voices).toBeNull();
+      expect(JSON.stringify(qual)).not.toMatch(/jarang/);
+      // A core leader reads the Owner's figures (ADR-0268) but never the reasons given about leaders (ADR-0276 §5).
+      const core = (await s().kpm.results(coreLeader('AGUS'), 'qual', june)).selected!.qual!;
+      expect(core.support).toHaveLength(2);
+      expect(core.voices).toBeNull();
+      // The downline table is per-person answers: Sari is Agus's own, so he sees her row; a core leader elsewhere none.
+      expect(core.coachingDownline.rows).toMatchObject([{ uplineName: 'Sari Puspita', leaderName: 'Nina Lestari' }]);
+      expect((await s().kpm.results(coreLeader('PEER_AB'), 'qual', june)).selected!.qual!.coachingDownline.rows).toEqual([]);
+      const summary = (await s().kpm.results(session('OWNER'), 'qual', june)).selected!.qual!;
+      expect(summary).toMatchObject({ aspirationNotes: null, voices: null });
+      expect(summary.coachingDownline.rows).toBeNull();
+      // *Agent*: the leader blocks were not asked of them.
+      const agents = (await s().kpm.results(as('OWNER'), 'qual', june, 'agent')).selected!.qual!;
+      expect(agents.blocks.find((b) => b.kode === 'RECRUIT')).toMatchObject({ asked: false, rows: [] });
+    });
+
+    it('P19.22-T7 AC-3 Per orang: every invitee, n item bermasalah, Belum menjawab; rows open for the Owner', async () => {
+      const view = await s().people.people(as('OWNER'), june);
+      expect(view).toMatchObject({ audience: 'office', answersShown: true, run: { periodKey: '2027-06' }, issueMaxRating: 3 });
+      const row = (id: string) => view.people!.find((p) => p.membershipId === id)!;
+      // Indah's Q5: 3, 4, 2, 3, 4, 5, 3 — four at 3 or below.
+      expect(row(office.id.INDAH)).toMatchObject({
+        name: 'Indah Permatasari', roleClass: 'agent', upline: 'Agus Salim', answered: true, issues: 4, canOpen: true,
+        workStatus: 'full_time', tenureYears: 3, age: 28, generation: 0, phone: null,
+      });
+      // Sari: Rekrutmen 8, Aktivasi 1, Manajemen unit 8 inconsistent — 17 items.
+      expect(row(office.id.SARI)).toMatchObject({ roleClass: 'aab', issues: 17, canOpen: true });
+      expect(row(office.id.RINA)).toMatchObject({ answered: false, issues: null, canOpen: false });
+      expect(view.people!.map((p) => p.name)).toEqual([...view.people!.map((p) => p.name)].sort((a, b) => a.localeCompare(b)));
+    });
+
+    it('P19.22-T7 AC-3 ADR-0276 §5 one person’s answers: tiles x/y, Q4, the cards; Q12 to the office alone; audited', async () => {
+      const indah = await s().people.person(as('OWNER'), office.id.INDAH, june);
+      expect(indah.tiles.map((t) => [t.kode, t.count, t.of])).toEqual([['SALES', 4, 7]]);
+      expect(indah.aspiration).toMatchObject({ note: 'Target saya MDRT dalam 2 tahun.' });
+      expect(indah.support).toEqual({ kode: 'Q12', score: 4 });
+      expect(JSON.stringify(indah)).not.toContain('jarang');
+      const sari = await s().people.person(as('ADMIN'), office.id.SARI, june);
+      expect(sari.tiles.map((t) => [t.kode, t.count, t.of])).toEqual([['SALES', 0, 7], ['RECRUIT', 8, 8], ['ACTIVATION', 1, 7], ['UNIT', 8, 8]]);
+      // The Super Admin inside the KPM reads as its Owner (ADR-0268).
+      const root = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), KPM_A);
+      expect((await s().people.person(root, office.id.INDAH, june)).support).toEqual({ kode: 'Q12', score: 4 });
+      expect((await s().people.people(root, june)).audience).toBe('office');
+      expect(await db().collection('auditLog').countDocuments({
+        targetMembershipId: office.id.SARI, actorMembershipId: office.id.ADMIN, 'after.surface': 'survey',
+      })).toBeGreaterThan(0);
+    });
+
+    it('P19.22-T7 AC-3 ADR-0276 §5 a core leader opens their own downline only, and never sees Q12', async () => {
+      const agus = await s().people.people(coreLeader('AGUS'), june);
+      expect(agus.people!.find((p) => p.membershipId === office.id.INDAH)!.canOpen).toBe(true);
+      expect((await s().people.person(coreLeader('AGUS'), office.id.INDAH, june)).support).toBeNull();
+      const peer = await s().people.people(coreLeader('PEER_AB'), june);
+      expect(peer.people!.find((p) => p.membershipId === office.id.INDAH)!.canOpen).toBe(false);
+      expect(await refusal(s().people.person(coreLeader('PEER_AB'), office.id.INDAH, june))).toMatchObject({ status: 404 });
+    });
+
+    it('P19.22-T7 AC-3 refusals: not answered is 404; a plain AB 404; a view-as session no names and 403; another KPM 404', async () => {
+      expect(await refusal(s().people.person(as('OWNER'), office.id.RINA, june))).toMatchObject({ status: 404 });
+      expect(await refusal(s().people.people(as('AGUS'), june))).toMatchObject({ status: 404 });
+      expect(await refusal(s().people.people(as('INDAH'), june))).toMatchObject({ status: 404 });
+      expect((await s().people.people(session('OWNER'), june)).people).toBeNull();
+      expect(await refusal(s().people.person(session('OWNER'), office.id.INDAH, june))).toMatchObject({ status: 403, code: 'SURVEY_ANSWERS_HIDDEN' });
+      const b = new RequestContext('u-b', 'none', { ...as('B_AB').membership!, isKpmOwner: true });
+      expect(await refusal(s().people.people(b, june))).toMatchObject({ status: 404 });
+      expect(await refusal(s().people.person(b, office.id.INDAH))).toMatchObject({ status: 404 });
+      expect(await refusal(s().people.person(as('OWNER'), office.id.B_AGENT, june))).toMatchObject({ status: 404 });
     });
 
     it('B4-4 AC-15 an anonymous qualitative run: the tab says so, and no answer crosses the network', async () => {
@@ -516,6 +615,27 @@ describe('P19.5-T4 surveys, on real rows', () => {
       const view = await s().coaching.read(as('AGUS'), office.id.INDAH);
       expect(view).toMatchObject({ state: 'anonymous', run: { periodKey: '2027-12' }, sections: [], aspiration: null, person: null });
       expect(await db().collection('surveyResponses').findOne({ runId: dec })).toMatchObject({ membershipId: null, noticeShown: false });
+      // P19.22-T7 AC-3 (ADR-0276 §5): *Per orang* of an anonymous run lists who answered, and no row opens.
+      const people = await s().people.people(as('OWNER'), dec);
+      expect(people.answersShown).toBe(false);
+      expect(people.people!.find((p) => p.membershipId === office.id.INDAH)).toMatchObject({ answered: true, issues: null, canOpen: false });
+      expect(await refusal(s().people.person(as('OWNER'), office.id.INDAH, dec))).toMatchObject({ status: 404 });
+    });
+
+    it('P19.22-T6 AC-3 ADR-0268 a core leader and the Super Admin inside the KPM send and cancel; a plain AB is 404', async () => {
+      const root = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), KPM_A);
+      const next = await s().kpm.create(root, 'qual', {
+        opensOn: '2028-06-01', closesOn: '2028-06-30', invitedRoleClasses: ['agent', 'aab', 'ab'], anonymous: false,
+        perPerson: true, remindHalfway: true,
+      });
+      expect(next).toMatchObject({ periodKey: '2028-06', state: 'scheduled' });
+      const moved = await s().kpm.update(coreLeader('AGUS'), next.runId, { closesOn: '2028-06-20' });
+      expect(moved.closesOn).toBe('2028-06-20');
+      await s().kpm.cancel(coreLeader('AGUS'), next.runId);
+      expect(await refusal(s().kpm.create(as('AGUS'), 'qual', {
+        opensOn: '2028-06-01', closesOn: '2028-06-30', invitedRoleClasses: ['agent'], anonymous: true, remindHalfway: false,
+      }))).toMatchObject({ status: 404 });
+      expect((await s().kpm.results(root, 'qual')).audience).toBe('office');
     });
   });
 });

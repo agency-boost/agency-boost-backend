@@ -22,8 +22,8 @@ const TENANT_COLLECTIONS = new Set([
 interface Query { collection: string; method: string; args: unknown[] }
 
 /**
- * **P18.1-T4 AC-3 — a meeting with a live scorecard, read at the office's ceiling** (Phase 18's P18-T7 measurement
- * extended; `performance-and-scale.md`): an office of **500 members** — the Owner at the root, nine AB agencies, each
+ * **P18.1-T4 AC-3 — a forum, read at the office's ceiling** (Phase 18's P18-T7 measurement extended, P19.22-T8: the
+ * forum reads no scorecard since ADR-0276; `performance-and-scale.md`): an office of **500 members** — the Owner at the root, nine AB agencies, each
  * with two AAB units, twenty of them tagged *Core Leader* — beside a second office of fifty, each with twenty-one months
  * of files and a cohort of hires. An upcoming meeting in each, read twenty times through the service a request reaches.
  *
@@ -134,10 +134,10 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
 
     for (const key of ['A', 'B'] as const) {
       for (const [n, date] of [[12, '2026-08-17'], [13, '2026-08-31']] as const) {
-        await forum.forum.create(owners[key], { title: `Strategic Check-in — #${n}`, date });
+        await forum.forum.create(owners[key], { date, time: `14:${String(n).padStart(2, '0')}` });
       }
-      meetings[key] = (await forum.forum.create(owners[key], { title: 'Strategic Check-in — #14', date: '2026-09-17' })).id;
-      for (let r = 0; r < 4; r += 1) await forum.minutes.addActionItem(owners[key], meetings[key]);
+      meetings[key] = (await forum.forum.create(owners[key], { date: '2026-09-17', time: '14:00' })).id;
+      for (let r = 0; r < 4; r += 1) await forum.minutes.addActionItem(owners[key], meetings[key], { text: `Action ${r + 1}` });
     }
   }, 600_000);
 
@@ -147,7 +147,7 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
   });
 
   const READS: Record<string, (key: 'A' | 'B') => Promise<unknown>> = {
-    'a meeting with a live scorecard': (key) => forum.forum.read(owners[key], meetings[key]),
+    'a forum': (key) => forum.forum.read(owners[key], meetings[key]),
     'the list': (key) => forum.forum.list(owners[key]),
   };
 
@@ -184,14 +184,14 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
     // eslint-disable-next-line no-console
     console.log(`  ${name}: ${large.length} queries — ${shape(large).join(', ')}`);
     expect(large.length).toBeLessThanOrEqual(20);
-    // A read of a live meeting writes nothing: no freeze, no audit row.
+    // A read of a forum writes nothing: no audit row.
     expect(large.filter((q) => !['find', 'findOne', 'aggregate', 'countDocuments', 'distinct'].includes(q.method))).toEqual([]);
   });
 
   it('P18.1-T4 AC-3 the meeting read scans no tenant collection: every query explained', async () => {
     const db = mongoose.connection.db!;
     const scans: string[] = [];
-    for (const q of await counted(() => READS['a meeting with a live scorecard']('A'))) {
+    for (const q of await counted(() => READS['a forum']('A'))) {
       if (!TENANT_COLLECTIONS.has(q.collection)) continue;
       let plan: unknown = null;
       if (q.method === 'find' || q.method === 'findOne') {
@@ -212,7 +212,7 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
     for (const [name, read] of Object.entries(READS)) results[name] = await p95(() => read('A'));
     // eslint-disable-next-line no-console
     console.log(`  p95 of 20 at 500 members: ${Object.entries(results).map(([n, ms]) => `${n} ${ms.toFixed(1)} ms`).join('; ')}`);
-    expect(results['a meeting with a live scorecard']).toBeLessThan(3000);
+    expect(results['a forum']).toBeLessThan(3000);
     expect(results['the list']).toBeLessThan(3000);
   }, 300_000);
 });

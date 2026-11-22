@@ -285,11 +285,13 @@ describe('campaign evaluation over the office’s records (P18.2-T8)', () => {
       }), ['INDAH', 'RINA']);
       // Indah logged two LEADS_CONTACTED on each of ten days: twenty touches, met while the window still runs.
       expect(e.members.get(office.id.INDAH)!.rows[0]).toMatchObject({ current: 20, state: 'met' });
-      // Rina recruits and closes nobody: 0 of the office's 0.3, in progress until September ends.
+      // Rina logs recruiting follow-ups only, and no *Presentasi rekrut*. Since ADR-0267 §6 (part D) the rate counts no
+      // follow-up — *Proses NPA* ÷ *Presentasi rekrut* — so it has nothing to divide by: no value, the ratio card's own
+      // answer, read by the campaign as *Nothing logged yet*. (It was 0 of the office's 0.3, over her follow-ups.)
       const ratios = await wired.activityLogs.ratiosOf(owner(), { membershipId: office.id.RINA, orgLevelCode: 'AB' });
       const theirs = ratios.ratios.find((r) => r.code === 'RECRUITMENT_SUCCESS_RATE')!;
-      expect(e.members.get(office.id.RINA)!.rows[1]).toMatchObject({ current: theirs.value, state: 'in_progress' });
-      expect(theirs.value).toBe(0);
+      expect(e.members.get(office.id.RINA)!.rows[1]).toMatchObject({ current: theirs.value, state: 'nothing_logged' });
+      expect(theirs.value).toBeNull();
     });
 
     it('P18.2-T8 AC-1 counts a Direct Unit’s active agents for the latest month held, by MAA’s one definition', async () => {

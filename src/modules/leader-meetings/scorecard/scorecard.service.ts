@@ -4,14 +4,15 @@ import { RequestContext } from '@/common/context/request-context';
 import { endOfMonth, type LocalDate } from '@/common/time/local-day';
 import { casesPerProducingAgent } from '@/domain/metrics/cases-per-producing-agent';
 import { averageCaseSizeRealised, caseSubmissions, maaMonthlyAvg, recruitmentMonthlyAvg } from '@/domain/metrics/held-months';
-import { maaCountInUnit } from '@/domain/metrics/maa-count-in-unit';
 import { monthlyActiveAgent } from '@/domain/metrics/monthly-active-agent';
 import { newAgentActivationOf, newAgentActivationShare } from '@/domain/metrics/new-agent-activation-3m';
 import { memberAt, officeHeadcount } from '@/domain/metrics/office-headcount';
 import { belongedDuring, producingAgents } from '@/domain/metrics/producing-agents';
+import { NOT_A_TEST_ACCOUNT } from '@/modules/org/counted-members';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { DataUploadBatchRepository } from '@/modules/production/data-upload-batch.repository';
 import { MonthlyAgentDataRepository } from '@/modules/production/monthly-agent-data.repository';
+import { activeAgentsOver } from '@/modules/production/active-agents';
 import { OfficialApe } from '@/modules/production/official-ape';
 import type { HeldFigure, MonthCells, OfficeMonth } from '@/modules/production/production-readings';
 import { AGENCY_CLASS, AGENT_CLASS, UNIT_CLASS } from '@/modules/reporting/agency-partition';
@@ -37,6 +38,12 @@ interface Period {
 interface Reads {
   timezone: string;
   everyone: readonly OfficePerson[];
+  /**
+   * **The office's counted members** — active today, never a test account (ADR-0267 §1; `OfficePeople` leaves test
+   * accounts out) — the people *Active Agent* is counted over, as the KPM Overview, the Unit Dashboard and *Informal
+   * group* count it.
+   */
+  counted: readonly string[];
   office: ReadonlyMap<string, OfficeMonth>;
   /** Each month's policy count over the office's file, `null` where no figure is held. */
   policies: ReadonlyMap<string, number | null>;
@@ -110,7 +117,12 @@ export class LeaderScorecardService {
     private readonly batches: DataUploadBatchRepository,
   ) {}
 
-  async compute(input: ScorecardInput): Promise<ComputedScorecard> {
+  /**
+   * `everyMonth` (P19.22-T3; ADR-0275 §3): **every row is computed in the month columns too** — *MAPA driver* shows *3M
+   * new agent %*, *Cases/producing agents* and *Avg. Case Size* month by month, where the forum's table drew *Not
+   * tracked*. Each through the same function, over the month's period. Absent, the forum's table as frozen.
+   */
+  async compute(input: ScorecardInput, options: { everyMonth?: boolean } = {}): Promise<ComputedScorecard> {
     const { kpmId, timezone, meetingDate } = input;
     const ctx = RequestContext.tenantRead(kpmId, 'leader-scorecard');
     const today = this.clock.localDateFor(timezone);
@@ -139,14 +151,16 @@ export class LeaderScorecardService {
       this.production.monthCellsAndYearToDateFor(ctx, ids, range),
       // Every new hire who joined over the periods, removed or not — a cohort is who joined. P19.3-T1: their own file's
       // months are read from the cells, by their membership (ADR-0202 §1).
+      // P19.22-T3 (ADR-0267 §1): never a test account.
       this.memberships.find(
         ctx,
-        { joinedAs: 'new_hire', joinDate: { $gte: periods.fy.from, $lte: cohortTo } },
+        { joinedAs: 'new_hire', joinDate: { $gte: periods.fy.from, $lte: cohortTo }, ...NOT_A_TEST_ACCOUNT },
         { projection: { _id: 1, joinedAs: 1, joinDate: 1 } },
       ),
       this.latestUpload(ctx, range, timezone),
     ]);
-    const reads: Reads = { timezone, everyone, office, policies, cells: file.cells, bounds: new Map() };
+    const counted = everyone.filter((p) => p.status === 'active').map((p) => p.membershipId);
+    const reads: Reads = { timezone, everyone, counted, office, policies, cells: file.cells, bounds: new Map() };
 
     // ---- Each row, column by column. **The office's current month is never named as left out**, as the Overview's
     // `missingMonths` never names it: its file is not due until it ends. *This Month* still reads *pending data* then.
@@ -162,7 +176,7 @@ export class LeaderScorecardService {
       Object.fromEntries(COLUMN_KEYS.map((key) => [key, named(cell(periods[key], key), key)])) as Record<ColumnKey, ScorecardCell>;
     /** A row the table tracks over the year columns alone: *Not tracked* in the *Monthly View*. */
     const yearly = (cell: (period: Period, key: ColumnKey) => ScorecardCell) =>
-      columns((period, key) => (MONTH_COLUMN_KEYS.includes(key) ? BLOCKED : cell(period, key)));
+      columns((period, key) => (!options.everyMonth && MONTH_COLUMN_KEYS.includes(key) ? BLOCKED : cell(period, key)));
     // Whose year to date each year column sums — P18.9-T1 AC-1: *YTD {Y−1}*'s last year's producers, as *Full Year*'s.
     const lastYears = producersIn(lastYear);
     const producers = { fy: lastYears, ytdLastYear: lastYears, ytd: producersIn(String(year)) } as Partial<Record<ColumnKey, string[]>>;
@@ -183,7 +197,7 @@ export class LeaderScorecardService {
       producing_agents: producing,
       new_agent_3m: yearly((period) => this.newAgent3m(reads, period, hires)),
       avg_monthly_aa: columns((period) => this.overHeld(
-        period, (m) => this.maaCount(reads, period, m),
+        period, (m) => this.maaCount(reads, m),
         (values) => (period.months.length === 1 ? values[0] : maaMonthlyAvg(values)),
       )),
       case_submission: cases,
@@ -282,7 +296,7 @@ export class LeaderScorecardService {
    * *pending data* while no month holds both, the months either half leaves out named.
    */
   private perActiveAgent(reads: Reads, period: Period): ScorecardCell {
-    const months = period.months.map((m) => ({ policies: reads.policies.get(m) ?? null, activeAgents: this.maaCount(reads, period, m) }));
+    const months = period.months.map((m) => ({ policies: reads.policies.get(m) ?? null, activeAgents: this.maaCount(reads, m) }));
     const value = casesPerProducingAgent(months);
     if (value === 'none') return NONE;
     return orPending(value, period.months.filter((_, i) => months[i].policies === null || months[i].activeAgents === null));
@@ -333,13 +347,15 @@ export class LeaderScorecardService {
   }
 
   /**
-   * `MAA_COUNT_IN_UNIT` over the office for a month, as the analytics' total reads its period's month: the members it
-   * had on its last day — in a period that ends sooner, on that day — `null` while the office holds no file for it.
+   * ***Active Agent* for a month** — `MAA_COUNT_IN_UNIT` over the office, `null` while it holds no file for the month —
+   * **through `activeAgentsOver`, the count `activeAgentsIn` makes**, over the office's counted members (`Reads.counted`):
+   * the KPM Overview's *Performa vs target*, the Unit Dashboard and *Informal group* read the same number for the same
+   * month (ADR-0267 §1, §2; invariant §8). *Changed 2026-11-20 (the integration review):* it counted the members on the
+   * month's last day (P18.1-T1 AC-4), so MAPA read 23 for the demo office's October where the Overview read 24 — a member
+   * whose join date fell after the month, with its production on file, was in one and not the other.
    */
-  private maaCount(reads: Reads, period: Period, m: string): number | null {
-    const end = this.monthEnd(reads, period, m).endExclusive;
-    const members = reads.everyone.filter((p) => memberAt(p, end));
-    return maaCountInUnit(members.map((p) => this.activeIn(reads, p.membershipId, m)), reads.office.get(m)?.held === true);
+  private maaCount(reads: Reads, m: string): number | null {
+    return activeAgentsOver(reads.cells, reads.counted, m, reads.office.get(m)?.held === true).count;
   }
 
   /** `PRODUCING_AGENTS` — *Annual Active Agents* — over the period's months held, each member's flags in the months they belonged in. */

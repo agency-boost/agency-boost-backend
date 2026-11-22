@@ -60,7 +60,8 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
   describe('AC-1 — the office’s definitions, over a fixed 30 days of stored entries', () => {
     it('sums both sides over the thirty days ending today, and nothing older', async () => {
       await day(TODAY, { SELL_SUBMISSION: 2, SELL_PRESENTATION: 6 });
-      await day('2026-02-10', { SELL_SUBMISSION: 1, SELL_FOLLOWUP: 4 }); // the 30th day back
+      // The 30th day back. P19.17-T1 AC-6 (ADR-0267 §6): a follow-up is no longer under the selling success rate.
+      await day('2026-02-10', { SELL_SUBMISSION: 1, SELL_PRESENTATION: 4, SELL_FOLLOWUP: 7 });
       await day('2026-02-09', { SELL_SUBMISSION: 50 }); // the 31st: outside
 
       const view = await wired.activityLogs.ratios(agent());
@@ -71,13 +72,15 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
     });
 
     it('keeps counting a type the office has since archived, and still names it', async () => {
-      await day(TODAY, { SELL_SUBMISSION: 1, SELL_FOLLOWUP: 9 });
-      const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'SELL_FOLLOWUP')!;
+      // P19.17-T1 (ADR-0267 §6): the follow-up left the selling success rate, and its two types are bound to the goal
+      // cascade, which refuses an archive — so *Leads per activity*'s denominator is the archived type.
+      await day(TODAY, { LEADS_NEW_PROSPECT: 1, LEADS_GEN_ACTIVITY: 9 });
+      const type = (await wired.activity.list(owner())).flatMap((c) => c.types).find((t) => t.code === 'LEADS_GEN_ACTIVITY')!;
       await wired.activity.archiveType(owner(), type.id);
 
-      const ssr = (await byCode(agent())).SELLING_SUCCESS_RATE;
-      expect(ssr.denominatorCount).toBe(9);
-      expect(ssr.denominator.map((t) => t.label)).toContain(type.label);
+      const lpa = (await byCode(agent())).LEADS_PER_ACTIVITY;
+      expect(lpa.denominatorCount).toBe(9);
+      expect(lpa.denominator.map((t) => t.label)).toContain(type.label);
     });
 
     it('takes thirty days whatever an office’s stored setting says (ADR-0022)', async () => {
@@ -130,7 +133,8 @@ describe('the office’s ratios, over a member’s last 30 days (P10-T2, P10-T3)
     it('names each side’s terms as the office numbers them, tags the section, and says what it measures', async () => {
       const view = await byCode(agent());
       expect(view.SELLING_SUCCESS_RATE.numerator).toEqual([{ code: 'SELL_SUBMISSION', label: expect.any(String), displayOrder: 6 }]);
-      expect(view.SELLING_SUCCESS_RATE.denominator.map((t) => t.displayOrder)).toEqual([4, 5]);
+      // P19.17-T1 AC-6 (ADR-0267 §6): *Presentasi penjualan* alone, the follow-up (5) no longer counted.
+      expect(view.SELLING_SUCCESS_RATE.denominator.map((t) => t.displayOrder)).toEqual([4]);
       expect(view.SELLING_SUCCESS_RATE.tag).toEqual({ code: 'SELLING', label: 'Penjualan' });
       expect(view.MEETING_PER_APPROACH.tag).toMatchObject({ code: 'LEADS_GENERATION' });
       expect(view.SELLING_SUCCESS_RATE.purpose).toBe('Mengukur tingkat konversi aktivitas selling menjadi submission');

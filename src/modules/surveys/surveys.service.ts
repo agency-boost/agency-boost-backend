@@ -13,7 +13,8 @@ import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { scopeFor } from '@/modules/rbac/permissions';
 import { User, type UserDocument } from '@/modules/users/user.schema';
-import { NPS, SURVEY, type SurveyRoleClass } from '@/domain/constants';
+import { NPS, SURVEY, type SurveyRoleClass, type WorkStatus } from '@/domain/constants';
+import { withoutTestAccounts } from '@/modules/org/counted-members';
 import type { ReminderMoment, SurveyParticipationDocument } from './survey-participation.schema';
 import type { SurveyAnswer } from './survey-response.schema';
 import type { SurveyKind, SurveyRunDocument, SurveySnapshot } from './survey-run.schema';
@@ -312,7 +313,8 @@ export class SurveysService {
   /** The caller's own direct reports who lead — Q11's rows — by name. */
   private async downlineLeaders(ctx: RequestContext): Promise<{ membershipId: string; name: string }[]> {
     const members = await this.memberships.find(
-      ctx, { leaderId: ctx.membershipId, status: 'active', role: { $in: ['aab', 'ab'] } }, { sort: { agentSeq: 1 } },
+      // P19.22 (ADR-0267 §1): a test account is never a downline leader to report on.
+      ctx, withoutTestAccounts({ leaderId: ctx.membershipId, status: 'active', role: { $in: ['aab', 'ab'] } }), { sort: { agentSeq: 1 } },
     );
     const names = await this.names.byMembershipId(ctx, members.map((m) => String(m._id)));
     return members.map((m) => ({ membershipId: String(m._id), name: names.get(String(m._id)) ?? '' }));
@@ -324,7 +326,7 @@ export class SurveysService {
    * the birth date. A blank one is `null` — *Belum diisi* — and is never asked.
    */
   private async bands(ctx: RequestContext, snapshot: SurveySnapshot, roleClass: SurveyRoleClass, today: LocalDate): Promise<{
-    roleClass: SurveyRoleClass; tenureBand: number | null; ageBand: number | null;
+    roleClass: SurveyRoleClass; tenureBand: number | null; ageBand: number | null; workStatus: WorkStatus | null;
   }> {
     const member = await this.memberships.findById(ctx, ctx.membershipId!);
     const user = member ? await this.users.findById(member.userId, { dateOfBirth: 1 }).lean().exec() : null;
@@ -334,6 +336,8 @@ export class SurveysService {
       roleClass,
       tenureBand: joinDate ? tenureBandOf(wholeYears(joinDate, today), snapshot.cutoffs.tenureBands) : null,
       ageBand: dob ? bandOf(wholeYears(dob, today), snapshot.cutoffs.ageBandUpper) : null,
+      // P19.22-T7 (ADR-0276 §4): *Status kerja* from the profile, for *Siapa yang menjawab* — never asked.
+      workStatus: member?.workStatus ?? null,
     };
   }
 }

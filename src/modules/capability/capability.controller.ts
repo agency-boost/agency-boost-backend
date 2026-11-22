@@ -53,8 +53,8 @@ export class CapabilityController {
     summary: 'Archive or restore',
     description:
       'There is no delete. An archived item stays readable on assessments that already reference '
-      + 'it and takes no new ones. Archiving a milestone a stage requires is refused, because that '
-      + 'stage would become unreachable.',
+      + 'it and takes no new ones. **Archiving a milestone takes it out of every stage that requires it** '
+      + '(ADR-0274), and restoring it puts it back — refused only when a stage would be left requiring nothing.',
   })
   @ApiResponse({ status: 200, type: CapabilityCatalogDto })
   async setStatus(@Ctx() ctx: RequestContext, @Body() dto: SetCapabilityStatusDto) {
@@ -66,16 +66,19 @@ export class CapabilityController {
   @Post('items')
   @RequirePermission('tenant_config:write')
   @ApiOperation({
-    summary: 'Add a milestone or a grid item',
+    summary: 'Add a stage, a milestone, a group or a skill',
     description:
       'The code is chosen once and refused when it is already used **anywhere in the catalog, '
       + 'archived rows included** — a tick names a code, so a reused one would re-point every '
-      + 'assessment that held it.',
+      + 'assessment that held it. **Absent, the server makes one from the label**. A milestone with '
+      + '`stageCode` is required by that stage and every stage above it; a stage comes with its `firstMilestone`; a '
+      + 'group (`grid`) starts empty. No automatic rule anywhere: leaders tick by hand.',
   })
   @ApiResponse({ status: 201, type: CapabilityCatalogDto })
   async add(@Ctx() ctx: RequestContext, @Body() dto: AddCapabilityDto) {
     return this.capability.add(
-      ctx, dto.part as 'milestone' | 'item', dto.code, dto.label, dto.gridCode,
+      ctx, dto.part as CapabilityPart, dto.code, dto.label, dto.gridCode,
+      { stageCode: dto.stageCode, firstMilestone: dto.firstMilestone },
     );
   }
 
@@ -89,6 +92,6 @@ export class CapabilityController {
   })
   @ApiResponse({ status: 200, type: CapabilityCatalogDto })
   async reorder(@Ctx() ctx: RequestContext, @Body() dto: ReorderCapabilityDto) {
-    return this.capability.reorder(ctx, dto.part as 'stage' | 'milestone' | 'grid', dto.codes);
+    return this.capability.reorder(ctx, dto.part as CapabilityPart, dto.codes, dto.gridCode);
   }
 }

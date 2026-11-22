@@ -3,16 +3,21 @@ import type { LocalDate } from '@/common/time/local-day';
 import type { SubjectReadSurface } from '@/modules/audit/subject-read-audit';
 import type { Office } from '@/modules/tenants/tenant-day.service';
 
-/** The six categories, in the prototype's order (`KPM_Owner.html:3013-3020`). */
-export const COMPLIANCE_CATEGORIES = ['training', 'goals', 'activity', 'activation', 'events', 'campaigns'] as const;
+/**
+ * The seven categories, in the brief's order (P19.19-T3 AC-2: *"Training, Goal Setting, Activity Mgmt, Leads Mgmt
+ * (new), Activation, Events, Campaigns"*); *Leads Mgmt* joined the prototype's six (`KPM_Owner.html:3013-3020`) on
+ * 2026-11-20 (ADR-0272 §6).
+ */
+export const COMPLIANCE_CATEGORIES = ['training', 'goals', 'activity', 'leads', 'activation', 'events', 'campaigns'] as const;
 export type ComplianceCategoryKey = (typeof COMPLIANCE_CATEGORIES)[number];
 
 /** The categories with one item only: an `item` on them is refused 400. */
-export const SINGLE_ITEM_CATEGORIES: readonly ComplianceCategoryKey[] = ['goals', 'activity', 'activation'];
+export const SINGLE_ITEM_CATEGORIES: readonly ComplianceCategoryKey[] = ['goals', 'activity', 'leads', 'activation'];
 
 /**
- * What every category reads over: the office's day, D-window's year, and the tree's members — active on the office's
- * day and placed by `partitionAgencies` (an unplaced member is in no row and no chip, D-units).
+ * What every category reads over: the office's day, D-window's year, and the scope's members — *since P19.19-T3
+ * (ADR-0272 §6)* the KPM Overview's: every active member of the KPM or of one informal group, test accounts never
+ * (`OfficeGroups.partition`), where it was `partitionAgencies`' placed members.
  */
 export interface ComplianceScope {
   ctx: RequestContext;
@@ -20,7 +25,7 @@ export interface ComplianceScope {
   today: LocalDate;
   /** D-window: this calendar year in the office's zone, as office days and as instants. */
   year: { from: LocalDate; to: LocalDate; start: Date; end: Date };
-  /** The tree's members, placed and active. */
+  /** The scope's members, in the Overview's tree order. */
   memberIds: readonly string[];
 }
 

@@ -11,7 +11,8 @@ import { ACTIVITY_SPANS, type ActivitySpan } from './unit-figures';
 
 /** The view's description, shared by the Overview's read and the *Potensi* tab's (ADR-0249 §1). */
 export const SCOPE_DESCRIPTION =
-  'Whose figures: `direct` (*Grup langsung*: the leader and everybody below them, never descending into an AB), '
+  'Whose figures: `unit` (*Direct Unit*: the leader and their direct reports who lead nobody and are no AB), `direct` '
+  + '(*Grup langsung*: the leader and everybody below them, never descending into an AB), '
   + '`informal` (*Grup informal*: that, and each AB below them tagged into a live group they own, with that AB’s own '
   + 'direct group — never anybody outside their downline) or `downline` (*Semua downline*: everybody below them; for the '
   + 'agency’s owner or an administrator on their own dashboard, every member of the agency). Omitted, or a view not '
@@ -26,8 +27,8 @@ export class UnitDashboardQueryDto {
     enum: UNIT_DASHBOARD.PERIODS,
     default: UNIT_DASHBOARD.DEFAULT_PERIOD,
     description:
-      'What the goal and activity figures measure. `month` (the default): this month. `year`: the year to '
-      + 'date. `7d`: activity over the last 7 days against this month’s targets pro-rated, and this month’s '
+      'What the goal and activity figures measure. `year` (the default): the year to date. `month`: this '
+      + 'month. `7d`: activity over the last 7 days against this month’s targets pro-rated, and this month’s '
       + 'goal figures — nobody reports a week’s APE. *Status*, the pacing mark and the lead counts are this '
       + 'month’s whatever the period.',
   })

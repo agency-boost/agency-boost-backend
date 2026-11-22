@@ -2,6 +2,7 @@ import {
   ANALYTICS, ANALYTICS_FIELD_READERS, ANALYTICS_MAA_INPUTS, ANALYTICS_SECTION_KODES, ANALYTICS_SYSTEM_KODES,
   ANALYTICS_SYSTEM_UNITS, DEMOGRAPHICS, NPS, QUAL, QUANT, SUBGROUP, SURVEY, SURVEY_ROLE_CLASSES, SURVEY_STATES,
 } from './index';
+import { DEMOGRAPHIC_DATA, INFORMAL_GROUP, PROGRESS_TONE } from './advanced-analytics';
 
 /**
  * **§B.33 — the template's *Advanced analytics* section: its bounds and its defaults** (P19.5-T1; ADR-0214 §2, ADR-0215
@@ -52,6 +53,8 @@ describe('§B.33 Advanced analytics constants', () => {
       MIN_PEERS: 3, PEER_BAND_PCT_DEFAULT: 5, PEER_BAND_PCT_MAX: 50, DIFF_BAND_DEFAULT: 2,
       // P19.5-T3 (ADR-0215 §6; AA UI-023): the runs and the windows the ten metrics read.
       RUN_MONTHS: [6, 12], FREEZE_DAY: 15, GROWTH_MONTHS: 24, ROLLING_MONTHS: 12, ACTIVATION_MONTHS_AFTER_JOIN: 12,
+      // P19.22-T4 (ADR-0275 §4): a run's own months are its half-year.
+      SEMESTER_MONTHS: 6,
     });
     expect(DEMOGRAPHICS).toEqual({ AGE_BAND_UPPER_DEFAULT: [29, 45], AGE_LABEL_FLOOR: 17, TENURE_BANDS_DEFAULT: [3, 7, 10] });
     expect(QUAL).toEqual({
@@ -84,5 +87,14 @@ describe('§B.33 Advanced analytics constants', () => {
     expect(SURVEY_ROLE_CLASSES).toEqual(['agent', 'aab', 'ab']);
     // A score question reads §B.4's scale: no second 0-to-10 constant.
     expect([NPS.SCALE_MIN, NPS.SCALE_MAX]).toEqual([0, 10]);
+  });
+
+  it('P19.22-T3 T5 pins the progress colours, the informal group drivers and Demografi’s required fields (ADR-0275)', () => {
+    expect(PROGRESS_TONE).toEqual({ GREEN_PCT: 100, YELLOW_PCT: 67 });
+    // DATA-DEFINITIONS.md, *Coaching*: 1-on-1 per minggu = sessions in 30 days ÷ 4,35; target 2 × the Active Agent target.
+    expect(INFORMAL_GROUP).toEqual({ WINDOW_DAYS: 30, WEEKS_IN_WINDOW: 4.35, ONE_ON_ONE_PER_ACTIVE_AGENT: 2 });
+    expect(DEMOGRAPHIC_DATA).toEqual({
+      REQUIRED_FIELDS: ['workStatus', 'dateOfBirth', 'joinDate'], FILE_MAX_BYTES: 90_000, FILE_MAX_ROWS: 2_000,
+    });
   });
 });

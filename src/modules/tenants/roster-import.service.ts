@@ -2,6 +2,7 @@ import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { canManageMember, canOpenMember, officeStewardKind } from '@/common/auth/office-steward';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
 import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
@@ -30,6 +31,7 @@ import { MemberInviteRepository, MembershipHistoryRepository } from '@/modules/o
 import { can } from '@/modules/rbac/permissions';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Kpm, KpmDocument } from './kpm.schema';
+import { RosterImportRecordRepository } from './roster-import-record.schema';
 import { OrgLevelService, type OrgLevelRow } from './org-level.service';
 import {
   parseRoster, ROSTER_COLUMNS, ROSTER_HEADER_NAMES, skippedRowsCsv, type AgentCodeRule, type ParsedRoster, type RosterField,
@@ -75,6 +77,17 @@ export interface RosterRowView {
    * for a skipped row, whose bad cells are among its `messages`.
    */
   warnings: string[];
+  /**
+   * **The row's cells as the file holds them** (P19.20-T5 AC-2; ADR-0273 §6), one per column of `RosterPreview.header`:
+   * what *Import people* opens when a row is tapped, to fix or fill before *Simpan semua* — the corrected rows are sent
+   * back as text (`roster/preview`, `roster`), so nothing is parsed twice in two places.
+   */
+  cells: string[];
+  /**
+   * **The columns left empty for their shape** (P19.20-T5 AC-2; ADR-0250 §2): the file's header names of the optional
+   * cells this row could not read — *perlu dicek*, the field drawn yellow when the row is opened. Empty when none.
+   */
+  flagged: string[];
   /**
    * **The invitation the commit made, to share on WhatsApp** (ADR-0250 §4): its link — to registration — and the number
    * it goes to. Only in the commit's answer, only for an `invited` row: the link is made once and kept only as a hash.
@@ -222,6 +235,11 @@ export class RosterImportService {
     @Optional() private readonly inviteRows?: MemberInviteRepository,
     /** The app's origin, for the invitation's link — as `/new-hires/agents` reads it. */
     @Optional() private readonly config?: ConfigService,
+    /**
+     * ***Riwayat unggah*** (P19.20-T5 AC-3; ADR-0273 §6): one record per saved file. `@Optional` for the specs that build
+     * this by hand; without it a commit writes none.
+     */
+    @Optional() private readonly records?: RosterImportRecordRepository,
   ) {}
 
   /** The format the KPM's template publishes for its agent codes, or none (the global pattern). */
@@ -292,11 +310,14 @@ export class RosterImportService {
     return this.previewOf(ctx, kpm, await this.textOf(file));
   }
 
-  /** The valid rows, as one unit; `invite` mails each new person their link (ADR-0205 §10). */
-  async commit(ctx: RequestContext, kpmId: string, text: string, invite = true): Promise<RosterCommitResult> {
+  /**
+   * The valid rows, as one unit; `invite` mails each new person their link (ADR-0205 §10). `fileName`: the file the rows
+   * came from, for *Riwayat unggah* — *Import people* sends it with rows it rebuilt from a corrected preview.
+   */
+  async commit(ctx: RequestContext, kpmId: string, text: string, invite = true, fileName: string | null = null): Promise<RosterCommitResult> {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
-    return this.commitOf(ctx, kpm, text, invite);
+    return this.commitOf(ctx, kpm, text, invite, fileName);
   }
 
   /** The file's valid rows, as `commit` writes a paste's. */
@@ -305,7 +326,7 @@ export class RosterImportService {
   ): Promise<RosterCommitResult> {
     this.require(ctx);
     const kpm = await this.office(ctx, kpmId);
-    return this.commitOf(ctx, kpm, await this.textOf(file), invite);
+    return this.commitOf(ctx, kpm, await this.textOf(file), invite, file?.originalname ?? null);
   }
 
   private async textOf(file: FileUpload | undefined): Promise<string> {
@@ -321,7 +342,9 @@ export class RosterImportService {
     return this.answer(ctx, parsed, await this.plan(ctx, kpm, parsed));
   }
 
-  private async commitOf(ctx: RequestContext, kpm: KpmDocument, text: string, invite: boolean): Promise<RosterCommitResult> {
+  private async commitOf(
+    ctx: RequestContext, kpm: KpmDocument, text: string, invite: boolean, fileName: string | null = null,
+  ): Promise<RosterCommitResult> {
     // The whole file again: the commit does not trust a preview the caller may not have run (ADR-0205 §9).
     const parsed = parseRoster(text, this.todayIn(kpm), await this.codeRuleOf(kpm));
     if (parsed.issues.length > 0) {
@@ -345,7 +368,34 @@ export class RosterImportService {
     const created = await this.write(ctx, kpm, plans);
     const invited = invite ? await this.invite(ctx, kpm, created) : 0;
     const shared = await this.inviteOnWhatsApp(ctx, plans);
-    return { ...this.answer(ctx, parsed, plans, shared), invited };
+    const answer = this.answer(ctx, parsed, plans, shared);
+    await this.recordFile(ctx, kpm, fileName, answer);
+    return { ...answer, invited };
+  }
+
+  /**
+   * ***Riwayat unggah*** (P19.20-T5 AC-3; ADR-0273 §6): the file, when, by whom, and what it came to — once it has landed.
+   * In this office (`kpmId` from the context, as every write of the import is), the actor the request's own: the
+   * Super Admin inside the KPM has no membership and is named by their account. A record that fails is logged and the
+   * import still answers: the people are in, and a missing history line is no reason to say otherwise.
+   */
+  private async recordFile(ctx: RequestContext, kpm: KpmDocument, fileName: string | null, answer: RosterPreview): Promise<void> {
+    if (!this.records) return;
+    const name = fileName?.trim().slice(0, 255) || null;
+    try {
+      await this.records.create(ctx, {
+        fileName: name,
+        created: answer.counts.imported + answer.counts.invited,
+        updated: answer.counts.updated,
+        invited: answer.counts.invited,
+        skipped: answer.counts.skipped,
+        actorMembershipId: ctx.membershipId ?? null,
+        actorUserId: ctx.auditActors.actorUserId ?? ctx.userId,
+        importedAt: this.clock.now(),
+      });
+    } catch (err) {
+      this.logger.warn(`Riwayat unggah not recorded for office ${String(kpm._id)}: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -366,6 +416,8 @@ export class RosterImportService {
       outcome: p.outcome,
       messages: p.reasons.map(say),
       warnings: p.warnings.map(say),
+      cells: [...p.row.cells],
+      flagged: [...new Set(p.row.warnings.map((w) => w.column))],
       ...(shared.has(p) ? { invite: shared.get(p) } : {}),
     }));
     const skipped = plans.filter((p) => p.outcome === 'skipped');
@@ -475,6 +527,29 @@ export class RosterImportService {
       }
       return plan;
     });
+
+    /*
+     * **A core leader imports into their own downline only** (ADR-0268 §1; P19.20-T5 AC-4), as People's own pages hold them:
+     * a member the file would change must be strictly below them (`canManageMember` — never themselves, a peer, an upline);
+     * the upline a row names must be them or somebody in their downline (`canOpenMember`, as `PeopleService.place`), and a
+     * new person must name one. A member of another KPM is already skipped above (the code is held elsewhere). The Owner,
+     * an Admin and the Super Admin inside the KPM reach the whole KPM, unchanged.
+     */
+    if (officeStewardKind(ctx) === 'core_leader') {
+      for (const p of plans) {
+        if (p.outcome === 'skipped') continue;
+        if (p.existing && !canManageMember(ctx, { membershipId: String(p.existing._id), ancestorIds: p.existing.ancestorIds })) {
+          skip(p, ROW.notInYourDownline);
+          continue;
+        }
+        const up = p.row.leaderAgentCode;
+        const upline = up ? activeByCode.get(up) : undefined;
+        if ((!up && !p.existing)
+          || (upline && !canOpenMember(ctx, { membershipId: String(upline._id), ancestorIds: upline.ancestorIds }))) {
+          skip(p, ROW.uplineNotInYourDownline);
+        }
+      }
+    }
 
     // The first row of a code stands for it; a later one is already skipped (*muncul dua kali*).
     const byCode = new Map<string, Plan>();
@@ -767,7 +842,8 @@ export class RosterImportService {
   /**
    * **A new person** (ADR-0205 §5, §10): an account and a membership, made together by `createWithAccount` once the
    * upline, the rung and the leader limit have been met with the lease held. An existing agent (ADR-0169 §6: nobody on a
-   * roster is given an activation), joined on *Tanggal bergabung* or the import's day.
+   * roster is given an activation, so nobody on one is a new hire — ADR-0264 §1), joined on *Tanggal bergabung* or the
+   * import's day.
    */
   private async create(
     scoped: RequestContext, kpm: KpmDocument, plan: Plan, idOf: Map<string, string>, unusable: string,
@@ -779,7 +855,11 @@ export class RosterImportService {
       role: (plan.rung as OrgLevelRow).code,
       leaderId,
       status: 'active',
+      // ADR-0267 §3: who imported them — an existing agent, so never a recruit, but the record says who placed them.
+      registeredByMembershipId: scoped.membershipId ?? null,
       workStatus: row.workStatus,
+      // Always an existing agent (ADR-0169 §6, ADR-0205 §5): an import starts no activation (P13-T1), so it makes no new
+      // hire whatever *Bulan bergabung di perusahaan* says (ADR-0264 §1; OD-357).
       joining: { joinedAs: 'existing_agent', ...(row.joinDate ? { joinDate: row.joinDate } : {}) },
     }, async () => {
       const account = await this.users.create({

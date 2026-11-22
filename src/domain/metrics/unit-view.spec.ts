@@ -1,6 +1,6 @@
 import { partitionAgencies } from '@/modules/reporting/agency-partition';
 import {
-  absNotInInformalGroup, directGroup, downline, informalGroup, placeView, viewChosen, viewsOffered, type ViewMember,
+  absNotInInformalGroup, directGroup, directUnit, downline, informalGroup, placeView, viewChosen, viewsOffered, type ViewMember,
 } from './unit-view';
 
 /**
@@ -56,7 +56,7 @@ const WILSON_DOWNLINE = OFFICE.filter((x) => x.ancestorIds.includes('W'));
 const sorted = (ids: readonly string[]) => [...ids].sort();
 const WILSON_DIRECT = ['W', 'A1', 'S', 'S1', 'S2', 'S21', 'L', 'L1'];
 
-describe('the Unit Dashboard’s three views (P19.12-T6; ADR-0249; metrics §The views)', () => {
+describe('the Unit Dashboard’s four views (P19.12-T6, P19.18-T1; ADR-0249, ADR-0271; metrics §The views)', () => {
   describe('DIRECT_GROUP — Grup langsung', () => {
     it('P19.12-T6 AC-1 Wilson’s direct group leaves out every AB below him and their people, and keeps the nested AABs', () => {
       expect(directGroup('W', WILSON_DOWNLINE)).toEqual(WILSON_DIRECT);
@@ -158,49 +158,77 @@ describe('the Unit Dashboard’s three views (P19.12-T6; ADR-0249; metrics §The
     });
   });
 
-  describe('the views offered, and the default (the client’s item 7)', () => {
-    it('P19.12-T6 AC-2 a leader with an AB below: all three, Grup langsung first chosen', () => {
-      expect(viewsOffered({ reader: 'leader', leadsSomebody: true, ownsLiveGroup: false, abBelow: 4 }))
-        .toEqual({ offered: ['direct', 'informal', 'downline'], default: 'direct' });
+  describe('DIRECT_UNIT — Direct Unit (P19.18-T1 AC-2; ADR-0271 §2)', () => {
+    it('P19.18-T1 AC-2 the head and their direct reports who lead nobody and are no AB — an AAB with no team sits in it', () => {
+      // A1 an agent; S an AAB with a team, L an agent who leads, G and Y ABs: none of those four.
+      expect(directUnit('W', WILSON_DOWNLINE)).toEqual(['W', 'A1']);
+      const lone = m('D', 'aab', ['W']);
+      expect(directUnit('W', [...WILSON_DOWNLINE, lone])).toEqual(['W', 'A1', 'D']);
     });
 
-    it('P19.12-T6 AC-2 an AAB with no AB below: Grup langsung alone — Semua downline would be the same people', () => {
-      expect(viewsOffered({ reader: 'leader', leadsSomebody: true, ownsLiveGroup: false, abBelow: 0 }))
-        .toEqual({ offered: ['direct'], default: 'direct' });
-      // Owning a group offers Grup informal.
-      expect(viewsOffered({ reader: 'leader', leadsSomebody: true, ownsLiveGroup: true, abBelow: 0 }))
-        .toEqual({ offered: ['direct', 'informal'], default: 'direct' });
+    it('P19.18-T1 AC-2 an AB who leads nobody is a unit of their own, never in the head’s Direct Unit; a leaver is never in it', () => {
+      expect(directUnit('W', WILSON_DOWNLINE)).not.toContain('Y');
+      expect(directUnit('W', [...WILSON_DOWNLINE, m('Z', 'agent', ['W'], false)])).not.toContain('Z');
     });
 
-    it('P19.12-T6 AC-2 the Owner’s own dashboard: Semua downline, always offered, first chosen', () => {
-      expect(viewsOffered({ reader: 'owner', leadsSomebody: true, ownsLiveGroup: true, abBelow: 4 }))
-        .toEqual({ offered: ['direct', 'informal', 'downline'], default: 'downline' });
-      expect(viewsOffered({ reader: 'owner', leadsSomebody: false, ownsLiveGroup: false, abBelow: 0 }))
+    it('P19.18-T1 AC-2 Direct Unit ⊆ Grup langsung, for every head', () => {
+      for (const head of ['W', 'S', 'G', 'L', 'Y']) {
+        const unit = directUnit(head, OFFICE);
+        expect(directGroup(head, OFFICE)).toEqual(expect.arrayContaining(unit));
+      }
+    });
+  });
+
+  describe('the views offered, and the default (the client’s item 7; P19.18-T1 AC-2, ADR-0271 §2)', () => {
+    const facts = (over: Partial<Parameters<typeof viewsOffered>[0]>) => viewsOffered({
+      reader: 'leader', leadsSomebody: true, ownsLiveGroup: false, abBelow: 0, groupBeyondUnit: false, ...over,
+    });
+
+    it('P19.18-T1 AC-2 a leader with an AB below and a group beyond the unit: all four, Grup langsung first chosen', () => {
+      expect(facts({ abBelow: 4, groupBeyondUnit: true }))
+        .toEqual({ offered: ['unit', 'direct', 'informal', 'downline'], default: 'direct' });
+    });
+
+    it('P19.18-T1 AC-2 a leader with only a unit: Direct Unit alone, first chosen — Grup langsung would be the same people', () => {
+      expect(facts({})).toEqual({ offered: ['unit'], default: 'unit' });
+      // Owning a group offers Grup informal; the default stays Direct Unit.
+      expect(facts({ ownsLiveGroup: true })).toEqual({ offered: ['unit', 'informal'], default: 'unit' });
+      // An AB below with only a unit of one's own: Direct Unit first chosen, Semua downline offered.
+      expect(facts({ abBelow: 2 })).toEqual({ offered: ['unit', 'informal', 'downline'], default: 'unit' });
+    });
+
+    it('P19.18-T1 AC-2 an AAB with a team and no AB below: Direct Unit and Grup langsung, Grup langsung first chosen', () => {
+      expect(facts({ groupBeyondUnit: true })).toEqual({ offered: ['unit', 'direct'], default: 'direct' });
+    });
+
+    it('P19.18-T1 AC-2 the Owner’s own dashboard: all four while they lead somebody, Semua downline first chosen', () => {
+      expect(facts({ reader: 'owner', ownsLiveGroup: true, abBelow: 4 }))
+        .toEqual({ offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' });
+      expect(facts({ reader: 'owner', leadsSomebody: false }))
         .toEqual({ offered: ['downline'], default: 'downline' });
     });
 
-    it('P19.12-T6 AC-2 an Admin: Grup langsung while they lead somebody, else Semua downline', () => {
-      expect(viewsOffered({ reader: 'admin', leadsSomebody: true, ownsLiveGroup: false, abBelow: 2 }))
-        .toEqual({ offered: ['direct', 'informal', 'downline'], default: 'direct' });
-      expect(viewsOffered({ reader: 'admin', leadsSomebody: false, ownsLiveGroup: false, abBelow: 2 }))
+    it('P19.18-T1 AC-2 an Admin is the Owner but for admins (ADR-0268): Semua downline first chosen, leading somebody or not', () => {
+      expect(facts({ reader: 'admin', abBelow: 2 }))
+        .toEqual({ offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' });
+      expect(facts({ reader: 'admin', leadsSomebody: false, abBelow: 2 }))
         .toEqual({ offered: ['informal', 'downline'], default: 'downline' });
     });
 
     it('P19.12-T6 AC-2 a head who leads nobody is offered nothing, and the default stands over an empty unit', () => {
-      expect(viewsOffered({ reader: 'leader', leadsSomebody: false, ownsLiveGroup: false, abBelow: 0 }))
-        .toEqual({ offered: [], default: 'direct' });
+      expect(facts({ leadsSomebody: false })).toEqual({ offered: [], default: 'unit' });
       // A default not offered gives way to the first that is.
-      expect(viewsOffered({ reader: 'leader', leadsSomebody: false, ownsLiveGroup: true, abBelow: 0 }))
-        .toEqual({ offered: ['informal'], default: 'informal' });
+      expect(facts({ leadsSomebody: false, ownsLiveGroup: true })).toEqual({ offered: ['informal'], default: 'informal' });
     });
 
     it('P19.12-T6 AC-2 a view asked for is answered while offered; any other falls back to the default', () => {
-      const views = viewsOffered({ reader: 'leader', leadsSomebody: true, ownsLiveGroup: false, abBelow: 0 });
-      expect(viewChosen(undefined, views)).toBe('direct');
-      expect(viewChosen('downline', views)).toBe('direct');
-      expect(viewChosen('direct', views)).toBe('direct');
-      const all = viewsOffered({ reader: 'leader', leadsSomebody: true, ownsLiveGroup: false, abBelow: 1 });
+      const views = facts({});
+      expect(viewChosen(undefined, views)).toBe('unit');
+      expect(viewChosen('downline', views)).toBe('unit');
+      expect(viewChosen('direct', views)).toBe('unit');
+      const all = facts({ abBelow: 1, groupBeyondUnit: true });
       expect(viewChosen('informal', all)).toBe('informal');
+      expect(viewChosen('unit', all)).toBe('unit');
     });
   });
 

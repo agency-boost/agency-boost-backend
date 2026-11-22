@@ -21,19 +21,14 @@ export const LEADER_MEETING_SHARE_DAYS = 14;
 export const LEADER_MEETING_SHARE_TOKEN_BYTES = 32;
 
 /**
- * **The bounds of what the leaders type** (D-forum-model), in characters. The prototype bounds nothing — every
- * field is `contenteditable` (`:2655-2843`); these are ours, each with room for the prototype's longest value.
- *
- * - `titleMax` — a meeting's title, after trimming, from 1. *"Strategic Check-in — #14"* is 24.
- * - `textMax` — an agenda item's text, and each cell of the tracker but its PIC.
- * - `picMax` — a PIC, typed by hand (`:2817`, `:2834`): a name or two, never a membership.
- * - `targetMax` — a *Monthly Target* cell: short text, *"22 (3 @ unit)"* (`:2470`), *TBD* a value.
+ * **The bound of what the leaders type** (D-forum-model; P19.22-T8, ADR-0276), in characters, after trimming: an agenda
+ * line's text and an action item's, from 1. The prototype bounds nothing; this is ours, with room for the mockup's
+ * longest line (*"Strategi rekrut Q4: tiap AB 1 presentasi rekrut per minggu"*). A forum has no title to type since
+ * P19.22 (*Forum #n*), and a PIC is a member, picked, never typed: the title, PIC and *Monthly Target* bounds went with
+ * them.
  */
 export const LEADER_MEETING_LIMITS = {
-  titleMax: 120,
   textMax: 500,
-  picMax: 80,
-  targetMax: 40,
 } as const;
 
 /**

@@ -23,6 +23,30 @@ import { AccountLink, AccountLinkDocument, linkPair } from './account-link.schem
 export const IMPERSONATION_MAX_MINUTES = 60;
 
 /**
+ * **How long *Lihat sebagai*'s window has to open** (P19.23-T2 AC-7; ADR-0277): the one-time code the start answers
+ * opens the window's session for this many seconds after the start, and once. Long enough for a browser to open a
+ * window and load the app on a slow line; short enough that a code copied out of a history is worth nothing.
+ */
+export const IMPERSONATION_HANDOFF_SECONDS = 60;
+
+/** What a session started in its own tab answers: the token, held in that tab's memory. */
+export interface SessionStarted {
+  accessToken: string;
+  expiresAt: Date;
+  sessionId: string;
+  readOnly: true;
+}
+
+/** What a session started for a new window answers: no token — the window redeems the code for one. */
+export interface WindowSessionStarted {
+  handoffCode: string;
+  handoffExpiresAt: Date;
+  expiresAt: Date;
+  sessionId: string;
+  readOnly: true;
+}
+
+/**
  * Support impersonation, time-boxed and dually attributed.
  *
  * The whole feature is defensible only because every action it produces records both
@@ -61,7 +85,129 @@ export class ImpersonationService {
      * naming none, or `support`.
      */
     purpose: ImpersonationPurpose = 'support',
-  ): Promise<{ accessToken: string; expiresAt: Date; sessionId: string; readOnly: true }> {
+  ): Promise<SessionStarted> {
+    const started = await this.begin(ctx, targetUserId, reason, durationMinutes, purpose, false);
+    return {
+      accessToken: started.accessToken!, expiresAt: started.expiresAt, sessionId: started.sessionId, readOnly: true,
+    };
+  }
+
+  /**
+   * ***Lihat sebagai*, in a new window** (P19.23-T2 AC-7; ADR-0277; the Super Admin spec §5 *"Buka jendela baru opens a
+   * new window showing exactly what that person sees, view only, logged"*): the same session, checked, recorded and
+   * announced exactly as `start` does — but **no access token is minted here**. The answer is a one-time `handoffCode`,
+   * stored hashed on the session's row and alive `IMPERSONATION_HANDOFF_SECONDS`; the new window redeems it
+   * (`redeemHandoff`) and the token is minted then, into that window's memory alone. So the console's own tab never holds
+   * the session, and a code that leaks from the window's address is spent, expired, or useless to anybody but the Super
+   * Admin who started it.
+   */
+  async startForWindow(
+    ctx: RequestContext,
+    targetUserId: string,
+    reason: string,
+    durationMinutes = IMPERSONATION_MAX_MINUTES,
+    purpose: ImpersonationPurpose = 'support',
+  ): Promise<WindowSessionStarted> {
+    const started = await this.begin(ctx, targetUserId, reason, durationMinutes, purpose, true);
+    return {
+      handoffCode: started.handoffCode!,
+      handoffExpiresAt: started.handoffExpiresAt!,
+      expiresAt: started.expiresAt,
+      sessionId: started.sessionId,
+      readOnly: true,
+    };
+  }
+
+  /**
+   * **The window takes up its session** (P19.23-T2 AC-7; ADR-0277): the code `startForWindow` answered, redeemed once by
+   * **the Super Admin who started the session** — the window holds their refresh cookie, so it restores them first and
+   * asks as them. Answers what `start` answers: an access token for the rest of the session's hour, minted now, its hash
+   * written on the row in the same update that marks the code redeemed, so two redemptions at once mint one session.
+   *
+   * - An unknown code, or another Super Admin's, is `404` — a code is 256 random bits, and its holder learns nothing.
+   * - A code redeemed already, past its seconds, or whose session has ended or run out, is `410
+   *   IMPERSONATION_HANDOFF_SPENT`, `details.reason` `used` · `expired` · `ended`. Nothing is minted.
+   * - Audited `impersonation.window_opened`, in the session's office, beside its `impersonation.started`.
+   */
+  async redeemHandoff(ctx: RequestContext, code: string): Promise<SessionStarted> {
+    if (ctx.isImpersonating) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        AUTH_REFUSALS.PERM_DENIED.alreadyImpersonating,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    if (!can(ctx, 'impersonation:start')) {
+      throw new DomainException(
+        ErrorCode.PERM_DENIED,
+        AUTH_REFUSALS.PERM_DENIED.superAdminOnly,
+        HttpStatus.FORBIDDEN,
+        { permission: 'impersonation:start' },
+      );
+    }
+    const row = code
+      ? await this.sessions.findOne({ handoffCodeHash: this.passwords.hashToken(code), deletedAt: null }).exec()
+      : null;
+    // Another Super Admin's code is nobody's to them: answered as an unknown one, so it confirms nothing.
+    if (!row || row.realActorUserId !== ctx.userId) throw new NotFoundException('Session');
+
+    const now = this.clock.now();
+    const spent = (reason: 'used' | 'expired' | 'ended') => new DomainException(
+      ErrorCode.IMPERSONATION_HANDOFF_SPENT,
+      AUTH_REFUSALS.IMPERSONATION_HANDOFF_SPENT[reason],
+      HttpStatus.GONE,
+      { reason, sessionId: String(row._id) },
+    );
+    if (row.handoffRedeemedAt) throw spent('used');
+    if (row.endedAt || row.expiresAt.getTime() <= now.getTime()) throw spent('ended');
+    if (!row.handoffExpiresAt || row.handoffExpiresAt.getTime() <= now.getTime()) throw spent('expired');
+
+    // The rest of the session's hour, never more: the token dies with the session it belongs to.
+    const ttlSeconds = Math.max(1, Math.floor((row.expiresAt.getTime() - now.getTime()) / 1000));
+    const accessToken = this.signer.sign({ sub: row.effectiveUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
+    let taken: ImpersonationSessionDocument | null;
+    try {
+      taken = await this.sessions.findOneAndUpdate(
+        { _id: row._id, handoffRedeemedAt: null, endedAt: null, deletedAt: null },
+        { $set: { handoffRedeemedAt: now, tokenHash: this.passwords.hashToken(accessToken) } },
+        { new: true },
+      ).exec();
+    } catch (err) {
+      // The same person, the same Super Admin, the same second as another session's token (ADR-0168 §4).
+      if (isDuplicateTokenHash(err)) {
+        throw new DomainException(
+          ErrorCode.IMPERSONATION_JUST_STARTED,
+          AUTH_REFUSALS.IMPERSONATION_JUST_STARTED.aMomentAgo,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
+    // A second redemption that read the row before the first wrote it: the first won, this one mints nothing.
+    if (!taken) throw spent('used');
+
+    const sessionId = String(row._id);
+    await this.audit.record(row.kpmId ? RequestContext.superAdminInTenant(ctx.userId, row.kpmId) : ctx, {
+      action: 'impersonation.window_opened',
+      targetCollection: 'users',
+      targetId: row.effectiveUserId,
+      after: { sessionId },
+    });
+    return { accessToken, expiresAt: row.expiresAt, sessionId, readOnly: true };
+  }
+
+  /** The checks, the row, the entry and the notices both kinds of start share; `handoff` decides what is minted. */
+  private async begin(
+    ctx: RequestContext,
+    targetUserId: string,
+    reason: string,
+    durationMinutes: number,
+    purpose: ImpersonationPurpose,
+    handoff: boolean,
+  ): Promise<{
+    accessToken: string | null; handoffCode: string | null; handoffExpiresAt: Date | null;
+    expiresAt: Date; sessionId: string;
+  }> {
     /*
      * **This one first, and the order is the point.**
      *
@@ -222,8 +368,13 @@ export class ImpersonationService {
       : ctx;
 
     // `sid` records who is really acting, so the resolved context can carry both.
-    const accessToken = this.signer.sign({ sub: targetUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
+    // For a new window (P19.23-T2 AC-7) no token yet: the window's redemption mints it (`redeemHandoff`).
+    const accessToken = handoff ? null : this.signer.sign({ sub: targetUserId, sid: `imp:${ctx.userId}` }, ttlSeconds);
     const expiresAt = new Date(this.clock.now().getTime() + ttlSeconds * 1000);
+    const handoffCode = handoff ? this.passwords.generateToken() : null;
+    const handoffExpiresAt = handoff
+      ? new Date(this.clock.now().getTime() + IMPERSONATION_HANDOFF_SECONDS * 1000)
+      : null;
 
     /**
      * **The session, so that ending it can mean something.**
@@ -249,7 +400,14 @@ export class ImpersonationService {
         realActorUserId: ctx.userId,
         effectiveUserId: targetUserId,
         kpmId,
-        tokenHash: this.passwords.hashToken(accessToken),
+        /*
+         * A window's row waits for its token with the hash of something no token can be (P19.23-T2 AC-7): unique, as
+         * the index wants, and matching no token anybody holds until the redemption writes the real one.
+         */
+        tokenHash: this.passwords.hashToken(accessToken ?? `handoff:${this.passwords.generateToken()}`),
+        handoffCodeHash: handoffCode ? this.passwords.hashToken(handoffCode) : null,
+        handoffExpiresAt,
+        handoffRedeemedAt: null,
         // Every session only looks (ADR-0206 §3): read-only, a support session, with nothing it may write.
         readOnly: true,
         purpose: 'support',
@@ -284,12 +442,12 @@ export class ImpersonationService {
       action: 'impersonation.started',
       targetCollection: 'users',
       targetId: targetUserId,
-      after: { reason: reason.trim(), minutes, readOnly: true, sessionId },
+      after: { reason: reason.trim(), minutes, readOnly: true, sessionId, ...(handoff ? { window: true } : {}) },
     });
 
     await this.announce(targetUserId, kpmId, office?.ownerUserId ?? null, reason.trim());
 
-    return { accessToken, expiresAt, sessionId, readOnly: true };
+    return { accessToken, handoffCode, handoffExpiresAt, expiresAt, sessionId };
   }
 
   /**

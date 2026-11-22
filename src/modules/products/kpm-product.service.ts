@@ -19,7 +19,7 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { Kpm } from '@/modules/tenants/kpm.schema';
 import { KpmProductConfigDocument } from './kpm-product-config.schema';
 import { KpmProductConfigRepository } from './kpm-product.repository';
-import { Product, ProductDocument } from './product.schema';
+import { heldByKpm, Product, ProductDocument } from './product.schema';
 import { objectionCards } from './product.service';
 import { documentSlotLabel, PRODUCTS_REFUSALS } from './products.messages';
 import { readFaq, readOfficePlanHighlights, type FaqEntry, type PlanHighlight } from './proposal-fields';
@@ -214,8 +214,9 @@ export class KpmProductService {
    */
   async shelfOf(ctx: RequestContext): Promise<OfficeShelf> {
     const companyId = await this.companyOf(ctx);
+    const held = await this.heldHere(ctx);
     const [products, rows] = await Promise.all([
-      this.productsOf(companyId).sort({ sortOrder: 1 }).exec(),
+      this.productsOf(companyId, held).sort({ sortOrder: 1 }).exec(),
       this.configs.find(ctx, {}),
     ]);
     const byProduct = new Map(rows.map((row) => [row.productId, row]));
@@ -477,7 +478,7 @@ export class KpmProductService {
    */
   async documentUrl(ctx: RequestContext, productId: string, slot: string): Promise<string> {
     const companyId = await this.companyOf(ctx);
-    const product = await this.productOf(companyId, productId);
+    const product = await this.productOf(companyId, productId, await this.heldHere(ctx));
     this.requireSlot(slot);
 
     const row = await this.configs.findOne(ctx, { productId });
@@ -657,11 +658,13 @@ export class KpmProductService {
   private async requireProduct(
     ctx: RequestContext, productId: string,
   ): Promise<ProductDocument> {
-    return this.productOf(await this.companyOf(ctx), productId);
+    return this.productOf(await this.companyOf(ctx), productId, await this.heldHere(ctx));
   }
 
-  private async productOf(companyId: string, productId: string): Promise<ProductDocument> {
-    const product = await this.productsOf(companyId)
+  private async productOf(
+    companyId: string, productId: string, held: Record<string, unknown>,
+  ): Promise<ProductDocument> {
+    const product = await this.productsOf(companyId, held)
       .findOne({ _id: productId })
       .exec()
       .catch(() => null);
@@ -674,8 +677,17 @@ export class KpmProductService {
    * (as `ProductService.of` applies it for the company's own side): `products` is
    * company-partitioned, so `companyId` — the office's own, from `companyOf` — is what scopes it.
    */
-  private productsOf(companyId: string) {
-    return this.products.find({ companyId, deletedAt: null });
+  private productsOf(companyId: string, held: Record<string, unknown>) {
+    return this.products.find({ companyId, deletedAt: null, ...held });
+  }
+
+  /**
+   * **The products this KPM has** (P19.23-T4 AC-5; ADR-0278 §4): `heldByKpm` over its id and when it was made — a new
+   * product published to other KPMs is on no shelf of this one, and a draft on nobody's.
+   */
+  private async heldHere(ctx: RequestContext): Promise<Record<string, unknown>> {
+    const kpm = await this.kpms.findById(ctx.kpmId).select('createdAt').lean().exec();
+    return heldByKpm(String(ctx.kpmId), (kpm as { createdAt?: Date } | null)?.createdAt ?? null);
   }
 
   /**

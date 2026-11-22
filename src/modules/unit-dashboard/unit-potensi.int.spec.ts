@@ -119,7 +119,11 @@ describe('P19.1-T6 the Potensi tab over HTTP', () => {
 
     it('P19.12-T6 AC-2 the view: an AB on Grup langsung; the Owner on Semua downline, the office’s cards; a `for` view direct', async () => {
       as('AGUS');
-      expect((await tab().expect(200)).body).toMatchObject({ scope: 'direct', scopes: { offered: ['direct'] }, informal: null });
+      // P19.18-T1 AC-2: Direct Unit beside Grup langsung, his group first chosen; Direct Unit read when asked (Dewi in it).
+      expect((await tab().expect(200)).body).toMatchObject({ scope: 'direct', scopes: { offered: ['unit', 'direct'] }, informal: null });
+      const unit = (await tab({ scope: 'unit' }).expect(200)).body;
+      expect(unit.units.map((u: { kind: string }) => u.kind)).toEqual(['direct']);
+      expect(unit.units[0].people.map((p: { name: string }) => p.name)).toEqual(['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']);
       as('OWNER');
       const owner = (await tab().expect(200)).body;
       expect(owner).toMatchObject({ scope: 'downline', scopes: { default: 'downline' } });

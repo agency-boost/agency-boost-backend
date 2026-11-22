@@ -91,10 +91,14 @@ describe('the compliance tree’s Events category (P18.3-T2)', () => {
       expect(catalog.find((e) => e.id === idOf('UPCOMING'))).toMatchObject({ phase: 'upcoming', startsOn: '2026-09-19' });
     });
 
-    it('P18.3-T2 AC-1 opens on the picker’s first event without an item, as the prototype does (Owner:3497)', async () => {
+    it('P19.19-T3 AC-3 without an item, every event at once — Semua event, the card’s own figure, each cell done or not', async () => {
       const result = await read(ownerScope());
-      expect(result.item).toBe(idOf('RUNNING_LEADERS'));
+      expect(result.item).toBeNull();
       expect(result.cells!.size).toBe(ACTIVE.length);
+      const cells = [...result.cells!.values()];
+      expect(cells.filter((c) => c.done === true)).toHaveLength(result.chip.count);
+      expect(cells.filter((c) => c.done !== null)).toHaveLength(result.chip.of);
+      expect(new Set(cells.map((c) => c.status))).toEqual(new Set(cells.map((c) => (c.done === null ? null : c.done ? 'done' : 'not_done'))));
     });
 
     it('P18.3-T2 AC-1 answers 404 for an event it does not list: another office’s, archived, last year’s, or no id at all', async () => {
@@ -108,7 +112,8 @@ describe('the compliance tree’s Events category (P18.3-T2)', () => {
       const b = scopeOf(office.as('B_OWNER'), [office.id.B_AB, office.id.B_AGENT]);
       const result = await read(b);
       expect(result.catalog.map((e) => e.id)).toEqual([idOf('B_PAST')]);
-      expect(result.item).toBe(idOf('B_PAST'));
+      expect(result.item).toBeNull();
+      expect((await read(b, idOf('B_PAST'))).item).toBe(idOf('B_PAST'));
       await expect(read(b, idOf('PAST_ALL'))).rejects.toMatchObject({ status: 404 });
     });
 
@@ -237,7 +242,7 @@ describe('the compliance tree’s Events category (P18.3-T2)', () => {
           counts: { audience: 1, attended: 1, registered: 0, unconfirmed: 0, no_show: 0, not_registered: 0 },
         }]]),
       } as never);
-      const result = await stub.read(scopeOf(office.as('OWNER'), [office.id.RINA]), { selected: true, item: null });
+      const result = await stub.read(scopeOf(office.as('OWNER'), [office.id.RINA]), { selected: true, item: listed.id });
       expect(result.cells!.get(office.id.RINA)).toEqual({ status: 'attended', done: true, on: '2026-09-01', second: 'shared' });
       expect(result.chip).toEqual({ count: 1, of: 1 });
     });
@@ -248,11 +253,28 @@ describe('the compliance tree’s Events category (P18.3-T2)', () => {
         eventsBetween: async () => [listed],
         attendanceOfMany: async () => new Map(),
       } as never);
-      const result = await stub.read(scopeOf(office.as('OWNER'), [office.id.RINA]), { selected: true, item: null });
+      const result = await stub.read(scopeOf(office.as('OWNER'), [office.id.RINA]), { selected: true, item: listed.id });
       expect(result).toEqual({
         catalog: [expect.objectContaining({ id: listed.id })], chip: { count: 0, of: 0 }, item: listed.id,
         cells: new Map([[office.id.RINA, { status: null, done: null, on: null, second: null }]]),
       });
+    });
+
+    it('P19.19-T3 AC-3 Semua event: a member in no listed event’s audience draws —, and is in neither side of the chip', async () => {
+      // Rina is in the one listed event's audience and attended it; Budi (a leaders-only event, say) is in none.
+      const listed = event({ id: '66f00000000000000000e003' });
+      const stub = new EventsComplianceCategory({
+        eventsBetween: async () => [listed],
+        attendanceOfMany: async () => new Map([[listed.id, {
+          event: listed, rows: [{ ...row('attended'), membershipId: office.id.RINA }], rate: 100,
+          counts: { audience: 1, attended: 1, registered: 0, unconfirmed: 0, no_show: 0, not_registered: 0 },
+        }]]),
+      } as never);
+      const result = await stub.read(scopeOf(office.as('OWNER'), [office.id.RINA, office.id.BUDI]), { selected: true, item: null });
+      expect(result.item).toBeNull();
+      expect(result.cells!.get(office.id.RINA)).toEqual({ status: 'done', done: true, on: null, second: null });
+      expect(result.cells!.get(office.id.BUDI)).toEqual({ status: null, done: null, on: null, second: null });
+      expect(result.chip).toEqual({ count: 1, of: 1 });
     });
   });
 
@@ -290,7 +312,7 @@ describe('the compliance tree’s Events category (P18.3-T2)', () => {
         january, idOf('UPCOMING'), idOf('RUNNING_LEADERS'), idOf('ENDS_NOW'), idOf('PAST_ALL'), idOf('PAST_CHOSEN'), idOf('PAST_LEADERS'),
       ]);
       expect(result.catalog[0]).toMatchObject({ title: 'JAN KICKOFF', phase: 'upcoming', startsOn: '2027-01-11' });
-      expect(result.item).toBe(january);
+      expect(result.item).toBeNull();
       const lastYear = (await wired.events.list(office.as('OWNER'))).find((e) => e.code === 'LAST_YEAR')!.id;
       await expect(read(november(), lastYear)).rejects.toMatchObject({ status: 404 });
       const archived = (await wired.events.list(office.as('OWNER'), true)).find((e) => e.code === 'ARCHIVED_JAN')!.id;

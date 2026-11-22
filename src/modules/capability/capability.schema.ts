@@ -25,6 +25,14 @@ export class CapabilityEntry {
   /** Archived items stay readable on assessments that already reference them, and take no new ones. */
   @Prop({ type: String, enum: ['active', 'archived'], default: 'active' })
   status!: 'active' | 'archived';
+
+  /**
+   * **The stages an archived milestone was taken out of** (P19.21-T3 AC-4, ADR-0274): archiving a milestone under a
+   * *tahap* takes it out of every stage that required it, and restoring it puts it back into those that still exist.
+   * `[]` on every other entry, and on a milestone archived before P19.21.
+   */
+  @Prop({ type: [String], default: [] })
+  detachedFrom!: string[];
 }
 
 export const CapabilityEntrySchema = SchemaFactory.createForClass(CapabilityEntry);

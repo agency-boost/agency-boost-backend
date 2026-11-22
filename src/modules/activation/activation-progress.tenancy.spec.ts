@@ -418,6 +418,72 @@ describe('the activation instance (P13-T1)', () => {
       expect(await activations()).toHaveLength(1);
     });
 
+    /*
+     * P19.16-T2 (ADR-0264; the client's request of 17 November): with the month the person joined the company on their
+     * account, that month decides — a new hire when it is in the join date's year — on every path that classifies.
+     */
+    const withMonth = async (userId: string, companyJoinMonth: string | null) => {
+      await mongoose.model(User.name, UserSchema).updateOne({ _id: userId }, { $set: { companyJoinMonth } });
+    };
+
+    it('P19.16-T2 AC-1 an approval today of somebody who joined the company years ago makes them an existing agent, with no activation', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const tenured = await member(KPM_A, 'agent', null, 'pending');
+      await withMonth(tenured.userId, '2019-06');
+      await approvals.approve(leader.ctx, await requestFrom(tenured.id, leader.id));
+
+      expect(await read(KPM_A, tenured.id)).toMatchObject({ joinDate: TODAY, joinedAs: 'existing_agent' });
+      expect(await activations()).toEqual([]);
+    });
+
+    it('P19.16-T2 AC-1 an approval of somebody who joined the company this year makes them a new hire, whatever the 90 days say', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const recruit = await member(KPM_A, 'agent', null, 'pending');
+      const backdated = await member(KPM_A, 'agent', null, 'pending');
+      await withMonth(recruit.userId, '2026-08');
+      await withMonth(backdated.userId, '2026-01');
+      await approvals.approve(leader.ctx, await requestFrom(recruit.id, leader.id));
+      // 91 days back made an existing agent by the 90-day rule; joined the company that year, it is a new hire now.
+      await approvals.tag(leader.ctx, backdated.id, addDays(TODAY, -91));
+
+      expect(await read(KPM_A, recruit.id)).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+      expect(await read(KPM_A, backdated.id)).toMatchObject({ joinDate: '2026-06-16', joinedAs: 'new_hire' });
+    });
+
+    it('P19.16-T2 AC-1 a leader’s code decides by the month too; with no month on file the 90-day rule stands', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const tenured = await person();
+      await withMonth(tenured, '2021-02');
+      await codes.redeem(new RequestContext(tenured, 'none', null), leader.leaderCode);
+      expect((await members.find(office(KPM_A), { userId: tenured }))[0]).toMatchObject({ joinDate: TODAY, joinedAs: 'existing_agent' });
+
+      const unknown = await person();
+      await codes.redeem(new RequestContext(unknown, 'none', null), leader.leaderCode);
+      expect((await members.find(office(KPM_A), { userId: unknown }))[0]).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+    });
+
+    it('P19.16-T2 AC-1 a month given decides over the account’s; the import and the Owner stay forced, whatever the month', async () => {
+      const leader = await member(KPM_A, 'aab', null);
+      const given = await hierarchy.create(office(KPM_A), {
+        userId: await person(), role: 'agent', leaderId: leader.id, status: 'active', joining: { companyJoinMonth: '2026-05' },
+      });
+      // What `RosterImportService` and `TenantService` pass (ADR-0169 §6, ADR-0264 §1): an import starts no activation.
+      const importedUser = await person();
+      await withMonth(importedUser, '2026-05');
+      const imported = await hierarchy.create(office(KPM_A), {
+        userId: importedUser, role: 'agent', leaderId: leader.id, status: 'active', joining: { joinedAs: 'existing_agent' },
+      });
+      const ownerUser = await person();
+      await withMonth(ownerUser, '2026-04');
+      const owner = await hierarchy.create(office(KPM_A), {
+        userId: ownerUser, role: 'ab', leaderId: null, status: 'active', joining: { joinedAs: 'existing_agent' },
+      });
+
+      expect(given).toMatchObject({ joinDate: TODAY, joinedAs: 'new_hire' });
+      expect(imported).toMatchObject({ joinDate: TODAY, joinedAs: 'existing_agent' });
+      expect(owner).toMatchObject({ joinDate: TODAY, joinedAs: 'existing_agent' });
+    });
+
     it('P18.8-T2 AC-1 cross-tenant: office A approving or tagging office B’s member with a join date reaches nothing, and writes nothing there', async () => {
       const leaderA = await member(KPM_A, 'aab', null);
       const leaderB = await member(KPM_B, 'aab', null);

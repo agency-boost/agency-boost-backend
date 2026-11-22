@@ -10,25 +10,27 @@ import { Kpm, type KpmDocument } from '@/modules/tenants/kpm.schema';
 import { User, type UserDocument } from '@/modules/users/user.schema';
 import { ProposalBranding } from './proposal-branding';
 import { ProposalPdfBuilder, ProposalPdfTooLong } from './proposal-pdf.builder';
-import { dispositionOf, proposalFileName, type PdfInput } from './proposal-pdf.layout';
+import { dispositionOf, proposalFileName } from './proposal-pdf.layout';
+import { pdfModelOf, type PdfModelInput } from './proposal-pdf.model';
 import { ProposalService } from './proposal.service';
 
 /** The file a route answers: its bytes, its `Content-Disposition`, and how many pages it has. */
 export interface ProposalPdfFile { bytes: Buffer; disposition: string; pages: number }
 
 /**
- * **`GET /proposals/:proposalId/pdf`: the file, built from the data each time and kept nowhere** (P19.7-T3; ADR-0222).
+ * **`GET /proposals/:proposalId/pdf`: the file, built from the data each time and kept nowhere** (P19.7-T3; ADR-0222;
+ * *redrawn 2026-11-12 by P19.14-T3, ADR-0256*).
  *
  * - **The caller's own proposal, or `404 PROPOSAL_NOT_FOUND`** — the same lookup every proposal route makes, so another
  *   member's, another KPM's and a deleted one answer alike (ADR-0221 §2). A view-only session never reaches here: the
  *   guard refuses `proposal:download` (`403 PERM_DENIED`).
- * - **A *Draf* is built too**: step 3 shows its pages before *Simpan PDF* finishes it. The pages carry no status, and
- *   nothing here changes the proposal.
+ * - **A *Draf* is built too**: the preview shows its pages before *Simpan PDF* finishes it. Nothing here changes it.
  * - **Read now, never kept** (ADR-0222 §2): the agent's name and phone (`users`) and agent code (`memberships`), the
- *   KPM's name, its company's name for the disclaimer, and the KPM's branding as it shows today. The bytes are built in
- *   memory and returned; no disk, bucket, cache or log holds them.
- * - **Audited as `proposal.pdf_built`**: the proposal, its item count and page count, no name; failing open, as a read's
- *   audit does — a file the agent asked for is not withheld because the log could not be written.
+ *   KPM's name, its company's name for the disclaimer, and the KPM's branding as it shows today — so a download again
+ *   after the KPM changes its branding carries the new one. The proposal becomes the file's model
+ *   (`proposal-pdf.model.ts`), the model its pages (`proposal-pdf.layout.ts`); the bytes are built in memory and
+ *   returned, and no disk, bucket, cache or log holds them.
+ * - **Audited as `proposal.pdf_built`**: the proposal, its item count and page count, no name; failing open.
  */
 @Injectable()
 export class ProposalPdfService {
@@ -41,7 +43,7 @@ export class ProposalPdfService {
     private readonly memberships: MembershipRepository,
     private readonly audit: AuditService,
     private readonly clock: Clock,
-    // Global identity, the office and its company: read for three words on the page, never written.
+    // Global identity, the office and its company: read for a few words on the page, never written.
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
     @InjectModel(Kpm.name) private readonly kpms: Model<KpmDocument>,
     @InjectModel(Company.name) private readonly companies: Model<CompanyDocument>,
@@ -50,10 +52,10 @@ export class ProposalPdfService {
   async pdf(ctx: RequestContext, id: string): Promise<ProposalPdfFile> {
     const proposal = await this.proposals.read(ctx, id);
     const [agent, office, branding] = await Promise.all([this.agentOf(ctx), this.officeOf(ctx), this.branding.of(ctx)]);
-    const input: PdfInput = { proposal, agent, insurer: office.insurer, kpmName: office.name, branding };
+    const input: PdfModelInput = { proposal, agent, insurer: office.insurer, kpmName: office.name, branding };
     let built;
     try {
-      built = await this.builder.build(input, this.clock.now());
+      built = await this.builder.build(pdfModelOf(input), this.clock.now());
     } catch (err) {
       // A bound raised without the worst-case test: logged with the proposal's id and no name, answered `500`.
       if (err instanceof ProposalPdfTooLong) this.logger.error(`proposal ${proposal.id}: ${err.message}`);
@@ -64,7 +66,7 @@ export class ProposalPdfService {
   }
 
   /** The agent, as their profile and membership hold them now. A part they lack is `null`, and the page leaves it out. */
-  private async agentOf(ctx: RequestContext): Promise<PdfInput['agent']> {
+  private async agentOf(ctx: RequestContext): Promise<PdfModelInput['agent']> {
     const membership = ctx.membershipId ? await this.memberships.findOne(ctx, { _id: ctx.membershipId }) : null;
     const userId = membership?.userId ?? ctx.userId;
     const user = isValidObjectId(userId)

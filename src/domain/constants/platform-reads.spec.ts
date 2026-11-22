@@ -1,5 +1,6 @@
 import {
-  KPM_COMPARISON_SORTS, PLATFORM_ACCOUNT_KPM_FILTERS, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES, PLATFORM_READ,
+  PLATFORM_ACCOUNT_KPM_FILTERS, PLATFORM_MEMBER_ROLES, PLATFORM_MEMBER_STATUSES,
+  PLATFORM_MEMBER_TEST_FILTERS, PLATFORM_READ,
 } from './index';
 
 /** `metrics-and-definitions.md` §B.35 (P19.4-T3; ADR-0207): each value pinned, so a drift fails here first. */
@@ -24,15 +25,18 @@ describe('P19.4-T3 the platform reads’ constants (§B.35)', () => {
       'platform_read.kpm_advanced_analytics',
       // P19.12-T2 AC-1 (ADR-0245 §1): *Akun terdaftar*, audited per read.
       'platform_read.accounts',
+      // P19.23-T3 AC-1 (ADR-0277): *Anggota*'s detail, the phone and the email, audited per read.
+      'platform_read.member_detail',
     ]);
   });
 
-  it('P19.4-T3 AC-1 the filters and the sorts', () => {
+  it('P19.4-T3 AC-1 the filters (the comparison’s sorts went with it, P19.23)', () => {
     expect(PLATFORM_MEMBER_ROLES).toEqual(['ab', 'aab', 'agent']);
     expect(PLATFORM_MEMBER_STATUSES).toEqual(['active', 'pending', 'removed']);
-    expect(KPM_COMPARISON_SORTS).toEqual([
-      'kpm', 'company', 'members', 'activeThisMonth', 'activeUsers', 'coached7d', 'coached30d', 'production', 'recruitment',
-    ]);
+  });
+
+  it('P19.23-T3 AC-1 Anggota’s test-account filter: Akun tes alone (OD-421)', () => {
+    expect(PLATFORM_MEMBER_TEST_FILTERS).toEqual(['only']);
   });
 
   it('P19.12-T2 AC-1 Akun terdaftar’s KPM filter: Tanpa KPM and Punya KPM', () => {

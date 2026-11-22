@@ -32,6 +32,11 @@ export interface PitchSlotView {
    * HTML page that a reader draws only in the sandboxed frame (P19.6-T2, ADR-0217 §4).
    */
   file: { name: string; bytes: number; uploadedOn: string; mimeType: string } | null;
+  /**
+   * **A material given as a link** (P19.21-T3 AC-6, ADR-0274): the `https://` address and the day it was set, in the
+   * office's calendar. `null` where the slot holds a file or nothing — a slot holds one or the other.
+   */
+  link: { url: string; addedOn: string } | null;
   /** `[]` for a slot with no checklist. Whether each item is ticked — never by whom. */
   checklist: { code: string; label: string; ticked: boolean }[];
   /** `0` while the slot has never held a file. */
@@ -98,7 +103,8 @@ export class RecruitmentPitchService {
     this.requireOffice(ctx, 'url');
     const definition = this.requireSlot(slotCode);
     const row = await this.slots.findOne(ctx, { slot: definition.code });
-    if (!row) throw new NotFoundException('Document');
+    // A slot given a link has no file to sign: its address is in the read itself (P19.21-T3 AC-6).
+    if (!row?.storageKey) throw new NotFoundException('Document');
     const url = await this.assets.urlFor(ctx, row.storageKey);
     const expiresAt = new Date(this.clock.now().getTime() + RECRUITMENT.LINK_TTL_SECONDS * 1000);
     return { url, expiresAt: expiresAt.toISOString() };
@@ -151,9 +157,10 @@ export class RecruitmentPitchService {
     // Another attach of this very file got there between the read above and this write: nothing changed.
     if (!swapped) return this.view(definition, row, await this.offices.timezoneOf(ctx), ctx.reader);
 
-    // Referenced once more only by a write that swapped the file in; the one it replaced, once less.
+    // Referenced once more only by a write that swapped the file in; the one it replaced, once less — a link held
+    // no file, so it releases nothing.
     await this.assets.retain(ctx, asset.storageKey);
-    if (previous) await this.assets.release(ctx, previous.storageKey);
+    if (previous?.storageKey) await this.assets.release(ctx, previous.storageKey);
 
     const cleared = (previous?.confirmations ?? []).map((c) => c.item);
     await this.audit.record(ctx, {
@@ -161,7 +168,10 @@ export class RecruitmentPitchService {
       targetCollection: PITCH,
       targetId: String(row._id),
       before: previous
-        ? { storageKey: previous.storageKey, fileName: previous.fileName, version: previous.version, confirmed: cleared }
+        ? {
+          storageKey: previous.storageKey, fileName: previous.fileName, linkUrl: previous.linkUrl ?? null,
+          version: previous.version, confirmed: cleared,
+        }
         : null,
       // What this write wrote — the version the one it replaced held, plus one — never a re-read, which a later
       // write could already have moved.
@@ -171,6 +181,47 @@ export class RecruitmentPitchService {
       },
     });
     return this.view(definition, row, await this.offices.timezoneOf(ctx), ctx.reader);
+  }
+
+  /**
+   * `PUT /kpm/settings/recruitment-pitch/:slot/link` (P19.21-T3 AC-6, ADR-0274): **a link as the slot's material**, in
+   * place of a file or a link it held. An `https://` address of at most `PITCH_LINK_MAX_LENGTH` characters with no user
+   * name or password — anything else is `400 VALIDATION_FAILED`, nothing written. Then, in one write, as `attach`:
+   * whatever the slot held is replaced, **every confirmation is cleared**, `version` moves by one, and a file it held is
+   * released, never deleted. Audited (`recruitment_pitch.linked`). The link the slot already holds changes nothing.
+   * The server never fetches it.
+   */
+  async setLink(ctx: RequestContext, slotCode: string, raw: string): Promise<PitchSlotView> {
+    this.requireOffice(ctx, 'setLink');
+    const definition = this.requireSlot(slotCode);
+    const linkUrl = pitchLinkOf(raw);
+    if (linkUrl === null) {
+      throw invalid(RECRUITMENT_REFUSALS.VALIDATION_FAILED.notALink({ max: RECRUITMENT.PITCH_LINK_MAX_LENGTH }), {
+        field: 'url',
+      });
+    }
+    const { previous, swapped } = await this.slots.setLink(ctx, definition.code, {
+      linkUrl, uploadedAt: this.clock.now(), uploadedByMembershipId: ctx.membershipId,
+    });
+    const row = (await this.slots.findOne(ctx, { slot: definition.code }))!;
+    const timezone = await this.offices.timezoneOf(ctx);
+    if (!swapped) return this.view(definition, row, timezone, ctx.reader);
+
+    if (previous?.storageKey) await this.assets.release(ctx, previous.storageKey);
+    const cleared = (previous?.confirmations ?? []).map((c) => c.item);
+    await this.audit.record(ctx, {
+      action: 'recruitment_pitch.linked',
+      targetCollection: PITCH,
+      targetId: String(row._id),
+      before: previous
+        ? {
+          storageKey: previous.storageKey, fileName: previous.fileName, linkUrl: previous.linkUrl ?? null,
+          version: previous.version, confirmed: cleared,
+        }
+        : null,
+      after: { slot: definition.code, linkUrl, version: (previous?.version ?? 0) + 1, clearedItems: cleared },
+    });
+    return this.view(definition, row, timezone, ctx.reader);
   }
 
   /**
@@ -253,14 +304,36 @@ export class RecruitmentPitchService {
       title: render(pitchSlotTitle(definition.code), reader),
       line: render(pitchSlotLine(definition.code), reader),
       required: definition.required,
-      state: recruitmentPitchState(row !== null, checklist),
-      file: row ? {
-        name: row.fileName, bytes: row.bytes, uploadedOn: localDayOf(row.uploadedAt, timezone), mimeType: row.mimeType,
+      // A file or a link is the slot's material (P19.21-T3 AC-6); a row with neither is never written.
+      state: recruitmentPitchState(row !== null && (!!row.storageKey || !!row.linkUrl), checklist),
+      file: row?.storageKey ? {
+        name: row.fileName ?? '', bytes: row.bytes ?? 0, uploadedOn: localDayOf(row.uploadedAt, timezone),
+        mimeType: row.mimeType ?? '',
       } : null,
+      link: row?.linkUrl ? { url: row.linkUrl, addedOn: localDayOf(row.uploadedAt, timezone) } : null,
       checklist,
       version: row?.version ?? 0,
     };
   }
+}
+
+/**
+ * **A pitch link, or `null`** (P19.21-T3 AC-6, ADR-0274): trimmed; an absolute `https:` URL the platform's parser
+ * reads, with a host, no user name or password, and at most `PITCH_LINK_MAX_LENGTH` characters. Written back as typed
+ * (trimmed), so the office's own address is what agents open.
+ */
+export function pitchLinkOf(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (text === '' || text.length > RECRUITMENT.PITCH_LINK_MAX_LENGTH || /\s/.test(text)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) return null;
+  return text;
 }
 
 function invalid(message: Sentence<'VALIDATION_FAILED'>, details: Record<string, unknown>): DomainException {

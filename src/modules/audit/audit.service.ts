@@ -71,6 +71,21 @@ export class AuditService {
     }
   }
 
+  /**
+   * **A change to a company's data, recorded in the platform's log whoever made it** (ADR-0260 §6, amended
+   * 2026-11-12): the catalogue, its premium tables and rules, its uploads and illustrations belong to the insurer, not
+   * to any office. Written as `record` writes — never throwing, the actor from the context — but in the `kpmId: null`
+   * scope, so a *Kelola data produk* holder's change to another insurer's data never lands in their own office's log,
+   * where that office's Owner would read the other insurer's figures. The Super Admin's own writes were there already.
+   */
+  async recordForCompany(ctx: RequestContext, entry: AuditEntry): Promise<void> {
+    try {
+      await this.model.create({ ...this.rowOf(ctx, entry), kpmId: null });
+    } catch (err) {
+      this.logger.error({ err, action: entry.action }, 'failed to write audit entry');
+    }
+  }
+
   /** The row an entry is written as: both actors under impersonation, and whether it was on somebody's behalf. */
   private rowOf(ctx: RequestContext, entry: AuditEntry): Record<string, unknown> {
     const { actorUserId, effectiveUserId } = ctx.auditActors;
@@ -119,6 +134,41 @@ export class AuditService {
       .sort({ createdAt: -1, _id: -1 })
       .limit(limit)
       .exec();
+  }
+
+  /**
+   * **The platform console's read across offices, by name** (P19.23-T6 AC-1; ADR-0279): one batch, newest first, after a
+   * row — as `findNewestFirst`, but with **no scope of its own**: `reach` says which rows across every office are read,
+   * and only `AuditReadService` calls it, for the Super Admin's *Semua KPM* — the platform's log and every Super Admin
+   * change inside a KPM. The named cross-tenant method, never an absent scope (invariant §1).
+   */
+  async findNewestFirstAcrossOffices(
+    reach: FilterQuery<AuditLogDocument>,
+    filter: FilterQuery<AuditLogDocument>,
+    after: { at: Date; id: string } | null,
+    limit: number,
+  ): Promise<AuditLogDocument[]> {
+    const past = after
+      ? [{ $or: [{ createdAt: { $lt: after.at } }, { createdAt: after.at, _id: { $lt: new Types.ObjectId(after.id) } }] }]
+      : [];
+    return this.model
+      .find({ $and: [reach, filter, ...past] })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /**
+   * **The different values of one field across offices** (P19.23-T6 AC-1): `distinctWithin`'s, for the same reach — and
+   * `targetId`, for the accounts a `super_admin.*` row names.
+   */
+  async distinctAcrossOffices(
+    reach: FilterQuery<AuditLogDocument>,
+    key: 'action' | 'actorUserId' | 'targetId',
+    filter: FilterQuery<AuditLogDocument> = {},
+  ): Promise<string[]> {
+    const values = await this.model.distinct(key, { $and: [reach, filter] }).exec();
+    return (values as unknown[]).filter((v): v is string => typeof v === 'string');
   }
 
   /**

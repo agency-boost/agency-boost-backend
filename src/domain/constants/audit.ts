@@ -19,4 +19,9 @@ export const AUDIT_LOG = Object.freeze({
    * on the same target within 10 minutes grouped with a count pill"*).
    */
   GROUP_WINDOW_MINUTES: 10,
+  /**
+   * **The longest *Cari perubahan* the read accepts, in characters** (P19.23-T6 AC-1; ADR-0279): a search is a few words
+   * a line says, read as text — longer is refused `400 VALIDATION_FAILED` naming `q` before a query is built.
+   */
+  SEARCH_MAX_LENGTH: 100,
 });

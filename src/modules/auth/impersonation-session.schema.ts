@@ -104,6 +104,23 @@ export class ImpersonationSession {
   @Prop({ type: String, enum: [...IMPERSONATION_END_REASONS], default: null })
   endReason!: ImpersonationEndReason | null;
 
+  /**
+   * ***Lihat sebagai*'s new window** (P19.23-T2 AC-7; ADR-0277): the hash of the one-time code the window is opened on,
+   * for a session started with `handoff: true` — whose access token is not minted at the start but when the window
+   * redeems the code (`ImpersonationService.redeemHandoff`). `null` for a session started in its own tab, as every
+   * session was before.
+   */
+  @Prop({ type: String, default: null })
+  handoffCodeHash!: string | null;
+
+  /** When the window's code stops opening anything: `IMPERSONATION_HANDOFF_SECONDS` after the start. */
+  @Prop({ type: Date, default: null })
+  handoffExpiresAt!: Date | null;
+
+  /** When the window redeemed the code — once: a second redemption is `410 IMPERSONATION_HANDOFF_SPENT`. */
+  @Prop({ type: Date, default: null })
+  handoffRedeemedAt!: Date | null;
+
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
 }
@@ -115,3 +132,9 @@ ImpersonationSessionSchema.index({ kpmId: 1, startedAt: -1 });
 
 /** Ending every session an operator has open. */
 ImpersonationSessionSchema.index({ effectiveUserId: 1, endedAt: 1 });
+
+/** *Lihat sebagai*'s window redeeming its one-time code (P19.23-T2 AC-7): only the rows that carry one. */
+ImpersonationSessionSchema.index(
+  { handoffCodeHash: 1 },
+  { partialFilterExpression: { handoffCodeHash: { $type: 'string' } } },
+);

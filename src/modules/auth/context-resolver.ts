@@ -1,16 +1,17 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { RequestContext, TenantMembership, isEffectiveCoreLeader } from '@/common/context/request-context';
-import { DomainException } from '@/common/errors/domain.exception';
+import { DomainException, NotFoundException } from '@/common/errors/domain.exception';
 import { ErrorCode } from '@/common/errors/error-codes';
-import { readerOf } from '@/common/i18n/reader';
+import { readerOf, type Reader } from '@/common/i18n/reader';
 import { isLanguage, type Language } from '@/domain/constants/language';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { isEnded } from '@/modules/tenants/subscription';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { Membership, MembershipDocument } from '@/modules/org/membership.schema';
+import { ProductDataGrant, ProductDataGrantDocument } from '@/modules/product-data/product-data-grant.schema';
 import { AUTH_REFUSALS } from './auth.messages';
 
 /**
@@ -30,6 +31,12 @@ export class ContextResolver {
     @InjectModel(Membership.name) private readonly memberships: Model<MembershipDocument>,
     // The office's today, for the end of its subscription (ADR-0112 §3). Never `new Date()`.
     private readonly clock: Clock,
+    /*
+     * **The person's *Kelola data produk* grant** (ADR-0260 §2; P19.15-T4 AC-2), read here on every request of an active
+     * Owner or Admin, so giving, changing or removing it is in force from their next request. Optional so a spec that is
+     * about something else may build the resolver without it: nobody then holds one.
+     */
+    @Optional() @InjectModel(ProductDataGrant.name) private readonly grants?: Model<ProductDataGrantDocument>,
   ) {}
 
   async resolve(
@@ -53,6 +60,15 @@ export class ContextResolver {
      * written there (ADR-0179 §2), so the support person's screen's language, or nobody's.
      */
     headerLanguage: Language | null = null,
+    /**
+     * **The KPM a Super Admin works inside** (ADR-0268 §3; P19.17 F2): the request's `X-Kpm-Id`, read by the guard, or
+     * `null`. Honoured **only for a `platformRole: 'super_admin'` account acting as themselves** — the context is then
+     * that KPM's Owner's (`RequestContext.superAdminInKpm`, `can()`), whatever membership the account holds elsewhere.
+     * **Ignored for everybody else**, a support session included (its user is the member, never a Super Admin), so a
+     * stale header left in a browser after a sign-in as somebody else changes nothing. A KPM that does not exist, or has
+     * been deleted, is `404 NOT_FOUND`; a suspended or archived one is entered — the Super Admin is who mends it.
+     */
+    enteredKpmId: string | null = null,
   ): Promise<RequestContext> {
     const user = await this.users.findOne({ _id: userId, deletedAt: null }).exec();
     if (!user) {
@@ -71,6 +87,13 @@ export class ContextResolver {
         AUTH_REFUSALS.AUTH_ACCOUNT_DEACTIVATED.deactivated,
         HttpStatus.FORBIDDEN,
       ).writtenFor(reader);
+    }
+
+    if (enteredKpmId !== null && user.platformRole === 'super_admin' && impersonatorUserId === null) {
+      return RequestContext.superAdminInKpm(
+        new RequestContext(userId, 'super_admin', null, null, null, user.mustChangePassword === true, false, reader),
+        await this.enteredKpm(enteredKpmId, reader),
+      );
     }
 
     const membership = await this.resolveMembership(userId);
@@ -133,7 +156,36 @@ export class ContextResolver {
       // Every session, and never outside one: somebody acting as themselves is not being restrained.
       impersonatorUserId !== null,
       reader,
+      await this.productDataCompaniesOf(userId, membership),
     );
+  }
+
+  /**
+   * **The KPM named by `X-Kpm-Id`, or `404`** (ADR-0268 §3): an id that is not an ObjectId is refused before it reaches
+   * the query, so a malformed header is a `404`, never a cast error's `500`. The id is read back from the row.
+   */
+  private async enteredKpm(kpmId: string, reader: Reader): Promise<string> {
+    const kpm = isValidObjectId(kpmId)
+      ? await this.kpms.findOne({ _id: kpmId, deletedAt: null }).select('_id').exec()
+      : null;
+    if (!kpm) throw new NotFoundException('KPM').writtenFor(reader);
+    return String(kpm._id);
+  }
+
+  /**
+   * **The companies their *Kelola data produk* grant ticks** (ADR-0260 §2): read only for an **active KPM Owner or KPM
+   * Admin**, who alone may hold it — anybody else is answered empty without a read, so an agent's request costs nothing
+   * more. A grant removed, or an Admin whose access the Owner took away, holds nothing from the next request. In a
+   * support session it is read as for the person, so the session sees their *Data produk* — read-only, as every
+   * session is (`can()`, by the permission's verb).
+   */
+  private async productDataCompaniesOf(userId: string, membership: TenantMembership | null): Promise<readonly string[]> {
+    if (!this.grants || membership?.status !== 'active' || !(membership.isKpmOwner || membership.isKpmAdmin)) return [];
+    const grant = await this.grants
+      .findOne({ userId, revokedAt: null, deletedAt: null }, { companyIds: 1 })
+      .lean()
+      .exec() as { companyIds?: string[] } | null;
+    return grant?.companyIds ?? [];
   }
 
   /**

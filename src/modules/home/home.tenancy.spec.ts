@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
+import { RequestContext } from '@/common/context/request-context';
 import { TenantDay } from '@/modules/tenants/tenant-day.service';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
@@ -37,7 +38,6 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
     home = new HomeService(
       new TenantDay(wired.kpms as never, wired.clock),
       wired.unitDashboard,
-      wired.paceStatus,
       wired.coachingReadings,
       wired.activityReadings,
       wired.memberships,
@@ -89,36 +89,34 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   }, 120_000);
   afterAll(stopMongo);
 
-  const read = (who: Who): Promise<HomeView> => home.read(office.as(who));
+  const read = (who: Who, query: Parameters<HomeService['read']>[1] = {}): Promise<HomeView> => home.read(office.as(who), query);
   const team = (view: HomeView) => view.leader!.team.map((p) => office.name[whoOf(p.membershipId)]);
   const whoOf = (id: string) => (Object.keys(office.id) as Who[]).find((w) => office.id[w] === id)!;
 
   describe('UI-100 the leader’s tiles', () => {
-    it('UI-100 Active Agent shows exactly the Unit Dashboard tile: its figure, its manpower and its Unit / AAB split', async () => {
-      const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
-      // Over Grup langsung, the dashboard's default (ADR-0249 §5): its AB side is nobody, and Home draws none.
-      const { ab, ...split } = dashboard.tiles.potentialActive;
-      expect(ab).toEqual({ count: 0, of: 0 });
-      expect(view.leader!.activeAgent).toEqual(split);
-      // Manpower: everybody in the Group, Agus included (UI-013).
-      expect(view.leader!.activeAgent.of).toBe(dashboard.tiles.team.total);
+    it('P19.18-T4 AC-1 Active Agent is the Unit Dashboard’s number: the upload’s active people of the month, out of everybody in the Group', async () => {
+      const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'), { scope: 'direct' })]);
+      const tile = dashboard.tiles.activeAgent;
+      expect(view.leader!.activeAgent).toMatchObject({ count: tile.count ?? 0, held: tile.held, of: dashboard.tiles.team.total });
+      // The split adds up: his Direct Unit — Dewi in it since ADR-0271 §2 — and the rest of his Grup langsung.
+      const { unit, aab } = view.leader!.activeAgent;
+      expect([unit.of, aab.of]).toEqual([4, 7]);
+      expect(unit.count + aab.count).toBe(view.leader!.activeAgent.count);
       expect(view.month).toBe(dashboard.month);
     });
 
-    it('UI-100 the same at every period the dashboard shows, and for an AAB’s own unit', async () => {
-      const dashboard = await wired.unitDashboard.read(office.as('AGUS'), { period: 'year' });
-      const { ab: _agusAb, ...agus } = dashboard.tiles.potentialActive;
-      expect((await read('AGUS')).leader!.activeAgent).toEqual(agus);
-      const sari = await wired.unitDashboard.read(office.as('SARI'));
-      const { ab: _sariAb, ...sariSplit } = sari.tiles.potentialActive;
-      expect((await read('SARI')).leader!.activeAgent).toEqual(sariSplit);
+    it('P19.18-T4 AC-1 the same for an AAB’s own unit, whatever period the dashboard shows', async () => {
+      const sari = await wired.unitDashboard.read(office.as('SARI'), { period: '7d' });
+      expect((await read('SARI')).leader!.activeAgent).toMatchObject({
+        count: sari.tiles.activeAgent.count ?? 0, held: sari.tiles.activeAgent.held, of: sari.tiles.team.total,
+      });
     });
 
     it('UI-100 Coaching 7 hari counts members coached in the last 7 days over the same manpower, split Unit / AAB', async () => {
       const view = await read('AGUS');
-      // Indah (4 days ago) in his Unit of three; Rina (today) and Budi (2 days ago, by a coach since gone) of the
-      // AAB side's eight. Sari's 1:1 was twelve days ago; Dimas's is a draft, which never counts.
-      expect(view.leader!.coached7d).toEqual({ count: 3, of: 11, unit: { count: 1, of: 3 }, aab: { count: 2, of: 8 } });
+      // Indah (4 days ago) in his Unit of four (Dewi in it, ADR-0271 §2); Rina (today) and Budi (2 days ago, by a coach since
+      // gone) of the AAB side's seven. Sari's 1:1 was twelve days ago; Dimas's is a draft, which never counts.
+      expect(view.leader!.coached7d).toEqual({ count: 3, of: 11, unit: { count: 1, of: 4 }, aab: { count: 2, of: 7 } });
       expect(view.leader!.coached7d.of).toBe(view.leader!.activeAgent.of);
     });
   });
@@ -126,12 +124,17 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
   describe('UI-101 Laporan tim', () => {
     it('UI-101 lists everybody in the Group but the reader, empty both days first, then empty today, then the rest', async () => {
       const view = await read('AGUS');
+      // Within each rank the roster's order (P19.18-T1 AC-6): Dewi in his unit after him, Sari's unit before Lukas's.
       expect(team(view)).toEqual([
-        'Dimas Pratama', 'Indah Permatasari', 'Dewi Lestari', 'Lukas Hartono', 'Tari Anggraini', 'Sari Puspita',
-        'Budi Santoso', 'Nina Lestari', 'Dodi Kurniawan', 'Rina Wijaya',
+        'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari', 'Sari Puspita', 'Budi Santoso', 'Nina Lestari',
+        'Dodi Kurniawan', 'Lukas Hartono', 'Tari Anggraini', 'Rina Wijaya',
       ]);
       expect(view.leader!.team.some((p) => p.membershipId === office.id.AGUS)).toBe(false);
-      expect(view.leader!.team.filter((p) => p.inUnit).map((p) => whoOf(p.membershipId))).toEqual(['DIMAS', 'INDAH']);
+      // P19.18-T1 AC-6: his Unit is Direct Unit — Dewi, an AAB with no team, in it.
+      expect(view.leader!.team.filter((p) => p.inUnit).map((p) => whoOf(p.membershipId)).sort()).toEqual(['DEWI', 'DIMAS', 'INDAH']);
+      // A field leader's list is not grouped (P19.18-T4).
+      expect(view.leader!.office).toBeNull();
+      expect(view.leader!.team.every((p) => p.unitKey === null)).toBe(true);
     });
 
     it('L7 an AAB reads Laporan tim of their own unit only: a peer AAB’s and the AB’s other units’ agents are absent', async () => {
@@ -218,7 +221,9 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
    */
   describe('P19.8-T2 AC-10 Home by role', () => {
     const zero = { count: 0, of: 0 };
-    const ZERO_BLOCK = { activeAgent: { ...zero, unit: zero, aab: zero }, coached7d: { ...zero, unit: zero, aab: zero }, team: [] };
+    const ZERO_BLOCK = {
+      activeAgent: { ...zero, unit: zero, aab: zero, held: false }, coached7d: { ...zero, unit: zero, aab: zero }, team: [], office: null,
+    };
 
     it('P19.8-T2 AC-10 an AAB who leads nobody gets the leader block at zero, not null — and nobody is recorded as read', async () => {
       const before = await db().collection('auditLog').countDocuments({ 'after.surface': 'home' });
@@ -229,19 +234,21 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
     });
 
     /*
-     * *Changed 2026-11-11 (P19.12-T6, ADR-0249 §5):* Home's team is the Owner's *Grup langsung*, and in this office every
-     * report of his is an AB — so his block is there, its list empty, where it listed the office.
+     * *Changed 2026-11-20 (P19.18-T4; ADR-0271 §7; the brief's part B, gap 1):* the Owner's and an Admin's team parts are the
+     * whole office — Maya, who leads nobody, too. From P19.12-T6 the Owner's was his *Grup langsung*, himself alone.
      */
-    it('P19.8-T2 AC-10 every leader by role gets the block — an AB, an AAB, the Owner and an Admin with nobody — an Agent none', async () => {
+    it('P19.18-T4 AC-1 every leader by role gets the block; the Owner and an Admin, leading somebody or not, over the whole office; an Agent none', async () => {
       for (const who of ['AGUS', 'SARI'] as Who[]) {
         const view = await read(who);
         expect({ who, team: view.leader!.team.length > 0 }).toEqual({ who, team: true });
       }
-      const owner = await read('OWNER');
-      expect(owner.leader).not.toBeNull();
-      expect(owner.leader!.team).toEqual([]);
-      // Maya runs the office and leads nobody: the block at zero, as Dewi's.
-      expect((await read('ADMIN')).leader).toEqual(ZERO_BLOCK);
+      for (const who of ['OWNER', 'ADMIN'] as Who[]) {
+        const view = await read(who);
+        // Sixteen active people in office A, the reader left off the list; Fajar, who left, never.
+        expect({ who, team: view.leader!.team.length, of: view.leader!.activeAgent.of, scope: view.leader!.office?.scope })
+          .toEqual({ who, team: 15, of: 16, scope: 'downline' });
+        expect(view.leader!.team.map((p) => p.membershipId)).not.toContain(office.id.LEFT);
+      }
       for (const who of ['INDAH', 'RINA', 'DODI'] as Who[]) {
         const view = await read(who);
         expect({ who, leader: view.leader }).toEqual({ who, leader: null });
@@ -297,7 +304,7 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
     it('P19.8-T2 AC-10 with a team, the leader block is the Unit Dashboard’s rows', async () => {
       const [view, dashboard] = await Promise.all([read('AGUS'), wired.unitDashboard.read(office.as('AGUS'))]);
       expect(view.leader!.team.length).toBe(dashboard.tiles.team.total - 1);
-      expect(Object.keys(view.leader!).sort()).toEqual(['activeAgent', 'coached7d', 'team']);
+      expect(Object.keys(view.leader!).sort()).toEqual(['activeAgent', 'coached7d', 'office', 'team']);
     });
 
     it('P19.9-T3 AC-6 OD-288 New hires is what /new-hires opens on — this calendar year’s new hires in reach — not last year’s, and not the Unit Dashboard’s', async () => {
@@ -506,6 +513,15 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       expect(JSON.stringify(agus)).not.toContain(office.id.B_AGENT);
     });
 
+    it('P19.18-T4 cross-tenant: office B’s Owner reads office B’s whole office alone, and nothing of office A', async () => {
+      const b = office.as('B_AB');
+      const owner = new RequestContext(b.userId, 'none', { ...b.membership!, isKpmOwner: true });
+      const view = await home.read(owner);
+      expect(view.leader!.team.map((p) => p.membershipId)).toEqual([office.id.B_AGENT]);
+      expect(view.leader!.office?.scope).toBe('downline');
+      expect(JSON.stringify(view)).not.toContain(office.id.AGUS);
+    });
+
     it('office B’s leader reads office B’s team alone, and nothing of office A', async () => {
       const view = await read('B_AB');
       expect(view.leader!.team.map((p) => p.membershipId)).toEqual([office.id.B_AGENT]);
@@ -514,6 +530,65 @@ describe('GET /home, on real rows (Phase 18.11 T11)', () => {
       for (const who of ['AGUS', 'INDAH', 'RINA', 'SARI'] as Who[]) expect(body).not.toContain(office.id[who]);
       expect(body).not.toContain('Office B meeting');
       expect(view.actions).toEqual([]);
+    });
+  });
+
+  /**
+   * **P19.18-T4 — Home for the KPM Owner and an Admin: the whole office** (ADR-0271 §7; the brief's part B, gap 1): *Active
+   * Agent* and *Coaching 7 hari* over everybody, *Laporan aktivitas tim* grouped by unit in the roster's order, and the view
+   * the reader narrows it to (`?scope=`).
+   */
+  describe('P19.18-T4 the whole office for its Owner and an Admin', () => {
+    it('P19.18-T4 AC-2 the Owner’s list is grouped by unit — Agus’s, Hendra’s, Maya’s — each in the roster’s order, AB → AAB → agents', async () => {
+      const view = await read('OWNER');
+      const lines = view.leader!.office!.units;
+      expect(lines.map((l) => [l.leader?.name ?? null, l.count, l.isReader])).toEqual([
+        ['Agus Salim', 11, false], ['Hendra Gunawan', 3, false], ['Maya Kusuma', 1, false],
+      ]);
+      // Every person names their line, and the list runs line by line.
+      const keys = view.leader!.team.map((p) => p.unitKey);
+      expect(keys.every((k) => k !== null)).toBe(true);
+      expect(keys.filter((k, i) => i === 0 || keys[i - 1] !== k)).toEqual(lines.map((l) => l.key));
+      // Inside Agus's: Agus first, then Dewi (an AAB with no team), then his agents; Sari's team after them.
+      const agus = view.leader!.team.filter((p) => p.unitKey === office.id.AGUS).map((p) => whoOf(p.membershipId));
+      expect(agus.slice(0, 4)).toEqual(['AGUS', 'DEWI', 'DIMAS', 'INDAH']);
+      expect(agus).toEqual(expect.arrayContaining(['SARI', 'NINA', 'DODI', 'LUKAS', 'TARI']));
+      // An AB is never his AAB: Hendra heads his own line.
+      expect(view.leader!.team.find((p) => p.membershipId === office.id.PEER_AB)!.unitKey).toBe(office.id.PEER_AB);
+    });
+
+    it('P19.18-T4 AC-1 the Owner’s tiles over the whole office — no AB stops them — and the same numbers as the Unit Dashboard’s', async () => {
+      const [view, dashboard] = await Promise.all([read('OWNER'), wired.unitDashboard.read(office.as('OWNER'))]);
+      expect(dashboard.scope).toBe('downline');
+      expect(view.leader!.activeAgent).toMatchObject({ count: dashboard.tiles.activeAgent.count ?? 0, of: dashboard.tiles.team.total });
+      expect(view.leader!.coached7d.of).toBe(dashboard.tiles.team.total);
+    });
+
+    it('P19.18-T4 AC-2 the Owner narrows it like an AB: Direct Unit is himself alone, Grup informal his group’s', async () => {
+      const unit = await read('OWNER', { scope: 'unit' });
+      expect(unit.leader!.office).toMatchObject({ scope: 'unit', scopes: { offered: ['unit', 'direct', 'informal', 'downline'], default: 'downline' } });
+      expect(unit.leader!.team).toEqual([]);
+      expect(unit.leader!.activeAgent.of).toBe(1);
+      // A view not offered falls back to the default, never a refusal.
+      expect((await read('ADMIN', { scope: 'unit' })).leader!.office!.scope).toBe('downline');
+    });
+
+    it('P19.18-T4 test accounts are never on the list nor in the tiles (ADR-0267 §1)', async () => {
+      await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.TARI) }, { $set: { testAccount: true } });
+      try {
+        const view = await read('OWNER');
+        expect(view.leader!.team.map((p) => p.membershipId)).not.toContain(office.id.TARI);
+        expect(view.leader!.activeAgent.of).toBe(15);
+        expect(view.leader!.coached7d.of).toBe(15);
+      } finally {
+        await db().collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.TARI) }, { $set: { testAccount: false } });
+      }
+    });
+
+    it('P19.18-T4 a field leader’s scope is ignored: Agus reads his Grup langsung whatever he asks', async () => {
+      const asked = await read('AGUS', { scope: 'downline' });
+      expect(asked.leader!.office).toBeNull();
+      expect(asked.leader!.team.length).toBe((await read('AGUS')).leader!.team.length);
     });
   });
 });

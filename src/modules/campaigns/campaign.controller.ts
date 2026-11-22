@@ -4,7 +4,7 @@ import { Ctx, RequirePermission } from '@/common/auth/auth.decorators';
 import { RequestContext } from '@/common/context/request-context';
 import { ApiErrorEnvelope } from '@/common/errors/error-envelope.dto';
 import { ClearStandingOverrideDto, OverrideStandingDto, SaveCampaignDto } from './campaign.dto';
-import { CampaignDto, QualificationRuleDto, StandingOverrideResultDto } from './campaign.response.dto';
+import { CampaignDto, StandingOverrideResultDto } from './campaign.response.dto';
 import { CampaignService } from './campaign.service';
 import { CampaignStandingOverrides } from './campaign-standing-overrides';
 
@@ -12,11 +12,16 @@ import { CampaignStandingOverrides } from './campaign-standing-overrides';
 const refusal = (status: number, description: string) => ({ status, description, type: ApiErrorEnvelope });
 
 /**
- * An office's campaigns, and the carrier rules it is measured against (P5-T7, ADR-0026).
+ * An office's campaigns (P5-T7, ADR-0026).
  *
  * **The tiers have no write route at all.** Not a permission that refuses one — no route. A
  * production club tier is the insurer's recognition programme, and a branch manager cannot delete
  * Chairman's Club any more than they can retag their office to another company.
+ *
+ * *Changed 2026-11-20 (P19.25-T5 AC-1, ADR-0282 §6):* **and no read route either, for now.** `GET …/campaigns/rules`
+ * served the *Production club tiers* tab — the tiers and MOC — which the owner took off every screen (*"MOC / Club: not
+ * shown anywhere for now"*). The rules stay stored, untouched and unarchived (`CampaignService.listRules` still reads
+ * them); a screen that shows them again brings its route back with it.
  */
 @ApiTags('tenant configuration')
 @ApiBearerAuth()
@@ -26,21 +31,6 @@ export class CampaignController {
     private readonly campaigns: CampaignService,
     private readonly overrides: CampaignStandingOverrides,
   ) {}
-
-  @Get('rules')
-  @RequirePermission('campaign_settings:read')
-  @ApiOperation({
-    summary: 'The carrier rules this office is measured against',
-    description:
-      'MOC and the production club tiers, the insurer’s, as the agency’s Campaigns settings show them — read by its '
-      + 'owner and its administrators. **Read only** — '
-      + 'there is no write route here at all. A rule waiting on a metric this product does not '
-      + 'compute yet says so, rather than being shown as an ordinary rule nobody can ever pass.',
-  })
-  @ApiResponse({ status: 200, type: QualificationRuleDto, isArray: true })
-  async listRules(@Ctx() ctx: RequestContext, @Query('kind') kind?: string) {
-    return this.campaigns.listRules(ctx, kind);
-  }
 
   @Get()
   @RequirePermission('campaign_settings:read')

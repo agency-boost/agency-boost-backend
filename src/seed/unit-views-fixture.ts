@@ -8,8 +8,9 @@ import { User, UserSchema } from '@/modules/users/user.schema';
  * ADR-0249; `functional/unit-dashboard.md`, *Views*, *Seed*).
  *
  * Wilson Tanoto, 0417's Owner and root AB, already holds what the views need: **every report of his is an AB** — Maya
- * (the Admin), Agus, Yosef and Satria (`demo.ts`, `reporting-fixture.ts`) — and he owns ***Top Producers 2026***, a live
- * group with **Agus tagged** (and Sari, an AAB under Agus) and the other three not. So, signed in as him:
+ * (the Admin), Agus, Yosef and Satria (`demo.ts`, `reporting-fixture.ts`) — and he carries ***Top Producers 2026***, a
+ * live group with **Agus in it** (his AAB Sari following him, ADR-0270 §1) and the other three not
+ * (`informal-groups-fixture.ts`). So, signed in as him:
  *
  * - ***Semua downline*** (his default): the whole office, every AB's tree under its AB, chips *1 langsung · 0 AAB · n AB*;
  * - ***Grup informal***: Wilson, Agus's own direct group and Sari — and the line ***"3 AB di bawah Anda belum masuk
@@ -33,7 +34,7 @@ export interface UnitViewsFixtureDeps {
 }
 
 export interface UnitViewsFixture {
-  /** The live group Wilson owns, and the ABs below him in it and not. */
+  /** The live group Wilson carries, and the ABs below him in it and not. */
   group: { groupId: string; name: string } | null;
   tagged: string[];
   untagged: string[];
@@ -45,8 +46,10 @@ export async function seedUnitViewsFixture(deps: UnitViewsFixtureDeps): Promise<
   const Memberships = mongoose.model(Membership.name, MembershipSchema, undefined, RECOMPILE);
   const Users = mongoose.model(User.name, UserSchema, undefined, RECOMPILE);
 
+  // Wilson's group is the one his own row carries (ADR-0270 §1: only an AB carries a group).
+  const own = await Memberships.findOne({ _id: deps.owner }).select('groupIds').lean().exec();
   const group = await Groups.findOne({
-    kpmId: deps.kpmId, ownerMembershipId: deps.owner, name: WILSON_GROUP, status: 'active', deletedAt: null,
+    kpmId: deps.kpmId, _id: { $in: own?.groupIds ?? [] }, name: WILSON_GROUP, status: 'active', deletedAt: null,
   }).lean().exec();
   const abs = await Memberships.find({
     kpmId: deps.kpmId, ancestorIds: deps.owner, role: 'ab', status: 'active', deletedAt: null,

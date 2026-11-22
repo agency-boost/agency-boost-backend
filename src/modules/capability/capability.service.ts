@@ -111,18 +111,42 @@ export class CapabilityService {
   ): Promise<CapabilityCatalogView> {
     const row = await this.require(ctx);
     const target = this.find(row, part, code, gridCode);
+    let detached: string[] = [];
+    let reattached: string[] = [];
 
-    if (part === 'milestone' && status === 'archived') {
-      // A stage requiring an archived milestone is a stage nobody could reach again.
+    if (part === 'milestone' && status === 'archived' && target.status !== 'archived') {
+      /*
+       * **Archiving a milestone takes it out of the stages that require it** (P19.21-T3 AC-4, ADR-0274), where it was
+       * refused until P19.21 with *"Take it out of them first"* and no way to. A stage requiring an archived milestone
+       * is a stage nobody could reach again; a stage left requiring nothing is one everybody is on — so that is the
+       * one refusal left.
+       */
       const needed = row.stages.filter((s) => s.requiredMilestoneCodes.includes(code));
-      if (needed.length > 0) {
-        throw new InvalidRequestException(SAY.milestoneRequired({ stages: needed.map((s) => s.label) }));
+      const emptied = needed.filter((s) => s.requiredMilestoneCodes.length === 1);
+      if (emptied.length > 0) {
+        throw new InvalidRequestException(SAY.lastMilestoneOf({ stages: emptied.map((s) => s.label) }));
       }
+      for (const stage of needed) {
+        stage.requiredMilestoneCodes = stage.requiredMilestoneCodes.filter((c) => c !== code);
+      }
+      detached = needed.map((s) => s.code);
+      (target as { detachedFrom?: string[] }).detachedFrom = detached;
+    }
+    if (part === 'milestone' && status === 'active' && target.status === 'archived') {
+      // Restored into the stages it was taken out of, those that still exist (P19.21-T3 AC-4).
+      const entry = target as { detachedFrom?: string[] };
+      for (const stage of row.stages.filter((s) => (entry.detachedFrom ?? []).includes(s.code))) {
+        if (!stage.requiredMilestoneCodes.includes(code)) stage.requiredMilestoneCodes.push(code);
+        reattached.push(stage.code);
+      }
+      entry.detachedFrom = [];
     }
 
     target.status = status;
     return this.save(ctx, row, `capability.${status === 'archived' ? 'archived' : 'restored'}`, {
       part, code,
+      ...(detached.length ? { detachedFrom: detached } : {}),
+      ...(reattached.length ? { reattachedTo: reattached } : {}),
     });
   }
 
@@ -134,35 +158,57 @@ export class CapabilityService {
    */
   async add(
     ctx: RequestContext,
-    part: 'milestone' | 'item',
-    code: string,
+    part: CapabilityPart,
+    code: string | undefined,
     label: string,
     gridCode?: string,
+    /**
+     * P19.21-T3 AC-4 (ADR-0274): `stageCode` puts a new milestone under a *tahap* — required by it and every stage above
+     * it, as the ladder is cumulative; `firstMilestone` is a new stage's first milestone's name.
+     */
+    under: { stageCode?: string; firstMilestone?: string } = {},
   ): Promise<CapabilityCatalogView> {
-    const normalised = code.trim().toUpperCase();
-    if (!normalised) throw new InvalidRequestException(SAY.itemNeedsCode);
     if (!label.trim()) throw new InvalidRequestException(SAY.itemNeedsLabel);
-
     const row = await this.require(ctx);
-    if (this.codes(row).has(normalised)) {
-      throw new InvalidRequestException(SAY.codeUsed({ code: normalised }));
-    }
+    const used = this.codes(row);
+    const given = code?.trim().toUpperCase();
+    if (code !== undefined && !given) throw new InvalidRequestException(SAY.itemNeedsCode);
+    if (given && used.has(given)) throw new InvalidRequestException(SAY.codeUsed({ code: given }));
+    const normalised = given || capabilityCodeFrom(label, part, used);
+    used.add(normalised);
+    const entry = (c: string, l: string, displayOrder: number) => ({
+      code: c, label: l.trim(), displayOrder, status: 'active' as const,
+    });
 
     if (part === 'milestone') {
-      row.milestones.push({
-        code: normalised, label: label.trim(),
-        displayOrder: row.milestones.length + 1, status: 'active',
+      const stage = under.stageCode === undefined ? null : row.stages.find((s) => s.code === under.stageCode);
+      if (under.stageCode !== undefined && !stage) throw new NotFoundException('CapabilityItem');
+      row.milestones.push(entry(normalised, label, row.milestones.length + 1) as never);
+      // Required by this stage and every stage above it: a ladder where a higher stage asks less is no ladder.
+      if (stage) {
+        for (const s of row.stages.filter((x) => x.stageOrder >= stage.stageOrder)) s.requiredMilestoneCodes.push(normalised);
+      }
+    } else if (part === 'stage') {
+      if (!under.firstMilestone?.trim()) throw new InvalidRequestException(SAY.stageNeedsMilestone);
+      const milestone = capabilityCodeFrom(under.firstMilestone, 'milestone', used);
+      const top = [...row.stages].sort((a, b) => b.stageOrder - a.stageOrder)[0];
+      row.milestones.push(entry(milestone, under.firstMilestone, row.milestones.length + 1) as never);
+      row.stages.push({
+        ...entry(normalised, label, row.stages.length + 1),
+        requiredMilestoneCodes: [...(top?.requiredMilestoneCodes ?? []), milestone],
+        stageOrder: (top?.stageOrder ?? 0) + 1,
       } as never);
+    } else if (part === 'grid') {
+      row.grids.push({ ...entry(normalised, label, row.grids.length + 1), requiresDownline: false, items: [] } as never);
     } else {
       const grid = row.grids.find((g) => g.code === gridCode);
       if (!grid) throw new NotFoundException('CapabilityGrid');
-      grid.items.push({
-        code: normalised, label: label.trim(),
-        displayOrder: grid.items.length + 1, status: 'active',
-      } as never);
+      grid.items.push(entry(normalised, label, grid.items.length + 1) as never);
     }
 
-    return this.save(ctx, row, 'capability.added', { part, code: normalised });
+    return this.save(ctx, row, 'capability.added', {
+      part, code: normalised, ...(under.stageCode ? { stageCode: under.stageCode } : {}),
+    });
   }
 
   /**
@@ -172,10 +218,14 @@ export class CapabilityService {
    * out from the array index — so tidying the ladder there would move everybody's stage.
    */
   async reorder(
-    ctx: RequestContext, part: 'stage' | 'milestone' | 'grid', codes: string[],
+    ctx: RequestContext, part: CapabilityPart, codes: string[], gridCode?: string,
   ): Promise<CapabilityCatalogView> {
     const row = await this.require(ctx);
-    const list = part === 'stage' ? row.stages : (part === 'milestone' ? row.milestones : row.grids);
+    // A kelompok's skills, since P19.21-T3 AC-4: drag reorders them too.
+    const grid = part === 'item' ? row.grids.find((g) => g.code === gridCode) : null;
+    if (part === 'item' && !grid) throw new NotFoundException('CapabilityGrid');
+    const list: { code: string; displayOrder: number }[] = part === 'stage' ? row.stages
+      : part === 'milestone' ? row.milestones : part === 'grid' ? row.grids : grid!.items;
 
     const known = new Set(list.map((entry) => entry.code));
     if (codes.length !== list.length || new Set(codes).size !== codes.length
@@ -271,5 +321,21 @@ export class CapabilityService {
       })),
       version: row.version,
     };
+  }
+}
+
+/**
+ * **A code made from a label, once, when the office gives none** (P19.21-T3 AC-4, ADR-0274): the label's letters and
+ * digits in capitals joined by `_` — *Sells policies independently* → `SELLS_POLICIES_INDEPENDENTLY` — starting with a
+ * letter, at most 40 characters; the part's own word where a label has no letter (`MILESTONE`); `_2`, `_3`… after it
+ * when the catalog holds it already, archived rows included. Never changed afterwards: a rename moves the label only.
+ */
+export function capabilityCodeFrom(label: string, part: CapabilityPart, used: ReadonlySet<string>): string {
+  const words = label.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().match(/[A-Z0-9]+/g) ?? [];
+  const base = (words.join('_').replace(/^[0-9_]+/, '').slice(0, 36).replace(/_+$/, '')) || part.toUpperCase();
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const next = `${base}_${n}`;
+    if (!used.has(next)) return next;
   }
 }

@@ -1,7 +1,8 @@
 import { FixedClock } from '@/common/clock/clock.port';
 import { SUBSCRIPTION } from '@/domain/constants';
 import {
-  isEnded, subscriptionStateOf, subscriptionStateOn, validateSubscription, type SubscriptionInput,
+  addOfficeDays, graceEndsOn, isEnded, isPastGraceOn, subscriptionStateOf, subscriptionStateOn, trialSubscription,
+  validateSubscription, type SubscriptionInput,
 } from './subscription';
 
 /**
@@ -63,10 +64,16 @@ describe.each(['UTC', 'Asia/Jakarta', 'America/New_York'])('the end, with the pr
     expect(isEnded(office, clock)).toBe(false);
   });
 
-  it('refuses from 00:00 the next day in Jakarta (17:00 UTC on the end date)', () => {
+  it('ends from 00:00 the next day in Jakarta (17:00 UTC on the end date), and serves it through the grace', () => {
     const clock = new FixedClock(new Date('2026-09-30T17:00:00Z'));
     expect(subscriptionStateOf(office, clock)).toBe('ended');
-    expect(isEnded(office, clock)).toBe(true);
+    // P19.23-T5 AC-5 (ADR-0279 §5): seven days of grace before anyone is refused.
+    expect(isEnded(office, clock)).toBe(false);
+  });
+
+  it('P19.23-T5 AC-5 serves the seventh day of grace to 23:59:59 in Jakarta, and refuses from 00:00 on the eighth', () => {
+    expect(isEnded(office, new FixedClock(new Date('2026-10-07T16:59:59Z')))).toBe(false);
+    expect(isEnded(office, new FixedClock(new Date('2026-10-07T17:00:00Z')))).toBe(true);
   });
 
   it('keeps an office kept active open past the same instant', () => {
@@ -79,6 +86,35 @@ describe.each(['UTC', 'Asia/Jakarta', 'America/New_York'])('the end, with the pr
   it('reads an office with no timezone in the platform default, never the process zone', () => {
     const clock = new FixedClock(new Date('2026-09-30T17:00:00Z'));
     expect(subscriptionStateOf({ ...office, timezone: null }, clock)).toBe('ended');
+  });
+});
+
+describe('the grace and the trial (P19.23-T5; ADR-0279 §4, §5)', () => {
+  const ended = (endDate: string, keepActiveAfterEnd = false) => ({ endDate, keepActiveAfterEnd });
+
+  it('P19.23-T5 AC-5 the grace is the end date and seven office days: day 0 and day 7 served, day 8 not', () => {
+    expect(graceEndsOn('2026-11-01')).toBe('2026-11-08');
+    expect(isPastGraceOn(ended('2026-11-01'), '2026-11-01')).toBe(false); // day 0: the end date itself
+    expect(isPastGraceOn(ended('2026-11-01'), '2026-11-08')).toBe(false); // day 7
+    expect(isPastGraceOn(ended('2026-11-01'), '2026-11-09')).toBe(true); // day 8
+  });
+
+  it('P19.23-T5 AC-5 never past the grace when kept active, or with no end', () => {
+    expect(isPastGraceOn(ended('2026-11-01', true), '2027-01-01')).toBe(false);
+    expect(isPastGraceOn({ endDate: null, keepActiveAfterEnd: false }, '2027-01-01')).toBe(false);
+    expect(isPastGraceOn(null, '2027-01-01')).toBe(false);
+  });
+
+  it('P19.23-T5 AC-5 counts across a month and a year end', () => {
+    expect(graceEndsOn('2026-12-28')).toBe('2027-01-04');
+    expect(addOfficeDays('2028-02-25', 4)).toBe('2028-02-29');
+  });
+
+  it('P19.23-T5 AC-3 a new KPM’s trial runs 30 days, its creation day the first: no plan, no price, no limit', () => {
+    expect(trialSubscription('2026-12-01')).toEqual({
+      startDate: '2026-12-01', endDate: '2026-12-30', pricePerLeaderMinor: null, currency: 'IDR', maxLeaders: null,
+      keepActiveAfterEnd: false, plan: null, trial: true,
+    });
   });
 });
 

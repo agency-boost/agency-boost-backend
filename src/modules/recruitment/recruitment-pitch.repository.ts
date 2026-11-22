@@ -49,7 +49,8 @@ export class RecruitmentPitchRepository extends TenantScopedRepository<Recruitme
     const write = () => this.model.findOneAndUpdate(
       filter,
       {
-        $set: { ...file, confirmations: [], updatedBy: ctx.membershipId },
+        // A file replaces a link as it replaces a file (P19.21-T3 AC-6): the row holds one or the other.
+        $set: { ...file, linkUrl: null, confirmations: [], updatedBy: ctx.membershipId },
         $inc: { version: 1 },
         $setOnInsert: { createdBy: ctx.membershipId },
       },
@@ -71,6 +72,41 @@ export class RecruitmentPitchRepository extends TenantScopedRepository<Recruitme
    * apart by reading the slot again. A tick pushes `{ item, byMembershipId, at }` once; an untick pulls it.
    * The version does not move: it tracks the file, not the ticks.
    */
+  /**
+   * **A link in place of whatever the slot held** (P19.21-T3 AC-6, ADR-0274): the file's fields emptied, the link set,
+   * every confirmation cleared and `version` moved by one, in one write — as `attach` does for a file. Filtered on the
+   * link the slot does **not** already hold, so the same link twice is no swap: the caller answers the row as it is.
+   * Returns the row as it was before, for the file it released and the audit's *before*.
+   */
+  async setLink(
+    ctx: RequestContext,
+    slot: RecruitmentPitchSlotCode,
+    link: { linkUrl: string; uploadedAt: Date; uploadedByMembershipId: string | null },
+  ): Promise<{ previous: RecruitmentPitchSlotDocument | null; swapped: boolean }> {
+    const filter = this.scope(ctx, 'setLink', { slot, linkUrl: { $ne: link.linkUrl } });
+    const write = () => this.model.findOneAndUpdate(
+      filter,
+      {
+        $set: {
+          ...link, storageKey: null, fileName: null, mimeType: null, bytes: null,
+          confirmations: [], updatedBy: ctx.membershipId,
+        },
+        $inc: { version: 1 },
+        $setOnInsert: { createdBy: ctx.membershipId },
+      },
+      { new: false, upsert: true },
+    ).exec();
+    try {
+      return { previous: await write(), swapped: true };
+    } catch (err) {
+      // The slot holds this very link already, so the filter missed it and the upsert met the unique index.
+      if ((err as { code?: number }).code !== 11000) throw err;
+      const now = await this.findOne(ctx, { slot });
+      if (now?.linkUrl === link.linkUrl) return { previous: now, swapped: false };
+      return { previous: await write(), swapped: true };
+    }
+  }
+
   async setConfirmation(
     ctx: RequestContext,
     slot: RecruitmentPitchSlotCode,

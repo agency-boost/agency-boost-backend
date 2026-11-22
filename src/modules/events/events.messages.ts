@@ -95,6 +95,16 @@ export const EVENTS_REFUSALS = refusals('modules/events', {
       id: `score harus berupa bilangan bulat dari ${idNumber(min)} sampai ${idNumber(max)}.`,
     }),
 
+    /* ---- Advanced analytics › *Event*'s period (`event-analytics.service.ts`; P19.25-T1, T2) ---- */
+    monthShape: {
+      en: 'month must be a month written YYYY-MM.',
+      id: 'month harus berupa bulan dengan format YYYY-MM.',
+    },
+    monthLater: {
+      en: 'month cannot be later than this month.',
+      id: 'month tidak boleh setelah bulan ini.',
+    },
+
     /* ---- the roll call (`event-roll-call.service.ts`) ---- */
     entriesNotList: {
       en: 'entries must be a list.',

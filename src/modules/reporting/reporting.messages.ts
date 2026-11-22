@@ -1,18 +1,14 @@
-import { formatDate, formatMonth } from '@/common/format/format';
+import { formatDate } from '@/common/format/format';
 import { messages, refusals } from '@/common/i18n/sentence';
 
 /**
- * **The Owner's reporting's refusals, in both languages** (P18.10-T5 AC-2, AC-3): the Overview's recruitment target,
- * the compliance tree's item, and the target's month as a DTO checks it. *Target* and *Recruitment* stay English
- * (§A.6); the office is *KPM* (§B.9).
+ * **The Owner's reporting's refusals, in both languages** (P18.10-T5 AC-2, AC-3): the compliance card's item, and the
+ * Overview's month as a DTO checks it. *Changed 2026-11-20 (P19.19; ADR-0272 §7):* the recruitment target's month went
+ * with the target. The office is *KPM* (§B.9).
  */
 export const REPORTING_REFUSALS = refusals('modules/reporting', {
   VALIDATION_FAILED: {
-    recruitTargetMonth: ({ month }: { month: string }) => ({
-      en: (figures) => `A recruitment target is set for ${formatMonth(month, figures)}, the agency's current month.`,
-      id: `Target recruitment ditetapkan untuk ${formatMonth(month, 'id')}, bulan berjalan KPM.`,
-    }),
-    /** `SetRecruitTargetDto.month` (`field`). */
+    /** `OverviewPerformanceQueryDto.month` (`field`). */
     monthShape: {
       en: 'month must be YYYY-MM',
       id: 'month harus dengan format YYYY-MM',

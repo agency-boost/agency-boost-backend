@@ -107,6 +107,15 @@ export class RequestContext {
      * A context built for a job, or by hand in a test, reads as a reader who has chosen nothing.
      */
     readonly reader: Reader = readerOf(),
+    /**
+     * **The insurer companies this person may manage the product data of** (ADR-0260 §2; P19.15-T4 AC-2): the
+     * companies ticked on their live *Kelola data produk* grant (`productDataGrants`), read by `ContextResolver` on
+     * every request — so a grant given, changed or removed is in force from the next request, never at a token's
+     * refresh. Empty for everybody without one, and for anybody who is not an active KPM Owner or KPM Admin, whatever
+     * the grant says (`holds`, the `grant` grantee). `ProductDataAccess` reads it for the company; `can()` only for
+     * whether there is one.
+     */
+    readonly productDataCompanyIds: readonly string[] = [],
   ) {
     Object.freeze(this);
   }
@@ -115,7 +124,7 @@ export class RequestContext {
   withReader(reader: Reader): RequestContext {
     return new RequestContext(
       this.userId, this.platformRole, this.membership, this.impersonatorUserId, this.actingInKpmId,
-      this.mustChangePassword, this.impersonationReadOnly, reader,
+      this.mustChangePassword, this.impersonationReadOnly, reader, this.productDataCompanyIds,
     );
   }
 
@@ -223,6 +232,31 @@ export class RequestContext {
   get isPlatformRead(): boolean {
     return this.isSuperAdmin && this.membership === null && this.actingInKpmId !== null && this.impersonationReadOnly
       && this.impersonatorUserId === null;
+  }
+
+  /**
+   * **A Super Admin working inside one KPM, as its Owner** (ADR-0268 §3; P19.17 F2): the KPM named by the request's
+   * `X-Kpm-Id` header (`ContextResolver`), no membership, **writable**, nobody impersonated. `can()` gives such a context
+   * every grant the KPM Owner holds there (`holds`, the `tenant` grantee), so the Super Admin changes the KPM's data
+   * directly, at once, with no approval — and every write's audit row names them, `auditActors.actorUserId`, in that
+   * KPM's log. Not a member, so never on the KPM's admin list and never anybody's leader.
+   *
+   * *Lihat sebagai* is not this: a support session acts as a member and only looks (`impersonationReadOnly`), and a
+   * platform read is read-only too (`isPlatformRead`). Both answer `false` here.
+   */
+  get isSuperAdminInKpm(): boolean {
+    return this.isSuperAdmin && this.membership === null && this.actingInKpmId !== null && !this.impersonationReadOnly
+      && this.impersonatorUserId === null;
+  }
+
+  /**
+   * **The context a Super Admin's request gets inside a KPM** (ADR-0268 §3): the KPM from the `X-Kpm-Id` header, the
+   * Super Admin's own reader and password state kept, no membership — their own, if they hold one somewhere, is set
+   * aside for the request, since inside a KPM they are its Owner, not one of its members — and writable. Only
+   * `ContextResolver` builds it, and only for a `platformRole: 'super_admin'` account outside a support session.
+   */
+  static superAdminInKpm(ctx: RequestContext, kpmId: string): RequestContext {
+    return new RequestContext(ctx.userId, 'super_admin', null, null, kpmId, ctx.mustChangePassword, false, ctx.reader);
   }
 
   /**

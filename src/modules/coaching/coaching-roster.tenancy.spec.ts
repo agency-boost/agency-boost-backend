@@ -11,10 +11,14 @@ const M = 1_000_000 * 100;
 
 /** Every key the roster may carry, at any depth (P11-T6 AC-6): verdicts and dates, and no count. */
 const ROSTER_KEYS = [
-  'today', 'overdueAfterDays', 'directAgents', 'units', 'head', 'members',
+  'today', 'overdueAfterDays',
   'membershipId', 'name', 'rung', 'code', 'label', 'depth', 'lastOneOnOne', 'days', 'date', 'overdue', 'coach', 'status',
   // UI V1 (UI-111): each row's profile photo, a signed link or null — a picture, never a figure.
   'photoUrl',
+  // P19.18-T5 (ADR-0271 §9): the view, the sections and their team lines, and per row the coaching tile, WhatsApp, the
+  // reader's own row and whether it opens. *n orang* and *Semua orang · n* are counts of people on the roster, no figure.
+  'scope', 'scopes', 'offered', 'default', 'total', 'sections', 'key', 'kind', 'leader', 'count', 'rows', 'teams',
+  'coaching', 'phone', 'isReader', 'opens',
 ].sort();
 
 /** Every key in an answer, at any depth. */
@@ -46,74 +50,118 @@ describe('the coaching roster (P11-T6)', () => {
   afterAll(stopMongo);
 
   const roster = (who: Who) => wired.coachingRoster.read(office.as(who));
-  /** The roster as `[name, depth]` pairs, in the order it is drawn. */
-  const drawn = (view: CoachingRosterView) => ({
-    directAgents: view.directAgents.map((r) => r.name),
-    units: view.units.map((u) => [u.head.name, ...u.members.map((m) => `${'  '.repeat(m.depth - 2)}${m.name}`)]),
-  });
+  /** The roster as its sections draw it (P19.18-T5): each section's kind, line and rows, then its team lines'. */
+  const drawn = (view: CoachingRosterView) => view.sections.map((x) => [
+    x.kind, x.leader?.name ?? null, x.count, x.rows.map((r) => r.name), x.teams.map((t) => [t.leader.name, t.count, t.rows.map((r) => r.name)]),
+  ]);
   const everyRow = (view: CoachingRosterView): RosterRow[] =>
-    [...view.directAgents, ...view.units.flatMap((u) => [u.head, ...u.members])];
+    view.sections.flatMap((x) => [...x.rows, ...x.teams.flatMap((t) => t.rows)]);
+  const coachees = (view: CoachingRosterView) => everyRow(view).filter((r) => !r.isReader);
   const rowOf = (view: CoachingRosterView, who: Who) => everyRow(view).find((r) => r.membershipId === office.id[who])!;
 
   describe('AC-2: everyone in the reader’s reach, grouped as the prototype groups it, and nobody else', () => {
-    it('P11-T6 AC-2 an AB: direct agents, then each leader below them heading their whole team, A to Z', async () => {
-      expect(drawn(await roster('AGUS'))).toEqual({
-        directAgents: ['Dimas Pratama', 'Indah Permatasari'],
-        units: [
-          ['Dewi Lestari'],
-          // An agent who leads heads a unit rather than sitting among the direct agents.
-          ['Lukas Hartono', 'Tari Anggraini'],
-          // Tree order: a nested head followed by their own members, one level further in.
-          ['Sari Puspita', 'Budi Santoso', 'Nina Lestari', '  Dodi Kurniawan', 'Rina Wijaya'],
-        ],
-      });
+    it('P19.18-T5 AC-2 an AB: Unit Anda — them, an AAB with no team, their agents — then each unit with its team lines, AB → AAB → agents', async () => {
+      expect(drawn(await roster('AGUS'))).toEqual([
+        ['own', 'Agus Salim', 4, ['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari'], []],
+        // A team inside a unit is a team line of the same section, never a folder (Nina's under Sari's).
+        ['unit', 'Sari Puspita', 5, ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya'], [['Nina Lestari', 2, ['Nina Lestari', 'Dodi Kurniawan']]]],
+        // An agent who leads heads a unit rather than sitting among the agents.
+        ['unit', 'Lukas Hartono', 2, ['Lukas Hartono', 'Tari Anggraini'], []],
+      ]);
     });
 
     it('P11-T6 AC-2 depth counts the edges from the reader, and the rung is the ladder’s', async () => {
       const view = await roster('AGUS');
-      expect(view.units[2].head).toMatchObject({ name: 'Sari Puspita', depth: 1, rung: { code: 'AAB', label: 'AAB' } });
-      expect(view.units[2].members.map((m) => [m.name, m.depth, m.rung.code])).toEqual([
-        ['Budi Santoso', 2, 'AGENT'], ['Nina Lestari', 2, 'AAB'], ['Dodi Kurniawan', 3, 'AGENT'], ['Rina Wijaya', 2, 'AGENT'],
+      const sari = view.sections[1];
+      expect(sari.rows[0]).toMatchObject({ name: 'Sari Puspita', depth: 1, rung: { code: 'AAB', label: 'AAB' } });
+      expect([...sari.rows.slice(1), ...sari.teams[0].rows].map((m) => [m.name, m.depth, m.rung.code])).toEqual([
+        ['Budi Santoso', 2, 'AGENT'], ['Rina Wijaya', 2, 'AGENT'], ['Nina Lestari', 2, 'AAB'], ['Dodi Kurniawan', 3, 'AGENT'],
       ]);
-      expect(view.directAgents[0].rung).toEqual({ code: 'AGENT', label: 'Agent' });
+      expect(view.sections[0].rows[2].rung).toEqual({ code: 'AGENT', label: 'Agent' });
+      expect(view.sections[0].rows[0]).toMatchObject({ depth: 0, isReader: true, opens: true });
     });
 
     it('P11-T6 AC-2 an AAB reaches their subtree, a nested AAB’s agent included (ADR-0074)', async () => {
-      expect(drawn(await roster('SARI'))).toEqual({
-        directAgents: ['Budi Santoso', 'Rina Wijaya'],
-        units: [['Nina Lestari', 'Dodi Kurniawan']],
-      });
+      expect(drawn(await roster('SARI'))).toEqual([
+        ['own', 'Sari Puspita', 3, ['Sari Puspita', 'Budi Santoso', 'Rina Wijaya'], []],
+        ['unit', 'Nina Lestari', 2, ['Nina Lestari', 'Dodi Kurniawan'], []],
+      ]);
     });
 
     it('P11-T6 AC-2 a peer AAB’s agent is never listed, either way round', async () => {
       const sari = everyRow(await roster('SARI')).map((r) => r.membershipId);
-      const peer = everyRow(await roster('PEER_AAB')).map((r) => r.membershipId);
+      const peer = coachees(await roster('PEER_AAB')).map((r) => r.membershipId);
       expect(sari).not.toContain(office.id.PEER_AGENT);
       expect(peer).toEqual([office.id.PEER_AGENT]);
       expect(everyRow(await roster('AGUS')).map((r) => r.membershipId)).not.toContain(office.id.PEER_AGENT);
     });
 
-    it('P11-T6 AC-2 never the reader, never upward, and never a member who has left', async () => {
-      const ids = everyRow(await roster('AGUS')).map((r) => r.membershipId);
-      expect(ids).not.toContain(office.id.AGUS);
+    it('P19.18-T5 AC-2 the reader once, on their own row; never upward, and never a member who has left', async () => {
+      const view = await roster('AGUS');
+      const ids = everyRow(view).map((r) => r.membershipId);
+      expect(ids.filter((id) => id === office.id.AGUS)).toHaveLength(1);
       expect(ids).not.toContain(office.id.OWNER);
       expect(ids).not.toContain(office.id.LEFT);
-      expect(ids).toHaveLength(10);
+      expect(ids).toHaveLength(11);
+      expect(view.total).toBe(11);
     });
 
-    it('P11-T6 AC-2 the Owner standing at the root coaches the whole office as its AB — nobody in another', async () => {
+    it('P19.18-T5 AC-1, AC-2 the Owner reads the whole office: one line per AB unit — never called AAB — its teams as team lines', async () => {
       const view = await roster('OWNER');
-      expect(view.directAgents).toEqual([]);
-      expect(view.units.map((u) => [u.head.name, u.members.length])).toEqual([
-        ['Agus Salim', 10], ['Hendra Gunawan', 2], ['Maya Kusuma', 0],
+      expect(view).toMatchObject({ scope: 'downline', scopes: { default: 'downline' }, total: 16 });
+      expect(view.sections.map((x) => [x.kind, x.leader?.name, x.count, x.teams.map((t) => t.leader.name)])).toEqual([
+        ['own', 'Wilson Tanoto', 1, []],
+        ['unit', 'Agus Salim', 11, ['Sari Puspita', 'Nina Lestari', 'Lukas Hartono']],
+        ['unit', 'Hendra Gunawan', 3, ['Putu Ayu']],
+        ['unit', 'Maya Kusuma', 1, []],
       ]);
+      // An AB below the Owner carries the AB rung, never AAB.
+      expect(view.sections[1].rows[0].rung.code).toBe('AB');
       expect(everyRow(view).map((r) => r.membershipId)).not.toContain(office.id.B_AGENT);
+      expect(everyRow(view).every((r) => r.opens)).toBe(true);
+    });
+
+    it('P19.18-T5 AC-1 the Admin, leading nobody, reads the whole office too; who is outside her own team is listed and does not open', async () => {
+      const view = await roster('ADMIN');
+      expect(view.total).toBe(16);
+      expect(everyRow(view).filter((r) => r.opens).map((r) => r.membershipId)).toEqual([office.id.ADMIN]);
+    });
+
+    it('P19.18-T5 AC-1 the view narrows it: Direct Unit, Grup langsung — offered as the Unit Dashboard offers them', async () => {
+      const owner = await wired.coachingRoster.read(office.as('OWNER'), { scope: 'unit' });
+      expect(owner).toMatchObject({ scope: 'unit', total: 1, scopes: { offered: ['unit', 'direct', 'informal', 'downline'] } });
+      const agus = await wired.coachingRoster.read(office.as('AGUS'), { scope: 'unit' });
+      expect(everyRow(agus).map((r) => r.name)).toEqual(['Agus Salim', 'Dewi Lestari', 'Dimas Pratama', 'Indah Permatasari']);
+      // A view not offered falls back to everybody coached.
+      expect((await wired.coachingRoster.read(office.as('SARI'), { scope: 'downline' })).total).toBe(5);
+    });
+
+    it('P19.18-T5 AC-2 each row carries the coaching status tile and who led the 1:1, and the WhatsApp number — none on the reader’s own', async () => {
+      await mongoose.connection.db!.collection('users').updateOne({ fullName: 'Rina Wijaya' }, { $set: { phone: '+6281211110000' } });
+      const view = await roster('AGUS');
+      expect(rowOf(view, 'RINA')).toMatchObject({
+        coaching: { status: 'recent', days: 0, coach: { membershipId: office.id.SARI, name: 'Sari Puspita' } }, phone: '+6281211110000',
+      });
+      expect(rowOf(view, 'AGUS').phone).toBeNull();
+      for (const row of everyRow(view)) {
+        const expected = row.coaching.days === null ? 'never' : row.coaching.days <= 14 ? 'recent' : 'lapsed';
+        expect({ who: row.name, status: row.coaching.status }).toEqual({ who: row.name, status: expected });
+      }
+    });
+
+    it('P19.18-T5 AC-2 test accounts are never on it (ADR-0267 §1)', async () => {
+      await mongoose.connection.db!.collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.TARI) }, { $set: { testAccount: true } });
+      try {
+        expect(everyRow(await roster('OWNER')).map((r) => r.membershipId)).not.toContain(office.id.TARI);
+      } finally {
+        await mongoose.connection.db!.collection('memberships').updateOne({ _id: new mongoose.Types.ObjectId(office.id.TARI) }, { $set: { testAccount: false } });
+      }
     });
 
     it('P11-T6 AC-2 somebody who coaches nobody gets an empty roster, not an error', async () => {
-      for (const who of ['ADMIN', 'DEWI', 'INDAH', 'TARI'] as const) {
-        expect({ who, view: await roster(who) }).toEqual({
-          who, view: { today: ROSTER_TODAY, overdueAfterDays: 7, directAgents: [], units: [] },
+      for (const who of ['DEWI', 'INDAH', 'TARI'] as const) {
+        expect({ who, view: await roster(who) }).toMatchObject({
+          who, view: { today: ROSTER_TODAY, overdueAfterDays: 7, total: 0, sections: [] },
         });
       }
     });
@@ -256,14 +304,15 @@ describe('the coaching roster (P11-T6)', () => {
         else if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walk(v, k);
       };
       walk(await roster('AGUS'), '');
-      expect([...new Set(numbers)].sort()).toEqual(['days', 'depth', 'overdueAfterDays']);
+      // P19.18-T5: and how many people a line and the roster hold — a headcount, nobody's figure.
+      expect([...new Set(numbers)].sort()).toEqual(['count', 'days', 'depth', 'overdueAfterDays', 'total']);
     });
   });
 
   describe('the tenant boundary', () => {
     it('P11-T6 AC-2 an AB in another office reads their own office’s people and none of this one’s', async () => {
       const view = await roster('B_AB');
-      expect(everyRow(view).map((r) => r.name)).toEqual(['Bayu Saputra']);
+      expect(coachees(view).map((r) => r.name)).toEqual(['Bayu Saputra']);
       expect(everyRow(view).find((r) => r.membershipId === office.id.RINA)).toBeUndefined();
     });
 
@@ -273,7 +322,7 @@ describe('the coaching roster (P11-T6)', () => {
         membershipId: office.id.AGUS, kpmId: '66f0000000000000000000b1', orgLevelCode: 'AB', hierarchyRole: 'ab',
         status: 'active', isKpmOwner: false, isKpmAdmin: false, directCount: 6,
       } as never);
-      expect(await wired.coachingRoster.read(misplaced)).toMatchObject({ directAgents: [], units: [] });
+      expect(await wired.coachingRoster.read(misplaced)).toMatchObject({ total: 0, sections: [] });
     });
 
     it('P11-T6 AC-2 an office whose row is gone still answers its rungs, by their codes', async () => {
@@ -301,9 +350,10 @@ describe('the coaching roster (P11-T6)', () => {
       // No ladder to label them, and no account to name them: the code, and an empty name, rather than a guess.
       const unnamed = (id: mongoose.Types.ObjectId) => ({
         membershipId: String(id), name: '', photoUrl: null, rung: { code: 'AGENT', label: 'AGENT' }, depth: 1,
-        lastOneOnOne: null, status: 'no_goal_set',
+        lastOneOnOne: null, status: 'no_goal_set', coaching: { status: 'never', days: null, coach: null }, phone: null,
+        isReader: false, opens: true,
       });
-      expect(view.directAgents).toEqual([unnamed(first), unnamed(second)]);
+      expect(view.sections[0].rows.slice(1)).toEqual([unnamed(first), unnamed(second)]);
     });
 
     it('P11-T6 AC-9 reads nothing for nobody: an empty list asks no question of the month', async () => {

@@ -4,11 +4,11 @@ import { configSchemaOptions } from '@/common/schema/base.schema';
 import { ProductDocumentRefSchema } from './kpm-product-config.schema';
 import {
   PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRODUCT_CURRENCIES, PRODUCT_DEFAULT_CURRENCIES, PRODUCT_KINDS,
-  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PROPOSAL_DEFAULT_INSURED,
+  PRODUCT_LIFECYCLES, PRODUCT_NEEDS, PROPOSAL_CALC_TYPES, PROPOSAL_DEFAULT_INSURED, PROPOSAL_NEED_TAGS,
   type ProductCategory, type ProductChannel, type ProductCurrency, type ProductKind, type ProductLifecycle,
-  type ProductNeed, type ProposalDefaultInsured,
+  type ProductNeed, type ProposalCalcType, type ProposalDefaultInsured, type ProposalNeedTag, type ProposalPayFrequency,
 } from '@/domain/constants';
-import type { FaqEntry, PdfDetailBlock, PlanOption, ProposalField } from './proposal-fields';
+import type { FaqEntry, PayTerm, PdfDetailBlock, PlanOption, PlanRule, ProposalField } from './proposal-fields';
 
 export type ProductDocument = HydratedDocument<Product>;
 
@@ -209,6 +209,61 @@ export class Product {
   @Prop({ type: Object, default: null })
   proposalFieldsSource!: { import: string; hash: string } | null;
 
+  /*
+   * **The catalogue's calculation fields** (P19.14-T2 AC-5; ADR-0255 §4, §5; the 11 Nov spec's *Products (catalog)*):
+   * checked on every save with the proposal fields (`checkProposalSettings`), so stored as plain values, the shapes in
+   * `proposal-fields.ts`. Each defaults to what changes nothing: `manual`, no limits, the four periodic *Cara bayar*.
+   * **No syariah flag**: `channel: 'syariah'` is it (`isSyariahProduct`). **No currency field**: `currencies` and the
+   * `currency` proposal field are it (ADR-0225 §8).
+   */
+
+  /** `up_premium`, `goal`, `premium_benefit`, `plan_priced` or `manual` — which amounts the card shows. */
+  @Prop({ type: String, enum: PROPOSAL_CALC_TYPES, default: 'manual' })
+  calcType!: ProposalCalcType;
+
+  /** The ages at the next birthday a client may enter at; `null` for no limit. */
+  @Prop({ type: Object, default: null })
+  entryAge!: { min: number; max: number } | null;
+
+  /** Each with its `maxEntryAge`; `[]` for none. */
+  @Prop({ type: [Object], default: [] })
+  payTerms!: PayTerm[];
+
+  /** *Cara bayar* offered; `[]` reads the four periodic ones. */
+  @Prop({ type: [String], default: [] })
+  frequencies!: ProposalPayFrequency[];
+
+  @Prop({ type: Boolean, default: false })
+  smokerRated!: boolean;
+
+  /** How the `derived` field is worked out, or `null`. */
+  @Prop({ type: Object, default: null })
+  planRule!: PlanRule | null;
+
+  /** Minor units of the item's currency, each `null` for none; read by 19.15's calculation. */
+  @Prop({ type: Number, default: null })
+  upStep!: number | null;
+
+  @Prop({ type: Number, default: null })
+  upMin!: number | null;
+
+  @Prop({ type: Number, default: null })
+  upMax!: number | null;
+
+  @Prop({ type: Number, default: null })
+  premiumMin!: number | null;
+
+  @Prop({ type: Number, default: null })
+  premiumMax!: number | null;
+
+  /** The active premium table's version (19.15); `null` is `manual`. */
+  @Prop({ type: String, default: null })
+  rateTableId!: string | null;
+
+  /** The need tile it ticks; `null` reads its first need's or its category's (`needTagOf`). */
+  @Prop({ type: String, enum: [...PROPOSAL_NEED_TAGS, null], default: null })
+  needTag!: ProposalNeedTag | null;
+
   @Prop({ type: String, enum: PRODUCT_LIFECYCLES, default: 'active', index: true })
   lifecycle!: ProductLifecycle;
 
@@ -225,6 +280,39 @@ export class Product {
   /** What an office sells before its Owner has an opinion about it (ADR-0033). */
   @Prop({ type: Boolean, default: false })
   activeByDefault!: boolean;
+
+  /*
+   * **A draft, and which KPMs have the product** (P19.23-T4 AC-3, AC-5; ADR-0278 §4). The fields above are the
+   * **published** product, which every KPM that has it reads live (ADR-0033). What the Super Admin is still editing waits
+   * in `draft`, read by no KPM, until *Terbitkan ke KPM* publishes it.
+   */
+
+  /**
+   * The unpublished edits: any of the fields `PATCH …/products/:productId` takes, plus `alsoFits`, as the editor saved
+   * them with *Simpan draf*. `null` when nothing waits. Checked again, whole, when it is published.
+   */
+  @Prop({ type: Object, default: null })
+  draft!: ProductDraft | null;
+
+  /**
+   * **The KPMs that have it** (ADR-0278 §4): `null` is every KPM of the company — every product made before ADR-0278,
+   * and every product the full editor makes; a list is the KPMs it was published to, `[]` a new product published to
+   * none yet. A KPM created after {@link firstPublishedAt} has it too: a new KPM starts from the company as it stands.
+   */
+  @Prop({ type: [String], default: null })
+  releasedTo!: string[] | null;
+
+  /** When it was first published to a KPM; `null` for a new product still a draft. Absent on rows made before. */
+  @Prop({ type: Date, default: null })
+  firstPublishedAt!: Date | null;
+
+  /**
+   * ***Juga sesuai*** (P19.23-T4 AC-3; ADR-0278 §4): codes of this company's other products, in the order the agent's
+   * Sales attack plan offers them under *Juga sesuai kebutuhan ini* — by code, never by position (invariant §4). `[]`:
+   * the brief's other matches, as the plan has always chosen them.
+   */
+  @Prop({ type: [String], default: [] })
+  alsoFits!: string[];
 
   /** Presentation only, and one number — the prototype's four copies each had their own. */
   @Prop({ type: Number, required: true })
@@ -263,3 +351,31 @@ ProductSchema.index({ companyId: 1, sortOrder: 1 });
 
 /** The riders of a base, read when a base is withdrawn or deleted (P19.4-T4 AC-6, AC-13). */
 ProductSchema.index({ companyId: 1, attachesTo: 1 });
+
+/** A product's unpublished edits (ADR-0278 §4): the write's own fields, by name, as the editor saved them. */
+export type ProductDraft = Record<string, unknown>;
+
+/**
+ * **Which of a company's products one KPM has** (P19.23-T4 AC-5; ADR-0278 §4): every product with no release list (all
+ * of them before ADR-0278), one published to this KPM, and one first published before this KPM was made. A new product
+ * still a draft (`releasedTo: []`, never published) is in no KPM. Laid over the company filter by every KPM-side read of
+ * the catalogue (`KpmProductService.productsOf`), so the rule is written once.
+ */
+export function heldByKpm(kpmId: string, kpmCreatedAt: Date | null | undefined): Record<string, unknown> {
+  return {
+    $or: [
+      { releasedTo: null },
+      { releasedTo: kpmId },
+      ...(kpmCreatedAt ? [{ firstPublishedAt: { $ne: null, $lte: kpmCreatedAt } }] : []),
+    ],
+  };
+}
+
+/** The same rule for a product in hand: whether one KPM has it. */
+export function isHeldBy(
+  product: Pick<Product, 'releasedTo' | 'firstPublishedAt'>, kpm: { id: string; createdAt: Date | null | undefined },
+): boolean {
+  if (product.releasedTo === null || product.releasedTo === undefined) return true;
+  if (product.releasedTo.includes(kpm.id)) return true;
+  return Boolean(product.firstPublishedAt && kpm.createdAt && product.firstPublishedAt <= kpm.createdAt);
+}

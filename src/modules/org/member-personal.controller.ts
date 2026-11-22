@@ -6,8 +6,8 @@ import { CompleteMemberPersonalDto, MemberPersonalCompletedDto } from './member-
 import { MemberPersonalService } from './member-personal.service';
 
 /**
- * **The office fills a member's blank personal data** (ADR-0248 §3; the client's TI-2) — *Lengkapi data* on the member
- * page.
+ * **The member sheet's edits** (P19.20-T2; ADR-0273 §3, amending ADR-0248 §3) — every field of *Profil* and *Demografi*
+ * but *Peran*, *Leader*, *Group* and *Unit*, which have writes of their own.
  *
  * Its own controller under `/members`, as `MemberPhoneController` is: a `PATCH` on `:membershipId/personal` meets no
  * route on `OrgController`, and the specs that build `OrgController` with each of its services stubbed stay as they are.
@@ -22,17 +22,21 @@ export class MemberPersonalController {
   @RequirePermission('member:complete_personal')
   @RefuseInSupportSession()
   @ApiOperation({
-    summary: 'Fill a member’s blank personal data',
+    summary: 'Change any field of a member’s details: the member sheet',
     description:
-      '*Lengkapi data* on the member page: the Owner or an Admin fills a member’s **blank** birth date, gender, company '
-      + 'join month, work status or WhatsApp number — at least one, each optional. A member of another office, one who '
-      + 'has left, or an id that is none is `404 NOT_FOUND`. The shapes and the rules are the profile’s, the dates '
-      + 'measured against today in the office’s calendar (`400 VALIDATION_FAILED`, `details.field`); none is clearable. '
-      + '**Only a blank field is filled**: one already on file is `409 MEMBER_DETAIL_ON_FILE` with `details.fields`, and '
-      + 'nothing is written — a recorded value is the person’s own to change (`PATCH /auth/me`). Each write carries the '
-      + 'condition, so a race cannot overwrite. The account’s fields are saved on the person’s account, so they are what '
-      + 'the person sees on their own profile. One `member.personal_completed` audit entry, naming the fields and never '
-      + 'their values. **Refused `403 PERM_DENIED` in any support session.**',
+      'The member sheet (ADR-0273 §3): the Owner, an Admin, the Super Admin inside the KPM, or a core leader for somebody '
+      + '**strictly below them**, changes a member’s join date, company join month, work status, agent code, birth date, '
+      + 'gender, WhatsApp number or email — at least one, each optional, **any value, not only a blank** (ADR-0273 §3). '
+      + 'A member of another office, one who has left, one outside a core leader’s downline, or an id that is none is '
+      + '`404 NOT_FOUND`. The shapes and the rules are the profile’s and the joining’s, the dates measured against today '
+      + 'in the office’s calendar (`400 VALIDATION_FAILED`, `details.field`); none is clearable. An agent code held by '
+      + 'somebody else at the insurer is `409 AGENT_CODE_TAKEN`; an address held by another account `409 '
+      + 'AUTH_EMAIL_TAKEN`; **an email is changed only for somebody who has never signed in** — `409 '
+      + 'MEMBER_EMAIL_SIGNED_IN` otherwise (OD-400). The account’s fields are saved on the person’s account, so they are '
+      + 'what the person sees on their own profile; the agent code on the account and on this office’s membership. One '
+      + '`member.details_edited` audit entry with each changed field **before and after**; a value sent as stored changes '
+      + 'nothing. Answers what changed, the details and the member as now read. **Refused `403 PERM_DENIED` in any '
+      + 'support session.**',
   })
   async complete(
     @Ctx() ctx: RequestContext,

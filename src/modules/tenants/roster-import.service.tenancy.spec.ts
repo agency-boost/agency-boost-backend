@@ -37,6 +37,9 @@ import { Kpm, KpmSchema } from './kpm.schema';
 import { OrgLevelService } from './org-level.service';
 import { ROSTER_TEMPLATE_HEADER } from './roster-csv';
 import { RosterImportService, type RosterPreview } from './roster-import.service';
+import {
+  RosterImportRecord, RosterImportRecordRepository, RosterImportRecordSchema,
+} from './roster-import-record.schema';
 
 const H = ROSTER_TEMPLATE_HEADER;
 const NOW = new Date('2026-09-09T02:00:00.000Z');
@@ -467,6 +470,131 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       const preview = await service.preview(theOwner(), kpmId, 'Nama,Email\nBudi,b@k.test');
       expect(preview.issues).toEqual([{ line: 1, column: 'file', message: 'The file has no Kode agen, Peran column. Download the template and use its header.' }]);
       expect(preview.rows).toEqual([]);
+    });
+  });
+
+  describe('P19.20-T5 Import people: each row’s cells, and Riwayat unggah', () => {
+    const withRecords = () => new RosterImportService(
+      members, hierarchy, mongoose.model(Kpm.name) as never, mongoose.model(User.name) as never, new PasswordService(),
+      new AuditService(mongoose.model(AuditLog.name) as never), clock, orgLevels, historyRepo, notifications as never,
+      mongoose.model(AuthToken.name) as never, undefined, undefined, undefined, undefined,
+      new RosterImportRecordRepository(
+        (mongoose.models[RosterImportRecord.name] ?? mongoose.model(RosterImportRecord.name, RosterImportRecordSchema)) as never,
+      ),
+    );
+    const records = () => mongoose.connection.db!.collection('rosterImports');
+
+    it('P19.20-T5 AC-2 the preview answers each row’s cells and the columns left empty for their shape', async () => {
+      const preview = await service.preview(theOwner(), kpmId, a3(
+        line('101', 'Rahmat', 'AB', '', '', 'r@k.test', '', '', '10/10/2015'),
+      ));
+
+      expect(preview.rows[0].cells.slice(0, 3)).toEqual(['101', 'Rahmat', 'AB']);
+      expect(preview.rows[0].cells).toHaveLength(preview.header.length);
+      expect(preview.rows[0].flagged).toEqual(['Tanggal lahir']);
+    });
+
+    it('P19.20-T5 AC-3 a saved file is recorded: its name, who, n baru, n diperbarui — in this office only', async () => {
+      await withRecords().commit(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB'), person('102', 'Sari', 'AAB', '101')), true, 'anggota_nov_2026.xlsx');
+
+      const saved = await records().find({}).toArray();
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatchObject({
+        kpmId, fileName: 'anggota_nov_2026.xlsx', created: 2, updated: 0, invited: 0, skipped: 0, actorMembershipId: 'mem-1',
+      });
+    });
+
+    it('P19.20-T5 AC-3 a record that cannot be written leaves the people in and the answer whole', async () => {
+      const failing = new RosterImportService(
+        members, hierarchy, mongoose.model(Kpm.name) as never, mongoose.model(User.name) as never, new PasswordService(),
+        new AuditService(mongoose.model(AuditLog.name) as never), clock, orgLevels, historyRepo, notifications as never,
+        mongoose.model(AuthToken.name) as never, undefined, undefined, undefined, undefined,
+        { create: async () => { throw new Error('disk full'); } } as never,
+      );
+
+      const result = await failing.commit(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB')), true, '   ');
+
+      expect(result.counts.imported).toBe(1);
+      expect(await byCode('101')).not.toBeNull();
+    });
+
+    it('P19.20-T5 AC-3 a preview, and an import refused for having nothing to save, record nothing', async () => {
+      await withRecords().preview(theOwner(), kpmId, a3(person('101', 'Rahmat', 'AB')));
+      await expect(withRecords().commit(theOwner(), kpmId, a3(person('105', 'Fikri', 'Agent', '70049999')))).rejects.toThrow();
+
+      expect(await records().countDocuments()).toBe(0);
+    });
+  });
+
+  /*
+   * **A core leader imports into their own downline only** (ADR-0268 §1; P19.20-T5 AC-4; the permission review of 20
+   * November 2026): *Import people* is theirs, and without this a row with a peer's code demoted the peer and moved their
+   * team under the core leader, and a row with their own code promoted them.
+   *
+   *   UMAR (AB) ── AGUS (AB, ★ core leader) ── SARI (AAB) ── RINA (Agent)
+   *   PUTRA (AB, a peer) ── PITA (Agent)
+   */
+  describe('P19.20-T5 AC-4 a core leader’s import reaches their own downline only (ADR-0268 §1)', () => {
+    const NOT_YOURS = 'You can change only the people below you in your downline. Ask the KPM Owner to change this row.';
+    const UPLINE_NOT_YOURS = 'The upline must be you or somebody in your downline.';
+    let agus: string;
+    const coreLeader = () => memberOf(kpmId, { membershipId: agus, isCoreLeader: true });
+
+    beforeEach(async () => {
+      await service.commit(theOwner(), kpmId, a3(
+        person('201', 'Umar', 'AB'), person('202', 'Agus', 'AB', '201'), person('203', 'Sari', 'AAB', '202'),
+        person('204', 'Rina', 'Agent', '203'), person('205', 'Putra', 'AB'), person('206', 'Pita', 'Agent', '205'),
+      ));
+      agus = String((await byCode('202'))!._id);
+    });
+
+    it('P19.20-T5 AC-4 a core leader updates and places people in their own downline', async () => {
+      const file = a3(person('204', 'Rina', 'Agent', '202'), person('207', 'Nina', 'Agent', '203'), person('208', 'Nanda', 'Agent', '202'));
+      expect(results(await service.preview(coreLeader(), kpmId, file))).toMatchObject({
+        204: ['updated', expect.anything()], 207: ['imported', null], 208: ['imported', null],
+      });
+      await service.commit(coreLeader(), kpmId, file);
+      expect((await byCode('204'))!.leaderId).toBe(agus);
+      expect((await byCode('207'))!.ancestorIds).toEqual([String((await byCode('201'))!._id), agus, String((await byCode('203'))!._id)]);
+    });
+
+    it('P19.20-T5 AC-4 a peer, a peer’s agent, an upline, themselves and another KPM’s member are skipped, and nothing changes', async () => {
+      const other = await otherOffice();
+      await service.commit(memberOf(other, { isKpmOwner: true }), other, a3(person('209', 'Bima', 'AB')));
+      const file = a3(
+        person('205', 'Putra', 'Agent', '202'), person('206', 'Pita', 'Agent', '202'), person('201', 'Umar', 'AAB', '202'),
+        person('202', 'Agus', 'AB'), person('209', 'Bima', 'Agent', '202'),
+      );
+      const preview = results(await service.preview(coreLeader(), kpmId, file));
+      expect(preview).toMatchObject({
+        205: ['skipped', NOT_YOURS], 206: ['skipped', NOT_YOURS], 201: ['skipped', NOT_YOURS], 202: ['skipped', NOT_YOURS],
+        209: ['skipped', expect.anything()],
+      });
+      const before = await mongoose.connection.db!.collection('memberships').find({}).sort({ _id: 1 }).toArray();
+      await expect(service.commit(coreLeader(), kpmId, file)).rejects.toThrow();
+      expect(await mongoose.connection.db!.collection('memberships').find({}).sort({ _id: 1 }).toArray()).toEqual(before);
+    });
+
+    it('P19.20-T5 AC-4 a core leader places nobody under somebody outside their downline, nor at the top of the KPM', async () => {
+      const preview = results(await service.preview(coreLeader(), kpmId, a3(
+        person('210', 'Wawan', 'Agent', '205'), person('211', 'Yudi', 'AB'), person('212', 'Zaki', 'Agent', '211'),
+        person('204', 'Rina', 'Agent', '205'), person('213', 'Dina', 'Agent', '202'),
+      )));
+      expect(preview).toMatchObject({
+        210: ['skipped', UPLINE_NOT_YOURS], 211: ['skipped', UPLINE_NOT_YOURS], 212: ['skipped', expect.stringContaining('211')],
+        204: ['skipped', UPLINE_NOT_YOURS], 213: ['imported', null],
+      });
+    });
+
+    it.each([
+      ['the Owner', () => theOwner()],
+      ['an Admin', () => memberOf(kpmId, { isKpmAdmin: true })],
+      ['the Super Admin inside the KPM', () => RequestContext.superAdminInKpm(RequestContext.platform('root'), kpmId).withReader(SOURCE_READER)],
+    ] as [string, () => RequestContext][])('P19.20-T5 AC-4 %s still reaches the whole KPM', async (_who, who) => {
+      const file = a3(person('206', 'Pita', 'Agent', '202'), person('214', 'Eko', 'Agent', '205'), person('215', 'Fajar', 'AB'));
+      expect(results(await service.preview(who(), kpmId, file))).toMatchObject({
+        206: ['updated', expect.anything()], 214: ['imported', null], 215: ['imported', null],
+      });
     });
   });
 

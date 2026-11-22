@@ -61,6 +61,22 @@ export async function readXlsx(bytes: Uint8Array, options: ReadXlsxOptions): Pro
   return { sheet: sheet.name, rows: rowsOf(sheet, new Set(options.monthColumns ?? [])) };
 }
 
+/**
+ * **Every sheet of a workbook, as rows of text** (P19.15-T1; ADR-0258 §3): what a premium table's upload reads, whose
+ * template has a second sheet, *Ketentuan*, beside its data. The same limits as `readXlsx` — unpacked within
+ * `unpackWithinLimits`, each sheet at most `SPREADSHEET.MAX_ROWS` rows and `MAX_COLUMNS` columns — and the same cells.
+ */
+export async function readWorkbookSheets(bytes: Uint8Array): Promise<SheetRows[]> {
+  const unpacked = unpackWithinLimits(bytes);
+  const workbook = new Workbook();
+  try {
+    await workbook.xlsx.load(Buffer.from(unpacked) as unknown as Parameters<Workbook['xlsx']['load']>[0]);
+  } catch {
+    throw notAWorkbook();
+  }
+  return workbook.worksheets.map((sheet) => ({ sheet: sheet.name, rows: rowsOf(sheet, new Set()) }));
+}
+
 function dataSheetOf(workbook: Workbook, isHeader: ReadXlsxOptions['isHeader']): Worksheet | null {
   const sheets = workbook.worksheets;
   const named = sheets.find((s) => s.name.trim().toLowerCase() === SPREADSHEET.DATA_SHEET.toLowerCase());

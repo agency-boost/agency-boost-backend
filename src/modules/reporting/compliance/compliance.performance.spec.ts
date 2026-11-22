@@ -9,6 +9,7 @@ import { clearCollections, startMongo, stopMongo } from '../../../../test/mongo'
 import { configModule, provisionOffice } from '../../../../test/config-module';
 import { ActivationComplianceCategory } from './activation.category';
 import { ActivityComplianceCategory } from './activity.category';
+import { LeadsComplianceCategory } from './leads.category';
 import { CampaignsComplianceCategory } from './campaigns.category';
 import { COMPLIANCE_CATEGORIES, type ComplianceCategoryKey } from './compliance-category';
 import { ComplianceService } from './compliance.service';
@@ -225,13 +226,15 @@ describe('the compliance tree, measured at 500 members (P18.3-T1 AC-11, P18.3-T2
 
     const activationReadings = new ActivationReadings(wired.activationRows, wired.activationProgress, wired.clock);
     compliance = new ComplianceService(
-      wired.officePeople, new TenantDay(wired.kpms as never, wired.clock), wired.clock, wired.subjectReads,
+      new TenantDay(wired.kpms as never, wired.clock), wired.clock, wired.subjectReads,
+      wired.officeGroups, new MemberNames(wired.memberships, wired.users as never),
       new TrainingComplianceCategory(wired.offeredTraining, wired.trainingReadings, wired.clock),
       new GoalsComplianceCategory(wired.goals, wired.clock),
       new ActivityComplianceCategory(wired.activityReadings),
       new ActivationComplianceCategory(activationReadings),
       new EventsComplianceCategory(wired.eventReadings),
       new CampaignsComplianceCategory(wired.campaignStandingsReader, new MemberNames(wired.memberships, wired.users as never)),
+      new LeadsComplianceCategory(wired.leadReadings),
     );
 
     // Every model's indexes built before anything is counted: an index build is not a read's query.
@@ -277,8 +280,8 @@ describe('the compliance tree, measured at 500 members (P18.3-T1 AC-11, P18.3-T2
   it('P18.3-T1 AC-11 the tree lists every member of each office: 500 and 50, every chip computed', async () => {
     for (const [owner, people] of [[owners.A, 500], [owners.B, 50]] as const) {
       const view = await compliance.read(owner, { category: 'activity' });
-      expect(view.people).toBe(people);
-      expect(view.summary.every((c) => c.of > 0)).toBe(true);
+      expect(view.selected!.cells).toHaveLength(people);
+      expect(view.cards.filter((c) => c.category !== 'leads').every((c) => c.of > 0)).toBe(true);
     }
   });
 

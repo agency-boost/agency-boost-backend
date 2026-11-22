@@ -43,6 +43,8 @@ export interface ShownBranding {
   palette: BrandingPalette | null;
   mascot: BrandingMascot | null;
   source: { logos: BrandingSource; colours: BrandingSource; mascot: BrandingSource };
+  /** ***Nama sistem*** (P19.21-T4; ADR-0274): the KPM's own, never a template's; `null` is *AgencyBoost*. */
+  systemName: string | null;
 }
 
 /** **What the session carries** (§8): enough to paint before anything else is asked, and to build every image's address. */
@@ -57,15 +59,26 @@ export interface SessionBranding {
   mascotPoses: MascotPose[];
   /** A lesson's colours (ADR-0217 §5): `null` when the KPM shows no colours of its own or its template's. */
   lesson: LessonColours | null;
+  /**
+   * ***Nama sistem*** (P19.21-T4 AC-1; ADR-0274): what the app is called for this KPM's members, written in place of the
+   * word *AgencyBoost*; `null` is the default, *AgencyBoost*.
+   */
+  systemName: string | null;
 }
 
-/** **What the proposal's PDF draws** (P19.7-T3; ADR-0223 §3, §6): the wide logo's PNG, and four colours. */
+/**
+ * **What the proposal's PDF draws of a KPM** (P19.7-T3; *redrawn 2026-11-12 by P19.14-T3, ADR-0256 §3, §5*): its name,
+ * whether it shows any branding at all, its logo — **the square one, else the wide one** — and the two colours it
+ * picked, as picked (the PDF derives its own shades from them; `null` where it shows none).
+ */
 export interface BrandingForPdf {
+  /** The KPM's name, as the sign-in page writes it: its branch name. */
+  name: string;
+  /** A logo or a pair of colours — the KPM's own or its template's. Without either, the file is AgencyBoost's. */
+  branded: boolean;
   logo: { png: Buffer; width: number; height: number } | null;
-  primary: string;
-  primaryInk: string;
-  secondary: string;
-  secondaryInk: string;
+  primary: string | null;
+  secondary: string | null;
 }
 
 /** AgencyBoost's, for the PDF without branding: the tokens' defaults (ADR-0218 §6). */
@@ -108,10 +121,15 @@ export class BrandingReader {
   ) {}
 
   /** The KPM's own live row, as fields; `null` when it has none. */
-  async ownOf(kpmId: string): Promise<{ fields: BrandingFields; version: number; id: string } | null> {
+  async ownOf(kpmId: string): Promise<{ fields: BrandingFields; version: number; id: string; systemName: string | null } | null> {
     const row = await this.rows.live(RequestContext.tenantRead(kpmId, 'kpm-branding'));
     if (!row) return null;
-    return { fields: fieldsOf(row as unknown as KpmBranding), version: row.version, id: String(row._id) };
+    return {
+      fields: fieldsOf(row as unknown as KpmBranding),
+      version: row.version,
+      id: String(row._id),
+      systemName: typeof row.systemName === 'string' && row.systemName.trim() ? row.systemName : null,
+    };
   }
 
   /** The KPM's template's published *Tampilan*: its fields and version, and the company that owns its images. */
@@ -131,7 +149,7 @@ export class BrandingReader {
     const kpm = await this.kpmOf(kpmId);
     if (!kpm || (liveOnly && kpm.status !== 'active')) return null;
     const [own, template] = await Promise.all([this.ownOf(kpmId), this.templateOf(kpm)]);
-    return resolve(kpmId, kpm.branchName ?? '', own?.fields ?? EMPTY, template?.fields ?? EMPTY);
+    return resolve(kpmId, kpm.branchName ?? '', own?.fields ?? EMPTY, template?.fields ?? EMPTY, own?.systemName ?? null);
   }
 
   /** The KPM's register row, the fields this reads; `null` for an id that names no KPM. */
@@ -150,25 +168,37 @@ export class BrandingReader {
   }
 
   /**
-   * **The proposal's PDF** (P19.7-T3 AC-7; ADR-0223 §6): the wide logo's PNG bytes, read from storage, and the four
-   * colours; AgencyBoost's where the KPM shows none.
+   * **The proposal's PDF** (P19.7-T3; *since 2026-11-12, P19.14-T3 AC-4, ADR-0256 §5*): the KPM's name; its logo's PNG
+   * bytes read from storage — the square `logo-square.png` where it has one, the wide `logo.png` else, `null` when
+   * neither reads; and the two colours it shows. A logo that cannot be read is left out, never a failed file.
    */
   async forPdf(kpmId: string): Promise<BrandingForPdf> {
     const shown = await this.shownFor(kpmId);
-    const palette = shown?.palette ?? null;
+    if (!shown) return { name: '', branded: false, logo: null, primary: null, secondary: null };
+    const read = (key: string) => this.storage.read(key, BRANDING.IMAGE_MAX_BYTES).catch(() => null);
     let logo: BrandingForPdf['logo'] = null;
-    if (shown?.logo) {
-      const png = await this.storage.read(`${shown.logo.key}/logo.png`, BRANDING.IMAGE_MAX_BYTES).catch(() => null);
+    if (shown.logoSquare) {
+      const png = await read(`${shown.logoSquare.key}/logo-square.png`);
+      if (png && png.length > 0) logo = { png, width: BRANDING.SQUARE_MIN_PX, height: BRANDING.SQUARE_MIN_PX };
+    }
+    if (!logo && shown.logo) {
+      const png = await read(`${shown.logo.key}/logo.png`);
       if (png && png.length > 0) logo = { png, width: shown.logo.width, height: shown.logo.height };
     }
-    return palette
-      ? { logo, primary: palette.primary, primaryInk: palette.primaryInk, secondary: palette.secondary, secondaryInk: palette.secondaryInk }
-      : { logo, ...AGENCYBOOST_COLOURS };
+    return {
+      name: shown.name,
+      branded: Boolean(shown.logo || shown.logoSquare || shown.palette),
+      logo,
+      primary: shown.palette ? shown.primary : null,
+      secondary: shown.palette ? shown.secondary : null,
+    };
   }
 }
 
 /** **The resolution by group** (§3): own, else the template's, else AgencyBoost's. */
-export function resolve(kpmId: string, name: string, own: BrandingFields, template: BrandingFields): ShownBranding {
+export function resolve(
+  kpmId: string, name: string, own: BrandingFields, template: BrandingFields, systemName: string | null = null,
+): ShownBranding {
   const logos: BrandingSource = own.logo ? 'own' : template.logo ? 'template' : null;
   const colours: BrandingSource = own.primary ? 'own' : template.primary ? 'template' : null;
   const mascotSource: BrandingSource = own.mascot ? 'own' : template.mascot ? 'template' : null;
@@ -189,7 +219,9 @@ export function resolve(kpmId: string, name: string, own: BrandingFields, templa
   const version = createHash('sha1')
     .update(JSON.stringify({ l: shown.logo, s: shown.logoSquare, p: shown.primary, q: shown.secondary, m: shown.mascot }))
     .digest('hex').slice(0, BRANDING.VERSION_LENGTH);
-  return { kpmId, name, version, ...shown, source: { logos, colours: palette ? colours : null, mascot: mascotSource } };
+  return {
+    kpmId, name, version, ...shown, source: { logos, colours: palette ? colours : null, mascot: mascotSource }, systemName,
+  };
 }
 
 /** The session's shape of what a KPM shows. */
@@ -206,5 +238,6 @@ export function sessionOf(shown: ShownBranding): SessionBranding {
     icons: Boolean(shown.iconsKey),
     mascotPoses: poses,
     lesson: lessonColoursOf(shown.palette),
+    systemName: shown.systemName,
   };
 }

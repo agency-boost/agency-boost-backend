@@ -265,6 +265,13 @@ describe('domain constants', () => {
         'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         // P19.6-T2 (ADR-0217 §1): the vocabulary only. Which routes accept it is pinned in `assets.spec.ts`.
         'text/html',
+        // P19.21-T3 AC-6 (ADR-0274 §10): the pitch material's wider formats; only `PITCH_MATERIAL_MIME_TYPES` takes them.
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'video/webm',
+        'video/quicktime',
       ]);
     });
   });

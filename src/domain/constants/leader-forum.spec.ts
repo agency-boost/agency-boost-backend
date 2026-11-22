@@ -12,11 +12,10 @@ describe('the Strategic Leader Forum’s constants (Phase 18.1, §B)', () => {
     expect(LEADER_MEETING_SHARE_TOKEN_BYTES).toBe(32);
   });
 
-  it('P18.1-T2 AC-7 the bounds of what the leaders type: a title 120, a text 500, a PIC 80, a target 40', () => {
-    expect(LEADER_MEETING_LIMITS).toEqual({ titleMax: 120, textMax: 500, picMax: 80, targetMax: 40 });
-    // The prototype's own longest values fit: a title, and a Monthly Target cell (`:2470`).
-    expect('Strategic Check-in — #14'.length).toBeLessThanOrEqual(LEADER_MEETING_LIMITS.titleMax);
-    expect('22 (3 @ unit)'.length).toBeLessThanOrEqual(LEADER_MEETING_LIMITS.targetMax);
+  it('P19.22-T8 AC-3, AC-4 the bound of what the leaders type: a line of the agenda or an action item, 500', () => {
+    expect(LEADER_MEETING_LIMITS).toEqual({ textMax: 500 });
+    // The mockup's longest line fits (`slf-tablet` frame 6).
+    expect('Strategi rekrut Q4: tiap AB 1 presentasi rekrut per minggu'.length).toBeLessThanOrEqual(LEADER_MEETING_LIMITS.textMax);
   });
 
   it('P18.9-T1 AC-10 a Monthly Target’s rate is typed and kept to two places (ADR-0175 §4)', () => {

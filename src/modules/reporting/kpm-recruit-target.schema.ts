@@ -8,7 +8,8 @@ export type KpmRecruitTargetDocument = HydratedDocument<KpmRecruitTarget>;
  * **An office's recruitment target for a month** (Phase 18, D-recruit): the Overview's *Target* tile
  * (`KPM_Owner.html:1060-1062`), which the prototype defaults to 15 and keeps nowhere (contradiction 8).
  *
- * One row per office and month, written by the Owner or an Admin (`kpm_overview:set_recruit_target`), each
+ * One row per office and month, written by the Owner or an Admin (`kpm_overview:set_recruit_target`, retired with the
+ * route by P19.19, ADR-0272 §7: no longer written, kept for history; the monthly targets are `abGroupTargets`), each
  * change audited with before and after. **A month with none reads the latest earlier month's** — the target
  * carries forward until somebody changes it — and an office that never set one has none, so the pill is not
  * drawn rather than judged against the prototype's 15. Soft-deleted, never removed.

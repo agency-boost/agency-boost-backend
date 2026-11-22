@@ -202,7 +202,8 @@ describe('the answer and the roll call, read whole (P18.2-T5 AC-7, P18.2-T6 AC-3
     });
     /** The service over stubs: three members, `a` with a row; the batch answers as given; audits recorded. */
     const service = (batch: { created: Record<number, string>; failed: number[]; error: unknown }) => {
-      const audits: { targetId: unknown; targetMembershipId: unknown }[][] = [];
+      const audits: { targetId: unknown; targetMembershipId: unknown; after: unknown }[][] = [];
+      const written: { membershipId: string; set: Record<string, unknown> }[][] = [];
       const reading = {
         event: { id: 'evt-1', title: 'T', phase: 'past', ended: true, startsOn: '2026-09-01' },
         rows: [row('a', 'row-a'), row('b', null), row('c', null)], rate: 0,
@@ -210,7 +211,7 @@ describe('the answer and the roll call, read whole (P18.2-T5 AC-7, P18.2-T6 AC-3
       };
       const svc = new EventRollCallService(
         { attendance: async () => reading } as never,
-        { setMany: async () => batch } as never,
+        { setMany: async (_ctx: unknown, _event: unknown, rows: never) => { written.push(rows); return batch; } } as never,
         {} as never,
         { byMembershipId: async () => new Map() } as never,
         {} as never,
@@ -218,7 +219,7 @@ describe('the answer and the roll call, read whole (P18.2-T5 AC-7, P18.2-T6 AC-3
         { recordMany: async (_ctx: unknown, entries: never) => { audits.push(entries); } } as never,
         new FixedClock(new Date('2026-09-14T03:00:00Z')),
       );
-      return { svc, audits };
+      return { svc, audits, written };
     };
     const all = { entries: ['a', 'b', 'c'].map((membershipId) => ({ membershipId, attended: true })) };
 
@@ -233,6 +234,25 @@ describe('the answer and the roll call, read whole (P18.2-T5 AC-7, P18.2-T6 AC-3
       const { svc, audits } = service({ created: { 1: 'row-b', 2: 'row-c' }, failed: [], error: null });
       await expect(svc.saveRollCall(owner, 'evt-1', all)).resolves.toMatchObject({ eventId: 'evt-1' });
       expect(audits[0].map((a) => a.targetId)).toEqual(['row-a', 'row-b', 'row-c']);
+    });
+
+    it('ADR-0268 §1 the Super Admin inside the KPM confirms as its Owner: no row of theirs to refuse, the confirmer null', async () => {
+      const superAdmin = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), 'kpm-1');
+      const { svc, audits, written } = service({ created: { 1: 'row-b', 2: 'row-c' }, failed: [], error: null });
+      const call = await svc.saveRollCall(superAdmin, 'evt-1', all);
+      // Nobody on the roll call is the caller: the Super Admin holds no membership in the office.
+      expect(call.people.map((p) => p.self)).toEqual([false, false, false]);
+      expect(written[0].map((w) => w.set.confirmedByMembershipId)).toEqual([null, null, null]);
+      expect(audits[0].map((a) => a.after)).toEqual(['a', 'b', 'c'].map(() => ({ eventId: 'evt-1', attended: true, confirmedByMembershipId: null })));
+    });
+
+    it('TENANT_NO_MEMBERSHIP for a caller in the office with no membership of theirs, and for one in no office', async () => {
+      const { svc, written } = service({ created: {}, failed: [], error: null });
+      for (const ctx of [RequestContext.tenantRead('kpm-1', 'not-a-member'), RequestContext.platform('u-root')]) {
+        await expect(svc.saveRollCall(ctx, 'evt-1', all)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP', status: 403 });
+        await expect(svc.rollCall(ctx, 'evt-1')).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+      }
+      expect(written).toEqual([]);
     });
   });
 });

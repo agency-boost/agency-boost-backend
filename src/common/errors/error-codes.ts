@@ -41,19 +41,6 @@ export const ErrorCode = {
    * (the enumeration oracle) — but this route is behind a session and the password, and rate limited.
    */
   AUTH_EMAIL_TAKEN: 'AUTH_EMAIL_TAKEN',
-  /**
-   * **A login already has its one link** (UI-169 item 5; ADR-0199 §1): `POST /auth/links` from a login that is linked,
-   * and `POST /auth/links/confirm` when either login was linked since the link was sent. `409`. A login has at most one
-   * link — a pair — in v1; the first is removed before another is made. Never answered for the *other* address at the
-   * start, which says nothing about it (`202` whatever it is).
-   */
-  AUTH_LINK_EXISTS: 'AUTH_LINK_EXISTS',
-  /**
-   * **The other login has no live session on this browser** (ADR-0199 §4): `POST /auth/links/switch` with no
-   * `password`, and `agencyboost_refresh_linked` absent, another login's, or dead. `409`, not `401`: the caller is
-   * signed in, and a `401` would end their session. The switcher asks that login's password once and sends it.
-   */
-  AUTH_LINK_SIGN_IN_REQUIRED: 'AUTH_LINK_SIGN_IN_REQUIRED',
 
   /*
    * Activity logging (P6). The catalog carried these four rows from an earlier phase and the
@@ -140,6 +127,26 @@ export const ErrorCode = {
    * Nothing written; the screen takes the agent to the first gap.
    */
   PROPOSAL_INCOMPLETE: 'PROPOSAL_INCOMPLETE',
+  /**
+   * **A premium table version that is no longer a draft** (P19.15-T1 AC-3; ADR-0258 §2): `409`. Its file, columns,
+   * rules, dates and test profiles change only while it is a draft; an activated version is replaced by a new one,
+   * never edited. `details.status` names its state.
+   */
+  RATE_TABLE_NOT_EDITABLE: 'RATE_TABLE_NOT_EDITABLE',
+  /**
+   * **A draft not ready to activate** (P19.15-T1 AC-2; ADR-0258 §6): `422`, `details.reason` — `unmapped` (the columns
+   * not confirmed), `no_rows`, `rules` (the *Ketentuan* read from the file not confirmed) or `tests` (the three profiles
+   * not all matching within Rp1 and no written reason), with `details.tests` the profiles' results.
+   */
+  RATE_TABLE_NOT_READY: 'RATE_TABLE_NOT_READY',
+  /** **A version a proposal has used** (P19.15-T1 AC-3): `409` on delete. Turn it off instead; proposals keep it. */
+  RATE_TABLE_IN_USE: 'RATE_TABLE_IN_USE',
+  /**
+   * **A table's cells that cannot be read under the columns chosen** (P19.15-T1 AC-1): `422`, `details.problems` —
+   * up to `PRODUCT_DATA.PROBLEMS_MAX` of `{ row, column, value, reason }`, `row` as the sheet numbers it — and
+   * `details.count`. Nothing is written; the columns stay unconfirmed.
+   */
+  RATE_TABLE_ROWS_INVALID: 'RATE_TABLE_ROWS_INVALID',
   /** Already won or lost. Reopening is an explicit act, not a side effect of the next write. */
   LEAD_ALREADY_CLOSED: 'LEAD_ALREADY_CLOSED',
   /**
@@ -182,17 +189,17 @@ export const ErrorCode = {
   TENANT_ARCHIVED: 'TENANT_ARCHIVED',
   /**
    * The office's subscription ended and it is not kept active (ADR-0112 §3, P13.2-T3). `403` on every
-   * request of a member, from 00:00 of the office day after its end date; `details` carry `endDate`,
-   * `kpmCode` and `branch`, which the app's page names. Raised in `ContextResolver` beside the
-   * suspension, which wins, as an archive does. Never to the Super Admin, and never in a support session.
+   * request of a member **once the seven days of grace have passed** (ADR-0279 §5, P19.23-T5 AC-5): from 00:00 of the
+   * eighth office day after its end date, in the minutes before the daily run suspends the KPM (`TENANT_SUSPENDED`
+   * thereafter). `details` carry `endDate`, `kpmCode` and `branch`, which the app's page names. Raised in
+   * `ContextResolver` beside the suspension, which wins, as an archive does. Never to the Super Admin, and never in a
+   * support session.
    */
   TENANT_SUBSCRIPTION_ENDED: 'TENANT_SUBSCRIPTION_ENDED',
-  /**
-   * **A quote with nobody to receive it** (ADR-0211 §5; P19.4-T3 AC-10): `POST /admin/tenants/:kpmId/quote` for a KPM
-   * with no Owner, or whose Owner's address is not verified (ADR-0190 §4). `409`, `details: { kpmId, reason:
-   * 'no_owner' | 'unverified' }`; the message says to print the quote instead. Nothing is sent and nothing is audited.
+  /*
+   * `BILLING_QUOTE_NO_OWNER` stood here until P19.23-T5 (ADR-0279 §7): *Kirim penawaran* now opens WhatsApp (OD-359),
+   * so no quote is sent by the API and nothing can lack a recipient.
    */
-  BILLING_QUOTE_NO_OWNER: 'BILLING_QUOTE_NO_OWNER',
   /**
    * A support session refused at its start because the office of the person named is **suspended or
    * archived** (P13.2 exit review): every request of the session would meet `TENANT_SUSPENDED` or
@@ -222,6 +229,13 @@ export const ErrorCode = {
    * `500`.
    */
   IMPERSONATION_JUST_STARTED: 'IMPERSONATION_JUST_STARTED',
+  /**
+   * ***Lihat sebagai*'s window opened on a code that opens nothing any more** (P19.23-T2 AC-7; ADR-0277):
+   * `POST /admin/impersonate/handoff` with a code already redeemed, past its `IMPERSONATION_HANDOFF_SECONDS`, or whose
+   * session has ended or run out. `410`, `details.reason` `used` · `expired` · `ended`; nothing is minted. A code that is
+   * unknown, or another Super Admin's, is `404` instead.
+   */
+  IMPERSONATION_HANDOFF_SPENT: 'IMPERSONATION_HANDOFF_SPENT',
   TENANT_NO_MEMBERSHIP: 'TENANT_NO_MEMBERSHIP',
   TENANT_CODE_TAKEN: 'TENANT_CODE_TAKEN',
   /**
@@ -371,8 +385,31 @@ export const ErrorCode = {
   ORG_ALREADY_REMOVED: 'ORG_ALREADY_REMOVED',
   ORG_TREE_TOO_LARGE: 'ORG_TREE_TOO_LARGE',
   ORG_GROUP_NAME_TAKEN: 'ORG_GROUP_NAME_TAKEN',
-  ORG_GROUP_OWNER_NOT_IN_KPM: 'ORG_GROUP_OWNER_NOT_IN_KPM',
   ORG_GROUP_NOT_FOUND: 'ORG_GROUP_NOT_FOUND',
+  /**
+   * **An AB into more than one group at once** (P19.13-T3; narrowed by P19.17-T4, ADR-0270 §1). `400`, from `PUT
+   * /members/:id/tags`: an AB has one group or none. Nothing is written.
+   */
+  ORG_GROUP_ONE_PER_LEADER: 'ORG_GROUP_ONE_PER_LEADER',
+  /**
+   * **A group on somebody who is not an AB** (P19.17-T4; ADR-0270 §1, §2). `422`, from `PUT /members/:id/group`, `PUT
+   * /members/:id/tags`, `POST /members/groups` (`abMembershipId`), `POST /members/groups/:groupId/members` and `PUT
+   * /members/groups/:groupId/leaders/:membershipId`: only an AB carries a group or is a Group Leader — an AAB and an
+   * agent follow their AB. Nothing is written.
+   */
+  ORG_GROUP_AB_ONLY: 'ORG_GROUP_AB_ONLY',
+  /**
+   * **A Group Leader who is not in the group** (P19.17-T4; ADR-0270 §2). `422`, from `PUT
+   * /members/groups/:groupId/leaders/:membershipId`: *Jadikan group leader · <group>* is offered on an AB of that group,
+   * and the API refuses anybody else. Nothing is written.
+   */
+  ORG_GROUP_LEADER_NOT_IN_GROUP: 'ORG_GROUP_LEADER_NOT_IN_GROUP',
+  /**
+   * **A target for a month that is not open** (P19.17-T4; ADR-0270 §4). `422`, from `GET` and `PUT /kpm/ab-group-targets`:
+   * a target is read and set from January 2024 (`AB_GROUP_TARGETS.EARLIEST_MONTH`) to a year after the office's month.
+   * Nothing is written.
+   */
+  AB_GROUP_TARGET_MONTH_CLOSED: 'AB_GROUP_TARGET_MONTH_CLOSED',
   /**
    * Tagging *Core Leader* a member whose rung is not a leader rung (ADR-0159 §1, P18.5-T5 AC-2). `400`. The tag is
    * a leader's: a Core Leader reads the whole office's analytics, and a tagged Agent would read every member's
@@ -395,6 +432,13 @@ export const ErrorCode = {
    * blank, so two saves at once cannot overwrite each other. Nothing is written by the refused request.
    */
   MEMBER_DETAIL_ON_FILE: 'MEMBER_DETAIL_ON_FILE',
+  /**
+   * **The member sheet's *Email* for somebody who has signed in** (P19.20-T2 AC-2; ADR-0273 §3; OD-400). `409`, from
+   * `PATCH /members/:membershipId/personal`: the office corrects the address of a person who has **never** signed in —
+   * the one their invitation goes to — and never the address somebody signs in with, which is theirs to change on *Profil
+   * saya*: an office that could change it could take the account, with every office it belongs to. Nothing is written.
+   */
+  MEMBER_EMAIL_SIGNED_IN: 'MEMBER_EMAIL_SIGNED_IN',
   ORG_ALREADY_ADMIN: 'ORG_ALREADY_ADMIN',
   ORG_NOT_AN_ADMIN: 'ORG_NOT_AN_ADMIN',
   ORG_ADMIN_TARGET_NOT_ACTIVE: 'ORG_ADMIN_TARGET_NOT_ACTIVE',
@@ -645,6 +689,12 @@ export const ErrorCode = {
    * (`scriptApprovals`), and riders attached to it (`riders`).
    */
   PRODUCT_IN_USE: 'PRODUCT_IN_USE',
+  /**
+   * ***Kelola data produk* for somebody who cannot hold it** (ADR-0260 §1; P19.15-T4 AC-2): `PUT
+   * /admin/product-data-grants/:userId` for a person who is not an active KPM Owner or KPM Admin — an agent, a leader,
+   * a Super Admin, somebody in no KPM. `409`, `details.userId`. Nothing is written.
+   */
+  PRODUCT_DATA_GRANT_NOT_ELIGIBLE: 'PRODUCT_DATA_GRANT_NOT_ELIGIBLE',
 
   /*
    * The surveys (P19.5-T4; ADR-0216; `functional/surveys.md`, *Data contract*). A run of another KPM, a cancelled one and
@@ -672,6 +722,58 @@ export const ErrorCode = {
    * another KPM is `NOT_FOUND`.
    */
   SURVEY_ANSWERS_HIDDEN: 'SURVEY_ANSWERS_HIDDEN',
+
+  // P19.15-T2, T3 (ADR-0259): *Unggah file* and the illustration.
+  /**
+   * **Reading files with Claude is not switched on** (ADR-0259 §6): the deployment has no `ANTHROPIC_API_KEY`. `503`, as
+   * `STORAGE_NOT_CONFIGURED` for a missing bucket. The screens disable the button with the same sentence; the premium
+   * table's own Excel/CSV upload is unaffected.
+   */
+  AI_READING_OFF: 'AI_READING_OFF',
+  /** An intake card confirmed with a question still unanswered. `409`, `details: { open }` the open questions' ids. */
+  INTAKE_QUESTIONS_OPEN: 'INTAKE_QUESTIONS_OPEN',
+  /** An intake card answered, confirmed or rejected after it was applied or rejected, or while its upload is read. `409`. */
+  INTAKE_ITEM_DECIDED: 'INTAKE_ITEM_DECIDED',
+  /**
+   * **A confirmed card that cannot be applied as it stands** (ADR-0259 §4): a table with no price read exactly, a
+   * percentage with no table in force to apply it to, nothing applicable. `409`, `details: { reason }`. Nothing is written.
+   */
+  INTAKE_APPLY_REFUSED: 'INTAKE_APPLY_REFUSED',
+  /** An illustration published while a formula does not match the illustration's numbers. `409`, `details: { rows }`. */
+  ILLUSTRATION_FORMULA_MISMATCH: 'ILLUSTRATION_FORMULA_MISMATCH',
+  /** An illustration edited, previewed as a draft or published while it is read, failed, or already published. `409`. */
+  ILLUSTRATION_NOT_DRAFT: 'ILLUSTRATION_NOT_DRAFT',
+
+  /*
+   * The platform console's *Platform* (P19.23-T6; ADR-0279).
+   */
+  /**
+   * **Nobody to make a Super Admin** (P19.23-T6 AC-2): `POST /admin/platform/team` with an email no account has, or
+   * whose account is deactivated. `422`, `details: { field: 'email', reason: 'no_account' | 'deactivated' }`. The
+   * person registers first (or is reactivated); nothing is written.
+   */
+  SUPER_ADMIN_NO_ACCOUNT: 'SUPER_ADMIN_NO_ACCOUNT',
+  /**
+   * **An address nobody has proved** (P19.23-T6 AC-2): the account exists and has not verified its email. `422`,
+   * `details: { field: 'email' }`. Granting the platform's every power to an address anybody could have registered is
+   * refused until its owner opens the verification link.
+   */
+  SUPER_ADMIN_UNVERIFIED: 'SUPER_ADMIN_UNVERIFIED',
+  /**
+   * **A KPM member as a Super Admin** (P19.23-T6 AC-2; spec §1: *"never a KPM role"*): the account holds a live
+   * membership in a KPM. `409`, `details: { field: 'email' }`. Nothing is written.
+   */
+  SUPER_ADMIN_HAS_MEMBERSHIP: 'SUPER_ADMIN_HAS_MEMBERSHIP',
+  /** **Your own role** (P19.23-T6 AC-2): `DELETE /admin/platform/team/:userId` naming the caller. `409`; another Super Admin removes it. */
+  SUPER_ADMIN_SELF: 'SUPER_ADMIN_SELF',
+  /** **The last one** (P19.23-T6 AC-2): removing the only active Super Admin. `409`; the platform is never left with none. */
+  SUPER_ADMIN_LAST: 'SUPER_ADMIN_LAST',
+  /**
+   * **An announcement nobody would receive** (P19.23-T6 AC-4): `POST /admin/platform/announcements` whose audience
+   * resolves to no active person — no live KPM, none of the chosen, or only test accounts. `409`; nothing is sent or
+   * recorded.
+   */
+  ANNOUNCEMENT_NO_RECIPIENTS: 'ANNOUNCEMENT_NO_RECIPIENTS',
 
   // Validation
   VALIDATION_FAILED: 'VALIDATION_FAILED',

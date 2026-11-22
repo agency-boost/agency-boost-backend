@@ -442,8 +442,12 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
   {
     code: 'SELLING_SUCCESS_RATE',
     label: 'Selling success rate',
+    /*
+     * **Submission polis ÷ Presentasi penjualan** (the owner's part D, 19 November 2026; ADR-0267 §6): a follow-up is
+     * no longer counted under it. `SEEDED_RATIO_FORMULAS_BEFORE_ADR_0267` keeps the formula it replaced, for 0067.
+     */
     numerator: ['SELL_SUBMISSION'],
-    denominator: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'],
+    denominator: ['SELL_PRESENTATION'],
     benchmark: RATIO_BENCHMARKS.SELLING_SUCCESS_RATE,
     comparison: 'gte',
     displayUnit: 'percent',
@@ -452,8 +456,9 @@ export const SEED_RATIO_DEFINITIONS: readonly SeedRatioDefinition[] = [
   {
     code: 'RECRUITMENT_SUCCESS_RATE',
     label: 'Recruitment success rate',
+    // **Proses NPA ÷ Presentasi rekrut** (part D; ADR-0267 §6): *Follow up rekrut* is no longer counted.
     numerator: ['RECRUIT_AGENT_CODE'],
-    denominator: ['RECRUIT_PRESENTATION', 'RECRUIT_FOLLOWUP'],
+    denominator: ['RECRUIT_PRESENTATION'],
     benchmark: RATIO_BENCHMARKS.RECRUITMENT_SUCCESS_RATE,
     comparison: 'gte',
     displayUnit: 'percent',
@@ -501,6 +506,19 @@ export const SEEDED_RATIO_VALUES_BEFORE_ADR_0160: Readonly<Record<
   RECRUITMENT_SUCCESS_RATE: { benchmark: 0.15 },
   LEADS_PER_ACTIVITY: { benchmark: 0.3 },
   MEETING_PER_APPROACH: { benchmark: 1.5, label: 'Meeting per approach', displayUnit: 'decimal' },
+};
+
+/**
+ * **The two success rates' formulas before ADR-0267** (the owner's part D, 19 November 2026): each divided by its
+ * presentations **and its follow-ups**. Kept only so migration `0067` can recognise an office, a snapshot and a template
+ * still on the standard formula, and move it; a formula an Owner chose is never this one's to move.
+ */
+export const SEEDED_RATIO_FORMULAS_BEFORE_ADR_0267: Readonly<Record<
+  'SELLING_SUCCESS_RATE' | 'RECRUITMENT_SUCCESS_RATE',
+  { readonly numerator: readonly string[]; readonly denominator: readonly string[] }
+>> = {
+  SELLING_SUCCESS_RATE: { numerator: ['SELL_SUBMISSION'], denominator: ['SELL_PRESENTATION', 'SELL_FOLLOWUP'] },
+  RECRUITMENT_SUCCESS_RATE: { numerator: ['RECRUIT_AGENT_CODE'], denominator: ['RECRUIT_PRESENTATION', 'RECRUIT_FOLLOWUP'] },
 };
 
 /**

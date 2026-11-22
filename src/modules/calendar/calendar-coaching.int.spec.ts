@@ -124,7 +124,9 @@ describe('1:1 coaching entries (P12-T6)', () => {
 
       expect(await measure()).toEqual(before);
       // Sanity: the roster really reads *No 1:1 yet* for Dimas, who has only calendar entries.
-      expect(before.roster.directAgents.find((r) => r.membershipId === h.id('DIMAS'))!.lastOneOnOne).toBeNull();
+      // The roster reads in sections since P19.18 (ADR-0271): every row, its teams' included.
+      const rows = before.roster.sections.flatMap((s) => [...s.rows, ...s.teams.flatMap((t) => t.rows)]);
+      expect(rows.find((r) => r.membershipId === h.id('DIMAS'))!.lastOneOnOne).toBeNull();
     });
   });
 });

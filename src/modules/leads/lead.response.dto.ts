@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { LEAD_AGE, LEAD_GENDERS } from '@/domain/constants';
+import { LEAD_GENDERS } from '@/domain/constants';
+import { ProposalClientDetailsDto } from '@/modules/proposals/proposal.response.dto';
 import { LEAD_OUTCOMES, LEAD_TYPES } from './lead.schema';
 import type { LeadDetailView, LeadFlag, LeadMoveView, LeadPage, LeadView } from './lead.service';
 
@@ -25,20 +26,35 @@ export class LeadOwnerDto {
   name!: string | null;
 }
 
-/** The latest proposal's products, as its card names them (P19.7-T2 AC-12). */
+/** The latest proposal with a product, as its card names it (P19.7-T2 AC-12; P19.14-T4 AC-1; ADR-0257 §1). */
 export class LeadLatestProposalDto {
+  @ApiProperty({ type: String, nullable: true, description: 'The proposal’s id; `null` when every live proposal is still empty.' })
+  id!: string | null;
+
   @ApiProperty({
     type: [String],
     example: ['PRUWell Medical', 'PRUCinta'],
-    description: 'The item names of the live proposal updated last that has a product, as the proposal shows them, in order. '
-      + 'Empty when every live proposal of the lead is still empty.',
+    description: 'The item names of the live proposal updated last that has a product — **a draft included** — in order: '
+      + 'the card’s *"PRUWell Medical +1"*. Empty when every live proposal of the lead is still empty.',
   })
   products!: string[];
 }
 
+/** What the next proposal for a lead starts from (P19.14-T1 AC-5; ADR-0254 §4). */
+export class LeadProposalClientDto {
+  @ApiProperty({ type: Number, nullable: true, description: 'The last proposal’s age, moved up by the whole years since it was entered.' })
+  age!: number | null;
+
+  @ApiProperty({ enum: LEAD_GENDERS, nullable: true })
+  gender!: 'male' | 'female' | null;
+
+  @ApiProperty({ type: ProposalClientDetailsDto })
+  details!: ProposalClientDetailsDto;
+}
+
 /** The lead's finished proposal saved last (P19.11-T3 AC-1): what the card's proposal icon opens. */
 export class LeadLatestDoneProposalDto {
-  @ApiProperty({ type: String, description: 'The proposal’s id: `/proposal/{id}?step=3` on the screen.' })
+  @ApiProperty({ type: String, description: 'The proposal’s id.' })
   id!: string;
 }
 
@@ -54,7 +70,7 @@ export class LeadProposalsDto {
     type: Number,
     minimum: 0,
     description: 'Among them, the finished ones: `status: "done"`, the PDF saved and not changed since.'
-      + ' Drafts never count. The card draws its proposal icon only when this is 1 or more.',
+      + ' Drafts never count.',
   })
   done!: number;
 
@@ -64,6 +80,14 @@ export class LeadProposalsDto {
     description: 'The finished proposal saved last, by `doneAt`; `null` when none is finished.',
   })
   latestDone!: LeadLatestDoneProposalDto | null;
+
+  @ApiProperty({
+    type: LeadProposalClientDto,
+    nullable: true,
+    description: 'The client of the proposal updated last, the age moved up: what step 1 starts from for this lead. '
+      + 'Never the lead’s own — a lead holds no age or gender (ADR-0254).',
+  })
+  client!: LeadProposalClientDto | null;
 }
 
 export class LeadResponseDto implements LeadView {
@@ -133,32 +157,6 @@ export class LeadResponseDto implements LeadView {
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   dateRegistered!: string | null;
 
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    minimum: LEAD_AGE.MIN,
-    example: 36,
-    description: '**The client\'s age at the next birthday, today** (*Umur ulang tahun berikutnya*; ADR-0224 §2): the '
-      + 'age written plus the whole years since `ageRecordedOn`, on the office\'s calendar — one more on each '
-      + 'anniversary, at 00:00 WIB. `null` when none was given. Read by whoever reads the lead.',
-  })
-  age!: number | null;
-
-  @ApiProperty({
-    type: String,
-    nullable: true,
-    example: '2026-11-05',
-    description: 'The office\'s day the age was last written, `YYYY-MM-DD`; `null` with it. Set by the server only.',
-  })
-  ageRecordedOn!: string | null;
-
-  @ApiProperty({
-    enum: LEAD_GENDERS,
-    nullable: true,
-    description: '*Laki-laki* or *Perempuan* (ADR-0224 §1), or `null`. Printed nowhere, and decides no figure.',
-  })
-  gender!: 'male' | 'female' | null;
-
   @ApiProperty({ type: Number, description: 'What a later write pins, so two people cannot overwrite each other.' })
   version!: number;
 
@@ -207,9 +205,9 @@ export class LeadResponseDto implements LeadView {
     type: LeadProposalsDto,
     nullable: true,
     description:
-      'How many live proposals the lead has, and the latest’s products — the card’s *"PRUWell '
-      + 'Medical +1"*. **`null` on a lead with none, and on every lead that is not yours**: a leader reads a downline’s '
-      + 'lead, never what was proposed on it.',
+      'How many live proposals the lead has, the latest’s products — the card’s *"PRUWell Medical +1"* — and '
+      + 'the last client entered, for the next proposal’s step 1. **`null` on a lead with none, and on every lead that is '
+      + 'not yours**: a leader reads a downline’s lead, never what was proposed on it.',
   })
   proposals!: LeadProposalsDto | null;
 }

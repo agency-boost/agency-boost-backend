@@ -126,8 +126,9 @@ export function checkCampaign(
  * campaign as it will be stored (a patch merged onto the stored row). Every refusal is a sentence an Owner reads.
  *
  * - A seasonal campaign is dated: it has an end, its window is its dates, and it has no subtype.
- * - A structural one is a standing programme: a subtype, a calendar year or the last twelve months held, and an end
- *   only if the office gives it one.
+ * - A structural one is a standing programme: a calendar year or the last twelve months held, and an end only if the
+ *   office gives it one. **Its subtype is optional since P19.25-T5** (ADR-0282 §5): the Owner tags a campaign only
+ *   *Struktural* or *Musiman*, so a new structural campaign carries none; a stored one keeps its own.
  * - **Whole office months** where a requirement reads the monthly file: the file is a month at a time (ADR-0050), so
  *   a window of 15 August to 15 September would read two whole months and claim half of each.
  * - Its rungs are the company's (`rungCodes`), named when one is not.
@@ -153,7 +154,6 @@ export function checkCampaignShape(
     if (campaign.window !== 'campaign_dates') violations.push(SAY.seasonalWindow);
     if (campaign.subtype !== null) violations.push(SAY.subtypeOnlyStructural);
   } else {
-    if (campaign.subtype === null) violations.push(SAY.structuralSubtype);
     if (!STRUCTURAL_CAMPAIGN_WINDOWS.includes(campaign.window)) {
       violations.push(SAY.structuralWindow({ windows: STRUCTURAL_CAMPAIGN_WINDOWS }));
     }

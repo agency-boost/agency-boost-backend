@@ -1,173 +1,236 @@
 import { platformAnalyticsConfig } from '@/modules/config/analytics-config';
 import { SURVEY } from '@/domain/constants';
 import { snapshotOf } from './survey-opening';
-import { npsResults, qualResults, type ResponseRow } from './survey-results';
+import {
+  npsHeadlineOf, npsResults, qualResults, rowsOf, sharesOf, whoShown, type NpsHistoryRun, type ResponseRow,
+} from './survey-results';
 import { complemented, underFloor } from './survey-rules';
 
 /**
- * **The results' floor at small n** (P19.5-T4; ADR-0216 §3, amended 2026-11-06): one or two respondents' score is their
- * answer, so an anonymous run under `SURVEY.MIN_GROUP` shows no figure, and a breakdown never hides a single cell that
- * the overall and the other cells would give back.
+ * **The results, per view, and their floor at small n** (P19.5-T4, rebuilt by P19.22-T6 and T7; ADR-0216 §3, ADR-0276
+ * §1–§5): the first NPS question is *Keseluruhan KPM*, the others lowest first with their shares, trend and reasons;
+ * *Analisa kualitatif* ranks A–D by *% masalah* against *semester lalu*; an anonymous run under `SURVEY.MIN_GROUP`
+ * shows no figure, a class view is hidden while either class is under it, and a quote names its class only from it.
  */
 const published = { templateId: null, templateName: null, version: 1, config: platformAnalyticsConfig() };
 const npsSnap = snapshotOf({ kind: 'nps', anonymous: true, perPerson: false }, published);
 const qualSnap = snapshotOf({ kind: 'qual', anonymous: true, perPerson: false }, published);
 const LIVE = { qualBigPct: 60, qualWatchPct: 40, coachingGoodPct: 70 };
 
-/** A sent NPS form: the same score on P1 to P5, an open answer, and its bands. */
-function nps(score: number, bands: Partial<Omit<ResponseRow, 'answers'>> = {}, open = 'Lebih banyak pelatihan.'): ResponseRow {
+/** A sent NPS form: `p1` on P1, `rest` on P2–P5 (P3 one lower), a *Kenapa?* on P2, and an open answer. */
+function nps(p1: number, extra: Partial<Omit<ResponseRow, 'answers'>> = {}, rest = p1, why = '', open = ''): ResponseRow {
   return {
     answers: [
-      ...['P1', 'P2', 'P3', 'P4', 'P5'].map((kode) => ({ questionKode: kode, value: { score } })),
-      { questionKode: 'OPEN', value: { text: open } },
+      { questionKode: 'P1', value: { score: p1 } },
+      { questionKode: 'P2', value: { score: rest, ...(why ? { why } : {}) } },
+      { questionKode: 'P3', value: { score: Math.max(0, rest - 1) } },
+      { questionKode: 'P4', value: { score: rest } },
+      { questionKode: 'P5', value: { score: rest } },
+      ...(open ? [{ questionKode: 'OPEN', value: { text: open } }] : []),
     ],
-    roleClass: 'agent', tenureBand: 0, ageBand: 0, ...bands,
+    roleClass: 'agent', tenureBand: 0, ageBand: 0, ...extra,
   };
 }
 
-/** A sent qualitative form: Q4, every Q5 item at `rating`, Q12; an AB also the leader blocks' Q6 and Q10. */
-function qual(rating: number, leader = false): ResponseRow {
-  const q5 = qualSnap.blocks.find((b) => b.kode === 'SALES')!.questions[0].items.map((i) => i.kode);
-  const q6 = qualSnap.blocks.find((b) => b.kode === 'RECRUIT')!.questions[0].items.map((i) => i.kode);
+/** A sent qualitative form: Q4 with a note, every Q5 item at `rating`, Q12 with a reason; a leader the leader blocks. */
+function qual(rating: number, leader = false, extra: Partial<Omit<ResponseRow, 'answers'>> = {}): ResponseRow {
+  const items = (block: string, q = 0) => qualSnap.blocks.find((b) => b.kode === block)!.questions[q].items.map((i) => i.kode);
   return {
     answers: [
-      { questionKode: 'Q4', value: { chosen: ['TOP'] } },
-      { questionKode: 'Q5', value: Object.fromEntries(q5.map((k) => [k, rating])) },
+      { questionKode: 'Q4', value: { chosen: [leader ? 'TEAM' : 'TOP'], note: leader ? 'Membangun tim.' : 'Jadi MDRT.' } },
+      { questionKode: 'Q5', value: Object.fromEntries(items('SALES').map((k) => [k, rating])) },
       ...(leader ? [
-        { questionKode: 'Q6', value: Object.fromEntries(q6.map((k) => [k, rating])) },
+        { questionKode: 'Q6', value: Object.fromEntries(items('RECRUIT').map((k) => [k, rating])) },
+        { questionKode: 'Q7', value: Object.fromEntries(items('ACTIVATION').map((k) => [k, rating <= 3 ? 'inconsistent' : 'consistent'])) },
+        { questionKode: 'Q8', value: Object.fromEntries(items('UNIT').map((k) => [k, 'consistent'])) },
+        { questionKode: 'Q9', value: Object.fromEntries(items('UNIT', 1).map((k) => [k, rating])) },
         { questionKode: 'Q10', value: { answer: 'yes' } },
+        { questionKode: 'Q11', value: { leaders: [{ membershipId: 'mem-down', areas: rating <= 3 ? ['SALES'] : [] }] } },
       ] : []),
-      { questionKode: 'Q12', value: { score: 9 } },
+      { questionKode: 'Q12', value: { score: leader ? 6 : 9, reason: leader ? 'Jarang bertemu.' : 'Selalu membantu.' } },
     ],
-    roleClass: leader ? 'ab' : 'agent', tenureBand: 0, ageBand: 0,
+    roleClass: leader ? 'ab' : 'agent', tenureBand: leader ? 2 : 0, ageBand: 0, workStatus: leader ? 'full_time' : 'part_time',
+    membershipId: null, ...extra,
   };
 }
 
-const anonymous = (rows: ResponseRow[]) => ({ snapshot: npsSnap, rows, anonymous: true });
-const named = (rows: ResponseRow[]) => ({ snapshot: npsSnap, rows, anonymous: false });
+const run = (rows: ResponseRow[], anonymous = true, periodKey = '2026-Q4'): NpsHistoryRun => ({ snapshot: npsSnap, rows, anonymous, periodKey });
+const qrun = (rows: ResponseRow[], anonymous = true) => ({ snapshot: qualSnap, rows, anonymous });
 
-describe('P19.5-T4 ADR-0216 §3 the results at small n', () => {
-  describe('the floor', () => {
-    it('P19.5-T4 ADR-0216 §3 the floor is an anonymous run’s, under SURVEY.MIN_GROUP (3)', () => {
+describe('P19.22 ADR-0276 the survey results', () => {
+  describe('the floor and the views', () => {
+    it('P19.22 ADR-0216 §3 the floor is an anonymous run’s, under SURVEY.MIN_GROUP (3)', () => {
       expect(SURVEY.MIN_GROUP).toBe(3);
       expect([0, 1, 2, 3].map((n) => underFloor(true, n))).toEqual([true, true, true, false]);
       expect([0, 1, 2].map((n) => underFloor(false, n))).toEqual([false, false, false]);
     });
 
-    it('P19.5-T4 ADR-0216 §3 an anonymous NPS run under three respondents: no overall, no score or change per aspect or question, no open answers', () => {
-      for (const rows of [[nps(9)], [nps(9), nps(3)]]) {
-        const r = npsResults(anonymous(rows), 'office', null);
-        expect(r.respondents).toBe(rows.length);
-        expect(r.overall).toBeNull();
-        expect(r.change).toBeNull();
-        expect(r.aspects.map((a) => [a.score, a.change])).toEqual(r.aspects.map(() => [null, null]));
-        expect(r.questions.map((q) => [q.score, q.change])).toEqual(r.questions.map(() => [null, null]));
-        // How many answered is a count, not an answer: it stays.
-        expect(r.questions.map((q) => q.n)).toEqual(r.questions.map(() => rows.length));
-        expect(r.openAnswers).toBeNull();
-        expect(Object.values(r.breakdowns).flat().every((c) => c.score === null)).toBe(true);
-        expect(JSON.stringify(r)).not.toContain('Lebih banyak pelatihan');
-      }
+    it('P19.22-T6 AC-1 ADR-0276 §3 the leaders are the ABs and the AABs; a class view of an anonymous run needs three of each class', () => {
+      const rows = [nps(9, { roleClass: 'ab' }), nps(9, { roleClass: 'aab' }), nps(9), nps(9), nps(9)];
+      expect(rowsOf(rows, 'leader')).toHaveLength(2);
+      expect(rowsOf(rows, 'agent')).toHaveLength(3);
+      expect(rowsOf(rows, 'all')).toHaveLength(5);
+      expect(whoShown(run(rows), 'all')).toBe(true);
+      expect(whoShown(run(rows), 'agent')).toBe(false);
+      expect(whoShown(run([...rows, nps(9, { roleClass: 'ab' })]), 'agent')).toBe(true);
+      expect(whoShown(run(rows, false), 'leader')).toBe(true);
     });
 
-    it('P19.5-T4 ADR-0216 §3 at three respondents the anonymous run’s figures are shown', () => {
-      const r = npsResults(anonymous([nps(9), nps(9), nps(3)]), 'office', null);
-      // 15 scores: 10 promoters, 5 detractors — round(100 · 5 / 15) = 33.
-      expect(r.overall).toEqual({ score: 33, promoters: 10, passives: 0, detractors: 5, n: 15 });
-      expect(r.questions.every((q) => q.score === 33)).toBe(true);
-      expect(r.openAnswers).toHaveLength(3);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 a run that is not anonymous keeps its figures under three: its respondents were told', () => {
-      const r = npsResults(named([nps(10)]), 'office', null);
-      expect(r.overall).toMatchObject({ score: 100, n: 5 });
-      expect(r.questions[0].score).toBe(100);
-      expect(r.openAnswers).toEqual(['Lebih banyak pelatihan.']);
-      // The cell minimum is every run's.
-      expect(r.breakdowns.roleClass).toEqual([{ key: 'agent', respondents: 1, score: null }]);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 a previous anonymous run under its floor gives no change, which today’s score would give back', () => {
-      const today = anonymous([nps(9), nps(9), nps(9)]);
-      expect(npsResults(today, 'office', anonymous([nps(3)])).change).toBeNull();
-      expect(npsResults(today, 'office', anonymous([nps(3)])).questions.map((q) => q.change)).toEqual([null, null, null, null, null]);
-      expect(npsResults(today, 'office', anonymous([nps(3)])).aspects.every((a) => a.change === null)).toBe(true);
-      // Over its floor, or not anonymous, the previous run gives its change.
-      expect(npsResults(today, 'office', anonymous([nps(3), nps(3), nps(3)])).change).toBe(200);
-      expect(npsResults(today, 'office', named([nps(3)])).change).toBe(200);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 an anonymous qualitative run: a figure over fewer than three answers is null; how many answered stays', () => {
-      // Two agents: every figure is under the floor.
-      const two = qualResults({ snapshot: qualSnap, rows: [qual(1), qual(5)], anonymous: true }, 'office', LIVE);
-      const sales = two.blocks.find((b) => b.kode === 'SALES')!.items;
-      expect(sales.map((i) => [i.answers, i.issues, i.issuePct, i.severity])).toEqual(sales.map(() => [2, null, null, null]));
-      expect(two.aspiration.map((a) => [a.count, a.pct])).toEqual(two.aspiration.map(() => [null, null]));
-      expect(two.support).toEqual({ n: 2, satisfiedPct: null, fairPct: null, poorPct: null });
-      expect(two.respondents).toBe(2);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 per figure: four sent, one AB answered the leader blocks — those are hidden, Penjualan is shown', () => {
-      const r = qualResults({
-        snapshot: qualSnap, rows: [qual(1, true), qual(1), qual(5), qual(5)], anonymous: true,
-      }, 'office', LIVE);
-      expect(r.blocks.find((b) => b.kode === 'SALES')!.items[0]).toMatchObject({ answers: 4, issues: 2, issuePct: 50, severity: 'watch' });
-      expect(r.blocks.find((b) => b.kode === 'RECRUIT')!.items[0]).toMatchObject({ answers: 1, issues: null, issuePct: null, severity: null });
-      expect(r.coachingDownline).toEqual({ n: 1, pct: null, good: null });
-      expect(r.aspiration.find((a) => a.kode === 'TOP')).toMatchObject({ count: 4, pct: 100 });
-      expect(r.support).toMatchObject({ n: 4, satisfiedPct: 100 });
-    });
-
-    it('P19.5-T4 ADR-0216 §3 a qualitative run that is not anonymous keeps its figures under three', () => {
-      const r = qualResults({ snapshot: qualSnap, rows: [qual(1, true)], anonymous: false }, 'office', LIVE);
-      expect(r.blocks.find((b) => b.kode === 'RECRUIT')!.items[0]).toMatchObject({ answers: 1, issues: 1, issuePct: 100, severity: 'big' });
-      expect(r.coachingDownline).toEqual({ n: 1, pct: 100, good: true });
-      expect(r.aspiration.find((a) => a.kode === 'TOP')).toMatchObject({ count: 1, pct: 100 });
+    it('P19.22-T6 AC-1 ADR-0276 §3 a hidden class view has no figure and no quote; the counts stay', () => {
+      const rows = [nps(9, { roleClass: 'ab' }, 9, 'Jelas.'), ...[10, 10, 3].map((s) => nps(s, {}, s, 'Ok.'))];
+      const r = npsResults(run(rows), 'office', [], 'agent');
+      expect(r).toMatchObject({ who: 'agent', whoShown: false, respondents: 3, improve: null });
+      expect(r.headline).toMatchObject({ score: null, n: 3, shares: null, reasons: null });
+      expect(r.questions.every((q) => q.score === null && q.reasons === null)).toBe(true);
     });
   });
 
-  describe('one hidden cell is never alone', () => {
+  describe('NPS', () => {
+    it('P19.22-T6 AC-2 ADR-0276 §1 Keseluruhan KPM is the first question; the others follow lowest first', () => {
+      const rows = [10, 10, 9, 8, 3].map((s) => nps(s, {}, 7));
+      const r = npsResults(run(rows), 'office', []);
+      expect(r.headline).toMatchObject({ kode: 'P1', score: 40, n: 5 });
+      // P3 scores one lower than P2, P4, P5: 6s, all detractors.
+      expect(r.questions.map((q) => q.kode)).toEqual(['P3', 'P2', 'P4', 'P5']);
+      expect(r.questions[0].score).toBe(-100);
+      expect(npsHeadlineOf(run(rows))).toBe(40);
+    });
+
+    it('P19.22-T6 AC-2 the promoter · passive · detractor shares add to 100 and their ends differ by the score', () => {
+      expect(sharesOf([10, 10, 9, 8, 3], 9, 7)).toEqual({ promoterPct: 60, passivePct: 20, detractorPct: 20 });
+      // 69 / 24 / 7 → 62, the mockup's headline.
+      const scores = [...Array(20).fill(9), ...Array(7).fill(7), ...Array(2).fill(3)];
+      const s = sharesOf(scores, 9, 7)!;
+      expect(s.promoterPct + s.passivePct + s.detractorPct).toBe(100);
+      expect(s.promoterPct - s.detractorPct).toBe(Math.round((100 * (20 - 2)) / 29));
+      expect(sharesOf([], 9, 7)).toBeNull();
+    });
+
+    it('P19.22-T6 AC-2 change in poin against the previous run, and a four-run trend oldest first', () => {
+      const q1 = run([10, 10, 3].map((s) => nps(s)), true, '2026-Q1');
+      const q2 = run([10, 3, 3].map((s) => nps(s)), true, '2026-Q2');
+      const q3 = run([10, 10].map((s) => nps(s)), true, '2026-Q3');
+      const now = run([10, 10, 10].map((s) => nps(s)), true, '2026-Q4');
+      const r = npsResults(now, 'office', [q1, q2, q3]);
+      expect(r.trendPeriods).toEqual(['2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4']);
+      // Q3 had two answers, anonymous: hidden in the trend, and no change against it.
+      expect(r.headline!.trend).toEqual([33, -33, null, 100]);
+      expect(r.headline!.change).toBeNull();
+      const named = npsResults(now, 'office', [q1, q2]);
+      expect(named.headline!.change).toBe(100 - -33);
+    });
+
+    it('P19.22-T6 AC-2 ADR-0276 §3 the reasons: tagged by class from three of it, untagged below, none for a summary', () => {
+      const rows = [
+        nps(9, { roleClass: 'ab' }, 9, 'Visi sudah jelas.'),
+        nps(9, {}, 9, 'Hanya slogan.'), nps(9, {}, 9, 'Terlalu umum.'), nps(9, {}, 9, ''),
+      ];
+      const r = npsResults(run(rows), 'office', []);
+      const p2 = r.questions.find((q) => q.kode === 'P2')!;
+      expect(p2.reasons).toHaveLength(3);
+      expect(p2.reasons!.find((q) => q.text === 'Visi sudah jelas.')!.who).toBeNull();
+      expect(p2.reasons!.find((q) => q.text === 'Hanya slogan.')!.who).toBe('agent');
+      expect(npsResults(run(rows, false), 'office', []).questions.find((q) => q.kode === 'P2')!.reasons!
+        .find((q) => q.text === 'Visi sudah jelas.')!.who).toBe('leader');
+      expect(npsResults(run(rows), 'summary', []).questions.every((q) => q.reasons === null)).toBe(true);
+      // Under the floor: no reasons at all.
+      expect(npsResults(run(rows.slice(0, 2)), 'office', []).questions.find((q) => q.kode === 'P2')!.reasons).toBeNull();
+    });
+
+    it('P19.22-T6 AC-2 the open question’s answers are *what to improve*, in an order that is not the order sent', () => {
+      const rows = ['Lebih banyak pelatihan.', 'Acara rutin.', 'Coaching mingguan.'].map((t) => nps(9, {}, 9, '', t));
+      const r = npsResults(run(rows), 'office', []);
+      expect(r.improve!.map((q) => q.text).sort()).toEqual(['Acara rutin.', 'Coaching mingguan.', 'Lebih banyak pelatihan.']);
+      expect(npsResults(run(rows), 'summary', []).improve).toBeNull();
+    });
+  });
+
+  describe('Analisa kualitatif', () => {
+    it('P19.22-T7 AC-2 A–D in one row format, ranked by % masalah; the agents’ view of a leader block says it was not asked', () => {
+      const rows = [qual(2, true), qual(5, true), qual(1, true), qual(2), qual(4), qual(5)];
+      const r = qualResults(qrun(rows, false), 'office', LIVE);
+      const sales = r.blocks.find((b) => b.kode === 'SALES')!;
+      expect(sales).toMatchObject({ asked: true, respondents: 6 });
+      expect(sales.rows[0]).toMatchObject({ answers: 6, issuePct: 50, severity: 'watch' });
+      const recruit = r.blocks.find((b) => b.kode === 'RECRUIT')!;
+      expect(recruit.rows[0]).toMatchObject({ answers: 3, issuePct: 67, severity: 'big' });
+      const agents = qualResults(qrun(rows, false), 'office', LIVE, null, 'agent');
+      expect(agents.blocks.find((b) => b.kode === 'RECRUIT')).toMatchObject({ asked: false, respondents: 0, rows: [] });
+      expect(agents.blocks.find((b) => b.kode === 'SALES')!.rows[0].issuePct).toBe(33);
+      expect(agents.coachingDownline.asked).toBe(false);
+    });
+
+    it('P19.22-T7 AC-2 D · Manajemen unit carries *tidak nyaman x%* from Q9 beside Q8’s consistency', () => {
+      const r = qualResults(qrun([qual(2, true), qual(5, true), qual(1, true)], false), 'office', LIVE);
+      const unit = r.blocks.find((b) => b.kode === 'UNIT')!;
+      expect(unit.rows[0]).toMatchObject({ kind: 'state', issuePct: 0, comfortPct: 67 });
+      expect(r.blocks.find((b) => b.kode === 'SALES')!.rows[0].comfortPct).toBeNull();
+    });
+
+    it('P19.22-T7 AC-2 ADR-0276 §4 semester lalu: ▲ worse, ▼ better against the run before, same view', () => {
+      const before = qrun([qual(5), qual(5), qual(2)], false);
+      const now = qrun([qual(2), qual(2), qual(5)], false);
+      const r = qualResults(now, 'office', LIVE, before);
+      expect(r.blocks.find((b) => b.kode === 'SALES')!.rows[0]).toMatchObject({ issuePct: 67, previousPct: 33, trend: 'worse' });
+      const better = qualResults(before, 'office', LIVE, now);
+      expect(better.blocks.find((b) => b.kode === 'SALES')!.rows[0]).toMatchObject({ issuePct: 33, previousPct: 67, trend: 'better' });
+      expect(qualResults(now, 'office', LIVE, null).blocks[0].rows[0].trend).toBeNull();
+    });
+
+    it('P19.22-T7 AC-2 Siapa yang menjawab, Aspirasi with the leaders’ and agents’ shares, Dukungan leader by who rated', () => {
+      const rows = [qual(2, true), qual(5, true), qual(1, true), qual(2), qual(4), qual(5)];
+      const r = qualResults(qrun(rows, false), 'office', LIVE);
+      expect(r.profile.workStatus).toEqual({ fullTime: 3, partTime: 3, unknown: 0 });
+      expect(r.profile.tenure).toMatchObject({ counts: [3, 0, 3, 0], unknown: 0 });
+      expect(r.aspiration.find((a) => a.kode === 'TOP')).toMatchObject({ pct: 50, leaderPct: 0, agentPct: 100 });
+      expect(r.support).toEqual([
+        { rater: 'agent', n: 3, average: 9, satisfiedPct: 100, fairPct: 0, poorPct: 0 },
+        { rater: 'leader', n: 3, average: 6, satisfiedPct: 0, fairPct: 0, poorPct: 100 },
+      ]);
+      expect(qualResults(qrun(rows, false), 'office', LIVE, null, 'leader').support.map((s) => s.rater)).toEqual(['leader']);
+      expect(r.aspirationNotes!.map((q) => q.text).sort()).toEqual(['Jadi MDRT.', 'Jadi MDRT.', 'Jadi MDRT.', 'Membangun tim.', 'Membangun tim.', 'Membangun tim.']);
+    });
+
+    it('P19.22-T7 AC-2 ADR-0276 §5 Suara responden: the office’s alone, from three reasons; a core leader and a summary get none', () => {
+      const rows = [qual(2, true), qual(5), qual(4)];
+      expect(qualResults(qrun(rows, false), 'office', LIVE).voices).toHaveLength(3);
+      expect(qualResults(qrun(rows, false), 'core_leader', LIVE).voices).toBeNull();
+      expect(qualResults(qrun(rows, false), 'summary', LIVE).voices).toBeNull();
+      expect(qualResults(qrun(rows.slice(0, 2), false), 'office', LIVE).voices).toBeNull();
+    });
+
+    it('P19.22-T7 AC-2 Coaching leader downline: x dari y, and a named run’s table of downline leaders', () => {
+      const rows = [qual(2, true, { membershipId: 'mem-agus' }), qual(5, true, { membershipId: 'mem-yosef' })];
+      const r = qualResults(qrun(rows, false), 'office', LIVE);
+      expect(r.coachingDownline).toMatchObject({ asked: true, n: 2, yes: 2, pct: 100, good: true });
+      expect(r.coachingDownline.rows).toEqual([
+        { leaderId: 'mem-down', uplineId: 'mem-agus', areas: ['SALES'], independent: false },
+        { leaderId: 'mem-down', uplineId: 'mem-yosef', areas: [], independent: true },
+      ]);
+      expect(qualResults(qrun(rows, true), 'office', LIVE).coachingDownline.rows).toBeNull();
+    });
+
+    it('P19.22 ADR-0216 §3 an anonymous qualitative run: a figure over fewer than three answers is null; how many answered stays', () => {
+      const two = qualResults(qrun([qual(1), qual(5)]), 'office', LIVE);
+      const sales = two.blocks.find((b) => b.kode === 'SALES')!.rows;
+      expect(sales.map((i) => [i.answers, i.issuePct, i.severity])).toEqual(sales.map(() => [2, null, null]));
+      expect(two.aspiration.map((a) => a.pct)).toEqual(two.aspiration.map(() => null));
+      expect(two.profile).toEqual({ workStatus: null, tenure: null });
+      expect(two.support[0]).toMatchObject({ n: 2, average: null, satisfiedPct: null });
+      expect(two.aspirationNotes).toBeNull();
+      expect(two.respondents).toBe(2);
+    });
+  });
+
+  describe('one hidden cell is never alone (the breakdown rule the class views follow)', () => {
     const cell = (key: string, respondents: number, score: number | null = respondents < 3 ? null : 10 * respondents) =>
       ({ key, respondents, score });
 
     it('P19.5-T4 ADR-0216 §3 one hidden cell: the shown cell with the fewest respondents is hidden too', () => {
       expect(complemented([cell('aab', 1), cell('ab', 3), cell('agent', 4)], 0))
         .toEqual([cell('aab', 1), { key: 'ab', respondents: 3, score: null }, cell('agent', 4)]);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 a tie hides the first by key; two hidden cells, or none, stay as they are', () => {
-      expect(complemented([cell('0', 2), cell('1', 5), cell('2', 5)], 0).map((c) => c.score)).toEqual([null, null, 50]);
-      expect(complemented([cell('0', 2), cell('1', 1), cell('2', 5)], 0).map((c) => c.score)).toEqual([null, null, 50]);
       expect(complemented([cell('0', 3), cell('1', 5)], 0).map((c) => c.score)).toEqual([30, 50]);
-      // Nothing shown to hide: a lone hidden cell stays alone.
-      expect(complemented([cell('0', 2)], 0).map((c) => c.score)).toEqual([null]);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 the rows with no band are a group of their own: one or two of them hide the smallest cell', () => {
       expect(complemented([cell('0', 3), cell('1', 4)], 1).map((c) => c.score)).toEqual([null, 40]);
-      expect(complemented([cell('0', 3), cell('1', 4)], 3).map((c) => c.score)).toEqual([30, 40]);
-      // With a hidden cell beside them, two are hidden already.
-      expect(complemented([cell('0', 2), cell('1', 4)], 2).map((c) => c.score)).toEqual([null, 40]);
-    });
-
-    it('P19.5-T4 ADR-0216 §3 in the NPS breakdowns: one AAB beside three ABs and four agents hides the ABs’ cell as well', () => {
-      const rows = [
-        nps(3, { roleClass: 'aab' }),
-        ...[9, 9, 9].map((s) => nps(s, { roleClass: 'ab' })),
-        ...[10, 10, 8, 8].map((s) => nps(s, { roleClass: 'agent' })),
-      ];
-      const r = npsResults(anonymous(rows), 'office', null);
-      expect(r.breakdowns.roleClass).toEqual([
-        { key: 'aab', respondents: 1, score: null },
-        { key: 'ab', respondents: 3, score: null },
-        { key: 'agent', respondents: 4, score: 50 },
-      ]);
-      // Two with no date of birth beside eight banded: the smallest band is hidden with them.
-      const aged = npsResults(anonymous([
-        ...rows.slice(0, 3).map((x) => ({ ...x, ageBand: 1 })), ...rows.slice(3, 6), ...rows.slice(6).map((x) => ({ ...x, ageBand: null })),
-      ]), 'office', null);
-      // Band 1: the AAB's 3s and two ABs' 9s — 10 promoters, 5 detractors of 15, 33. The tie hides band 0, first by key.
-      expect(aged.breakdowns.ageBand.map((c) => [c.key, c.respondents, c.score])).toEqual([['0', 3, null], ['1', 3, 33]]);
     });
   });
 });

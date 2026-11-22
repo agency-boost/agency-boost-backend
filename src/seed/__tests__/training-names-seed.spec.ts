@@ -67,7 +67,10 @@ describe('P19.6-T4 the training names seed', () => {
     const owner = await as('owner@kpm0417.test', { owner: true });
     expect((await col('trainingSkills').find({ kpmId: kpm, code: { $in: Object.keys(DEMO_SKILL_DESCRIPTIONS) } }).toArray())
       .map((s) => s.version)).toEqual(Object.keys(DEMO_SKILL_DESCRIPTIONS).map(() => 1));
-    expect((await wired.config.state(owner)).hasUnpublishedChanges).toBe(false);
+    // *Amended 2026-11-20 (P19.21-T2; ADR-0274 §8):* each setting has its own bar, and the hub's seed leaves only *Activity
+    // types* changed after its publish (`settings-hub-fixture.ts`): Training's, which the seeded lines are on, is silent.
+    expect((await wired.config.state(owner)).settings.filter((s) => s.hasUnpublishedChanges).map((s) => s.setting))
+      .toEqual(['activity_types']);
   });
 
   it('P19.6-T4 a second run writes nothing', async () => {
