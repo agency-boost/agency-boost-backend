@@ -353,7 +353,7 @@ describe('GET /admin/audit — paged, filtered and grouped on the server (P19.2-
       await write(1, { kpmId: FIXTURE_KPM, action: 'platform_read.kpm_analytics', targetCollection: 'kpms', targetId: FIXTURE_KPM });
       await write(2, { kpmId: KPM_B, action: 'platform_read.kpm_analytics', targetCollection: 'kpms', targetId: KPM_B });
 
-      const { body } = await read(`?kpmId=${FIXTURE_KPM}`).set('Accept-Language', 'id').expect(200);
+      const { body } = await read(`?kpmId=${FIXTURE_KPM}&includeViewed=true`).set('Accept-Language', 'id').expect(200);
 
       expect(body.items.map((g: { actionLabel: string; targetLabel: string }) => [g.actionLabel, g.targetLabel]))
         .toEqual([['Analytics KPM 0417 dilihat', 'KPM 0417 · Surabaya']]);
@@ -421,8 +421,10 @@ describe('GET /admin/audit — paged, filtered and grouped on the server (P19.2-
       session.current = OWNER;
       expect(shape((await read().expect(200)).body)).toEqual(['member.role_changed×2']);
       session.current = SUPER_ADMIN;
-      expect(shape((await read(`?kpmId=${FIXTURE_KPM}`).expect(200)).body))
+      expect(shape((await read(`?kpmId=${FIXTURE_KPM}&includeViewed=true`).expect(200)).body))
         .toEqual(['member.role_changed×1', 'leader_note.read×1', 'member.role_changed×1']);
+      // P19.26-T3 AC-1: changes only by default — the note's read is a look, and the two changes fold into one group.
+      expect(shape((await read(`?kpmId=${FIXTURE_KPM}`).expect(200)).body)).toEqual(['member.role_changed×2']);
     });
   });
 
@@ -453,7 +455,7 @@ describe('GET /admin/audit — paged, filtered and grouped on the server (P19.2-
       await write(4, { kpmId: null, action: 'platform_read.kpm_data', targetCollection: 'kpms', targetId: FIXTURE_KPM });
       await write(4, { kpmId: FIXTURE_KPM, action: 'platform_read.kpm_data', targetCollection: 'kpms', targetId: FIXTURE_KPM });
 
-      const body = (await read().expect(200)).body;
+      const body = (await read('?includeViewed=true').expect(200)).body;
       expect(shape(body)).toEqual(['super_admin.revoked×1', 'ab_group_target.set×1', 'member.role_changed×1', 'platform_read.kpm_data×1']);
       expect(body.items[1]).toMatchObject({
         change: '6 → 8',
@@ -462,8 +464,48 @@ describe('GET /admin/audit — paged, filtered and grouped on the server (P19.2-
         actorName: 'Superadmin',
       });
       // One KPM: its whole log, the Owner's change included.
-      expect(shape((await read(`?kpmId=${FIXTURE_KPM}`).expect(200)).body))
+      expect(shape((await read(`?kpmId=${FIXTURE_KPM}&includeViewed=true`).expect(200)).body))
         .toEqual(['ab_group_target.set×1', 'member.leader_changed×1', 'platform_read.kpm_data×1']);
+    });
+
+    /*
+     * **P19.26-T3 AC-1 (UI-217; ADR-0284 §3): changes only by default.** The looks — every `platform_read.` row, and the
+     * reads recorded inside an office — sit behind *Termasuk dilihat*, filtered by the server before the page is cut.
+     */
+    it('P19.26-T3 AC-1 lists changes only by default, the looks with includeViewed=true, a look asked by name always', async () => {
+      await write(0, { action: 'company.updated', targetId: MANU, after: { name: 'Manulife Baru' }, before: { name: 'Manulife' } });
+      await write(1, { kpmId: null, action: 'platform_read.members', targetCollection: 'kpms', targetId: null });
+      await write(2, { kpmId: null, action: 'platform_read.member_detail', targetCollection: 'kpms', targetId: null });
+
+      const changes = (await read().expect(200)).body;
+      expect(shape(changes)).toEqual(['company.updated×1']);
+      expect(changes.facets.actions).toEqual(['company.updated']);
+      const all = (await read('?includeViewed=true').expect(200)).body;
+      expect(shape(all)).toEqual(['company.updated×1', 'platform_read.members×1', 'platform_read.member_detail×1']);
+      expect(all.facets.actions).toEqual(['company.updated', 'platform_read.member_detail', 'platform_read.members']);
+      expect(shape((await read('?action=platform_read.members').expect(200)).body)).toEqual(['platform_read.members×1']);
+      expect(shape((await read('?includeViewed=false').expect(200)).body)).toEqual(['company.updated×1']);
+    });
+
+    it('P19.26-T3 AC-1 pages over changes alone: 50 changes a page whatever looks sit between them, and the cursor goes on', async () => {
+      // 55 changes, each about its own target so none fold, with a look written between every two.
+      for (let i = 0; i < 55; i += 1) {
+        await write(i * 2, { action: 'company.updated', targetId: `c-${i}`, after: { name: `N${i}` } });
+        await write(i * 2 + 1, { kpmId: null, action: 'platform_read.accounts', targetCollection: 'users', targetId: `v-${i}` });
+      }
+      const first = (await read().expect(200)).body;
+      expect(first.items).toHaveLength(50);
+      expect(first.items.every((g: { action: string }) => g.action === 'company.updated')).toBe(true);
+      expect(first.page.nextCursor).toEqual(expect.any(String));
+      const second = (await read(`?cursor=${first.page.nextCursor}`).expect(200)).body;
+      expect(second.items).toHaveLength(5);
+      expect(second.page.nextCursor).toBeNull();
+    });
+
+    it('P19.26-T3 AC-1 refuses includeViewed that is not true or false, naming it', async () => {
+      const res = await read('?includeViewed=yes').expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+      expect(JSON.stringify(res.body.error)).toContain('includeViewed');
     });
 
     it('P19.23-T6 AC-1 Cari perubahan: by who, by KPM, by company, by the action’s words and by a value the change names', async () => {

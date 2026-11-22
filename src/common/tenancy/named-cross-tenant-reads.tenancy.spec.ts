@@ -120,6 +120,30 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*All members* › *Akun terdaftar* (P19.12-T2 AC-1, ADR-0245 §1): how many live memberships each account holds in '
       + 'any office, for *Tanpa KPM*, *Punya KPM* and each row\'s *n KPM*, by the Super Admin who is in none — a count '
       + 'per account, never an office, a row or a name; audited per read in the platform\'s log',
+    countPerOfficeAcrossTenants:
+      '*Anggota*\'s footer and *Aktif n* (P19.26-T1 AC-1, ADR-0284 §1): the counted members per KPM of the scope asked, '
+      + 'by the Super Admin who is in none — a count per office, never a row or a name; inside the read already audited',
+  },
+  // P19.28 (ADR-0286 §5): Anggota's *Menunggu* and its three chips, by the Super Admin who is in no office.
+  'reporting/platform/anggota-waiting.ts': {
+    listWaitingAcrossTenants:
+      '*Menunggu*\'s *Diundang* rows (P19.28-T1 AC-5): the waiting invitations of *Tambah user* in the KPMs named — who, '
+      + 'where, which rung and when — and the *Menunggu* chip\'s count; audited per read in the platform\'s log and each KPM\'s',
+    listMembershipsAcrossTenants:
+      '*Menunggu*\'s *Belum ada KPM* rows (P19.28-T1 AC-5): the pending memberships of the KPMs named — somebody registered '
+      + 'to a KPM nobody placed — and the people who left any KPM, so a leaver is under *Keluar* and not twice; audited per read',
+    liveMembershipCountsPerUserAcrossTenants:
+      '*Menunggu*\'s accounts in no KPM (P19.28-T1 AC-5): whether each account holds a live membership anywhere — a count per '
+      + 'account, never an office or a row — so an account with none reads *Belum ada KPM*',
+    countPerOfficeAcrossTenants:
+      'Anggota\'s chips *Aktif n* and *Keluar n* (P19.28-T3 AC-4): the counted members and the ended memberships per KPM '
+      + 'of the scope asked — a count per office, never a row or a name',
+  },
+  // P19.28 (ADR-0286): *Kirim ulang* and *Batalkan* on Anggota's row, where the Super Admin is in no KPM.
+  'tenants/add-user.service.ts': {
+    findByIdAcrossTenants:
+      '*Tambah user*\'s invitation by its id (P19.28-T1 AC-4), for *Kirim ulang* and *Batalkan* from Anggota — the Super '
+      + 'Admin is in no KPM; the write then goes through a context naming the invitation\'s KPM, audited in its log',
   },
   // P19.23-T1, T2 (ADR-0277): the console's Dashboard and KPM list, by the Super Admin who is in no office.
   'reporting/platform/platform-console.service.ts': {

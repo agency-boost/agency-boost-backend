@@ -11,6 +11,7 @@ import {
   DEFAULT_TENANT_TIMEZONE, PRODUCT_CURRENCIES, SEED_PRODUCTS, seedObjectionsOf,
   type ObjectionCard, type ProductCurrency, type ProductKind, type ProductLifecycle, type ProposalDefaultInsured,
 } from '@/domain/constants';
+import { seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import { AuditService } from '@/modules/audit/audit.service';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { plainText, plainTextLines } from '@/common/validation/plain-text';
@@ -442,7 +443,8 @@ export class ProductService {
     if (await this.products.exists({ companyId, deletedAt: null })) return 0;
 
     const now = this.clock.now();
-    const rows = SEED_PRODUCTS.map((product) => ({
+    // In the seed's Indonesian (P19.26-T4 AC-4; OD-440): the Super Admin's *Produk & proposal* reads what is stored.
+    const rows = SEED_PRODUCTS.map(seedProductInIndonesian).map((product) => ({
       ...product,
       primaryNeeds: [...product.primaryNeeds],
       eligibleAgeBands: [...product.eligibleAgeBands],

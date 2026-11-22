@@ -4295,88 +4295,6 @@
         "x-required-permission": "kpm_request:decide"
       }
     },
-    "/api/v1/admin/accounts": {
-      "get": {
-        "description": "\"Ganti Owner\"'s picker (ADR-0191 §5): accounts whose name or email contains `q` (at least two characters, else `400`), at most twenty, Super Admins left out — each with its company, whether its address is verified and whether it holds an agent code, and the offices it already owns or belongs to.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "AdminController_searchAccounts_v1",
-        "parameters": [
-          {
-            "name": "q",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "example": "victor",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AccountChoiceDto"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `kpm:assign_owner`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Find the account to make an Owner",
-        "tags": [
-          "admin (Super Admin)"
-        ],
-        "x-required-permission": "kpm:assign_owner"
-      }
-    },
     "/api/v1/admin/companies": {
       "get": {
         "operationId": "AdminController_listCompanies_v1",
@@ -5990,104 +5908,6 @@
         "x-required-permission": "kpm:archive"
       }
     },
-    "/api/v1/admin/tenants/{id}/owner": {
-      "patch": {
-        "description": "Name the person by email or by user id — \"Ganti Owner\" picks the id from `GET /admin/accounts` — or, with `owner { fullName, phone, email, agentCode? }`, somebody named (ADR-0212 §3): an account with that email is made the Owner, or one is made for it (no usable password; `agentCode` then required, `400`, and free in the company, `409 AGENT_CODE_TAKEN`), and invited by email unless `sendInvitation` is `false` (an account that has signed in is sent none); `owner.email` is required (`400`). A pending Owner (`pendingOwner`) is cleared once one is set. Refused before anything is written: `409 TENANT_COMPANY_MISMATCH` for an account of another company or with no agent code, `409 AUTH_EMAIL_NOT_VERIFIED` for an unverified address (ADR-0190 §4). Audited with both the outgoing and incoming user. Answers the office as the list reads it.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
-        "operationId": "AdminController_assignOwner_v1",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AssignOwnerDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KpmAdminViewDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`PERM_DENIED` — the caller does not hold `kpm:assign_owner`. `details.permission` names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`NOT_FOUND` — no such resource, **or** it belongs to another office. The two are deliberately indistinguishable: a `403` here would confirm the id exists.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Assign or transfer the KPM Owner",
-        "tags": [
-          "admin (Super Admin)"
-        ],
-        "x-required-permission": "kpm:assign_owner"
-      }
-    },
     "/api/v1/admin/tenants/{id}/company": {
       "patch": {
         "description": "\"Pindahkan ke perusahaan lain\" (ADR-0191 §5): only while the office has no member but its Owner (`409 TENANT_NOT_EMPTY`, `details.members`), its configuration provisioned again from the new company's default template and the old one soft-deleted. The Owner must be the new company's (`409 TENANT_COMPANY_MISMATCH`) and keeps their rung by its code; the code must be free there (`409 TENANT_CODE_TAKEN`); the Template library holds no office (`409 COMPANY_IS_TEMPLATE_LIBRARY`); the same company is `400`. Every check first, so a refusal writes nothing. Audited as `kpm.company_moved`.\n\n**Requires `kpm:update_company_tag`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -6963,6 +6783,19 @@
             }
           },
           {
+            "name": "includeViewed",
+            "required": false,
+            "in": "query",
+            "description": "*Termasuk dilihat* (ADR-0284 §3; UI-217): `true` lists the entries that record a look too — the `platform_read.` family, `activity_log.read_raw`, `leader_note.read`, `lead.viewed`. Absent or `false`, **changes only**, filtered before the page is cut. An `action` that is a look is listed whatever this says.",
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "name": "cursor",
             "required": false,
             "in": "query",
@@ -7271,7 +7104,7 @@
     },
     "/api/v1/admin/tenants/{id}/owner/whatsapp-invitation": {
       "post": {
-        "description": "*Kirim undangan* (OD-420): nothing is sent — the answer is the link the Super Admin's own WhatsApp sends (`wa.me`, OD-359). For an Owner named with no email (`pendingOwner`), `kind: claim` — `<app>/owner-invite/<token>`, single use, alive `ROSTER_INVITATION.TTL_DAYS`, a new one replacing the last; the person signs in or signs up and accepts it (`POST /owner-invites/:token/accept`). For an Owner whose account never signed in, `kind: password` — the email invitation's link to choose a password (`/reset-password/<token>`), the account's older links revoked, `memberships.invitedAt` stamped. Audited `kpm.owner_invited` with `channel: whatsapp`. The token is in this answer and nowhere else.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "*Kirim undangan* (OD-420): nothing is sent — the answer is the link the Super Admin's own WhatsApp sends (`wa.me`, OD-359). For an Owner named with no email (`pendingOwner`), `kind: claim` — `<app>/owner-invite/<token>`, single use, alive `ROSTER_INVITATION.TTL_DAYS`, a new one replacing the last; the person signs in or signs up and accepts it (`POST /owner-invites/:token/accept`). For an Owner whose account is not theirs yet (never signed in, no address proven), `kind: password` — the email invitation's link to choose a password (`/reset-password/<token>`), the account's older links revoked, `memberships.invitedAt` stamped. Audited `kpm.owner_invited` with `channel: whatsapp`. The token is in this answer and nowhere else. Since ADR-0285 a KPM has one or more owners: `userId` names which (*Kirim ulang undangan* on their ⋯); absent, the first owner.\n\n**Requires `kpm:assign_owner`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OwnerWhatsAppInvitationController_invite_v1",
         "parameters": [
           {
@@ -7283,6 +7116,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerInvitationRequestDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -7290,6 +7133,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OwnerWhatsAppInvitationDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
                 }
               }
             }
@@ -7315,7 +7168,7 @@
             }
           },
           "404": {
-            "description": "`NOT_FOUND` — no KPM with that id: indistinguishable from another office’s.",
+            "description": "`NOT_FOUND` — no KPM with that id, indistinguishable from another office’s; or `userId` is not one of its owners.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7325,7 +7178,7 @@
             }
           },
           "409": {
-            "description": "`TENANT_OWNER_NOT_INVITABLE` — `details.reason` `no_owner` (nobody named) or `signed_in` (the Owner has signed in already).",
+            "description": "`TENANT_OWNER_NOT_INVITABLE` — `details.reason` `no_owner` (nobody named) or `signed_in` (the Owner's account is theirs already: signed in, or its address proven — OD-475).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7431,7 +7284,7 @@
     },
     "/api/v1/owner-invites/{token}/accept": {
       "post": {
-        "description": "The signed-in account becomes the KPM's Owner — its root AB — through the checks every Owner meets, asked **before** the link is spent: the KPM's company and an agent code, and a verified address. Then the link is used (single use), the Owner written only while the KPM has none, `pendingOwner` cleared, and the claim audited in the KPM's log as `kpm.owner_assigned` (`via: whatsapp_claim`). Refused in a support session, which only looks. Rate limited per account, twenty an hour.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "The signed-in account becomes the KPM's Owner — its root AB — through the checks every Owner meets, asked **before** the link is spent: the KPM's company and an agent code, and a verified address. Then the link is used (single use), the Owner written only while the KPM has none, `pendingOwner` cleared, and the claim audited in the KPM's log as `kpm.owner_added` (`via: whatsapp_claim`; ADR-0285). Refused in a support session, which only looks. Rate limited per account, twenty an hour.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "OwnerInvitesController_accept_v1",
         "parameters": [
           {
@@ -7525,6 +7378,987 @@
           "joining an office"
         ],
         "x-required-permission": "join_via_code_link_qr"
+      }
+    },
+    "/api/v1/members/{membershipId}/owner": {
+      "post": {
+        "description": "*Jadikan owner* (F-2): every owner holds the same full KPM Owner rights. The Super Admin inside the KPM, or an owner of it. Idempotent: an owner already is answered as one. The member may be active or invited (`pending`). Audited `kpm.owner_added` in the KPM's log. Answers `{ owners, canManage }`, the owners in order of `since`.\n\n**Requires `kpm_owner:grant`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmOwnersController_add_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "`{ owners: KpmOwnerView[], canManage }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmOwnerListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_OWNER_ONLY` — a KPM Admin: adding owners is the owners' own (`kpm_owner:grant`); `PERM_DENIED` for anybody else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no live membership with that id in this KPM, answered exactly as one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Make a member of this KPM one of its owners",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "kpm_owner:grant"
+      },
+      "delete": {
+        "description": "*Hapus sebagai owner* (F-2): the person stays a member, their rung and leader unchanged. The Super Admin inside the KPM, or another owner of it — an owner never removes themselves. Audited `kpm.owner_removed`. Answers `{ owners, canManage }`.\n\n**Requires `kpm_owner:revoke`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "KpmOwnersController_remove_v1",
+        "parameters": [
+          {
+            "name": "membershipId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{ owners: KpmOwnerView[], canManage }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KpmOwnerListDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_OWNER_ONLY` — a KPM Admin, or an owner naming themselves.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no membership with that id in this KPM, or it is not an owner; one in another office is answered alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`KPM_LAST_OWNER` — the KPM's only owner: add another first. `details: { kpmId, userId }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove one of this KPM's owners — never the last",
+        "tags": [
+          "organisation"
+        ],
+        "x-required-permission": "kpm_owner:revoke"
+      }
+    },
+    "/api/v1/user-invitations/options": {
+      "get": {
+        "description": "*Pilih KPM*’s next step on the sheet: the KPM’s company ladder for *Peran* (junior rung first), its active ABs and AABs for *Leader* (ABs first; test accounts never), and whether the reader may switch *Jadikan KPM Owner* and choose *＋ KPM baru*. With `companyId` alone — *＋ KPM baru*, the Super Admin’s — the company’s ladder. The Super Admin names any KPM (`kpmId`, or the KPM they work inside); an Owner or a KPM Admin adds to their own, and naming another is `404`, exactly as a KPM that is not there.\n\n**Requires `member:add`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AddUserController_options_v1",
+        "parameters": [
+          {
+            "name": "kpmId",
+            "required": false,
+            "in": "query",
+            "description": "The KPM. The Super Admin names any; an Owner or an Admin reads their own.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "companyId",
+            "required": false,
+            "in": "query",
+            "description": "A company with no KPM yet (*＋ KPM baru*): its ladder alone, no leaders.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddUserOptionsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field is missing, malformed, or not on the DTO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — an AB, an AAB or an Agent; `companyId` alone by anybody but the Super Admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — an archived KPM or none, or a company that is not there; answered as another office’s KPM is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Who a person can be in a KPM",
+        "tags": [
+          "people (add & place)"
+        ],
+        "x-required-permission": "member:add"
+      }
+    },
+    "/api/v1/user-invitations": {
+      "post": {
+        "description": "The sheet’s *Tambah & kirim undangan WhatsApp*: an invitation carrying the KPM, the rung, the leader and *Jadikan KPM Owner*, and its one-time link — `<app>/user-invite/<token>`, alive `INVITES.EXPIRY_DAYS` — which the reader’s own WhatsApp sends (`wa.me`, OD-359; nothing is sent from the server). The person reads *Diundang · hari ini* in Anggota’s *Menunggu* until they accept, then is *Aktif*. **`newKpm`** (the Super Admin’s): the KPM is made from its company’s template with an automatic code, and the invitation is to its senior rung as its first owner — in one step; a failure discards the KPM. The Super Admin names any KPM (`kpmId`, or the KPM they work inside); an Owner or a KPM Admin adds to their own, and naming another is `404`, exactly as a KPM that is not there. Audited `user_invitation.created` in the KPM’s log.\n\n**Requires `member:add`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AddUserController_add_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInvitedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — a field’s shape; a number that is not 9 to 13 digits after `+62`; no KPM; both a KPM and a new one; no role; a leader for an AB, or none for anybody else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — an AB, an AAB, an Agent or a support session; `newKpm` by anybody but the Super Admin; `makeOwner` by a KPM Admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the KPM is archived or not there, or the company is not; answered as another office’s KPM is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_LEVEL_NOT_ON_LADDER` — a role the company does not publish. `ORG_AGENT_ALREADY_TAGGED` — the number or email belongs to somebody already *Aktif* in this KPM or another (named to the Super Admin alone), or to the AgencyBoost team. `ORG_INVITE_PENDING` — an invitation for the number already waits in this KPM. `TENANT_COMPANY_MISMATCH` (placement) — the account is of another company, or has no agent code. `LEADER_LIMIT_REACHED` — the KPM has no leader seat left.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the leader is not an active AB or AAB of the KPM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Tambah user — invite a person to a KPM",
+        "tags": [
+          "people (add & place)"
+        ],
+        "x-required-permission": "member:add"
+      }
+    },
+    "/api/v1/user-invitations/{invitationId}/resend": {
+      "post": {
+        "description": "A new link and `INVITES.EXPIRY_DAYS` more; the old link opens nothing now, and the row reads *Diundang · hari ini*. An expired invitation is revived. Answers the link once. The Super Admin names any KPM (`kpmId`, or the KPM they work inside); an Owner or a KPM Admin adds to their own, and naming another is `404`, exactly as a KPM that is not there. Audited `user_invitation.resent`.\n\n**Requires `member:add`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AddUserController_resend_v1",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInvitationResentDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:add`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such invitation, or one in another office, answered alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — it was accepted or cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — more than 10 new links for it within the hour.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Kirim ulang — a new link for an invitation",
+        "tags": [
+          "people (add & place)"
+        ],
+        "x-required-permission": "member:add"
+      }
+    },
+    "/api/v1/user-invitations/{invitationId}": {
+      "delete": {
+        "description": "Its link opens nothing from now on. The row stays, cancelled, as the record of who invited whom; it never counted. The Super Admin names any KPM (`kpmId`, or the KPM they work inside); an Owner or a KPM Admin adds to their own, and naming another is `404`, exactly as a KPM that is not there. Audited `user_invitation.cancelled`.\n\n**Requires `member:add`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AddUserController_cancel_v1",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInvitationCancelledDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `member:add`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such invitation, or one in another office, answered alike.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_REQUEST_ALREADY_DECIDED` — it was accepted or cancelled already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Batalkan — cancel an invitation",
+        "tags": [
+          "people (add & place)"
+        ],
+        "x-required-permission": "member:add"
+      }
+    },
+    "/api/v1/admin/accounts/{userId}/placement": {
+      "post": {
+        "description": "Anggota › *Menunggu* › *Belum ada KPM* › **Masukkan**: the account — registered, and in no KPM or only waiting in one nobody placed them in — gets an *Aktif* membership in the KPM now, on the rung and under the leader chosen, an existing agent (no activation starts), and an owner when *Jadikan KPM Owner* is on. The membership they waited in is ended and soft-deleted, its open join requests cancelled. **`newKpm`**: the KPM is made from its company’s template and the person is its senior rung and first owner, in one step. **Nothing is left on a failure**: every write is undone and a KPM made here discarded. The person is told in the app (OD-442); the WhatsApp half is the screen’s own link. Audited `member.placed` in the KPM’s log, before → after.\n\n**Requires `member:place`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "PlacementController_place_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPlacedDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — no KPM, both a KPM and a new one, no role, a leader for an AB or none for anybody else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — anybody but the Super Admin, a support session included.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no such account, KPM or company: another office is never the reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_LEVEL_NOT_ON_LADDER` — a role the company does not publish. `ORG_AGENT_ALREADY_TAGGED` — the account is *Aktif* in a KPM already, or is the AgencyBoost team’s. `TENANT_COMPANY_MISMATCH` — the account is of another company, or has no agent code. `LEADER_LIMIT_REACHED` — no leader seat left.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the leader is not an active AB or AAB of the KPM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Masukkan — place an account that has no KPM",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "member:place"
+      }
+    },
+    "/api/v1/user-invites/{token}": {
+      "get": {
+        "description": "The banner `/user-invite/<token>` shows: the KPM’s name and code, its company, the name the inviter typed, the role, whether it makes them an owner, and when the link stops working. **Public** — the person may have no account yet — and rate limited per address, 60 an hour. A link that opens nothing — unknown, used, cancelled, expired, or a KPM archived or ended — is `404 NOT_FOUND`, its sentence saying which.",
+        "operationId": "UserInviteLinkController_banner_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInviteBannerDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the link opens nothing, said in plain words — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — too many link openings from this address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "What a Tambah user invitation link is for",
+        "tags": [
+          "joining an office"
+        ]
+      }
+    },
+    "/api/v1/user-invites/{token}/accept": {
+      "post": {
+        "description": "The signed-in account becomes an *Aktif* member of the KPM on the invitation’s rung, under its leader — and an owner when it says so — checked **before** the link is spent: the account it was sent to (if one), the KPM’s company and an agent code, no active membership anywhere, the leader still a member. A membership the account waited in elsewhere is ended. Single use. Rate limited per account, 20 an hour. Audited `user_invitation.accepted`.\n\n**Requires `join_via_code_link_qr`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "UserInviteLinkController_accept_v1",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInviteAcceptedDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — the caller does not hold `join_via_code_link_qr`. `details.permission` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the link opens nothing (unknown, used, cancelled, expired), or it is for another account — answered as a link into another office is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ORG_AGENT_ALREADY_TAGGED` — you are already a member of a KPM. `TENANT_COMPANY_MISMATCH` — your account is of another company or has no agent code. `LEADER_LIMIT_REACHED` — no leader seat left.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`ORG_LEADER_NOT_IN_KPM` — the leader who was chosen has left the KPM.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`AUTH_RATE_LIMITED` — too many attempts from this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Accept a Tambah user invitation, signed in",
+        "tags": [
+          "joining an office"
+        ],
+        "x-required-permission": "join_via_code_link_qr"
+      }
+    },
+    "/api/v1/admin/waiting-members": {
+      "get": {
+        "description": "Anggota › *Menunggu*, 50 a page, by name: **Diundang** — an invitation of *Tambah user* not accepted (its KPM, its rung and the day it went; ⋯ *Kirim ulang · Batalkan*) — and **Belum ada KPM** — an account registered and not placed, waiting in a KPM nobody placed them in or in none (its email, and the KPM it registered to, which *Masukkan* prefills, OD-441). One person once; somebody who left is under *Keluar*. With the three chips. **Audited per read** as `platform_read.members_waiting` (ADR-0207 §5), in the platform’s log and each KPM’s whose rows it returned; a failure to write it fails the read.\n\n**Requires `platform_members:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AnggotaWaitingController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": false,
+            "in": "query",
+            "description": "One company’s KPMs, and its accounts in no KPM.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kpmId",
+            "required": false,
+            "in": "query",
+            "description": "One KPM. Accounts in no KPM are left out.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "required": false,
+            "in": "query",
+            "description": "An invitation’s class. Nobody unplaced has one.",
+            "schema": {
+              "enum": [
+                "ab",
+                "aab",
+                "agent"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "A name, a phone number or an email, in part.",
+            "schema": {
+              "minLength": 2,
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "testAccount",
+            "required": false,
+            "in": "query",
+            "description": "`include`: *Tampilkan akun tes*.",
+            "schema": {
+              "enum": [
+                "only",
+                "include"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `q` shorter than two characters, an unknown `role`, a bad `page` or id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED` — every tenant role, and a support session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — the read’s audit entries could not be written, so it is not served.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Menunggu — who is not Aktif yet",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "platform_members:read"
       }
     },
     "/api/v1/admin/companies/{companyId}/templates": {
@@ -31867,7 +32701,7 @@
     },
     "/api/v1/admin/members": {
       "get": {
-        "description": "*All members* and a KPM's *Anggota* tab (SA UI-010, SA R1): one row per membership, 50 a page, by name: the person, the company, the KPM, the rung with the *Owner* and *Admin* badges, the leader, the status, the invitation’s state, the join date and the last day an activity was logged. Filtered and searched on the server; `q` matches a name, a phone number or an email address, **neither of which is returned**. A person in two KPMs is two rows. View-only: a row links to its KPM. **Audited per read** as `platform_read.members` (ADR-0207 §5): one entry in the platform’s log with the purpose, the filters, the page and the number of rows, and one in each KPM’s whose data it returned, written before the answer is sent. Read-only: nothing in any KPM is written. The entries name the memberships returned.\n\n**Requires `platform_members:read`.** See `docs/00-product/roles-and-permissions.md`.",
+        "description": "*All members* and a KPM's *Anggota* tab (SA UI-010, SA R1): one row per membership, 50 a page, by name: the person, the company, the KPM, the rung with the *Owner* and *Admin* badges, the leader, the status, the invitation’s state, the join date and the last day an activity was logged. Filtered and searched on the server; `q` matches a name, a phone number or an email address, **neither of which is returned**. A person in two KPMs is two rows. View-only: a row links to its KPM. With every page, *Aktif n · Menunggu n · Keluar n* over the same scope, test accounts never (`chips`); `status=removed` rows carry the day they left (`leftOn`), and `testAccount=include` (*Tampilkan akun tes*) lists test accounts beside the others, tagged. **Audited per read** as `platform_read.members` (ADR-0207 §5): one entry in the platform’s log with the purpose, the filters, the page and the number of rows, and one in each KPM’s whose data it returned, written before the answer is sent. Read-only: nothing in any KPM is written. The entries name the memberships returned.\n\n**Requires `platform_members:read`.** See `docs/00-product/roles-and-permissions.md`.",
         "operationId": "PlatformReadsController_members_v1",
         "parameters": [
           {
@@ -31941,10 +32775,11 @@
             "name": "testAccount",
             "required": false,
             "in": "query",
-            "description": "*Anggota*'s *Akun tes* (OD-421): `only` lists the test accounts alone. Absent, test accounts are in no row and no count (ADR-0267 §1).",
+            "description": "*Anggota*'s test accounts: `only` lists them alone (OD-421); `include` — *Tampilkan akun tes* — lists them beside everybody else, each tagged. Absent, test accounts are in no row. They are in no count whichever is asked (ADR-0267 §1).",
             "schema": {
               "enum": [
-                "only"
+                "only",
+                "include"
               ],
               "type": "string"
             }
@@ -45958,7 +46793,7 @@
           "sendInvitation": {
             "type": "boolean",
             "default": true,
-            "description": "*\"Kirim undangan … sekarang\"*: email the Owner a one-time link to choose a password, alive for `ROSTER_INVITATION.TTL_DAYS`. Only an Owner with an account who has never signed in is sent one."
+            "description": "*\"Kirim undangan … sekarang\"*: email the Owner a one-time link to choose a password, alive for `ROSTER_INVITATION.TTL_DAYS`. Only an Owner whose account is not theirs yet — never signed in, no address proven (OD-475) — is sent one."
           }
         },
         "required": [
@@ -45983,33 +46818,6 @@
         "required": [
           "payload"
         ]
-      },
-      "AssignOwnerDto": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string",
-            "example": "owner@kpm0417.test",
-            "description": "The account to make Owner. It must already exist — create one at /register or with POST /auth/register. Email is what a Super Admin normally knows."
-          },
-          "userId": {
-            "type": "string",
-            "description": "Alternative to email, for when you already have the id."
-          },
-          "owner": {
-            "description": "*Ganti pemilik* to somebody named here (ADR-0212 §3): `owner.email` required. An account with it is made the Owner under the same refusals; with none, an account is made for it and the Owner invited. Instead of `email`/`userId`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/OwnerInputDto"
-              }
-            ]
-          },
-          "sendInvitation": {
-            "type": "boolean",
-            "default": true,
-            "description": "With `owner`: email the new Owner their invitation (an account that has signed in is sent none)."
-          }
-        }
       },
       "MoveCompanyDto": {
         "type": "object",
@@ -46179,6 +46987,329 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "OwnerInvitationRequestDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "One of the KPM's owners (`users._id`) — *Kirim ulang undangan* on their ⋯. Absent: the first owner, or the owner named with no email."
+          }
+        }
+      },
+      "NewKpmInlineDto": {
+        "type": "object",
+        "properties": {
+          "branchName": {
+            "type": "string",
+            "example": "Bintaro Branch",
+            "maxLength": 120
+          },
+          "companyId": {
+            "type": "string",
+            "description": "The company (`companies._id`) whose template the KPM is made from."
+          }
+        },
+        "required": [
+          "branchName",
+          "companyId"
+        ]
+      },
+      "AddUserDto": {
+        "type": "object",
+        "properties": {
+          "kpmId": {
+            "type": "string",
+            "description": "The KPM. The Super Admin names any; an Owner or a KPM Admin their own (another is `404`). Absent with `newKpm`, or for an Owner or an Admin, whose KPM it is."
+          },
+          "newKpm": {
+            "description": "*＋ KPM baru* (the Super Admin’s alone, `kpm:create`): the KPM is made from its company’s template, the person placed on its senior rung with no leader, and made its first owner — in one step, nothing left on a failure.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewKpmInlineDto"
+              }
+            ]
+          },
+          "role": {
+            "type": "string",
+            "example": "AGENT",
+            "description": "*Peran*: a rung code of the KPM’s company ladder. Required with `kpmId`; ignored with `newKpm`, which is always the senior rung."
+          },
+          "leaderMembershipId": {
+            "type": "string",
+            "description": "*Leader*: an active AB or AAB of the KPM (`memberships._id`). Required for a rung that is not the senior one; refused for an AB."
+          },
+          "makeOwner": {
+            "type": "boolean",
+            "description": "*Jadikan KPM Owner*, off by default. The Super Admin or an owner of the KPM; a KPM Admin is `403`. Always on with `newKpm`."
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Rina Kartika",
+            "maxLength": 120
+          },
+          "phone": {
+            "type": "string",
+            "example": "0812-7788-4410",
+            "description": "*Nomor WhatsApp*, as typed after the fixed `+62`: a leading `0`, `62` or `+62`, spaces and dashes go (`normalisePhone`); 9 to 13 digits stay. Stored `+62…`."
+          },
+          "email": {
+            "type": "string",
+            "example": "rina@email.com",
+            "description": "*Email · opsional*."
+          }
+        },
+        "required": [
+          "fullName",
+          "phone"
+        ]
+      },
+      "PlaceUserDto": {
+        "type": "object",
+        "properties": {
+          "kpmId": {
+            "type": "string",
+            "description": "The KPM. The Super Admin names any; an Owner or a KPM Admin their own (another is `404`). Absent with `newKpm`, or for an Owner or an Admin, whose KPM it is."
+          },
+          "newKpm": {
+            "description": "*＋ KPM baru* (the Super Admin’s alone, `kpm:create`): the KPM is made from its company’s template, the person placed on its senior rung with no leader, and made its first owner — in one step, nothing left on a failure.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NewKpmInlineDto"
+              }
+            ]
+          },
+          "role": {
+            "type": "string",
+            "example": "AGENT",
+            "description": "*Peran*: a rung code of the KPM’s company ladder. Required with `kpmId`; ignored with `newKpm`, which is always the senior rung."
+          },
+          "leaderMembershipId": {
+            "type": "string",
+            "description": "*Leader*: an active AB or AAB of the KPM (`memberships._id`). Required for a rung that is not the senior one; refused for an AB."
+          },
+          "makeOwner": {
+            "type": "boolean",
+            "description": "*Jadikan KPM Owner*, off by default. The Super Admin or an owner of the KPM; a KPM Admin is `403`. Always on with `newKpm`."
+          }
+        }
+      },
+      "WaitingCompanyDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Prudential"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "WaitingKpmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "0417"
+          },
+          "branch": {
+            "type": "string",
+            "example": "BSD City Branch"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "branch"
+        ]
+      },
+      "WaitingRoleDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AGENT"
+          },
+          "label": {
+            "type": "string",
+            "example": "Agent"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "class"
+        ]
+      },
+      "WaitingRowDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invited",
+              "unplaced"
+            ],
+            "description": "*Diundang · <date>* or *Belum ada KPM*."
+          },
+          "invitationId": {
+            "type": "string",
+            "nullable": true,
+            "description": "`invited`: what *Kirim ulang* and *Batalkan* write."
+          },
+          "userId": {
+            "type": "string",
+            "nullable": true,
+            "description": "`unplaced`: what *Masukkan* places."
+          },
+          "membershipId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The pending membership of somebody registered to a KPM."
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "description": "`unplaced` alone: the account’s email (ADR-0286 §5)."
+          },
+          "company": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WaitingCompanyDto"
+              }
+            ]
+          },
+          "kpm": {
+            "nullable": true,
+            "description": "`invited`: the KPM invited to. `unplaced`: the KPM they registered to — *Masukkan* prefills it (OD-441) — or `null`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WaitingKpmDto"
+              }
+            ]
+          },
+          "role": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WaitingRoleDto"
+              }
+            ]
+          },
+          "since": {
+            "type": "string",
+            "example": "2026-11-22",
+            "description": "When the invitation went, or the account registered (an office day)."
+          },
+          "expired": {
+            "type": "boolean",
+            "description": "An invitation past its days: still *Diundang*; *Kirim ulang* revives it."
+          },
+          "testAccount": {
+            "type": "boolean"
+          },
+          "hasPhone": {
+            "type": "boolean",
+            "description": "Whether there is a WhatsApp number to write to — never the number. An invitation always has one; an account, when its own number reads as one. The screen opens WhatsApp in the tap only when it is `true`; *Masukkan* answers the number."
+          }
+        },
+        "required": [
+          "kind",
+          "invitationId",
+          "userId",
+          "membershipId",
+          "fullName",
+          "avatarUrl",
+          "email",
+          "company",
+          "kpm",
+          "role",
+          "since",
+          "expired",
+          "testAccount",
+          "hasPhone"
+        ]
+      },
+      "AnggotaChipsDto": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "number",
+            "example": 50,
+            "description": "*Aktif*: the counted member (ADR-0284 §1)."
+          },
+          "pending": {
+            "type": "number",
+            "example": 2,
+            "description": "*Menunggu*: *Diundang* and *Belum ada KPM* (`GET /admin/waiting-members`)."
+          },
+          "removed": {
+            "type": "number",
+            "example": 3,
+            "description": "*Keluar*: memberships that ended."
+          }
+        },
+        "required": [
+          "active",
+          "pending",
+          "removed"
+        ]
+      },
+      "WaitingPageDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WaitingRowDto"
+            }
+          },
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "pageSize": {
+            "type": "number",
+            "example": 50
+          },
+          "total": {
+            "type": "number"
+          },
+          "chips": {
+            "$ref": "#/components/schemas/AnggotaChipsDto"
+          }
+        },
+        "required": [
+          "rows",
+          "page",
+          "pageSize",
+          "total",
+          "chips"
         ]
       },
       "CreateTemplateDto": {
@@ -64233,7 +65364,7 @@
               "not_invited",
               "signed_in"
             ],
-            "description": "*Diundang* (an invitation went, never signed in), *Belum diundang*, or signed in (ADR-0212 §2)."
+            "description": "*Diundang* (an invitation went, the account not theirs yet), *Belum diundang*, or `signed_in` — the account is theirs: signed in, or its address proven (ADR-0212 §2; OD-475)."
           },
           "joinedOn": {
             "type": "string",
@@ -64254,6 +65385,12 @@
                 "$ref": "#/components/schemas/MemberLastActiveDto"
               }
             ]
+          },
+          "leftOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-14",
+            "description": "*Keluar <Mon YYYY>*: the office day the membership ended; `null` while it has not."
           }
         },
         "required": [
@@ -64271,7 +65408,27 @@
           "invitation",
           "joinedOn",
           "lastActiveOn",
-          "lastActive"
+          "lastActive",
+          "leftOn"
+        ]
+      },
+      "CountedMembersDto": {
+        "type": "object",
+        "properties": {
+          "members": {
+            "type": "number",
+            "example": 55,
+            "description": "The counted members the scope holds."
+          },
+          "kpms": {
+            "type": "number",
+            "example": 8,
+            "description": "The KPMs they are in."
+          }
+        },
+        "required": [
+          "members",
+          "kpms"
         ]
       },
       "PlatformMembersPageDto": {
@@ -64282,6 +65439,14 @@
             "items": {
               "$ref": "#/components/schemas/PlatformMemberRowDto"
             }
+          },
+          "chips": {
+            "description": "The three chips, whatever status is listed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AnggotaChipsDto"
+              }
+            ]
           },
           "page": {
             "type": "number",
@@ -64298,15 +65463,25 @@
           "kpmCount": {
             "type": "number",
             "example": 8,
-            "description": "The KPMs those rows are in: *\"n anggota di m KPM\"*."
+            "description": "The KPMs those rows are in."
+          },
+          "counted": {
+            "description": "*\"n anggota di m KPM\"* and *Aktif n* (ADR-0284 §1): the scope’s counted members, whatever status is listed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CountedMembersDto"
+              }
+            ]
           }
         },
         "required": [
           "rows",
+          "chips",
           "page",
           "pageSize",
           "total",
-          "kpmCount"
+          "kpmCount",
+          "counted"
         ]
       },
       "PlatformAccountRowDto": {
@@ -64407,7 +65582,7 @@
           },
           "members": {
             "type": "number",
-            "description": "Live members, active or pending."
+            "description": "*Anggota*: the counted members (`COUNTED_MEMBERS`; ADR-0284 §1)."
           },
           "notSignedIn": {
             "type": "number",
@@ -64595,7 +65770,7 @@
               "not_invited",
               "signed_in"
             ],
-            "description": "*Diundang* (an invitation went, never signed in), *Belum diundang*, or signed in (ADR-0212 §2)."
+            "description": "*Diundang* (an invitation went, the account not theirs yet), *Belum diundang*, or `signed_in` — the account is theirs: signed in, or its address proven (ADR-0212 §2; OD-475)."
           },
           "joinedOn": {
             "type": "string",
@@ -64616,6 +65791,12 @@
                 "$ref": "#/components/schemas/MemberLastActiveDto"
               }
             ]
+          },
+          "leftOn": {
+            "type": "string",
+            "nullable": true,
+            "example": "2026-09-14",
+            "description": "*Keluar <Mon YYYY>*: the office day the membership ended; `null` while it has not."
           },
           "phone": {
             "type": "string",
@@ -64645,6 +65826,7 @@
           "joinedOn",
           "lastActiveOn",
           "lastActive",
+          "leftOn",
           "phone",
           "email"
         ]
@@ -64718,10 +65900,16 @@
             "description": "*KPM aktif dari n*."
           },
           "leaders": {
-            "type": "number"
+            "type": "number",
+            "description": "*Anggota*’s leaders (AB and AAB): counted members (ADR-0284 §1) of every KPM but an archived one."
           },
           "agents": {
-            "type": "number"
+            "type": "number",
+            "description": "*Anggota*’s agents, the same."
+          },
+          "needsAction": {
+            "type": "number",
+            "description": "*Perlu tindakan*: the KPMs that need action (ADR-0284 §2), the same number on every page."
           }
         },
         "required": [
@@ -64730,7 +65918,8 @@
           "companies",
           "activeKpms",
           "leaders",
-          "agents"
+          "agents",
+          "needsAction"
         ]
       },
       "FunnelStepDto": {
@@ -64763,7 +65952,7 @@
         "properties": {
           "members": {
             "type": "number",
-            "description": "*Anggota*: the active KPMs’ counted members."
+            "description": "*Anggota*: every counted member (`COUNTED_MEMBERS`; ADR-0284 §1), the tile’s number."
           },
           "everUsed": {
             "$ref": "#/components/schemas/FunnelStepDto"
@@ -64888,6 +66077,13 @@
             "nullable": true,
             "description": "The Owner, or the named Owner who waits; `null`: none."
           },
+          "ownerNames": {
+            "description": "Every owner's name in order of `since` (ADR-0285 §3): *\"♛ FIRST OWNER +n\"*; the search matches any of them.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "ownerState": {
             "type": "string",
             "enum": [
@@ -64918,11 +66114,21 @@
               ]
             }
           },
+          "needsAction": {
+            "type": "boolean",
+            "description": "*Perlu tindakan*: one of `KPM_ACTION_ISSUES` (ADR-0284 §2)."
+          },
           "missingMonth": {
             "type": "string",
             "nullable": true,
             "example": "2026-10",
             "description": "`data_missing`’s month."
+          },
+          "trialDaysLeft": {
+            "type": "number",
+            "nullable": true,
+            "example": 30,
+            "description": "The days left of a running trial, today and the last day both counted (*Trial 30 hari*); `null`: no trial running."
           }
         },
         "required": [
@@ -64934,11 +66140,14 @@
           "status",
           "active",
           "ownerName",
+          "ownerNames",
           "ownerState",
           "createdAt",
           "usage",
           "issues",
-          "missingMonth"
+          "needsAction",
+          "missingMonth",
+          "trialDaysLeft"
         ]
       },
       "ConsoleDashboardDto": {
@@ -65090,6 +66299,83 @@
           "pendingName"
         ]
       },
+      "KpmOwnerViewDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "membershipId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Their live membership in this KPM; `null` with none."
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "agentCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ],
+            "description": "The orange label before the name."
+          },
+          "photoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "*Owner sejak <Mon YYYY>*."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "invited",
+              "not_invited"
+            ],
+            "description": "`active` — *Aktif*: the account is theirs, signed in or its address proven (OD-475), and nothing is offered to send. `invited` — *Diundang*: invited, the account not theirs yet (*Kirim ulang undangan* then offered). `not_invited` — *Belum diundang*."
+          }
+        },
+        "required": [
+          "userId",
+          "membershipId",
+          "fullName",
+          "agentCode",
+          "role",
+          "photoUrl",
+          "since",
+          "state"
+        ]
+      },
+      "KpmOwnerListDto": {
+        "type": "object",
+        "properties": {
+          "owners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmOwnerViewDto"
+            }
+          },
+          "canManage": {
+            "type": "boolean",
+            "description": "An owner of this KPM, or the Super Admin — never an Admin."
+          }
+        },
+        "required": [
+          "owners",
+          "canManage"
+        ]
+      },
       "FirstMemberDto": {
         "type": "object",
         "properties": {
@@ -65211,6 +66497,14 @@
           "owner": {
             "$ref": "#/components/schemas/PeopleOwnerDto"
           },
+          "owners": {
+            "description": "*KPM Owner · n* (ADR-0285): every owner in order of `since`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KpmOwnerListDto"
+              }
+            ]
+          },
           "admins": {
             "type": "array",
             "items": {
@@ -65233,6 +66527,7 @@
         "required": [
           "kpm",
           "owner",
+          "owners",
           "admins",
           "coreLeaders",
           "members",
@@ -73030,6 +74325,31 @@
           "month"
         ]
       },
+      "KpmReportRecipientDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The owner's account; `null` for the owner named and waiting (`pendingOwner`)."
+          },
+          "name": {
+            "type": "string",
+            "example": "Wilson Tanoto"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+62 811 2000 300",
+            "nullable": true,
+            "description": "Their WhatsApp number as on file; `null`: none."
+          }
+        },
+        "required": [
+          "userId",
+          "name",
+          "phone"
+        ]
+      },
       "KpmReportLinkViewDto": {
         "type": "object",
         "properties": {
@@ -73063,13 +74383,20 @@
             "type": "string",
             "example": "Wilson Tanoto",
             "nullable": true,
-            "description": "The KPM Owner, or the Owner named and waiting; `null`: none."
+            "description": "The first owner (ADR-0285 §3), or the Owner named and waiting; `null`: none."
           },
           "ownerPhone": {
             "type": "string",
             "example": "+62 811 2000 300",
             "nullable": true,
             "description": "The Owner's WhatsApp number as on file; `null`: none — WhatsApp then asks whom to send it to."
+          },
+          "owners": {
+            "description": "**Every owner**, in order of `since` (ADR-0285 §5): the pick-list, every one chosen by default, one WhatsApp link each (OD-359). The owner named and waiting when the KPM has none. Empty: nobody to send to.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmReportRecipientDto"
+            }
           }
         },
         "required": [
@@ -73080,7 +74407,8 @@
           "kpmCode",
           "companyName",
           "ownerName",
-          "ownerPhone"
+          "ownerPhone",
+          "owners"
         ]
       },
       "StatusAckDto": {
@@ -74803,7 +76131,7 @@
               "claim",
               "password"
             ],
-            "description": "`claim` — the Owner named with no email: the link lets them sign in or sign up and claim the KPM. `password` — an Owner whose account never signed in: the email invitation's link to choose a password."
+            "description": "`claim` — the Owner named with no email: the link lets them sign in or sign up and claim the KPM. `password` — an Owner whose account is not theirs yet (never signed in, no address proven): the email invitation's link to choose a password."
           },
           "link": {
             "type": "string",
@@ -74896,6 +76224,406 @@
         "required": [
           "kpmId",
           "kpmName"
+        ]
+      },
+      "OptionsKpmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "0602"
+          },
+          "branch": {
+            "type": "string",
+            "example": "Bekasi Barat Branch"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRefDto"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "branch",
+          "company"
+        ]
+      },
+      "RungChoiceDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AGENT"
+          },
+          "label": {
+            "type": "string",
+            "example": "Agent"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ],
+            "description": "`ab` and `aab` draw the orange label (ADR-0156)."
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "class"
+        ]
+      },
+      "AddUserOptionsDto": {
+        "type": "object",
+        "properties": {
+          "kpm": {
+            "nullable": true,
+            "description": "`null` for a company asked alone (*＋ KPM baru*).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OptionsKpmDto"
+              }
+            ]
+          },
+          "company": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompanyRefDto"
+              }
+            ]
+          },
+          "roles": {
+            "description": "The company ladder, junior rung first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RungChoiceDto"
+            }
+          },
+          "seniorCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "AB",
+            "description": "The senior rung: no leader, and a new KPM’s first owner’s."
+          },
+          "leaders": {
+            "description": "Active ABs and AABs, ABs first; test accounts never.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderChoiceDto"
+            }
+          },
+          "mayMakeOwner": {
+            "type": "boolean",
+            "description": "*Jadikan KPM Owner* is the reader’s: the Super Admin or an owner, never a KPM Admin."
+          },
+          "mayMakeKpm": {
+            "type": "boolean",
+            "description": "*＋ KPM baru* is the reader’s: the Super Admin alone."
+          }
+        },
+        "required": [
+          "kpm",
+          "company",
+          "roles",
+          "seniorCode",
+          "leaders",
+          "mayMakeOwner",
+          "mayMakeKpm"
+        ]
+      },
+      "InvitationRoleDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "AGENT"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "ab",
+              "aab",
+              "agent"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "class"
+        ]
+      },
+      "UserInvitationViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kpmId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Rina Kartika"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+6281277884410",
+            "description": "Stored `+62…`: what WhatsApp opens to."
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "$ref": "#/components/schemas/InvitationRoleDto"
+          },
+          "leaderMembershipId": {
+            "type": "string",
+            "nullable": true
+          },
+          "makeOwner": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "expired",
+              "accepted",
+              "cancelled"
+            ]
+          },
+          "invitedAt": {
+            "type": "string",
+            "example": "2026-11-22T03:00:00.000Z",
+            "description": "*Diundang · <date>*."
+          },
+          "expiresAt": {
+            "type": "string",
+            "example": "2026-12-06T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "kpmId",
+          "fullName",
+          "phone",
+          "email",
+          "role",
+          "leaderMembershipId",
+          "makeOwner",
+          "state",
+          "invitedAt",
+          "expiresAt"
+        ]
+      },
+      "PlacedKpmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "0602"
+          },
+          "branch": {
+            "type": "string",
+            "example": "Bekasi Barat Branch"
+          },
+          "created": {
+            "type": "boolean",
+            "description": "Made in this step (*＋ KPM baru*)."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "branch",
+          "created"
+        ]
+      },
+      "UserInvitedDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "invited"
+            ]
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/UserInvitationViewDto"
+          },
+          "link": {
+            "type": "string",
+            "example": "https://app.agencyboost.id/user-invite/66f0000000000000000000a1.c2VjcmV0",
+            "description": "The one-time link, in this answer and nowhere else: the reader’s own WhatsApp sends it (OD-359)."
+          },
+          "kpm": {
+            "$ref": "#/components/schemas/PlacedKpmDto"
+          }
+        },
+        "required": [
+          "outcome",
+          "invitation",
+          "link",
+          "kpm"
+        ]
+      },
+      "UserInvitationResentDto": {
+        "type": "object",
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/UserInvitationViewDto"
+          },
+          "link": {
+            "type": "string",
+            "description": "The new one-time link; the old one opens nothing now."
+          }
+        },
+        "required": [
+          "invitation",
+          "link"
+        ]
+      },
+      "UserInvitationCancelledDto": {
+        "type": "object",
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/UserInvitationViewDto"
+          }
+        },
+        "required": [
+          "invitation"
+        ]
+      },
+      "PlacedPersonDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Fajar Nugroho"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+6281234567890"
+          },
+          "email": {
+            "type": "string",
+            "example": "fajar@email.com"
+          }
+        },
+        "required": [
+          "userId",
+          "fullName",
+          "phone",
+          "email"
+        ]
+      },
+      "UserPlacedDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "placed"
+            ]
+          },
+          "membershipId": {
+            "type": "string"
+          },
+          "kpm": {
+            "$ref": "#/components/schemas/PlacedKpmDto"
+          },
+          "person": {
+            "$ref": "#/components/schemas/PlacedPersonDto"
+          },
+          "appLink": {
+            "type": "string",
+            "example": "https://app.agencyboost.id",
+            "description": "For the WhatsApp message beside the in-app notice."
+          }
+        },
+        "required": [
+          "outcome",
+          "membershipId",
+          "kpm",
+          "person",
+          "appLink"
+        ]
+      },
+      "UserInviteBannerDto": {
+        "type": "object",
+        "properties": {
+          "kpmName": {
+            "type": "string",
+            "example": "Bekasi Barat Branch"
+          },
+          "kpmCode": {
+            "type": "string",
+            "example": "0602"
+          },
+          "companyName": {
+            "type": "string",
+            "example": "Prudential"
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Rina Kartika",
+            "description": "The name the inviter typed."
+          },
+          "roleLabel": {
+            "type": "string",
+            "example": "Agent"
+          },
+          "makeOwner": {
+            "type": "boolean",
+            "description": "Accepting also makes them an owner of the KPM."
+          },
+          "expiresAt": {
+            "type": "string",
+            "example": "2026-12-06T03:00:00.000Z"
+          }
+        },
+        "required": [
+          "kpmName",
+          "kpmCode",
+          "companyName",
+          "fullName",
+          "roleLabel",
+          "makeOwner",
+          "expiresAt"
+        ]
+      },
+      "UserInviteAcceptedDto": {
+        "type": "object",
+        "properties": {
+          "kpmId": {
+            "type": "string"
+          },
+          "kpmName": {
+            "type": "string",
+            "example": "Bekasi Barat Branch"
+          },
+          "membershipId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kpmId",
+          "kpmName",
+          "membershipId"
         ]
       },
       "ActivityTypeDto": {
@@ -77664,6 +79392,31 @@
           "unpublished"
         ]
       },
+      "KpmViewOwnerDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "since": {
+            "type": "string",
+            "description": "When they became an owner, ISO."
+          }
+        },
+        "required": [
+          "userId",
+          "fullName",
+          "email",
+          "since"
+        ]
+      },
       "KpmViewDto": {
         "type": "object",
         "properties": {
@@ -77692,15 +79445,25 @@
           },
           "ownerUserId": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner — the earliest `since` (ADR-0285 §3)."
           },
           "ownerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's name."
           },
           "ownerEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's email."
+          },
+          "owners": {
+            "description": "Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmViewOwnerDto"
+            }
           },
           "timezone": {
             "type": "string"
@@ -77751,6 +79514,7 @@
           "ownerUserId",
           "ownerName",
           "ownerEmail",
+          "owners",
           "timezone",
           "locale",
           "currency",
@@ -78192,7 +79956,7 @@
               "invited",
               "not_invited"
             ],
-            "description": "Whether they have been invited, and have signed in: `signed_in` once the account has signed in; before that `invited` when an invitation went (*Diundang*), else `not_invited` (*Belum diundang*). An `active` member who has never signed in is shown by this, not as *Aktif*; `status` is unchanged by it."
+            "description": "Whether they have been invited, and whether the account is theirs: `signed_in` once it has signed in or its address was proven (OD-475); before that `invited` when an invitation went (*Diundang*), else `not_invited` (*Belum diundang*). An `active` member whose account is not theirs yet is shown by this, not as *Aktif*; `status` is unchanged by it."
           },
           "rejoinedOn": {
             "type": "string",
@@ -78515,12 +80279,23 @@
         "properties": {
           "owner": {
             "nullable": true,
-            "description": "The KPM Owner; `null` while it has none.",
+            "description": "The first owner (ADR-0285 §3); `null` while it has none.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/StewardOwnerDto"
               }
             ]
+          },
+          "owners": {
+            "description": "*KPM Owner · n*: every owner, in order of `since`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmOwnerViewDto"
+            }
+          },
+          "canManageOwners": {
+            "type": "boolean",
+            "description": "The reader may add and remove owners: an owner, or the Super Admin inside the KPM."
           },
           "admins": {
             "type": "number",
@@ -78533,6 +80308,8 @@
         },
         "required": [
           "owner",
+          "owners",
+          "canManageOwners",
           "admins",
           "coreLeaders"
         ]
@@ -80150,100 +81927,6 @@
           "items"
         ]
       },
-      "AccountOfficeDto": {
-        "type": "object",
-        "properties": {
-          "kpmId": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "branchName": {
-            "type": "string"
-          },
-          "companyName": {
-            "type": "string"
-          },
-          "isOwner": {
-            "type": "boolean"
-          },
-          "membershipStatus": {
-            "type": "string",
-            "enum": [
-              "active",
-              "pending"
-            ],
-            "nullable": true
-          }
-        },
-        "required": [
-          "kpmId",
-          "code",
-          "branchName",
-          "companyName",
-          "isOwner",
-          "membershipStatus"
-        ]
-      },
-      "AccountChoiceDto": {
-        "type": "object",
-        "properties": {
-          "userId": {
-            "type": "string"
-          },
-          "fullName": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "phone": {
-            "type": "string",
-            "nullable": true
-          },
-          "companyId": {
-            "type": "string",
-            "nullable": true
-          },
-          "companyName": {
-            "type": "string",
-            "nullable": true
-          },
-          "hasAgentCode": {
-            "type": "boolean"
-          },
-          "emailVerified": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "invited",
-              "active",
-              "deactivated"
-            ]
-          },
-          "offices": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AccountOfficeDto"
-            }
-          }
-        },
-        "required": [
-          "userId",
-          "fullName",
-          "email",
-          "phone",
-          "companyId",
-          "companyName",
-          "hasAgentCode",
-          "emailVerified",
-          "status",
-          "offices"
-        ]
-      },
       "CodeHolderDto": {
         "type": "object",
         "properties": {
@@ -80393,15 +82076,25 @@
           },
           "ownerUserId": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner — the earliest `since` (ADR-0285 §3)."
           },
           "ownerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's name."
           },
           "ownerEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's email."
+          },
+          "owners": {
+            "description": "Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmViewOwnerDto"
+            }
           },
           "timezone": {
             "type": "string"
@@ -80472,7 +82165,7 @@
               "invited",
               "active"
             ],
-            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and never signed in; active — *Aktif*, the Owner's account has signed in."
+            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and the account not theirs yet; active — *Aktif*, the Owner's account is theirs: signed in, or its address proven (OD-475)."
           },
           "ownerPhone": {
             "type": "string",
@@ -80514,6 +82207,7 @@
           "ownerUserId",
           "ownerName",
           "ownerEmail",
+          "owners",
           "timezone",
           "locale",
           "currency",
@@ -80755,15 +82449,25 @@
           },
           "ownerUserId": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner — the earliest `since` (ADR-0285 §3)."
           },
           "ownerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's name."
           },
           "ownerEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's email."
+          },
+          "owners": {
+            "description": "Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmViewOwnerDto"
+            }
           },
           "timezone": {
             "type": "string"
@@ -80834,7 +82538,7 @@
               "invited",
               "active"
             ],
-            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and never signed in; active — *Aktif*, the Owner's account has signed in."
+            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and the account not theirs yet; active — *Aktif*, the Owner's account is theirs: signed in, or its address proven (OD-475)."
           },
           "ownerPhone": {
             "type": "string",
@@ -80879,6 +82583,7 @@
           "ownerUserId",
           "ownerName",
           "ownerEmail",
+          "owners",
           "timezone",
           "locale",
           "currency",
@@ -80928,15 +82633,25 @@
           },
           "ownerUserId": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner — the earliest `since` (ADR-0285 §3)."
           },
           "ownerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's name."
           },
           "ownerEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's email."
+          },
+          "owners": {
+            "description": "Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmViewOwnerDto"
+            }
           },
           "timezone": {
             "type": "string"
@@ -80977,7 +82692,11 @@
           },
           "invitationSent": {
             "type": "boolean",
-            "description": "True once the Owner's invitation email is on its way; false with no Owner, no email, *Kirim undangan* unticked, an Owner who has signed in, or a send that failed (logged; the KPM stands)."
+            "description": "True once the Owner's invitation email is on its way; false with no Owner, no email, *Kirim undangan* unticked, an Owner whose account is theirs already (signed in, or its address proven: OD-475), or a send that failed (logged; the KPM stands)."
+          },
+          "ownerNotified": {
+            "type": "boolean",
+            "description": "True when the Owner is an existing account already theirs (signed in, or its address proven: OD-475) and was told in the app instead of invited — `member.placed`, the notice *Masukkan* sends (OD-442). A failure to send is logged and answers false; the KPM stands."
           }
         },
         "required": [
@@ -80991,6 +82710,7 @@
           "ownerUserId",
           "ownerName",
           "ownerEmail",
+          "owners",
           "timezone",
           "locale",
           "currency",
@@ -81000,7 +82720,8 @@
           "suspendedAt",
           "suspendedReason",
           "createdAt",
-          "invitationSent"
+          "invitationSent",
+          "ownerNotified"
         ]
       },
       "KpmAdminPersonDto": {
@@ -81073,15 +82794,25 @@
           },
           "ownerUserId": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner — the earliest `since` (ADR-0285 §3)."
           },
           "ownerName": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's name."
           },
           "ownerEmail": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The first owner's email."
+          },
+          "owners": {
+            "description": "Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KpmViewOwnerDto"
+            }
           },
           "timezone": {
             "type": "string"
@@ -81152,7 +82883,7 @@
               "invited",
               "active"
             ],
-            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and never signed in; active — *Aktif*, the Owner's account has signed in."
+            "description": "The Owner's state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent and the account not theirs yet; active — *Aktif*, the Owner's account is theirs: signed in, or its address proven (OD-475)."
           },
           "ownerPhone": {
             "type": "string",
@@ -81208,6 +82939,7 @@
           "ownerUserId",
           "ownerName",
           "ownerEmail",
+          "owners",
           "timezone",
           "locale",
           "currency",

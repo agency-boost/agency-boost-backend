@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { clearCollections, startMongo, stopMongo } from '../../test/mongo';
 import { describeReport, parseArgs, run, USAGE } from './daily-notices';
+import { ownersOf } from '../../test/owners';
 
 /** 12 Nov 2026, 00:10 in Jakarta: the timer's moment. */
 const NOW = new Date('2026-11-11T17:10:00Z');
@@ -81,9 +82,9 @@ describe('P19.15-T4 daily-notices', () => {
       { _id: oid(OWNER_OTHER), fullName: 'Owner M', email: 'm@x.id', platformRole: 'none', status: 'active', deletedAt: null },
     ]);
     await db().collection('kpms').insertMany([
-      { _id: oid(KPM), code: '0417', branchName: 'Bandung', companyId: COMPANY, status: 'active', ownerUserId: OWNER, deletedAt: null },
-      { _id: oid(KPM_SUSPENDED), code: '0418', branchName: 'Bogor', companyId: COMPANY, status: 'suspended', ownerUserId: OWNER_SUSPENDED, deletedAt: null },
-      { _id: oid(KPM_OTHER), code: '0900', branchName: 'Medan', companyId: OTHER_COMPANY, status: 'active', ownerUserId: OWNER_OTHER, deletedAt: null },
+      { _id: oid(KPM), code: '0417', branchName: 'Bandung', companyId: COMPANY, status: 'active', owners: ownersOf(OWNER), deletedAt: null },
+      { _id: oid(KPM_SUSPENDED), code: '0418', branchName: 'Bogor', companyId: COMPANY, status: 'suspended', owners: ownersOf(OWNER_SUSPENDED), deletedAt: null },
+      { _id: oid(KPM_OTHER), code: '0900', branchName: 'Medan', companyId: OTHER_COMPANY, status: 'active', owners: ownersOf(OWNER_OTHER), deletedAt: null },
     ]);
     await db().collection('rateTables').insertMany([
       // PCB88: in force, ends in exactly 15 days, nothing after it — the Super Admins are told.

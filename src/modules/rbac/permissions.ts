@@ -201,7 +201,11 @@ export const PERMISSIONS = {
   'kpm:activate': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:archive': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   'kpm:assign_owner': [{ grantee: SUPER_ADMIN, scope: 'all' }],
-  'kpm:transfer_ownership': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
+   * ~~`kpm:transfer_ownership`~~ — *Retired 2026-11-22 (P19.27; ADR-0285 §7; the docs audit):* no route checked it once
+   * `PATCH /admin/tenants/:id/owner` went. Changing the owner is adding the new one (`kpm_owner:grant`), then removing the
+   * old (`kpm_owner:revoke`), never the last (`409 KPM_LAST_OWNER`).
+   */
   /*
    * An office's subscription — its dates, price per leader, leader limit and *keep active*
    * (ADR-0112 §2, P13.2-T3): `PATCH /admin/tenants/:kpmId/subscription`. **The Super Admin's
@@ -454,6 +458,21 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
     { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * **A KPM's owners, added and removed** (ADR-0285 §4; P19.27-T1 AC-4; F-2 (21 Nov)): `POST` and `DELETE
+   * /members/:membershipId/owner` — *Tambah owner* · *Hapus sebagai owner*. The Super Admin, any KPM (inside it); an owner,
+   * their own KPM. **Never a KPM Admin**: no tenant grantee but the Owner, so `isOwnerReserved` answers an Admin `403
+   * PERM_OWNER_ONLY`, as `kpm_admin:grant` does. The last owner is never removed (`409 KPM_LAST_OWNER`, the service). On
+   * `BLOCKED_WHILE_IMPERSONATING` below: ownership is never handed out from inside somebody's session.
+   */
+  'kpm_owner:grant': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+  ],
+  'kpm_owner:revoke': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
   ],
   // The platform-wide roster is a different question from an office's own admin list, and
   // needs its own grant: `kpm_admin:list` gives an Owner `own-kpm`, so gating the roster
@@ -1449,6 +1468,23 @@ export const PERMISSIONS = {
     { grantee: AAB, scope: 'own-unit' },
   ],
   /*
+   * ***Tambah user*** (P19.28-T1 AC-1, AC-4; ADR-0286 §4; F-1 (21 Nov)): the shared sheet's invitation —
+   * `POST /user-invitations`, its choices, *Kirim ulang* and *Batalkan*. **The Super Admin in any KPM**; an Owner and a
+   * KPM Admin **in their own** (another is `404`). Never an AB, an AAB or an Agent, whose *+ Tambah agent* is
+   * `member:invite`. *＋ KPM baru* inside it is `kpm:create` too, and *Jadikan KPM Owner* `kpm_owner:grant`.
+   */
+  'member:add': [
+    { grantee: SUPER_ADMIN, scope: 'all' },
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+    { grantee: KPM_ADMIN, scope: 'own-kpm' },
+  ],
+  /*
+   * ***Masukkan ke KPM*** (P19.28-T1 AC-2; ADR-0286 §3): an account registered and not placed (*Belum ada KPM*), placed in
+   * a KPM now — `POST /admin/accounts/:userId/placement`. **The Super Admin's alone**, as themselves: the people who
+   * registered and wait are the platform's to see (Anggota › *Menunggu*), and a support session only looks.
+   */
+  'member:place': [{ grantee: SUPER_ADMIN, scope: 'all' }],
+  /*
    * **Deciding a transfer request** (ADR-0170 §4, P18.8-T3 AC-3): the office's queue, and approving — which moves the
    * member through `HierarchyService.reparent`, with history — or declining. The Owner's and an Admin's alone: no
    * leader moves a member directly, so the leader who asked never decides their own request. *Since ADR-0268 §1:* **and a
@@ -1490,7 +1526,7 @@ export const PERMISSIONS = {
   // The Owner and an Admin decide anywhere in the office — a request whose leader never
   // looks is the failure the queue exists to prevent. This matched the matrix nowhere
   // until 2026-09-06: the code had only the two leader grants, and office-wide approval
-  // worked solely because `assignOwner` happens to make an Owner an AB. An agent
+  // worked solely because an Owner is made the KPM's root AB. An agent
   // promoted to Owner, or an Admin who is an agent, was refused their own queue.
   'leader_request:approve': [
     { grantee: SUPER_ADMIN, scope: 'all' },
@@ -1910,13 +1946,15 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   'super_admin:grant',
   'kpm:create',
   'kpm:archive',
-  'kpm:transfer_ownership',
   // ADR-0112 §2: an office's subscription is the platform's, and its end cuts every member off.
   'kpm:update_subscription',
   // ADR-0211 §5, ADR-0279 §7: and the offer made to it.
   'billing:send_quote',
   'kpm_admin:grant',
   'kpm_admin:revoke',
+  // ADR-0285 §4 (P19.27): and owners, as admins.
+  'kpm_owner:grant',
+  'kpm_owner:revoke',
   // ADR-0260 §4 (P19.15-T4): *Kelola data produk* is given and removed by the Super Admin as themselves, never in a session.
   'product_data_grant:manage',
   'notification_preference:manage',

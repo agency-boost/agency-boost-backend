@@ -24,4 +24,17 @@ export const AUDIT_LOG = Object.freeze({
    * a line says, read as text — longer is refused `400 VALIDATION_FAILED` naming `q` before a query is built.
    */
   SEARCH_MAX_LENGTH: 100,
+  /**
+   * ***Dilihat*: the entries that record somebody looking, not changing** (P19.26-T3 AC-1; ADR-0284 §3; UI-217 (21 Nov)).
+   * The log lists changes only by default; these sit behind the chip *Termasuk dilihat* (`includeViewed=true`), filtered
+   * on the server so the paging stays right. Every action in the `platform_read.` family — the Super Admin's reads across
+   * KPMs (ADR-0207 §5) — and the three reads recorded inside an office.
+   */
+  VIEWED_ACTION_PREFIX: 'platform_read.',
+  VIEWED_ACTIONS: Object.freeze(['activity_log.read_raw', 'leader_note.read', 'lead.viewed'] as const),
 });
+
+/** Whether an audit action records a look rather than a change (`AUDIT_LOG.VIEWED_*`). */
+export function isViewedAction(action: string): boolean {
+  return action.startsWith(AUDIT_LOG.VIEWED_ACTION_PREFIX) || (AUDIT_LOG.VIEWED_ACTIONS as readonly string[]).includes(action);
+}

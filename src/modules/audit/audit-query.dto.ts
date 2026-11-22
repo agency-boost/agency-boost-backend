@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsMongoId, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { field } from '@/common/validation/violations';
 import { AUDIT_LOG } from '@/domain/constants';
 import { AUDIT_REFUSALS } from './audit.messages';
@@ -90,6 +90,18 @@ export class AuditQueryDto {
   @IsString()
   @Matches(DAY, { message: field(SAY.dateShape) })
   to?: string;
+
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description:
+      '*Termasuk dilihat* (ADR-0284 §3; UI-217): `true` lists the entries that record a look too — the '
+      + '`platform_read.` family, `activity_log.read_raw`, `leader_note.read`, `lead.viewed`. Absent or `false`, '
+      + '**changes only**, filtered before the page is cut. An `action` that is a look is listed whatever this says.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['true', 'false'], { message: field(SAY.includeViewedShape) })
+  includeViewed?: 'true' | 'false';
 
   @ApiPropertyOptional({
     maxLength: 200,

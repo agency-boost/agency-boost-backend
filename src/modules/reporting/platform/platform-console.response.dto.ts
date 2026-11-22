@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { KPM_ISSUES, type KpmIssue } from '@/domain/constants';
+import { KpmOwnerListDto } from '@/modules/tenants/kpm-owners.response.dto';
 import type {
   ConsoleDashboard, ConsoleKpm, ConsoleKpmPeople, ConsolePerson, FunnelStep, PersonClass, UsageCounts,
 } from './platform-console.service';
@@ -31,6 +32,11 @@ class ConsoleKpmDto implements ConsoleKpm {
   @ApiProperty({ description: 'Active, its subscription not ended: in *KPM aktif* and *Adopsi per KPM*.' }) active!: boolean;
   @ApiProperty({ type: String, nullable: true, description: 'The Owner, or the named Owner who waits; `null`: none.' })
   ownerName!: string | null;
+  @ApiProperty({
+    type: String, isArray: true,
+    description: 'Every owner\'s name in order of `since` (ADR-0285 §3): *"♛ FIRST OWNER +n"*; the search matches any of them.',
+  })
+  ownerNames!: string[];
   @ApiProperty({ enum: ['none', 'not_invited', 'invited', 'active'] }) ownerState!: ConsoleKpm['ownerState'];
   @ApiProperty() createdAt!: string;
   @ApiProperty({ type: KpmUsageDto }) usage!: ConsoleKpm['usage'];
@@ -39,8 +45,15 @@ class ConsoleKpmDto implements ConsoleKpm {
     description: 'In `KPM_ISSUES`’ order. `suspended` and `archived` stand alone; the other four are *Perlu tindakan*.',
   })
   issues!: KpmIssue[];
+  @ApiProperty({ description: '*Perlu tindakan*: one of `KPM_ACTION_ISSUES` (ADR-0284 §2).' })
+  needsAction!: boolean;
   @ApiProperty({ type: String, nullable: true, example: '2026-10', description: '`data_missing`’s month.' })
   missingMonth!: string | null;
+  @ApiProperty({
+    type: Number, nullable: true, example: 30,
+    description: 'The days left of a running trial, today and the last day both counted (*Trial 30 hari*); `null`: no trial running.',
+  })
+  trialDaysLeft!: number | null;
 }
 
 class FunnelStepDto implements FunnelStep {
@@ -51,7 +64,7 @@ class FunnelStepDto implements FunnelStep {
 }
 
 class FunnelDto {
-  @ApiProperty({ description: '*Anggota*: the active KPMs’ counted members.' }) members!: number;
+  @ApiProperty({ description: '*Anggota*: every counted member (`COUNTED_MEMBERS`; ADR-0284 §1), the tile’s number.' }) members!: number;
   @ApiProperty({ type: FunnelStepDto }) everUsed!: FunnelStep;
   @ApiProperty({ type: FunnelStepDto }) used14!: FunnelStep;
   @ApiProperty({ type: FunnelStepDto }) powerUsers!: FunnelStep;
@@ -62,8 +75,11 @@ class OverallDto {
   @ApiProperty({ description: '*+n bulan ini*: made this calendar month.' }) kpmsNewThisMonth!: number;
   @ApiProperty({ description: '*Perusahaan*: the insurers.' }) companies!: number;
   @ApiProperty({ description: '*KPM aktif dari n*.' }) activeKpms!: number;
-  @ApiProperty() leaders!: number;
-  @ApiProperty() agents!: number;
+  @ApiProperty({ description: '*Anggota*’s leaders (AB and AAB): counted members (ADR-0284 §1) of every KPM but an archived one.' })
+  leaders!: number;
+  @ApiProperty({ description: '*Anggota*’s agents, the same.' }) agents!: number;
+  @ApiProperty({ description: '*Perlu tindakan*: the KPMs that need action (ADR-0284 §2), the same number on every page.' })
+  needsAction!: number;
 }
 
 class ScaleDto {
@@ -136,6 +152,8 @@ class ViewAsDto {
 export class ConsoleKpmPeopleDto implements ConsoleKpmPeople {
   @ApiProperty({ type: PeopleKpmDto }) kpm!: ConsoleKpmPeople['kpm'];
   @ApiProperty({ type: PeopleOwnerDto }) owner!: ConsoleKpmPeople['owner'];
+  @ApiProperty({ type: KpmOwnerListDto, description: '*KPM Owner · n* (ADR-0285): every owner in order of `since`.' })
+  owners!: KpmOwnerListDto;
   @ApiProperty({ type: ConsolePersonDto, isArray: true }) admins!: ConsolePerson[];
   @ApiProperty({ type: ConsolePersonDto, isArray: true }) coreLeaders!: ConsolePerson[];
   @ApiProperty({ type: PeopleMembersDto }) members!: ConsoleKpmPeople['members'];

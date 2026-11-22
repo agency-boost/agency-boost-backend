@@ -1,3 +1,4 @@
+import { ownerEntry } from '@/modules/tenants/kpm-owners';
 import { DateTime } from 'luxon';
 import type mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
@@ -182,14 +183,14 @@ async function subscribe(Kpms: mongoose.Model<never>, kpmId: string, subscriptio
 async function officeOf(
   deps: SubscriptionFixtureDeps,
   code: '0601' | '0602' | '0603',
-  ownerUserId: string,
+  ownerId: string,
 ): Promise<OfficeRef> {
   const { _id, branchName } = SUBSCRIPTION_OFFICES[code];
   const Kpms = deps.Kpms as unknown as mongoose.Model<{ companyId: string; code: string }>;
   const existing = await Kpms.findOne({ _id }).exec();
   if (!existing) {
     await Kpms.create({
-      _id, companyId: deps.companyId, code, branchName, ownerUserId, timezone: ZONE,
+      _id, companyId: deps.companyId, code, branchName, owners: [ownerEntry(ownerId, deps.daysAgo(420))], timezone: ZONE,
       counters: { nextMemberSeq: 1 }, status: 'active',
     } as never);
   }

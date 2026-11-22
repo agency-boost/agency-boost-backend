@@ -1,20 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import { Clock } from '@/common/clock/clock.port';
 import { isEffectiveCoreLeader, RequestContext } from '@/common/context/request-context';
 import { NotFoundException, PermissionDeniedException } from '@/common/errors/domain.exception';
-import { CONSOLE, DEFAULT_TENANT_TIMEZONE, type KpmIssue } from '@/domain/constants';
+import { CONSOLE, DEFAULT_TENANT_TIMEZONE, KPM_ACTION_ISSUES, type KpmIssue } from '@/domain/constants';
 import type { UsageStatus } from '@/domain/constants/usage';
 import type { UsageReading } from '@/domain/metrics/usage';
 import { ActivityReadings } from '@/modules/activity/activity-readings';
-import { withoutTestAccounts } from '@/modules/org/counted-members';
+import { countedMembers, isCountedOffice } from '@/modules/org/counted-members';
 import { LeaderLimitRequestService } from '@/modules/org/leader-limit-request.service';
 import { MembershipRepository, type MembershipListRow } from '@/modules/org/membership.repository';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
 import { KpmRequest, KpmRequestDocument } from '@/modules/tenants/kpm-request.schema';
 import { INSURERS_ONLY } from '@/modules/tenants/template-library';
+import { KpmOwnersService, type KpmOwnerList } from '@/modules/tenants/kpm-owners.service';
 import { TenantService, type KpmAdminView, type OwnerState } from '@/modules/tenants/tenant.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { OfficeGroups } from '../office-groups';
@@ -43,14 +44,27 @@ export interface ConsoleKpm {
   active: boolean;
   /** The Owner's name, or the named Owner who waits (`pendingOwner`); `null`: no Owner. */
   ownerName: string | null;
+  /**
+   * **Every owner's name, in order of `since`** (P19.27-T3 AC-2; ADR-0285 §3): the card's *"♛ FIRST OWNER +n"* — `ownerName`
+   * is the first — and the search (*Cari nama KPM atau owner*) matches any of them. Empty with no owner.
+   */
+  ownerNames: string[];
   ownerState: OwnerState;
   createdAt: string;
-  /** Counted members — active, test accounts never — by class. */
+  /** Counted members (`COUNTED_MEMBERS`, ADR-0284 §1) by class: the card's *n anggota* is their sum. An archived KPM: 0. */
   usage: { leader: UsageCounts; agent: UsageCounts };
   /** Everything to say about the KPM, in `KPM_ISSUES`' order: the card shows the first, the dashboard each action. */
   issues: KpmIssue[];
+  /** ***Perlu tindakan***: one of `KPM_ACTION_ISSUES` (P19.26-T1 AC-3; ADR-0284 §2). */
+  needsAction: boolean;
   /** `data_missing`'s month, `YYYY-MM`, or `null`. */
   missingMonth: string | null;
+  /**
+   * **The days left of a running trial** (OD-477; stop motion B frame 7, *"Trial 30 hari"*): the KPM's own today to the
+   * trial's last day, both counted — `30` on the day it is made — or `null` when the KPM is not in a trial (no
+   * subscription, a paid one, or a trial that has ended). The phone card's pill when nothing needs action.
+   */
+  trialDaysLeft: number | null;
 }
 
 /** The funnel's step against last month (P19.23-T1 AC-2): this month's count and percentage, and last month's. */
@@ -74,8 +88,10 @@ export interface ConsoleDashboard {
     activeKpms: number;
     leaders: number;
     agents: number;
+    /** ***Perlu tindakan***: how many KPMs need action (ADR-0284 §2) — the Dashboard's heading and the KPM list's tile. */
+    needsAction: number;
   };
-  /** *Pemakaian AgencyBoost* over the active KPMs' members. */
+  /** *Pemakaian AgencyBoost* over every counted member (ADR-0284 §1): its *Anggota* is the tile's number. */
   funnel: { members: number; everUsed: FunnelStep; used14: FunnelStep; powerUsers: FunnelStep };
   /** Pending approvals: KPM registrations and leaders past the limit. */
   approvalsPending: number;
@@ -96,7 +112,10 @@ export interface ConsolePerson {
 /** **`GET /admin/tenants/:id/people`** — a KPM page's *Owner & admin*, *Anggota* and *Lihat sebagai* (ADR-0277 §3). */
 export interface ConsoleKpmPeople {
   kpm: { kpmId: string; name: string; code: string; companyId: string; companyName: string; status: ConsoleKpm['status'] };
+  /** The first owner (ADR-0285 §3) and the KPM's owner state; `pendingName` the owner named and waiting. */
   owner: { state: OwnerState; person: ConsolePerson | null; pendingName: string | null };
+  /** ***KPM Owner · n*** (P19.27-T2 AC-1; ADR-0285): every owner, in order of `since`, with whether the reader manages them. */
+  owners: KpmOwnerList;
   admins: ConsolePerson[];
   coreLeaders: ConsolePerson[];
   members: {
@@ -122,7 +141,7 @@ const CLASS_ORDER: Record<string, number> = { ab: 0, aab: 1, agent: 2 };
  *   is ADR-0011's aggregate, and is not audited per read (ADR-0277 §1). A KPM's page names its people, as the Owner's own
  *   pages do, to the Super Admin who is that KPM's Owner (ADR-0268 §3).
  * - **Tenancy** (invariant §1): the memberships through the named `listMembershipsAcrossTenants`, test accounts left out
- *   (`withoutTestAccounts`, ADR-0267 §1); every KPM's activity through that KPM's own reading
+ *   (`countedMembers`, `COUNTED_MEMBERS`: active, test accounts never, ADR-0284 §1); every KPM's activity through that KPM's own reading
  *   (`ActivityReadings.usageOf`) in a platform read's context (`RequestContext.platformRead`) — tenant-scoped, the KPM
  *   named, read-only — as *All members*' *Terakhir pakai* is read.
  * - **One definition per number** (invariant §8; ADR-0267 §4): *Pernah pakai*, *Pakai 14 hari terakhir* and *Power user*
@@ -142,6 +161,8 @@ export class PlatformConsole {
     private readonly leaderLimit: LeaderLimitRequestService,
     private readonly groups: OfficeGroups,
     private readonly clock: Clock,
+    /** *KPM Owner · n* (P19.27-T2; ADR-0285). Optional for the specs that build this by hand: the owners from the view then. */
+    @Optional() @Inject(KpmOwnersService) private readonly kpmOwners: KpmOwnersService | null = null,
   ) {}
 
   /** The route's guard has asked; this is the second wall: a Super Admin, outside any session (ADR-0207 §1). */
@@ -162,11 +183,13 @@ export class PlatformConsole {
     ]);
     const insurerIds = new Set(insurers.map((c) => String(c._id)));
     const live = offices.filter((k) => insurerIds.has(k.companyId));
-    const open = live.filter((k) => k.status !== 'archived');
+    // The KPMs whose members are counted (ADR-0284 §1): every live one but an archived one.
+    const open = live.filter((k) => isCountedOffice(k));
 
     const [dataStatus, counted] = await Promise.all([
       this.reads.dataStatusAcrossTenants(ctx, open),
-      this.memberships.listMembershipsAcrossTenants(ctx, open.map((k) => k._id), withoutTestAccounts({ status: 'active' })),
+      // *Anggota*, the console's one count (P19.26-T1 AC-1; ADR-0284 §1).
+      this.memberships.listMembershipsAcrossTenants(ctx, open.map((k) => k._id), countedMembers()),
     ]);
     const membersOf = new Map<string, MembershipListRow[]>();
     for (const m of counted) membersOf.set(m.kpmId, [...(membersOf.get(m.kpmId) ?? []), m]);
@@ -195,6 +218,8 @@ export class PlatformConsole {
       }
       const subscriptionEnded = kpm.subscriptionState === 'ended';
       const missingMonth = dataStatus.get(kpm._id)?.missingMonth ?? null;
+      const trialDaysLeft = trialDaysLeftOf(kpm, this.clock.localDateFor(kpm.timezone));
+      const issues = issuesOf(kpm, subscriptionEnded, missingMonth, trialDaysLeft !== null);
       return {
         kpmId: kpm._id,
         name: kpm.branchName,
@@ -204,21 +229,29 @@ export class PlatformConsole {
         status: kpm.status,
         active: kpm.status === 'active' && !subscriptionEnded,
         ownerName: kpm.ownerName ?? kpm.pendingOwner?.fullName ?? null,
+        ownerNames: kpm.owners.length > 0 ? kpm.owners.map((o) => o.fullName) : (kpm.pendingOwner ? [kpm.pendingOwner.fullName] : []),
         ownerState: kpm.ownerState,
         createdAt: kpm.createdAt,
         usage: counts,
-        issues: issuesOf(kpm, subscriptionEnded, missingMonth),
+        issues,
+        needsAction: needsAction(issues),
         missingMonth,
+        trialDaysLeft,
       };
     }).sort((a, b) => a.companyName.localeCompare(b.companyName) || a.name.localeCompare(b.name));
 
-    // The funnel and the summary: the active KPMs' members (*KPM aktif*), as the tree.
+    /*
+     * The funnel and the summary: **every counted member** (P19.26-T1 AC-1; ADR-0284 §1), a suspended KPM's and an ended
+     * subscription's included — so *Anggota*, *Pemakaian AgencyBoost · n anggota*, the sum of the KPM cards, *Anggota*'s
+     * footer and *Perusahaan* are one number. Until P19.26 it was the active KPMs' alone (UI-204: 50 beside 55).
+     */
     const active = kpms.filter((k) => k.active);
     const now = EMPTY();
     const before = EMPTY();
     let leaders = 0;
-    for (const kpm of active) {
-      const read = usage.get(kpm.kpmId)!;
+    for (const kpm of kpms) {
+      const read = usage.get(kpm.kpmId);
+      if (!read) continue;
       for (const m of read.people) {
         if (leaderClass(m.role)) leaders += 1;
         tally(now, read.now.get(String(m._id)));
@@ -241,6 +274,7 @@ export class PlatformConsole {
         activeKpms: active.length,
         leaders,
         agents: now.members - leaders,
+        needsAction: kpms.filter((k) => k.needsAction).length,
       },
       funnel: { members: now.members, everUsed: step('everUsed'), used14: step('used14'), powerUsers: step('powerUsers') },
       approvalsPending: kpmRequestsPending + leaderLimitRows.filter((r) => r.status === 'pending').length,
@@ -258,7 +292,8 @@ export class PlatformConsole {
     const kpm = await this.tenants.readProfile(ctx, kpmId) as KpmAdminView;
     const office = RequestContext.platformRead(ctx, kpmId);
 
-    const rows = await this.memberships.find(office, withoutTestAccounts({ status: 'active' }), {
+    // *Anggota*, the console's one count (P19.26-T1 AC-1; ADR-0284 §1): the KPM page's tile is the card's number.
+    const rows = await this.memberships.find(office, countedMembers(), {
       projection: { userId: 1, role: 1, isCoreLeader: 1, adminAccess: 1 },
     });
     const names = await this.namesOf(rows.map((m) => String(m.userId)));
@@ -272,9 +307,11 @@ export class PlatformConsole {
       (CLASS_ORDER[a.class] ?? 3) - (CLASS_ORDER[b.class] ?? 3) || a.fullName.localeCompare(b.fullName);
     const people = rows.map(person).sort(byClassThenName);
 
-    const ownerRow = kpm.ownerUserId ? rows.find((m) => String(m.userId) === kpm.ownerUserId) ?? null : null;
-    const owner = ownerRow ? person(ownerRow) : null;
-    const admins = rows.filter((m) => m.adminAccess?.isKpmAdmin === true && String(m.userId) !== kpm.ownerUserId)
+    // Every owner (ADR-0285 §3): the first is the one `owner` names; none of them is listed again as an Admin.
+    const ownerIds = kpm.owners.map((o) => o.userId);
+    const ownerRows = ownerIds.flatMap((id) => rows.filter((m) => String(m.userId) === id));
+    const owner = ownerRows[0] && String(ownerRows[0].userId) === ownerIds[0] ? person(ownerRows[0]) : null;
+    const admins = rows.filter((m) => m.adminAccess?.isKpmAdmin === true && !ownerIds.includes(String(m.userId)))
       .map(person).sort(byClassThenName);
     const coreLeaders = rows.filter((m) => isEffectiveCoreLeader(m)).map(person).sort(byClassThenName);
 
@@ -292,6 +329,18 @@ export class PlatformConsole {
         kpmId, name: kpm.branchName, code: kpm.code, companyId: kpm.companyId, companyName: kpm.companyName, status: kpm.status,
       },
       owner: { state: kpm.ownerState, person: owner, pendingName: kpm.pendingOwner?.fullName ?? null },
+      owners: this.kpmOwners
+        ? await this.kpmOwners.list(ctx, kpmId)
+        : {
+          canManage: false,
+          owners: kpm.owners.map((o) => {
+            const row = rows.find((m) => String(m.userId) === o.userId);
+            return {
+              userId: o.userId, membershipId: row ? String(row._id) : null, fullName: o.fullName, agentCode: null,
+              role: (row?.role as PersonClass | undefined) ?? null, photoUrl: null, since: o.since, state: 'active' as const,
+            };
+          }),
+        },
       admins,
       coreLeaders,
       members: {
@@ -310,7 +359,7 @@ export class PlatformConsole {
         }),
       },
       viewAs: {
-        owner: owner ? [owner] : [],
+        owner: ownerRows.map(person),
         admin: admins,
         ab: people.filter((p) => p.class === 'ab'),
         agent: people.filter((p) => p.class === 'agent'),
@@ -338,18 +387,44 @@ function tally(into: UsageCounts, reading: UsageReading | undefined): void {
 /**
  * **A KPM's issues** (ADR-0277 §2), in `KPM_ISSUES`' order. A suspended or archived KPM says only that: the Super Admin
  * set it, and nothing in it can be acted on until it is undone.
+ *
+ * **A KPM in its trial with its owners alone is not *no members*** (OD-477): a KPM is made with its first owner and
+ * nobody else, so every new KPM would be *Perlu tindakan* the moment it exists. The owner's stop motion (B frame 7) shows
+ * the new KPM with *Trial 30 hari* and *Perlu tindakan* unchanged. After the trial, an office still with nobody but its
+ * owners is *no members* again.
  */
 export function issuesOf(
   kpm: Pick<KpmAdminView, 'status' | 'ownerState' | 'membersBesidesOwner'>, subscriptionEnded: boolean, missingMonth: string | null,
+  inTrial = false,
 ): KpmIssue[] {
   if (kpm.status === 'suspended') return ['suspended'];
   if (kpm.status === 'archived') return ['archived'];
   const issues: KpmIssue[] = [];
   if (subscriptionEnded) issues.push('subscription_ended');
   if (kpm.ownerState === 'none' || kpm.ownerState === 'not_invited') issues.push('owner_not_invited');
-  if (kpm.membersBesidesOwner === 0) issues.push('no_members');
+  if (kpm.membersBesidesOwner === 0 && !inTrial) issues.push('no_members');
   if (missingMonth !== null) issues.push('data_missing');
   return issues;
+}
+
+/**
+ * **The days left of a KPM's running trial** (OD-477), counted from its own `today` to the trial's last day, both days
+ * included — `30` on the day a KPM is made (`trialSubscription`). `null` when there is no trial running: no subscription,
+ * a paid one, or a trial whose last day has passed.
+ */
+export function trialDaysLeftOf(
+  kpm: Pick<KpmAdminView, 'subscription'>, today: string,
+): number | null {
+  const sub = kpm.subscription;
+  if (!sub?.trial || !sub.endDate || today > sub.endDate) return null;
+  const from = Date.parse(`${today}T00:00:00Z`);
+  const to = Date.parse(`${sub.endDate}T00:00:00Z`);
+  return Math.round((to - from) / 86_400_000) + 1;
+}
+
+/** ***Perlu tindakan*** (ADR-0284 §2): a KPM with one of `KPM_ACTION_ISSUES`. A suspended or archived KPM never. */
+export function needsAction(issues: readonly KpmIssue[]): boolean {
+  return issues.some((i) => KPM_ACTION_ISSUES.includes(i));
 }
 
 /** The same day a calendar month earlier, clamped to that month's last day (`2026-03-31` → `2026-02-28`). */

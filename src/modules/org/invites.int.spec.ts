@@ -51,6 +51,7 @@ import {
 } from './org.repositories';
 import { TransferRequest, TransferRequestSchema } from './transfer-request.schema';
 import { TransfersService } from './transfers.service';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on Tuesday 27 October 2026 in Jakarta. */
 const NOW = new Date('2026-10-27T03:00:00Z');
@@ -229,11 +230,11 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
     user = u;
     await mongoose.model(Kpm.name).create({
       _id: KPM_A, companyId, code: '0417', branchName: 'BSD City', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.OWNER),
     });
     await mongoose.model(Kpm.name).create({
       _id: KPM_B, companyId, code: '0555', branchName: 'Kelapa Gading', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.B_OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.B_OWNER),
     });
     const i = {} as Record<Who, string>;
     i.OWNER = await place(KPM_A, u.OWNER, 'ab', null);
@@ -368,15 +369,15 @@ describe('P18.8-T3 + Add agent, invites, transfers and Find Your Leader over HTT
     it('P18.8-T8 M3 the office’s owner who has a leader is refused 403 ORG_NOT_PERMITTED_TO_TAG, when asked and when approved — nothing moves', async () => {
       const kpm = { _id: new mongoose.Types.ObjectId(KPM_A) };
       // Ownership moved to Sari, who keeps her leader, Agus.
-      await col('kpms').updateOne(kpm, { $set: { ownerUserId: user.SARI } });
+      await col('kpms').updateOne(kpm, { $set: { owners: ownersOf(user.SARI) } });
       await signIn('PEER');
       const asked = await add({ agentCode: '10004' }).expect(403);
       expect(asked.body.error).toMatchObject({ code: 'ORG_NOT_PERMITTED_TO_TAG', message: 'They own this office. Nobody adds them to a unit.' });
       expect(await col('transferRequests').countDocuments({})).toBe(0);
       // Asked for while Rina was nobody's owner, and approved once she is.
-      await col('kpms').updateOne(kpm, { $set: { ownerUserId: user.OWNER } });
+      await col('kpms').updateOne(kpm, { $set: { owners: ownersOf(user.OWNER) } });
       const transferId = (await add({ agentCode: '10005' }).expect(200)).body.transfer.transferId;
-      await col('kpms').updateOne(kpm, { $set: { ownerUserId: user.RINA } });
+      await col('kpms').updateOne(kpm, { $set: { owners: ownersOf(user.RINA) } });
       await signIn('OWNER');
       expect((await http().post(`/transfer-requests/${transferId}/approve`).expect(403)).body.error.code).toBe('ORG_NOT_PERMITTED_TO_TAG');
       expect(await col('transferRequests').findOne({})).toMatchObject({ status: 'pending' });

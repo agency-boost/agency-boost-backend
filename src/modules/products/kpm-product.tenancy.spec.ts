@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
 import { SEED_PRODUCTS } from '@/domain/constants';
+import { seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 
@@ -338,7 +339,8 @@ describe('an office’s product decisions (P5-T5)', () => {
   });
 
   describe('the office’s description, held for approval with the script (OD-136, ADR-0120)', () => {
-    const TAGLINE = 'Endowment-style life with guaranteed retirement payouts from age 55.';
+    // The company's catalogue is written in the seed's Indonesian (P19.26-T4 AC-4; OD-440).
+    const TAGLINE = seedProductInIndonesian(SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!).tagline;
     const OURS = 'Dana pensiun yang cair rutin dari usia 55, mulai Rp200 ribu sebulan.';
 
     it('reads the company’s tagline until the office writes its own, and writes no row by looking', async () => {
@@ -373,7 +375,7 @@ describe('an office’s product decisions (P5-T5)', () => {
       const served = await wired.kpmProducts.effectiveScript(ctx, mapanId);
       expect(served).toMatchObject({ source: 'kpm', description: OURS });
       // Only the description was approved: the script is still the company's, field by field.
-      const company = SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!.defaultAttackPlan;
+      const company = seedProductInIndonesian(SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!).defaultAttackPlan;
       expect(served.script.opening).toBe(company.opening);
 
       // A new draft does not move what agents read until it is approved in its turn.

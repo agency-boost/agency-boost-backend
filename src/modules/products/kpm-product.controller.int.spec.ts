@@ -8,6 +8,8 @@ import { RequestContext } from '@/common/context/request-context';
 import { DomainExceptionFilter } from '@/common/errors/error.filter';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
+import { SEED_PRODUCTS } from '@/domain/constants';
+import { seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import {
   AAB, AB, ADMIN, AGENT, declaredPermissions, FIXTURE_KPM, OWNER,
   productionPipe, session, StubAuth, SUPER_ADMIN,
@@ -223,7 +225,8 @@ describe('an office’s products over HTTP (P5-T5, P5-T10)', () => {
   });
 
   describe('the office’s description over HTTP (OD-136, ADR-0120)', () => {
-    const TAGLINE = 'Endowment-style life with guaranteed retirement payouts from age 55.';
+    // The company's catalogue is written in the seed's Indonesian (P19.26-T4 AC-4; OD-440).
+    const TAGLINE = seedProductInIndonesian(SEED_PRODUCTS.find((p) => p.code === 'PRUMAPAN')!).tagline;
 
     it.each([['the Owner', () => OWNER], ['the Admin', () => ADMIN]])(
       'lets %s write it, trimmed, and it waits for approval', async (_name, who) => {

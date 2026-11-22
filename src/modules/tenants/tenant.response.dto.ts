@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
-  AccountChoice, AccountOffice, AttentionItem, CompanyCard, KpmAdminView, KpmCreated, KpmView, OwnerState, PlatformAdminRow,
+  AttentionItem, CompanyCard, KpmAdminView, KpmCreated, KpmView, KpmViewOwner, OwnerState,
+  PlatformAdminRow,
   PlatformOverview,
 } from './tenant.service';
 import type { KpmPendingOwner, KpmSubscription } from './kpm.schema';
@@ -20,6 +21,21 @@ import type { KpmDataStatus } from '@/modules/reporting/platform/platform-reads.
  * Swagger runs, which is why 0 of 69 operations documented a response body until
  * P3.1-T11.
  */
+/** One owner of an office (ADR-0285 §3). */
+export class KpmViewOwnerDto implements KpmViewOwner {
+  @ApiProperty({ type: String })
+  userId!: string;
+
+  @ApiProperty({ type: String })
+  fullName!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  email!: string | null;
+
+  @ApiProperty({ type: String, description: 'When they became an owner, ISO.' })
+  since!: string;
+}
+
 export class KpmViewDto implements KpmView {
   @ApiProperty({ type: String })
   _id!: string;
@@ -42,14 +58,20 @@ export class KpmViewDto implements KpmView {
   @ApiProperty({ type: String, nullable: true })
   contactPhone!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true, description: 'The first owner — the earliest `since` (ADR-0285 §3).' })
   ownerUserId!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true, description: 'The first owner\'s name.' })
   ownerName!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true, description: 'The first owner\'s email.' })
   ownerEmail!: string | null;
+
+  @ApiProperty({
+    type: () => KpmViewOwnerDto, isArray: true,
+    description: 'Every owner, in order of `since` (ADR-0285 §1): all hold the same full KPM Owner rights.',
+  })
+  owners!: KpmViewOwnerDto[];
 
   @ApiProperty({ type: String })
   timezone!: string;
@@ -161,7 +183,8 @@ export class KpmAdminViewDto extends KpmViewDto implements KpmAdminView {
     description:
       'The Owner\'s state (ADR-0212 §2, §3): none — no Owner and none named; not_invited — *Belum diundang*, never '
       + 'sent an invitation or named with no email (`pendingOwner`); invited — *Diundang*, the latest invitation sent '
-      + 'and never signed in; active — *Aktif*, the Owner\'s account has signed in.',
+      + 'and the account not theirs yet; active — *Aktif*, the Owner\'s account is theirs: signed in, or its address '
+      + 'proven (OD-475).',
   })
   ownerState!: OwnerState;
 
@@ -234,9 +257,18 @@ export class KpmCreatedDto extends KpmViewDto implements KpmCreated {
   @ApiProperty({
     type: Boolean,
     description: 'True once the Owner\'s invitation email is on its way; false with no Owner, no email, *Kirim '
-      + 'undangan* unticked, an Owner who has signed in, or a send that failed (logged; the KPM stands).',
+      + 'undangan* unticked, an Owner whose account is theirs already (signed in, or its address proven: OD-475), or a '
+      + 'send that failed (logged; the KPM stands).',
   })
   invitationSent!: boolean;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'True when the Owner is an existing account already theirs (signed in, or its address proven: OD-475) and '
+      + 'was told in the app instead of invited — `member.placed`, the notice *Masukkan* sends (OD-442). A failure to '
+      + 'send is logged and answers false; the KPM stands.',
+  })
+  ownerNotified!: boolean;
 }
 
 export class PlatformAdminRowDto implements PlatformAdminRow {
@@ -428,32 +460,6 @@ export class MyKpmRequestStateDto implements MyKpmRequestState {
     description: 'The company the reader signed up with; `null` for an account with none — the form then asks for one.',
   })
   company!: { companyId: string; name: string } | null;
-}
-
-/** An office an account owns or belongs to. */
-export class AccountOfficeDto implements AccountOffice {
-  @ApiProperty({ type: String }) kpmId!: string;
-  @ApiProperty({ type: String }) code!: string;
-  @ApiProperty({ type: String }) branchName!: string;
-  @ApiProperty({ type: String }) companyName!: string;
-  @ApiProperty({ type: Boolean }) isOwner!: boolean;
-  @ApiProperty({ type: String, enum: ['active', 'pending'], nullable: true })
-  membershipStatus!: 'active' | 'pending' | null;
-}
-
-/** One account *Ganti Owner* may choose (`GET /admin/accounts`). */
-export class AccountChoiceDto implements AccountChoice {
-  @ApiProperty({ type: String }) userId!: string;
-  @ApiProperty({ type: String }) fullName!: string;
-  @ApiProperty({ type: String }) email!: string;
-  @ApiProperty({ type: String, nullable: true }) phone!: string | null;
-  @ApiProperty({ type: String, nullable: true }) companyId!: string | null;
-  @ApiProperty({ type: String, nullable: true }) companyName!: string | null;
-  @ApiProperty({ type: Boolean }) hasAgentCode!: boolean;
-  @ApiProperty({ type: Boolean }) emailVerified!: boolean;
-  @ApiProperty({ type: String, enum: ['invited', 'active', 'deactivated'] })
-  status!: 'invited' | 'active' | 'deactivated';
-  @ApiProperty({ type: () => AccountOfficeDto, isArray: true }) offices!: AccountOffice[];
 }
 
 /** The live office holding a code. */

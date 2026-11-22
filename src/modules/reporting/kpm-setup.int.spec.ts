@@ -26,6 +26,7 @@ import { KpmOverviewController } from './reporting.controller';
 import { KpmOverviewService } from './kpm-overview.service';
 import { SETUP_STEP_SAVED, touchesActivityTypes, type SetupStepSaved } from './setup-step-saved';
 import { SetupStepSavedInterceptor } from './setup-step-saved.interceptor';
+import { ownersOf } from '../../../test/owners';
 
 const M = 1_000_000 * 100;
 const COMPANY = '66f0000000000000000000d1';
@@ -74,7 +75,7 @@ describe('P19.3-T2 the KPM setup card and the months still open', () => {
       leaderId: leader, ancestorIds: leader ? [leader] : [], depth: leader ? 1 : 0, status: 'active',
       joinedAt: new Date('2026-11-01T03:00:00Z'), deletedAt: null,
     });
-    if (over.owner) await db().collection('kpms').updateOne({ _id: new mongoose.Types.ObjectId(kpmId) }, { $set: { ownerUserId: String(userId) } });
+    if (over.owner) await db().collection('kpms').updateOne({ _id: new mongoose.Types.ObjectId(kpmId) }, { $set: { owners: ownersOf(String(userId)) } });
     ids[who] = { membershipId: String(membershipId), userId: String(userId) };
     return ids[who];
   };

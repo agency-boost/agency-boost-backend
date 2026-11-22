@@ -41,19 +41,19 @@ describe('AdminController', () => {
   it('reads the platform log for a Super Admin who names no tenant', async () => {
     const { controller, audit } = make();
     await controller.readAudit(RequestContext.platform('root'), {});
-    expect(audit.page).toHaveBeenCalledWith({ kpmId: null, readerUserId: 'root', reader: expect.objectContaining({ language: 'id' }) }, {}, undefined);
+    expect(audit.page).toHaveBeenCalledWith({ kpmId: null, readerUserId: 'root', reader: expect.objectContaining({ language: 'id' }) }, { includeViewed: false }, undefined);
   });
 
   it('narrows to the named tenant for a Super Admin', async () => {
     const { controller, audit } = make();
     await controller.readAudit(RequestContext.platform('root'), { kpmId: 'kpm-b' });
-    expect(audit.page).toHaveBeenCalledWith({ kpmId: 'kpm-b', readerUserId: 'root', reader: expect.objectContaining({ language: 'id' }) }, {}, undefined);
+    expect(audit.page).toHaveBeenCalledWith({ kpmId: 'kpm-b', readerUserId: 'root', reader: expect.objectContaining({ language: 'id' }) }, { includeViewed: false }, undefined);
   });
 
   it('pins a tenant admin to their own office whatever they pass', async () => {
     const { controller, audit } = make();
     await controller.readAudit(owner, { kpmId: 'kpm-b' });
-    expect(audit.page).toHaveBeenCalledWith({ kpmId: 'kpm-a', readerUserId: 'u-owner', reader: expect.objectContaining({ language: 'id' }) }, {}, undefined);
+    expect(audit.page).toHaveBeenCalledWith({ kpmId: 'kpm-a', readerUserId: 'u-owner', reader: expect.objectContaining({ language: 'id' }) }, { includeViewed: false }, undefined);
   });
 
   it('P19.2-T2 AC-6 passes the filters and the cursor on, and never the kpmId asked for', async () => {
@@ -64,9 +64,17 @@ describe('AdminController', () => {
     });
     expect(audit.page).toHaveBeenCalledWith(
       { kpmId: 'kpm-a', readerUserId: 'u-owner', reader: expect.objectContaining({ language: 'id' }) },
-      { companyId: 'co-1', action: 'company.created', actorUserId: 'u-1', from: '2026-11-01', to: '2026-11-02' },
+      { companyId: 'co-1', action: 'company.created', actorUserId: 'u-1', from: '2026-11-01', to: '2026-11-02', includeViewed: false },
       'abc',
     );
+  });
+
+  it('ADR-0284 §3 lists the looks too only when *Termasuk dilihat* says `true`', async () => {
+    const { controller, audit } = make();
+    await controller.readAudit(RequestContext.platform('root'), { includeViewed: 'true' });
+    expect(audit.page).toHaveBeenCalledWith(expect.anything(), { includeViewed: true }, undefined);
+    await controller.readAudit(RequestContext.platform('root'), { includeViewed: 'false' });
+    expect(audit.page).toHaveBeenLastCalledWith(expect.anything(), { includeViewed: false }, undefined);
   });
 
   /** The template's kind routes and the roster template, over stubs that record what they were asked. */

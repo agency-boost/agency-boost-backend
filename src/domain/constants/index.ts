@@ -646,7 +646,7 @@ export {
 } from './language';
 
 // Phase 19.2: the audit log's pages, 50 groups a read and a 10-minute group window (§B.32; UI-132).
-export { AUDIT_LOG } from './audit';
+export { AUDIT_LOG, isViewedAction } from './audit';
 // P19.23-T6 (ADR-0279): *Pengumuman*'s audiences and bounds.
 export { ANNOUNCEMENT, type AnnouncementAudience } from './platform-console';
 

@@ -9,12 +9,13 @@ import { AuthTokenSchema } from '@/modules/auth/auth-token.schema';
 import { AccountLinkSchema } from '@/modules/auth/account-link.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
-import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { KpmOwnerSchema, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { UserInvitationSchema } from '@/modules/org/user-invitation.schema';
 import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
 import { RosterImportRecordSchema } from '@/modules/tenants/roster-import-record.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
@@ -141,6 +142,8 @@ const SOFT_DELETABLE: ReadonlyArray<[string, Schema]> = [
   ['leaderLimitRequests', LeaderLimitRequestSchema],
   // P18.8-T3 (ADR-0170): a cancelled invite and a decided transfer stay, as the record of who asked for what.
   ['memberInvites', MemberInviteSchema],
+  // ADR-0286 §4: *Tambah user*'s invitation — a cancelled or accepted one stays, as the record of who invited whom.
+  ['userInvitations', UserInvitationSchema],
   ['transferRequests', TransferRequestSchema],
   // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
   ['rosterImports', RosterImportRecordSchema],
@@ -485,6 +488,13 @@ const NOT_SOFT_DELETABLE: ReadonlyArray<[string, Schema, string]> = [
     'an action item is removed by its trash after *Hapus action item?* (P19.22-T8 AC-4), with its copies in later '
       + 'forums: the audit row keeps what it was, and the forum holding it is soft-deleted whole',
   ],
+  [
+    'kpmOwner (subdocument)',
+    KpmOwnerSchema,
+    'one owner of a KPM (ADR-0285 §1): *Hapus sebagai owner* takes the entry off the list and the person stays a '
+      + 'member; the audit row `kpm.owner_removed` keeps who, when and the list before and after, and the KPM holding it '
+      + 'is soft-deleted whole',
+  ],
 ];
 
 const EXPORT_NAMES = new Map<Schema, string>([
@@ -561,6 +571,8 @@ const EXPORT_NAMES = new Map<Schema, string>([
   [JoinRequestSchema, 'JoinRequestSchema'],
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [MemberInviteSchema, 'MemberInviteSchema'],
+  [UserInvitationSchema, 'UserInvitationSchema'],
+  [KpmOwnerSchema, 'KpmOwnerSchema'],
   [TransferRequestSchema, 'TransferRequestSchema'],
   [RosterImportRecordSchema, 'RosterImportRecordSchema'],
   [GroupSchema, 'GroupSchema'],

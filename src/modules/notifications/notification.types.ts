@@ -46,6 +46,11 @@ export const NotificationTemplate = {
    * the leader they left (`payload.audience`). The payload names people by their names and ids, never a phone.
    */
   MEMBER_INVITE_ACCEPTED: 'member_invite.accepted',
+  /*
+   * P19.28-T1 AC-2 (ADR-0286; OD-442): *Masukkan* — the Super Admin placed a person who had no KPM, *Aktif* at once. In
+   * the app only; the WhatsApp half is the Super Admin's own link (OD-359). The payload names the KPM, never a phone.
+   */
+  MEMBER_PLACED: 'member.placed',
   TRANSFER_REQUEST_RECEIVED: 'transfer_request.received',
   TRANSFER_REQUEST_DECIDED: 'transfer_request.decided',
   MEMBER_REMOVED: 'member.removed',
@@ -199,6 +204,7 @@ export const TEMPLATE_CHANNELS: Record<NotificationTemplateId, readonly Notifica
   [NotificationTemplate.JOIN_REQUEST_DECLINED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_TAGGED_BY_LEADER]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_INVITE_ACCEPTED]: ['in_app', 'email'],
+  [NotificationTemplate.MEMBER_PLACED]: ['in_app'],
   [NotificationTemplate.TRANSFER_REQUEST_RECEIVED]: ['in_app', 'email'],
   [NotificationTemplate.TRANSFER_REQUEST_DECIDED]: ['in_app', 'email'],
   [NotificationTemplate.MEMBER_REMOVED]: ['in_app', 'email'],

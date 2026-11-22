@@ -39,6 +39,7 @@ import {
 import { OrgTreeService } from './org-tree.service';
 import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on Thursday 29 October 2026 in Jakarta. */
 const NOW = new Date('2026-10-29T03:00:00Z');
@@ -183,7 +184,7 @@ describe('P18.10-T5 the org module’s words in the reader’s language, over HT
     });
     root = await place('ab', null, 'Wilson Tanoto');
     await mongoose.model(Kpm.name).updateOne(
-      { _id: FIXTURE_KPM }, { $set: { ownerUserId: (await members.findById(OWNER, root))!.userId } },
+      { _id: FIXTURE_KPM }, { $set: { owners: ownersOf((await members.findById(OWNER, root))!.userId) } },
     );
     aab = await place('aab', root, 'Sari Puspita');
     agent = await place('agent', aab, 'Rina Wijaya');

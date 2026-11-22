@@ -10,6 +10,24 @@ import {
 export type KpmDocument = HydratedDocument<Kpm>;
 
 /**
+ * **One owner of a KPM** (ADR-0285 §1): who, since when, and who made them one — `null` for an owner nobody added by hand
+ * (migration `0077`'s, a KPM request's applicant, a WhatsApp claim).
+ */
+@Schema({ _id: false })
+export class KpmOwner {
+  @Prop({ type: String, required: true })
+  userId!: string;
+
+  @Prop({ type: Date, required: true })
+  since!: Date;
+
+  @Prop({ type: String, default: null })
+  addedByUserId!: string | null;
+}
+
+export const KpmOwnerSchema = SchemaFactory.createForClass(KpmOwner);
+
+/**
  * Per-office knobs the prototypes hardcode. Seeded from the platform defaults at
  * provisioning; the office owns them thereafter.
  */
@@ -65,9 +83,17 @@ export class Kpm {
   @Prop({ type: String, default: null })
   contactPhone!: string | null;
 
-  /** Read-only to the Owner; Super Admin assigns and transfers. */
-  @Prop({ type: String, default: null, index: true })
-  ownerUserId!: string | null;
+  /**
+   * **The KPM's owners** (P19.27-T1; ADR-0285 §1; F-2 (21 Nov)): one or more people, every one with the same full KPM Owner
+   * rights, the earliest `since` first wherever one is named alone (`firstOwnerOf`). It replaced `ownerUserId`, the one
+   * owner (migration `0077`). Each owner is a member of the KPM — an invited one, who has not signed in yet, included.
+   *
+   * **Never empty once an owner is set**: `KpmOwnersService.remove` refuses the last one (`409 KPM_LAST_OWNER`). Empty only
+   * for a KPM made with no owner yet (*"Lewati, nanti saja"*, or a `pendingOwner` waiting). Read through `kpm-owners.ts`
+   * (`isOwnerOf`, `ownerUserIdsOf`, `firstOwnerOf`) and written only by `KpmOwnersService`.
+   */
+  @Prop({ type: [KpmOwnerSchema], default: [] })
+  owners!: KpmOwner[];
 
   /** Canonical for every day boundary in this office. Never the server's zone. */
   @Prop({ type: String, default: DEFAULT_TENANT_TIMEZONE })
@@ -288,3 +314,5 @@ KpmSchema.index(
   { unique: true, name: 'one_live_code_per_company', partialFilterExpression: { deletedAt: null } },
 );
 KpmSchema.index({ status: 1, createdAt: -1 });
+/** *Is this person an owner of a KPM?* — the context resolver's question on every request (ADR-0285 §1). */
+KpmSchema.index({ 'owners.userId': 1 }, { name: 'owners_userId' });

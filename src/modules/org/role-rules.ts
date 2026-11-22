@@ -46,7 +46,7 @@ export interface RoleTarget {
   role: HierarchyRole;
   orgLevelCode: string;
   status: 'active' | 'pending' | 'removed';
-  /** They own the office (`kpms.ownerUserId`). */
+  /** They are one of the office's owners (`kpms.owners`, ADR-0285: any owner). */
   isOwner: boolean;
 }
 

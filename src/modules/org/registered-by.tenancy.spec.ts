@@ -25,6 +25,7 @@ import {
 import { recruitCountsByRecruiter, recruitsJoined } from './recruits';
 import { TransferRequest, TransferRequestSchema } from './transfer-request.schema';
 import { TransfersService } from './transfers.service';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on Friday 20 November 2026 in Jakarta. */
 const NOW = new Date('2026-11-20T03:00:00Z');
@@ -135,10 +136,10 @@ describe('P19.17-T1 AC-3 who registered each person, and Recruitment', () => {
       ['B_OWNER', 'Hendra Wijaya', '30001'],
     ];
     for (const [who, name, code] of people) u[who] = await account(name, code);
-    for (const [kpmId, code, ownerUserId] of [[KPM_A, '0417', u.OWNER], [KPM_B, '0555', u.B_OWNER]]) {
+    for (const [kpmId, code, ownerId] of [[KPM_A, '0417', u.OWNER], [KPM_B, '0555', u.B_OWNER]]) {
       await mongoose.model(Kpm.name).create({
         _id: kpmId, companyId, code, branchName: code, counters: { nextMemberSeq: 1 }, status: 'active',
-        timezone: 'Asia/Jakarta', ownerUserId,
+        timezone: 'Asia/Jakarta', owners: ownersOf(ownerId),
       });
     }
     const i = {} as Record<Who, string>;

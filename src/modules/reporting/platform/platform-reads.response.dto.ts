@@ -72,7 +72,8 @@ export class PlatformMemberRowDto implements PlatformMemberRow {
   @ApiProperty({ enum: ['active', 'pending', 'removed'] }) status!: 'active' | 'pending' | 'removed';
   @ApiProperty({
     enum: ['invited', 'not_invited', 'signed_in'],
-    description: '*Diundang* (an invitation went, never signed in), *Belum diundang*, or signed in (ADR-0212 §2).',
+    description: '*Diundang* (an invitation went, the account not theirs yet), *Belum diundang*, or `signed_in` — the account '
+      + 'is theirs: signed in, or its address proven (ADR-0212 §2; OD-475).',
   })
   invitation!: 'invited' | 'not_invited' | 'signed_in';
   @ApiProperty({ type: String, nullable: true, example: '2024-03-01', description: 'The KPM join date (ADR-0169).' })
@@ -84,15 +85,41 @@ export class PlatformMemberRowDto implements PlatformMemberRow {
   lastActiveOn!: string | null;
   @ApiProperty({ type: MemberLastActiveDto, description: '*Terakhir pakai*: the days and the bucket.' })
   lastActive!: MemberLastActiveDto;
+  @ApiProperty({
+    type: String, nullable: true, example: '2026-09-14',
+    description: '*Keluar <Mon YYYY>*: the office day the membership ended; `null` while it has not.',
+  })
+  leftOn!: string | null;
+}
+
+/** *Aktif n · Menunggu n · Keluar n* (P19.28-T3 AC-4; UI-209; ADR-0286 §5), over the scope asked, test accounts never. */
+export class AnggotaChipsDto {
+  @ApiProperty({ example: 50, description: '*Aktif*: the counted member (ADR-0284 §1).' }) active!: number;
+  @ApiProperty({ example: 2, description: '*Menunggu*: *Diundang* and *Belum ada KPM* (`GET /admin/waiting-members`).' })
+  pending!: number;
+  @ApiProperty({ example: 3, description: '*Keluar*: memberships that ended.' }) removed!: number;
+}
+
+/** *Anggota* (`COUNTED_MEMBERS`): active, never a test account, in a KPM that is not archived. */
+class CountedMembersDto {
+  @ApiProperty({ example: 55, description: 'The counted members the scope holds.' }) members!: number;
+  @ApiProperty({ example: 8, description: 'The KPMs they are in.' }) kpms!: number;
 }
 
 export class PlatformMembersPageDto implements PlatformMembersPage {
   @ApiProperty({ type: [PlatformMemberRowDto] }) rows!: PlatformMemberRowDto[];
+  @ApiProperty({ type: AnggotaChipsDto, description: 'The three chips, whatever status is listed.' })
+  chips!: AnggotaChipsDto;
   @ApiProperty({ example: 1 }) page!: number;
   @ApiProperty({ example: 50 }) pageSize!: number;
   @ApiProperty({ description: 'Every row the filters match, across the pages.' }) total!: number;
-  @ApiProperty({ example: 8, description: 'The KPMs those rows are in: *"n anggota di m KPM"*.' })
+  @ApiProperty({ example: 8, description: 'The KPMs those rows are in.' })
   kpmCount!: number;
+  @ApiProperty({
+    type: CountedMembersDto,
+    description: '*"n anggota di m KPM"* and *Aktif n* (ADR-0284 §1): the scope’s counted members, whatever status is listed.',
+  })
+  counted!: CountedMembersDto;
 }
 
 /** *Anggota*'s detail (P19.23-T3 AC-1; ADR-0277): the row, and the person's WhatsApp number and email. */
@@ -164,7 +191,7 @@ class CompanyKpmRowDto implements CompanyKpmRow {
 class CompanyKpmTilesDto {
   @ApiProperty() kpms!: number;
   @ApiProperty({ description: 'Owners who have signed in.' }) activeOwners!: number;
-  @ApiProperty({ description: 'Live members, active or pending.' }) members!: number;
+  @ApiProperty({ description: '*Anggota*: the counted members (`COUNTED_MEMBERS`; ADR-0284 §1).' }) members!: number;
   @ApiProperty({ description: 'Of them, accounts that have never signed in.' }) notSignedIn!: number;
   @ApiProperty({ description: 'KPMs whose month is complete.' }) complete!: number;
   @ApiProperty({ example: 3 }) needed!: number;

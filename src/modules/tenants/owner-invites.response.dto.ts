@@ -6,7 +6,8 @@ export class OwnerWhatsAppInvitationDto implements OwnerWhatsAppInvitation {
   @ApiProperty({
     enum: ['claim', 'password'],
     description: '`claim` — the Owner named with no email: the link lets them sign in or sign up and claim the KPM. '
-      + '`password` — an Owner whose account never signed in: the email invitation\'s link to choose a password.',
+      + '`password` — an Owner whose account is not theirs yet (never signed in, no address proven): the email '
+      + 'invitation\'s link to choose a password.',
   })
   kind!: 'claim' | 'password';
 

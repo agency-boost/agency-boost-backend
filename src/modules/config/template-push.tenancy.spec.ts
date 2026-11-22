@@ -6,6 +6,7 @@ import { configModule, provisionFrom } from '../../../test/config-module';
 import { english } from '../../../test/i18n';
 import { TEMPLATE_PUSH_REFUSALS } from './template-push.messages';
 import { OFFICE_TEMPLATE_KINDS } from './template-defaults';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-11-05T03:00:00Z');
 const COMPANY = '66f0000000000000000000c1';
@@ -43,7 +44,7 @@ describe('P19.4-T1 a template’s material and its push (ADR-0208)', () => {
     const startFrom = { kind: 'template' as const, templateId: template };
     const plan = await wired.provisioning.planFor(companyId, startFrom);
     await kpms.create({
-      _id, companyId, code, branchName: `${code} Branch`, startedFrom: plan.startedFrom, ownerUserId: owner,
+      _id, companyId, code, branchName: `${code} Branch`, startedFrom: plan.startedFrom, owners: ownersOf(owner),
     } as never);
     const done = await provisionFrom(wired, String(_id), companyId, startFrom);
     await kpms.updateOne({ _id } as never, { $set: { seededFrom: done.seededFrom } } as never);

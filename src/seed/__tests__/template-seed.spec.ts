@@ -175,6 +175,13 @@ describe('P13.2-T6 the template seed — a run at 10:00 on 7 October 2026 in Jak
     expect(view).toMatchObject({ startDate: '2026-09-30', state: 'open', total: 1 });
   });
 
+  it('P19.26-T5 AC-3 gives Allianz Life the ladder Agent → BP, BP its one leader rung (UI-218; OD-440)', async () => {
+    const allianz = String((await col('companies').findOne({ slug: 'allianz-life' }))!._id);
+    const active = await col('companyOrgLevels').find({ companyId: allianz, status: 'active', deletedAt: null })
+      .sort({ displayOrder: 1 }).toArray();
+    expect(active.map((r) => [r.code, r.label, r.leaderTier])).toEqual([['AGENT', 'Agent', null], ['BP', 'BP', 'senior']]);
+  });
+
   it('P19.4-T5 AC-2 gives Allianz Life an archived rung nothing names — ABP, which /admin/org-levels lets the Super Admin delete', async () => {
     const allianz = String((await col('companies').findOne({ slug: 'allianz-life' }))!._id);
     expect(await col('companyOrgLevels').findOne({ companyId: allianz, code: 'ABP', deletedAt: null }))

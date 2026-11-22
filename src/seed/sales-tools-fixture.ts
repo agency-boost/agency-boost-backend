@@ -118,7 +118,7 @@ export interface SalesToolsFixtureDeps {
   /** 0417's Owner, who approved the description. */
   ownerMembershipId: string;
   /** The Owner's account, the actor on the audit rows of the office's decisions. */
-  ownerUserId: string;
+  ownerAccountId: string;
   /** The Super Admin's account, the actor on the audit rows of the schedules. */
   superAdminUserId: string;
 }
@@ -156,7 +156,7 @@ export async function seedSalesToolsFixture(deps: SalesToolsFixtureDeps): Promis
   });
   /** The audit row the office's service would have written, as 0417's Owner, at `at`. */
   const ownersRow = (action: string, rowId: string, after: Record<string, unknown>, at: Date) => Audit.create({
-    kpmId, actorUserId: deps.ownerUserId, actorMembershipId: deps.ownerMembershipId,
+    kpmId, actorUserId: deps.ownerAccountId, actorMembershipId: deps.ownerMembershipId,
     action, targetCollection: 'kpmProductConfigs', targetId: rowId, after, createdAt: at, updatedAt: at,
   });
 

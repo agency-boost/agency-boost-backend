@@ -27,6 +27,7 @@ import { KpmRequestService } from './kpm-request.service';
 import { OwnerInvitations } from './owner-invitations';
 import { TEMPLATE_LIBRARY } from './template-library';
 import { TenantService } from './tenant.service';
+import { ownerUserIdsOf } from './kpm-owners';
 
 const NOW = new Date('2026-11-05T03:00:00Z');
 const DAY = 24 * 60 * 60_000;
@@ -50,6 +51,7 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
   let manulife: string;
   let seq = 0;
   const sent: { userId: string; kpmId?: string | null; templateId: string; payload: Record<string, unknown> }[] = [];
+  let notifier: NotificationService;
   const db = () => mongoose.connection.db as mongoose.mongo.Db;
   const col = (name: string) => db().collection(name);
   const tokens = () => mongoose.model(AuthToken.name, AuthTokenSchema);
@@ -60,6 +62,7 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
     clock = new FixedClock(NOW);
     const users = wired.users as never;
     const notifications = { send: async (r: (typeof sent)[number]) => { sent.push(r); } } as unknown as NotificationService;
+    notifier = notifications;
     const invitations = new OwnerInvitations(
       new PasswordService(), tokens() as never, notifications, new RateLimiter(clock), wired.memberships, wired.audit, clock,
     );
@@ -72,7 +75,7 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
         clock, wired.orgLevels,
       ),
       wired.memberships, wired.orgLevels, wired.provisioning, wired.products, wired.campaigns,
-      wired.namedTemplates, invitations,
+      wired.namedTemplates, invitations, null, notifications,
     );
     const requests = new KpmRequestService(
       mongoose.model(KpmRequest.name, KpmRequestSchema) as never, wired.companies as never, users, tenants,
@@ -144,7 +147,9 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
   describe('KPM baru with its Owner (AC-6)', () => {
     it('P19.4-T3 AC-6 (A5-1) 0602 Bandung Dago with Owner Wulan Kartika: the KPM, her account, and her invitation by email', async () => {
       const res = await api().post('/api/admin/tenants').send(newKpm()).expect(201);
-      expect(res.body).toMatchObject({ code: '0602', branchName: 'Bandung Dago', ownerName: 'Wulan Kartika', invitationSent: true });
+      expect(res.body).toMatchObject({
+        code: '0602', branchName: 'Bandung Dago', ownerName: 'Wulan Kartika', invitationSent: true, ownerNotified: false,
+      });
 
       const user = await col('users').findOne({ email: 'wulan.kartika@example.test' });
       // An account with no usable password (nobody holds it), her company, her code, her number as +62…, unverified.
@@ -153,7 +158,9 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
         emailVerifiedAt: null, mustChangePassword: false, platformRole: 'none',
       });
       const kpmId = res.body._id as string;
-      expect((await kpmRow(kpmId))).toMatchObject({ ownerUserId: String(user!._id), pendingOwner: null });
+      // Her KPM's one owner (ADR-0285 §1).
+      expect(ownerUserIdsOf(await kpmRow(kpmId) as never)).toEqual([String(user!._id)]);
+      expect((await kpmRow(kpmId))).toMatchObject({ pendingOwner: null });
       // The KPM's root AB, joined as an existing agent (ADR-0169 §6), and *Diundang* stamped.
       const membership = await col('memberships').findOne({ kpmId, userId: String(user!._id) });
       expect(membership).toMatchObject({ role: 'ab', status: 'active', leaderId: null, joinedAs: 'existing_agent', invitedAt: NOW });
@@ -167,7 +174,7 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
       expect(token).toMatchObject({ kind: 'password_reset' });
       expect(token!.expiresAt.getTime() - NOW.getTime()).toBe(ROSTER_INVITATION.TTL_DAYS * DAY);
       expect(new PasswordService().hashToken(sent[0].payload.token as string)).toBe(token!.tokenHash);
-      expect(await actions()).toEqual(expect.arrayContaining(['kpm.created', 'kpm.owner_assigned', 'kpm.owner_invited']));
+      expect(await actions()).toEqual(expect.arrayContaining(['kpm.created', 'kpm.owner_added', 'kpm.owner_invited']));
 
       // The Owner's card reads *Diundang*, with her WhatsApp number — a number shown, nothing sent by it.
       const read = await api().get(`/api/admin/tenants/${kpmId}`).expect(200);
@@ -186,24 +193,42 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
         .toMatchObject({ ownerState: 'not_invited', ownerInvitedAt: null });
     });
 
-    it('P19.4-T3 AC-6 an existing verified account with the email becomes the Owner and is invited; its number is kept', async () => {
+    /*
+     * *Changed 2026-11-22 (OD-475):* an existing account the Owner verified is already theirs — they hold its password —
+     * so it reads *Aktif* and no link to set a password goes. Until then it was invited, as one that had never signed in.
+     */
+    it('P19.4-T3 AC-6 OD-475 an existing verified account with the email becomes the Owner: Aktif, no invitation; its number kept', async () => {
       const dewi = await account('Dewi Lestari', prudential, { phone: '+6281100000001' });
       const res = await api().post('/api/admin/tenants')
         .send(newKpm({ owner: wulan({ email: 'dewi.lestari@example.test', fullName: 'Dewi L.', phone: '0812 9999 0000', agentCode: undefined }) }))
         .expect(201);
-      expect(res.body).toMatchObject({ ownerUserId: dewi, ownerName: 'Dewi Lestari', invitationSent: true });
+      expect(res.body).toMatchObject({ ownerUserId: dewi, ownerName: 'Dewi Lestari', invitationSent: false, ownerNotified: true });
       expect(await col('users').countDocuments({})).toBe(1);
       // The person's own field (UI-101): kept where one is on file.
       expect((await col('users').findOne({}))!.phone).toBe('+6281100000001');
-      expect(sent.map((m) => m.userId)).toEqual([dewi]);
+      // Told in the app, as *Masukkan* tells a new KPM's owner (OD-442): no link, no email.
+      expect(sent).toEqual([{
+        userId: dewi, kpmId: res.body._id, templateId: NotificationTemplate.MEMBER_PLACED,
+        payload: { kpmName: res.body.branchName, kpmCode: res.body.code },
+      }]);
+      expect((await api().get(`/api/admin/tenants/${res.body._id}`).expect(200)).body.ownerState).toBe('active');
     });
 
     it('P19.4-T3 AC-6 an existing account that has signed in is made the Owner with no invitation: Aktif', async () => {
       const dewi = await account('Dewi Lestari', prudential, { lastLoginAt: new Date(NOW.getTime() - DAY) });
       const res = await api().post('/api/admin/tenants').send(newKpm({ owner: wulan({ email: 'dewi.lestari@example.test' }) })).expect(201);
-      expect(res.body).toMatchObject({ ownerUserId: dewi, invitationSent: false });
-      expect(sent).toEqual([]);
+      expect(res.body).toMatchObject({ ownerUserId: dewi, invitationSent: false, ownerNotified: true });
+      expect(sent.map((m) => [m.userId, m.templateId])).toEqual([[dewi, NotificationTemplate.MEMBER_PLACED]]);
       expect((await api().get(`/api/admin/tenants/${res.body._id}`).expect(200)).body.ownerState).toBe('active');
+    });
+
+    it('OD-442 a notice that cannot be sent is logged and the KPM stands: ownerNotified false', async () => {
+      const dewi = await account('Dewi Lestari', prudential, { lastLoginAt: new Date(NOW.getTime() - DAY) });
+      const send = jest.spyOn(notifier, 'send').mockRejectedValueOnce(new Error('inbox down'));
+      const res = await api().post('/api/admin/tenants').send(newKpm({ owner: wulan({ email: 'dewi.lestari@example.test' }) })).expect(201);
+      send.mockRestore();
+      expect(res.body).toMatchObject({ ownerUserId: dewi, invitationSent: false, ownerNotified: false });
+      expect(await kpmsLive()).toBe(1);
     });
 
     it('P19.4-T3 AC-6 refuses the Owner before anything is written, as ADR-0191 §5 refuses one: no KPM is left', async () => {
@@ -272,11 +297,8 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
         expect(res.body.error.code).toBe('VALIDATION_FAILED');
         expect(JSON.stringify(res.body.error)).toContain(field);
       }
-      const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201)).body._id;
-      // *Ganti pemilik* by an existing account's email: the same, for the address it names.
-      const res = await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ email: 42 }).expect(400);
-      expect(res.body.error.code).toBe('VALIDATION_FAILED');
-      expect(JSON.stringify(res.body.error)).toContain('email');
+      await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201);
+      // *Ganti pemilik*'s own route is retired (ADR-0285 §4): only *KPM baru*'s owner is refused here.
       expect(await kpmsLive()).toBe(1);
       expect(await col('users').countDocuments({})).toBe(0);
     });
@@ -334,46 +356,21 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
       expect(overview.body.attention[0].detail).toContain('Wulan Kartika');
     });
 
-    it('P19.4-T3 AC-6 Ganti pemilik gives her an email: the account is made, she is the Owner and invited, the pending record goes', async () => {
+    it('P19.27-T1 AC-1 an owner added to a KPM whose Owner waits clears the pending record, audited kpm.owner_added', async () => {
       const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: wulan({ email: undefined }) })).expect(201)).body._id;
-      const res = await api().patch(`/api/admin/tenants/${kpmId}/owner`)
-        .send({ owner: wulan({ email: 'wulan@bandung.test' }) }).expect(200);
-      expect(res.body).toMatchObject({ ownerName: 'Wulan Kartika', ownerState: 'invited', pendingOwner: null });
+      const dewi = await account('Dewi Lestari', prudential);
+      await tenants.installAccountOwner(RequestContext.platform('root'), kpmId, dewi);
+      expect(ownerUserIdsOf(await kpmRow(kpmId) as never)).toEqual([dewi]);
       expect((await kpmRow(kpmId))!.pendingOwner).toBeNull();
-      expect(sent).toHaveLength(1);
-      expect(sent[0]).toMatchObject({ templateId: NotificationTemplate.OWNER_INVITATION, kpmId });
+      expect(await col('auditLog').findOne({ action: 'kpm.owner_added', targetId: kpmId }))
+        .toMatchObject({ before: { owners: [] }, after: { owners: [dewi], userId: dewi } });
     });
 
-    it('P19.4-T3 AC-6 Ganti pemilik to a named person needs their email: the invitation goes there', async () => {
-      const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201)).body._id;
-      const res = await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: undefined }) }).expect(400);
-      expect(res.body.error).toMatchObject({ code: 'VALIDATION_FAILED', details: { field: 'owner.email' } });
-      expect(await col('users').countDocuments({})).toBe(0);
-    });
-
-    it('P19.4-T3 AC-6 Ganti pemilik to a named person, from the Owner there, is a transfer, audited from and to', async () => {
-      const res = await api().post('/api/admin/tenants').send(newKpm()).expect(201);
-      const kpmId = res.body._id as string;
-      const wulanId = res.body.ownerUserId as string;
-      const dewi = await account('Dewi Lestari', prudential);
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`)
-        .send({ owner: wulan({ fullName: 'Dewi Lestari', email: 'dewi.lestari@example.test' }) }).expect(200);
-
-      expect((await kpmRow(kpmId))!.ownerUserId).toBe(dewi);
-      const transfer = await col('auditLog').findOne({ action: 'kpm.owner_transferred' });
-      expect(transfer).toMatchObject({
-        targetId: kpmId, before: { ownerUserId: wulanId }, after: { ownerUserId: dewi, accountCreated: false },
-      });
-      // The first Owner was assigned, not transferred: one of each.
-      expect((await actions()).filter((a) => a === 'kpm.owner_assigned' || a === 'kpm.owner_transferred'))
-        .toEqual(['kpm.owner_assigned', 'kpm.owner_transferred']);
-    });
-
-    it('P19.4-T3 AC-6 picking an existing account clears the pending Owner too', async () => {
+    it('P19.27-T1 AC-4 Ganti pemilik is retired: PATCH …/owner answers 404 and writes nothing (ADR-0285 §4)', async () => {
       const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: wulan({ email: undefined }) })).expect(201)).body._id;
-      const dewi = await account('Dewi Lestari', prudential);
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: dewi }).expect(200);
-      expect((await kpmRow(kpmId))).toMatchObject({ ownerUserId: dewi, pendingOwner: null });
+      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'wulan@bandung.test' }) }).expect(404);
+      expect((await kpmRow(kpmId))!.pendingOwner).toMatchObject({ fullName: 'Wulan Kartika' });
+      expect(await col('users').countDocuments({})).toBe(0);
     });
   });
 
@@ -422,9 +419,8 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
   });
 
   describe('who may (AC-6; ADR-0206 §1)', () => {
-    const routes = (kpmId: string) => [
+    const routes = (_kpmId: string) => [
       ['POST /admin/tenants with an owner', () => api().post('/api/admin/tenants').send(newKpm({ code: '0999' }))],
-      ['PATCH …/owner with an owner', () => api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'x@kpm.test' }) })],
     ] as const;
 
     it.each(EVERY_MEMBER)('P19.4-T3 AC-6 refuses %s every route, writing and sending nothing', async (_who, role) => {
@@ -450,7 +446,8 @@ describe('P19.4-T3 a new KPM with its Owner, invited by email (ADR-0212)', () =>
 
     it('P19.4-T3 AC-6 the Super Admin holds every route', async () => {
       const kpmId = (await api().post('/api/admin/tenants').send(newKpm({ owner: undefined })).expect(201)).body._id as string;
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'w@kpm.test' }) }).expect(200);
+      // P19.27 (ADR-0285 §4): *Ganti pemilik* is retired too — owners are added inside the KPM.
+      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ owner: wulan({ email: 'w@kpm.test' }) }).expect(404);
       // P19.23-T2 (ADR-0277 §3): the email resend is retired, and its address answers 404 like any that does not exist.
       await api().post(`/api/admin/tenants/${kpmId}/owner/invitation`).expect(404);
     });

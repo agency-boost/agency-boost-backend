@@ -31,6 +31,7 @@ import { RemovalService } from './removal.service';
 import { RoleChangeService } from './role-change.service';
 import { TransferRequest, TransferRequestSchema } from './transfer-request.schema';
 import { TransfersService } from './transfers.service';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on Wednesday 11 November 2026 in Jakarta. */
 const NOW = new Date('2026-11-11T03:00:00Z');
@@ -175,11 +176,11 @@ describe('P19.12-T4 a leader sets roles up to their own rung, and people change 
     user = u;
     await mongoose.model(Kpm.name).create({
       _id: KPM_A, companyId, code: '0417', branchName: 'BSD City', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.OWNER),
     });
     await mongoose.model(Kpm.name).create({
       _id: KPM_B, companyId, code: '0555', branchName: 'Kelapa Gading', counters: { nextMemberSeq: 1 }, status: 'active',
-      timezone: 'Asia/Jakarta', ownerUserId: u.B_OWNER,
+      timezone: 'Asia/Jakarta', owners: ownersOf(u.B_OWNER),
     });
     const i = {} as Record<Who, string>;
     i.OWNER = await place(KPM_A, u.OWNER, 'ab', null);

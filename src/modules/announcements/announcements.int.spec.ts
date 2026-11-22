@@ -30,6 +30,7 @@ import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { Announcement, AnnouncementSchema } from './announcement.schema';
 import { AnnouncementsController } from './announcements.controller';
 import { AnnouncementsService } from './announcements.service';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-11-20T03:00:00Z');
 const PRU = '66f0000000000000000000c1';
@@ -104,8 +105,8 @@ describe('Pengumuman (P19.23-T6 AC-4)', () => {
       { _id: oid(PRU), name: 'Prudential', slug: 'prudential', deletedAt: null },
       { _id: oid(MANU), name: 'Manulife', slug: 'manulife', deletedAt: null },
     ]);
-    const kpm = (k: string, companyId: string, ownerUserId: string, code: string, over: Record<string, unknown> = {}) => ({
-      _id: oid(k), companyId, ownerUserId, code, branchName: `Branch ${code}`, status: 'active', deletedAt: null, ...over,
+    const kpm = (k: string, companyId: string, ownerId: string, code: string, over: Record<string, unknown> = {}) => ({
+      _id: oid(k), companyId, owners: ownersOf(ownerId), code, branchName: `Branch ${code}`, status: 'active', deletedAt: null, ...over,
     });
     await db.collection('kpms').insertMany([
       kpm(KPM_A, PRU, OWNER_A, '0417'),

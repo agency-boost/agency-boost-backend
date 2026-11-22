@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { RequestContext } from '@/common/context/request-context';
-import { SEED_PRODUCTS, SEED_REPLY_BY_NEED } from '@/domain/constants';
+import { SEED_PRODUCTS } from '@/domain/constants';
+import { SEED_REPLY_BY_NEED_ID, seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import { up as attackPlanReply } from '@/migrations/0024-attack-plan-reply';
 import { up as productNamePlaceholder } from '@/migrations/0039-product-name-placeholder';
 import { up as productKindAndCurrency } from '@/migrations/0053-product-kind-and-currency';
@@ -25,7 +26,8 @@ import { seedDemo } from '../demo';
 const RUN_MS = 240_000;
 const quiet = () => undefined;
 const col = (name: string) => mongoose.connection.db!.collection(name);
-const seedOf = (code: string) => SEED_PRODUCTS.find((p) => p.code === code)!;
+// As the seed writes the catalogue: in the seed's Indonesian (P19.26-T4 AC-4; OD-440).
+const seedOf = (code: string) => seedProductInIndonesian(SEED_PRODUCTS.find((p) => p.code === code)!);
 
 async function as(email: string, owner = false): Promise<RequestContext> {
   const account = await col('users').findOne({ email });
@@ -148,7 +150,8 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
   it('seeds the push-back’s reply as the need’s, and migration 0024 finds nothing to rewrite', async () => {
     const mapan = await col('products').findOne({ companyId: prudentialId, code: 'PRUMAPAN' });
     // The pair as its one card since P19.4-T4 (ADR-0209 §9).
-    expect(mapan!.defaultAttackPlan.objections[0].answer).toBe(SEED_REPLY_BY_NEED.retirement);
+    // In the seed's Indonesian since P19.26-T4 AC-4 (OD-440).
+    expect(mapan!.defaultAttackPlan.objections[0].answer).toBe(SEED_REPLY_BY_NEED_ID.retirement);
 
     for (let run = 0; run < 2; run += 1) {
       expect(await attackPlanReply(mongoose.connection.db!, clock.now()))
@@ -247,7 +250,7 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
 
     const again = await seedSalesToolsFixture({
       clock, companyId: prudentialId, kpm0417: owner0417.kpmId!, ownerMembershipId: owner0417.membershipId!,
-      ownerUserId: owner0417.userId, superAdminUserId: superAdmin.userId,
+      ownerAccountId: owner0417.userId, superAdminUserId: superAdmin.userId,
     });
 
     expect(again.written).toBe(0);
@@ -271,7 +274,7 @@ describe('Phase 14 the sales tools seed — a run at 10:00 on 8 October 2026 in 
 
     const again = await seedSalesToolsFixture({
       clock, companyId: prudentialId, kpm0417: owner0417.kpmId!, ownerMembershipId: owner0417.membershipId!,
-      ownerUserId: owner0417.userId, superAdminUserId: 'u-root',
+      ownerAccountId: owner0417.userId, superAdminUserId: 'u-root',
     });
 
     expect(again.written).toBe(0);

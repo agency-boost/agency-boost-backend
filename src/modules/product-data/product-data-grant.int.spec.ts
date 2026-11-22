@@ -26,6 +26,7 @@ import { ProductDataCompaniesService } from './product-data-companies.service';
 import { ProductDataCompaniesController, ProductDataGrantController } from './product-data-grant.controller';
 import { ProductDataGrant, ProductDataGrantSchema } from './product-data-grant.schema';
 import { ProductDataGrantService } from './product-data-grant.service';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-11-12T03:00:00Z');
 const PRU = '66f0000000000000000000c1';
@@ -124,8 +125,8 @@ describe('P19.15-T4 Kelola data produk over HTTP', () => {
       { _id: oid(TEMPLATE_CO), name: 'Template library', slug: 'template', kind: 'template', deletedAt: null },
     ]);
     await db().collection('kpms').insertMany([
-      { _id: oid(FIXTURE_KPM), companyId: PRU, code: '0417', branchName: 'Bandung', ownerUserId: OWNER, status: 'active', deletedAt: null },
-      { _id: oid(KPM_B), companyId: MANU, code: '0900', branchName: 'Medan', ownerUserId: null, status: 'active', deletedAt: null },
+      { _id: oid(FIXTURE_KPM), companyId: PRU, code: '0417', branchName: 'Bandung', owners: ownersOf(OWNER), status: 'active', deletedAt: null },
+      { _id: oid(KPM_B), companyId: MANU, code: '0900', branchName: 'Medan', owners: ownersOf(null), status: 'active', deletedAt: null },
     ]);
     const membership = (userId: string, over: Record<string, unknown>) => ({
       kpmId: FIXTURE_KPM, userId, status: 'active', role: 'agent', deletedAt: null, adminAccess: { isKpmAdmin: false },

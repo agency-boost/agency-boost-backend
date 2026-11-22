@@ -14,6 +14,7 @@ import { Membership } from '@/modules/org/membership.schema';
 import { User } from '@/modules/users/user.schema';
 import { listenOnLoopback } from '../../../test/listen';
 import { startMongo, stopMongo } from '../../../test/mongo';
+import { ownersOf } from '../../../test/owners';
 
 /**
  * **P19.23-T2 AC-7 — *Lihat sebagai*'s new window, over HTTP** (ADR-0277): `POST /admin/impersonate/:userId` with
@@ -64,7 +65,7 @@ describe('P19.23-T2 AC-7 the view-as window over HTTP', () => {
     ownerId = String(owner._id);
     const kpm = await kpms.create({
       companyId: '66f0000000000000000000c1', code: '0417', branchName: 'BSD City Branch', timezone: 'Asia/Jakarta',
-      status: 'active', ownerUserId: String(owner._id),
+      status: 'active', owners: ownersOf(String(owner._id)),
     });
     const kpmId = String(kpm._id);
     const member = (userId: unknown, code: string, role: 'ab' | 'agent', isKpmAdmin = false) => memberships.create({

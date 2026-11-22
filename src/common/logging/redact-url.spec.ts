@@ -27,6 +27,13 @@ describe('P18.1-T3 AC-1 a shared link’s token is redacted from every logged UR
     expect(serializeRequest({ url: '/x' })).toEqual({ url: '/x' });
   });
 
+  it('P19.28-T1 AC-4 a Tambah user invitation link is redacted, its banner and its accept; an invitation’s id is not', () => {
+    expect(redactUrl(`/api/v1/user-invites/${TOKEN}`)).toBe(`/api/v1/user-invites/${REDACTED}`);
+    expect(redactUrl(`/api/v1/user-invites/${TOKEN}/accept`)).toBe(`/api/v1/user-invites/${REDACTED}/accept`);
+    expect(redactUrl('/api/v1/user-invitations/66f0000000000000000000a1/resend'))
+      .toBe('/api/v1/user-invitations/66f0000000000000000000a1/resend');
+  });
+
   it('P19.23-T2 AC-3 a KPM Owner’s claim link (OD-420) is redacted too, its banner and its accept', () => {
     expect(redactUrl(`/api/v1/owner-invites/${TOKEN}`)).toBe(`/api/v1/owner-invites/${REDACTED}`);
     expect(redactUrl(`/api/v1/owner-invites/${TOKEN}/accept`)).toBe(`/api/v1/owner-invites/${REDACTED}/accept`);

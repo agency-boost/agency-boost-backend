@@ -110,16 +110,17 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
   /** *Kirim ulang undangan* with nobody to send it to (ADR-0212 §2, §3; P19.4-T3 AC-6). */
   TENANT_OWNER_NOT_INVITABLE: {
     noOwner: {
-      en: 'This KPM has no Owner to invite. Set one with "Ganti pemilik".',
-      id: 'KPM ini belum punya Owner untuk diundang. Tetapkan lewat "Ganti pemilik".',
+      en: 'This KPM has no owner to invite. Add one with "Tambah owner" on its page.',
+      id: 'KPM ini belum punya owner untuk diundang. Tambahkan lewat "Tambah owner" di halamannya.',
     },
     noEmail: ({ name }: { name: string }) => ({
       en: `${name} has no email yet, and an invitation goes by email. Give one with "Ganti pemilik".`,
       id: `${name} belum punya email, dan undangan dikirim lewat email. Isi emailnya lewat "Ganti pemilik".`,
     }),
     signedIn: ({ name }: { name: string }) => ({
-      en: `${name} has already signed in, so there is nothing to invite them to.`,
-      id: `${name} sudah pernah masuk, jadi tidak perlu diundang lagi.`,
+      // OD-475: signed in before, or the address proven — the account is theirs either way.
+      en: `${name} already has their own account, so there is nothing to invite them to.`,
+      id: `${name} sudah punya akun sendiri, jadi tidak perlu diundang lagi.`,
     }),
   },
   /** A new Owner's account would take an agent code another account of the company holds (ADR-0212 §2). */
@@ -146,12 +147,6 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
       id: `KPM ini memiliki ${idCount(members)} anggota dan ${idCount(records)} data, jadi tidak dapat dihapus. `
         + 'Arsipkan saja.',
     }),
-  },
-  PERM_LAST_OWNER: {
-    alwaysAnOwner: {
-      en: 'A KPM must always have an Owner. Transfer ownership instead of removing it.',
-      id: 'KPM harus selalu memiliki Owner. Pindahkan kepemilikan alih-alih menghapusnya.',
-    },
   },
   ORG_AGENT_ALREADY_TAGGED: {
     alreadyInOffice: {
@@ -256,10 +251,6 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
       en: 'Nothing to change.',
       id: 'Tidak ada yang diubah.',
     },
-    nameTheOwner: {
-      en: 'Name the new owner by email or by user id.',
-      id: 'Sebutkan Owner baru dengan email atau ID pengguna.',
-    },
     /** A KPM request from an account with no company, naming none (ADR-0191 §1, P19-T2 AC-2). */
     chooseCompany: {
       en: 'Choose the company you work for.',
@@ -269,11 +260,6 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
     sameCompany: {
       en: 'This office already belongs to that company.',
       id: 'KPM ini sudah milik perusahaan itu.',
-    },
-    /** `GET /admin/accounts?q=`: at least two characters, so the list is a search and not the platform's users. */
-    searchTwoCharacters: {
-      en: 'Type at least two characters of a name or an email address.',
-      id: 'Ketik minimal dua karakter nama atau alamat email.',
     },
     ownerDeactivated: {
       en: 'That account is deactivated and cannot own an office.',
@@ -297,11 +283,6 @@ export const TENANTS_REFUSALS = refusals('modules/tenants', {
       en: 'There is no account with that email yet, so one will be made: type the owner\u2019s agent code '
         + '(Kode agen pemilik).',
       id: 'Belum ada akun dengan email itu, jadi akun baru akan dibuat: isi kode agen pemilik.',
-    },
-    /** *Ganti pemilik* to a named person: the invitation goes by email, so an email is needed (ADR-0212 §3). */
-    ownerEmailNeeded: {
-      en: 'owner.email: type the new owner\u2019s email. The invitation goes there.',
-      id: 'owner.email: isi email pemilik baru. Undangan dikirim ke sana.',
     },
     startFromDefaults: {
       en: 'Start from a template — the Template’s Default template holds the AgencyBoost defaults — or Empty.',

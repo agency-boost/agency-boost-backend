@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { FixedClock } from '@/common/clock/clock.port';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { seedProductDataAccessFixture } from '../product-data-access-fixture';
+import { ownersOf } from '../../../test/owners';
 
 const col = (name: string) => mongoose.connection.db!.collection(name);
 const oid = (id: string) => new mongoose.Types.ObjectId(id);
@@ -33,7 +34,7 @@ describe('P19.15-T4 the Kelola data produk seed', () => {
       { _id: oid(OWNER), fullName: 'Wilson Tanoto', email: 'owner@kpm0417.test', platformRole: 'none', status: 'active', deletedAt: null },
     ]);
     await col('companies').insertOne({ _id: oid(PRU), name: 'Prudential', slug: 'prudential', kind: 'insurer', deletedAt: null });
-    await col('kpms').insertOne({ _id: oid(KPM), companyId: PRU, code: '0417', status: 'active', ownerUserId: OWNER, deletedAt: null });
+    await col('kpms').insertOne({ _id: oid(KPM), companyId: PRU, code: '0417', status: 'active', owners: ownersOf(OWNER), deletedAt: null });
     await col('products').insertMany([
       { _id: oid('66f0000000000000000000d1'), companyId: PRU, code: 'PRUWELL_MEDICAL', name: 'PRUWell Medical' },
       { _id: oid('66f0000000000000000000d2'), companyId: PRU, code: 'PRUCRITICAL_BENEFIT_88', name: 'PRUCritical Benefit 88' },

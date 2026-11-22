@@ -24,6 +24,7 @@ import { ContextResolver } from './context-resolver';
 import { ImpersonationService } from './impersonation.service';
 import { RateLimiter } from './rate-limiter';
 import { Hs256TokenSigner, TokenSigner } from './token-signer';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-10-29T03:00:00Z');
 
@@ -129,7 +130,7 @@ describe('P18.10-T2 the language on the account, over HTTP', () => {
       role: rung, status: 'active',
       adminAccess: { isKpmAdmin: role === 'admin', grantedByUserId: null, grantedAt: null, revokedAt: null },
     });
-    if (role === 'owner') await kpms.updateOne({ _id: kpm._id }, { $set: { ownerUserId: String(user._id) } });
+    if (role === 'owner') await kpms.updateOne({ _id: kpm._id }, { $set: { owners: ownersOf(String(user._id)) } });
     return String(user._id);
   }
 

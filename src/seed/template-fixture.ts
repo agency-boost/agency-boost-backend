@@ -1,3 +1,4 @@
+import { ownerEntry } from '@/modules/tenants/kpm-owners';
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { DEFAULT_ORG_LADDER, DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
@@ -173,7 +174,7 @@ export async function seedTemplateFixture(deps: TemplateFixtureDeps): Promise<Te
     const startedFrom: KpmStartedFrom = { source: 'empty', templateId: null, templateName: null };
     await Kpms.create({
       _id: kpmId, companyId: blankId, code: EMPTY_OFFICE.code, branchName: EMPTY_OFFICE.branchName,
-      address: 'Jl. Cempaka Putih Raya, Jakarta Pusat', ownerUserId: String(ownerUser._id), timezone: ZONE,
+      address: 'Jl. Cempaka Putih Raya, Jakarta Pusat', owners: [ownerEntry(String(ownerUser._id), deps.clock.now())], timezone: ZONE,
       settings: { ...DEFAULT_KPM_SETTINGS }, counters: { nextMemberSeq: 1 }, status: 'active',
       startedFrom,
       deletedAt: null,

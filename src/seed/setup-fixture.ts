@@ -1,3 +1,4 @@
+import { firstOwnerOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import mongoose from 'mongoose';
 import { up as kpmSetupRunningOffices } from '@/migrations/0052-kpm-setup-running-offices';
 
@@ -16,11 +17,11 @@ import { up as kpmSetupRunningOffices } from '@/migrations/0052-kpm-setup-runnin
 export async function seedSetupMarks(now: Date): Promise<{ running: number; setupOffice: string | null }> {
   const db = mongoose.connection.db!;
   const { marked, current } = await kpmSetupRunningOffices(db, now);
-  const kpm = await db.collection('kpms').findOne({ code: '0701', deletedAt: null }, { projection: { ownerUserId: 1 } });
+  const kpm = await db.collection('kpms').findOne({ code: '0701', deletedAt: null }, { projection: { owners: 1 } });
   if (!kpm) return { running: marked + current, setupOffice: null };
   const kpmId = String(kpm._id);
   const owner = await db.collection('memberships').findOne(
-    { kpmId, status: 'active', deletedAt: null, ...(kpm.ownerUserId ? { userId: kpm.ownerUserId } : { role: 'ab' }) },
+    { kpmId, status: 'active', deletedAt: null, ...(firstOwnerOf(kpm as WithOwners) ? { userId: firstOwnerOf(kpm as WithOwners)!.userId } : { role: 'ab' }) },
     { projection: { _id: 1 } },
   );
   await db.collection('kpmSetupMarks').updateOne(

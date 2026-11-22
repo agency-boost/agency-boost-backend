@@ -200,9 +200,10 @@ export class DirectoryMemberDto implements DirectoryMember {
   @ApiProperty({
     type: String, enum: ['signed_in', 'invited', 'not_invited'],
     description:
-      'Whether they have been invited, and have signed in: `signed_in` once the account has signed in; before that '
-      + '`invited` when an invitation went (*Diundang*), else `not_invited` (*Belum diundang*). An `active` member who '
-      + 'has never signed in is shown by this, not as *Aktif*; `status` is unchanged by it.',
+      'Whether they have been invited, and whether the account is theirs: `signed_in` once it has signed in or its '
+      + 'address was proven (OD-475); before that `invited` when an invitation went (*Diundang*), else `not_invited` '
+      + '(*Belum diundang*). An `active` member whose account is not theirs yet is shown by this, not as *Aktif*; '
+      + '`status` is unchanged by it.',
   })
   invitation!: InvitationState;
 

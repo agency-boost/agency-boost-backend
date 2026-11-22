@@ -1,3 +1,4 @@
+import { firstOwnerOf, type WithOwners } from '@/modules/tenants/kpm-owners';
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 import { DEFAULT_TENANT_TIMEZONE } from '@/domain/constants';
@@ -25,14 +26,14 @@ export const DATA_UPLOAD_NOT_YET_MEMBERS = [
  */
 export async function seedDataUploadFixture(deps: { clock: Clock; kpmCode: string }): Promise<{ guide: string; written: number }> {
   const db = mongoose.connection.db!;
-  const kpm = await db.collection('kpms').findOne({ code: deps.kpmCode, deletedAt: null }, { projection: { _id: 1, ownerUserId: 1 } });
+  const kpm = await db.collection('kpms').findOne({ code: deps.kpmCode, deletedAt: null }, { projection: { _id: 1, owners: 1 } });
   if (!kpm) return { guide: `Data upload (P19.21-T1): no KPM ${deps.kpmCode}; nothing written.`, written: 0 };
   const kpmId = String(kpm._id);
   const today = deps.clock.localDateFor(DEFAULT_TENANT_TIMEZONE);
   const thisMonth = today.slice(0, 7);
   const lastYear = String(Number(today.slice(0, 4)) - 1);
   const owner = await db.collection('memberships').findOne(
-    { kpmId, status: 'active', deletedAt: null, ...(kpm.ownerUserId ? { userId: kpm.ownerUserId } : {}) },
+    { kpmId, status: 'active', deletedAt: null, ...(firstOwnerOf(kpm as WithOwners) ? { userId: firstOwnerOf(kpm as WithOwners)!.userId } : {}) },
     { projection: { _id: 1 } },
   );
   const by = owner ? String(owner._id) : null;

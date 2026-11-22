@@ -4,6 +4,7 @@ import { byKode } from '@/modules/production/upload-columns';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { configModule } from '../../../test/config-module';
 import { buildForumServices, type ForumServices } from '../../../test/forum-office';
+import { ownersOf } from '../../../test/owners';
 
 /** 10:00 on 14 September in Jakarta: a year of files, the last held this month. */
 const NOW = new Date('2026-09-14T03:00:00Z');
@@ -91,8 +92,8 @@ describe('the forum’s meeting read, measured at 500 members (P18.1-T4 AC-3)', 
     expect(everyone.A).toHaveLength(500);
     expect(everyone.B).toHaveLength(50);
     await (wired.kpms as { create: (d: unknown) => Promise<unknown> }).create([
-      { _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta', ownerUserId: rootA.userId },
-      { _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta', ownerUserId: rootB.userId },
+      { _id: KPM_A, companyId: COMPANY, code: '0417', branchName: 'A', timezone: 'Asia/Jakarta', owners: ownersOf(rootA.userId) },
+      { _id: KPM_B, companyId: COMPANY, code: '0555', branchName: 'B', timezone: 'Asia/Jakarta', owners: ownersOf(rootB.userId) },
     ]);
     await db.collection('users').insertMany(users);
     await db.collection('memberships').insertMany(members);

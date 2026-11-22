@@ -28,7 +28,7 @@ describe('P19.23-T2 AC-3 the owner-invitation seed', () => {
 
   it('P19.23-T2 AC-3 0418 waits for BUDI HARTONO, named with WhatsApp only, and no link has gone yet', async () => {
     const kpm = (await kpmOf(OWNER_WHATSAPP_SEED.pending.code))!;
-    expect(kpm.ownerUserId).toBeNull();
+    expect(kpm.owners ?? []).toEqual([]);
     expect(kpm.pendingOwner).toEqual({ fullName: 'BUDI HARTONO', phone: '+6281234567890', agentCode: null });
     expect(await db().collection('activityTypes').countDocuments({ kpmId: String(kpm._id) })).toBeGreaterThan(0);
     const budi = (await db().collection('users').findOne({ email: OWNER_WHATSAPP_SEED.pending.claimer.email }))!;
@@ -40,7 +40,7 @@ describe('P19.23-T2 AC-3 the owner-invitation seed', () => {
   it('P19.23-T2 AC-3 0419’s Owner has an account that has never signed in, the KPM’s root AB', async () => {
     const kpm = (await kpmOf(OWNER_WHATSAPP_SEED.neverSignedIn.code))!;
     const rina = (await db().collection('users').findOne({ email: OWNER_WHATSAPP_SEED.neverSignedIn.owner.email }))!;
-    expect(kpm.ownerUserId).toBe(String(rina._id));
+    expect(kpm.owners.map((o: { userId: string }) => o.userId)).toEqual([String(rina._id)]);
     expect(rina.lastLoginAt ?? null).toBeNull();
     expect(await db().collection('memberships').findOne({ kpmId: String(kpm._id), userId: String(rina._id) }))
       .toMatchObject({ status: 'active', role: 'ab', leaderId: null });

@@ -53,6 +53,7 @@ describe('P18.10-T5 every code’s refusal, in both languages', () => {
     IMPERSONATION_SETUP_TARGET: 'Retired by ADR-0206 (P19.4-T2): there is no setup session, so nothing raises it; kept and never reused.',
     ORG_INVITE_EXHAUSTED: 'Catalogued for an invite with a use limit; every invite is single-use, answered ORG_INVITE_EXPIRED.',
     PERM_OUT_OF_SCOPE: 'P11-T3 AC-3: a subject outside the grant is answered NOT_FOUND, never this.',
+    PERM_LAST_OWNER: 'Retired by ADR-0285 (P19.27): the last owner is KPM_LAST_OWNER; nothing raises it; kept and never reused.',
     RATE_LIMITED: 'The generic limit: the API limits only signing in and registering, under AUTH_RATE_LIMITED.',
     VALIDATION_UNKNOWN_FIELD: 'An unknown field is refused VALIDATION_FAILED by the pipe (`forbidNonWhitelisted`).',
   };

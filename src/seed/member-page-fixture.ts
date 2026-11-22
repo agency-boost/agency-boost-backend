@@ -1,3 +1,4 @@
+import { isOwnerOf } from '@/modules/tenants/kpm-owners';
 import mongoose from 'mongoose';
 import type { Clock } from '@/common/clock/clock.port';
 
@@ -16,6 +17,11 @@ import type { Clock } from '@/common/clock/clock.port';
  * | the second | ***Diundang***: invited yesterday, everything recorded |
  *
  * Everybody else who never signed in reads ***Belum diundang***; everybody who has, *Aktif*.
+ *
+ * **Their addresses are unconfirmed** (OD-475): an account whose address is proven is its person's own and reads *Aktif*,
+ * and the seed's `user()` proves every address so a walk can sign in. The people this presents as imported and never
+ * opened carry what the roster import writes for such an account — `emailVerifiedAt: null` — and only while they have
+ * still never signed in.
  *
  * **Idempotent, and the same people every run**: the sign-ins it reads are written only where none is, `invitedAt` only
  * where none is, and the blanking is the same four fields on the same person — the seed's `user()` and `place()` give an
@@ -52,13 +58,20 @@ export async function seedMemberPageFixture(deps: MemberPageFixtureDeps): Promis
     .toArray();
   const byId = new Map(accounts.map((a) => [String(a._id), a]));
 
-  const chosen = rows
+  const unopened = rows
     .map((row) => ({ row, account: byId.get(String(row.userId)) }))
     .filter(({ row, account }) => account && !account.lastLoginAt
       && !deps.spare.has(String(account.email))
-      && String(row.userId) !== String(kpm?.ownerUserId ?? '')
-      && row.adminAccess?.isKpmAdmin !== true)
-    .slice(0, 2);
+      && !isOwnerOf(kpm as never, String(row.userId))
+      && row.adminAccess?.isKpmAdmin !== true);
+  const chosen = unopened.slice(0, 2);
+
+  if (unopened.length > 0) {
+    await db.collection('users').updateMany(
+      { _id: { $in: unopened.map(({ account }) => account!._id) }, lastLoginAt: null },
+      { $set: { emailVerifiedAt: null } },
+    );
+  }
 
   for (const [i, { row }] of chosen.entries()) {
     await db.collection('memberships').updateOne(

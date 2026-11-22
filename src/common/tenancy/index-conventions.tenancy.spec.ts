@@ -15,13 +15,14 @@ import { IntakeItemSchema, UploadIntakeSchema } from '@/modules/product-data/upl
 import { IllustrationSchema } from '@/modules/product-data/illustration.schema';
 import { CompanySchema } from '@/modules/tenants/company.schema';
 import { CompanyOrgLevelSchema } from '@/modules/tenants/company-org-level.schema';
-import { KpmSchema } from '@/modules/tenants/kpm.schema';
+import { KpmOwnerSchema, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { UserSchema } from '@/modules/users/user.schema';
 import { GroupSchema } from '@/modules/org/group.schema';
 import { JoinRequestSchema } from '@/modules/org/join-request.schema';
 import { LeaderLimitRequestSchema } from '@/modules/org/leader-limit-request.schema';
 import { MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { UserInvitationSchema } from '@/modules/org/user-invitation.schema';
 import { TransferRequestSchema } from '@/modules/org/transfer-request.schema';
 import { RosterImportRecordSchema } from '@/modules/tenants/roster-import-record.schema';
 import { MembershipHistorySchema } from '@/modules/org/membership-history.schema';
@@ -137,6 +138,8 @@ const TENANT_SCOPED: ReadonlyArray<[string, Schema]> = [
   // P18.8-T3 (ADR-0170): a leader's invites — opened by `(kpmId, tokenHash)` — and the requests to move a member.
   ['memberInvites', MemberInviteSchema],
   ['transferRequests', TransferRequestSchema],
+  // P19.28-T1 (ADR-0286 §2): *Tambah user*'s invitations — opened by `(kpmId, tokenHash)`.
+  ['userInvitations', UserInvitationSchema],
   // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
   ['rosterImports', RosterImportRecordSchema],
   ['groups', GroupSchema],
@@ -221,6 +224,8 @@ const EXEMPT: ReadonlyArray<[string, Schema, string]> = [
     'a subdocument of an activation aspect, for the same reason',
   ],
   ['auditLog', AuditLogSchema, 'kpmId is nullable: platform actions belong to no tenant'],
+  // P19.27 (ADR-0285): one owner of a KPM, kept on the KPM row itself.
+  ['kpmOwner (subdocument)', KpmOwnerSchema, 'a subdocument of kpms: no collection, no _id of its own — the tenant record itself'],
   // P19.23-T6 (ADR-0279): the platform console's own records — no KPM owns them.
   ['platformSettings', PlatformSettingsSchema, 'the platform\'s one settings document, written by the Super Admin alone'],
   ['announcements', AnnouncementSchema, 'an announcement may reach every KPM: a platform record of a Super Admin\'s send'],
@@ -666,11 +671,13 @@ const SCHEMA_EXPORT_NAMES = new Map<Schema, string>([
   [CompanySchema, 'CompanySchema'],
   [CompanyOrgLevelSchema, 'CompanyOrgLevelSchema'],
   [KpmSchema, 'KpmSchema'],
+  [KpmOwnerSchema, 'KpmOwnerSchema'],
   [UserSchema, 'UserSchema'],
   [GroupSchema, 'GroupSchema'],
   [JoinRequestSchema, 'JoinRequestSchema'],
   [LeaderLimitRequestSchema, 'LeaderLimitRequestSchema'],
   [MemberInviteSchema, 'MemberInviteSchema'],
+  [UserInvitationSchema, 'UserInvitationSchema'],
   [TransferRequestSchema, 'TransferRequestSchema'],
   [RosterImportRecordSchema, 'RosterImportRecordSchema'],
   [MembershipHistorySchema, 'MembershipHistorySchema'],

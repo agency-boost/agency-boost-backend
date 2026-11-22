@@ -28,5 +28,10 @@ export const AUDIT_REFUSALS = refusals('modules/audit', {
       en: 'q must be at most 100 characters',
       id: 'q paling banyak 100 karakter',
     },
+    // P19.26-T3 AC-1 (ADR-0284 §3): *Termasuk dilihat* is a switch.
+    includeViewedShape: {
+      en: 'includeViewed must be true or false',
+      id: 'includeViewed harus true atau false',
+    },
   },
 });

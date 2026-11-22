@@ -128,69 +128,22 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
   }
 
   const live = async (kpmId: string) => col('kpms').findOne({ _id: new mongoose.Types.ObjectId(kpmId) });
+  /** One of a KPM's owners (ADR-0285): the retired `PATCH …/owner`'s work, done as an approval does it. */
+  const makeOwner = (kpmId: string, userId: string) =>
+    tenants.installAccountOwner(RequestContext.platform('root'), kpmId, userId);
 
   describe('Ganti Owner (AC-5)', () => {
-    it('P19-T3 AC-5 finds accounts by name or email, with their company, verification and the offices they hold', async () => {
-      const victor = await account('Victor Gunawan', manulife);
-      const kpmId = await office(manulife, '3001', 'Kemang');
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: victor }).expect(200);
-      await account('Victoria Halim', prudential, { emailVerifiedAt: null });
-      await account('Root Operator', null, { platformRole: 'super_admin' });
-
-      const byName = await api().get('/api/admin/accounts?q=vic').expect(200);
-      expect(byName.body.map((a: { fullName: string }) => a.fullName)).toEqual(['Victor Gunawan', 'Victoria Halim']);
-      expect(byName.body[0]).toMatchObject({
-        userId: victor, email: 'victor.gunawan@example.test', companyName: 'Manulife', emailVerified: true,
-        hasAgentCode: true, offices: [{ kpmId, code: '3001', branchName: 'Kemang', companyName: 'Manulife', isOwner: true }],
-      });
-      expect(byName.body[1]).toMatchObject({ companyName: 'Prudential', emailVerified: false, offices: [] });
-
-      const byEmail = await api().get('/api/admin/accounts?q=victoria.halim@').expect(200);
-      expect(byEmail.body).toHaveLength(1);
-      // A Super Admin sells for nobody, and is not offered.
-      expect((await api().get('/api/admin/accounts?q=root').expect(200)).body).toEqual([]);
-      expect((await api().get('/api/admin/accounts?q=v').expect(400)).body.error.code).toBe('VALIDATION_FAILED');
+    it('P19.27-T1 AC-4 GET /admin/accounts, Ganti Owner’s search, is retired with its page: 404', async () => {
+      await account('Victor Gunawan', manulife);
+      await api().get('/api/admin/accounts?q=vic').expect(404);
     });
 
-    it('P19-T3 AC-5 lists the offices an account is in as they stand: a request to join pending, an office deleted since gone', async () => {
-      const rina = await account('Rina Wijaya', prudential);
-      const joining = await office(prudential, '1001', 'Kemang');
-      const deleted = await office(prudential, '1002', 'Serpong');
-      for (const [kpmId, status, code] of [[joining, 'pending', '7101'], [deleted, 'active', '7102']]) {
-        await wired.memberships.create(RequestContext.superAdminInTenant('root', kpmId), {
-          userId: rina, role: 'agent', status, agentCode: code, agentSeq: 1, leaderCode: `LC${code}`,
-          orgLevelId: 'x', orgLevelCode: 'AGENT',
-        } as never);
-      }
-      await col('kpms').updateOne({ _id: new mongoose.Types.ObjectId(deleted) }, { $set: { deletedAt: NOW } });
-
-      const [found] = (await api().get('/api/admin/accounts?q=rina').expect(200)).body;
-      expect(found.offices).toEqual([{
-        kpmId: joining, code: '1001', branchName: 'Kemang', companyName: 'Prudential', isOwner: false, membershipStatus: 'pending',
-      }]);
-    });
-
-    it('P19-T3 AC-5 refuses an account of another company, naming both, before anything is written', async () => {
-      const kpmId = await office(prudential, '1001');
-      const victor = await account('Victor Gunawan', manulife);
-      const res = await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: victor }).expect(409);
-      expect(res.body.error).toMatchObject({
-        code: 'TENANT_COMPANY_MISMATCH', details: { userCompanyId: manulife, kpmCompanyId: prudential },
-      });
-      expect(res.body.error.message).toContain('Victor Gunawan signed up with Manulife');
-      expect((await live(kpmId))?.ownerUserId).toBeNull();
-      expect(await col('memberships').countDocuments({ kpmId })).toBe(0);
-    });
-
-    it('P19-T3 AC-5 refuses an unverified address (ADR-0190 §4), and makes a verified one the Owner', async () => {
+    it('P19.27-T1 AC-4 PATCH /admin/tenants/:id/owner is retired: 404, nothing written — owners are added inside the KPM', async () => {
       const kpmId = await office(manulife, '1001');
-      const unverified = await account('Dewi Lestari', manulife, { emailVerifiedAt: null });
-      const res = await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: unverified }).expect(409);
-      expect(res.body.error.code).toBe('AUTH_EMAIL_NOT_VERIFIED');
-
       const victor = await account('Victor Gunawan', manulife);
-      const ok = await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: victor }).expect(200);
-      expect(ok.body).toMatchObject({ ownerUserId: victor, ownerName: 'Victor Gunawan' });
+      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: victor }).expect(404);
+      expect((await live(kpmId))?.owners).toEqual([]);
+      expect(await col('memberships').countDocuments({ kpmId })).toBe(0);
     });
   });
 
@@ -238,7 +191,7 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
     it('P19-T3 AC-6 takes the Owner along, on the new company’s rung of the same code', async () => {
       const kpmId = await office(prudential, '1001');
       const owner = await account('Hendra Wijaya', prudential);
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: owner }).expect(200);
+      await makeOwner(kpmId, owner);
       // Their account moved company first (the only way an Owner can move with the office).
       await col('users').updateOne({ _id: new mongoose.Types.ObjectId(owner) }, { $set: { companyId: manulife } });
 
@@ -262,7 +215,7 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
     it('P19-T3 AC-6 refuses an office with members besides its Owner, with the reason, and writes nothing', async () => {
       const kpmId = await office(prudential, '1001');
       const owner = await account('Hendra Wijaya', prudential);
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: owner }).expect(200);
+      await makeOwner(kpmId, owner);
       const agent = await account('Rina Wijaya', prudential);
       await wired.memberships.create(RequestContext.superAdminInTenant('root', kpmId), {
         userId: agent, role: 'agent', status: 'active', agentCode: '1', agentSeq: 2, leaderCode: 'LC2',
@@ -278,7 +231,7 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
     it('P19-T3 AC-6 refuses an Owner of the old company, a code taken in the new one, the same company and the Template library', async () => {
       const kpmId = await office(prudential, '1001');
       const owner = await account('Hendra Wijaya', prudential);
-      await api().patch(`/api/admin/tenants/${kpmId}/owner`).send({ userId: owner }).expect(200);
+      await makeOwner(kpmId, owner);
       expect((await api().patch(`/api/admin/tenants/${kpmId}/company`).send({ companyId: manulife }).expect(409))
         .body.error.code).toBe('TENANT_COMPANY_MISMATCH');
 
@@ -315,8 +268,7 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
 
     it('P19-T3 AC-7 refuses an office with a member or a record, with the counts — it is archived instead', async () => {
       const owned = await office(prudential, '1001');
-      await api().patch(`/api/admin/tenants/${owned}/owner`).send({ userId: await account('Hendra Wijaya', prudential) })
-        .expect(200);
+      await makeOwner(owned, await account('Hendra Wijaya', prudential));
       const held = (await api().get(`/api/admin/tenants/${owned}/contents`).expect(200)).body;
       expect(held).toMatchObject({ members: 1, deletable: false });
       const res = await api().delete(`/api/admin/tenants/${owned}`).expect(409);
@@ -382,7 +334,6 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
   describe('who may (positive and negative, every role an office has)', () => {
     const ID = '66f0000000000000000000a1';
     const routes: Array<[string, () => request.Test]> = [
-      ['GET /admin/accounts', () => api().get('/api/admin/accounts?q=victor')],
       ['GET /admin/tenants/code-availability', () => api().get(`/api/admin/tenants/code-availability?companyId=${ID}&code=1001`)],
       ['PATCH /admin/tenants/:id/company', () => api().patch(`/api/admin/tenants/${ID}/company`).send({ companyId: ID })],
       ['GET /admin/tenants/:id/contents', () => api().get(`/api/admin/tenants/${ID}/contents`)],
@@ -423,8 +374,8 @@ describe('P19-T3 the Super Admin’s requests and KPMs, over HTTP', () => {
     // 2. Pindahkan ke perusahaan lain: 1001 to Manulife.
     await api().patch(`/api/admin/tenants/${k1001}/company`).send({ companyId: manulife }).expect(200);
     // 3. Ganti Owner: Victor, found by name.
-    const [found] = (await api().get('/api/admin/accounts?q=victor').expect(200)).body;
-    await api().patch(`/api/admin/tenants/${k1001}/owner`).send({ userId: found.userId }).expect(200);
+    const found = { userId: String((await col('users').findOne({ fullName: 'Victor Gunawan' }))!._id) };
+    await makeOwner(k1001, found.userId);
     // 4. Hapus the request the office now answers.
     await api().delete(`/api/admin/kpm-requests/${requestId}`).expect(200);
 

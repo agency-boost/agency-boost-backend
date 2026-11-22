@@ -12,6 +12,7 @@ import { NotificationService } from '@/modules/notifications/notification.servic
 import { NotificationTemplate } from '@/modules/notifications/notification.types';
 import { can } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { isOwnerOf } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { displayNameOf } from '@/modules/users/display-name';
 import { User, UserDocument } from '@/modules/users/user.schema';
@@ -365,7 +366,7 @@ export class LeaderLimitRequestService {
     const asker = await this.members.findById(office, request.requestedByMembershipId);
     if (!asker || asker.status !== 'active') return STALE_REASONS.askerGone;
     const kpm = await this.kpms.findOne({ _id: request.kpmId, deletedAt: null }).exec();
-    const tenantAdmin = asker.adminAccess?.isKpmAdmin === true || kpm?.ownerUserId === asker.userId;
+    const tenantAdmin = asker.adminAccess?.isKpmAdmin === true || isOwnerOf(kpm, asker.userId);
     if (tenantAdmin) return null;
     if (request.action === 'activate') {
       return request.leaderMembershipId === String(asker._id) ? null : STALE_REASONS.notRoutedToAsker;

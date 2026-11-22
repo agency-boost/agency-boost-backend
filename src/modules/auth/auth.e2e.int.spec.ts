@@ -418,6 +418,19 @@ describe('auth and admin over HTTP', () => {
   }
 
   /** Registers, reads the verification token from the notification, and signs in. */
+  /**
+   * **One of a KPM's owners, set up** (ADR-0285): `PATCH /admin/tenants/:id/owner` is retired (P19.27-T1 AC-4), so a spec
+   * that needs an Owner makes one as a KPM request's approval does — the account's membership as the KPM's root AB, then
+   * the owner (`TenantService.installAccountOwner`).
+   */
+  async function makeOwner(kpmId: unknown, who: { userId?: string; email?: string }) {
+    const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+    const user = who.userId
+      ? await users.findById(who.userId).exec()
+      : await users.findOne({ email: who.email!.trim().toLowerCase() }).exec();
+    await app.get(TenantService).installAccountOwner(RequestContext.platform('e2e-root'), String(kpmId), String(user!._id));
+  }
+
   async function makeUser(email: string, platformRole: 'super_admin' | 'none' = 'none') {
     const companyId = await anInsurer();
     e2eCodeSeq += 1;
@@ -647,8 +660,9 @@ describe('auth and admin over HTTP', () => {
       expect(created.body.ownerName).toBeNull();
       expect(created.body.companyName).toBe('Prudential');
 
-      const assigned = await api().patch(`/api/v1/admin/tenants/${created.body._id}/owner`)
-        .set(auth).send({ email: 'rina@kpm0417.test' }).expect(200);
+      // One of its owners (ADR-0285): the retired `PATCH …/owner`'s work, done the way an approval does it.
+      await makeOwner(created.body._id, { email: 'rina@kpm0417.test' });
+      const assigned = await api().get(`/api/v1/admin/tenants/${created.body._id}`).set(auth).expect(200);
       expect(assigned.body.ownerName).toBe('Test Person');
       expect(assigned.body.ownerEmail).toBe('rina@kpm0417.test');
 
@@ -1016,8 +1030,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: '0289', branchName: 'BGC' }).expect(201);
 
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       // Roles resolve per request, so the existing token already sees the new grant.
       const me = await api().get('/api/v1/auth/me')
@@ -1038,8 +1051,7 @@ describe('auth and admin over HTTP', () => {
       const companyId = await anInsurer();
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: '0731', branchName: 'Kuningan' }).expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const office = await api().get(`/api/v1/admin/tenants/${kpm.body._id}`)
         .set('Authorization', `Bearer ${owner.accessToken}`).expect(200);
@@ -1061,18 +1073,18 @@ describe('auth and admin over HTTP', () => {
         .send({ companyId, code: '0801', branchName: 'Mine' }).expect(201);
       const theirs = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: '0802', branchName: 'Theirs' }).expect(201);
-      await api().patch(`/api/v1/admin/tenants/${mine.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(mine.body._id, { userId: owner.id });
 
       const res = await api().get(`/api/v1/admin/tenants/${theirs.body._id}`)
         .set('Authorization', `Bearer ${owner.accessToken}`).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
     });
 
-    it('refuses to point an office at an account that does not exist', async () => {
-      // The console's screen claimed this error before the service produced it: the id
-      // was stored on trust, so an office could be left owned by nobody, permanently.
+    it('P19.27-T1 AC-4: PATCH /admin/tenants/:id/owner is retired — 404, and the KPM keeps no owner', async () => {
+      // A KPM has one or more owners (ADR-0285), added and removed from inside it (`POST`/`DELETE
+      // /members/:membershipId/owner`). *Ganti owner*'s route answers like any that does not exist.
       const sa = await makeUser('sa6@agencyboost.test', 'super_admin');
+      const owner = await makeUser('owner7@kpm.test');
       const auth = { Authorization: `Bearer ${sa.accessToken}` };
 
       const companyId = await anInsurer();
@@ -1080,28 +1092,12 @@ describe('auth and admin over HTTP', () => {
         .send({ companyId, code: '1001', branchName: 'Menteng' }).expect(201);
 
       const res = await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ email: 'nobody@nowhere.test' }).expect(404);
+        .set(auth).send({ userId: owner.id }).expect(404);
       expect(res.body.error.code).toBe('NOT_FOUND');
 
       const after = await api().get(`/api/v1/admin/tenants/${kpm.body._id}`).set(auth).expect(200);
       expect(after.body.ownerUserId).toBeNull();
-    });
-
-    it('assigns by the email a Super Admin actually knows', async () => {
-      const sa = await makeUser('sa7@agencyboost.test', 'super_admin');
-      const owner = await makeUser('owner7@kpm.test');
-      const auth = { Authorization: `Bearer ${sa.accessToken}` };
-
-      const companyId = await anInsurer();
-      const kpm = await api().post('/api/v1/admin/tenants').set(auth)
-        .send({ companyId, code: '1002', branchName: 'Thamrin' }).expect(201);
-
-      // Pasted addresses carry whitespace and case. @IsEmail runs before the service
-      // normalises, so the trim has to happen on the DTO or HTTP rejects what the
-      // service would have accepted.
-      const assigned = await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ email: '  Owner7@KPM.test  ' }).expect(200);
-      expect(assigned.body.ownerUserId).toBe(owner.id);
+      expect(after.body.owners).toEqual([]);
     });
 
     it('P3.1-T1: the overview counts the platform, and refuses an Owner', async () => {
@@ -1131,8 +1127,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: '7002', branchName: 'Roster Branch' })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const res = await api().get('/api/v1/admin/tenant-admins').set(auth).expect(200);
       const row = res.body.find((r: { kpmLabel: string }) => r.kpmLabel.includes('7002'));
@@ -1226,8 +1221,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Join Branch' })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       return { kpmId: String(kpm.body._id), code: kpm.body.code, owner };
     }
@@ -1350,8 +1344,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'Roster Branch' })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       return { kpmId: String(kpm.body._id), owner, auth: { Authorization: `Bearer ${owner.accessToken}` } };
     }
@@ -1425,8 +1418,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Invite Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       return { kpmId: String(kpm.body._id), auth: { Authorization: `Bearer ${owner.accessToken}` } };
     }
@@ -1716,8 +1708,7 @@ describe('auth and admin over HTTP', () => {
       const kpmId = String(kpm.body._id);
 
       const owner = await makeUser(`owner-cfg-${Math.random()}@kpm.test`);
-      await api().patch(`/api/v1/admin/tenants/${kpmId}/owner`).set(saAuth)
-        .send({ email: owner.email }).expect(200);
+      await makeOwner(kpmId, { email: owner.email });
       // The grant lands on the membership, so the token has to be minted after it.
       const again = await api().post('/api/v1/auth/login')
         .send({ email: owner.email, password: PASSWORD }).expect(200);
@@ -1869,8 +1860,7 @@ describe('auth and admin over HTTP', () => {
         })
         .expect(201);
       const owner = await makeUser(`owner-cfgread-${Math.random()}@kpm.test`);
-      await api().patch(`/api/v1/admin/tenants/${String(kpm.body._id)}/owner`).set(saAuth)
-        .send({ email: owner.email }).expect(200);
+      await makeOwner(String(kpm.body._id), { email: owner.email });
       const again = await api().post('/api/v1/auth/login')
         .send({ email: owner.email, password: PASSWORD }).expect(200);
       return {
@@ -1984,7 +1974,7 @@ describe('auth and admin over HTTP', () => {
         })
         .expect(201);
       const owner = await makeUser(`roster-owner-${Math.random()}@kpm.test`);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(saAuth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
       // The grant lands on the membership, so the Owner's own token is minted after it.
       const again = await api().post('/api/v1/auth/login').send({ email: owner.email, password: PASSWORD }).expect(200);
       const auth = { Authorization: `Bearer ${(again.body as { accessToken: string }).accessToken}` };
@@ -2132,8 +2122,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Approval Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       return { kpmId: String(kpm.body._id), auth: { Authorization: `Bearer ${owner.accessToken}` } };
     }
@@ -2342,8 +2331,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Role Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       const kpmId = String(kpm.body._id);
@@ -2533,8 +2521,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Removal Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       return { kpmId: String(kpm.body._id), asOwner };
@@ -2717,8 +2704,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Tree Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       return { kpmId: String(kpm.body._id), asOwner: { Authorization: `Bearer ${owner.accessToken}` } };
     }
@@ -2842,8 +2828,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Group Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
@@ -2996,7 +2981,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId: await anInsurer(), code, branchName: 'Cempaka Putih' })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       const kpmId = String(kpm.body._id);
       const joins = async () => {
@@ -3106,8 +3091,7 @@ describe('auth and admin over HTTP', () => {
           branchName: 'Delegation Branch',
         })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`)
-        .set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       const roster = await api().get('/api/v1/members').set(asOwner).expect(200);
@@ -3407,7 +3391,7 @@ describe('auth and admin over HTTP', () => {
       const kpm = await api().post('/api/v1/admin/tenants').set(auth)
         .send({ companyId: await anInsurer(), code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'WS Branch' })
         .expect(201);
-      await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(auth).send({ userId: owner.id }).expect(200);
+      await makeOwner(kpm.body._id, { userId: owner.id });
 
       const asOwner = { Authorization: `Bearer ${owner.accessToken}` };
       const me = await api().get('/api/v1/auth/me').set(asOwner).expect(200);
@@ -3520,8 +3504,7 @@ describe('auth and admin over HTTP', () => {
         const kpm = await api().post('/api/v1/admin/tenants').set(saAuth)
           .send({ companyId, code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName }).expect(201);
         const owner = await makeUser(`owner-setup-${Math.random()}@kpm.test`);
-        await api().patch(`/api/v1/admin/tenants/${kpm.body._id}/owner`).set(saAuth)
-          .send({ userId: owner.id }).expect(200);
+        await makeOwner(kpm.body._id, { userId: owner.id });
         // The grant lands on the membership, so the Owner's own token is minted after it.
         const again = await api().post('/api/v1/auth/login').send({ email: owner.email, password: PASSWORD }).expect(200);
         return {

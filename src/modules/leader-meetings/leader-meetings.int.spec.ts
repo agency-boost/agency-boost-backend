@@ -11,6 +11,7 @@ import { ROSTER_NOW, type Who } from '../../../test/coaching-office';
 import { buildForumOffice, forumApp, KPM_A, type ForumOffice } from '../../../test/forum-office';
 import { LeaderMeetingsController } from './leader-meetings.controller';
 import { LEADER_MEETINGS_MESSAGES as SAY } from './leader-meetings.messages';
+import { ownersOf } from '../../../test/owners';
 
 /**
  * **The forum over HTTP, per role** (P19.22-T8 AC-1, AC-2; ADR-0276, ADR-0268), with the real `PermissionsGuard`, the
@@ -306,14 +307,14 @@ describe('the Strategic Leader Forum over HTTP (P19.22-T8)', () => {
   });
 
   it('P19.22-T8 AC-2 an office with no Owner assigned: its core leaders still edit, and the Owner is nobody', async () => {
-    await db().collection('kpms').updateOne({ _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { ownerUserId: null } });
+    await db().collection('kpms').updateOne({ _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { owners: ownersOf(null) } });
     try {
       const card = await office.forum.create(office.coreLeader('AGUS'), { date: '2026-11-02', time: '14:00' });
       const view = await office.forum.read(office.coreLeader('AGUS'), card.id);
       expect(view.people.filter((p) => p.pickable).map((p) => p.firstName)).toEqual(['Maya', 'Agus', 'Sari']);
     } finally {
       await db().collection('kpms').updateOne(
-        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { ownerUserId: await office.userIdOf('OWNER') } },
+        { _id: new mongoose.Types.ObjectId(KPM_A) }, { $set: { owners: ownersOf(await office.userIdOf('OWNER')) } },
       );
     }
   });

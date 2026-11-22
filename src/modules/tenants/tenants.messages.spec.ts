@@ -25,7 +25,7 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
     ['1001', 'KPM 1001 · stellar', 'Prudential']],
   ['TENANT_REQUEST_IN_PROGRESS.beingApproved', R.TENANT_REQUEST_IN_PROGRESS.beingApproved, []],
   // P19.4-T3 (ADR-0212): the Owner's invitation and a new Owner's agent code.
-  ['TENANT_OWNER_NOT_INVITABLE.noOwner', R.TENANT_OWNER_NOT_INVITABLE.noOwner, ['Ganti pemilik']],
+  ['TENANT_OWNER_NOT_INVITABLE.noOwner', R.TENANT_OWNER_NOT_INVITABLE.noOwner, ['Tambah owner']],
   ['TENANT_OWNER_NOT_INVITABLE.noEmail', R.TENANT_OWNER_NOT_INVITABLE.noEmail({ name: 'Wulan Kartika' }), ['Wulan Kartika']],
   ['TENANT_OWNER_NOT_INVITABLE.signedIn', R.TENANT_OWNER_NOT_INVITABLE.signedIn({ name: 'Wulan Kartika' }), ['Wulan Kartika']],
   ['AGENT_CODE_TAKEN.ownerCode', R.AGENT_CODE_TAKEN.ownerCode({ agentCode: '70045001', company: 'Prudential' }),
@@ -43,8 +43,6 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['TENANT_NOT_EMPTY.cannotDelete', R.TENANT_NOT_EMPTY.cannotDelete({ members: 0, records: 12 }), ['0', '12']],
   ['VALIDATION_FAILED.chooseCompany', V.chooseCompany, []],
   ['VALIDATION_FAILED.sameCompany', V.sameCompany, []],
-  ['VALIDATION_FAILED.searchTwoCharacters', V.searchTwoCharacters, []],
-  ['PERM_LAST_OWNER.alwaysAnOwner', R.PERM_LAST_OWNER.alwaysAnOwner, ['Owner']],
   ['ORG_AGENT_ALREADY_TAGGED.alreadyInOffice', R.ORG_AGENT_ALREADY_TAGGED.alreadyInOffice, []],
   ['TENANT_REQUEST_ALREADY_OPEN.alreadyAsked', R.TENANT_REQUEST_ALREADY_OPEN.alreadyAsked, []],
   ['TENANT_REQUEST_DECIDED.alreadyDecided', R.TENANT_REQUEST_DECIDED.alreadyDecided({ status: 'approved' }), []],
@@ -73,7 +71,6 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
     label: 'AB', references: [{ kind: 'memberships', count: 1250 }, { kind: 'companyTemplates', count: 2 }],
   }), ['AB', '2']],
   ['VALIDATION_FAILED.nothingToChange', V.nothingToChange, []],
-  ['VALIDATION_FAILED.nameTheOwner', V.nameTheOwner, ['email']],
   ['VALIDATION_FAILED.ownerDeactivated', V.ownerDeactivated, []],
   ['VALIDATION_FAILED.startFromDefaults', V.startFromDefaults, ['Default template', 'AgencyBoost']],
   ['VALIDATION_FAILED.unknownTemplateKind', V.unknownTemplateKind({ kind: 'nope', kinds: ['ratio_set', 'lead_pipeline'] }),
@@ -117,7 +114,6 @@ const REFUSALS: [entry: string, sentence: Message, values: string[]][] = [
   ['VALIDATION_FAILED.ownerPhoneShape', V.ownerPhoneShape, ['owner.phone', '+62']],
   ['VALIDATION_FAILED.ownerAgentCodeShape', V.ownerAgentCodeShape, ['owner.agentCode']],
   ['VALIDATION_FAILED.ownerAgentCodeNeeded', V.ownerAgentCodeNeeded, []],
-  ['VALIDATION_FAILED.ownerEmailNeeded', V.ownerEmailNeeded, ['owner.email']],
   ['VALIDATION_FAILED.notAWorkStatus', V.notAWorkStatus({ value: 'fulltime' }), ['"fulltime"', 'Full-time', 'Part-time']],
   // P19.12-T7 AC-1 (ADR-0250 §1): the letters the import reads too.
   ['VALIDATION_FAILED.notAGender', V.notAGender({ value: 'f' }), ['"f"', 'male', 'female', 'L', 'P', 'Laki-laki', 'Perempuan']],

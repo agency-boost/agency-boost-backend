@@ -19,6 +19,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, seedLadder, startMongo, stopMongo } from '../../../test/mongo';
 import { LEADER_CHANGE_SEED, leaderChangeRowId, seedLeaderChangeFixture } from '../leader-change-fixture';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-11-11T03:00:00Z');
 const KPM = new mongoose.Types.ObjectId().toString();
@@ -69,7 +70,7 @@ describe('P19.12-T4 the changing-a-leader seed', () => {
     };
     await kpms.create({
       _id: KPM, companyId: String(company._id), code: '0417', branchName: 'BSD City', counters: { nextMemberSeq: 1 },
-      status: 'active', timezone: 'Asia/Jakarta', ownerUserId: ids.wilson,
+      status: 'active', timezone: 'Asia/Jakarta', owners: ownersOf(ids.wilson),
     });
     const job = RequestContext.forJob(KPM, 'leader-change-seed');
     const place = async (userId: string, role: 'ab' | 'aab' | 'agent', leaderId: string | null) => String((await hierarchy.create(job, {

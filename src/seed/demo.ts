@@ -116,10 +116,13 @@ import { seedRegisteredAccountsFixture } from './registered-accounts-fixture';
 import { seedTestAccountsFixture } from './test-accounts-fixture';
 import { seedWholeOfficeFixture } from './whole-office-fixture';
 import { seedApprovalsFixture } from './approvals-fixture';
+import { ownerEntry } from '@/modules/tenants/kpm-owners';
+import { seedKpmOwnersFixture } from './kpm-owners-fixture';
 import { seedOwnerWhatsAppFixture } from './owner-whatsapp-invite-fixture';
 import { seedPlatformConsoleFixture } from './platform-console-fixture';
 import { seedCompanyConsoleFixture } from './company-console-fixture';
 import { seedPeopleFixture } from './people-fixture';
+import { seedTambahUserFixture } from './tambah-user-fixture';
 import { planSeed } from './seed-guard';
 import type { StoragePort } from '@/modules/assets/storage.port';
 import { LONG_PIPELINE } from './long-pipeline';
@@ -148,6 +151,7 @@ import {
   SEED_MOC_RULES, SEED_PRODUCTION_CLUB_TIERS, SEED_PRODUCTS, SEED_RATIO_DEFINITIONS, seedObjectionsOf,
   metricByKey,
 } from '@/domain/constants';
+import { seedProductInIndonesian } from '@/domain/constants/product-words-id';
 import {
   ActivityCategory, ActivityCategorySchema,
 } from '@/modules/config/activity-category.schema';
@@ -222,7 +226,7 @@ const RECOMPILE = { overwriteModels: true } as const;
 
 /**
  * Days before the run, each written in two places that must agree: when KPM 0417's Owner joined and the
- * audit log's `kpm.owner_assigned`, and when Rina and Budi joined and the notices of how they arrived.
+ * audit log's `kpm.owner_added`, and when Rina and Budi joined and the notices of how they arrived.
  */
 const OWNER_ASSIGNED_DAYS_AGO = 109;
 const RINA_JOINED_DAYS_AGO = 58;
@@ -356,6 +360,8 @@ const OWNED_COLLECTIONS = [
   'leaderLimitRequests',
   // P18.8-T3, with the writer that fills them (`joining-fixture.ts`): Agus's invites and his transfer request (ADR-0170).
   'memberInvites', 'transferRequests',
+  // P19.28-T5, with the writer that fills it (`tambah-user-fixture.ts`): *Tambah user*'s invitation to 0417 (ADR-0286).
+  'userInvitations',
   // P19.2-T1 AC-8: the Owner's two logins were linked here (ADR-0199). Retired (ADR-0269): nothing writes it now; kept
   // so `--reset` empties the link an earlier run wrote.
   'accountLinks',
@@ -720,7 +726,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   async function seedProducts(companyId: string) {
     if (await Products.exists({ companyId })) return;
-    await Products.insertMany(SEED_PRODUCTS.map((product) => ({
+    // In Bahasa Indonesia (P19.26-T4 AC-4; UI-216 (21 Nov); OD-440): the catalogue the console shows, as an insurer types it.
+    await Products.insertMany(SEED_PRODUCTS.map(seedProductInIndonesian).map((product) => ({
       ...product,
       // The seed's one pair, as the objection card a product stores (P19.4-T4, ADR-0209 §9).
       defaultAttackPlan: { ...product.defaultAttackPlan, objections: seedObjectionsOf(product.defaultAttackPlan) },
@@ -741,7 +748,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     companyId: string,
     code: string,
     branchName: string,
-    opts: { ownerUserId?: string; status?: string; address?: string } = {},
+    opts: { ownerId?: string; ownerSince?: Date; status?: string; address?: string } = {},
   ) {
     const existing = await Kpms.findOne({ companyId, code }).exec();
     if (existing) return existing;
@@ -750,7 +757,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       code,
       branchName,
       address: opts.address ?? null,
-      ownerUserId: opts.ownerUserId ?? null,
+      // ADR-0285 §1: a KPM's owners, a list; the seed's offices start with one.
+      owners: opts.ownerId ? [ownerEntry(opts.ownerId, opts.ownerSince ?? clock.now())] : [],
       timezone: 'Asia/Jakarta',
       settings: { ...DEFAULT_KPM_SETTINGS },
       counters: { nextAgentCodeSeq: 1 },
@@ -1453,10 +1461,15 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
    * leaders are not called AB or AAB. Allianz has no office yet, so nobody stands on them and the tiers can still
    * be changed there; the members who hold a custom rung's rights are the seed task's (P18.5-T14).
    */
+  /*
+   * *Changed 2026-11-22 (P19.26-T5 AC-3; UI-218 (21 Nov); ADR-0284 §5; OD-440, OD-444):* Allianz Life's ladder is
+   * **Agent → BP** — *Business Partner* the one leader rung, a senior leader as an AB is — and no longer *Agent → Unit
+   * Manager → Senior Manager*. Still a rung not called AB, so the custom-rung demo stands. A database seeded before keeps
+   * its two old rungs archived, never deleted (invariant §3); staging and production are the operator's.
+   */
   for (const rung of [
     { code: 'AGENT', label: 'Agent', displayOrder: 1, leaderTier: null },
-    { code: 'UM', label: 'Unit Manager', displayOrder: 2, leaderTier: 'associate' },
-    { code: 'SM', label: 'Senior Manager', displayOrder: 3, leaderTier: 'senior' },
+    { code: 'BP', label: 'BP', displayOrder: 2, leaderTier: 'senior' },
   ]) {
     if (!(await OrgLevels.exists({ companyId: String(allianz._id), code: rung.code }))) {
       await OrgLevels.create({
@@ -1464,6 +1477,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       });
     }
   }
+  await OrgLevels.updateMany(
+    { companyId: String(allianz._id), code: { $in: ['UM', 'SM'] }, status: 'active' },
+    { $set: { status: 'archived', archivedAt: clock.now() } },
+  ).exec();
   /*
    * **An archived rung nothing names** (P19.4-T5 AC-2, ADR-0213 §2; the 11-03 handover's B1-6): *Associate Business
    * Partner*, archived the day it was added, as Manulife and Sequis archived AAB and AB. No membership, setting or template
@@ -1489,7 +1506,8 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
     platformRole: 'super_admin', uncounted: true,
   });
   const kpm0417 = await office(String(prudential._id), '0417', 'BSD City Branch', {
-    ownerUserId: String(ownerUser._id),
+    ownerId: String(ownerUser._id),
+    ownerSince: new Date(clock.now().getTime() - OWNER_ASSIGNED_DAYS_AGO * 24 * 60 * 60 * 1000),
     address: 'Jl. Raya Serpong, Tangerang Selatan',
   });
   const office0417 = {
@@ -2489,7 +2507,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const owner0555User = await user('owner@kpm0555.test', 'Hendra Wijaya', { pronoun: 'he' });
   const kpm0555 = await office(String(prudential._id), '0555', 'Kelapa Gading Branch', {
-    ownerUserId: String(owner0555User._id),
+    ownerId: String(owner0555User._id),
     address: 'Jl. Boulevard Raya, Jakarta Utara',
   });
   const office0555 = {
@@ -2621,7 +2639,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const suspendedOwnerUser = await user('owner@kpm0999.test', 'Bagus Setiawan', { pronoun: 'he' });
   const kpm0999 = await office(String(prudential._id), '0999', 'Suspended Branch', {
-    ownerUserId: String(suspendedOwnerUser._id),
+    ownerId: String(suspendedOwnerUser._id),
     status: 'suspended',
   });
   await configure(String(kpm0999._id));
@@ -2668,7 +2686,7 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
 
   const salesTools = await seedSalesToolsFixture({
     clock, companyId: String(prudential._id), kpm0417: id0417, ownerMembershipId: owner.id,
-    ownerUserId: String(ownerUser._id), superAdminUserId: String(superAdmin._id),
+    ownerAccountId: String(ownerUser._id), superAdminUserId: String(superAdmin._id),
   });
 
   // ------------------- the Unit Dashboard: Indah's nomination, Sari's correction (Phase 15; `unit-dashboard-fixture.ts`)
@@ -3072,9 +3090,10 @@ export async function seedDemo(options: SeedOptions = {}): Promise<SeedResult> {
       createdAt: daysAgo(days),
     });
   }
-  await audited('kpm.owner_assigned', 'kpms', {
+  // ADR-0285: an owner is added — the audit log's word for it since the one-owner model went.
+  await audited('kpm.owner_added', 'kpms', {
     targetId: id0417,
-    after: { ownerUserId: String(ownerUser._id) },
+    after: { owners: [String(ownerUser._id)], userId: String(ownerUser._id) },
     createdAt: daysAgo(OWNER_ASSIGNED_DAYS_AGO),
   });
   await audited('kpm.suspended', 'kpms', {
@@ -4336,8 +4355,11 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   log((await seedTestAccountsFixture({ user, place: (userId) => place(office0417, userId, 'agent', ab, { joinedDaysAgo: 20 }) })).guide);
   // P19.23-T2 AC-3 (OD-420): 0418's Owner waits for a WhatsApp claim link, 0419's has never signed in.
   log((await seedOwnerWhatsAppFixture({ companyId: String(prudential._id), office, configure, user, placeOwner: (kpm, userId) => place(kpm, userId, 'ab', null, { joinedDaysAgo: 2 }) })).guide);
+
   // P19.23-T5 AC-3 (ADR-0279 §4): 0418 and 0419, the newest offices, on their 30-day trial (`subscription-fixture.ts`).
   log((await seedTrialSubscriptions({ clock, Kpms: Kpms as never })).guide);
+  // P19.27-T6 AC-1 (ADR-0285): 0602 Bekasi Barat's second owner, Sinta, invited — its first owner and its counts unchanged.
+  log((await seedKpmOwnersFixture({ clock })).guide);
   // P19.23-T6 (ADR-0279): Platform's audit rows, a Super Admin candidate, the WhatsApp number and an announcement.
   log((await seedPlatformConsoleFixture({
     clock, superAdminUserId: String(superAdmin._id), secondSuperAdminUserId: String(secondSuperAdmin._id), kpmId: id0417,
@@ -4345,6 +4367,10 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   })).guide);
   // P19.20 (ADR-0273): Riwayat's move, a second Admin, Riwayat unggah (`people-fixture.ts`).
   log((await seedPeopleFixture({ clock, kpmId: id0417, owner: { ...owner, userId: String(ownerUser._id) }, user, placeRemoved: (userId, leader, joinedDaysAgo, removedDaysAgo) => place(office0417, userId, 'agent', leader, { status: 'removed', joinedDaysAgo, removedDaysAgo }) })).guide);
+  // P19.28-T5 AC-1 (ADR-0286): Anggota's *Menunggu* — one *Diundang*, Fajar *Belum ada KPM* — and its *Keluar*.
+  log((await seedTambahUserFixture({
+    clock, kpmId: id0417, leaderMembershipId: sari.id, invitedByUserId: String(ownerUser._id), invitedByMembershipId: owner.id,
+  })).guide);
   log(activation3M.guide);
   log(`Profile photos (${avatars.images}, ${avatars.written} written): Agus, Arief and Tari — Tari's not-yet circle on `
     + 'New Hires, Arief\'s group row and Agus\'s own; everybody else initials. Sign in as agus@kpm0417.test.');

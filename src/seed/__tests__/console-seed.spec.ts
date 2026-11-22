@@ -43,7 +43,7 @@ describe('the demo seed for the Super Admin console (P19.23-T1)', () => {
   }, RUN_MS);
 
   it('P19.23-T1 AC-3 something needs action: an Owner who waits uninvited, and approvals waiting beside decided ones', async () => {
-    expect(await db().collection('kpms').countDocuments({ deletedAt: null, ownerUserId: null, 'pendingOwner.fullName': { $exists: true } }))
+    expect(await db().collection('kpms').countDocuments({ deletedAt: null, 'owners.0': { $exists: false }, 'pendingOwner.fullName': { $exists: true } }))
       .toBeGreaterThan(0);
     expect(await db().collection('kpmRequests').countDocuments({ status: 'pending', deletedAt: null })).toBeGreaterThan(0);
     expect(await db().collection('kpmRequests').countDocuments({ status: { $in: ['approved', 'declined'] }, deletedAt: null }))

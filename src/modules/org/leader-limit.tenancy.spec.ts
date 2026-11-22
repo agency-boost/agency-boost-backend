@@ -27,6 +27,7 @@ import { Membership, MembershipSchema } from './membership.schema';
 import { OnboardingService } from './onboarding.service';
 import { JoinRequestRepository, MembershipHistoryRepository } from './org.repositories';
 import { RoleChangeService } from './role-change.service';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 
 const KPM_A = new mongoose.Types.ObjectId().toString();
 const KPM_B = new mongoose.Types.ObjectId().toString();
@@ -179,7 +180,7 @@ describe('the leader limit', () => {
 
     it('counts the Owner, made the root AB when assigned', async () => {
       const ownerId = await person('owner@kpm0602.test');
-      await tenants.assignOwner(RequestContext.platform('sa-1'), KPM_A, { userId: ownerId });
+      await tenants.installAccountOwner(RequestContext.platform('sa-1'), KPM_A, ownerId);
       expect(await used(KPM_A)).toBe(1);
     });
 
@@ -284,9 +285,9 @@ describe('the leader limit', () => {
       await limit(KPM_A, 3);
       const newcomer = await person('new-owner@kpm0602.test');
       await expect(
-        tenants.assignOwner(RequestContext.platform('sa-1'), KPM_A, { userId: newcomer }),
+        tenants.installAccountOwner(RequestContext.platform('sa-1'), KPM_A, newcomer),
       ).rejects.toMatchObject(LIMIT);
-      expect((await kpms.findById(KPM_A).lean().exec())!.ownerUserId ?? null).toBeNull();
+      expect(ownerUserIdsOf(await kpms.findById(KPM_A).lean().exec() as never)).toEqual([]);
       expect(await mongoose.model(Membership.name).countDocuments({ userId: newcomer })).toBe(0);
     });
 
@@ -294,8 +295,10 @@ describe('the leader limit', () => {
       await limit(KPM_A, 3);
       const sitting = (await members.findById(office(KPM_A), sub))!.userId;
       await expect(
-        tenants.assignOwner(RequestContext.platform('sa-1'), KPM_A, { userId: sitting }),
-      ).resolves.toMatchObject({ ownerUserId: sitting, leadersUsed: 3 });
+        tenants.installAccountOwner(RequestContext.platform('sa-1'), KPM_A, sitting),
+      ).resolves.toBeUndefined();
+      expect(ownerUserIdsOf(await kpms.findById(KPM_A).lean().exec() as never)).toContain(sitting);
+      expect(await used(KPM_A)).toBe(3);
     });
   });
 
@@ -480,11 +483,11 @@ describe('the leader limit', () => {
 
     it('the Owner’s assignment: refused at the limit, the office’s Owner unchanged', async () => {
       await approvals.tag(rootCtx, first.membershipId!);
-      const before = (await kpms.findById(KPM_A).lean().exec())!.ownerUserId ?? null;
+      const before = ownerUserIdsOf(await kpms.findById(KPM_A).lean().exec() as never);
       await expect(
-        tenants.assignOwner(RequestContext.platform('sa-1'), KPM_A, { userId: second.userId }),
+        tenants.installAccountOwner(RequestContext.platform('sa-1'), KPM_A, second.userId),
       ).rejects.toMatchObject(LIMIT);
-      expect((await kpms.findById(KPM_A).lean().exec())!.ownerUserId ?? null).toBe(before);
+      expect(ownerUserIdsOf(await kpms.findById(KPM_A).lean().exec() as never)).toEqual(before);
       expect(await row(second)).toMatchObject({ status: 'pending' });
       expect(await used(KPM_A)).toBe(3);
     });
@@ -492,7 +495,7 @@ describe('the leader limit', () => {
     it('below the limit, the same approval and assignment are served', async () => {
       await limit(KPM_A, 4);
       await approvals.approve(rootCtx, (await requestOf(first)).requestId);
-      await tenants.assignOwner(RequestContext.platform('sa-1'), KPM_A, { userId: second.userId });
+      await tenants.installAccountOwner(RequestContext.platform('sa-1'), KPM_A, second.userId);
       expect(await row(second)).toMatchObject({ status: 'active' });
       expect(await used(KPM_A)).toBe(4);
     });

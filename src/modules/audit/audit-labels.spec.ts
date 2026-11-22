@@ -23,6 +23,8 @@ const NOT_ACTIONS = new Map<string, string>([
   ['commitments.month', 'a lead’s field path in the demo seed'],
   ['discount.percent', 'a quote’s field, named by a refusal (`billing/price-quote.ts`)'],
   ['kpm.owner_failed', 'why a half-made KPM was undone, written in `kpm.discarded`’s `after.why`'],
+  ['member.place_failed', 'why a KPM made with *Masukkan* was undone, in `kpm.discarded`’s `after.why` (P19.28-T1 AC-3)'],
+  ['user_invitation.failed', 'why a KPM made with *Tambah user* was undone, in `kpm.discarded`’s `after.why` (P19.28-T1 AC-3)'],
   ['owner.email', 'a field `POST /admin/tenants` refuses, named in `details.field`'],
   ['it.code', 'a field path in the activation service'],
   ['it.source', 'a field path in the activation service'],

@@ -29,6 +29,7 @@ import { OwnerInvitations } from './owner-invitations';
 import { OwnerInvitesController, OwnerWhatsAppInvitationController } from './owner-invites.controller';
 import { TEMPLATE_LIBRARY } from './template-library';
 import { TenantService } from './tenant.service';
+import { ownerUserIdsOf } from './kpm-owners';
 
 const NOW = new Date('2026-11-20T03:00:00Z');
 const DAY = 24 * 60 * 60_000;
@@ -225,21 +226,21 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
         .toEqual({ kpmId, kpmName: 'Serpong Branch' });
 
       const row = await kpmRow(kpmId);
-      expect(row?.ownerUserId).toBe(budi);
+      expect(ownerUserIdsOf(row as never)).toEqual([budi]);
       expect(row?.pendingOwner).toBeNull();
       const membership = await col('memberships').findOne({ kpmId, userId: budi });
       expect(membership).toMatchObject({ status: 'active', leaderId: null, role: 'ab' });
       // The number the Super Admin typed is kept on an account that had none.
       expect((await col('users').findOne({ _id: new mongoose.Types.ObjectId(budi) }))?.phone).toBe('+6281234567890');
-      const audit = await col('auditLog').findOne({ action: 'kpm.owner_assigned', targetId: kpmId });
-      expect(audit).toMatchObject({ kpmId, after: { ownerUserId: budi, via: 'whatsapp_claim' } });
+      const audit = await col('auditLog').findOne({ action: 'kpm.owner_added', targetId: kpmId });
+      expect(audit).toMatchObject({ kpmId, after: { owners: [budi], userId: budi, via: 'whatsapp_claim', pendingOwner: 'BUDI HARTONO' } });
 
       // Single use: a second tap, or anybody else, meets *already used*.
       const other = await account('Sari Puspita', prudential);
       signedInAs(other);
       expect((await api().post(`/api/owner-invites/${token}/accept`).expect(404)).body.error.message).toContain('already used');
       expect((await api().get(`/api/owner-invites/${token}`).expect(404)).body.error.message).toContain('already used');
-      expect((await kpmRow(kpmId))?.ownerUserId).toBe(budi);
+      expect(ownerUserIdsOf(await kpmRow(kpmId) as never)).toEqual([budi]);
     });
 
     it('P19.23-T2 AC-3 an account of another company is refused before the link is spent, which still works', async () => {
@@ -259,7 +260,7 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
       const token = tokenOf((await invite(kpmId).expect(200)).body.link);
       signedInAs(await account('Budi Hartono', prudential, { emailVerifiedAt: null }));
       expect((await api().post(`/api/owner-invites/${token}/accept`).expect(409)).body.error.code).toBe('AUTH_EMAIL_NOT_VERIFIED');
-      expect((await kpmRow(kpmId))?.ownerUserId).toBeNull();
+      expect(ownerUserIdsOf(await kpmRow(kpmId) as never)).toEqual([]);
       expect(await col('memberships').countDocuments({ kpmId })).toBe(0);
     });
 
@@ -267,7 +268,7 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
       const kpmId = await pendingKpm();
       const token = tokenOf((await invite(kpmId).expect(200)).body.link);
       const picked = await account('Picked By Super Admin', prudential);
-      await tenants.assignOwner(SUPER_ADMIN, kpmId, { userId: picked });
+      await tenants.installAccountOwner(SUPER_ADMIN, kpmId, picked);
       signedInAs(await account('Budi Hartono', prudential));
       expect((await api().post(`/api/owner-invites/${token}/accept`).expect(404)).body.error.message).toContain('already used');
     });
@@ -280,11 +281,15 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
     });
   });
 
-  describe('the password link, for an Owner whose account never signed in', () => {
+  describe('the password link, for an Owner whose account is not theirs yet', () => {
+    /**
+     * An Owner account the Super Admin made for somebody: never signed in, and no address proven — not theirs yet, so
+     * it reads *Belum diundang* and may be sent a link (OD-475). `lastLoginAt` set makes it theirs.
+     */
     async function ownedKpm(lastLoginAt: Date | null) {
-      const owner = await account('Wulan Kartika', prudential, { phone: '+6281277006020', lastLoginAt });
+      const owner = await account('Wulan Kartika', prudential, { phone: '+6281277006020', lastLoginAt, emailVerifiedAt: null });
       const made = await tenants.createKpm(SUPER_ADMIN, { companyId: prudential, code: '0602', branchName: 'Bandung Dago' });
-      await tenants.assignOwner(SUPER_ADMIN, made._id, { userId: owner });
+      await tenants.installAccountOwner(SUPER_ADMIN, made._id, owner);
       return { kpmId: made._id, owner };
     }
 
@@ -304,10 +309,35 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
         .toMatchObject({ userId: owner, channel: 'whatsapp', kind: 'password' });
     });
 
+    it('P19.27-T1 AC-4 Kirim ulang undangan names one of several owners: the second, invited, gets her own password link', async () => {
+      const { kpmId, owner } = await ownedKpm(new Date(NOW.getTime() - DAY));
+      const sinta = await account('Sinta Maharani', prudential, { phone: '+6281299990000', emailVerifiedAt: null });
+      await tenants.installAccountOwner(SUPER_ADMIN, kpmId, sinta);
+      // The first owner has signed in: the route with no one named answers as before.
+      expect((await invite(kpmId).expect(409)).body.error.details.reason).toBe('signed_in');
+      const res = await api().post(`/api/admin/tenants/${kpmId}/owner/whatsapp-invitation`).send({ userId: sinta }).expect(200);
+      expect(res.body).toMatchObject({ kind: 'password', ownerName: 'Sinta Maharani', ownerPhone: '+6281299990000' });
+      expect((await col('memberships').findOne({ kpmId, userId: sinta }))?.invitedAt).toEqual(NOW);
+      expect((await col('memberships').findOne({ kpmId, userId: owner }))?.invitedAt ?? null).toBeNull();
+      // Somebody who is not one of its owners is 404, as another KPM's person is; a malformed id 400.
+      const stranger = await account('Joko Prasetyo', prudential);
+      await api().post(`/api/admin/tenants/${kpmId}/owner/whatsapp-invitation`).send({ userId: stranger }).expect(404);
+      await api().post(`/api/admin/tenants/${kpmId}/owner/whatsapp-invitation`).send({ userId: 'nope' }).expect(400);
+    });
+
     it('P19.23-T2 AC-3 an Owner who has signed in is invited to nothing (409 signed_in)', async () => {
       const { kpmId } = await ownedKpm(new Date(NOW.getTime() - DAY));
       const res = await invite(kpmId).expect(409);
       expect(res.body.error).toMatchObject({ code: 'TENANT_OWNER_NOT_INVITABLE', details: { reason: 'signed_in' } });
+    });
+
+    it('OD-475 an Owner whose account is already theirs — its address proven, never signed in — is invited to nothing', async () => {
+      const { kpmId, owner } = await ownedKpm(null);
+      await col('users').updateOne({ _id: new mongoose.Types.ObjectId(owner) }, { $set: { emailVerifiedAt: NOW } });
+      const res = await invite(kpmId).expect(409);
+      expect(res.body.error).toMatchObject({ code: 'TENANT_OWNER_NOT_INVITABLE', details: { reason: 'signed_in' } });
+      expect(res.body.error.message).toContain('already has their own account');
+      expect((await col('memberships').findOne({ kpmId, userId: owner }))?.invitedAt ?? null).toBeNull();
     });
 
     it('P19.23-T2 AC-3 a KPM with nobody named has nobody to invite (409 no_owner); an unknown one is 404', async () => {
@@ -342,7 +372,7 @@ describe('P19.23-T2 AC-3 the KPM Owner invited by WhatsApp (OD-420)', () => {
       session.current = new RequestContext('u-owner', 'none', OWNER.membership!, 'root', null, false, true);
       await invite(kpmId).expect(403);
       await api().post(`/api/owner-invites/${token}/accept`).expect(403);
-      expect((await kpmRow(kpmId))?.ownerUserId).toBeNull();
+      expect(ownerUserIdsOf(await kpmRow(kpmId) as never)).toEqual([]);
     });
 
     it(`P19.23-T2 AC-3 at most ${OWNER_WHATSAPP_LIMIT} links an hour for one KPM, then 429`, async () => {

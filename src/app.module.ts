@@ -345,6 +345,15 @@ import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { TenantService } from '@/modules/tenants/tenant.service';
 import { OwnerInvitations } from '@/modules/tenants/owner-invitations';
 import { OwnerClaims } from '@/modules/tenants/owner-claims.service';
+import { KpmOwnersController } from '@/modules/tenants/kpm-owners.controller';
+import { KpmOwnersService } from '@/modules/tenants/kpm-owners.service';
+// P19.28 (ADR-0286): *Tambah user* and *Masukkan* — the shared sheet's invitation, the placement and the link.
+import { AddUserController, PlacementController, UserInviteLinkController } from '@/modules/tenants/add-user.controller';
+import { AddUserService } from '@/modules/tenants/add-user.service';
+import { AnggotaWaiting } from '@/modules/reporting/platform/anggota-waiting';
+import { AnggotaWaitingController } from '@/modules/reporting/platform/anggota-waiting.controller';
+import { UserInvitationRepository } from '@/modules/org/user-invitation.repository';
+import { UserInvitation, UserInvitationSchema } from '@/modules/org/user-invitation.schema';
 import { OwnerInvitesController, OwnerWhatsAppInvitationController } from '@/modules/tenants/owner-invites.controller';
 import { KpmRequest, KpmRequestSchema } from '@/modules/tenants/kpm-request.schema';
 import { KpmRequestService } from '@/modules/tenants/kpm-request.service';
@@ -556,6 +565,8 @@ import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
       // P18.8-T3 (ADR-0170): a leader's invites, and the requests to move a member to another leader.
       { name: MemberInvite.name, schema: MemberInviteSchema },
       { name: TransferRequest.name, schema: TransferRequestSchema },
+      // P19.28-T1 (ADR-0286 §2): *Tambah user*'s invitations — the placement, until the person accepts.
+      { name: UserInvitation.name, schema: UserInvitationSchema },
       // P19.20-T5 (ADR-0273 §6): *Riwayat unggah*, one record per member file saved.
       { name: RosterImportRecord.name, schema: RosterImportRecordSchema },
       { name: Group.name, schema: GroupSchema },
@@ -648,6 +659,13 @@ import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
     // P19.23-T2 AC-3 (OD-420): the KPM Owner's invitation by WhatsApp, and the claim link they open.
     OwnerWhatsAppInvitationController,
     OwnerInvitesController,
+    // P19.27 (ADR-0285): a KPM's owners, added and removed from inside it.
+    KpmOwnersController,
+    // P19.28 (ADR-0286): *Tambah user*, *Masukkan* and the invitation link.
+    AddUserController,
+    PlacementController,
+    UserInviteLinkController,
+    AnggotaWaitingController,
     // P13.2-T6: a company's named templates (ADR-0115).
     NamedTemplateController,
     // P19.23-T4 (ADR-0278): *Terbitkan ke KPM*, and *Perusahaan baru* from the Default template or a copy.
@@ -975,6 +993,11 @@ import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
     OwnerInvitations,
     // P19.23-T2 AC-3 (OD-420): the Owner invited by WhatsApp — the claim link and the password link handed over.
     OwnerClaims,
+    KpmOwnersService,
+    // P19.28 (ADR-0286): *Tambah user* and *Masukkan*, and their invitations.
+    AddUserService,
+    UserInvitationRepository,
+    AnggotaWaiting,
     // P19.4-T3 (ADR-0211), P19.23-T5 (ADR-0279): Langganan per KPM, Konfirmasi paket and the offer's PDF.
     BillingService,
     PlatformTeamService,

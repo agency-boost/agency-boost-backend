@@ -5,6 +5,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { Membership, MembershipSchema } from '@/modules/org/membership.schema';
 import { ContextResolver } from './context-resolver';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { ownersOf } from '../../../test/owners';
 
 describe('ContextResolver', () => {
   let resolver: ContextResolver;
@@ -31,7 +32,7 @@ describe('ContextResolver', () => {
   }
 
   /**
-   * The membership row is what resolves a context now, not `kpms.ownerUserId`. The
+   * The membership row is what resolves a context now, not `kpms.owners`. The
    * synthetic owner membership Phase 2 fabricated is gone: a context built from a row
    * that does not exist cannot carry a direct count, and leadership is that count.
    */
@@ -69,7 +70,7 @@ describe('ContextResolver', () => {
   it('resolves a KPM Owner to their office', async () => {
     const u = await makeUser();
     const kpm = await mongoose.model(Kpm.name).create({
-      companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(u._id),
+      companyId: 'c1', code: '0417', branchName: 'BSD', owners: ownersOf(String(u._id)),
     });
     await join(String(u._id), String(kpm._id));
     const ctx = await resolver.resolve(String(u._id));
@@ -165,14 +166,14 @@ describe('ContextResolver', () => {
   it('resolves roles from the database, not the token — a revoked grant bites at once', async () => {
     const u = await makeUser();
     const kpm = await mongoose.model(Kpm.name).create({
-      companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(u._id),
+      companyId: 'c1', code: '0417', branchName: 'BSD', owners: ownersOf(String(u._id)),
     });
     await join(String(u._id), String(kpm._id));
     expect((await resolver.resolve(String(u._id))).membership?.isKpmOwner).toBe(true);
 
     // Ownership moves; the membership stays. They are still in the office, no longer
     // running it — which is exactly what a transfer does.
-    await mongoose.model(Kpm.name).updateOne({ _id: kpm._id }, { $set: { ownerUserId: null } });
+    await mongoose.model(Kpm.name).updateOne({ _id: kpm._id }, { $set: { owners: ownersOf(null) } });
     const after = await resolver.resolve(String(u._id));
     expect(after.membership).not.toBeNull();
     expect(after.membership?.isKpmOwner).toBe(false);
@@ -195,7 +196,7 @@ describe('ContextResolver', () => {
     const u = await makeUser();
     const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD',
-      ownerUserId: String(u._id), status: 'suspended',
+      owners: ownersOf(String(u._id)), status: 'suspended',
     });
     await join(String(u._id), String(kpm._id));
     await expect(resolver.resolve(String(u._id))).rejects.toMatchObject({
@@ -207,7 +208,7 @@ describe('ContextResolver', () => {
     const u = await makeUser();
     const kpm = await mongoose.model(Kpm.name).create({
       companyId: 'c1', code: '0417', branchName: 'BSD',
-      ownerUserId: String(u._id), status: 'archived',
+      owners: ownersOf(String(u._id)), status: 'archived',
     });
     await join(String(u._id), String(kpm._id));
     await expect(resolver.resolve(String(u._id))).rejects.toMatchObject({

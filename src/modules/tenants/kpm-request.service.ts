@@ -310,7 +310,8 @@ export class KpmRequestService {
         madeHere = true;
         await this.requests.updateOne({ _id: request._id }, { $set: { createdKpmId: kpmId } }).exec();
       }
-      await this.tenants.assignOwner(ctx, kpmId, { userId: String(applicant._id) });
+      // The applicant, the KPM's first owner (ADR-0285 §1).
+      await this.tenants.installAccountOwner(ctx, kpmId, String(applicant._id));
     } catch (err) {
       if (kpmId && madeHere) {
         await this.tenants.discardHalfMade(ctx, kpmId, 'kpm_request.approval_failed');
@@ -341,7 +342,7 @@ export class KpmRequestService {
       targetCollection: 'kpmRequests',
       targetId: requestId,
       before: { status: 'pending', companyId: request.companyId },
-      after: { status: 'approved', createdKpmId: kpmId, companyId, ownerUserId: String(applicant._id) },
+      after: { status: 'approved', createdKpmId: kpmId, companyId, firstOwnerUserId: String(applicant._id) },
     });
 
     return this.queue(ctx);

@@ -16,6 +16,7 @@ import { KpmOverviewService } from '../kpm-overview.service';
 import { KpmOverviewController } from '../reporting.controller';
 import { PlatformReadsController } from './platform-reads.controller';
 import { PlatformReads } from './platform-reads.service';
+import { ownersOf } from '../../../../test/owners';
 
 /** A second company, its KPM, and a person in a KPM of each company (SA case 3). */
 const MANULIFE = '66f0000000000000000000c2';
@@ -27,6 +28,8 @@ const KPM_C = '66f0000000000000000000d1';
  */
 const MEMBER_FIELDS = [
   'agentCode', 'avatarUrl', 'company', 'fullName', 'invitation', 'joinedOn', 'kpm', 'lastActive', 'lastActiveOn', 'leader',
+  // P19.28-T3 AC-5: *Keluar <Mon YYYY>*, the day the membership ended — `null` while it has not.
+  'leftOn',
   'membershipId', 'role', 'status', 'testAccount', 'userId',
 ].sort();
 
@@ -55,7 +58,7 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
   beforeAll(async () => {
     h = await startComplianceHarness();
     const owner = await h.office.userIdOf('OWNER');
-    await db().collection('kpms').updateOne({ _id: oid(KPM_A) }, { $set: { ownerUserId: owner } });
+    await db().collection('kpms').updateOne({ _id: oid(KPM_A) }, { $set: { owners: ownersOf(owner) } });
     await db().collection('users').updateOne({ _id: oid(await h.office.userIdOf('INDAH')) }, { $set: { phone: '+6281234500001' } });
     await db().collection('memberships').updateOne({ _id: oid(h.id('DIMAS')) }, { $set: { invitedAt: new Date('2026-09-01T03:00:00Z') } });
     await db().collection('memberships').updateOne({ _id: oid(h.id('ADMIN')) }, { $set: { 'adminAccess.isKpmAdmin': true } });
@@ -443,7 +446,7 @@ describe('P19.4-T3 the Super Admin’s reads across KPMs (ADR-0207)', () => {
 
     it('P19.4-T3 AC-1 a malformed KPM id that reaches the service finds nobody — never a cast error', async () => {
       expect(await reads.members(SUPER_ADMIN, { kpmId: 'not-an-id' })).toEqual({
-        rows: [], page: 1, pageSize: PLATFORM_READ.PAGE_SIZE, total: 0, kpmCount: 0,
+        rows: [], page: 1, pageSize: PLATFORM_READ.PAGE_SIZE, total: 0, kpmCount: 0, counted: { members: 0, kpms: 0 },
       });
     });
 

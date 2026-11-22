@@ -3,6 +3,7 @@ import { FixedClock } from '@/common/clock/clock.port';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { PLATFORM_CONSOLE_SEED, seedPlatformConsoleFixture } from '../platform-console-fixture';
+import { ownersOf } from '../../../test/owners';
 
 const SA = '66f00000000000000000e001';
 const SECOND = '66f00000000000000000e002';
@@ -24,9 +25,9 @@ describe('the platform console seed (P19.23-T6)', () => {
     await startMongo();
     await clearCollections();
     const kpms = mongoose.models[Kpm.name] ?? mongoose.model(Kpm.name, KpmSchema);
-    await kpms.create({ _id: KPM_0417, companyId: 'c1', code: '0417', branchName: 'BSD City Branch', ownerUserId: OWNER_A, status: 'active' });
-    await kpms.create({ companyId: 'c1', code: '0603', branchName: 'Tangerang', ownerUserId: OWNER_B, status: 'active' });
-    await kpms.create({ companyId: 'c1', code: '0999', branchName: 'Suspended', ownerUserId: OWNER_A, status: 'suspended' });
+    await kpms.create({ _id: KPM_0417, companyId: 'c1', code: '0417', branchName: 'BSD City Branch', owners: ownersOf(OWNER_A), status: 'active' });
+    await kpms.create({ companyId: 'c1', code: '0603', branchName: 'Tangerang', owners: ownersOf(OWNER_B), status: 'active' });
+    await kpms.create({ companyId: 'c1', code: '0999', branchName: 'Suspended', owners: ownersOf(OWNER_A), status: 'suspended' });
   }, 120_000);
 
   afterAll(async () => {

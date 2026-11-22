@@ -14,6 +14,7 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { ImpersonationService, IMPERSONATION_MAX_MINUTES } from './impersonation.service';
 import { Hs256TokenSigner } from './token-signer';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
+import { ownersOf } from '../../../test/owners';
 
 const NOW = new Date('2026-09-05T02:00:00Z');
 
@@ -145,7 +146,7 @@ describe('ImpersonationService', () => {
     it('refuses an Owner of a suspended office, 409 with the office and the reason', async () => {
       const target = await makeUser();
       await mongoose.model(Kpm.name).create({
-        companyId: 'c1', code: '0417', branchName: 'BSD', ownerUserId: String(target._id),
+        companyId: 'c1', code: '0417', branchName: 'BSD', owners: ownersOf(String(target._id)),
         status: 'suspended',
       });
       const refused = await service.start(superAdmin, String(target._id), 'r').catch((e) => e);
@@ -267,7 +268,7 @@ describe('ImpersonationService', () => {
       const ownerUser = await makeUser();
       const kpm = await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0417', branchName: 'B', timezone: 'Asia/Jakarta',
-        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+        locale: 'id-ID', currency: 'IDR', status: 'active', owners: ownersOf(String(ownerUser._id)),
       } as never);
       void kpm;
       const target = await makeUser();
@@ -289,7 +290,7 @@ describe('ImpersonationService', () => {
       const ownerUser = await makeUser();
       await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0418', branchName: 'B', timezone: 'Asia/Jakarta',
-        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+        locale: 'id-ID', currency: 'IDR', status: 'active', owners: ownersOf(String(ownerUser._id)),
       } as never);
 
       await service.start(superAdmin, String(ownerUser._id), 'ticket 42');
@@ -318,7 +319,7 @@ describe('ImpersonationService', () => {
       const ownerUser = await makeUser();
       await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0419', branchName: 'B', timezone: 'Asia/Jakarta',
-        locale: 'id-ID', currency: 'IDR', status: 'active', ownerUserId: String(ownerUser._id),
+        locale: 'id-ID', currency: 'IDR', status: 'active', owners: ownersOf(String(ownerUser._id)),
       } as never);
 
       // A Super Admin holds the grant, so this is allowed.
@@ -342,7 +343,7 @@ describe('ImpersonationService', () => {
       const ownerUser = await makeUser();
       const kpm = await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0420', branchName: 'BSD', timezone: 'Asia/Jakarta', locale: 'id-ID', currency: 'IDR',
-        status: 'active', ownerUserId: String(ownerUser._id),
+        status: 'active', owners: ownersOf(String(ownerUser._id)),
       } as never) as unknown as { _id: unknown };
       const target = await makeUser();
       await mongoose.model(Membership.name).create({
@@ -379,7 +380,7 @@ describe('ImpersonationService', () => {
       const owner = await makeUser();
       await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: '0421', branchName: 'BSD', timezone: 'Asia/Jakarta', status: 'active',
-        ownerUserId: String(owner._id),
+        owners: ownersOf(String(owner._id)),
       } as never);
 
       await service.start(superAdmin, String(owner._id), 'Ticket 42');
@@ -424,7 +425,7 @@ describe('ImpersonationService', () => {
       const ownerUser = await makeUser({ fullName: 'Rina Owner' });
       const kpm = await mongoose.model(Kpm.name).create({
         companyId: 'c1', code: `${Math.floor(Math.random() * 9000) + 1000}`, branchName: 'BSD',
-        timezone: 'Asia/Jakarta', locale: 'id-ID', currency: 'IDR', status, ownerUserId: String(ownerUser._id),
+        timezone: 'Asia/Jakarta', locale: 'id-ID', currency: 'IDR', status, owners: ownersOf(String(ownerUser._id)),
       } as never) as unknown as { _id: unknown };
       const kpmId = String(kpm._id);
       const join = async (userId: string, over: Record<string, unknown> = {}) =>

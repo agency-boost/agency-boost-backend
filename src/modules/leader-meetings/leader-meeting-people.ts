@@ -7,7 +7,8 @@ import { DEFAULT_TENANT_TIMEZONE, LEADER_CLASSES } from '@/domain/constants';
 import { withoutTestAccounts } from '@/modules/org/counted-members';
 import { MemberNames } from '@/modules/org/member-names.service';
 import { MembershipRepository } from '@/modules/org/membership.repository';
-import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
+import { Kpm, KpmDocument, type KpmOwner } from '@/modules/tenants/kpm.schema';
+import { ownerUserIdsOf } from '@/modules/tenants/kpm-owners';
 import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import type { EditorStanding, ForumEditor } from './leader-meeting.schema';
 import { firstNameOf, type ForumPerson } from './leader-meeting.view';
@@ -29,7 +30,8 @@ export interface ForumReader {
 export interface ForumOffice {
   timezone: string;
   branch: string;
-  ownerUserId: string | null;
+  /** Every owner's account, in order of `since` (ADR-0285 §3): each one an editor as the Owner. */
+  ownerUserIds: string[];
   companyId: string | null;
 }
 
@@ -89,18 +91,18 @@ export class LeaderMeetingPeople {
   }
 
   async office(ctx: RequestContext): Promise<ForumOffice> {
-    const row = await this.kpms.findById(ctx.kpmId).select('timezone branchName ownerUserId companyId').lean().exec();
-    const kpm = row as { timezone?: string; branchName?: string; ownerUserId?: string | null; companyId?: string } | null;
+    const row = await this.kpms.findById(ctx.kpmId).select('timezone branchName owners companyId').lean().exec();
+    const kpm = row as { timezone?: string; branchName?: string; owners?: KpmOwner[]; companyId?: string } | null;
     return {
       timezone: kpm?.timezone ?? DEFAULT_TENANT_TIMEZONE,
       branch: kpm?.branchName ?? '',
-      ownerUserId: kpm?.ownerUserId ?? null,
+      ownerUserIds: ownerUserIdsOf(kpm),
       companyId: kpm?.companyId ?? null,
     };
   }
 
   /**
-   * **The editors now** (D-coeditors): the Owner — the active membership of the office's owning account — then the
+   * **The editors now** (D-coeditors): the owners — the active memberships of the office's owning accounts — then the
    * Admins, then every other core leader (tagged, on a leader rung), each once, by membership id and rung. No test
    * account (ADR-0267 §1).
    */
@@ -110,7 +112,7 @@ export class LeaderMeetingPeople {
       withoutTestAccounts({
         status: 'active',
         $or: [
-          ...(office.ownerUserId ? [{ userId: office.ownerUserId }] : []),
+          ...(office.ownerUserIds.length > 0 ? [{ userId: { $in: office.ownerUserIds } }] : []),
           { 'adminAccess.isKpmAdmin': true },
           // ADR-0159 §1: a core leader is tagged **and** a leader by rung; a tagged Agent is nobody's editor.
           { isCoreLeader: true, role: { $in: [...LEADER_CLASSES] } },
@@ -118,13 +120,14 @@ export class LeaderMeetingPeople {
       }),
       { projection: { userId: 1, orgLevelCode: 1, role: 1, isCoreLeader: 1, adminAccess: 1 } },
     );
-    const owner = office.ownerUserId ? rows.find((row) => row.userId === office.ownerUserId) ?? null : null;
+    // Every owner an editor as the Owner (ADR-0285 §3), in order of `since`.
+    const owners = office.ownerUserIds.flatMap((id) => rows.filter((row) => row.userId === id));
     const editor = (row: (typeof rows)[number], as: EditorStanding): ForumEditor => ({
       membershipId: String(row._id), as, rungCode: row.orgLevelCode, tagged: isEffectiveCoreLeader(row),
     });
-    const others = rows.filter((row) => row !== owner);
+    const others = rows.filter((row) => !owners.includes(row));
     return [
-      ...(owner ? [editor(owner, 'owner')] : []),
+      ...owners.map((row) => editor(row, 'owner')),
       ...others.filter((row) => row.adminAccess?.isKpmAdmin === true).map((row) => editor(row, 'admin')),
       ...others.filter((row) => row.adminAccess?.isKpmAdmin !== true && isEffectiveCoreLeader(row))
         .map((row) => editor(row, 'core_leader')),

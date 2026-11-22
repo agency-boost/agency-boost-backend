@@ -12,11 +12,13 @@ import { AuditService } from '@/modules/audit/audit.service';
 import { AuthToken, type AuthTokenDocument } from '@/modules/auth/auth-token.schema';
 import { PasswordService } from '@/modules/auth/password.service';
 import { RateLimiter } from '@/modules/auth/rate-limiter';
+import { ownsAccount } from '@/modules/org/invitation-state';
 import { MembershipRepository } from '@/modules/org/membership.repository';
 import { can } from '@/modules/rbac/permissions';
 import { User, type UserDocument } from '@/modules/users/user.schema';
 import { Company, type CompanyDocument } from './company.schema';
 import { Kpm, type KpmDocument } from './kpm.schema';
+import { firstOwnerOf, HAS_NO_OWNER, isOwnerOf, ownerCountOf } from './kpm-owners';
 import { OWNER_CLAIM_REFUSALS } from './owner-claims.messages';
 import { TenantService } from './tenant.service';
 import { TENANTS_REFUSALS } from './tenants.messages';
@@ -79,7 +81,7 @@ export interface OwnerInviteAccepted {
  *   case, as a member's invite link already travels by WhatsApp (`inviteWhatsAppLink`) — the same risk, the same answer.
  *
  * Every send is audited `kpm.owner_invited` with `channel: 'whatsapp'`; the claim is audited in the KPM's log as
- * `kpm.owner_assigned`, its actor the person who claimed. An Owner who has signed in is invited to nothing (`409
+ * `kpm.owner_added` (ADR-0285), its actor the person who claimed. An Owner who has signed in is invited to nothing (`409
  * TENANT_OWNER_NOT_INVITABLE`, `signed_in`), and a KPM with no Owner named has nobody to invite (`no_owner`).
  */
 @Injectable()
@@ -98,12 +100,13 @@ export class OwnerClaims {
   ) {}
 
   /**
-   * ***Kirim undangan* by WhatsApp** (`POST /admin/tenants/:id/owner/whatsapp-invitation`): a fresh link for the KPM's
-   * Owner — the claim link for one named with no email, the password link for an account never signed in — and what the
+   * ***Kirim undangan* by WhatsApp** (`POST /admin/tenants/:id/owner/whatsapp-invitation`): a fresh link for one of the
+   * KPM's owners — `forUserId`, else the first (ADR-0285; *Kirim ulang undangan* on an owner's ⋯) — the claim link for
+   * one named with no email, the password link for an account never signed in — and what the
    * screen needs to write the message. Refused before anything is written: `404` for an unknown KPM, `409
    * TENANT_OWNER_NOT_INVITABLE` for no Owner or one who has signed in, `429` past `OWNER_WHATSAPP_LIMIT` an hour.
    */
-  async invite(ctx: RequestContext, kpmId: string, appOrigin: string): Promise<OwnerWhatsAppInvitation> {
+  async invite(ctx: RequestContext, kpmId: string, appOrigin: string, forUserId?: string): Promise<OwnerWhatsAppInvitation> {
     if (!can(ctx, 'kpm:assign_owner')) throw new PermissionDeniedException('kpm:assign_owner');
     const kpm = isValidObjectId(kpmId) ? await this.kpms.findOne({ _id: kpmId, deletedAt: null }).exec() : null;
     if (!kpm) throw new NotFoundException('KPM');
@@ -111,11 +114,18 @@ export class OwnerClaims {
     const say = TENANTS_REFUSALS.TENANT_OWNER_NOT_INVITABLE;
     const refusal = (reason: 'no_owner' | 'signed_in', sentence: Sentence<typeof ErrorCode.TENANT_OWNER_NOT_INVITABLE>) =>
       new DomainException(ErrorCode.TENANT_OWNER_NOT_INVITABLE, sentence, HttpStatus.CONFLICT, { reason, kpmId });
-    const owner = kpm.ownerUserId && isValidObjectId(kpm.ownerUserId)
-      ? await this.users.findOne({ _id: kpm.ownerUserId, deletedAt: null }).exec()
+    /*
+     * **Which owner** (ADR-0285; P19.27-T2 AC-3, *Kirim ulang undangan*): the one named — who must be one of the KPM's
+     * owners (`404` otherwise, as another KPM's person is) — else the first owner, as when the KPM had one.
+     */
+    if (forUserId !== undefined && !isOwnerOf(kpm, forUserId)) throw new NotFoundException('Membership');
+    const chosen = forUserId ?? firstOwnerOf(kpm)?.userId ?? null;
+    const owner = chosen && isValidObjectId(chosen)
+      ? await this.users.findOne({ _id: chosen, deletedAt: null }).exec()
       : null;
     if (!owner && !kpm.pendingOwner) throw refusal('no_owner', say.noOwner);
-    if (owner?.lastLoginAt) throw refusal('signed_in', say.signedIn({ name: owner.fullName }));
+    // An account already the owner's own (OD-475) — signed in, or its address proven — has nothing to be invited to.
+    if (owner && ownsAccount(owner)) throw refusal('signed_in', say.signedIn({ name: owner.fullName }));
     this.limit(`owner-whatsapp:${kpmId}`, OWNER_WHATSAPP_LIMIT, OWNER_WHATSAPP_WINDOW_SECONDS);
 
     const origin = appOrigin.replace(/\/+$/, '');
@@ -199,7 +209,7 @@ export class OwnerClaims {
     const now = this.clock.now();
     const kpmId = String(kpm._id);
     const taken = await this.kpms.updateOne(
-      { _id: kpmId, deletedAt: null, ownerUserId: null, 'pendingOwner.invite.tokenHash': hash, 'pendingOwner.invite.usedAt': null },
+      { _id: kpmId, deletedAt: null, ...HAS_NO_OWNER, 'pendingOwner.invite.tokenHash': hash, 'pendingOwner.invite.usedAt': null },
       { $set: { 'pendingOwner.invite.usedAt': now } },
     ).exec();
     if (taken.modifiedCount === 0) throw this.dead(OWNER_CLAIM_REFUSALS.NOT_FOUND.alreadyUsed);
@@ -209,7 +219,7 @@ export class OwnerClaims {
       if (!installed) throw this.dead(OWNER_CLAIM_REFUSALS.NOT_FOUND.alreadyUsed);
     } catch (err) {
       await this.kpms.updateOne(
-        { _id: kpmId, ownerUserId: null, 'pendingOwner.invite.tokenHash': hash },
+        { _id: kpmId, ...HAS_NO_OWNER, 'pendingOwner.invite.tokenHash': hash },
         { $set: { 'pendingOwner.invite.usedAt': null } },
       ).exec();
       throw err;
@@ -226,9 +236,10 @@ export class OwnerClaims {
     if (!kpm || kpm.status === 'archived') throw this.dead(OWNER_CLAIM_REFUSALS.NOT_FOUND.linkNotValid);
     const hash = this.passwords.hashToken(token);
     const invite = kpm.pendingOwner?.invite;
-    if (!invite || kpm.ownerUserId) {
-      // The KPM has its Owner now (this link used, or another way): say so, rather than *not valid*.
-      throw this.dead(kpm.ownerUserId ? OWNER_CLAIM_REFUSALS.NOT_FOUND.alreadyUsed : OWNER_CLAIM_REFUSALS.NOT_FOUND.linkNotValid);
+    const owned = ownerCountOf(kpm) > 0;
+    if (!invite || owned) {
+      // The KPM has its owner now (this link used, or another way): say so, rather than *not valid*.
+      throw this.dead(owned ? OWNER_CLAIM_REFUSALS.NOT_FOUND.alreadyUsed : OWNER_CLAIM_REFUSALS.NOT_FOUND.linkNotValid);
     }
     if (!this.passwords.tokensMatch(invite.tokenHash, hash)) throw this.dead(OWNER_CLAIM_REFUSALS.NOT_FOUND.linkNotValid);
     if (invite.usedAt) throw this.dead(OWNER_CLAIM_REFUSALS.NOT_FOUND.alreadyUsed);

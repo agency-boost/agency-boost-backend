@@ -40,6 +40,7 @@ import { RosterImportService, type RosterPreview } from './roster-import.service
 import {
   RosterImportRecord, RosterImportRecordRepository, RosterImportRecordSchema,
 } from './roster-import-record.schema';
+import { ownersOf } from '../../../test/owners';
 
 const H = ROSTER_TEMPLATE_HEADER;
 const NOW = new Date('2026-09-09T02:00:00.000Z');
@@ -394,7 +395,7 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
     it('P19.3-T4 AC-8 the Owner’s rung is not changed by an import', async () => {
       await service.commit(theOwner(), kpmId, office());
       const wilson = (await mongoose.model(User.name).findOne({ agentCode: '100' }))!;
-      await mongoose.model(Kpm.name).updateOne({ _id: kpmId }, { $set: { ownerUserId: String(wilson._id) } });
+      await mongoose.model(Kpm.name).updateOne({ _id: kpmId }, { $set: { owners: ownersOf(String(wilson._id)) } });
       const preview = await service.preview(theOwner(), kpmId, a3(line('100', 'Wilson', 'AAB')));
       expect(results(preview)['100']).toEqual(['skipped', 'They own this KPM, so an import does not change their role.']);
     });

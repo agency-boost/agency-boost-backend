@@ -17,6 +17,7 @@ import { MembershipRepository } from '@/modules/org/membership.repository';
 import { Product, ProductDocument } from '@/modules/products/product.schema';
 import { can, type Permission } from '@/modules/rbac/permissions';
 import { Company, CompanyDocument } from '@/modules/tenants/company.schema';
+import { isOwnerOf, OWNERS_PROJECTION, type WithOwners } from '@/modules/tenants/kpm-owners';
 import { Kpm, KpmDocument } from '@/modules/tenants/kpm.schema';
 import { INSURERS_ONLY } from '@/modules/tenants/template-library';
 import { TENANTS_MESSAGES } from '@/modules/tenants/tenants.messages';
@@ -244,13 +245,14 @@ export class ProductDataGrantService {
     if (userIds.length === 0) return new Map();
     const live = await this.memberships.findAcrossAllTenants(ctx, { userId: { $in: [...userIds] }, status: 'active' });
     const offices = await this.kpms
-      .find({ _id: { $in: [...new Set(live.map((m) => m.kpmId))].filter(isObjectId) }, deletedAt: null }, { ownerUserId: 1 })
+      .find({ _id: { $in: [...new Set(live.map((m) => m.kpmId))].filter(isObjectId) }, deletedAt: null }, OWNERS_PROJECTION)
       .lean()
-      .exec() as { _id: unknown; ownerUserId?: string | null }[];
-    const owner = new Map(offices.map((k) => [String(k._id), k.ownerUserId ? String(k.ownerUserId) : null]));
+      .exec() as ({ _id: unknown } & WithOwners)[];
+    // Any owner of the KPM (ADR-0285 §3).
+    const office = new Map(offices.map((k) => [String(k._id), k]));
     const held = new Map<string, string>();
     for (const m of live) {
-      if (m.adminAccess?.isKpmAdmin || owner.get(m.kpmId) === m.userId) held.set(m.userId, m.kpmId);
+      if (m.adminAccess?.isKpmAdmin || isOwnerOf(office.get(m.kpmId), m.userId)) held.set(m.userId, m.kpmId);
     }
     return held;
   }

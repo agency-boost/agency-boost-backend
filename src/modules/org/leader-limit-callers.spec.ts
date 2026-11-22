@@ -26,6 +26,11 @@ const CALLERS: Record<string, { method: Method; makes: string }[]> = {
   'modules/org/leader-code.service.ts': [{ method: 'create', makes: 'Agent (a leader’s code)' }],
   // P18.8-T3 (ADR-0170 §3): an invite accepted places its person at the ladder's joining rung, active.
   'modules/org/invites.service.ts': [{ method: 'create', makes: 'Agent (an invite accepted)' }],
+  // ADR-0286 §2, §3: *Tambah user*'s invitation accepted and *Masukkan* each place the person on the rung chosen — a new
+  // KPM's first owner at its senior rung — active, through `create`, so a leader past the limit is refused as anywhere.
+  'modules/tenants/add-user.service.ts': [
+    { method: 'create', makes: 'any, the rung the sheet chose (an invitation accepted, or Masukkan); AB as a new KPM’s first owner' },
+  ],
   'modules/tenants/roster-import.service.ts': [
     { method: 'createWithAccount', makes: 'any, from the role column, the account made with the seat' },
     // ADR-0205 §5: a row whose code is already in the office updates that member, the rung through the role change's own

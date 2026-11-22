@@ -27,6 +27,7 @@ import { ContextResolver } from './context-resolver';
 import { ImpersonationService } from './impersonation.service';
 import { RateLimiter } from './rate-limiter';
 import { Hs256TokenSigner, TokenSigner } from './token-signer';
+import { ownersOf } from '../../../test/owners';
 
 /** Any tenant route: what a member's next request after `/auth/me` meets. */
 @Controller('probe')
@@ -159,7 +160,7 @@ describe('an ended office over HTTP (P13.2-T3 AC-5)', () => {
         isKpmAdmin: role === 'admin', grantedByUserId: null, grantedAt: null, revokedAt: null,
       },
     });
-    if (role === 'owner') await kpms.updateOne({ _id: kpm._id }, { $set: { ownerUserId: String(user._id) } });
+    if (role === 'owner') await kpms.updateOne({ _id: kpm._id }, { $set: { owners: ownersOf(String(user._id)) } });
     return String(user._id);
   }
 

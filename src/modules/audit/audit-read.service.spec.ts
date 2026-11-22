@@ -627,10 +627,43 @@ describe('AuditReadService — P19.23-T6 AC-1 the platform console', () => {
   it('P19.23-T6 AC-1 one KPM reads that KPM’s whole log, as before', async () => {
     const { service, audit } = make([row()]);
 
-    await service.page({ kpmId: KPM, readerUserId: READER }, {});
+    await service.page({ kpmId: KPM, readerUserId: READER }, { includeViewed: true });
 
     expect(audit.findNewestFirst).toHaveBeenCalledWith(KPM, {}, null, expect.any(Number));
     expect(audit.findNewestFirstAcrossOffices).not.toHaveBeenCalled();
+  });
+
+  describe('P19.26-T3 AC-1 changes only by default (UI-217; ADR-0284 §3)', () => {
+    const NOT_VIEWED = {
+      action: { $not: /^platform_read\./, $nin: ['activity_log.read_raw', 'leader_note.read', 'lead.viewed'] },
+    };
+
+    it('leaves the looks out in the query itself, so a page of 50 is 50 changes and the cursor stays right', async () => {
+      const { service, audit } = make([at(0)]);
+      await service.page(platform(), {});
+      expect(audit.findNewestFirstAcrossOffices.mock.calls[0][1]).toEqual({ $and: [NOT_VIEWED] });
+    });
+
+    it('lists them too with Termasuk dilihat', async () => {
+      const { service, audit } = make([at(0)]);
+      await service.page(platform(), { includeViewed: true });
+      expect(audit.findNewestFirstAcrossOffices.mock.calls[0][1]).toEqual({});
+    });
+
+    it('lists a look asked for by name, whatever the chip says', async () => {
+      const { service, audit } = make([at(0)]);
+      await service.page(platform(), { action: 'platform_read.members' });
+      expect(audit.findNewestFirstAcrossOffices.mock.calls[0][1]).toEqual({ $and: [{ action: 'platform_read.members' }] });
+    });
+
+    it('offers the looks in Tindakan only beside Termasuk dilihat', async () => {
+      const { service, audit } = make([at(0)]);
+      audit.distinctAcrossOffices.mockImplementation(async (_scope: unknown, field: string) =>
+        (field === 'action' ? ['kpm.suspended', 'platform_read.members'] : []));
+      expect((await service.page(platform(), {})).facets?.actions).toEqual(['kpm.suspended']);
+      expect((await service.page(platform(), { includeViewed: true })).facets?.actions)
+        .toEqual(['kpm.suspended', 'platform_read.members']);
+    });
   });
 
   it('P19.23-T6 AC-1 says what changed, before → after: one field as its two values, money in rupiah', async () => {
@@ -690,7 +723,7 @@ describe('AuditReadService — P19.23-T6 AC-1 the platform console', () => {
   it('P19.23-T6 AC-1 a blank search narrows nothing', async () => {
     const { service, audit } = make([at(0)]);
 
-    await service.page(platform(), { q: '   ' });
+    await service.page(platform(), { q: '   ', includeViewed: true });
 
     expect(audit.findNewestFirstAcrossOffices.mock.calls[0][1]).toEqual({});
   });
