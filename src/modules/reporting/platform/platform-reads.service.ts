@@ -248,7 +248,11 @@ export class PlatformReads {
     let filter: Record<string, unknown> = {};
     if (query.status) filter.status = query.status;
     if (query.role) filter.role = query.role;
-    if (q) filter.userId = { $in: await this.usersMatching(q) };
+    /*
+     * **A retired account is in none of Anggota's lists** (P19.31-T2 AC-3; ADR-0289; OD-487): its ended membership would
+     * read under *Keluar*, so its person is left out by id — the KPM's own *Riwayat* still shows the removal, with the name.
+     */
+    filter.userId = withoutRetired(q ? await this.usersMatching(q) : null, await retiredUserIds(this.users));
     /*
      * **Test accounts: never listed or counted, but under *Akun tes*** (P19.23-T3 AC-1; ADR-0267 §1; OD-421): the
      * membership's copy of the flag, one clause on the read; `testAccount=only` lists them alone, so one flagged by
@@ -706,3 +710,22 @@ export function searchOf(q: string, { phone }: { phone: boolean }): Record<strin
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * **The accounts *Hapus akun* retired** (P19.31; ADR-0289): soft-deleted by the Super Admin (`deletedByUserId`), as
+ * distinct from an import's undone account. Few, and read whole.
+ */
+export async function retiredUserIds(users: Model<UserDocument>): Promise<string[]> {
+  const rows = await users.find({ deletedAt: { $ne: null }, deletedByUserId: { $ne: null } }).select('_id').lean().exec();
+  return rows.map((u) => String(u._id));
+}
+
+/** A `userId` clause: the people a search found, or everybody, less the retired. */
+export function withoutRetired(matching: readonly string[] | null, retired: readonly string[]): Record<string, unknown> {
+  if (matching) {
+    const gone = new Set(retired);
+    return { $in: matching.filter((id) => !gone.has(id)) };
+  }
+  return { $nin: [...retired] };
+}
+

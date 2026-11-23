@@ -117,6 +117,11 @@ export interface RosterPreview {
  */
 export interface RosterCommitResult extends RosterPreview {
   invited: number;
+  /**
+   * **The memberships the commit made** (P19.30-T2 AC-2; ADR-0288 §5): one per `imported` row, in the order written —
+   * what *Password sementara (PDF)* narrows the *Akun & password* PDF to. Never an updated or a WhatsApp-invited row's.
+   */
+  membershipIds: string[];
 }
 
 /** A row and what it comes to, before any of it is written. */
@@ -132,6 +137,8 @@ interface Plan {
   existing: MembershipDocument | null;
   /** Their account, for an update. */
   account: UserDocument | null;
+  /** The membership a new person's row made, once written (P19.30-T2). */
+  membershipId?: string;
 }
 
 /** What the office holds that a file is checked against, read once per check. */
@@ -198,9 +205,11 @@ function forgivingEmail(row: RosterRow): RosterRow {
  * - **The valid rows are committed as one unit.** There is no transaction (ADR-0152: one server, no replica set), so the
  *   commit checks the whole file again, writes leader first, and **on any failed write undoes what it wrote** — soft
  *   deletes the memberships, edges and accounts it made, and puts back what it changed — before it answers the failure.
- * - **Nobody reads a password.** A new account's password is a secret nobody holds; *Kirim undangan* mails each new
+ * - **Nobody reads a password here.** A new account's password is a secret nobody holds; *Kirim undangan* mails each new
  *   person a one-time link to choose their own (the reset link's mechanism, P4-T14), and without it they use *Lupa kata
- *   sandi?*, which proves the mailbox the same way.
+ *   sandi?*, which proves the mailbox the same way. *Since ADR-0288 §5 (P19.30-T2):* or — `invite: false`, *Password
+ *   sementara (PDF)* — the Owner downloads the *Akun & password* PDF for the memberships the commit made
+ *   (`membershipIds`), each with a temporary password issued there (`TemporaryPasswordsService`), never here.
  */
 @Injectable()
 export class RosterImportService {
@@ -371,7 +380,7 @@ export class RosterImportService {
     const shared = await this.inviteOnWhatsApp(ctx, plans);
     const answer = this.answer(ctx, parsed, plans, shared);
     await this.recordFile(ctx, kpm, fileName, answer);
-    return { ...answer, invited };
+    return { ...answer, invited, membershipIds: created.flatMap((p) => (p.membershipId ? [p.membershipId] : [])) };
   }
 
   /**
@@ -649,13 +658,26 @@ export class RosterImportService {
     }
     settle();
 
-    // **The leader limit** (ADR-0113 §2, P13.2-T4): each row past it skipped, in the file's order, with its words.
+    /*
+     * **The leader limit** (ADR-0113 §2, P13.2-T4): each row past it skipped, with its words.
+     *
+     * *Changed 2026-11-22 (P19.30-T3 AC-1; ADR-0288 §6):* **a seat goes only to a row that will be written.** The rows are
+     * taken upline first (`leaderFirst`: the file's order, each row's upline row moved ahead of it), and a row whose upline
+     * this very check has skipped is skipped for that — with the upline's words — **before** it is counted. Counted in the
+     * file's order, a leader whose upline row came later took a seat, then fell with that upline once the limit skipped it,
+     * and the seat was never given back: with `maxLeaders` 60 District 41's PruDynamic file kept 28 rows and wasted 31.
+     */
     const { max, used } = await this.seats(kpm);
     if (max !== null) {
       let leaders = used;
-      for (const p of plans) {
+      for (const p of this.leaderFirst(plans)) {
         if (p.outcome === 'skipped' || !isLeaderClass(classOf(p.rung as OrgLevelRow))) continue;
         if (p.existing && isLeaderClass(p.existing.role)) continue;
+        const problem = changes(p) ? uplineProblem(p) : null;
+        if (problem) {
+          skip(p, problem);
+          continue;
+        }
         leaders += 1;
         if (leaders > max) skip(p, SAY.pastLimitForOffice({ max, used }));
       }
@@ -899,6 +921,7 @@ export class RosterImportService {
     });
     const id = String(membership._id);
     idOf.set(row.agentCode, id);
+    plan.membershipId = id;
     undo.push(async () => {
       await this.history.updateMany(scoped, { membershipId: id }, { $set: { deletedAt: this.clock.now() } });
       await this.members.softDeleteById(scoped, id, this.clock.now());

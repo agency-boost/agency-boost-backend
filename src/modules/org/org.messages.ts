@@ -99,9 +99,13 @@ export const ORG_REFUSALS = refusals('modules/org', {
       en: 'Only somebody’s direct leader can remove them.',
       id: 'Hanya leader langsung seseorang yang dapat mengeluarkannya.',
     },
-    root: {
-      en: 'The office’s root member cannot be removed. Reassign the office first.',
-      id: 'Anggota teratas KPM ini tidak dapat dikeluarkan. Alihkan kepemilikan KPM ini terlebih dahulu.',
+    /**
+     * Somebody with no leader who is not an owner (P19.30-T3 AC-3; OD-480's default): moved under a leader first. It said
+     * *"Alihkan kepemilikan KPM ini"* — ownership — until 2026-11-22, which is not what is wrong.
+     */
+    noLeader: {
+      en: 'They have no leader. Move them under a leader first (Ganti leader on their page), then remove them.',
+      id: 'Dia belum punya leader. Pindahkan dulu ke bawah seorang leader (Ganti leader di halamannya), lalu keluarkan.',
     },
     owner: {
       en: 'They own this office. Transfer it first — only the platform can do that.',

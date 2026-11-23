@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { RequestContext } from '@/common/context/request-context';
 import { readerIn, SOURCE_READER } from '@/common/i18n/reader';
+import { render } from '@/common/i18n/sentence';
 import { Clock } from '@/common/clock/clock.port';
 import { Kpm, KpmSchema } from '@/modules/tenants/kpm.schema';
 import { User, UserSchema } from '@/modules/users/user.schema';
@@ -3504,6 +3505,76 @@ describe('organisation', () => {
         await expect(removals.remove(owner, root, CONFIRM)).rejects.toMatchObject({
           code: 'ORG_REMOVAL_NOT_PERMITTED',
         });
+      });
+
+      /*
+       * P19.30-T3 AC-3 (ADR-0288 §6; OD-480's default): **a member with no leader who is not an owner is moved under a
+       * leader first** — and the refusal says exactly that. It told the remover to *transfer ownership* until 2026-11-22.
+       */
+      it('P19.30-T3 AC-3 refuses a leaderless member who is no owner, saying to move them under a leader — never ownership', async () => {
+        const owner = await asMember(ab, { isKpmOwner: true });
+        const loose = await join(KPM_A, 'agent');
+        type Refusal = { code: string; message: string; details: unknown; sentence: Parameters<typeof render>[0] };
+        const refusal = await removals.remove(owner, loose, CONFIRM).then(() => null, (err: unknown) => err as Refusal) as Refusal;
+        expect(refusal).toMatchObject({ code: 'ORG_REMOVAL_NOT_PERMITTED', details: { membershipId: loose, reason: 'no_leader' } });
+        expect(refusal.message).toBe('They have no leader. Move them under a leader first (Ganti leader on their page), then remove them.');
+        expect(refusal.message).not.toMatch(/owner|transfer|reassign the office/i);
+        // In Indonesian too: *Pindahkan dulu ke bawah seorang leader*, never *Alihkan kepemilikan*.
+        const indonesian = render(refusal.sentence, readerIn('id'));
+        expect(indonesian).toBe('Dia belum punya leader. Pindahkan dulu ke bawah seorang leader (Ganti leader di halamannya), lalu keluarkan.');
+        expect(indonesian).not.toMatch(/kepemilikan/);
+        expect((await members.findById(ctx(KPM_A), loose))!.status).toBe('active');
+        // Once under a leader, they may go.
+        await hierarchy.reparent(ctx(KPM_A), loose, ab, 'Placed');
+        await removals.remove(owner, loose, CONFIRM);
+        expect((await members.findById(ctx(KPM_A), loose))!.status).toBe('removed');
+      });
+
+      it('P19.30-T3 AC-3 an owner with no leader is still refused as the owner, in the owner’s words', async () => {
+        const ownerAccount = (await members.findById(ctx(KPM_A), ab))!.userId;
+        await mongoose.model(Kpm.name).updateOne({ _id: KPM_A }, { $set: { owners: ownersOf(ownerAccount) } });
+        const admin = await asMember(aab, { isKpmAdmin: true });
+        await expect(removals.remove(admin, ab, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_REMOVAL_NOT_PERMITTED', message: 'They own this office. Transfer it first — only the platform can do that.',
+        });
+      });
+
+      /*
+       * P19.30-T3 AC-2 (ADR-0288 §6; ADR-0268 §3): **the Super Admin inside a KPM removes a member as its Owner may** — no
+       * longer `TENANT_NO_MEMBERSHIP`. Nobody's member: the history names their account alone, and the audit row them.
+       */
+      it('P19.30-T3 AC-2 the Super Admin inside the KPM removes a member, the history and the audit naming them', async () => {
+        const inside = RequestContext.superAdminInKpm(RequestContext.platform('u-root'), KPM_A).withReader(SOURCE_READER);
+        const deep = await join(KPM_A, 'agent', aab);
+        await hierarchy.refreshCounts(ctx(KPM_A), aab);
+        await removals.remove(inside, deep, { ...CONFIRM, reason: 'Pindah kantor' });
+        expect((await members.findById(ctx(KPM_A), deep))!.status).toBe('removed');
+        const event = await mongoose.model(MembershipHistory.name).findOne({ membershipId: deep, eventType: 'removed' }).lean<{
+          actorMembershipId: string | null; actorUserId: string | null;
+        }>();
+        expect(event).toMatchObject({ actorMembershipId: null, actorUserId: 'u-root' });
+        const row = await mongoose.model(AuditLog.name).findOne({ action: 'member.removed', targetId: deep }).lean<{
+          kpmId: string; actorUserId: string; actorMembershipId: string | null;
+        }>();
+        expect(row).toMatchObject({ kpmId: KPM_A, actorUserId: 'u-root', actorMembershipId: null });
+        // A leader with reports is moved first, as the Owner moves them.
+        await join(KPM_A, 'agent', aab);
+        await expect(removals.remove(inside, aab, CONFIRM)).rejects.toMatchObject({ code: 'ORG_SUBTREE_DISPOSITION_REQUIRED' });
+        // Another KPM's member is never reached from inside this one.
+        const theirs = await join(KPM_B, 'agent');
+        await expect(removals.remove(inside, theirs, CONFIRM)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        // The same refusals as the Owner's: a leaderless member is moved under a leader first.
+        await expect(removals.remove(inside, ab, CONFIRM)).rejects.toMatchObject({
+          code: 'ORG_REMOVAL_NOT_PERMITTED', details: { reason: 'no_leader' },
+        });
+      });
+
+      it('P19.30-T3 AC-2 a Super Admin in a support session, or outside every KPM, is still refused', async () => {
+        const outside = RequestContext.platform('u-root').withReader(SOURCE_READER);
+        await expect(removals.remove(outside, agent, CONFIRM)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+        const platformRead = RequestContext.platformRead(outside, KPM_A);
+        await expect(removals.remove(platformRead, agent, CONFIRM)).rejects.toMatchObject({ code: 'TENANT_NO_MEMBERSHIP' });
+        expect((await members.findById(ctx(KPM_A), agent))!.status).toBe('active');
       });
 
       it('refuses removing them twice, saying when the first one was', async () => {

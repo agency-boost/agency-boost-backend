@@ -136,13 +136,16 @@ export class User {
   /**
    * They are signed in on a password somebody else chose for them.
    *
-   * Set by the roster import (P3.2-T4), which generates one and hands it to the admin to
-   * pass on. Until it is replaced, `AuthGuard` refuses every route but the ones that let
-   * them replace it — a screen-level redirect would leave the temporary password working
-   * against the API for as long as the account exists.
+   * **Set by the *Akun & password* PDF** (`TemporaryPasswordsService`; P19.30-T1, ADR-0288 §1): each download issues
+   * every account of the KPM not yet its person's own a fresh temporary password, writes its hash and sets this. *Was*
+   * set by the roster import (P3.2-T4), which generated one for an admin to pass on, until ADR-0205 §10 (P19.3-T4)
+   * replaced that with invitations — from then until P19.30 nothing set it, and the import writes `false` (it holds no
+   * password anybody knows). Until it is replaced, `AuthGuard` refuses every route but the ones that let them replace it
+   * (`@AllowTemporaryPassword`: `/auth/me`, `/auth/change-password`, `/auth/logout`) — a screen-level redirect would
+   * leave the temporary password working against the API for as long as the account exists.
    *
-   * Cleared by `POST /auth/change-password`, and by nothing else. A reset through the
-   * forgot-password flow clears it too, because that also proves control of the mailbox.
+   * Cleared by `POST /auth/change-password`, and by a reset through the forgot-password flow or an invitation's link,
+   * which prove control of the mailbox.
    */
   @Prop({ type: Boolean, default: false })
   mustChangePassword!: boolean;
@@ -167,11 +170,35 @@ export class User {
   @Prop({ type: Boolean, default: false })
   testAccount!: boolean;
 
+  /**
+   * **Soft-deleted**: nothing signs in as it, and nothing finds it by its address or code (every such read filters
+   * `deletedAt: null`). *Since P19.31 (ADR-0289):* set by ***Hapus akun*** — the Super Admin retiring the account — with
+   * `deletedByUserId` and `deletedReason`, and `email` replaced by the tombstone `retired+<userId>@akun-dihapus.invalid`
+   * (`retiredEmailOf`), since the email index is unique over soft-deleted rows too. The agent code is released by
+   * `deletedAt` alone (its index covers live rows only). **The name stays**: every membership and its history still read
+   * who did what. Not erasure — that is Phase 20's.
+   */
   @Prop({ type: Date, default: null, index: true })
   deletedAt!: Date | null;
+
+  /** Who retired the account (*Hapus akun*, P19.31): the Super Admin's own user id. `null` otherwise. */
+  @Prop({ type: String, default: null })
+  deletedByUserId!: string | null;
+
+  /** Why, as the Super Admin typed it (*Hapus akun*, P19.31). `null` otherwise. */
+  @Prop({ type: String, default: null })
+  deletedReason!: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+/** The reserved domain a retired account's address is moved to (ADR-0289 §1): `.invalid` never delivers. */
+export const RETIRED_EMAIL_DOMAIN = 'akun-dihapus.invalid';
+
+/** **A retired account's tombstone address** (ADR-0289 §1): unique by its id, so the email index never refuses it. */
+export function retiredEmailOf(userId: string): string {
+  return `retired+${userId}@${RETIRED_EMAIL_DOMAIN}`;
+}
 
 /**
  * Unique per company, over live rows only.

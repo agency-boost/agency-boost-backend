@@ -203,6 +203,32 @@ export class MemberInviteRepository extends TenantScopedRepository<MemberInviteD
       companyId, agentCode, status: 'pending', expiresAt: { $gt: now }, deletedAt: null,
     })) !== null;
   }
+
+  /**
+   * **Every waiting *+ Tambah agent* invite for one agent code at its insurer, cancelled** — *Hapus akun* (P19.31-T1
+   * AC-3; ADR-0289 §2): the code is released with the account, so nothing waits on it. The Super Admin's alone; answers
+   * the ids cancelled, for `reopenAcrossTenants`.
+   */
+  async cancelPendingForCodeAcrossTenants(
+    ctx: RequestContext, companyId: string, agentCode: string, set: Record<string, unknown>,
+  ): Promise<string[]> {
+    if (!ctx.isSuperAdmin) throw new MissingTenantContextError(this.collectionName, 'cancelPendingForCodeAcrossTenants');
+    const ids = (await this.model.find({ companyId, agentCode, status: 'pending', deletedAt: null }).select('_id').exec())
+      .map((row) => String(row._id));
+    if (ids.length === 0) return [];
+    await this.model.updateMany({ _id: { $in: ids }, status: 'pending' }, { $set: { ...set, status: 'cancelled' } }).exec();
+    return ids;
+  }
+
+  /** **The invites a failed retirement cancelled, waiting again** (P19.31): by id, the Super Admin's alone. */
+  async reopenAcrossTenants(ctx: RequestContext, ids: readonly string[]): Promise<void> {
+    if (!ctx.isSuperAdmin) throw new MissingTenantContextError(this.collectionName, 'reopenAcrossTenants');
+    if (ids.length === 0) return;
+    await this.model.updateMany(
+      { _id: { $in: [...ids] }, status: 'cancelled' },
+      { $set: { status: 'pending', cancelledAt: null, cancelledByMembershipId: null } },
+    ).exec();
+  }
 }
 
 /**

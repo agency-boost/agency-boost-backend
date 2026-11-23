@@ -67,6 +67,15 @@ export class MembershipRepository extends TenantScopedRepository<MembershipDocum
   }
 
   /**
+   * **The KPMs where one person has ever been a member**, any status — *Hapus akun*'s confirmation (P19.31; ADR-0289):
+   * the history that stays. **Deliberately unscoped, and named so**, as `liveForUserAnywhere`: the Super Admin is in no
+   * office. KPM ids only, never a row.
+   */
+  async kpmIdsOfUserAnywhere(userId: string): Promise<string[]> {
+    return (await this.model.distinct('kpmId', { userId, deletedAt: null }).exec()).map(String);
+  }
+
+  /**
    * Who these memberships belong to, in whichever office holds each one.
    *
    * **Deliberately unscoped, and named so.** The Super Admin's audit console shows platform

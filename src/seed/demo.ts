@@ -96,6 +96,7 @@ import { seedSettingsHubFixture } from './settings-hub-fixture';
 import { seedActivationCohort } from './cohort-fixture';
 import { ACTIVATION_3M_SEED, seedActivation3MFixture, type Activation3MSeed } from './activation-3m-fixture';
 import { seedMemberPageFixture } from './member-page-fixture';
+import { seedTemporaryPasswordFixture } from './temporary-password-fixture';
 import { markNewHires } from './join-dates';
 import { buildFirstSaleFixture, type FirstSaleFixture } from './first-sale-fixture';
 import { up as backfillFirstSales } from '../migrations/0042-membership-first-sale';
@@ -4328,13 +4329,15 @@ Sign in at POST /api/v1/auth/login, then send the access token as
   })).guide);
   // P19.12-T5 (ADR-0248 §3, §4): *Diundang* and *Lengkapi data* on 0417's member page, after every sign-in the seed
   // writes (`member-page-fixture.ts`), sparing the people other walks read.
-  log((await seedMemberPageFixture({
-    clock, kpmId: id0417,
-    spare: new Set([
-      ...COACHING_CAST.map((p) => p.email), ...Object.values(ACTIVATION_3M_SEED).map((p) => p.email),
-      'owner@kpm0417.test', 'admin@kpm0417.test',
-    ]),
-  })).guide);
+  const spare0417 = new Set([
+    ...COACHING_CAST.map((p) => p.email), ...Object.values(ACTIVATION_3M_SEED).map((p) => p.email),
+    'owner@kpm0417.test', 'admin@kpm0417.test',
+  ]);
+  log((await seedMemberPageFixture({ clock, kpmId: id0417, spare: spare0417 })).guide);
+  // P19.30-T4 AC-1 (ADR-0288): one account on a temporary password, after the two *Diundang* above
+  // (`temporary-password-fixture.ts`).
+  // Raka's estimate is walked signed in as him (`agent/08-your-summary.md`), so he keeps the field password.
+  log((await seedTemporaryPasswordFixture({ kpmId: id0417, spare: new Set([...spare0417, 'raka@kpm0417.test']) })).guide);
   // ------------------- P19.15-T1 (ADR-0258): Prudential's premium tables — SAMPLE numbers, never its rates — before the
   // notices below read them (`rate-table-fixture.ts`).
   log((await seedRateTableFixture({

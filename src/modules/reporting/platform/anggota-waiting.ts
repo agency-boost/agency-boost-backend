@@ -17,7 +17,7 @@ import { OrgLevelService } from '@/modules/tenants/org-level.service';
 import { User, UserDocument } from '@/modules/users/user.schema';
 import { AvatarLinks } from '@/modules/users/avatar.service';
 import { PLATFORM_READS_REFUSALS } from './platform-reads.messages';
-import { searchOf } from './platform-reads.service';
+import { retiredUserIds, searchOf, withoutRetired } from './platform-reads.service';
 
 /** The audit action of one read of *Menunggu* (ADR-0207 §5), labelled in the audit log. */
 const WAITING_ACTION = 'platform_read.members_waiting';
@@ -160,7 +160,8 @@ export class AnggotaWaiting {
   ): Promise<AnggotaChips> {
     const narrow: Record<string, unknown> = {};
     if (scope.role) narrow.role = scope.role;
-    if (matching) narrow.userId = { $in: matching };
+    // A retired account is counted in no chip (P19.31; OD-487), as it is listed in none.
+    narrow.userId = withoutRetired(matching, await retiredUserIds(this.users));
     const counted = offices.filter((k) => isCountedOffice(k)).map((k) => String(k._id));
     const [active, removed, waiting] = await Promise.all([
       this.memberships.countPerOfficeAcrossTenants(ctx, counted, countedMembers(narrow)),

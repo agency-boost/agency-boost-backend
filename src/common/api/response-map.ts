@@ -43,6 +43,8 @@ import { AbGroupTargetsViewDto } from '@/modules/reporting/ab-group-targets/ab-g
 import { MemberPersonalCompletedDto } from '@/modules/org/member-personal.dto';
 import { KpmStewardsDto, PeopleHistoryEntryDto, RosterImportViewDto } from '@/modules/org/people.response.dto';
 import { KpmOwnerListDto } from '@/modules/tenants/kpm-owners.response.dto';
+import { TemporaryPasswordsPreviewDto } from '@/modules/org/temporary-passwords.dto';
+import { RetirementPreviewDto, RetirementResultDto } from '@/modules/users/account-retirement.dto';
 import {
   CodeAvailabilityDto, KpmAdminViewDto, KpmListRowDto, KpmProfileDto, KpmContentsDto, KpmCreatedDto, KpmDeletedDto, KpmRequestRowDto, KpmViewDto,
   MyKpmRequestStateDto, OrgLevelRowDto, PlatformAdminRowDto, PlatformOverviewDto, RosterCommitDto, RosterPreviewDto,
@@ -789,6 +791,12 @@ export const RESPONSE_SHAPES: Readonly<Record<string, ResponseShape>> = {
   AdminKpmReportController_pdf: { files: ['application/pdf'] },
   AdminKpmReportController_link: { type: KpmReportLinkViewDto },
   KpmReportLinkController_open: { files: ['application/pdf'] },
+  // P19.30-T1 (ADR-0288): *Unduh akun & password (PDF)* — how many, then the PDF.
+  TemporaryPasswordsController_preview: { type: TemporaryPasswordsPreviewDto },
+  TemporaryPasswordsController_issue: { files: ['application/pdf'] },
+  // P19.31-T1 (ADR-0289): *Hapus akun* — what it would do, then doing it.
+  AccountRetirementController_preview: { type: RetirementPreviewDto },
+  AccountRetirementController_retire: { type: RetirementResultDto },
 };
 
 /**

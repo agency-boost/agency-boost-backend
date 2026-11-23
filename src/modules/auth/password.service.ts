@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { Sentence } from '@/common/i18n/sentence';
-import { PASSWORD } from '@/domain/constants';
+import { PASSWORD, TEMPORARY_PASSWORD } from '@/domain/constants';
 import { AUTH_REFUSALS } from './auth.messages';
 import * as argon2 from 'argon2';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 /**
  * Argon2id, with parameters chosen for an interactive login rather than defaults.
@@ -54,6 +54,19 @@ export class PasswordService {
       problems.push(AUTH_REFUSALS.VALIDATION_FAILED.passwordSpaces);
     }
     return problems;
+  }
+
+  /**
+   * **A temporary password** (ADR-0288 §1; P19.30-T1 AC-1): `TEMPORARY_PASSWORD.LENGTH` characters, each drawn
+   * uniformly from `TEMPORARY_PASSWORD.ALPHABET` — no look-alike, neither `0 O` nor `1 l I` — by `crypto.randomInt`, the
+   * platform's CSPRNG with no modulo bias. Made to be printed on the *Akun & password* PDF and typed by hand once; the
+   * caller keeps only its hash.
+   */
+  generateTemporary(): string {
+    const { ALPHABET, LENGTH } = TEMPORARY_PASSWORD;
+    let password = '';
+    for (let i = 0; i < LENGTH; i += 1) password += ALPHABET[randomInt(ALPHABET.length)];
+    return password;
   }
 
   /** A high-entropy token for refresh, verification and reset flows. */

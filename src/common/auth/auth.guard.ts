@@ -124,10 +124,10 @@ export class AuthGuard implements CanActivate {
     /*
      * **A temporary password buys three routes and nothing else.**
      *
-     * The roster import generates a password, an admin reads it and emails it on, and the
-     * person who signs in with it has demonstrated control of a mailbox — not that the
-     * account is theirs. Anybody who saw the email, or the admin's screen, or the
-     * spreadsheet it was pasted into, holds the same credential.
+     * The *Akun & password* PDF (ADR-0288; the roster import, before ADR-0205 §10) prints a
+     * password, the Owner hands it on, and the person who signs in with it has shown they
+     * hold a copy of that sheet — not that the account is theirs. Anybody who saw the PDF,
+     * or a photo of it, or the chat it was forwarded in, holds the same credential.
      *
      * Enforced here rather than by a redirect on the client, because a redirect leaves
      * the temporary password working against the API for as long as the account exists —

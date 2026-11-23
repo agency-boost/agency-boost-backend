@@ -65,4 +65,32 @@ export class UserInvitationRepository extends TenantScopedRepository<UserInvitat
       .exec();
     return result.matchedCount === 1;
   }
+
+  /**
+   * **Every waiting invitation for one account, in whichever KPM holds it, cancelled** — *Hapus akun* (P19.31-T1 AC-3;
+   * ADR-0289 §2): the ones made for the account (`userId`) or to its address. The Super Admin's alone; answers the ids
+   * cancelled, so a failed retirement can open them again (`reopenAcrossTenants`).
+   */
+  async cancelWaitingForAccountAcrossTenants(
+    ctx: RequestContext, account: { userId: string; email: string }, set: Record<string, unknown>,
+  ): Promise<string[]> {
+    if (!ctx.isSuperAdmin) throw new MissingTenantContextError(this.collectionName, 'cancelWaitingForAccountAcrossTenants');
+    const filter = {
+      status: 'pending', deletedAt: null, $or: [{ userId: account.userId }, { email: account.email.toLowerCase() }],
+    } as FilterQuery<UserInvitationDocument>;
+    const ids = (await this.model.find(filter).select('_id').exec()).map((row) => String(row._id));
+    if (ids.length === 0) return [];
+    await this.model.updateMany({ _id: { $in: ids }, status: 'pending' }, { $set: { ...set, status: 'cancelled' } }).exec();
+    return ids;
+  }
+
+  /** **The invitations a failed retirement cancelled, waiting again** (P19.31): by id, the Super Admin's alone. */
+  async reopenAcrossTenants(ctx: RequestContext, ids: readonly string[]): Promise<void> {
+    if (!ctx.isSuperAdmin) throw new MissingTenantContextError(this.collectionName, 'reopenAcrossTenants');
+    if (ids.length === 0) return;
+    await this.model.updateMany(
+      { _id: { $in: [...ids] }, status: 'cancelled' },
+      { $set: { status: 'pending', cancelledAt: null, cancelledByUserId: null } },
+    ).exec();
+  }
 }

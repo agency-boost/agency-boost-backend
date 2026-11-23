@@ -637,7 +637,7 @@ export {
 export { PHONE_NATIONAL_DIGITS, PHONE_COUNTRY_PREFIX, normalisePhone } from './phone';
 
 // The product owner, 2026-11-01: a password's bounds, 8 to 200 characters (§B.30).
-export { PASSWORD } from './password';
+export { PASSWORD, TEMPORARY_PASSWORD } from './password';
 
 // Phase 18.10: the two languages, and Bahasa Indonesia for a person who has chosen neither (ADR-0179 §1).
 export {

@@ -460,6 +460,14 @@ export const ErrorCode = {
    */
   KPM_LAST_OWNER: 'KPM_LAST_OWNER',
 
+  // Retiring an account (P19.31; ADR-0289 §2) — each `409`, nothing written, the sentence saying what to do first.
+  /** *Hapus akun* on a Super Admin's, or the AgencyBoost team's, account: never retired from this screen. */
+  ACCOUNT_RETIRE_PLATFORM_TEAM: 'ACCOUNT_RETIRE_PLATFORM_TEAM',
+  /** *Hapus akun* on an owner of a KPM: removed as owner first (*Kelola owner*; never the last owner), `details.kpms`. */
+  ACCOUNT_RETIRE_OWNER: 'ACCOUNT_RETIRE_OWNER',
+  /** *Hapus akun* on somebody people report to in an active membership: those people moved first, `details.reports`. */
+  ACCOUNT_RETIRE_HAS_REPORTS: 'ACCOUNT_RETIRE_HAS_REPORTS',
+
   // Configuration
   /**
    * **Retired by ADR-0024** — an office may change any ratio's formula, and a row that no

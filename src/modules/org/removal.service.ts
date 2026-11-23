@@ -77,7 +77,13 @@ export class RemovalService {
     membershipId: string,
     input: { confirmation: string; reason?: string; subtree?: SubtreeDisposition },
   ): Promise<TeamMember[]> {
-    if (!ctx.kpmId || !ctx.membershipId) {
+    /*
+     * *Changed 2026-11-22 (P19.30-T3 AC-2; ADR-0288 §6):* **the Super Admin inside a KPM removes as its Owner removes**
+     * (ADR-0268 §3) — nobody's member, so no unit of their own and no *yourself* to refuse, the audit naming them. They were
+     * refused `TENANT_NO_MEMBERSHIP` here, past the guard that had let them through on the Owner's grant.
+     */
+    const superAdminInKpm = ctx.isSuperAdminInKpm;
+    if (!ctx.kpmId || (!ctx.membershipId && !superAdminInKpm)) {
       throw new DomainException(
         ErrorCode.TENANT_NO_MEMBERSHIP,
         SAY.TENANT_NO_MEMBERSHIP.notInOffice,
@@ -119,7 +125,7 @@ export class RemovalService {
 
     await this.refuseTheOffice(ctx, target);
 
-    const tenantAdmin = Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
+    const tenantAdmin = superAdminInKpm || Boolean(ctx.membership?.isKpmOwner || ctx.membership?.isKpmAdmin);
     if (!tenantAdmin && target.leaderId !== me) {
       throw new DomainException(
         ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
@@ -206,18 +212,6 @@ export class RemovalService {
    */
   async refuseTheOffice(ctx: RequestContext, target: MembershipDocument): Promise<void> {
     const membershipId = String(target._id);
-    // The root has no leader, so removing it leaves the whole office pointing at nothing
-    // and no one able to put it back. Transferring the office is a Super Admin operation
-    // on the tenant, not a member operation inside it.
-    if (target.leaderId === null) {
-      throw new DomainException(
-        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
-        SAY.ORG_REMOVAL_NOT_PERMITTED.root,
-        HttpStatus.FORBIDDEN,
-        { membershipId },
-      );
-    }
-
     /**
      * **The office's owner cannot be removed from inside the office.**
      *
@@ -237,6 +231,21 @@ export class RemovalService {
         { membershipId },
       );
     }
+
+    /*
+     * **Somebody with no leader who is not an owner** — at the top of the KPM, or left there by an earlier removal. Removing
+     * them would leave whoever reports to them leading nobody's unit, so they are moved under a leader first (OD-480's
+     * default). *Changed 2026-11-22 (P19.30-T3 AC-3; ADR-0288 §6):* checked after the owner's rule, and said as exactly that
+     * — the sentence told every such member's remover to *transfer ownership*, which is not what is wrong with them.
+     */
+    if (target.leaderId === null) {
+      throw new DomainException(
+        ErrorCode.ORG_REMOVAL_NOT_PERMITTED,
+        SAY.ORG_REMOVAL_NOT_PERMITTED.noLeader,
+        HttpStatus.FORBIDDEN,
+        { membershipId, reason: 'no_leader' },
+      );
+    }
   }
 
   /**
@@ -249,9 +258,17 @@ export class RemovalService {
   async depart(
     ctx: RequestContext,
     target: MembershipDocument,
-    input: { at: Date; reason: string | null; after?: Record<string, unknown> },
+    input: {
+      at: Date; reason: string | null; after?: Record<string, unknown>;
+      /**
+       * Tell the person (`MEMBER_REMOVED`). `false` for *Hapus akun* (P19.31; ADR-0289): the account is being retired,
+       * and nobody is told on a login that has ended.
+       */
+      notify?: boolean;
+    },
   ): Promise<void> {
-    const me = ctx.membershipId!;
+    // The Super Admin inside the KPM is nobody's member (ADR-0268 §3): the history names their account alone.
+    const me = ctx.membershipId ?? null;
     const membershipId = String(target._id);
     const now = input.at;
     const formerLeaderId = target.leaderId;
@@ -278,16 +295,18 @@ export class RemovalService {
 
     await this.hierarchy.refreshCounts(ctx, formerLeaderId);
 
-    await this.notifications.send({
-      userId: target.userId,
-      kpmId: ctx.kpmId!,
-      templateId: NotificationTemplate.MEMBER_REMOVED,
-      payload: {
-        reason: input.reason ?? null,
-        // What the prototype's own copy tells them to do next — stored, so in the remover's language (AC-6).
-        nextStep: render(ORG_MESSAGES.removedNextStep, ctx.reader),
-      },
-    });
+    if (input.notify !== false) {
+      await this.notifications.send({
+        userId: target.userId,
+        kpmId: ctx.kpmId!,
+        templateId: NotificationTemplate.MEMBER_REMOVED,
+        payload: {
+          reason: input.reason ?? null,
+          // What the prototype's own copy tells them to do next — stored, so in the remover's language (AC-6).
+          nextStep: render(ORG_MESSAGES.removedNextStep, ctx.reader),
+        },
+      });
+    }
 
     await this.audit.record(ctx, {
       action: 'member.removed',

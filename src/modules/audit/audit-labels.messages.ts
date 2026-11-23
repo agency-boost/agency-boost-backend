@@ -20,6 +20,9 @@ const kpmOf = (kpm: string | null, en: string, id: string, enNone: string, idNon
 
 const ACTIONS = {
   'account_link.created': { en: 'Login linked', id: 'Login ditautkan' },
+  // P19.31-T1 AC-5 (ADR-0289 §5): *Hapus akun* — the account retired, its original address in *before*.
+  'account.retired': { en: 'Account deleted (retired)', id: 'Akun dihapus' },
+  'account.retire_undone': { en: 'Account deletion undone after a failure', id: 'Penghapusan akun dibatalkan karena gagal' },
   'account_link.removed': { en: 'Linked login removed', id: 'Tautan login dihapus' },
   'account_link.requested': { en: 'Login link requested', id: 'Tautan login diminta' },
   'account_link.switched': { en: 'Switched to a linked login', id: 'Beralih ke login tertaut' },
@@ -205,6 +208,8 @@ const ACTIONS = {
   // P19.12-T4 (ADR-0247 §2): somebody moved to another leader at once, with everybody under them.
   'member.leader_changed': { en: 'Member’s leader changed', id: 'Leader anggota diganti' },
   'member.removed': { en: 'Member removed', id: 'Anggota dikeluarkan' },
+  // P19.30-T1 (ADR-0288 §3): the *Akun & password* PDF — its count and memberships, never a password.
+  'member.temporary_passwords_issued': { en: 'Temporary passwords issued (Akun & password PDF)', id: 'Password sementara dibuat (PDF akun & password)' },
   'member.role_changed': { en: 'Member’s role changed', id: 'Peran anggota diubah' },
   'member.tagged': { en: 'Member tagged', id: 'Anggota ditandai' },
   'member.tagged_by_leader': { en: 'Member added to a unit', id: 'Anggota ditambahkan ke unit' },

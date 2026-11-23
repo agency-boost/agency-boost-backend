@@ -679,4 +679,13 @@ export class RosterCommitDto extends RosterPreviewDto {
     description: 'How many new people were emailed an invitation. Those invited on WhatsApp are `counts.invited`.',
   })
   invited!: number;
+
+  @ApiProperty({
+    type: [String],
+    example: ['6740a1f2c3d4e5f601234567'],
+    description: '**The memberships this commit made** (ADR-0288 §5), one per `imported` row, in the order '
+      + 'written — never an updated or a WhatsApp-invited row\'s. *Password sementara (PDF)* sends them to `POST '
+      + '/members/temporary-passwords` to narrow the *Akun & password* PDF to the accounts just made.',
+  })
+  membershipIds!: string[];
 }

@@ -651,6 +651,9 @@ describe('P19.28-T1 Tambah user and Masukkan (ADR-0286)', () => {
       await member(bsd.kpmId, 'Tes Akun', 'AGENT', bsd.aab.membershipId, { testAccount: true });
       await col('memberships').updateOne({ userId: (await col('users').findOne({ fullName: 'Tes Akun' }))?._id.toString() }, { $set: { testAccount: true } });
 
+      // A *Belum ada KPM* row's day is its account's `createdAt`, the machine's time: pinned to the spec's day, so the test
+      // passes on any date (it failed on every day but 22 November 2026).
+      await col('users').updateMany({ email: { $in: ['untagged@example.test', 'loose@example.test'] } }, { $set: { createdAt: NOW } });
       const page = await waiting.page(SUPER_ADMIN, {});
       expect(page.rows.map((r) => [r.kind, r.fullName, r.kpm?.branch ?? null, r.email, r.since])).toEqual([
         ['unplaced', 'Fajar Nugroho', 'BSD City Branch', 'untagged@example.test', '2026-11-22'],

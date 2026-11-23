@@ -431,6 +431,12 @@ import { CoachingProfileController } from '@/modules/coaching/coaching-profile.c
 import { CoachingRecordService } from '@/modules/coaching/coaching-record.service';
 import { CoachingRecordController } from '@/modules/coaching/coaching-record.controller';
 import { RemovalService } from '@/modules/org/removal.service';
+// P19.30-T1 (ADR-0288): *Unduh akun & password (PDF)*.
+import { TemporaryPasswordsController } from '@/modules/org/temporary-passwords.controller';
+import { TemporaryPasswordsService } from '@/modules/org/temporary-passwords.service';
+// P19.31-T1 (ADR-0289): *Hapus akun*.
+import { AccountRetirementController } from '@/modules/users/account-retirement.controller';
+import { AccountRetirementService } from '@/modules/users/account-retirement.service';
 import { MemberDeparture, MemberDepartures } from '@/modules/org/member-departure.port';
 import { CalendarEvent, CalendarEventSchema } from '@/modules/calendar/calendar-event.schema';
 import { CalendarEventRepository } from '@/modules/calendar/calendar-event.repository';
@@ -793,6 +799,8 @@ import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
     IllustrationController,
     // P19.24 (ADR-0280): *Laporan KPM*.
     AdminKpmReportController,
+    TemporaryPasswordsController,
+    AccountRetirementController,
     KpmReportLinkController,
   ],
   providers: [
@@ -1037,6 +1045,8 @@ import { KpmReportService } from '@/modules/kpm-report/kpm-report.service';
     ProfileService,
     LeaderLimitRequestService,
     RemovalService,
+    TemporaryPasswordsService,
+    AccountRetirementService,
     OrgTreeService,
     // P11-T3: `COACH(actor, subject)`, and every read of a member's data that goes through it.
     CoachResolver,

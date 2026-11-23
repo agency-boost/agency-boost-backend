@@ -16,3 +16,22 @@ export const PASSWORD = {
   /** The longest, in characters. */
   MAX_LENGTH: 200,
 } as const;
+
+/**
+ * **A temporary password** (ADR-0288 §1; P19.30-T1 AC-1; metrics §B.30): what the *Akun & password* PDF prints for each
+ * account in a KPM not yet its person's own. Made fresh on every download by `PasswordService.generateTemporary`, from a
+ * CSPRNG (`crypto.randomInt`), one character at a time from `ALPHABET`; only its hash is kept, with
+ * `users.mustChangePassword: true`, so the person chooses their own at first sign-in.
+ *
+ * **No look-alikes** — neither `0 O` nor `1 l I` — because it is read off paper or a phone's screen and typed by hand.
+ * 57 characters, so ten of them carry about 58 bits: far beyond guessing within the sign-in limiter, and it is gone once
+ * the person chooses their own. Its length is within `PASSWORD`'s bounds, so the forms that check one accept it.
+ */
+export const TEMPORARY_PASSWORD = {
+  /** Characters in each temporary password. */
+  LENGTH: 10,
+  /** Upper case without `I` and `O`, lower case without `l`, the digits 2 to 9. */
+  ALPHABET: 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789',
+  /** The smallest text the PDF sets, in points (ADR-0288 §2; P19.30-T1 AC-2) — the KPM report's floor, 12 CSS px. */
+  PDF_MIN_TEXT_PT: 9,
+} as const;
