@@ -78,9 +78,10 @@ export class RequestContext {
     /**
      * They are signed in on a password somebody else chose for them.
      *
-     * Set on an account created by the roster import (P3.2-T4): the admin was handed a
-     * generated password to pass on, so until it is replaced, the person holding this
-     * session is not demonstrably the person the account belongs to.
+     * Set on an account issued a temporary password by the *Akun & password* PDF (ADR-0288;
+     * the roster import did it before ADR-0205 §10): the Owner was handed a generated password
+     * to pass on, so until it is replaced, the person holding this session is not demonstrably
+     * the person the account belongs to.
      *
      * `AuthGuard` refuses everything but the handful of routes that let them fix it. The
      * flag lives on the context rather than being re-read per route because the guard

@@ -598,7 +598,7 @@ export class AuthService {
     }
 
     user.passwordHash = await this.passwords.hash(next);
-    // The one thing that lifts the roster-import gate (P3.2-T4). Nothing else clears it.
+    // Lifts the temporary-password gate (P3.2-T4; the *Akun & password* PDF since ADR-0288), as a reset does.
     user.mustChangePassword = false;
     await user.save();
     await this.logoutAll(userId, 'password changed');

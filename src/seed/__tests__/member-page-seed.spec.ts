@@ -11,6 +11,8 @@ import { User, UserSchema } from '@/modules/users/user.schema';
 import { clearCollections, startMongo, stopMongo } from '../../../test/mongo';
 import { COACHING_CAST } from '../coaching-cast';
 import { seedDemo } from '../demo';
+import { PasswordService } from '@/modules/auth/password.service';
+import { TEMPORARY_DEMO_PASSWORD } from '../temporary-password-fixture';
 
 const RUN_MS = 300_000;
 const quiet = () => undefined;
@@ -90,4 +92,25 @@ describe('P19.12-T5 the member page’s states on the demo seed — a run at 09:
     const blank = await Promise.all(before.map((id) => directory.read(owner, id)));
     expect(blank.filter((r) => r.personal?.dateOfBirth === null)).toHaveLength(1);
   }, RUN_MS);
+
+  /*
+   * **P19.30-T4 AC-1 (ADR-0288): one account on a temporary password** (`temporary-password-fixture.ts`) — never signed in,
+   * never invited, nobody another walk reads — and its demo password signs in to choosing a password.
+   */
+  it('P19.30-T4 AC-1 one 0417 account is on the demo temporary password, gated, and listed by nothing else', async () => {
+    const gated = await col('users').find({ mustChangePassword: true }).toArray();
+    expect(gated).toHaveLength(1);
+    const [account] = gated;
+    expect(account.email).toMatch(/@kpm0417\.test$/);
+    expect(account.lastLoginAt ?? null).toBeNull();
+    await expect(new PasswordService().verify(account.passwordHash, TEMPORARY_DEMO_PASSWORD)).resolves.toBe(true);
+    const spared = new Set([...COACHING_CAST.map((p) => p.email), 'owner@kpm0417.test', 'admin@kpm0417.test']);
+    expect(spared.has(account.email)).toBe(false);
+    const kpm = await col('kpms').findOne({ code: '0417' });
+    const membership = await col('memberships').findOne({ kpmId: String(kpm!._id), userId: String(account._id), status: 'active' });
+    expect(membership).toMatchObject({ invitedAt: null });
+    // The two *Diundang* members are not it.
+    const rows = await directoryRows();
+    expect(rows.find((r) => r.email === account.email)?.invitation).toBe('not_invited');
+  });
 });

@@ -582,7 +582,9 @@ export class RosterRowsDto {
 export class RosterImportDto extends RosterRowsDto {
   @ApiPropertyOptional({
     type: Boolean, default: true,
-    description: 'Mail each new person a one-time link to choose their password (email only, ADR-0010). Default `true`.',
+    description: 'Mail each new person a one-time link to choose their password (email only, ADR-0010). Default `true`. '
+      + '*Since ADR-0288 §5:* `false` is *Password sementara (PDF)* — nobody is emailed, and the answer\'s '
+      + '`membershipIds` narrow `POST /members/temporary-passwords` to the accounts just made.',
   })
   @IsOptional()
   @IsBoolean()

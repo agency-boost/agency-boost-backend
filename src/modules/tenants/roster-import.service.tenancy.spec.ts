@@ -732,6 +732,77 @@ describe('RosterImportService (P3.2-T4; A3 since P19.3-T4, ADR-0205)', () => {
       expect(await byCode('102')).toBeNull();
       expect(await byCode('103')).not.toBeNull();
     });
+
+    /*
+     * **P19.30-T3 AC-1 (ADR-0288 §6): a seat goes only to a row that will be written.** The District 41 defect: counted in
+     * the file's order, an AAB listed before its AB took a seat, the AB was past the limit, the AAB fell with it — and the
+     * seat it had taken was never given back to the leader below who fitted.
+     */
+    const limit = (maxLeaders: number) => mongoose.model(Kpm.name).updateOne({ _id: kpmId }, {
+      $set: { subscription: { startDate: null, endDate: null, pricePerLeaderMinor: null, currency: 'IDR', maxLeaders, keepActiveAfterEnd: false } },
+    });
+
+    it('P19.30-T3 AC-1 a leader listed before its upline is counted after it: both seats are used, none held for a row that falls', async () => {
+      await limit(2);
+      const file = a3(
+        // Sari's upline Bayu comes after her. In the file's order Sari took seat 1 and Rahmat seat 2, Bayu was past the
+        // limit, Sari fell with him, and one seat stood empty. Upline first, Bayu and Sari take the two.
+        person('102', 'Sari', 'AAB', '103'), person('101', 'Rahmat', 'AB'), person('104', 'Dewi', 'AB'),
+        person('103', 'Bayu', 'AB'), person('105', 'Fikri', 'Agent', '104'),
+      );
+      const preview = await service.preview(theOwner(), kpmId, file);
+      const outcome = results(preview);
+      expect(outcome['103'][0]).toBe('imported');
+      expect(outcome['102'][0]).toBe('imported');
+      const past = /Import them as an Agent, then promote them on their page/;
+      expect(outcome['101']).toEqual(['skipped', expect.stringMatching(past)]);
+      expect(outcome['104']).toEqual(['skipped', expect.stringMatching(past)]);
+      // Fikri's upline Dewi is past the limit, so Fikri falls with her, and says so.
+      expect(outcome['105']).toEqual(['skipped', expect.stringContaining('104')]);
+      expect(preview.counts).toEqual({ imported: 2, updated: 0, invited: 0, skipped: 3 });
+    });
+
+    it('P19.30-T3 AC-1 counted the old way the AAB would have wasted a seat: now every row that fits is written', async () => {
+      await limit(3);
+      // An AB with two AABs listed before it, then another AB: the three seats go to the AB and its two AABs, in the tree.
+      const file = a3(
+        person('202', 'Sari', 'AAB', '201'), person('203', 'Wulan', 'AAB', '201'), person('201', 'Rahmat', 'AB'),
+        person('204', 'Dewi', 'AB'), person('205', 'Bayu', 'Agent', '203'),
+      );
+      const result = await service.commit(theOwner(), kpmId, file);
+      expect(result.counts).toEqual({ imported: 4, updated: 0, invited: 0, skipped: 1 });
+      for (const code of ['201', '202', '203', '205']) expect(await byCode(code)).not.toBeNull();
+      expect(results(result)['204'][0]).toBe('skipped');
+    });
+
+    it('P19.30-T3 AC-1 sixty seats and a hundred leaders in a deep tree: exactly sixty imported, none wasted', async () => {
+      await limit(60);
+      // A chain of 100 AABs under one AB, listed bottom first — the order that wasted every seat before.
+      const rows = [person('3000', 'Root', 'AB')];
+      for (let i = 1; i <= 100; i += 1) rows.unshift(person(String(3000 + i), `Leader ${i}`, 'AAB', String(3000 + i - 1)));
+      const preview = await service.preview(theOwner(), kpmId, a3(...rows));
+      expect(preview.counts.imported).toBe(60);
+      expect(preview.counts.skipped).toBe(41);
+      // The sixty are the top of the chain: the root and the first fifty-nine below it.
+      const imported = new Set(preview.rows.filter((r) => r.outcome === 'imported').map((r) => Number(r.agentCode)));
+      for (let code = 3000; code < 3060; code += 1) expect(imported.has(code)).toBe(true);
+    });
+  });
+
+  describe('P19.30-T2 AC-2 the commit answers the memberships it made (ADR-0288 §5)', () => {
+    it('P19.30-T2 AC-2 membershipIds: one per new person, never an updated row, and none for a skipped one', async () => {
+      await service.commit(theOwner(), kpmId, a3(person('100', 'Wilson', 'AB')), false);
+      const result = await service.commit(theOwner(), kpmId, a3(
+        person('101', 'Rahmat', 'AB', '100'), person('102', 'Sari', 'AAB', '101'), line('100', 'Wilson', 'AB'),
+        person('105', 'Fikri', 'Agent', '70049999'),
+      ), false);
+      const [rahmat, sari] = await Promise.all(['101', '102'].map(byCode));
+      expect(result.membershipIds.sort()).toEqual([String(rahmat!._id), String(sari!._id)].sort());
+      expect(result.membershipIds).not.toContain(String((await byCode('100'))!._id));
+      // With `invite: false` nobody is mailed, and nothing carries a password.
+      expect(result.invited).toBe(0);
+      expect(JSON.stringify(result)).not.toMatch(/password/i);
+    });
   });
 
   /*

@@ -42413,6 +42413,369 @@
         "x-required-permission": "kpm_report:read"
       }
     },
+    "/api/v1/members/temporary-passwords/preview": {
+      "post": {
+        "description": "Lists each **active** member of the KPM in context whose account is **not yet their own** — still on a temporary password, or never signed in with no address proven — never a test account, a Super Admin or the reader. `membershipIds` narrows it to those memberships; one that is not this KPM's is `404`. **Issues nothing**: what the confirmation says before a download. `member:issue_temporary_password`: the KPM's Owners, and the Super Admin inside the KPM (`X-Kpm-Id`) as its Owner. A KPM Admin is `403 PERM_OWNER_ONLY`; an AB, an AAB, an Agent, the Super Admin outside a KPM and any support session `403 PERM_DENIED`.\n\n**Requires `member:issue_temporary_password`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TemporaryPasswordsController_preview_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemporaryPasswordsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryPasswordsPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `membershipIds` not a list of 1 to 2,000 ObjectIds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_OWNER_ONLY` (a KPM Admin) or `PERM_DENIED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — a membership named is not this KPM's: indistinguishable from one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "How many people the Akun & password PDF would list",
+        "tags": [
+          "members"
+        ],
+        "x-required-permission": "member:issue_temporary_password"
+      }
+    },
+    "/api/v1/members/temporary-passwords": {
+      "post": {
+        "description": "Lists each **active** member of the KPM in context whose account is **not yet their own** — still on a temporary password, or never signed in with no address proven — never a test account, a Super Admin or the reader. `membershipIds` narrows it to those memberships; one that is not this KPM's is `404`. **Each gets a fresh 10-character password** (no 0 O 1 l I), of which only the hash is written, with `mustChangePassword: true` — so it reaches nothing but `/choose-a-password` until its person chooses their own — and their sessions are ended: **an older PDF stops working for everybody in this one** (OD-478). Answers the PDF (`application/pdf`, A4, `Content-Disposition: attachment`, `Akun-password-{KPM}-{YYYY-MM-DD}.pdf`): No · Nama · Peran · Kode agen · Email · Password, the header row on every page, *\"<KPM> · Akun & password · hal. x / n\"* at every foot. **No password is kept, logged, audited or answered anywhere else.** Audited `member.temporary_passwords_issued` (the count and the memberships) in the KPM's log before the answer is sent: a failure fails the request. `member:issue_temporary_password`: the KPM's Owners, and the Super Admin inside the KPM (`X-Kpm-Id`) as its Owner. A KPM Admin is `403 PERM_OWNER_ONLY`; an AB, an AAB, an Agent, the Super Admin outside a KPM and any support session `403 PERM_DENIED`.\n\n**Requires `member:issue_temporary_password`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "TemporaryPasswordsController_issue_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemporaryPasswordsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The file.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — `membershipIds` malformed, or nobody to list (`details.listed: 0`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_OWNER_ONLY` (a KPM Admin) or `PERM_DENIED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — a membership named is not this KPM's: indistinguishable from one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — the audit entry could not be written, so the file is not served.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Issue temporary passwords and download the Akun & password PDF",
+        "tags": [
+          "members"
+        ],
+        "x-required-permission": "member:issue_temporary_password"
+      }
+    },
+    "/api/v1/admin/accounts/{userId}/retirement": {
+      "get": {
+        "description": "The account, its one live membership (ended by a retirement) and in how many KPMs it has history (which stays), and `refusal` — `{ code, message, details }` — when one of the three applies: an AgencyBoost team account (`ACCOUNT_RETIRE_PLATFORM_TEAM`), an owner of a KPM (`ACCOUNT_RETIRE_OWNER`), people reporting to them (`ACCOUNT_RETIRE_HAS_REPORTS`). Writes nothing. `account:retire`: the Super Admin alone, as themselves — every tenant role `403 PERM_DENIED`, and any support session `403`.\n\n**Requires `account:retire`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AccountRetirementController_preview_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetirementPreviewDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no live account with this id: unknown, malformed, or already retired — indistinguishable from one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "What deleting an account would end, and what stays",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "account:retire"
+      },
+      "post": {
+        "description": "`{ reason, fullName }`, the name typed in full. **Not erasure**: the account is soft-deleted (who, why), its address moved to `retired+<userId>@akun-dihapus.invalid`, its name kept, its agent code released; its sessions and unused links revoked; its open invitations cancelled; its live membership ended by the removal itself (`member.removed` in that KPM's log). Every membership and its history stays. All or nothing: a failure undoes what was written (`account.retire_undone`). Audited `account.retired` — the original address in `before` — in the platform's log and the KPM's. `account:retire`: the Super Admin alone, as themselves — every tenant role `403 PERM_DENIED`, and any support session `403`.\n\n**Requires `account:retire`.** See `docs/00-product/roles-and-permissions.md`.",
+        "operationId": "AccountRetirementController_retire_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireAccountDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetirementResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`VALIDATION_FAILED` — no reason, or a name that is not theirs (`details.field: fullName`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID` — no bearer token, or one that is spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`PERM_DENIED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`NOT_FOUND` — no live account with this id: unknown, malformed, or already retired — indistinguishable from one in another office.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ACCOUNT_RETIRE_PLATFORM_TEAM`, `ACCOUNT_RETIRE_OWNER` (`details.kpms`) or `ACCOUNT_RETIRE_HAS_REPORTS` (`details.reports`) — nothing written; the sentence says what to do first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`INTERNAL_ERROR` — quote `requestId`; the detail is in the log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete (retire) an account so its address and agent code can be used again",
+        "tags": [
+          "admin (Super Admin)"
+        ],
+        "x-required-permission": "account:retire"
+      }
+    },
     "/api/v1/kpm-report/shared/{token}": {
       "get": {
         "description": "The report the link names — its KPM and month — built now, as the Super Admin who sent it would build it. Only the KPM's Owner or a KPM Admin, signed in in that KPM; a view-as session is refused (it opens the report and cannot take it away). Rate limited per account, thirty an hour. Audited in the platform's log and the KPM's, written before the answer is sent: a failure fails the request.\n\n**Requires `kpm_report:download_link`.** See `docs/00-product/roles-and-permissions.md`.",
@@ -46933,7 +47296,7 @@
           "invite": {
             "type": "boolean",
             "default": true,
-            "description": "Mail each new person a one-time link to choose their password (email only, ADR-0010). Default `true`."
+            "description": "Mail each new person a one-time link to choose their password (email only, ADR-0010). Default `true`. *Since ADR-0288 §5:* `false` is *Password sementara (PDF)* — nobody is emailed, and the answer's `membershipIds` narrow `POST /members/temporary-passwords` to the accounts just made."
           },
           "fileName": {
             "type": "string",
@@ -74411,6 +74774,222 @@
           "owners"
         ]
       },
+      "TemporaryPasswordsDto": {
+        "type": "object",
+        "properties": {
+          "membershipIds": {
+            "minItems": 1,
+            "maxItems": 2000,
+            "example": [
+              "6740a1f2c3d4e5f601234567"
+            ],
+            "description": "Narrow the PDF to these memberships of the KPM in context. Absent: every account not yet its person’s own. Each an ObjectId; one that is not a membership of this KPM is `404`. One whose account is already its person’s own is simply not listed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TemporaryPasswordsPreviewDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 110,
+            "description": "The people the PDF would list now: active members whose account is not yet their own, never a test account or a Super Admin. `0`: nobody — the dialog says so and offers no download."
+          },
+          "kpmName": {
+            "type": "string",
+            "example": "PruDynamic",
+            "description": "The KPM's name, for the confirmation's line under its title."
+          },
+          "fileName": {
+            "type": "string",
+            "example": "Akun-password-PruDynamic-2026-11-22.pdf",
+            "description": "What the download is saved as — the name its `Content-Disposition` carries, the day the KPM's."
+          }
+        },
+        "required": [
+          "count",
+          "kpmName",
+          "fileName"
+        ]
+      },
+      "RetirementMembershipDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "kpmId": {
+            "type": "string"
+          },
+          "kpmName": {
+            "type": "string",
+            "example": "Bekasi Barat Branch"
+          },
+          "kpmCode": {
+            "type": "string",
+            "example": "0602"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "membershipId",
+          "kpmId",
+          "kpmName",
+          "kpmCode",
+          "status"
+        ]
+      },
+      "RetirementRefusalDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "ACCOUNT_RETIRE_PLATFORM_TEAM",
+              "ACCOUNT_RETIRE_OWNER",
+              "ACCOUNT_RETIRE_HAS_REPORTS"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "The refusal's sentence in the reader's language: what to do first."
+          },
+          "details": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
+        ]
+      },
+      "RetirementPreviewDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Simonta Tuan"
+          },
+          "email": {
+            "type": "string",
+            "example": "simonta@example.com"
+          },
+          "membership": {
+            "nullable": true,
+            "description": "The one live membership, which retiring ends.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RetirementMembershipDto"
+              }
+            ]
+          },
+          "kpmsWithHistory": {
+            "type": "number",
+            "example": 1,
+            "description": "In how many KPMs they have been a member, ended or not: the history that stays."
+          },
+          "refusal": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RetirementRefusalDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "fullName",
+          "email",
+          "membership",
+          "kpmsWithHistory",
+          "refusal"
+        ]
+      },
+      "RetireAccountDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Dibuat ulang dari file District 41 (PruDynamic).",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Simonta Tuan",
+            "description": "The account's full name, typed in full: compared with spaces collapsed and in any case. Another name is `400 VALIDATION_FAILED`, `details.field: fullName`."
+          }
+        },
+        "required": [
+          "reason",
+          "fullName"
+        ]
+      },
+      "RetirementEndedDto": {
+        "type": "object",
+        "properties": {
+          "membershipId": {
+            "type": "string"
+          },
+          "kpmId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "membershipId",
+          "kpmId"
+        ]
+      },
+      "RetirementResultDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Simonta Tuan"
+          },
+          "retiredAt": {
+            "type": "string",
+            "example": "2026-11-23T03:00:00.000Z"
+          },
+          "membershipEnded": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RetirementEndedDto"
+              }
+            ]
+          },
+          "invitationsCancelled": {
+            "type": "number",
+            "example": 0
+          }
+        },
+        "required": [
+          "userId",
+          "fullName",
+          "retiredAt",
+          "membershipEnded",
+          "invitationsCancelled"
+        ]
+      },
       "StatusAckDto": {
         "type": "object",
         "properties": {
@@ -83215,6 +83794,16 @@
           "invited": {
             "type": "number",
             "description": "How many new people were emailed an invitation. Those invited on WhatsApp are `counts.invited`."
+          },
+          "membershipIds": {
+            "example": [
+              "6740a1f2c3d4e5f601234567"
+            ],
+            "description": "**The memberships this commit made** (ADR-0288 §5), one per `imported` row, in the order written — never an updated or a WhatsApp-invited row's. *Password sementara (PDF)* sends them to `POST /members/temporary-passwords` to narrow the *Akun & password* PDF to the accounts just made.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -83223,7 +83812,8 @@
           "counts",
           "rows",
           "skippedCsv",
-          "invited"
+          "invited",
+          "membershipIds"
         ]
       },
       "AuditKpmRefDto": {

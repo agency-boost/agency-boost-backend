@@ -1,5 +1,13 @@
 import { english, englishAll, indonesianAll } from '../../../test/i18n';
-import { PASSWORD } from '@/domain/constants';
+import * as crypto from 'node:crypto';
+import { PASSWORD, TEMPORARY_PASSWORD } from '@/domain/constants';
+
+/** `randomInt` watched, and still the real one unless a test says otherwise (a built-in's property cannot be spied on). */
+jest.mock('node:crypto', () => {
+  const actual = jest.requireActual<typeof import('node:crypto')>('node:crypto');
+  return { ...actual, randomInt: jest.fn(actual.randomInt) };
+});
+const randomInt = crypto.randomInt as unknown as jest.Mock;
 import { PasswordService } from './password.service';
 
 /**
@@ -12,6 +20,47 @@ import { PasswordService } from './password.service';
  */
 describe('PasswordService', () => {
   const passwords = new PasswordService();
+
+  /** ADR-0288 §1 (P19.30-T1 AC-1): the *Akun & password* PDF's temporary passwords. */
+  describe('a temporary password', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+      randomInt.mockReset();
+      randomInt.mockImplementation(jest.requireActual<typeof import('node:crypto')>('node:crypto').randomInt);
+    });
+
+    it('P19.30-T1 AC-1 is ten characters of the alphabet with no look-alike, and passes the password rules', () => {
+      for (let i = 0; i < 500; i += 1) {
+        const password = passwords.generateTemporary();
+        expect(password).toHaveLength(TEMPORARY_PASSWORD.LENGTH);
+        for (const ch of password) expect(TEMPORARY_PASSWORD.ALPHABET).toContain(ch);
+        expect(password).not.toMatch(/[0O1lI]/);
+        expect(passwords.validate(password)).toEqual([]);
+      }
+    });
+
+    it('P19.30-T1 AC-1 draws every character from crypto.randomInt over the whole alphabet — never Math.random', () => {
+      const random = jest.spyOn(Math, 'random');
+      randomInt.mockClear();
+      passwords.generateTemporary();
+      expect(random).not.toHaveBeenCalled();
+      expect(randomInt).toHaveBeenCalledTimes(TEMPORARY_PASSWORD.LENGTH);
+      for (const call of randomInt.mock.calls) expect(call).toEqual([TEMPORARY_PASSWORD.ALPHABET.length]);
+    });
+
+    it('P19.30-T1 AC-1 maps each draw to its character, so the first and the last of the alphabet both occur', () => {
+      const last = TEMPORARY_PASSWORD.ALPHABET.length - 1;
+      const draws = [0, last, 1, 2, 3, 4, 5, 6, 7, 8];
+      randomInt.mockImplementation(() => draws.shift());
+      expect(passwords.generateTemporary()).toBe('A9BCDEFGHJ');
+    });
+
+    it('P19.30-T1 AC-1 is fresh each time: a thousand draws, no two alike, every character of the alphabet seen', () => {
+      const made = Array.from({ length: 1000 }, () => passwords.generateTemporary());
+      expect(new Set(made).size).toBe(made.length);
+      expect(new Set(made.join(''))).toEqual(new Set(TEMPORARY_PASSWORD.ALPHABET));
+    });
+  });
 
   describe('hashing and verifying', () => {
     it('round-trips a password', async () => {

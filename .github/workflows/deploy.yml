@@ -51,6 +51,10 @@ on:
         type: choice
         options: [staging, production]
         required: true
+      skip_ci:
+        description: "Skip ci for this run (an urgent release whose exact commit already passed ci on development). Build, the pre-deploy snapshot, deploy and smoke still run."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -88,6 +92,9 @@ jobs:
 
   ci:
     needs: target
+    # A manual run may skip ci (skip_ci), for an urgent release of a commit that already passed it on development.
+    # A push never skips it.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_ci) }}
     uses: ./.github/workflows/ci.yml
     # The one secret CI reads: the superproject's docs and prototype, for the parity specs.
     secrets:
@@ -95,6 +102,8 @@ jobs:
 
   build:
     needs: [target, ci]
+    # ci passed, or a manual run skipped it on purpose (skip_ci); never after a failed or cancelled ci.
+    if: ${{ !cancelled() && needs.target.result == 'success' && (needs.ci.result == 'success' || (needs.ci.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.skip_ci)) }}
     runs-on: ubuntu-latest
     # The environment's variables, and the identity that may push, exist only inside it.
     environment: ${{ needs.target.outputs.environment }}

@@ -635,8 +635,11 @@ describe('permission matrix', () => {
        * fails the build until somebody has made it on purpose, with an ADR.
        */
       const reserved = (Object.keys(PERMISSIONS) as Permission[]).filter(isOwnerReserved).sort();
-      // ADR-0285 §4 (P19.27): and adding and removing owners, never an Admin's.
-      expect(reserved).toEqual(['kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke']);
+      // ADR-0285 §4 (P19.27): and adding and removing owners, never an Admin's. ADR-0288 §3 (P19.30; OD-479): and a KPM's
+      // temporary passwords.
+      expect(reserved).toEqual([
+        'kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke', 'member:issue_temporary_password',
+      ]);
     });
 
     it('grants the Admin exactly what it grants the Owner, scope and status alike (ADR-0028)', () => {
@@ -662,7 +665,9 @@ describe('permission matrix', () => {
           return JSON.stringify(as(grants, 'kpm_owner')) !== JSON.stringify(as(grants, 'kpm_admin'));
         })
         .sort();
-      expect(differ).toEqual(['kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke']);
+      expect(differ).toEqual([
+        'kpm_admin:grant', 'kpm_admin:revoke', 'kpm_owner:grant', 'kpm_owner:revoke', 'member:issue_temporary_password',
+      ]);
       // And the one that used to differ is now held by both.
       expect(can(ctx({ admin: true }), 'audit_log:export')).toBe(true);
     });
@@ -1296,6 +1301,52 @@ describe('permission matrix', () => {
       expect(BLOCKED_WHILE_IMPERSONATING as readonly string[]).not.toContain('kpm:transfer_ownership');
       // What it guarded is two grants now, each the Super Admin's and an owner's, and both blocked in a session.
       expect(BLOCKED_WHILE_IMPERSONATING).toEqual(expect.arrayContaining(['kpm_owner:grant', 'kpm_owner:revoke']));
+    });
+
+    /*
+     * **P19.30-T1 AC-3 (ADR-0288 §3; OD-479): *Unduh akun & password (PDF)*** — a KPM's Owners, and the Super Admin inside
+     * the KPM as its Owner; never a KPM Admin, a leader, an agent, a core leader, the Super Admin outside a KPM, a platform
+     * read or any support session.
+     */
+    /* P19.31-T1 AC-1 (ADR-0289 §3): *Hapus akun* — the Super Admin as themselves, and nobody else. */
+    it('P19.31-T1 AC-1 account:retire: the Super Admin, inside a KPM or not, and never a tenant role or a session', () => {
+      const permission = 'account:retire';
+      const superAdmin = ctx({ superAdmin: true, noMembership: true });
+      expect(can(superAdmin, permission)).toBe(true);
+      expect(scopeFor(superAdmin, permission)).toBe('all');
+      expect(can(RequestContext.superAdminInKpm(superAdmin, 'kpm-a'), permission)).toBe(true);
+      for (const who of [
+        ctx({ role: 'ab', owner: true }), ctx({ role: 'ab', admin: true }), ctx({ role: 'ab' }), ctx({ role: 'aab' }),
+        ctx({ role: 'agent' }), ctx({ role: 'ab', coreLeader: true }),
+      ]) {
+        expect(can(who, permission)).toBe(false);
+      }
+      expect(BLOCKED_WHILE_IMPERSONATING).toContain(permission);
+      expect(can(ctx({ superAdmin: true, role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: true }), permission)).toBe(false);
+      expect(can(ctx({ superAdmin: true, role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false }), permission)).toBe(false);
+      expect(isReadLike(permission)).toBe(false);
+      expect(isOwnerReserved(permission)).toBe(false);
+    });
+
+    it('P19.30-T1 AC-3 member:issue_temporary_password: an Owner and the Super Admin inside the KPM, and nobody else', () => {
+      const permission = 'member:issue_temporary_password';
+      expect(can(ctx({ role: 'ab', owner: true }), permission)).toBe(true);
+      expect(scopeFor(ctx({ role: 'ab', owner: true }), permission)).toBe('own-kpm');
+      expect(can(RequestContext.superAdminInKpm(ctx({ superAdmin: true, noMembership: true }), 'kpm-a'), permission)).toBe(true);
+      for (const who of [
+        ctx({ role: 'ab', admin: true }), ctx({ role: 'ab' }), ctx({ role: 'aab' }), ctx({ role: 'agent' }),
+        ctx({ role: 'ab', coreLeader: true }), ctx({ superAdmin: true, noMembership: true }),
+        RequestContext.platformRead(ctx({ superAdmin: true, noMembership: true }), 'kpm-a'),
+      ]) {
+        expect(can(who, permission)).toBe(false);
+      }
+      // A KPM Admin is answered `PERM_OWNER_ONLY`, as with the admins' and the owners' own grants.
+      expect(isOwnerReserved(permission)).toBe(true);
+      // Never in a support session — read-only, or the hard-blocked list's own layer.
+      expect(BLOCKED_WHILE_IMPERSONATING).toContain(permission);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: true }), permission)).toBe(false);
+      expect(can(ctx({ role: 'ab', owner: true, impersonatedBy: 'sa-1', readOnly: false }), permission)).toBe(false);
+      expect(isReadLike(permission)).toBe(false);
     });
 
     it('UI-025 new_hire:mark_left is retired with its route: nobody holds it (ADR-0180 §6)', () => {

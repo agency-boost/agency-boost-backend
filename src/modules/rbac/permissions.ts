@@ -474,6 +474,24 @@ export const PERMISSIONS = {
     { grantee: SUPER_ADMIN, scope: 'all' },
     { grantee: KPM_OWNER, scope: 'own-kpm' },
   ],
+  /*
+   * ***Unduh akun & password (PDF)*** (P19.30-T1 AC-3; ADR-0288 §3; OD-479): `POST /members/temporary-passwords` and its
+   * `…/preview` — a fresh temporary password for every account of the KPM not yet its person's own, printed once in one
+   * PDF. **The KPM's Owners**, and the Super Admin **inside the KPM** as its Owner (ADR-0268 §3, the `tenant` grantee) —
+   * never outside one, so no `SUPER_ADMIN` row. **Never a KPM Admin** (OD-479's default): no tenant grantee but the
+   * Owner, so `isOwnerReserved` answers an Admin `403 PERM_OWNER_ONLY`. On `BLOCKED_WHILE_IMPERSONATING` below: a
+   * credential is never handed out from inside somebody's session.
+   */
+  'member:issue_temporary_password': [
+    { grantee: KPM_OWNER, scope: 'own-kpm' },
+  ],
+  /*
+   * ***Hapus akun*** (P19.31-T1 AC-1; ADR-0289 §3): `GET` and `POST /admin/accounts/:userId/retirement` — retiring an
+   * account so its address and agent code may be used again, its history kept. **The Super Admin's alone**, as
+   * themselves: no tenant grantee, so an Owner or a KPM Admin holds nothing here; on `BLOCKED_WHILE_IMPERSONATING`, and a
+   * write by its verb, so no support session.
+   */
+  'account:retire': [{ grantee: SUPER_ADMIN, scope: 'all' }],
   // The platform-wide roster is a different question from an office's own admin list, and
   // needs its own grant: `kpm_admin:list` gives an Owner `own-kpm`, so gating the roster
   // on it let an Owner past the guard and left the repository to refuse them — with
@@ -1955,6 +1973,10 @@ export const BLOCKED_WHILE_IMPERSONATING: readonly Permission[] = [
   // ADR-0285 §4 (P19.27): and owners, as admins.
   'kpm_owner:grant',
   'kpm_owner:revoke',
+  // ADR-0288 §3 (P19.30): and a KPM's temporary passwords — sign-in credentials for other people, never from a session.
+  'member:issue_temporary_password',
+  // ADR-0289 §2 (P19.31): and retiring an account — the operator does it as themselves, where the audit says so.
+  'account:retire',
   // ADR-0260 §4 (P19.15-T4): *Kelola data produk* is given and removed by the Super Admin as themselves, never in a session.
   'product_data_grant:manage',
   'notification_preference:manage',

@@ -78,6 +78,15 @@ import { AdminDelegationService } from '@/modules/org/admin-delegation.service';
 import { GroupService } from '@/modules/org/group.service';
 import { OrgTreeService } from '@/modules/org/org-tree.service';
 import { RemovalService } from '@/modules/org/removal.service';
+import { TemporaryPasswordsController } from '@/modules/org/temporary-passwords.controller';
+import { TemporaryPasswordsService } from '@/modules/org/temporary-passwords.service';
+import { readPdf } from '../../../test/pdf-text';
+import { AccountRetirementController } from '@/modules/users/account-retirement.controller';
+import { AccountRetirementService } from '@/modules/users/account-retirement.service';
+import { UserInvitation, UserInvitationSchema } from '@/modules/org/user-invitation.schema';
+import { UserInvitationRepository } from '@/modules/org/user-invitation.repository';
+import { MemberInvite, MemberInviteSchema } from '@/modules/org/member-invite.schema';
+import { MemberInviteRepository } from '@/modules/org/org.repositories';
 import { RoleChangeService } from '@/modules/org/role-change.service';
 import { AuthToken, AuthTokenSchema } from './auth-token.schema';
 import {
@@ -229,6 +238,9 @@ describe('auth and admin over HTTP', () => {
           { name: User.name, schema: UserSchema },
           { name: AuthToken.name, schema: AuthTokenSchema },
           { name: ImpersonationSession.name, schema: ImpersonationSessionSchema },
+          // P19.31 (ADR-0289): *Hapus akun* cancels the invitations waiting for the account.
+          { name: UserInvitation.name, schema: UserInvitationSchema },
+          { name: MemberInvite.name, schema: MemberInviteSchema },
           { name: Company.name, schema: CompanySchema },
           { name: Kpm.name, schema: KpmSchema },
           { name: KpmRequest.name, schema: KpmRequestSchema },
@@ -274,6 +286,10 @@ describe('auth and admin over HTTP', () => {
       ],
       controllers: [
         AuthController, AdminController, CompanyController, OrgController, OnboardingController,
+        // P19.30 (ADR-0288): the *Akun & password* PDF, so a temporary password is walked through the real guard.
+        TemporaryPasswordsController,
+        // P19.31 (ADR-0289): *Hapus akun*, so a retired account is walked through the real guard and sign-in.
+        AccountRetirementController,
         TenantConfigController,
         TenantConfigReadController,
       ],
@@ -321,7 +337,8 @@ describe('auth and admin over HTTP', () => {
         { provide: StoragePort, useClass: StubStorage },
         AuditService, AuditReadService, NotificationRepository, NotificationService, PasswordService, RateLimiter,
         AuthService, ContextResolver, ImpersonationService, TenantService, KpmRequestService, OrgLevelService,
-        RosterImportService,
+        RosterImportService, TemporaryPasswordsService,
+        AccountRetirementService, UserInvitationRepository, MemberInviteRepository,
         MembershipRepository, GroupRepository, JoinRequestRepository,
         MembershipHistoryRepository,
     GroupRepository,
@@ -2068,6 +2085,132 @@ describe('auth and admin over HTTP', () => {
       // The link proved the mailbox; it works once.
       expect((await users.findOne({ email }).exec())!.emailVerifiedAt).not.toBeNull();
       await api().post('/api/v1/auth/reset-password').send({ token, newPassword: 'another one of mine' }).expect(400);
+    });
+
+    /*
+     * **P19.30 end to end (ADR-0288; T1 AC-5, T2 AC-2)**, through the real `AuthGuard`: the Owner imports with *Password
+     * sementara (PDF)* — `invite: false`, nobody mailed — downloads the PDF narrowed to the accounts the commit made, and
+     * the person signs in with the password printed there. Every route but the three is `403
+     * AUTH_PASSWORD_CHANGE_REQUIRED`; a second PDF makes the first one's password stop working; once they choose their
+     * own, the next PDF leaves them out.
+     */
+    it('P19.30-T1 AC-5 a temporary password from the PDF signs in to choose-a-password only; then the account is theirs', async () => {
+      const { auth, kpmId } = await anOffice();
+      const email = `sementara-${Math.random()}@k.test`;
+      const committed = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ rows: file(row(digits(), 'Dewi Lestari', 'AB', email)), invite: false }).expect(201);
+      expect(committed.body.invited).toBe(0);
+      expect(committed.body.membershipIds).toHaveLength(1);
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const account = (await users.findOne({ email }).exec())!;
+      expect(mailbox.sent.filter((m) => m.to.userId === String(account._id) && m.to.templateId === 'member.invitation')).toEqual([]);
+
+      const passwordIn = async (body: Record<string, unknown>) => {
+        const res = await api().post('/api/v1/members/temporary-passwords').set(auth).send(body)
+          .buffer(true).parse((r, done) => {
+            const chunks: Buffer[] = [];
+            r.on('data', (chunk: Buffer) => chunks.push(chunk));
+            r.on('end', () => done(null, Buffer.concat(chunks)));
+          }).expect(200);
+        const line = readPdf(res.body as Buffer).pages.flatMap((p) => p.text.split('\n')).find((l) => l.includes(email))!;
+        const words = line.split(' ');
+        return words[words.indexOf(email) + 1];
+      };
+      const narrowed = { membershipIds: committed.body.membershipIds };
+      expect((await api().post('/api/v1/members/temporary-passwords/preview').set(auth).send(narrowed).expect(200)).body)
+        .toMatchObject({ count: 1 });
+      const first = await passwordIn(narrowed);
+      expect(first).toMatch(/^[A-HJ-NP-Za-km-z2-9]{10}$/);
+
+      // It signs in — to choosing a password, and nothing else.
+      const signedIn = await api().post('/api/v1/auth/login').send({ email, password: first }).expect(200);
+      const theirs = { Authorization: `Bearer ${signedIn.body.accessToken}` };
+      const me = await api().get('/api/v1/auth/me').set(theirs).expect(200);
+      expect(me.body.mustChangePassword).toBe(true);
+      for (const [method, path] of [['get', '/api/v1/join/me'], ['get', '/api/v1/members'], ['post', '/api/v1/members/temporary-passwords/preview']] as const) {
+        const res = await api()[method](path).set(theirs).send({}).expect(403);
+        expect([path, res.body.error.code]).toEqual([path, 'AUTH_PASSWORD_CHANGE_REQUIRED']);
+      }
+
+      // Downloaded again: a fresh password, and the first PDF's no longer signs in.
+      const second = await passwordIn(narrowed);
+      expect(second).not.toBe(first);
+      await api().post('/api/v1/auth/login').send({ email, password: first }).expect(401);
+      const again = await api().post('/api/v1/auth/login').send({ email, password: second }).expect(200);
+      const now = { Authorization: `Bearer ${again.body.accessToken}` };
+
+      // They choose their own: the gate lifts, and the next PDF leaves them out.
+      await api().post('/api/v1/auth/change-password').set(now)
+        .send({ currentPassword: second, newPassword: 'dewi memilih sendiri' }).expect(200);
+      const own = await api().post('/api/v1/auth/login').send({ email, password: 'dewi memilih sendiri' }).expect(200);
+      await api().get('/api/v1/join/me').set({ Authorization: `Bearer ${own.body.accessToken}` }).expect(200);
+      expect((await api().post('/api/v1/members/temporary-passwords/preview').set(auth).send(narrowed).expect(200)).body)
+        .toMatchObject({ count: 0 });
+      await api().post('/api/v1/members/temporary-passwords').set(auth).send(narrowed).expect(400);
+    });
+
+    /*
+     * **P19.31 end to end (ADR-0289; T1 AC-4)**, through the real `AuthGuard`, sign-in, registration and import: the Super
+     * Admin retires an imported member; their address and password no longer sign in, *Lupa kata sandi?* sends them
+     * nothing, their old session is refused; the same address and agent code are imported again as a **new** account, and
+     * registered again too; the old membership still reads, with the name.
+     */
+    it('P19.31-T1 AC-4 a retired account signs in nowhere; its address and code are imported, and registered, as somebody new', async () => {
+      const { auth, kpmId } = await anOffice();
+      const email = `retired-${Math.random()}@k.test`;
+      const code = digits();
+      const first = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ rows: file(row(code, 'Simonta Tuan', 'AB', email)), invite: false }).expect(201);
+      const [oldMembership] = first.body.membershipIds as string[];
+      // Signed in once on a temporary password, as somebody handed the PDF would be.
+      const temp = await api().post('/api/v1/members/temporary-passwords').set(auth).send({ membershipIds: [oldMembership] })
+        .buffer(true).parse((r, done) => {
+          const chunks: Buffer[] = [];
+          r.on('data', (chunk: Buffer) => chunks.push(chunk));
+          r.on('end', () => done(null, Buffer.concat(chunks)));
+        }).expect(200);
+      const line = readPdf(temp.body as Buffer).pages.flatMap((p) => p.text.split('\n')).find((l) => l.includes(email))!;
+      const password = line.split(' ')[line.split(' ').indexOf(email) + 1];
+      const before = await api().post('/api/v1/auth/login').send({ email, password }).expect(200);
+
+      const users = app.get<Model<UserDocument>>(getModelToken(User.name));
+      const oldId = String((await users.findOne({ email }).exec())!._id);
+      const sa = await makeUser(`sa-retire-${Math.random()}@agencyboost.test`, 'super_admin');
+      const saAuth = { Authorization: `Bearer ${sa.accessToken}` };
+      const preview = await api().get(`/api/v1/admin/accounts/${oldId}/retirement`).set(saAuth).expect(200);
+      expect(preview.body).toMatchObject({ fullName: 'Simonta Tuan', refusal: null, membership: { membershipId: oldMembership, status: 'active' } });
+      await api().post(`/api/v1/admin/accounts/${oldId}/retirement`).set(saAuth)
+        .send({ reason: 'Dibuat ulang dari file District 41.', fullName: 'simonta tuan' }).expect(200);
+
+      // Nothing signs in as it: the address, the password, the old session; and no reset link goes.
+      await api().post('/api/v1/auth/login').send({ email, password }).expect(401);
+      await api().get('/api/v1/auth/me').set({ Authorization: `Bearer ${before.body.accessToken}` }).expect(401);
+      const mailsBefore = mailbox.sent.length;
+      await api().post('/api/v1/auth/forgot-password').send({ email }).expect(202);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mailbox.sent.slice(mailsBefore).filter((m) => m.to.templateId === 'auth.password_reset')).toEqual([]);
+
+      // The same address and agent code, imported again: a new account, a new membership — never the retired one.
+      const again = await api().post(`/api/v1/admin/tenants/${kpmId}/roster`)
+        .set(auth).send({ rows: file(row(code, 'Simonta Tuan', 'AB', email)), invite: false }).expect(201);
+      expect(again.body.counts).toMatchObject({ imported: 1, skipped: 0, updated: 0 });
+      const newAccount = (await users.findOne({ email, deletedAt: null }).exec())!;
+      expect(String(newAccount._id)).not.toBe(oldId);
+      expect(newAccount.agentCode).toBe(code);
+      expect(again.body.membershipIds[0]).not.toBe(oldMembership);
+
+      // The old membership still reads, with its name, among those who left.
+      const removed = await api().get(`/api/v1/members/${oldMembership}`).set(auth).expect(200);
+      expect(removed.body).toMatchObject({ status: 'removed', fullName: 'Simonta Tuan' });
+
+      // And an address retired is registrable too (after this one is retired as well).
+      await api().post(`/api/v1/admin/accounts/${String(newAccount._id)}/retirement`).set(saAuth)
+        .send({ reason: 'Uji daftar ulang.', fullName: 'Simonta Tuan' }).expect(200);
+      const companyId = await anInsurer();
+      await api().post('/api/v1/auth/register')
+        .send({ email, password: 'my own password here', fullName: 'Simonta Tuan', companyId, agentCode: code, ...PERSONAL })
+        .expect(201);
+      expect(await users.countDocuments({ email, deletedAt: null })).toBe(1);
     });
 
     it('P19.3-T4 AC-8 skips the bad row with its reason and imports the rest', async () => {

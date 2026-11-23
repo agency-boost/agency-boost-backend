@@ -63,6 +63,17 @@ const CALLERS: Record<string, Record<string, string>> = {
       '*+ Add agent* (P18.8-T3, ADR-0170 §2): whether an agent code already has an invite waiting anywhere in the '
       + 'company — the insurer issued the code and spans offices — answered as a boolean, never a row, an office or a name',
   },
+  'users/account-retirement.service.ts': {
+    cancelWaitingForAccountAcrossTenants:
+      '*Hapus akun* (P19.31-T1 AC-3; ADR-0289 §2; `account:retire`): the Super Admin, in no office, cancels the waiting '
+      + '*Tambah user* invitations made for the account or to its address, wherever they wait — by account, never a list',
+    cancelPendingForCodeAcrossTenants:
+      '*Hapus akun* (P19.31-T1 AC-3): the waiting *+ Tambah agent* invites on the account\'s agent code at its insurer, '
+      + 'cancelled with it, since the code is released — by code, never a list',
+    reopenAcrossTenants:
+      '*Hapus akun*\'s undo (P19.31-T1 AC-3): the invitations and invites it cancelled, waiting again by their ids, when a '
+      + 'later write of the retirement failed',
+  },
   'tenants/roster-import.service.ts': {
     pendingCodeAcrossTenants:
       'the people import\'s WhatsApp invitation for an Agent row with no email (P19.12-T7, ADR-0250): the same check '
