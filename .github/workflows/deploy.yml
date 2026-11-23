@@ -178,6 +178,8 @@ jobs:
 
   deploy:
     needs: [target, build]
+    # Explicit, because a job below a skipped one (ci, under skip_ci) is skipped by default even when its own needs passed.
+    if: ${{ !cancelled() && needs.target.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.target.outputs.environment }}
@@ -281,7 +283,7 @@ jobs:
 
   smoke:
     needs: [target, deploy]
-    if: needs.deploy.outputs.deployed == 'true'
+    if: ${{ !cancelled() && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
     runs-on: ubuntu-latest
     env:
       ENVIRONMENT: ${{ needs.target.outputs.environment }}
